@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (fmt · clippy · test · audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy (default = with mph)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: clippy (no-default-features = fst only)
+        run: cargo clippy --no-default-features --all-targets -- -D warnings
+      - name: test (default)
+        run: cargo test
+      - name: test (no-default-features)
+        run: cargo test --no-default-features
+      - name: cargo audit
+        run: cargo audit
