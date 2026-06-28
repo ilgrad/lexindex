@@ -32,6 +32,9 @@ mod perfect_hash;
 #[cfg(feature = "mph")]
 pub use perfect_hash::PerfectHashIndex;
 
+#[cfg(feature = "python")]
+mod python;
+
 use std::fmt;
 
 /// Errors from building, querying, or (de)serialising an index.

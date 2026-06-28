@@ -1,0 +1,77 @@
+name: Release
+
+# Build redistributable wheels for every platform and (on a version tag) publish to PyPI.
+# Publishing uses PyPI Trusted Publishing (OIDC) — add a pending publisher for this repo at
+# https://pypi.org/manage/account/publishing/ (workflow `release.yml`, environment `pypi`) before the
+# first `v*` tag, and create a `pypi` environment in the repo settings.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: wheels ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest, target: x86_64 }
+          - { runner: ubuntu-latest, target: aarch64 }
+          # macOS x86_64 is cross-built on the arm64 macos-14 runner: dedicated Intel (macos-13)
+          # runners are scarce/deprecated. abi3 needs no interpreter at build time, so this is sound.
+          - { runner: macos-14, target: x86_64 }
+          - { runner: macos-14, target: aarch64 }
+          - { runner: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  publish:
+    name: publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [wheels, sdist]
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

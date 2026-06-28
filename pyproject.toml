@@ -1,0 +1,54 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "betula-index"
+version = "0.1.0"
+description = "Compact, immutable string<->id indexes for huge catalogs: ordered FST lookup with prefix/range/fuzzy, plus a minimal-perfect-hash dictionary."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ilia Gradina", email = "ilia.gradina@gmail.com" }]
+keywords = [
+    "index",
+    "fst",
+    "perfect-hash",
+    "prefix",
+    "fuzzy",
+    "autocomplete",
+    "catalog",
+    "string-interning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing :: Indexing",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/ilgrad/betula-index"
+Repository = "https://github.com/ilgrad/betula-index"
+Issues = "https://github.com/ilgrad/betula-index/issues"
+
+[tool.maturin]
+features = ["python"]
+module-name = "betula_index._core"
+python-source = "python"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]

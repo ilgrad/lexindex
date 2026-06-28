@@ -10,18 +10,31 @@ readme = "README.md"
 keywords = ["index", "fst", "perfect-hash", "prefix", "catalog"]
 categories = ["data-structures", "text-processing"]
 
+[lib]
+name = "betula_index"
+# `cdylib` for the Python extension module (maturin/PyO3); `rlib` for use as a normal Rust crate.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # `levenshtein` adds the bounded edit-distance automaton (tiny `utf8-ranges` dep) for fuzzy search.
 fst = { version = "0.4", features = ["levenshtein"] }
 ptr_hash = { version = "1.1", optional = true }
 # epserde serialises the ptr_hash MPH for `PerfectHashIndex` persistence (already in the ptr_hash tree).
 epserde = { version = "0.8", optional = true }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"], optional = true }
 
 [features]
 default = ["mph"]
 # Minimal-perfect-hash dictionary (`PerfectHashIndex`), backed by the `ptr_hash` crate, with
 # epserde-based persistence (`save`/`load`).
 mph = ["dep:ptr_hash", "dep:epserde"]
+# Python bindings (PyO3 abi3 extension module); pulls in `mph` for the full API surface.
+python = ["dep:pyo3", "mph"]
+
+# The benchmark compares PerfectHashIndex (mph) too, so it is skipped on a no-default-features build.
+[[example]]
+name = "bench"
+required-features = ["mph"]
 
 [profile.release]
 opt-level = 3

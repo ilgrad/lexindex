@@ -40,3 +40,55 @@ jobs:
         run: cargo test --no-default-features
       - name: cargo audit
         run: cargo audit
+
+  python-build:
+    name: python (ruff · clippy · build)
+    runs-on: ubuntu-latest
+    env:
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - name: ruff check
+        run: uvx ruff check python/ tests/test_python.py
+      - name: ruff format --check
+        run: uvx ruff format --check python/ tests/test_python.py
+      - name: clippy (python bindings)
+        run: cargo clippy --features python -- -D warnings
+      - name: build abi3 wheel
+        run: uv run --with maturin maturin build --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+
+  python-test:
+    name: python (pytest · stubtest · py${{ matrix.python-version }})
+    needs: python-build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      # Install-only: the single abi3 wheel must import and pass on every supported interpreter.
+      - name: pytest
+        run: |
+          wheel=$(ls dist/*.whl | head -1)
+          uv run --python ${{ matrix.python-version }} --with pytest --with "$wheel" \
+            pytest tests/test_python.py -q
+      - name: stubtest
+        run: |
+          wheel=$(ls dist/*.whl | head -1)
+          uv run --python ${{ matrix.python-version }} --with mypy --with "$wheel" \
+            python -m mypy.stubtest betula_index

@@ -1,5 +1,11 @@
 # betula-index
 
+[![PyPI](https://img.shields.io/pypi/v/betula-index)](https://pypi.org/project/betula-index/)
+[![Python](https://img.shields.io/pypi/pyversions/betula-index)](https://pypi.org/project/betula-index/)
+[![CI](https://github.com/ilgrad/betula-index/actions/workflows/ci.yml/badge.svg)](https://github.com/ilgrad/betula-index/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ilgrad/betula-index/blob/main/LICENSE)
+[![Rust core · PyO3](https://img.shields.io/badge/Rust%20core-PyO3-orange.svg)](https://github.com/ilgrad/betula-index)
+
 Compact, immutable **string↔id indexes for huge catalogs** — the indexing companion to
 [`betula-cluster`](https://github.com/ilgrad/betula-cluster). Build once over a set of strings
 (entity names, cluster labels, document keys, vocabulary terms); query many times.
@@ -22,7 +28,30 @@ Both assign dense ids in `[0, n)`, support reverse lookup, and **serialise to a 
 (`save`/`load`) — build once, persist, then `load`/mmap and query many times. Both are immutable after
 building, like the clustering features in `betula-cluster`.
 
-## Install
+## Python
+
+```bash
+pip install betula-index
+```
+
+```python
+from betula_index import PerfectHashIndex, StringIndex
+
+idx = StringIndex(["apple", "apricot", "banana", "cherry"])
+idx.id("banana")             # 2  (sorted rank)
+idx.key(0)                   # "apple"
+idx.prefix("ap")             # [("apple", 0), ("apricot", 1)]
+idx.fuzzy("aple", 1)         # [("apple", 0)]  — typo-tolerant
+idx.save("catalog.bix")      # persist; StringIndex.load("catalog.bix") reloads it
+
+d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
+d.id("POST")                 # dense id in [0, n); membership verified, returns None if absent
+d.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
+```
+
+No runtime dependencies; a single abi3 wheel covers CPython 3.11+.
+
+## Rust
 
 ```toml
 [dependencies]
