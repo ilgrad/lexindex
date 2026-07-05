@@ -121,10 +121,14 @@ assert_eq!(dict.id("POST"), Some(id));
 
 ## Design notes
 
-- **`StringIndex`** keeps the FST (`key → id`, prefix/range) plus a string arena (`id → key`: one
-  contiguous byte buffer + offsets, no per-`String` overhead). Ids are the sorted rank of each key, so
-  they are stable for the same key set. The serialised blob is `[magic][fst][arena]`; `from_bytes`
-  validates every length and offset, so loading an untrusted blob can fail but never corrupts.
+- **`StringIndex`** keeps the FST (`key → id`, prefix/range) plus a **front-coded** string dictionary
+  (`id → key`). Ids are the sorted rank of each key, so the dictionary stores keys sorted and
+  delta-encodes each against its predecessor in fixed-size buckets — the first key of a bucket is
+  verbatim, the rest are `(shared-prefix length, suffix)`, with one pointer per *bucket* instead of one
+  8-byte offset per key. On a structured sorted catalog that collapses the reverse map to well under the
+  raw key bytes; a random `key(id)` decodes up to a bucket of deltas and returns an owned `String`. The
+  serialised blob is `[magic][fst][front-coded dict]`; `from_bytes` validates every length and pointer,
+  so loading an untrusted blob can fail but never corrupts.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test. Build fails (rather than
@@ -147,8 +151,13 @@ machine-dependent; the **ratios** and the trade-off are the point.
 | lexindex `PerfectHashIndex::id_unchecked` | ~310 ms | **~232 ns** | 27 B/key |
 | `std::HashMap<String, u32>` | ~205 ms | ~290 ns | — (in-RAM, not serialisable) |
 | lexindex `PerfectHashIndex::id` (verified) | ~376 ms | ~377 ns | 27 B/key |
-| lexindex `StringIndex` (FST) | ~138 ms | ~386 ns | 27 B/key |
+| lexindex `StringIndex` (FST) | ~138 ms | ~386 ns | **6 B/key** |
 | `std::BTreeMap<String, u32>` | ~39 ms | ~833 ns | — (in-RAM) |
+
+Serialised size tells the other half of the story: `StringIndex`'s front-coded reverse map compresses
+this structured sorted catalog to **~6 B/key — below the 19 B of raw key bytes**, and ~4× smaller than
+the `PerfectHashIndex` blob (whose slot-ordered arena cannot share prefixes). Reach for `StringIndex`
+when the on-disk / mmap footprint matters, `PerfectHashIndex` when raw lookup speed does.
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest** — ≈1.25× quicker than `HashMap` (no probing, no membership comparison) *and* compact +

@@ -18,15 +18,19 @@
 //! use lexindex::StringIndex;
 //! let idx = StringIndex::build(["apple", "apricot", "banana"]).unwrap();
 //! assert_eq!(idx.id("banana"), Some(2));
-//! assert_eq!(idx.key(0), Some("apple"));
+//! assert_eq!(idx.key(0).as_deref(), Some("apple"));
 //! assert_eq!(idx.prefix("ap").len(), 2);
 //! ```
 
-mod arena;
+mod front_coded;
 mod string_index;
 
 pub use string_index::StringIndex;
 
+// `StringArena` (flat `slot → key`) now backs only the MPH dictionary — `StringIndex` uses the
+// front-coded dictionary — so it compiles only with the `mph` feature.
+#[cfg(feature = "mph")]
+mod arena;
 #[cfg(feature = "mph")]
 mod perfect_hash;
 #[cfg(feature = "mph")]

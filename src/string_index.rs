@@ -1,20 +1,20 @@
 //! Ordered string↔id index backed by a finite-state transducer ([`fst::Map`]).
 //!
 //! Keys are stored in lexicographic order and assigned dense ids `0..n` by that order; the FST gives
-//! compressed `key → id` with prefix and range iteration, and a [`StringArena`] gives `O(1)`
-//! `id → key`. The whole index serialises to a flat, relocatable blob.
+//! compressed `key → id` with prefix and range iteration, and a front-coded string dictionary gives
+//! compact `id → key`. The whole index serialises to a flat, relocatable blob.
 
-use crate::arena::StringArena;
+use crate::front_coded::FrontCodedDict;
 use crate::IndexError;
 use fst::automaton::{Automaton, Levenshtein, Str, Subsequence};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
-const MAGIC: &[u8; 4] = b"BIX1";
+const MAGIC: &[u8; 4] = b"BIX2";
 
 /// An immutable, ordered string↔id index.
 pub struct StringIndex {
     map: Map<Vec<u8>>,
-    arena: StringArena,
+    dict: FrontCodedDict,
 }
 
 impl StringIndex {
@@ -33,8 +33,8 @@ impl StringIndex {
             builder.insert(k.as_bytes(), i as u64)?;
         }
         let map = Map::new(builder.into_inner()?)?;
-        let arena = StringArena::build(&keys);
-        Ok(Self { map, arena })
+        let dict = FrontCodedDict::build(&keys);
+        Ok(Self { map, dict })
     }
 
     /// Number of distinct keys.
@@ -57,9 +57,10 @@ impl StringIndex {
         self.map.get(key).is_some()
     }
 
-    /// Key for `id`, or `None` if out of range.
-    pub fn key(&self, id: u64) -> Option<&str> {
-        self.arena.get(id as usize)
+    /// Key for `id`, or `None` if out of range. The key is reconstructed from the front-coded
+    /// dictionary, so this returns an owned `String` (the forward lookups borrow; this one decodes).
+    pub fn key(&self, id: u64) -> Option<String> {
+        self.dict.get(id as usize)
     }
 
     /// All `(key, id)` pairs whose key starts with `prefix`, in lexicographic order.
@@ -114,14 +115,14 @@ impl StringIndex {
         out
     }
 
-    /// Serialise to a self-describing blob: `[magic 4][map_len u64][fst bytes][arena bytes]`.
+    /// Serialise to a self-describing blob: `[magic 4][map_len u64][fst bytes][front-coded dict bytes]`.
     pub fn to_bytes(&self) -> Vec<u8> {
         let map_bytes = self.map.as_fst().as_bytes();
         let mut out = Vec::with_capacity(12 + map_bytes.len());
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&(map_bytes.len() as u64).to_le_bytes());
         out.extend_from_slice(map_bytes);
-        out.extend_from_slice(&self.arena.to_bytes());
+        out.extend_from_slice(&self.dict.to_bytes());
         out
     }
 
@@ -136,11 +137,11 @@ impl StringIndex {
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format("fst length out of range"))?;
         let map = Map::new(bytes[12..map_end].to_vec())?;
-        let arena = StringArena::from_bytes(&bytes[map_end..])?;
-        if map.len() != arena.len() {
-            return Err(IndexError::Format("fst / arena length mismatch"));
+        let dict = FrontCodedDict::from_bytes(&bytes[map_end..])?;
+        if map.len() != dict.len() {
+            return Err(IndexError::Format("fst / dict length mismatch"));
         }
-        Ok(Self { map, arena })
+        Ok(Self { map, dict })
     }
 
     /// Write the index to `path` (see [`StringIndex::to_bytes`]).
@@ -173,7 +174,7 @@ mod tests {
         assert_eq!(idx.id("banana"), Some(2));
         assert_eq!(idx.id("missing"), None);
         assert!(idx.contains("cherry") && !idx.contains("durian"));
-        assert_eq!(idx.key(1), Some("apricot"));
+        assert_eq!(idx.key(1).as_deref(), Some("apricot"));
         assert_eq!(idx.key(99), None);
     }
 
@@ -235,7 +236,7 @@ mod tests {
         for k in ["apple", "apricot", "banana", "cherry"] {
             assert_eq!(restored.id(k), idx.id(k));
         }
-        assert_eq!(restored.key(3), Some("cherry"));
+        assert_eq!(restored.key(3).as_deref(), Some("cherry"));
     }
 
     #[test]

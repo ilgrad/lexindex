@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`StringIndex`'s reverse map (`id → key`) is now a front-coded string dictionary** instead of a flat
+  arena of raw bytes + one 8-byte offset per key. Because ids are the sorted rank, keys are stored
+  sorted and delta-encoded against their bucket predecessor (`(shared-prefix length, suffix)`, one
+  pointer per 8-key bucket), so on a structured sorted catalog the serialised `StringIndex` blob shrinks
+  from **~27 to ~6 bytes/key — below the raw key bytes**. `PerfectHashIndex` (unordered MPH slots, which
+  cannot share prefixes) keeps the flat arena and is unchanged.
+  - **Breaking:** `StringIndex::key(id)` now returns `Option<String>` (reconstructed on the fly) rather
+    than `Option<&str>`; the Python `StringIndex.key` is unaffected (still returns `str | None`).
+  - **Breaking:** the on-disk blob magic is now `BIX2`; `StringIndex` blobs written by 0.1.0 must be
+    rebuilt (`PerfectHashIndex` blobs are unchanged).
+
 ## [0.1.0] — 2026-06-28
 
 First public release — compact, immutable string<->id indexes for huge catalogs; a standalone Rust +

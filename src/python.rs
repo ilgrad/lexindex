@@ -58,7 +58,7 @@ impl PyStringIndex {
 
     /// Key for `id`, or `None` if out of range.
     fn key(&self, id: u64) -> Option<String> {
-        self.inner.key(id).map(str::to_owned)
+        self.inner.key(id)
     }
 
     /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered.

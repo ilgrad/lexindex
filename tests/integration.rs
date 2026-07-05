@@ -15,7 +15,7 @@ fn string_index_round_trips_a_catalog() {
     // forward + reverse are consistent across the whole catalog
     for name in &names {
         let id = idx.id(name).expect("present");
-        assert_eq!(idx.key(id), Some(name.as_str()));
+        assert_eq!(idx.key(id).as_deref(), Some(name.as_str()));
     }
     assert_eq!(idx.id("entity-99999"), None);
 
