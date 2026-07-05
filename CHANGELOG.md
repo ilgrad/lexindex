@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-07-05
 
 ### Added
 
@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
   `StringIndex.load_mmap` / `PerfectHashIndex.load_mmap`. Reads are byte-wise (no alignment
   requirement); the mapped file must stay immutable while an index borrows it. `--no-default-features`
   (the `fst`-only build) omits it.
+- **MkDocs documentation site** at <https://ilgrad.github.io/lexindex/> (Material + mkdocstrings API
+  reference), and a `mmap_zero_copy` example that times the owned `load` against the zero-copy
+  `load_mmap`.
+- CI now enforces a **95% line-coverage floor** (`cargo llvm-cov`) on the Rust core.
 
 ### Changed
 

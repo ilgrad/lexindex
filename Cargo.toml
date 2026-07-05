@@ -1,6 +1,6 @@
 [package]
 name = "lexindex"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Compact, immutable string↔id indexes for huge catalogs: ordered FST lookup with prefix/range queries, plus a minimal-perfect-hash dictionary."
@@ -39,6 +39,11 @@ python = ["dep:pyo3", "mph", "mmap"]
 [[example]]
 name = "bench"
 required-features = ["mph"]
+
+# The mmap demo loads a PerfectHashIndex zero-copy, so it needs both `mph` and `mmap`.
+[[example]]
+name = "mmap_zero_copy"
+required-features = ["mph", "mmap"]
 
 [profile.release]
 opt-level = 3

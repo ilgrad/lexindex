@@ -1,8 +1,11 @@
 /target
 /dist
 /.venv
+/.venv-docs
 __pycache__/
 *.py[cod]
 *.so
 .pytest_cache/
 .ruff_cache/
+# mkdocs build output
+/site/

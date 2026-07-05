@@ -1,0 +1,55 @@
+site_name: lexindex
+site_description: Compact, immutable string↔id indexes for huge catalogs — a Rust core with Python bindings
+site_url: https://ilgrad.github.io/lexindex/
+repo_url: https://github.com/ilgrad/lexindex
+repo_name: ilgrad/lexindex
+docs_dir: docs
+copyright: MIT-licensed · a Rust core (FST + minimal perfect hash) with Python bindings
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/weather-night, name: Switch to dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/weather-sunny, name: Switch to light mode }
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets: { base_path: ["."], check_paths: true }
+  - toc: { permalink: true }
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Usage guide: usage.md
+  - Design: design.md
+  - API reference: api.md
+  - Changelog: changelog.md

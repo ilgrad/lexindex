@@ -95,3 +95,40 @@ impl From<std::io::Error> for IndexError {
         IndexError::Io(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn index_error_display_and_source() {
+        // Format / Automaton carry a message and have no underlying source.
+        let fmt = IndexError::Format("bad blob");
+        assert!(fmt.to_string().contains("bad blob"));
+        assert!(fmt.source().is_none());
+        let auto = IndexError::Automaton("automaton too large".into());
+        assert!(auto.to_string().contains("automaton too large"));
+        assert!(auto.source().is_none());
+
+        // Io wraps a std::io::Error (with a source), reachable through the `From` impl.
+        let io: IndexError = std::io::Error::new(std::io::ErrorKind::NotFound, "nope").into();
+        assert!(io.to_string().contains("io error"));
+        assert!(io.source().is_some());
+
+        // Fst wraps an fst::Error (with a source): an out-of-order insert triggers one.
+        let mut b = fst::MapBuilder::memory();
+        b.insert("b", 1).unwrap();
+        let fst_err: IndexError = b.insert("a", 0).unwrap_err().into();
+        assert!(fst_err.to_string().contains("fst error"));
+        assert!(fst_err.source().is_some());
+    }
+
+    #[cfg(feature = "mph")]
+    #[test]
+    fn serde_error_display_has_no_source() {
+        let e = IndexError::Serde("corrupt mph".into());
+        assert!(e.to_string().contains("serde error") && e.to_string().contains("corrupt mph"));
+        assert!(e.source().is_none());
+    }
+}
