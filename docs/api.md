@@ -6,6 +6,10 @@ The typed public surface of the `lexindex` Python package.
 
 ::: lexindex.StringIndex
 
+## CompactHashIndex
+
+::: lexindex.CompactHashIndex
+
 ## PerfectHashIndex
 
 ::: lexindex.PerfectHashIndex

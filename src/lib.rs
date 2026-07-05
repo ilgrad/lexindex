@@ -1,18 +1,21 @@
 //! lexindex: compact, immutable string↔id indexes for huge catalogs.
 //!
-//! Two complementary, build-once / query-many indexes over a set of strings (entity names, cluster
+//! Three complementary, build-once / query-many indexes over a set of strings (entity names, cluster
 //! labels, document keys, vocabulary terms):
 //!
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
-//!   `string → id` and `id → string`, plus **prefix**, **range**, **fuzzy** (Levenshtein), and
-//!   **subsequence** iteration (automaton-driven, no full scan), in a compressed, serialisable form.
-//!   Use it for autocomplete / typo-tolerant search / browse / ordered scans of a large catalog.
-//! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary backed by [`ptr_hash`] (the `mph`
-//!   feature, on by default). Fastest exact `string → dense id` lookup with verified membership; no
-//!   ordering. Use it as a fixed-vocabulary token↔id map on a hot path.
+//!   `string → id` and `id → string` (the reverse reconstructed from the FST by a rank-walk, no stored
+//!   map), plus **prefix**, **range**, **fuzzy** (Levenshtein), and **subsequence** iteration
+//!   (automaton-driven, no full scan). Use it for autocomplete / fuzzy search / ordered scans.
+//! - [`CompactHashIndex`] — the **smallest** `string → dense id` map: a minimal perfect hash
+//!   ([`ptr_hash`], the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key,
+//!   at the cost of probabilistic membership and no reverse lookup. Use it when footprint is paramount.
+//! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
+//!   reverse lookup (keys stored). Fastest exact `string → dense id`; no ordering. Use it as a
+//!   fixed-vocabulary token↔id map on a hot path.
 //!
-//! Both assign dense ids in `[0, n)` and support reverse lookup. Neither is mutable after building —
-//! they are immutable summaries, like the clustering features in the companion `betula-cluster` crate.
+//! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable
+//! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
 //! ```
 //! use lexindex::StringIndex;
@@ -23,17 +26,23 @@
 //! ```
 
 mod blob;
-mod front_coded;
 mod string_index;
 
 pub use string_index::StringIndex;
 
-// `StringArena` (flat `slot → key`) now backs only the MPH dictionary — `StringIndex` uses the
-// front-coded dictionary — so it compiles only with the `mph` feature.
+// The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash
+// and arena live behind the `mph` feature; `StringIndex` reconstructs `id → key` from the FST itself
+// and needs none of them.
 #[cfg(feature = "mph")]
 mod arena;
 #[cfg(feature = "mph")]
+mod compact_hash;
+#[cfg(feature = "mph")]
+mod hash;
+#[cfg(feature = "mph")]
 mod perfect_hash;
+#[cfg(feature = "mph")]
+pub use compact_hash::CompactHashIndex;
 #[cfg(feature = "mph")]
 pub use perfect_hash::PerfectHashIndex;
 

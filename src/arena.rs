@@ -1,9 +1,9 @@
 //! Compact `slot → &str` storage: a contiguous byte buffer plus `n + 1` offsets, so a key is the
 //! slice `data[offsets[i]..offsets[i + 1]]`. Backs [`PerfectHashIndex`](crate::PerfectHashIndex),
-//! whose ids are unordered MPH slots — no shared prefixes to exploit, and its `id()` hot path needs
-//! the zero-copy `&str` for membership, so it keeps this flat layout (`StringIndex` uses the
-//! front-coded dictionary instead). It views a [`SharedBytes`], so a memory-mapped load borrows it
-//! without copying.
+//! whose `id()` hot path needs the stored key (zero-copy `&str`) to verify membership exactly.
+//! (`StringIndex` stores no keys — it reconstructs them from the FST by a rank-walk — and
+//! `CompactHashIndex` stores only fingerprints.) It views a [`SharedBytes`], so a memory-mapped load
+//! borrows it without copying.
 
 use crate::blob::SharedBytes;
 use crate::IndexError;

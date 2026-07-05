@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 #[cfg(feature = "mph")]
-use crate::PerfectHashIndex;
+use crate::{CompactHashIndex, PerfectHashIndex};
 
 fn to_py(e: IndexError) -> PyErr {
     match e {
@@ -205,10 +205,97 @@ impl PyPerfectHashIndex {
     }
 }
 
+/// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
+/// probabilistic (false-positive rate `256 ** -fingerprint_bytes`) and there is no reverse `id -> key`.
+#[cfg(feature = "mph")]
+#[pyclass(name = "CompactHashIndex", module = "lexindex._core", frozen)]
+pub struct PyCompactHashIndex {
+    inner: CompactHashIndex,
+}
+
+#[cfg(feature = "mph")]
+#[pymethods]
+impl PyCompactHashIndex {
+    /// Build from an iterable of strings, storing `fingerprint_bytes` (1, 2, or 4) per key — fewer
+    /// bytes is smaller but raises the membership false-positive rate to `256 ** -fingerprint_bytes`
+    /// (≈ 0.4% at 1 byte, ≈ 0.0015% at 2). Duplicates removed; ids are arbitrary dense slots.
+    #[new]
+    #[pyo3(signature = (items, fingerprint_bytes=1))]
+    fn new(items: Vec<String>, fingerprint_bytes: usize) -> PyResult<Self> {
+        Ok(Self {
+            inner: CompactHashIndex::build(items, fingerprint_bytes).map_err(to_py)?,
+        })
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Dense id of `key` (membership checked against the fingerprint), or `None`.
+    fn id(&self, key: &str) -> Option<u32> {
+        self.inner.id(key)
+    }
+
+    /// Dense id of `key` **without** the fingerprint check — `key` must be a member, or the result is
+    /// an arbitrary valid slot. Fastest lookup for a fixed vocabulary.
+    fn id_unchecked(&self, key: &str) -> u32 {
+        self.inner.id_unchecked(key)
+    }
+
+    /// Whether `key` is present (subject to the false-positive rate).
+    fn contains(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Serialise to a `bytes` blob.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        Ok(PyBytes::new(py, &self.inner.to_bytes().map_err(to_py)?))
+    }
+
+    /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.
+    #[staticmethod]
+    fn from_bytes(data: &[u8]) -> PyResult<Self> {
+        Ok(Self {
+            inner: CompactHashIndex::from_bytes(data).map_err(to_py)?,
+        })
+    }
+
+    /// Write the dictionary to `path`.
+    fn save(&self, path: &str) -> PyResult<()> {
+        self.inner.save(path).map_err(to_py)
+    }
+
+    /// Load a dictionary previously written with `save`.
+    #[staticmethod]
+    fn load(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: CompactHashIndex::load(path).map_err(to_py)?,
+        })
+    }
+
+    /// Zero-copy load: memory-map the file and borrow the fingerprint table.
+    #[staticmethod]
+    fn load_mmap(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: CompactHashIndex::load_mmap(path).map_err(to_py)?,
+        })
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
     #[cfg(feature = "mph")]
     m.add_class::<PyPerfectHashIndex>()?;
+    #[cfg(feature = "mph")]
+    m.add_class::<PyCompactHashIndex>()?;
     Ok(())
 }

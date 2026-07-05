@@ -11,27 +11,12 @@
 
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
+use crate::hash::hash_key;
 use crate::IndexError;
 use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 
 const MPH_MAGIC: &[u8; 4] = b"BMP1";
-
-/// Deterministic, **version-stable** 64-bit hash: FNV-1a over the bytes, then a splitmix64 finalizer
-/// for avalanche (so structured keys like `"key_0001"` still spread evenly across `ptr_hash`'s
-/// buckets). Stability across Rust versions and platforms is what lets a *serialised* MPH be reloaded
-/// and queried — `std`'s `DefaultHasher` is explicitly not guaranteed stable, so it cannot back
-/// persistence.
-fn hash_key(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
-    for &b in s.as_bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a prime
-    }
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9); // splitmix64 finalizer
-    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    h ^ (h >> 31)
-}
 
 /// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {

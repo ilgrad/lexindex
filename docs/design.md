@@ -1,24 +1,47 @@
 # Design
 
-lexindex is two build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
+lexindex is three build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
 
 ## `StringIndex`
 
 Keys are sorted and deduplicated on build, and each key's id is its **rank in sorted order**, so ids
-are stable for the same key set. Two structures back it:
+are stable for the same key set. It is backed by a single structure — a **finite-state transducer**
+([`fst`](https://crates.io/crates/fst)) — that serves *both* directions:
 
-- **`key → id`: a finite-state transducer** ([`fst`](https://crates.io/crates/fst)). The FST stores the
-  sorted keys as a minimised automaton, sharing common prefixes *and* suffixes, and drives prefix,
-  range, fuzzy (Levenshtein) and subsequence iteration by walking the automaton — never a full scan.
-- **`id → key`: a front-coded string dictionary.** Because the keys are sorted, adjacent keys share
-  long prefixes (`"entity-000123"`, `"entity-000124"`), so the reverse map stores keys in fixed-size
-  buckets: the first key of a bucket is verbatim, and each later key is a `(shared-prefix length,
-  suffix)` delta against its predecessor, with **one pointer per bucket** instead of one 8-byte offset
-  per key. On a structured sorted catalog that collapses the reverse map from ~27 to **~6 bytes/key —
-  below the raw key bytes**. A random `key(id)` decodes up to a bucket of deltas and returns an owned
-  `String`.
+- **`key → id`.** The FST stores the sorted keys as a minimised automaton, sharing common prefixes
+  *and* suffixes, mapping each key to its rank (an output value). It drives prefix, range, fuzzy
+  (Levenshtein) and subsequence iteration by walking the automaton — never a full scan.
+- **`id → key`: a rank-walk, with no stored reverse map.** Because a key's id equals the sum of the
+  output values along its accepting path, `key(id)` reconstructs the key directly from the FST: start at
+  the root with an accumulator of 0, and at each node take the **last** transition whose
+  `accumulator + transition output ≤ id` (transitions are ordered, so their output prefix-sums are
+  monotone); append that transition's byte, add its output, and descend. When a final state is reached
+  with `accumulator + final output == id`, the accumulated bytes are the key. This is `O(key length)`
+  and needs no auxiliary structure.
 
-The serialised blob is `[magic "BIX2"][fst length][fst bytes][front-coded dict bytes]`.
+Dropping the separate reverse dictionary (a front-coded map in 0.2.0) roughly halves the real-world
+blob — `/usr/share/dict/words` goes from **12.6 to 5.95 bytes/key** — because that map only reached its
+advertised size on structured keys that share long prefixes, not on a natural vocabulary. The
+serialised blob is now simply `[magic "BIX4"][fst bytes]`.
+
+## `CompactHashIndex`
+
+The smallest `string → dense id` map, and smaller than any installable trie. It pairs a minimal
+perfect hash with **one small fingerprint per key and no stored keys at all**:
+
+- **`key → id`.** The MPH ([`ptr_hash`](https://crates.io/crates/ptr_hash)) maps the key's
+  version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
+  for any input, so a membership check is needed.
+- **membership: a `k`-byte fingerprint.** Each slot stores a `fingerprint_bytes`-wide fingerprint
+  computed from a **second, independent** hash of the key. `id(key)` accepts the slot only if the
+  query's fingerprint matches the stored one. Independence of the two hashes makes the chance a
+  non-member both lands on a used slot and matches its fingerprint `256^-fingerprint_bytes` — the
+  tunable false-positive rate (≈ 0.4 % at 1 byte, ≈ 0.0015 % at 2, measured to match on real words).
+
+Because the keys themselves are never stored, size is dominated by the MPH (~1.1 B/key) plus the
+fingerprints (`fingerprint_bytes` B/key): **1.30 B/key at 1 byte, 2.30 at 2** on real words — below
+`marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+`id → key`. The serialised blob is `[magic "BCH1"][n][fp_bytes][mph length][mph epserde bytes][fingerprints]`.
 
 ## `PerfectHashIndex`
 
@@ -35,23 +58,23 @@ between two distinct keys.
 where membership is already guaranteed. The serialised blob is `[magic "BMP1"][n][mph length][mph
 epserde bytes][arena bytes]`.
 
-The MPH keeps the flat arena (not the front-coded dictionary) on purpose: its ids are unordered slots,
-so there are no shared prefixes to exploit, and its `id()` hot path needs the arena's zero-copy `&str`
-for the membership comparison.
+`PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
+a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
+between them is purely a size-vs-exactness trade, not a different lookup path.
 
 ## Zero-copy `load_mmap`
 
-Both indexes load two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the file
-and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of the
-index size and the OS shares the pages across processes.
+All three indexes load two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
+file and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of
+the index size and the OS shares the pages across processes.
 
 The mechanism is a single `SharedBytes` byte source: an owned `Arc<[u8]>` **or** an `Arc<memmap2::Mmap>`,
-exposed as `AsRef<[u8]>` and `'static`. It backs the FST (`Map<SharedBytes>`), the front-coded
-dictionary and the arena, so `from_bytes` (owned) and `load_mmap` (mapped) share one code path with no
+exposed as `AsRef<[u8]>` and `'static`. It backs the FST (`Map<SharedBytes>`), the fingerprint table and
+the key arena, so `from_bytes` (owned) and `load_mmap` (mapped) share one code path with no
 self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every field is read byte-wise
-(`u64::from_le_bytes`, varints), so there is no alignment requirement — for `PerfectHashIndex`,
-`load_mmap` borrows the key arena (the bulk of the blob) zero-copy and reads only the small MPH
-structure into memory, sidestepping the deserialiser's alignment concern entirely.
+(`u64::from_le_bytes`, varints), so there is no alignment requirement — for `PerfectHashIndex` and
+`CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
+and reads only the small MPH structure into memory, sidestepping the deserialiser's alignment concern entirely.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
 it. Parsing is fully bounds-checked, so loading a truncated or corrupt blob fails cleanly and never
@@ -59,7 +82,7 @@ reads out of bounds.
 
 ## Cargo features
 
-- `mph` (default) — `PerfectHashIndex` (pulls `ptr_hash` + `epserde`).
+- `mph` (default) — `PerfectHashIndex` and `CompactHashIndex` (pulls `ptr_hash` + `epserde`).
 - `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`).
 - `python` — the PyO3 abi3 extension module.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and

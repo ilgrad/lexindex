@@ -14,7 +14,8 @@ fn main() -> Result<(), IndexError> {
         .nth(1)
         .and_then(|a| a.parse().ok())
         .unwrap_or(500_000);
-    // Zero-padded so lexicographic order is the natural order (and the reverse map front-codes well).
+    // Zero-padded so lexicographic order matches numeric order (this demo measures load time, which is
+    // independent of key content; for a size benchmark use real words — see bench/compare.py).
     let keys: Vec<String> = (0..n).map(|i| format!("entity-{i:012}")).collect();
 
     let dir = std::env::temp_dir();

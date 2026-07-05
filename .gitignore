@@ -9,3 +9,9 @@ __pycache__/
 .ruff_cache/
 # mkdocs build output
 /site/
+# local planning notes (not shipped)
+/plans/
+# generated benchmark figures (regenerate with bench/*.py)
+/bench/plots/
+# dev-only lockfile from ad-hoc uv envs
+/uv.lock

@@ -1,9 +1,9 @@
 [package]
 name = "lexindex"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
-description = "Compact, immutable string↔id indexes for huge catalogs: ordered FST lookup with prefix/range queries, plus a minimal-perfect-hash dictionary."
+description = "Compact, immutable string↔id indexes for huge catalogs: an ordered FST with prefix/range/fuzzy queries, plus minimal-perfect-hash dictionaries (the compact one is ~1.3 B/key)."
 authors = ["Ilia Gradina <ilia.gradina@gmail.com>"]
 repository = "https://github.com/ilgrad/lexindex"
 readme = "README.md"

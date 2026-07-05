@@ -56,14 +56,35 @@ dict_ = PerfectHashIndex.load_mmap("verbs.bmp")   # arena mapped zero-copy; tiny
 Use `id_unchecked` only for a **fixed / closed vocabulary** where membership is already guaranteed —
 it returns an arbitrary (but valid) slot for an unknown key. Use `id` everywhere else.
 
+## `CompactHashIndex` — smallest footprint
+
+```python
+from lexindex import CompactHashIndex
+
+# fingerprint_bytes ∈ {1, 2, 4}: 1 is smallest (~1.3 B/key) with a ~0.4% membership false-positive
+# rate; 2 → ~0.0015%; 4 → effectively exact. No keys are stored, so there is no id → key.
+dict_ = CompactHashIndex(["GET", "POST", "PUT", "DELETE"], fingerprint_bytes=1)
+i = dict_.id("POST")           # dense id in [0, n); a non-member may rarely read as present
+dict_.contains("GET")          # True
+dict_.id_unchecked("GET")      # fastest lookup; no fingerprint check (closed-vocabulary hot path)
+
+dict_.save("verbs.bch")
+dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zero-copy
+```
+
+`CompactHashIndex` trades exactness for size: membership is correct except for a `256^-fingerprint_bytes`
+false-positive chance on a non-member, and it cannot map an id back to a string. Reach for it when a
+fixed vocabulary's on-disk / mmap footprint dominates; use `PerfectHashIndex` when you need exact
+membership or `id → key`, or `StringIndex` when you need order or fuzzy/prefix.
+
 ## Rust
 
 ```rust
-use lexindex::{PerfectHashIndex, StringIndex};
+use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
 
 let idx = StringIndex::build(["apple", "apricot", "banana"])?;
 assert_eq!(idx.id("banana"), Some(2));
-assert_eq!(idx.key(0).as_deref(), Some("apple")); // reconstructed → owned String
+assert_eq!(idx.key(0).as_deref(), Some("apple")); // rank-walk over the FST → owned String
 assert_eq!(idx.prefix("ap").len(), 2);
 let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
 assert_eq!(near, ["apple"]);
@@ -72,16 +93,20 @@ idx.save("catalog.bix")?;
 let idx = StringIndex::load_mmap("catalog.bix")?; // zero-copy; no read into RAM
 
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
-assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST"));
+assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
+
+let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // smallest; ~1.3 B/key, no reverse
+assert!(small.contains("POST"));
 # std::fs::remove_file("catalog.bix").ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
-Cargo features: `mph` (default) adds `PerfectHashIndex`; `mmap` (default) adds `load_mmap`;
-`--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies).
+Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
+`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies).
 
 ## Benchmark
 
-`cargo run --release --example bench` compares both indexes against `std::HashMap` / `BTreeMap`
-(build time, lookup latency, serialised size). `cargo run --release --example mmap_zero_copy` times
-the owned `load` against the zero-copy `load_mmap`.
+`python bench/compare.py` measures **serialised size** on real dictionary words against `marisa-trie`,
+DAWG and datrie (the double-crown table above). `cargo run --release --example bench` measures
+**point-lookup latency** for `StringIndex` and `PerfectHashIndex` against `std::HashMap` / `BTreeMap`;
+`cargo run --release --example mmap_zero_copy` times the owned `load` against the zero-copy `load_mmap`.

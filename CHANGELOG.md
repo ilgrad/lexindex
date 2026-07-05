@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-07-05
+
+### Added
+
+- **`CompactHashIndex` — the smallest `string → dense id` map, and smaller than any installable
+  alternative.** A minimal perfect hash ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a
+  `k`-byte fingerprint per key, storing **no keys at all**. On the real `/usr/share/dict/words`
+  (479 823 words) it serialises to **1.30 bytes/key** at `fingerprint_bytes=1` and **2.30** at `2` —
+  **2.3× smaller than `marisa-trie` (2.98)** and far below every trie benchmarked. The trade-offs are
+  explicit: membership is **probabilistic** (a non-member reads as present with probability
+  `256^-fingerprint_bytes` — measured 0.36 % at 1 byte, 0.001 % at 2) and there is **no reverse
+  `id → key`** (the keys are not stored). Reach for it when a fixed vocabulary's footprint is paramount
+  and rare false positives are acceptable; use `PerfectHashIndex` for exact membership + reverse, or
+  `StringIndex` for ordered/fuzzy queries. Exposed to Python as
+  `CompactHashIndex(items, fingerprint_bytes=1)` with `id` / `id_unchecked` / `contains` / `to_bytes` /
+  `from_bytes` / `save` / `load` / `load_mmap`; in Rust behind the default `mph` feature.
+
+### Changed
+
+- **`StringIndex` dropped its stored reverse map — `id → key` is now reconstructed from the FST by a
+  rank-walk.** Each id is the key's rank, i.e. the FST's output, so `key(id)` walks the automaton from
+  the root, at each node taking the last transition whose accumulated output stays `≤ id`, and returns
+  the path once the outputs sum to exactly `id` (`O(key length)`, no auxiliary structure). This
+  **deletes the front-coded reverse dictionary** added in 0.2.0: the serialised blob is now just
+  `[magic][fst]`. The effect on real-world size is large — on `/usr/share/dict/words` the `StringIndex`
+  blob shrinks from **12.61 to 5.95 bytes/key (−53 %)**, because 0.2.0's front-coded map only reached
+  its advertised "~6 B/key" on *structured* keys that share long prefixes, not on a natural vocabulary.
+  Full prefix / range / fuzzy / subsequence are retained.
+  - **Breaking:** the on-disk blob magic is now `BIX4`; `StringIndex` blobs written by 0.1.x / 0.2.0
+    must be rebuilt. `PerfectHashIndex` blobs are unchanged.
+- **Benchmarks are now measured on real English words**, not a synthetic `entity-{i}` catalog.
+  Sequential structured keys collapse the FST to a near-regular automaton and report a misleading ~0
+  bytes/key; `bench/compare.py` refuses synthetic keys and compares `size` and `build` against
+  `marisa-trie`, DAWG and datrie on `/usr/share/dict/words`.
+
 ## [0.2.0] — 2026-07-05
 
 ### Added

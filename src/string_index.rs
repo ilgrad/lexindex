@@ -1,21 +1,21 @@
 //! Ordered string↔id index backed by a finite-state transducer ([`fst::Map`]).
 //!
-//! Keys are stored in lexicographic order and assigned dense ids `0..n` by that order; the FST gives
-//! compressed `key → id` with prefix and range iteration, and a front-coded string dictionary gives
-//! compact `id → key`. The whole index serialises to a flat, relocatable blob.
+//! Keys are stored in lexicographic order and assigned dense ids `0..n` by that order. The FST gives
+//! compressed `key → id` with prefix / range / fuzzy iteration; `id → key` is reconstructed by walking
+//! the same transducer by rank (the ids *are* the FST outputs), so **no separate reverse map is
+//! stored** — the whole index is a single FST, which roughly halves the serialised size. It
+//! serialises to a flat, relocatable blob.
 
 use crate::blob::SharedBytes;
-use crate::front_coded::FrontCodedDict;
 use crate::IndexError;
 use fst::automaton::{Automaton, Levenshtein, Str, Subsequence};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
-const MAGIC: &[u8; 4] = b"BIX2";
+const MAGIC: &[u8; 4] = b"BIX4";
 
-/// An immutable, ordered string↔id index.
+/// An immutable, ordered string↔id index — a single finite-state transducer.
 pub struct StringIndex {
     map: Map<SharedBytes>,
-    dict: FrontCodedDict,
 }
 
 impl StringIndex {
@@ -34,8 +34,7 @@ impl StringIndex {
             builder.insert(k.as_bytes(), i as u64)?;
         }
         let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
-        let dict = FrontCodedDict::build(&keys);
-        Ok(Self { map, dict })
+        Ok(Self { map })
     }
 
     /// Number of distinct keys.
@@ -58,10 +57,38 @@ impl StringIndex {
         self.map.get(key).is_some()
     }
 
-    /// Key for `id`, or `None` if out of range. The key is reconstructed from the front-coded
-    /// dictionary, so this returns an owned `String` (the forward lookups borrow; this one decodes).
+    /// Key for `id`, or `None` if out of range.
+    ///
+    /// The id is the key's sorted rank, and the FST stores each key's rank as its transducer output,
+    /// so the key is reconstructed by walking the FST from the root: at each node take the last
+    /// transition whose accumulated output is `<= id` (that subtree's minimum rank), stopping when a
+    /// final state's total output equals `id`. This is `O(key length)` and needs no separate reverse
+    /// map — the returned `String` is decoded on the fly (forward lookups borrow; this one rebuilds).
     pub fn key(&self, id: u64) -> Option<String> {
-        self.dict.get(id as usize)
+        let fst = self.map.as_fst();
+        let mut node = fst.root();
+        let mut acc: u64 = 0;
+        let mut key: Vec<u8> = Vec::new();
+        loop {
+            if node.is_final() && acc + node.final_output().value() == id {
+                return String::from_utf8(key).ok();
+            }
+            // Transitions are in increasing byte order — increasing subtree-minimum rank. The subtree
+            // holding `id` is the last one whose minimum (`acc + out`) does not exceed it.
+            let mut chosen = None;
+            for i in 0..node.len() {
+                let t = node.transition(i);
+                if acc + t.out.value() <= id {
+                    chosen = Some(t);
+                } else {
+                    break;
+                }
+            }
+            let t = chosen?; // no transition qualifies ⇒ `id` is out of range
+            acc += t.out.value();
+            key.push(t.inp);
+            node = fst.node(t.addr);
+        }
     }
 
     /// All `(key, id)` pairs whose key starts with `prefix`, in lexicographic order.
@@ -116,14 +143,12 @@ impl StringIndex {
         out
     }
 
-    /// Serialise to a self-describing blob: `[magic 4][map_len u64][fst bytes][front-coded dict bytes]`.
+    /// Serialise to a self-describing blob: `[magic 4][fst bytes]` — the FST *is* the whole index.
     pub fn to_bytes(&self) -> Vec<u8> {
         let map_bytes = self.map.as_fst().as_bytes();
-        let mut out = Vec::with_capacity(12 + map_bytes.len());
+        let mut out = Vec::with_capacity(4 + map_bytes.len());
         out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&(map_bytes.len() as u64).to_le_bytes());
         out.extend_from_slice(map_bytes);
-        out.extend_from_slice(&self.dict.to_bytes());
         out
     }
 
@@ -132,31 +157,19 @@ impl StringIndex {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
     }
 
-    /// Reconstruct from a shared byte source, borrowing the FST and the front-coded dictionary from it
-    /// without copying. Backs both the owned [`from_bytes`](StringIndex::from_bytes) and the zero-copy
+    /// Reconstruct from a shared byte source, borrowing the FST from it without copying. Backs both the
+    /// owned [`from_bytes`](StringIndex::from_bytes) and the zero-copy
     /// [`load_mmap`](StringIndex::load_mmap).
     fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
-        if bytes.len() < 12 || &bytes[0..4] != MAGIC {
+        if bytes.len() < 4 || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
-        let map_len = u64::from_le_bytes(bytes[4..12].try_into().unwrap()) as usize;
-        let map_end = 12usize
-            .checked_add(map_len)
-            .filter(|&e| e <= bytes.len())
-            .ok_or(IndexError::Format("fst length out of range"))?;
         let map = Map::new(
-            blob.subslice(12, map_end)
-                .ok_or(IndexError::Format("fst length out of range"))?,
+            blob.subslice(4, blob.len())
+                .ok_or(IndexError::Format("fst range out of range"))?,
         )?;
-        let dict = FrontCodedDict::from_shared(
-            blob.subslice(map_end, blob.len())
-                .ok_or(IndexError::Format("dict range out of range"))?,
-        )?;
-        if map.len() != dict.len() {
-            return Err(IndexError::Format("fst / dict length mismatch"));
-        }
-        Ok(Self { map, dict })
+        Ok(Self { map })
     }
 
     /// Write the index to `path` (see [`StringIndex::to_bytes`]).
@@ -284,7 +297,7 @@ mod tests {
     #[cfg(feature = "mmap")]
     #[test]
     fn load_mmap_matches_owned_load() {
-        // Bigger than a couple of buckets so the front-coded reverse map spans several buckets.
+        // A non-trivial catalog so the id->key rank-walk descends several FST levels.
         let keys: Vec<String> = (0..50).map(|i| format!("entity-{i:04}")).collect();
         let idx = StringIndex::build(&keys).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_mmap_{}.bix", std::process::id()));
@@ -314,5 +327,36 @@ mod tests {
         assert_eq!(idx.id("x"), None);
         assert_eq!(idx.key(0), None);
         assert!(StringIndex::from_bytes(&idx.to_bytes()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn key_rank_walk_handles_prefixes_and_multibyte() {
+        // The id->key rank-walk over the FST must reconstruct every key, including keys that are
+        // prefixes of each other (the final-state case) and multibyte UTF-8 boundaries.
+        let raw = [
+            "a",
+            "ab",
+            "abc",
+            "abcd",
+            "b",
+            "ba",
+            "cat",
+            "catalog",
+            "cats",
+            "entity-0000",
+            "entity-0001",
+            "entity-0010",
+            "naïve",
+            "naïveté",
+            "zzz",
+        ];
+        let idx = StringIndex::build(raw).unwrap();
+        let mut sorted: Vec<&str> = raw.to_vec();
+        sorted.sort_unstable();
+        for (i, k) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(k), Some(i as u64));
+            assert_eq!(idx.key(i as u64).as_deref(), Some(*k)); // rank-walk round-trips
+        }
+        assert_eq!(idx.key(sorted.len() as u64), None); // out of range
     }
 }

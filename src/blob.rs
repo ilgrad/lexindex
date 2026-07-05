@@ -2,9 +2,9 @@
 //!
 //! [`SharedBytes`] is a cheaply-clonable (`Arc`-bump), range-limited, **`'static`** view of one byte
 //! source — either an owned buffer or a read-only memory map. Because it owns an `Arc` to the source,
-//! it can back an [`fst::Map`](fst::Map) or a front-coded dictionary directly, with no self-referential
-//! borrow and no `unsafe` beyond the single documented `Mmap::map`. This is what lets `from_bytes`
-//! (owned) and `load_mmap` (zero-copy) share one code path and one stored type.
+//! it can back an [`fst::Map`](fst::Map), a fingerprint table, or a key arena directly, with no
+//! self-referential borrow and no `unsafe` beyond the single documented `Mmap::map`. This is what lets
+//! `from_bytes` (owned) and `load_mmap` (zero-copy) share one code path and one stored type.
 
 use std::sync::Arc;
 

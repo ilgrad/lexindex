@@ -12,23 +12,28 @@ Build once over a set of strings (entity names, document keys, vocabulary terms,
 query many times. Pairs naturally with [`betula-cluster`](https://github.com/ilgrad/betula-cluster) —
 map string ids to cluster ids and back — but stands on its own.
 
-Two complementary, build-once / query-many structures:
+Three complementary, build-once / query-many structures — pick by what you need to ask:
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer
   ([`fst`](https://crates.io/crates/fst)). Exact `string → id` and `id → string`, plus **prefix**,
   **range**, **fuzzy** (bounded Levenshtein edit distance), and **subsequence** iteration — all driven
-  by automata over the FST, never a full scan — in a compressed, serialisable (and
-  memory-mappable-by-blob) form. Use it for autocomplete, typo-tolerant search, browse, and ordered
-  scans of a large catalog.
-- **`PerfectHashIndex`** — a **minimal-perfect-hash** dictionary backed by
-  [`ptr_hash`](https://crates.io/crates/ptr_hash) (the `mph` feature, on by default). Exact
-  `string → dense id` with **verified membership** (`id`) and reverse lookup; no ordering. For a
-  known-closed vocabulary, `id_unchecked` skips the membership comparison and is **faster than
-  `std::HashMap`** (see [Benchmarks](#benchmarks)). Use it as a fixed-vocabulary token↔id map on a hot path.
+  by automata over the FST, never a full scan — in a compressed, serialisable, memory-mappable form.
+  The only structure here that answers **ordered and typo-tolerant** queries. Use it for autocomplete,
+  fuzzy search, browse, and ordered scans of a large catalog.
+- **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
+  ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a small fingerprint per key, storing *no keys
+  at all*. **1.30 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`** and below
+  every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
+  (a tunable `256^-k` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
+  footprint is paramount and rare false positives are acceptable.
+- **`PerfectHashIndex`** — a minimal-perfect-hash dictionary with **verified membership** (`id`) and
+  **reverse lookup** (`key`); the arena stores full keys, so it is exact but larger. For a known-closed
+  vocabulary, `id_unchecked` skips the membership comparison and is **faster than `std::HashMap`**. Use
+  it as a fixed-vocabulary token↔id map on a hot path when you need exact membership and `id → key`.
 
-Both assign dense ids in `[0, n)`, support reverse lookup, and **serialise to a flat blob**
-(`save`/`load`) — build once, persist, then `load`/mmap and query many times. Both are immutable after
-building.
+All three assign dense ids in `[0, n)` and **serialise to a flat blob** (`save` / `load`, or zero-copy
+`load_mmap`) — build once, persist, then reload and query many times. All are immutable after building.
+The `mph` feature (on by default) provides the two hash indexes; `--no-default-features` is `fst`-only.
 
 ## Python
 
@@ -37,18 +42,22 @@ pip install lexindex
 ```
 
 ```python
-from lexindex import PerfectHashIndex, StringIndex
+from lexindex import CompactHashIndex, PerfectHashIndex, StringIndex
 
 idx = StringIndex(["apple", "apricot", "banana", "cherry"])
 idx.id("banana")             # 2  (sorted rank)
-idx.key(0)                   # "apple"
+idx.key(0)                   # "apple"  — reconstructed from the FST, no stored reverse map
 idx.prefix("ap")             # [("apple", 0), ("apricot", 1)]
 idx.fuzzy("aple", 1)         # [("apple", 0)]  — typo-tolerant
 idx.save("catalog.bix")      # persist; StringIndex.load("catalog.bix") reloads it
 
+c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key)
+c.id("POST")                 # dense id in [0, n); probabilistic membership, no id->key
+c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
+
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
 d.id("POST")                 # dense id in [0, n); membership verified, returns None if absent
-d.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
+d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
 ```
 
 No runtime dependencies; a single abi3 wheel covers CPython 3.11+.
@@ -120,59 +129,102 @@ assert_eq!(dict.id("POST"), Some(id));
 # Ok::<(), lexindex::IndexError>(())
 ```
 
+```rust
+use lexindex::CompactHashIndex;           // requires the default `mph` feature
+
+// The smallest string->id map: 1 fingerprint byte/key ⇒ ~1.3 B/key, ~0.4% membership false-positive.
+let dict = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 1)?;
+let id = dict.id("POST").unwrap();             // Some(slot); a non-member may rarely read as present
+assert!(dict.contains("GET"));
+let raw = dict.id_unchecked("POST");           // no fingerprint check — for a known-closed vocabulary
+assert_eq!(raw, id);
+// no key(id): CompactHashIndex stores no keys. Use PerfectHashIndex when you need id → string.
+# Ok::<(), lexindex::IndexError>(())
+```
+
 ## Design notes
 
-- **`StringIndex`** keeps the FST (`key → id`, prefix/range) plus a **front-coded** string dictionary
-  (`id → key`). Ids are the sorted rank of each key, so the dictionary stores keys sorted and
-  delta-encodes each against its predecessor in fixed-size buckets — the first key of a bucket is
-  verbatim, the rest are `(shared-prefix length, suffix)`, with one pointer per *bucket* instead of one
-  8-byte offset per key. On a structured sorted catalog that collapses the reverse map to well under the
-  raw key bytes; a random `key(id)` decodes up to a bucket of deltas and returns an owned `String`. The
-  serialised blob is `[magic][fst][front-coded dict]`; `from_bytes` validates every length and pointer,
-  so loading an untrusted blob can fail but never corrupts.
+- **`StringIndex` is the FST alone — `id → key` is reconstructed by a rank-walk, with no stored reverse
+  map.** Ids are the sorted rank of each key, which is exactly the FST's output value, so `key(id)`
+  walks the automaton from the root, at each node taking the last transition whose accumulated output
+  stays `≤ id`, and returns the path once the outputs sum to exactly `id`. That is `O(key length)` and
+  needs no auxiliary structure, so the serialised blob is just `[magic "BIX4"][fst]` — half the size of
+  the 0.2.0 front-coded layout on real words (12.6 → 6.0 B/key) and simpler to reason about.
+  `from_bytes` validates the magic and hands the rest to `fst`, which is itself bounds-checked, so
+  loading an untrusted blob can fail but never corrupts.
+- **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
+  slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's *independent*
+  `k`-byte fingerprint against the stored one; a match is a hit. Because the two hashes are independent,
+  a non-member survives both only with probability `256^-k`, the tunable false-positive rate. Dropping
+  the key arena is what takes it below `marisa-trie`; the price is that membership is probabilistic and
+  there is no `id → key`. The blob is `[magic "BCH1"][n][fp_bytes][mph][fingerprints]`.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
-  *any* input, so verification is what turns it into a real membership test. Build fails (rather than
-  silently corrupting) on the astronomically rare 64-bit hash collision between two distinct keys. The
-  hash is **version-stable** (FNV-1a + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a
-  `save`d MPH (the `ptr_hash` structure serialised via [`epserde`](https://crates.io/crates/epserde),
-  alongside the arena) reloads and queries identically on any build — the precondition for persistence.
+  *any* input, so verification is what turns it into a real membership test, and the stored keys give
+  exact `id → key`. Build fails (rather than silently corrupting) on the astronomically rare 64-bit
+  hash collision between two distinct keys. The hash is **version-stable** (FNV-1a + a splitmix64
+  finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH (the `ptr_hash` structure serialised via
+  [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and queries identically
+  on any build — the precondition for persistence. `CompactHashIndex` shares the same version-stable
+  slot hash plus a second independent one for the fingerprint.
 - **Zero-copy `load_mmap`** (the default `mmap` feature, `memmap2`) memory-maps a saved blob and
   borrows the index directly from the mapped pages — no read into RAM, so a multi-gigabyte index is
-  ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole thing
-  (FST + front-coded dictionary); `PerfectHashIndex` maps the key arena (the bulk) and reads only the
-  tiny MPH into memory. Every read is byte-wise, so there is no alignment gotcha; the one caveat is the
-  usual mmap contract — the file must not be mutated while an index borrows it.
-- `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst`. Enabling
-  `mph` pulls `ptr_hash` and its dependency tree, which currently carries a few informational RustSec
-  advisories (unmaintained / unsound) on transitive crates — `cargo audit` reports them as warnings,
-  not vulnerabilities. The `fst`-only build is free of them.
+  ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole FST;
+  `CompactHashIndex` maps its fingerprint table; `PerfectHashIndex` maps the key arena (the bulk) and
+  reads only the tiny MPH into memory. Every read is byte-wise, so there is no alignment gotcha; the one
+  caveat is the usual mmap contract — the file must not be mutated while an index borrows it.
+- `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst` (and keeps
+  `StringIndex`). Enabling `mph` pulls `ptr_hash` and its dependency tree, which currently carries a few
+  informational RustSec advisories (unmaintained / unsound) on transitive crates — `cargo audit`
+  reports them as warnings, not vulnerabilities. The `fst`-only build is free of them.
 
 ## Benchmarks
 
-`cargo run --release --example bench` (1 M keys, 19 bytes each). Absolute numbers are
-machine-dependent; the **ratios** and the trade-off are the point.
+### Serialised size on real English words
 
-| structure | build | lookup | serialised |
+`python bench/compare.py` on `/usr/share/dict/words` (479 823 words, 9.3 B/key raw). **Keys are a real
+vocabulary, never a synthetic `entity-{i}` sequence** — sequential keys collapse the FST to a
+near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
+better; the capability columns are why you would still pick a larger one.
+
+| library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.30** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.30** |
+| `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
+| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
+| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 17.62 |
+| DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
+| `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
+
+Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` map — 2.3× below
+`marisa-trie`** — when you can accept a bounded false-positive rate (measured **0.36 %** at 1 byte,
+**0.001 %** at 2, matching the `256^-k` theory) and don't need `id → key`. **`StringIndex` is the only
+structure that answers fuzzy and range queries at all**, at 5× below a plain DAWG. `marisa-trie`
+remains the pick when you need *exact* membership *and* ordering *and* the smallest such index —
+lexindex doesn't claim that particular cell.
+
+### Point-lookup latency vs the standard library
+
+`cargo run --release --example bench` (1 M keys). Absolute numbers are machine-dependent; the
+**ratios** are the point.
+
+| structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~310 ms | **~232 ns** | 27 B/key |
-| `std::HashMap<String, u32>` | ~205 ms | ~290 ns | — (in-RAM, not serialisable) |
-| lexindex `PerfectHashIndex::id` (verified) | ~376 ms | ~377 ns | 27 B/key |
-| lexindex `StringIndex` (FST) | ~138 ms | ~386 ns | **6 B/key** |
-| `std::BTreeMap<String, u32>` | ~39 ms | ~833 ns | — (in-RAM) |
-
-Serialised size tells the other half of the story: `StringIndex`'s front-coded reverse map compresses
-this structured sorted catalog to **~6 B/key — below the 19 B of raw key bytes**, and ~4× smaller than
-the `PerfectHashIndex` blob (whose slot-ordered arena cannot share prefixes). Reach for `StringIndex`
-when the on-disk / mmap footprint matters, `PerfectHashIndex` when raw lookup speed does.
+| lexindex `PerfectHashIndex::id_unchecked` | ~310 ms | **~232 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~205 ms | ~290 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~376 ms | ~377 ns | one extra cache line + key compare |
+| lexindex `StringIndex` (FST) | ~138 ms | ~386 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~39 ms | ~833 ns | in-RAM |
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest** — ≈1.25× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
-serialisable. Add membership verification (`id`) and you pay one extra cache line + a key comparison;
-use `StringIndex` and you trade more latency for **ordered / prefix / range / fuzzy** queries the hash
-maps cannot answer at all. So: `id_unchecked` for a known-closed token→id map on a hot path;
-`StringIndex` when order or fuzzy/prefix matters; `HashMap` when you just need a general in-RAM map with
-membership and nothing persisted.
+serialisable. `CompactHashIndex` shares that same MPH lookup while storing 13× less. Add membership
+verification (`id`) and you pay one extra cache line + a key comparison; use `StringIndex` and you trade
+more latency for **ordered / prefix / range / fuzzy** queries the hash maps cannot answer at all. So:
+`CompactHashIndex` when footprint dominates and a rare false positive is fine; `PerfectHashIndex::id`
+for exact membership + reverse; `StringIndex` when order or fuzzy/prefix matters; `HashMap` when you
+just need a general in-RAM map with nothing persisted.
 
 ## License
 
