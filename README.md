@@ -202,7 +202,32 @@ Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` ma
 **0.001 %** at 2, matching the `256^-k` theory) and don't need `id → key`. **`StringIndex` is the only
 structure that answers fuzzy and range queries at all**, at 5× below a plain DAWG. `marisa-trie`
 remains the pick when you need *exact* membership *and* ordering *and* the smallest such index —
-lexindex doesn't claim that particular cell.
+lexindex doesn't claim that particular cell (see below for why).
+
+### Against other Rust string indexes
+
+`marisa-trie` is C++. Among ordered string indexes you can `cargo add`, **none is smaller than
+`StringIndex`** — the double-array tries trade space for lookup speed, and no succinct LOUDS trie
+(marisa / XCDAT / CoCo-trie-style) exists in Rust to depend on. So `StringIndex` at 5.95 B/key is the
+**smallest ordered `string → id` index available in pure Rust** — second only to a C++ library, and the
+only one of them that does fuzzy and range. Same real words:
+
+| Rust structure | bytes/key | vs marisa |
+|---|---:|---:|
+| `marisa-trie` (C++, reference) | 2.98 | 1.0× |
+| **lexindex `StringIndex`** (ordered + fuzzy + reverse) | **5.95** | 2.0× |
+| `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.6× |
+| `yada` (double-array) | 15.98 | 5.4× |
+| `crawdad::MpTrie` (minimal-prefix) | 19.63 | 6.6× |
+| `crawdad::Trie` (double-array) | 26.22 | 8.8× |
+
+<sub>Measured with `crawdad` 0.4, `yada` 0.5, `fst` 0.4 over the same word list; size = serialised bytes
+(`serialize_to_vec().len()`) ÷ key count. Not lexindex dependencies — reproduce in a throwaway crate.</sub>
+
+Reaching `marisa`'s 2.98 needs its recursive succinct-trie label nesting, which the byte-oriented `fst`
+automaton is ~1.6× away from by construction (even a bare `fst::Set`, which stores no ids at all, is
+4.85) — so beating it on the *ordered* index means reimplementing marisa from scratch, not a bounded
+tweak. `CompactHashIndex` takes the size crown the other way: by dropping the keys entirely.
 
 ### Point-lookup latency vs the standard library
 
