@@ -106,6 +106,16 @@ impl PyStringIndex {
             inner: StringIndex::load(path).map_err(to_py)?,
         })
     }
+
+    /// Zero-copy load: memory-map the file and borrow the index from it — no read into RAM, so a
+    /// multi-gigabyte index is ready instantly and its pages are shared across processes. The mapped
+    /// file must not be modified while the index is alive.
+    #[staticmethod]
+    fn load_mmap(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: StringIndex::load_mmap(path).map_err(to_py)?,
+        })
+    }
 }
 
 /// Minimal-perfect-hash dictionary: fastest exact `string → dense id`, with persistence.
@@ -182,6 +192,15 @@ impl PyPerfectHashIndex {
     fn load(path: &str) -> PyResult<Self> {
         Ok(Self {
             inner: PerfectHashIndex::load(path).map_err(to_py)?,
+        })
+    }
+
+    /// Memory-map the file and borrow the key arena zero-copy (only the small MPH is read into RAM).
+    /// The mapped file must not be modified while the dictionary is alive.
+    #[staticmethod]
+    fn load_mmap(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: PerfectHashIndex::load_mmap(path).map_err(to_py)?,
         })
     }
 }

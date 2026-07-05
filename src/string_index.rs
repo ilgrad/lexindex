@@ -4,6 +4,7 @@
 //! compressed `key → id` with prefix and range iteration, and a front-coded string dictionary gives
 //! compact `id → key`. The whole index serialises to a flat, relocatable blob.
 
+use crate::blob::SharedBytes;
 use crate::front_coded::FrontCodedDict;
 use crate::IndexError;
 use fst::automaton::{Automaton, Levenshtein, Str, Subsequence};
@@ -13,7 +14,7 @@ const MAGIC: &[u8; 4] = b"BIX2";
 
 /// An immutable, ordered string↔id index.
 pub struct StringIndex {
-    map: Map<Vec<u8>>,
+    map: Map<SharedBytes>,
     dict: FrontCodedDict,
 }
 
@@ -32,7 +33,7 @@ impl StringIndex {
         for (i, k) in keys.iter().enumerate() {
             builder.insert(k.as_bytes(), i as u64)?;
         }
-        let map = Map::new(builder.into_inner()?)?;
+        let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
         let dict = FrontCodedDict::build(&keys);
         Ok(Self { map, dict })
     }
@@ -126,8 +127,16 @@ impl StringIndex {
         out
     }
 
-    /// Reconstruct an index from [`StringIndex::to_bytes`] output.
+    /// Reconstruct an index from [`StringIndex::to_bytes`] output (copies the blob into owned memory).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+    }
+
+    /// Reconstruct from a shared byte source, borrowing the FST and the front-coded dictionary from it
+    /// without copying. Backs both the owned [`from_bytes`](StringIndex::from_bytes) and the zero-copy
+    /// [`load_mmap`](StringIndex::load_mmap).
+    fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
+        let bytes = blob.as_ref();
         if bytes.len() < 12 || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -136,8 +145,14 @@ impl StringIndex {
             .checked_add(map_len)
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format("fst length out of range"))?;
-        let map = Map::new(bytes[12..map_end].to_vec())?;
-        let dict = FrontCodedDict::from_bytes(&bytes[map_end..])?;
+        let map = Map::new(
+            blob.subslice(12, map_end)
+                .ok_or(IndexError::Format("fst length out of range"))?,
+        )?;
+        let dict = FrontCodedDict::from_shared(
+            blob.subslice(map_end, blob.len())
+                .ok_or(IndexError::Format("dict range out of range"))?,
+        )?;
         if map.len() != dict.len() {
             return Err(IndexError::Format("fst / dict length mismatch"));
         }
@@ -150,9 +165,26 @@ impl StringIndex {
         Ok(())
     }
 
-    /// Load an index previously written with [`StringIndex::save`].
+    /// Load an index previously written with [`StringIndex::save`] (reads the whole file into memory).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         Self::from_bytes(&std::fs::read(path)?)
+    }
+
+    /// **Zero-copy load**: memory-map the file and borrow the index directly from the mapped pages —
+    /// no read into RAM, so a multi-gigabyte index is ready instantly and its pages are shared across
+    /// processes by the OS page cache. `key(id)` still returns an owned `String`; all other queries
+    /// borrow the map.
+    ///
+    /// # Safety / caveat
+    /// Memory-mapping trusts the file to stay unchanged: another process truncating or overwriting it
+    /// while the index is alive would make the borrowed bytes unsound. lexindex blobs are written once
+    /// and are immutable — do not modify the file for the lifetime of the returned index.
+    #[cfg(feature = "mmap")]
+    pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: see the caveat above — the mapped file must not be mutated while it is mapped.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)))
     }
 }
 
@@ -246,6 +278,24 @@ mod tests {
         idx.save(&path).unwrap();
         let loaded = StringIndex::load(&path).unwrap();
         assert_eq!(loaded.id("banana"), Some(2));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn load_mmap_matches_owned_load() {
+        // Bigger than a couple of buckets so the front-coded reverse map spans several buckets.
+        let keys: Vec<String> = (0..50).map(|i| format!("entity-{i:04}")).collect();
+        let idx = StringIndex::build(&keys).unwrap();
+        let path = std::env::temp_dir().join(format!("lexindex_mmap_{}.bix", std::process::id()));
+        idx.save(&path).unwrap();
+        let mapped = StringIndex::load_mmap(&path).unwrap();
+        assert_eq!(mapped.len(), idx.len());
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(mapped.id(k), Some(i as u64)); // forward borrows the mapped FST
+            assert_eq!(mapped.key(i as u64).as_deref(), Some(k.as_str())); // reverse decodes from the map
+        }
+        assert_eq!(mapped.prefix("entity-001").len(), 10); // 0010..0019
         std::fs::remove_file(&path).ok();
     }
 

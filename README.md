@@ -85,7 +85,7 @@ use lexindex::StringIndex;
 let idx = StringIndex::build(["apple", "apricot", "banana", "cherry"])?;
 
 assert_eq!(idx.id("banana"), Some(2));     // string → id (sorted rank)
-assert_eq!(idx.key(0), Some("apple"));     // id → string
+assert_eq!(idx.key(0).as_deref(), Some("apple")); // id → string
 assert!(idx.contains("cherry"));
 
 // prefix / range iteration, lexicographically ordered
@@ -98,9 +98,9 @@ assert_eq!(near, ["apple"]);
 let sub: Vec<_> = idx.subsequence("ap").into_iter().map(|(k, _)| k).collect();
 assert_eq!(sub, ["apple", "apricot"]);
 
-// serialise to a flat blob and reload (e.g. mmap the file, then `from_bytes`)
+// serialise to a flat blob, then reload — or `load_mmap` to borrow it zero-copy from the file
 idx.save("catalog.bix")?;
-let idx = StringIndex::load("catalog.bix")?;
+let idx = StringIndex::load_mmap("catalog.bix")?; // no read into RAM; pages shared across processes
 # Ok::<(), lexindex::IndexError>(())
 ```
 
@@ -136,6 +136,12 @@ assert_eq!(dict.id("POST"), Some(id));
   hash is **version-stable** (FNV-1a + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a
   `save`d MPH (the `ptr_hash` structure serialised via [`epserde`](https://crates.io/crates/epserde),
   alongside the arena) reloads and queries identically on any build — the precondition for persistence.
+- **Zero-copy `load_mmap`** (the default `mmap` feature, `memmap2`) memory-maps a saved blob and
+  borrows the index directly from the mapped pages — no read into RAM, so a multi-gigabyte index is
+  ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole thing
+  (FST + front-coded dictionary); `PerfectHashIndex` maps the key arena (the bulk) and reads only the
+  tiny MPH into memory. Every read is byte-wise, so there is no alignment gotcha; the one caveat is the
+  usual mmap contract — the file must not be mutated while an index borrows it.
 - `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst`. Enabling
   `mph` pulls `ptr_hash` and its dependency tree, which currently carries a few informational RustSec
   advisories (unmaintained / unsound) on transitive crates — `cargo audit` reports them as warnings,

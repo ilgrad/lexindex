@@ -6,20 +6,22 @@
 //! `(shared-prefix length, suffix)` deltas against their predecessor. That collapses both the offset
 //! table (one pointer per *bucket*, not per key) and the shared prefixes, at the cost of decoding up
 //! to `BUCKET_SIZE - 1` deltas to reconstruct a key. Keys MUST be supplied in sorted order — this
-//! backs [`crate::StringIndex`], whose ids are the sorted rank.
+//! backs [`crate::StringIndex`], whose ids are the sorted rank. It views a [`SharedBytes`], so a
+//! memory-mapped load borrows it without copying.
 
+use crate::blob::SharedBytes;
 use crate::IndexError;
 
 /// Keys per bucket. Larger ⇒ smaller pointer table and more prefix reuse, but up to `BUCKET_SIZE - 1`
 /// delta decodes per random access. 8 is the usual front-coding sweet spot.
 const BUCKET_SIZE: usize = 8;
 
-/// A front-coded dictionary addressable by index (`id → key`), for sorted keys.
-#[derive(Clone, Debug, Default)]
+/// A front-coded dictionary addressable by index (`id → key`), viewing a shared byte source.
+#[derive(Clone, Debug)]
 pub(crate) struct FrontCodedDict {
-    data: Vec<u8>,
-    bucket_ptrs: Vec<u64>, // byte offset in `data` where each bucket begins (len == number of buckets)
+    blob: SharedBytes, // [n: u64][num_buckets: u64][bucket_ptrs: nb × u64][data]
     n: usize,
+    data_start: usize, // 16 + num_buckets * 8
 }
 
 impl FrontCodedDict {
@@ -30,14 +32,14 @@ impl FrontCodedDict {
         S: AsRef<str>,
     {
         let mut data = Vec::new();
-        let mut bucket_ptrs = Vec::new();
+        let mut ptrs: Vec<u64> = Vec::new();
         let mut prev: Vec<u8> = Vec::new();
         let mut n = 0usize;
         for s in items {
             let key = s.as_ref().as_bytes();
             if n.is_multiple_of(BUCKET_SIZE) {
                 // Bucket head: stored verbatim so decoding a bucket needs no earlier bucket.
-                bucket_ptrs.push(data.len() as u64);
+                ptrs.push(data.len() as u64);
                 write_varint(&mut data, key.len() as u64);
                 data.extend_from_slice(key);
             } else {
@@ -51,11 +53,15 @@ impl FrontCodedDict {
             prev.extend_from_slice(key);
             n += 1;
         }
-        Self {
-            data,
-            bucket_ptrs,
-            n,
+        let nb = ptrs.len();
+        let mut blob = Vec::with_capacity(16 + nb * 8 + data.len());
+        blob.extend_from_slice(&(n as u64).to_le_bytes());
+        blob.extend_from_slice(&(nb as u64).to_le_bytes());
+        for p in &ptrs {
+            blob.extend_from_slice(&p.to_le_bytes());
         }
+        blob.extend_from_slice(&data);
+        Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built dict is valid")
     }
 
     /// Number of stored strings.
@@ -69,17 +75,19 @@ impl FrontCodedDict {
         if i >= self.n {
             return None;
         }
+        let bytes = self.blob.as_ref();
         let within = i % BUCKET_SIZE;
-        let mut pos = *self.bucket_ptrs.get(i / BUCKET_SIZE)? as usize;
+        let ptr = read_u64(bytes, 16 + (i / BUCKET_SIZE) * 8).ok()? as usize;
+        let mut pos = self.data_start.checked_add(ptr)?;
         // Bucket head: [len][bytes].
-        let head_len = read_varint(&self.data, &mut pos)? as usize;
-        let mut key = self.data.get(pos..pos.checked_add(head_len)?)?.to_vec();
+        let head_len = read_varint(bytes, &mut pos)? as usize;
+        let mut key = bytes.get(pos..pos.checked_add(head_len)?)?.to_vec();
         pos += head_len;
         // Replay the deltas up to the target key within the bucket.
         for _ in 0..within {
-            let lcp = read_varint(&self.data, &mut pos)? as usize;
-            let slen = read_varint(&self.data, &mut pos)? as usize;
-            let suffix = self.data.get(pos..pos.checked_add(slen)?)?;
+            let lcp = read_varint(bytes, &mut pos)? as usize;
+            let slen = read_varint(bytes, &mut pos)? as usize;
+            let suffix = bytes.get(pos..pos.checked_add(slen)?)?;
             pos += slen;
             if lcp > key.len() {
                 return None; // corrupt: prefix longer than the reconstructed predecessor
@@ -90,46 +98,47 @@ impl FrontCodedDict {
         String::from_utf8(key).ok()
     }
 
-    /// Serialise to `[n: u64][num_buckets: u64][bucket_ptrs: num_buckets × u64][data]` (little-endian).
+    /// Serialise to `[n: u64][num_buckets: u64][bucket_ptrs: num_buckets × u64][data]` — the layout it
+    /// already holds.
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let nb = self.bucket_ptrs.len();
-        let mut out = Vec::with_capacity(16 + nb * 8 + self.data.len());
-        out.extend_from_slice(&(self.n as u64).to_le_bytes());
-        out.extend_from_slice(&(nb as u64).to_le_bytes());
-        for &p in &self.bucket_ptrs {
-            out.extend_from_slice(&p.to_le_bytes());
-        }
-        out.extend_from_slice(&self.data);
-        out
+        self.blob.as_ref().to_vec()
     }
 
-    /// Parse the [`FrontCodedDict::to_bytes`] layout, validating every length and pointer (untrusted
-    /// input): it can fail, but never reads out of bounds and never panics.
+    /// Parse an owned blob (copies once) — a test convenience; production loads go through
+    /// [`FrontCodedDict::from_shared`] (owned or memory-mapped).
+    #[cfg(test)]
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+    }
+
+    /// View a shared blob without copying, validating the header (untrusted input). Individual bucket
+    /// pointers and deltas are bounds-checked lazily in [`get`](FrontCodedDict::get), so a
+    /// memory-mapped load stays instant (no `O(n)` scan).
+    pub(crate) fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
+        let bytes = blob.as_ref();
         let n = read_u64(bytes, 0)? as usize;
         let nb = read_u64(bytes, 8)? as usize;
         if nb != n.div_ceil(BUCKET_SIZE) {
             return Err(IndexError::Format("front-coded: bucket count mismatch"));
         }
-        let data_start = 16 + nb * 8;
+        let data_start = 16usize
+            .checked_add(
+                nb.checked_mul(8)
+                    .ok_or(IndexError::Format("front-coded: bucket table too large"))?,
+            )
+            .ok_or(IndexError::Format("front-coded: bucket table too large"))?;
         if bytes.len() < data_start {
             return Err(IndexError::Format("front-coded: truncated pointer table"));
         }
-        let mut bucket_ptrs = Vec::with_capacity(nb);
-        for i in 0..nb {
-            bucket_ptrs.push(read_u64(bytes, 16 + i * 8)?);
-        }
-        let data = bytes[data_start..].to_vec();
-        if bucket_ptrs.first().is_some_and(|&p| p != 0)
-            || bucket_ptrs.windows(2).any(|w| w[1] < w[0])
-            || bucket_ptrs.last().is_some_and(|&p| p as usize > data.len())
-        {
-            return Err(IndexError::Format("front-coded: bad bucket pointers"));
+        if nb > 0 && read_u64(bytes, 16)? != 0 {
+            return Err(IndexError::Format(
+                "front-coded: first bucket must start at 0",
+            ));
         }
         Ok(Self {
-            data,
-            bucket_ptrs,
+            blob,
             n,
+            data_start,
         })
     }
 }
@@ -171,8 +180,11 @@ fn read_varint(data: &[u8], pos: &mut usize) -> Option<u64> {
 }
 
 fn read_u64(bytes: &[u8], at: usize) -> Result<u64, IndexError> {
+    let end = at
+        .checked_add(8)
+        .ok_or(IndexError::Format("front-coded: offset overflow"))?;
     let slice = bytes
-        .get(at..at + 8)
+        .get(at..end)
         .ok_or(IndexError::Format("front-coded: unexpected end of buffer"))?;
     Ok(u64::from_le_bytes(slice.try_into().unwrap()))
 }
@@ -188,14 +200,18 @@ mod tests {
             assert_eq!(dict.get(i).as_deref(), Some(*k), "key {i}");
         }
         assert_eq!(dict.get(keys.len()), None); // out of range
+                                                // owned round-trip through the serialised form
+        let restored = FrontCodedDict::from_bytes(&dict.to_bytes()).unwrap();
+        assert_eq!(restored.len(), keys.len());
+        for (i, k) in keys.iter().enumerate() {
+            assert_eq!(restored.get(i).as_deref(), Some(*k));
+        }
     }
 
     #[test]
     fn reconstructs_across_bucket_boundaries() {
-        // 20 keys > 2 buckets of 8; heavy shared prefixes exercise the delta path.
         let keys: Vec<String> = (0..20).map(|i| format!("entity-{i:05}")).collect();
-        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-        roundtrip_all(&refs);
+        roundtrip_all(&keys.iter().map(String::as_str).collect::<Vec<_>>());
     }
 
     #[test]
@@ -204,7 +220,6 @@ mod tests {
         roundtrip_all(&["only"]);
         roundtrip_all(&["a", "ab", "abc"]); // increasing, lcp grows
         roundtrip_all(&["", "a"]); // empty first key
-                                   // exactly one and one-more-than a full bucket
         let exactly: Vec<String> = (0..8).map(|i| format!("k{i}")).collect();
         let plus: Vec<String> = (0..9).map(|i| format!("k{i}")).collect();
         roundtrip_all(&exactly.iter().map(String::as_str).collect::<Vec<_>>());
@@ -218,18 +233,6 @@ mod tests {
     }
 
     #[test]
-    fn serialises_and_reloads() {
-        let keys: Vec<String> = (0..37).map(|i| format!("entity-{i:04}")).collect();
-        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-        let dict = FrontCodedDict::build(refs.iter().copied());
-        let restored = FrontCodedDict::from_bytes(&dict.to_bytes()).unwrap();
-        assert_eq!(restored.len(), dict.len());
-        for (i, k) in refs.iter().enumerate() {
-            assert_eq!(restored.get(i).as_deref(), Some(*k));
-        }
-    }
-
-    #[test]
     fn empty_serialises_and_reloads() {
         let dict = FrontCodedDict::build(Vec::<&str>::new());
         let restored = FrontCodedDict::from_bytes(&dict.to_bytes()).unwrap();
@@ -240,16 +243,13 @@ mod tests {
     #[test]
     fn rejects_corrupt_buffers() {
         assert!(FrontCodedDict::from_bytes(b"short").is_err()); // < 16-byte header
-        let good = FrontCodedDict::build(["a", "b", "c"]).to_bytes();
-        // Corrupt the declared key count so the bucket-count invariant breaks.
-        let mut bad = good.clone();
-        bad[0] = 0xff;
+        let mut bad = FrontCodedDict::build(["a", "b", "c"]).to_bytes();
+        bad[0] = 0xff; // corrupt the declared key count → bucket-count invariant breaks
         assert!(FrontCodedDict::from_bytes(&bad).is_err());
     }
 
     #[test]
     fn is_smaller_than_a_flat_arena_on_sorted_keys() {
-        // Sanity: on a structured sorted catalog the blob beats the raw bytes + 8-byte offsets.
         let n = 5_000;
         let keys: Vec<String> = (0..n).map(|i| format!("entity-{i:012}")).collect();
         let dict = FrontCodedDict::build(keys.iter().map(String::as_str));

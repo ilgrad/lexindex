@@ -10,6 +10,7 @@
 //! keys collide in the 64-bit hash — reach for [`crate::StringIndex`] or rebuild in that case.
 
 use crate::arena::StringArena;
+use crate::blob::SharedBytes;
 use crate::IndexError;
 use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
@@ -153,6 +154,14 @@ impl PerfectHashIndex {
     /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. Validates every length (safe on
     /// untrusted input: it can fail, but never reads out of bounds).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+    }
+
+    /// Reconstruct from a shared byte source. The MPH structure (a few bytes/key) is deserialised into
+    /// owned memory; the key arena — the bulk of the blob — is borrowed zero-copy from `blob`, so a
+    /// memory-mapped load never copies it. Backs both `from_bytes` and `load_mmap`.
+    fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
+        let bytes = blob.as_ref();
         if bytes.len() < 20 || &bytes[0..4] != MPH_MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -171,7 +180,10 @@ impl PerfectHashIndex {
                     .map_err(|e| IndexError::Serde(e.to_string()))?,
             )
         };
-        let arena = StringArena::from_bytes(&bytes[mph_end..])?;
+        let arena = StringArena::from_shared(
+            blob.subslice(mph_end, blob.len())
+                .ok_or(IndexError::Format("arena range out of range"))?,
+        )?;
         if arena.len() != n {
             return Err(IndexError::Format("mph / arena length mismatch"));
         }
@@ -184,9 +196,20 @@ impl PerfectHashIndex {
         Ok(())
     }
 
-    /// Load a dictionary previously written with [`PerfectHashIndex::save`].
+    /// Load a dictionary previously written with [`PerfectHashIndex::save`] (reads the whole file).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         Self::from_bytes(&std::fs::read(path)?)
+    }
+
+    /// Memory-map the file and borrow the key arena (the bulk of the blob) zero-copy; only the small
+    /// MPH structure is read into memory. See [`StringIndex::load_mmap`](crate::StringIndex::load_mmap)
+    /// for the immutability caveat.
+    #[cfg(feature = "mmap")]
+    pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: the mapped file must not be mutated while it is mapped (see StringIndex::load_mmap).
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)))
     }
 }
 
@@ -260,6 +283,24 @@ mod tests {
         for w in ["GET", "POST", "PUT", "DELETE"] {
             assert_eq!(loaded.id(w), idx.id(w));
         }
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn load_mmap_matches_owned_load() {
+        let words: Vec<String> = (0..64).map(|i| format!("token_{i:03}")).collect();
+        let idx = PerfectHashIndex::build(&words).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("lexindex_mph_mmap_{}.bmp", std::process::id()));
+        idx.save(&path).unwrap();
+        let mapped = PerfectHashIndex::load_mmap(&path).unwrap();
+        assert_eq!(mapped.len(), idx.len());
+        for w in &words {
+            let id = mapped.id(w).expect("present"); // membership checks against the mapped arena
+            assert_eq!(mapped.key(id), Some(w.as_str()));
+        }
+        assert!(!mapped.contains("token_999")); // verified miss survives the mmap load
         std::fs::remove_file(&path).ok();
     }
 

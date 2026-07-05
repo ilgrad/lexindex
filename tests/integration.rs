@@ -48,3 +48,22 @@ fn perfect_hash_index_is_a_fast_dictionary() {
 
     assert!(!idx.contains("entity-99999"));
 }
+
+#[cfg(feature = "mmap")]
+#[test]
+fn zero_copy_mmap_load_round_trips() {
+    let names = catalog();
+    let idx = StringIndex::build(&names).unwrap();
+    let path = std::env::temp_dir().join(format!("lexindex_it_mmap_{}.bix", std::process::id()));
+    idx.save(&path).unwrap();
+
+    // load_mmap borrows the index from the mapped file — forward, reverse and prefix all work.
+    let mapped = StringIndex::load_mmap(&path).unwrap();
+    assert_eq!(mapped.len(), names.len());
+    for name in &names {
+        let id = mapped.id(name).expect("present");
+        assert_eq!(mapped.key(id).as_deref(), Some(name.as_str()));
+    }
+    assert_eq!(mapped.prefix("entity-001").len(), 100);
+    std::fs::remove_file(&path).ok();
+}

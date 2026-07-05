@@ -22,6 +22,7 @@
 //! assert_eq!(idx.prefix("ap").len(), 2);
 //! ```
 
+mod blob;
 mod front_coded;
 mod string_index;
 

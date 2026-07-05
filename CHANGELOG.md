@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Zero-copy `load_mmap`** on `StringIndex` and `PerfectHashIndex` (new default `mmap` feature, backed
+  by `memmap2`): memory-map a saved blob and borrow the index from the mapped pages instead of reading
+  it into RAM, so a multi-gigabyte index loads instantly and its pages are shared across processes.
+  `StringIndex` maps the whole blob (FST + front-coded dictionary); `PerfectHashIndex` maps the key
+  arena (the bulk) and reads only the small MPH into memory. Exposed to Python as
+  `StringIndex.load_mmap` / `PerfectHashIndex.load_mmap`. Reads are byte-wise (no alignment
+  requirement); the mapped file must stay immutable while an index borrows it. `--no-default-features`
+  (the `fst`-only build) omits it.
+
 ### Changed
 
 - **`StringIndex`'s reverse map (`id → key`) is now a front-coded string dictionary** instead of a flat

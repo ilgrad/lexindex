@@ -67,3 +67,26 @@ def test_perfect_hash_empty_and_corrupt():
     assert ph.is_empty() and ph.id("x") is None
     with pytest.raises(ValueError):
         lexindex.PerfectHashIndex.from_bytes(b"nope")
+
+
+def test_string_index_load_mmap(tmp_path):
+    si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
+    p = str(tmp_path / "idx.bix")
+    si.save(p)
+    mapped = lexindex.StringIndex.load_mmap(p)  # zero-copy: borrows the mapped file
+    assert len(mapped) == len(si)
+    assert mapped.id("banana") == si.id("banana")
+    assert mapped.key(0) == "apple"
+    assert [k for k, _ in mapped.prefix("ap")] == ["apple", "apricot"]
+
+
+def test_perfect_hash_load_mmap(tmp_path):
+    ph = lexindex.PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
+    p = str(tmp_path / "dict.bmp")
+    ph.save(p)
+    mapped = lexindex.PerfectHashIndex.load_mmap(p)
+    assert len(mapped) == len(ph)
+    for w in ["GET", "POST", "PUT", "DELETE"]:
+        i = mapped.id(w)
+        assert i == ph.id(w) and mapped.key(i) == w
+    assert "MISSING" not in mapped
