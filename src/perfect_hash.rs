@@ -118,8 +118,8 @@ impl PerfectHashIndex {
     }
 
     /// Serialise to a self-describing blob: `[magic 4][n u64][mph_len u64][mph epserde bytes][arena
-    /// bytes]`. The MPH is serialised with [`epserde`]; reloading queries correctly because
-    /// [`hash_key`] is version-stable.
+    /// bytes]`. The MPH is serialised with [`epserde`]; reloading queries correctly because the key
+    /// hash is version-stable.
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let mut mph_buf = Vec::new();
         if let Some(mph) = &self.mph {
@@ -136,8 +136,11 @@ impl PerfectHashIndex {
         Ok(out)
     }
 
-    /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. Validates every length (safe on
-    /// untrusted input: it can fail, but never reads out of bounds).
+    /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. The lexindex framing (magic, lengths,
+    /// arena offsets) is fully bounds-validated and never reads out of bounds, but the embedded minimal
+    /// perfect hash is deserialised by [`epserde`]: feed only blobs produced by
+    /// [`to_bytes`](Self::to_bytes) / [`save`](Self::save), since a corrupted MPH region may abort on a
+    /// failed allocation — the same "trust your own blob" contract as [`load_mmap`](Self::load_mmap).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
     }

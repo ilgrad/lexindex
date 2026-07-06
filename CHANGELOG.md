@@ -19,13 +19,22 @@ All notable changes to this project are documented here. The format follows
   `keys`) so a class is never mistaken for a mapping — `dict(index)` builds `{key: id}` from the
   iterator instead.
 
+### Fixed
+
+- `CompactHashIndex::from_bytes` guards the fingerprint-table length check with a checked multiply, so a
+  corrupt blob with a fabricated huge `n` fails cleanly instead of overflowing `usize` (a debug-build
+  panic; release builds already wrapped to a clean error). Documented the trust boundary shared by both
+  minimal-perfect-hash blobs: `from_bytes` / `load` validate the lexindex framing but deserialise the
+  embedded MPH via `epserde`, which does not bound-check a corrupted MPH region — feed only blobs you
+  produced (the same contract as `load_mmap`). `StringIndex` blobs are fully validated and unaffected.
+
 ### Testing
 
 - **Property-based tests** (`proptest`, dev-dependency only): the rank-walk `id ↔ key` round-trip over
   random prefix-nested and multibyte key sets; the `PerfectHashIndex` bijection onto `[0, n)`;
   `CompactHashIndex` never false-negatives a member; and every `from_bytes` deserialiser rejects
-  arbitrary or single-byte-flipped input cleanly — never panics or reads out of bounds. Line coverage
-  rose to 96.8%.
+  arbitrary or (for lexindex-owned bytes) single-byte-flipped input cleanly — never panics or reads out
+  of bounds. Line coverage rose to 97.0%.
 
 ## [0.3.0] — 2026-07-05
 

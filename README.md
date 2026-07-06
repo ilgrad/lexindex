@@ -205,9 +205,9 @@ better; the capability columns are why you would still pick a larger one.
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
 Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` map — 2.3× below
-`marisa-trie`** — when you can accept a bounded false-positive rate (measured **0.36 %** at 1 byte,
-**0.001 %** at 2, matching the `256^-k` theory) and don't need `id → key`. **`StringIndex` is the only
-structure that answers fuzzy and range queries at all**, at 5× below a plain DAWG. `marisa-trie`
+`marisa-trie`** — when you can accept a bounded false-positive rate (`256^-k`: **≈0.4 %** at 1 byte,
+**≈0.0015 %** at 2, which the benchmark confirms) and don't need `id → key`. **`StringIndex` is the only
+structure that answers fuzzy and range queries at all**, at 4× below a plain DAWG. `marisa-trie`
 remains the pick when you need *exact* membership *and* ordering *and* the smallest such index —
 lexindex doesn't claim that particular cell (see below for why).
 

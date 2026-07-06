@@ -38,9 +38,9 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   non-member both lands on a used slot and matches its fingerprint `256^-fingerprint_bytes` — the
   tunable false-positive rate (≈ 0.4 % at 1 byte, ≈ 0.0015 % at 2, measured to match on real words).
 
-Because the keys themselves are never stored, size is dominated by the MPH (~1.1 B/key) plus the
-fingerprints (`fingerprint_bytes` B/key): **1.30 B/key at 1 byte, 2.30 at 2** on real words — below
-`marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+Because the keys themselves are never stored, size is just the MPH (~0.3 B/key — PtrHash is ≈2.4
+bits/key) plus the fingerprints (`fingerprint_bytes` B/key): **1.30 B/key at 1 byte, 2.30 at 2** on real
+words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH1"][n][fp_bytes][mph length][mph epserde bytes][fingerprints]`.
 
 ## `PerfectHashIndex`

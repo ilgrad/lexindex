@@ -142,6 +142,12 @@ impl CompactHashIndex {
     }
 
     /// Reconstruct from [`CompactHashIndex::to_bytes`] output (copies the blob into owned memory).
+    ///
+    /// The lexindex header and fingerprint table are fully bounds-validated, but the embedded minimal
+    /// perfect hash is deserialised by [`epserde`]: feed only blobs produced by
+    /// [`to_bytes`](Self::to_bytes) / [`save`](Self::save). A corrupted MPH region may abort on a failed
+    /// allocation rather than returning a clean error — the same "trust your own blob" contract as
+    /// [`load_mmap`](Self::load_mmap).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
     }
@@ -175,7 +181,9 @@ impl CompactHashIndex {
         let fps = blob
             .subslice(mph_end, blob.len())
             .ok_or(IndexError::Format("fingerprint range out of range"))?;
-        if fps.len() != n * fp_bytes {
+        // `n` is untrusted (read from the header), so guard the multiply — a fabricated huge `n` would
+        // otherwise overflow `usize` and panic in a debug build instead of failing cleanly.
+        if n.checked_mul(fp_bytes) != Some(fps.len()) {
             return Err(IndexError::Format(
                 "compact-hash: fingerprint length mismatch",
             ));
@@ -304,6 +312,21 @@ mod tests {
         // Dropping a fingerprint byte makes the table length != n * fp_bytes.
         assert!(matches!(
             CompactHashIndex::from_bytes(&good[..good.len() - 1]),
+            Err(IndexError::Format(_))
+        ));
+    }
+
+    #[test]
+    fn from_bytes_rejects_overflowing_n_without_panicking() {
+        // A fabricated huge `n` in the header (with the MPH region left intact) must fail cleanly, not
+        // overflow `n * fp_bytes` — which would panic in a debug build.
+        let mut blob = CompactHashIndex::build(["a", "bb", "ccc"], 4)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        blob[11] ^= 0x40; // n: 3 -> 2^62, so `n * 4` would wrap u64
+        assert!(matches!(
+            CompactHashIndex::from_bytes(&blob),
             Err(IndexError::Format(_))
         ));
     }

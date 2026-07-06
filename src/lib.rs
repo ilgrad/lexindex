@@ -25,6 +25,12 @@
 //! assert_eq!(idx.prefix("ap").len(), 2);
 //! ```
 
+// The crate docs above link `PerfectHashIndex` / `CompactHashIndex` / `ptr_hash`, which exist only under
+// the default `mph` feature. docs.rs builds with default features, where the links resolve; on an
+// `fst`-only build they can't, so silence the broken-link lint just there rather than downgrade the
+// links to plain code spans.
+#![cfg_attr(not(feature = "mph"), allow(rustdoc::broken_intra_doc_links))]
+
 mod blob;
 mod string_index;
 
