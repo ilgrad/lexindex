@@ -61,6 +61,18 @@ impl PyStringIndex {
         self.inner.key(id)
     }
 
+    /// Batched [`id`](Self::id): one call for many keys, looping in Rust to amortise the Python↔Rust
+    /// boundary. Returns a list aligned with `keys`, `None` where a key is absent.
+    fn ids(&self, keys: Vec<String>) -> Vec<Option<u64>> {
+        keys.iter().map(|k| self.inner.id(k)).collect()
+    }
+
+    /// Batched [`key`](Self::key): one call for many ids. Returns a list aligned with `ids`, `None`
+    /// where an id is out of range.
+    fn keys(&self, ids: Vec<u64>) -> Vec<Option<String>> {
+        ids.iter().map(|&i| self.inner.key(i)).collect()
+    }
+
     /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered.
     fn prefix(&self, prefix: &str) -> Vec<(String, u64)> {
         self.inner.prefix(prefix)
@@ -169,6 +181,18 @@ impl PyPerfectHashIndex {
         self.inner.key(id).map(str::to_owned)
     }
 
+    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
+    fn ids(&self, keys: Vec<String>) -> Vec<Option<u32>> {
+        keys.iter().map(|k| self.inner.id(k)).collect()
+    }
+
+    /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
+    fn keys(&self, ids: Vec<u32>) -> Vec<Option<String>> {
+        ids.iter()
+            .map(|&i| self.inner.key(i).map(str::to_owned))
+            .collect()
+    }
+
     /// Serialise to a `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         Ok(PyBytes::new(py, &self.inner.to_bytes().map_err(to_py)?))
@@ -253,6 +277,11 @@ impl PyCompactHashIndex {
     /// Whether `key` is present (subject to the false-positive rate).
     fn contains(&self, key: &str) -> bool {
         self.inner.contains(key)
+    }
+
+    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
+    fn ids(&self, keys: Vec<String>) -> Vec<Option<u32>> {
+        keys.iter().map(|k| self.inner.id(k)).collect()
     }
 
     /// Serialise to a `bytes` blob.

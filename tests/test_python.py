@@ -162,3 +162,30 @@ def test_compact_hash_false_positive_rate_bounded():
         trials += 1
         fp += ch.contains(s)
     assert fp <= 10, f"false-positive rate too high: {fp}/{trials}"
+
+
+def test_string_index_batch():
+    si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
+    assert si.ids(["banana", "missing", "apple"]) == [2, None, 0]
+    assert si.keys([0, 2, 99]) == ["apple", "banana", None]
+    # the batch form agrees with the singular accessors, element for element
+    ws = ["cherry", "apricot", "nope"]
+    assert si.ids(ws) == [si.id(w) for w in ws]
+    assert si.keys([3, 1, 0]) == [si.key(i) for i in (3, 1, 0)]
+    assert si.ids([]) == [] and si.keys([]) == []
+
+
+def test_perfect_hash_batch():
+    ph = lexindex.PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
+    assert ph.ids(["POST", "PATCH", "GET"]) == [ph.id("POST"), None, ph.id("GET")]
+    ids = [ph.id(w) for w in ["GET", "POST"]]
+    assert ph.keys(ids) == ["GET", "POST"]
+    assert ph.keys([999]) == [None]
+
+
+def test_compact_hash_batch():
+    ch = lexindex.CompactHashIndex(["GET", "POST", "PUT", "DELETE"], 4)
+    ws = ["POST", "GET", "DELETE"]
+    assert ch.ids(ws) == [ch.id(w) for w in ws]  # batch == singular, in order
+    assert all(i is not None for i in ch.ids(ws))
+    assert ch.ids([]) == []

@@ -45,6 +45,10 @@ required-features = ["mph"]
 name = "mmap_zero_copy"
 required-features = ["mph", "mmap"]
 
+[dev-dependencies]
+# Property-based tests: rank-walk round-trip invariants and deserialiser robustness on arbitrary bytes.
+proptest = "1"
+
 [profile.release]
 opt-level = 3
 lto = true

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Batched lookups** — `ids(keys)` and `keys(ids)` on `StringIndex` and `PerfectHashIndex`, plus
+  `ids(keys)` on `CompactHashIndex`. Each loops in Rust and crosses the Python↔Rust boundary once
+  instead of per key, so a bulk `string → id` / `id → string` mapping avoids the per-call FFI overhead.
+  Returns a list aligned with the input, `None` where a key/id is absent.
+
+### Testing
+
+- **Property-based tests** (`proptest`, dev-dependency only): the rank-walk `id ↔ key` round-trip over
+  random prefix-nested and multibyte key sets; the `PerfectHashIndex` bijection onto `[0, n)`;
+  `CompactHashIndex` never false-negatives a member; and every `from_bytes` deserialiser rejects
+  arbitrary or single-byte-flipped input cleanly — never panics or reads out of bounds. Line coverage
+  rose to 96.8%.
+
 ## [0.3.0] — 2026-07-05
 
 ### Added
