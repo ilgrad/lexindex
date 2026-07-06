@@ -166,26 +166,48 @@ def test_compact_hash_false_positive_rate_bounded():
 
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
-    assert si.ids(["banana", "missing", "apple"]) == [2, None, 0]
-    assert si.keys([0, 2, 99]) == ["apple", "banana", None]
+    assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]
+    assert si.keys_of([0, 2, 99]) == ["apple", "banana", None]
     # the batch form agrees with the singular accessors, element for element
     ws = ["cherry", "apricot", "nope"]
-    assert si.ids(ws) == [si.id(w) for w in ws]
-    assert si.keys([3, 1, 0]) == [si.key(i) for i in (3, 1, 0)]
-    assert si.ids([]) == [] and si.keys([]) == []
+    assert si.ids_of(ws) == [si.id(w) for w in ws]
+    assert si.keys_of([3, 1, 0]) == [si.key(i) for i in (3, 1, 0)]
+    assert si.ids_of([]) == [] and si.keys_of([]) == []
 
 
 def test_perfect_hash_batch():
     ph = lexindex.PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
-    assert ph.ids(["POST", "PATCH", "GET"]) == [ph.id("POST"), None, ph.id("GET")]
+    assert ph.ids_of(["POST", "PATCH", "GET"]) == [ph.id("POST"), None, ph.id("GET")]
     ids = [ph.id(w) for w in ["GET", "POST"]]
-    assert ph.keys(ids) == ["GET", "POST"]
-    assert ph.keys([999]) == [None]
+    assert ph.keys_of(ids) == ["GET", "POST"]
+    assert ph.keys_of([999]) == [None]
 
 
 def test_compact_hash_batch():
     ch = lexindex.CompactHashIndex(["GET", "POST", "PUT", "DELETE"], 4)
     ws = ["POST", "GET", "DELETE"]
-    assert ch.ids(ws) == [ch.id(w) for w in ws]  # batch == singular, in order
-    assert all(i is not None for i in ch.ids(ws))
-    assert ch.ids([]) == []
+    assert ch.ids_of(ws) == [ch.id(w) for w in ws]  # batch == singular, in order
+    assert all(i is not None for i in ch.ids_of(ws))
+    assert ch.ids_of([]) == []
+
+
+def test_string_index_neighbours():
+    si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
+    # successor: smallest key >= query
+    assert si.successor("apple") == ("apple", 0)  # present -> itself
+    assert si.successor("ba") == ("banana", 2)  # between apricot and banana
+    assert si.successor("zzz") is None  # after all
+    # predecessor: largest key <= query
+    assert si.predecessor("cherry") == ("cherry", 3)  # present -> itself
+    assert si.predecessor("ba") == ("apricot", 1)  # between apricot and banana
+    assert si.predecessor("a") is None  # before all
+
+
+def test_string_index_iter():
+    si = lexindex.StringIndex(["banana", "apple", "apricot", "cherry"])
+    # __iter__ yields every (key, id) in sorted (= id) order, lazily
+    assert list(si) == [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
+    # a fresh iterator each time — iteration is repeatable
+    assert [k for k, _ in si] == ["apple", "apricot", "banana", "cherry"]
+    assert dict(si)["banana"] == 2
+    assert list(lexindex.StringIndex([])) == []

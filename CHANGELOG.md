@@ -8,10 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Batched lookups** — `ids(keys)` and `keys(ids)` on `StringIndex` and `PerfectHashIndex`, plus
-  `ids(keys)` on `CompactHashIndex`. Each loops in Rust and crosses the Python↔Rust boundary once
+- **Ordered navigation on `StringIndex`** — `successor(query)` (smallest key `>=` query) and
+  `predecessor(query)` (largest key `<=` query), each `O(query length)` by seeking the FST (no scan),
+  plus **lazy iteration**: `for key, id in index` in Rust `StringIndex::iter()` decodes one key per step
+  by the rank-walk, so it never materialises the whole key set the way `prefix("")` would.
+- **Batched lookups** — `ids_of(keys)` and `keys_of(ids)` on `StringIndex` and `PerfectHashIndex`, plus
+  `ids_of(keys)` on `CompactHashIndex`. Each loops in Rust and crosses the Python↔Rust boundary once
   instead of per key, so a bulk `string → id` / `id → string` mapping avoids the per-call FFI overhead.
-  Returns a list aligned with the input, `None` where a key/id is absent.
+  Returns a list aligned with the input, `None` where a key/id is absent. Named `ids_of`/`keys_of` (not
+  `keys`) so a class is never mistaken for a mapping — `dict(index)` builds `{key: id}` from the
+  iterator instead.
 
 ### Testing
 

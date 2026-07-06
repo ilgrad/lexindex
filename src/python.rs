@@ -62,14 +62,15 @@ impl PyStringIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, looping in Rust to amortise the Python↔Rust
-    /// boundary. Returns a list aligned with `keys`, `None` where a key is absent.
-    fn ids(&self, keys: Vec<String>) -> Vec<Option<u64>> {
+    /// boundary. Returns a list aligned with `keys`, `None` where a key is absent. (Named `ids_of`, not
+    /// `ids`/`keys`, so the class is not mistaken for a mapping by `dict(index)`.)
+    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u64>> {
         keys.iter().map(|k| self.inner.id(k)).collect()
     }
 
     /// Batched [`key`](Self::key): one call for many ids. Returns a list aligned with `ids`, `None`
     /// where an id is out of range.
-    fn keys(&self, ids: Vec<u64>) -> Vec<Option<String>> {
+    fn keys_of(&self, ids: Vec<u64>) -> Vec<Option<String>> {
         ids.iter().map(|&i| self.inner.key(i)).collect()
     }
 
@@ -83,6 +84,16 @@ impl PyStringIndex {
         self.inner.range(lo, hi)
     }
 
+    /// The smallest `(key, id)` with `key >= query`, or `None` if every key is smaller.
+    fn successor(&self, query: &str) -> Option<(String, u64)> {
+        self.inner.successor(query)
+    }
+
+    /// The largest `(key, id)` with `key <= query`, or `None` if every key is larger.
+    fn predecessor(&self, query: &str) -> Option<(String, u64)> {
+        self.inner.predecessor(query)
+    }
+
     /// `(key, id)` pairs within Levenshtein edit distance `max_distance` of `query`.
     fn fuzzy(&self, query: &str, max_distance: u32) -> PyResult<Vec<(String, u64)>> {
         self.inner.fuzzy(query, max_distance).map_err(to_py)
@@ -91,6 +102,17 @@ impl PyStringIndex {
     /// `(key, id)` pairs whose key contains `query` as a subsequence.
     fn subsequence(&self, query: &str) -> Vec<(String, u64)> {
         self.inner.subsequence(query)
+    }
+
+    /// Iterate every `(key, id)` in lexicographic (= id) order, **lazily** — one rank-walk per step, so
+    /// no giant list is materialised the way `prefix("")` would.
+    fn __iter__(slf: Bound<'_, Self>) -> StringIndexIterator {
+        let len = slf.borrow().inner.len() as u64;
+        StringIndexIterator {
+            parent: slf.unbind(),
+            pos: 0,
+            len,
+        }
     }
 
     /// Serialise to a `bytes` blob.
@@ -127,6 +149,32 @@ impl PyStringIndex {
         Ok(Self {
             inner: StringIndex::load_mmap(path).map_err(to_py)?,
         })
+    }
+}
+
+/// Lazy `(key, id)` iterator over a [`PyStringIndex`], in sorted order. Holds a reference to the parent
+/// index and decodes one key per step by the rank-walk, so it never materialises the whole key set.
+#[pyclass(name = "StringIndexIterator", module = "lexindex._core")]
+pub struct StringIndexIterator {
+    parent: Py<PyStringIndex>,
+    pos: u64,
+    len: u64,
+}
+
+#[pymethods]
+impl StringIndexIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self, py: Python<'_>) -> Option<(String, u64)> {
+        if self.pos >= self.len {
+            return None;
+        }
+        let key = self.parent.borrow(py).inner.key(self.pos)?;
+        let item = (key, self.pos);
+        self.pos += 1;
+        Some(item)
     }
 }
 
@@ -182,12 +230,12 @@ impl PyPerfectHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids(&self, keys: Vec<String>) -> Vec<Option<u32>> {
+    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u32>> {
         keys.iter().map(|k| self.inner.id(k)).collect()
     }
 
     /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
-    fn keys(&self, ids: Vec<u32>) -> Vec<Option<String>> {
+    fn keys_of(&self, ids: Vec<u32>) -> Vec<Option<String>> {
         ids.iter()
             .map(|&i| self.inner.key(i).map(str::to_owned))
             .collect()
@@ -280,7 +328,7 @@ impl PyCompactHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids(&self, keys: Vec<String>) -> Vec<Option<u32>> {
+    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u32>> {
         keys.iter().map(|k| self.inner.id(k)).collect()
     }
 
@@ -322,6 +370,7 @@ impl PyCompactHashIndex {
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
+    m.add_class::<StringIndexIterator>()?;
     #[cfg(feature = "mph")]
     m.add_class::<PyPerfectHashIndex>()?;
     #[cfg(feature = "mph")]

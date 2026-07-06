@@ -16,10 +16,11 @@ Three complementary, build-once / query-many structures — pick by what you nee
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer
   ([`fst`](https://crates.io/crates/fst)). Exact `string → id` and `id → string`, plus **prefix**,
-  **range**, **fuzzy** (bounded Levenshtein edit distance), and **subsequence** iteration — all driven
-  by automata over the FST, never a full scan — in a compressed, serialisable, memory-mappable form.
-  The only structure here that answers **ordered and typo-tolerant** queries. Use it for autocomplete,
-  fuzzy search, browse, and ordered scans of a large catalog.
+  **range**, **predecessor / successor** (nearest key ≤ / ≥ a query), **fuzzy** (bounded Levenshtein
+  edit distance), **subsequence**, and **lazy full iteration** — all driven by automata over the FST,
+  never a full scan — in a compressed, serialisable, memory-mappable form. The only structure here that
+  answers **ordered and typo-tolerant** queries. Use it for autocomplete, fuzzy search, browse, and
+  ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
   ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a small fingerprint per key, storing *no keys
   at all*. **1.30 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`** and below
@@ -49,6 +50,10 @@ idx.id("banana")             # 2  (sorted rank)
 idx.key(0)                   # "apple"  — reconstructed from the FST, no stored reverse map
 idx.prefix("ap")             # [("apple", 0), ("apricot", 1)]
 idx.fuzzy("aple", 1)         # [("apple", 0)]  — typo-tolerant
+idx.successor("ba")          # ("banana", 2)   — nearest key >= query
+idx.predecessor("ba")        # ("apricot", 1)  — nearest key <= query
+list(idx)                    # [("apple", 0), ...]  — lazy iteration in sorted order
+idx.ids_of(["apple", "x"])   # [0, None]  — batched: one FFI call, not one per key
 idx.save("catalog.bix")      # persist; StringIndex.load("catalog.bix") reloads it
 
 c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key at scale)
@@ -252,6 +257,22 @@ more latency for **ordered / prefix / range / fuzzy** queries the hash maps cann
 `CompactHashIndex` when footprint dominates and a rare false positive is fine; `PerfectHashIndex::id`
 for exact membership + reverse; `StringIndex` when order or fuzzy/prefix matters; `HashMap` when you
 just need a general in-RAM map with nothing persisted.
+
+### Scaling to millions of keys
+
+`python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow
+linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.30 bytes/key holds constant** as
+`n` grows:
+
+| n | structure | build | bytes/key | peak RSS | lookup |
+|---|---|---:|---:|---:|---:|
+| 1 M | `CompactHashIndex` | 0.28 s | 1.30 | 176 MB | 232 ns |
+| 10 M | `CompactHashIndex` | 4.4 s | 1.30 | 1.5 GB | 397 ns |
+| 10 M | `StringIndex` | 4.7 s | 2.00\* | 1.3 GB | 797 ns |
+
+<sub>\* bigram keys share more prefixes than single words, so `StringIndex` compresses below its 5.95
+B/key on the raw dictionary — the honest single-word figure is in the size table above. Peak RSS
+includes the input key list. Linear extrapolation puts 100 M at ~50 s and ~15 GB (a big-memory box).</sub>
 
 ## License
 

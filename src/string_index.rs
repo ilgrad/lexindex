@@ -143,6 +143,44 @@ impl StringIndex {
         out
     }
 
+    /// The smallest `(key, id)` with `key >= query` (the *successor*), or `None` if every key is
+    /// smaller. `O(query length)` — it seeks the FST, never scans the key set.
+    pub fn successor(&self, query: &str) -> Option<(String, u64)> {
+        let mut stream = self.map.range().ge(query).into_stream();
+        stream
+            .next()
+            .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+    }
+
+    /// The largest `(key, id)` with `key <= query` (the *predecessor*), or `None` if every key is
+    /// larger. `O(query length)`: if `query` is present it is its own predecessor; otherwise the answer
+    /// sits one rank below the smallest key greater than `query` (ids are the sorted rank).
+    pub fn predecessor(&self, query: &str) -> Option<(String, u64)> {
+        if let Some(id) = self.id(query) {
+            return Some((query.to_owned(), id));
+        }
+        // Rank of the smallest key strictly greater than `query` == number of keys below `query`.
+        let mut stream = self.map.range().gt(query).into_stream();
+        let rank_above = stream.next().map_or(self.len() as u64, |(_, v)| v);
+        rank_above
+            .checked_sub(1)
+            .and_then(|r| self.key(r).map(|k| (k, r)))
+    }
+
+    /// All `(key, id)` pairs in lexicographic (= id) order, **lazily**: keys are decoded one at a time
+    /// by the rank-walk, so nothing is materialised up front. Prefer this to `prefix("")` when the index
+    /// is large. Each step is `O(key length)`.
+    pub fn iter(&self) -> impl Iterator<Item = (String, u64)> + '_ {
+        // `fst` streams are `Streamer`, not `Iterator`; adapt one via `from_fn`, decoding to owned data
+        // so no borrow of the stream escapes.
+        let mut stream = self.map.stream();
+        std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        })
+    }
+
     /// Serialise to a self-describing blob: `[magic 4][fst bytes]` — the FST *is* the whole index.
     pub fn to_bytes(&self) -> Vec<u8> {
         let map_bytes = self.map.as_fst().as_bytes();
@@ -271,6 +309,37 @@ mod tests {
         // "ae" matches apple (a…e) but not apricot (no trailing e)
         let ae: Vec<String> = idx.subsequence("ae").into_iter().map(|(k, _)| k).collect();
         assert_eq!(ae, vec!["apple"]);
+    }
+
+    #[test]
+    fn predecessor_successor_and_iter() {
+        let idx = sample(); // apple(0) apricot(1) banana(2) cherry(3)
+                            // successor: smallest key >= query
+        assert_eq!(idx.successor("apple"), Some(("apple".into(), 0))); // present -> itself
+        assert_eq!(idx.successor("ba"), Some(("banana".into(), 2))); // between apricot and banana
+        assert_eq!(idx.successor("a"), Some(("apple".into(), 0))); // before all -> first
+        assert_eq!(idx.successor("zzz"), None); // after all
+                                                // predecessor: largest key <= query
+        assert_eq!(idx.predecessor("cherry"), Some(("cherry".into(), 3))); // present -> itself
+        assert_eq!(idx.predecessor("ba"), Some(("apricot".into(), 1))); // between apricot and banana
+        assert_eq!(idx.predecessor("zzz"), Some(("cherry".into(), 3))); // after all -> last
+        assert_eq!(idx.predecessor("a"), None); // before all
+                                                // iter yields every (key, id) in sorted order, lazily
+        let all: Vec<(String, u64)> = idx.iter().collect();
+        assert_eq!(
+            all,
+            vec![
+                ("apple".into(), 0),
+                ("apricot".into(), 1),
+                ("banana".into(), 2),
+                ("cherry".into(), 3),
+            ]
+        );
+        // empty index has neither neighbour and an empty iterator
+        let empty = StringIndex::build(Vec::<String>::new()).unwrap();
+        assert_eq!(empty.successor("x"), None);
+        assert_eq!(empty.predecessor("x"), None);
+        assert_eq!(empty.iter().count(), 0);
     }
 
     #[test]

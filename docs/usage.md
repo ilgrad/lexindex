@@ -19,8 +19,19 @@ idx.key(2)               # "banana"  (id → string)
 # ordered iteration — automaton-driven, never a full scan
 idx.prefix("ap")         # [("apple", 0), ("apricot", 1)]
 idx.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]  — [lo, hi)
+idx.successor("ba")      # ("banana", 2)   — smallest key ≥ query
+idx.predecessor("ba")    # ("apricot", 1)  — largest key ≤ query
 idx.fuzzy("aple", 1)     # [("apple", 0)]  — Levenshtein edit distance ≤ 1
 idx.subsequence("ae")    # [("apple", 0)]  — "a…e" in order, not necessarily contiguous
+
+# lazy iteration in sorted (= id) order — decodes one key at a time, never builds a giant list
+list(idx)                # [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
+dict(idx)                # {"apple": 0, "apricot": 1, "banana": 2, "cherry": 3}
+
+# batched lookups — one Rust↔Python crossing instead of one per key (named ids_of / keys_of so the
+# class is never mistaken for a mapping)
+idx.ids_of(["banana", "x"])   # [2, None]
+idx.keys_of([0, 2])           # ["apple", "banana"]
 ```
 
 ### Persistence and zero-copy loading
@@ -107,6 +118,7 @@ Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; 
 ## Benchmark
 
 `python bench/compare.py` measures **serialised size** on real dictionary words against `marisa-trie`,
-DAWG and datrie (the double-crown table above). `cargo run --release --example bench` measures
+DAWG and datrie (the double-crown table above). `python bench/scale.py` measures **build time, peak
+memory, and lookup latency from 1 M to 100 M** real keys. `cargo run --release --example bench` measures
 **point-lookup latency** for `StringIndex` and `PerfectHashIndex` against `std::HashMap` / `BTreeMap`;
 `cargo run --release --example mmap_zero_copy` times the owned `load` against the zero-copy `load_mmap`.
