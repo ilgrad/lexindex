@@ -51,7 +51,7 @@ idx.prefix("ap")             # [("apple", 0), ("apricot", 1)]
 idx.fuzzy("aple", 1)         # [("apple", 0)]  — typo-tolerant
 idx.save("catalog.bix")      # persist; StringIndex.load("catalog.bix") reloads it
 
-c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key)
+c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key at scale)
 c.id("POST")                 # dense id in [0, n); probabilistic membership, no id->key
 c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 
@@ -60,7 +60,9 @@ d.id("POST")                 # dense id in [0, n); membership verified, returns 
 d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
 ```
 
-No runtime dependencies; a single abi3 wheel covers CPython 3.11+.
+No runtime dependencies; a single abi3 wheel covers CPython 3.11+. See
+[`examples/quickstart.py`](https://github.com/ilgrad/lexindex/blob/main/examples/quickstart.py) for all
+three indexes end to end, and the [documentation site](https://ilgrad.github.io/lexindex/).
 
 ### Pairs with betula-cluster
 
@@ -149,7 +151,7 @@ assert_eq!(raw, id);
   walks the automaton from the root, at each node taking the last transition whose accumulated output
   stays `≤ id`, and returns the path once the outputs sum to exactly `id`. That is `O(key length)` and
   needs no auxiliary structure, so the serialised blob is just `[magic "BIX4"][fst]` — half the size of
-  the 0.2.0 front-coded layout on real words (12.6 → 6.0 B/key) and simpler to reason about.
+  the 0.2.0 front-coded layout on real words (12.6 → 5.95 B/key) and simpler to reason about.
   `from_bytes` validates the magic and hands the rest to `fst`, which is itself bounds-checked, so
   loading an untrusted blob can fail but never corrupts.
 - **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
