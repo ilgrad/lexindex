@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] — 2026-07-06
 
 ### Added
 
@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format follows
   Returns a list aligned with the input, `None` where a key/id is absent. Named `ids_of`/`keys_of` (not
   `keys`) so a class is never mistaken for a mapping — `dict(index)` builds `{key: id}` from the
   iterator instead.
+- **`musllinux_1_2` wheels** (x86_64 + aarch64) for Alpine / musl-based containers, alongside the
+  existing manylinux, macOS, and Windows wheels.
+- **Scale benchmark** (`bench/scale.py`) measuring build time, peak memory, and lookup latency from 1M
+  to 100M real keys.
 
 ### Fixed
 
