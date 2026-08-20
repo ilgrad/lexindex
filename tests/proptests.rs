@@ -32,7 +32,7 @@ fn check_string_index_roundtrip(keys: &[String]) {
         assert_eq!(idx.key(id).as_deref(), Some(key.as_str()), "key({id})");
     }
     assert_eq!(idx.key(expected.len() as u64), None); // one past the end
-                                                      // a serialise round-trip preserves every lookup
+    // a serialise round-trip preserves every lookup
     let restored = StringIndex::from_bytes(&idx.to_bytes()).unwrap();
     for (rank, key) in expected.iter().enumerate() {
         assert_eq!(restored.id(key), Some(rank as u64));

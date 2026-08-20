@@ -9,9 +9,9 @@
 //! reach for [`PerfectHashIndex`](crate::PerfectHashIndex) (exact membership + reverse) or
 //! [`StringIndex`](crate::StringIndex) (ordered) otherwise.
 
+use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::hash::{fingerprint, hash_key};
-use crate::IndexError;
 use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 

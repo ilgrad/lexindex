@@ -6,8 +6,8 @@
 //! stored** — the whole index is a single FST, which roughly halves the serialised size. It
 //! serialises to a flat, relocatable blob.
 
-use crate::blob::SharedBytes;
 use crate::IndexError;
+use crate::blob::SharedBytes;
 use fst::automaton::{Automaton, Levenshtein, Str, Subsequence};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn fuzzy_search_tolerates_typos() {
         let idx = sample(); // apple, apricot, banana, cherry
-                            // one insertion away from "apple"
+        // one insertion away from "apple"
         let near: Vec<String> = idx
             .fuzzy("aple", 1)
             .unwrap()
@@ -287,11 +287,12 @@ mod tests {
             .collect();
         assert_eq!(near, vec!["apple"]);
         // one deletion away from "apricot"
-        assert!(idx
-            .fuzzy("aprcot", 2)
-            .unwrap()
-            .iter()
-            .any(|(k, _)| k == "apricot"));
+        assert!(
+            idx.fuzzy("aprcot", 2)
+                .unwrap()
+                .iter()
+                .any(|(k, _)| k == "apricot")
+        );
         // distance 0 is exact: a non-key returns nothing, a key returns itself with its id
         assert!(idx.fuzzy("zzz", 0).unwrap().is_empty());
         assert_eq!(
@@ -314,17 +315,17 @@ mod tests {
     #[test]
     fn predecessor_successor_and_iter() {
         let idx = sample(); // apple(0) apricot(1) banana(2) cherry(3)
-                            // successor: smallest key >= query
+        // successor: smallest key >= query
         assert_eq!(idx.successor("apple"), Some(("apple".into(), 0))); // present -> itself
         assert_eq!(idx.successor("ba"), Some(("banana".into(), 2))); // between apricot and banana
         assert_eq!(idx.successor("a"), Some(("apple".into(), 0))); // before all -> first
         assert_eq!(idx.successor("zzz"), None); // after all
-                                                // predecessor: largest key <= query
+        // predecessor: largest key <= query
         assert_eq!(idx.predecessor("cherry"), Some(("cherry".into(), 3))); // present -> itself
         assert_eq!(idx.predecessor("ba"), Some(("apricot".into(), 1))); // between apricot and banana
         assert_eq!(idx.predecessor("zzz"), Some(("cherry".into(), 3))); // after all -> last
         assert_eq!(idx.predecessor("a"), None); // before all
-                                                // iter yields every (key, id) in sorted order, lazily
+        // iter yields every (key, id) in sorted order, lazily
         let all: Vec<(String, u64)> = idx.iter().collect();
         assert_eq!(
             all,

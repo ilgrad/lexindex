@@ -5,8 +5,8 @@
 //! `CompactHashIndex` stores only fingerprints.) It views a [`SharedBytes`], so a memory-mapped load
 //! borrows it without copying.
 
-use crate::blob::SharedBytes;
 use crate::IndexError;
+use crate::blob::SharedBytes;
 
 /// A contiguous arena of UTF-8 strings addressable by index, viewing a shared byte source.
 #[derive(Clone, Debug)]

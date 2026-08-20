@@ -9,10 +9,10 @@
 //! Build fails (rather than silently corrupting) on the astronomically rare event that two distinct
 //! keys collide in the 64-bit hash — reach for [`crate::StringIndex`] or rebuild in that case.
 
+use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
 use crate::hash::hash_key;
-use crate::IndexError;
 use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 
