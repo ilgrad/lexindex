@@ -3,7 +3,9 @@
 from collections.abc import Iterator
 from typing import final
 
-__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex"]
+__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]
+
+__version__: str
 
 @final
 class StringIndex:

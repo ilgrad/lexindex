@@ -12,6 +12,13 @@ All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` â€
 index and borrow it instantly).
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from lexindex._core import CompactHashIndex, PerfectHashIndex, StringIndex
 
-__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex"]
+try:
+    __version__ = version("lexindex")
+except PackageNotFoundError:  # pragma: no cover - source tree without install metadata
+    __version__ = "0.0.0+unknown"
+
+__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]

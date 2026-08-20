@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`lexindex.__version__`** in the Python package, read from the installed distribution
+  metadata (so it cannot drift from `pyproject.toml`) with a `0.0.0+unknown` fallback when
+  imported from a source tree that was never installed.
+
 ## [0.4.0] — 2026-07-06
 
 ### Added

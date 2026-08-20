@@ -211,3 +211,9 @@ def test_string_index_iter():
     assert [k for k, _ in si] == ["apple", "apricot", "banana", "cherry"]
     assert dict(si)["banana"] == 2
     assert list(lexindex.StringIndex([])) == []
+
+
+def test_version_is_exposed():
+    v = lexindex.__version__
+    assert isinstance(v, str) and v  # non-empty string
+    assert v[0].isdigit() and "." in v  # looks like a real version (installed metadata)
