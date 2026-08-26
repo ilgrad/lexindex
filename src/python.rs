@@ -300,7 +300,7 @@ impl PyPerfectHashIndex {
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
-        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
+        py.detach(|| self.inner.ids_of(&keys))
     }
 
     /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
@@ -407,7 +407,7 @@ impl PyCompactHashIndex {
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
-        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
+        py.detach(|| self.inner.ids_of(&keys))
     }
 
     /// Serialise to a `bytes` blob.

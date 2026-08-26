@@ -102,6 +102,24 @@ impl std::fmt::Debug for SharedBytes {
     }
 }
 
+/// Best-effort prefetch of the cache line holding `data[i]`; no-op off x86_64 or out of range.
+#[inline(always)]
+#[cfg(feature = "mph")]
+pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
+    #[cfg(target_arch = "x86_64")]
+    if i < data.len() {
+        // SAFETY: prefetch has no observable effect beyond cache state, and the pointer is in
+        // bounds by the check above.
+        unsafe {
+            std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
+                data.as_ptr().add(i).cast(),
+            )
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (data, i);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

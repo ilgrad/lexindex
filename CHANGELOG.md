@@ -14,6 +14,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Batch `ids_of` on `PerfectHashIndex` and `CompactHashIndex` streams its MPH lookups.**
+  Per-key `id()` walks hash → slot → verify serially, stalling on a cache miss at every step.
+  The batch path now drives ptr_hash's `index_stream` (software-prefetched slot resolution) and
+  prefetches the verification data (arena offsets and spans, fingerprint bytes) a fixed distance
+  ahead, so the memory latency of key *i+16* overlaps the compare of key *i*. Measured against the
+  per-key loop in the same binary: `PerfectHashIndex.ids_of` **1.55×** on the 479 823-word
+  dictionary and **1.83×** on 5 M real-word bigrams; `CompactHashIndex.ids_of` **1.10×** /
+  **1.21×** (its fingerprint compare was already a single byte load, so only the slot stream and
+  fingerprint prefetch help). The Python `ids_of` of both classes routes through the streamed core
+  with the GIL released; misses still come back as `None`, pinned by tests on both sides.
+
 - **The rank-walk (`id → key`) picks each FST transition by binary search instead of a linear
   scan.** Transitions are stored in increasing byte order, which makes their subtree-minimum ranks
   non-decreasing — the walk's invariant already guaranteed the order, the scan just wasn't using

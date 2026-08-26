@@ -83,6 +83,42 @@ impl StringArena {
         std::str::from_utf8(bytes.get(start..end)?).ok()
     }
 
+    /// Prefetch the cache line holding slot `i`'s offset pair (pipelined batch lookups).
+    #[inline(always)]
+    pub(crate) fn prefetch_offsets(&self, i: usize) {
+        if i < self.n {
+            crate::blob::prefetch_byte(self.blob.as_ref(), HEADER + i * self.width);
+        }
+    }
+
+    /// Absolute `(start, end)` byte span of slot `i` in the blob, or `None` if out of range /
+    /// corrupt. Splitting `get` into span + [`str_at`](Self::str_at) lets a batch caller prefetch
+    /// the data bytes between the two.
+    #[inline(always)]
+    pub(crate) fn span(&self, i: usize) -> Option<(usize, usize)> {
+        if i >= self.n {
+            return None;
+        }
+        let bytes = self.blob.as_ref();
+        let at = HEADER + i * self.width;
+        let lo = read_offset(bytes, at, self.width).ok()? as usize;
+        let hi = read_offset(bytes, at + self.width, self.width).ok()? as usize;
+        Some((
+            self.data_start.checked_add(lo)?,
+            self.data_start.checked_add(hi)?,
+        ))
+    }
+
+    #[inline(always)]
+    pub(crate) fn prefetch_span(&self, span: (usize, usize)) {
+        crate::blob::prefetch_byte(self.blob.as_ref(), span.0);
+    }
+
+    #[inline(always)]
+    pub(crate) fn str_at(&self, span: (usize, usize)) -> Option<&str> {
+        std::str::from_utf8(self.blob.as_ref().get(span.0..span.1)?).ok()
+    }
+
     /// Serialise to the layout it already holds.
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.blob.as_ref().to_vec()
