@@ -28,11 +28,52 @@ idx.subsequence("ae")    # [("apple", 0)]  — "a…e" in order, not necessarily
 list(idx)                # [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
 dict(idx)                # {"apple": 0, "apricot": 1, "banana": 2, "cherry": 3}
 
+# every query takes a limit: stop after that many matches, walking no further
+idx.prefix("ap", limit=1)        # [("apple", 0)]
+idx.fuzzy("aple", 1, limit=1)    # [("apple", 0)]
+
 # batched lookups — one Rust↔Python crossing instead of one per key (named ids_of / keys_of so the
 # class is never mistaken for a mapping)
 idx.ids_of(["banana", "x"])   # [2, None]
 idx.keys_of([0, 2])           # ["apple", "banana"]
 ```
+
+### What `limit` buys — and what it cannot
+
+`limit` is not a faster walk; it is **not doing work whose result would be thrown away**. Without it,
+`prefix("s")` on the 479 823-word system dictionary walks the whole `s` subtree of the FST and
+materialises every match — 45 064 `(str, int)` tuples — even if the caller wanted ten. With it, the
+walk stops at the tenth match. The saving is therefore proportional to how much of the result you
+*discard*, and it varies enormously by query (same dictionary, idle machine, min of 9 runs):
+
+| query | matches | full | `limit` | speedup |
+|---|---:|---:|---:|---:|
+| `prefix("s", limit=10)` | 45 064 | 10.96 ms | 0.004 ms | ~3 000× |
+| `prefix("a", limit=10)` | 25 192 | 4.83 ms | 0.003 ms | ~1 500× |
+| `prefix("un", limit=10)` | 20 358 | 4.09 ms | 0.006 ms | ~700× |
+| `subsequence("abc", limit=10)` | 1 910 | 41.31 ms | 0.51 ms | ~80× |
+| `fuzzy("hello", 2, limit=5)` | 242 | 1.52 ms | 0.26 ms | ~6× |
+
+Three regimes hide in that column, and they tell you when to reach for `limit`:
+
+- **Prefix / range: the walk is cheap, the discarded results were the cost.** Speedup tracks
+  `matches ÷ limit` almost linearly. This is the autocomplete case, and it is why the numbers are
+  in the thousands.
+- **Subsequence: the walk itself is expensive.** The `.*a.*b.*c.*` automaton visits many FST nodes
+  per match produced, so stopping early saves *traversal*, not just tuples — 80× despite discarding
+  far fewer results than `prefix("un")`.
+- **Fuzzy: a fixed cost dominates that `limit` cannot skip.** The Levenshtein automaton is built
+  eagerly before the walk starts (deliberately, so a too-large distance raises up front rather than
+  on first use). `limit` only trims the walk after that, hence single-digit gains.
+
+There is also a floor under every query: one call costs ~3 µs of FFI plus stream construction, so
+per-match cost at `limit=1` reads ~2 000 ns against a steady ~200 ns from `limit≈100` up. Asking
+for one match costs about the same as asking for ten — batch your UI accordingly.
+
+If you will consume **all** matches, `limit` (or omitting it) changes nothing: the eager form *is*
+the lazy walk collected, measured within noise of each other. In Rust, prefer the `*_iter` forms
+(`prefix_iter` / `range_iter` / `fuzzy_iter` / `subsequence_iter`) and `.take(n)` — same machinery,
+no intermediate `Vec` at all.
 
 ### Persistence and zero-copy loading
 

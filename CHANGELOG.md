@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **The usage guide now explains what `limit` buys — and what it cannot** (["What `limit` buys"](docs/usage.md)),
+  replacing 0.5.0's single headline number with the measured behaviour. The speedup is the work *not
+  done*, so it spans three regimes: prefix/range scale with `matches ÷ limit` (measured ~3 000× for
+  `prefix("s", limit=10)` on an idle machine — the 669× in the 0.5.0 notes was the same query on a
+  loaded one, i.e. conservative), subsequence gains ~80× because early stop saves the expensive
+  traversal itself, and fuzzy gains only ~6× because the eagerly-built Levenshtein automaton is a
+  fixed cost `limit` cannot skip. Also documented: the ~3 µs per-call floor (asking for 1 match
+  costs the same as 10), and that consuming *all* matches gains nothing by construction.
+
 ## [0.5.0] — 2026-08-26
 
 **Upgrading:** rebuild any saved `PerfectHashIndex` blob — its format changed (see below) and 0.5.0
