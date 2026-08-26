@@ -161,5 +161,6 @@ Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; 
 `python bench/compare.py` measures **serialised size** on real dictionary words against `marisa-trie`,
 DAWG and datrie (the double-crown table above). `python bench/scale.py` measures **build time, peak
 memory, and lookup latency from 1 M to 100 M** real keys. `cargo run --release --example bench` measures
-**point-lookup latency** for `StringIndex` and `PerfectHashIndex` against `std::HashMap` / `BTreeMap`;
+**point-lookup latency** for all three indexes against `std::HashMap` / `BTreeMap` on real
+dictionary-word bigrams (it refuses to run without a word list rather than substitute synthetic keys);
 `cargo run --release --example mmap_zero_copy` times the owned `load` against the zero-copy `load_mmap`.

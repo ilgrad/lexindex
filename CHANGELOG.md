@@ -6,7 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The speed benchmark (`examples/bench.rs`) now uses real dictionary-word bigrams**, the same key
+  generator as `bench/scale.py`, and refuses to run without a word list rather than substitute
+  synthetic keys — the same rule `bench/compare.py` has always enforced. The old
+  `entity-000…N` keys arrived pre-sorted and hash-degenerate, flattering every build time. On real
+  keys the README table moved both ways and was re-measured whole (one session, min of 12 runs):
+  every `build` reads higher because sorting real input is part of the job, while the lookup gap
+  over `std::HashMap` **widened from ~1.25× to ~1.5×** (realistic short keys make the byte-wise FNV
+  hash cheaper relative to SipHash). A `CompactHashIndex::id` row was added — measured **~238 ns**,
+  it beats `HashMap` while keeping its fingerprint membership check.
+
+### Fixed
+
+- **The hash-collision build error no longer suggests a retry that cannot work.** Both MPH builds
+  said "64-bit key-hash collision; rebuild or use StringIndex" — but the hash is deterministic and
+  unseeded (that is what makes a serialised MPH reloadable), so rebuilding the same key set fails
+  identically, forever. The message now says so and points at `StringIndex` or changing the keys.
+
 ### Documentation
+
+- **The collision odds behind "build fails on a 64-bit hash collision" are now quantified** instead
+  of called astronomically rare: `n(n-1)/2^65`, computed exactly (Maxima and PARI/GP agreeing) —
+  6.2×10⁻⁹ for the dictionary, 2.7×10⁻⁶ at 10 M keys, **2.7×10⁻⁴ at 100 M**, ~2.7% at 1 G. Honest
+  below ~10 M; a real design consideration at 10⁸–10⁹, where `StringIndex` has no such failure mode.
+
+- **The `256^-k` false-positive rate is now statistically verified, not just asserted.** On the
+  0.5.0 code, dictionary members with two non-member populations: 2 M random strings measured
+  0.384% at fp=1 (z = −1.5 against the exact 0.390 625%) and 33/2 M at fp=2 (z = +0.5); 50 000
+  held-out real words measured 0.310% (z = −2.9). At or below theory in every case — the advertised
+  rate is a ceiling in practice.
 
 - **The usage guide now explains what `limit` buys — and what it cannot** (["What `limit` buys"](docs/usage.md)),
   replacing 0.5.0's single headline number with the measured behaviour. The speedup is the work *not

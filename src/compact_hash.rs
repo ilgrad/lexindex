@@ -60,7 +60,8 @@ impl CompactHashIndex {
         sorted.sort_unstable();
         if sorted.windows(2).any(|w| w[0] == w[1]) {
             return Err(IndexError::Format(
-                "compact-hash: 64-bit key-hash collision; rebuild or use StringIndex",
+                "compact-hash: two keys share a 64-bit hash; the deterministic hash means this key \
+                 set can never build - use StringIndex or change the keys",
             ));
         }
         let mph: DefaultPtrHash = PtrHash::new(&hashes, PtrHashParams::default());

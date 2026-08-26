@@ -6,8 +6,11 @@
 //! [`StringArena`] from slot → key. The arena doubles as a **membership check**: an MPH returns a slot
 //! for *any* input, so a query is only a hit if the stored key at that slot equals the query.
 //!
-//! Build fails (rather than silently corrupting) on the astronomically rare event that two distinct
-//! keys collide in the 64-bit hash — reach for [`crate::StringIndex`] or rebuild in that case.
+//! Build fails (rather than silently corrupting) if two distinct keys collide in the 64-bit hash.
+//! The hash is deterministic and unseeded (that is what makes the serialised MPH reloadable), so a
+//! colliding key set can **never** build — the fix is [`crate::StringIndex`] or changing the keys,
+//! not retrying. The probability is `n(n-1)/2^65`: negligible below ~10 M keys (2.7e-6 at 10 M),
+//! 2.7e-4 at 100 M, and ~2.7% at 1 G.
 
 use crate::IndexError;
 use crate::arena::StringArena;
@@ -52,7 +55,8 @@ impl PerfectHashIndex {
         sorted.sort_unstable();
         if sorted.windows(2).any(|w| w[0] == w[1]) {
             return Err(IndexError::Format(
-                "perfect-hash: 64-bit key-hash collision; rebuild or use StringIndex",
+                "perfect-hash: two keys share a 64-bit hash; the deterministic hash means this key \
+                 set can never build - use StringIndex or change the keys",
             ));
         }
         let mph: DefaultPtrHash = PtrHash::new(&hashes, PtrHashParams::default());

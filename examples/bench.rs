@@ -1,13 +1,51 @@
 //! Build / query / size comparison of `lexindex` against the `std` maps it competes with.
 //!
 //! Run with `cargo run --release --example bench` (release matters — `lto` + `opt-level=3`). Numbers
-//! are illustrative and machine-dependent; the *ratios* are the point. No external dependencies: a
-//! deterministic stride walks the keys in a non-sequential order so lookups are not pure cache hits,
-//! and a checksum is printed so the optimiser cannot elide the queries.
+//! are illustrative and machine-dependent; the *ratios* are the point. A deterministic stride walks
+//! the keys in a non-sequential order so lookups are not pure cache hits, and a checksum is printed
+//! so the optimiser cannot elide the queries.
+//!
+//! Keys are **real dictionary-word bigrams** (`word_i.word_j`, the same generator as
+//! `bench/scale.py`), never synthetic sequences: sequential keys collapse the FST to a near-regular
+//! automaton and make every structure look better than it is on natural data. The word list comes
+//! from `$LEXINDEX_BENCH_WORDS` or `/usr/share/dict/words`; the benchmark refuses to run without
+//! one rather than silently substituting synthetic keys.
 
-use lexindex::{PerfectHashIndex, StringIndex};
+use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
+
+fn load_vocab() -> Vec<String> {
+    let path = std::env::var("LEXINDEX_BENCH_WORDS")
+        .unwrap_or_else(|_| "/usr/share/dict/words".to_string());
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        eprintln!(
+            "no word list at {path}; set LEXINDEX_BENCH_WORDS or install a system dictionary \
+             (this benchmark refuses synthetic keys — they misrepresent every structure here)"
+        );
+        std::process::exit(1);
+    };
+    let mut words: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    words
+}
+
+/// `n` distinct realistic compound keys `word_i.word_j` — natural prefix sharing, high entropy.
+fn make_keys(n: usize, vocab: &[String]) -> Vec<String> {
+    let m = (n as f64).sqrt().ceil() as usize;
+    let v = &vocab[..m.min(vocab.len())];
+    let w = v.len();
+    assert!(n <= w * w, "vocabulary too small for {n} distinct bigrams");
+    (0..n)
+        .map(|k| format!("{}.{}", v[k % w], v[(k / w) % w]))
+        .collect()
+}
 
 fn bench<T>(label: &str, n: usize, build: impl FnOnce() -> T, query: impl Fn(&T) -> u64) {
     let t0 = Instant::now();
@@ -23,7 +61,7 @@ fn bench<T>(label: &str, n: usize, build: impl FnOnce() -> T, query: impl Fn(&T)
         best = best.min(t1.elapsed().as_secs_f64() * 1e9 / n as f64);
     }
     println!(
-        "{label:24} build {build_ms:8.1} ms   lookup {best:6.1} ns/op   (checksum {checksum})"
+        "{label:26} build {build_ms:8.1} ms   lookup {best:6.1} ns/op   (checksum {checksum})"
     );
 }
 
@@ -32,16 +70,14 @@ fn main() {
         .nth(1)
         .and_then(|a| a.parse().ok())
         .unwrap_or(1_000_000);
-    // Zero-padded so lexicographic order is the natural order (fair to the ordered structures).
-    let keys: Vec<String> = (0..n).map(|i| format!("entity-{i:012}")).collect();
-    // Non-sequential, full-coverage probe order (stride by a large coprime of n... use a prime step).
+    let vocab = load_vocab();
+    let keys = make_keys(n, &vocab);
+    // Non-sequential, full-coverage probe order (stride by a large odd constant, coprime with n).
     const STEP: usize = 0x9E37_79B1; // ~golden-ratio odd constant → coprime with any power-of-two-ish n
     let probe: Vec<usize> = (0..n).map(|i| (i.wrapping_mul(STEP)) % n).collect();
 
-    println!(
-        "lexindex bench — n = {n} keys (len {} each)\n",
-        keys[0].len()
-    );
+    let mean_len = keys.iter().map(String::len).sum::<usize>() as f64 / n as f64;
+    println!("lexindex bench — n = {n} dictionary-word bigrams (mean len {mean_len:.1})\n");
 
     bench(
         "lexindex StringIndex (FST)",
@@ -68,6 +104,17 @@ fn main() {
             probe
                 .iter()
                 .map(|&i| u64::from(idx.id_unchecked(&keys[i])))
+                .sum()
+        },
+    );
+    bench(
+        "lexindex CompactHash (fp=1)",
+        n,
+        || CompactHashIndex::build(&keys, 1).unwrap(),
+        |idx| {
+            probe
+                .iter()
+                .map(|&i| idx.id(&keys[i]).map_or(0, u64::from))
                 .sum()
         },
     );
@@ -104,11 +151,18 @@ fn main() {
         },
     );
 
-    // Serialised size: the build-once / query-many payload you persist or mmap.
+    // Serialised size: the build-once / query-many payload you persist or mmap. Bigrams share more
+    // prefixes than single words, so StringIndex compresses further here than the single-word
+    // figures quoted in the README's size table — different corpus, different number.
     let si = StringIndex::build(&keys).unwrap();
     let ph = PerfectHashIndex::build(&keys).unwrap();
-    let raw = keys.iter().map(|k| k.len()).sum::<usize>();
+    let ch = CompactHashIndex::build(&keys, 1).unwrap();
+    let raw = keys.iter().map(String::len).sum::<usize>();
     println!("\nserialised size (bytes/key):");
+    println!(
+        "  lexindex CompactHashIndex   {:6.2}",
+        ch.to_bytes().unwrap().len() as f64 / n as f64
+    );
     println!(
         "  lexindex StringIndex blob   {:6.2}",
         si.to_bytes().len() as f64 / n as f64
@@ -120,11 +174,14 @@ fn main() {
     println!("  raw key bytes (no index)  {:6.2}", raw as f64 / n as f64);
 
     // A capability the maps do not have: typo-tolerant + prefix queries over the same structure.
+    let sample = &keys[keys.len() / 2];
+    let stem = &sample[..sample.len().min(4)];
     let t = Instant::now();
-    let fuzzy = si.fuzzy("entity-000000000042", 1).unwrap().len();
-    let pfx = si.prefix("entity-00000000000").len();
+    let fuzzy = si.fuzzy(sample, 1).unwrap().len();
+    let pfx = si.prefix(stem).len();
     println!(
-        "\nStringIndex extras: fuzzy(d=1) hit {fuzzy} match(es), prefix hit {pfx}, in {:.2} ms",
+        "\nStringIndex extras: fuzzy(\"{sample}\", 1) hit {fuzzy} match(es), \
+         prefix(\"{stem}\") hit {pfx}, in {:.2} ms",
         t.elapsed().as_secs_f64() * 1e3
     );
 }

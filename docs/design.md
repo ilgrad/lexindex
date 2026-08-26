@@ -36,7 +36,11 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   computed from a **second, independent** hash of the key. `id(key)` accepts the slot only if the
   query's fingerprint matches the stored one. Independence of the two hashes makes the chance a
   non-member both lands on a used slot and matches its fingerprint `256^-fingerprint_bytes` — the
-  tunable false-positive rate (≈ 0.4 % at 1 byte, ≈ 0.0015 % at 2, measured to match on real words).
+  tunable false-positive rate — exactly `2^-8k`: 0.390 625 % at 1 byte, 0.001 526 % at 2. Verified
+  statistically on the 0.5.0 code, dictionary members with two non-member populations: 2 M random
+  strings measured 0.384 % (z = −1.5 against theory) and 33/2 M at 2 bytes (z = +0.5); 50 000
+  held-out *real words* measured 0.310 % (z = −2.9) — at or slightly below theory in every case,
+  so the advertised rate is a ceiling in practice, not an average that can be exceeded.
 
 Because the keys themselves are never stored, size is just the MPH (~0.3 B/key — PtrHash is ≈2.4
 bits/key) plus the fingerprints (`fingerprint_bytes` B/key): **1.30 B/key at 1 byte, 2.30 at 2** on real
@@ -51,8 +55,13 @@ gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH with
 string (FNV-1a + a splitmix64 finalizer — not `std`'s `DefaultHasher`, which is not guaranteed stable
 and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
-query. Build fails, rather than silently corrupting, on the astronomically rare 64-bit hash collision
-between two distinct keys.
+query. Build fails, rather than silently corrupting, if two distinct keys collide in the 64-bit hash —
+and because the hash is deterministic and unseeded (that is what makes the serialised MPH reloadable),
+a colliding key set can *never* build: the fix is `StringIndex` or changing the keys, not retrying.
+The birthday bound `n(n-1)/2^65` says how often that happens (computed exactly, Maxima and PARI/GP
+agreeing): **6.2×10⁻⁹** for the 479 823-word dictionary, **2.7×10⁻⁸** at 1 M keys, **2.7×10⁻⁶** at
+10 M, **2.7×10⁻⁴** (1 in ~3 700) at 100 M, and **~2.7%** at 1 G — so "astronomically rare" is honest
+below ~10 M keys and a real design consideration at 10⁸–10⁹.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
 where membership is already guaranteed. The serialised blob is `[magic "BMP2"][n][mph length][mph
