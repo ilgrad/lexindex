@@ -4,13 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-08-26
 
 ### Added
 
 - **`lexindex.__version__`** in the Python package, read from the installed distribution
   metadata (so it cannot drift from `pyproject.toml`) with a `0.0.0+unknown` fallback when
   imported from a source tree that was never installed.
+
+### Changed
+
+- **The minimum supported Rust version is now 1.85**, declared as `rust-version` in `Cargo.toml`
+  and enforced by a CI job that derives its toolchain from that field, so the declaration cannot
+  drift from what is actually built. The crate moved to **edition 2024**, whose floor is exactly
+  1.85; `cargo fix --edition` required no source changes in any feature configuration, so the
+  only user-visible effect is the toolchain requirement itself.
+  - **Rust consumers on a toolchain older than 1.85 must upgrade** — `cargo` will refuse to build
+    lexindex rather than fail obscurely. This is why the release is 0.5.0 and not 0.4.1.
+  - **Python users are unaffected.** The published wheels are abi3 and carry no toolchain
+    requirement; `requires-python` is unchanged at `>=3.11`.
 
 ## [0.4.0] — 2026-07-06
 
