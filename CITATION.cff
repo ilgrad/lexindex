@@ -14,6 +14,7 @@ authors:
     given-names: Ilia
     orcid: "https://orcid.org/0009-0008-0911-8765"
 license: MIT
+doi: 10.5281/zenodo.22119002
 repository-code: "https://github.com/ilgrad/lexindex"
 url: "https://ilgrad.github.io/lexindex/"
 keywords:

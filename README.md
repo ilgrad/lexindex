@@ -6,6 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://ilgrad.github.io/lexindex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ilgrad/lexindex/blob/main/LICENSE)
 [![Rust core · PyO3](https://img.shields.io/badge/Rust%20core-PyO3-orange.svg)](https://github.com/ilgrad/lexindex)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22119002.svg)](https://doi.org/10.5281/zenodo.22119002)
 
 Compact, immutable **string↔id indexes for huge catalogs**, with a Rust core and Python bindings.
 Build once over a set of strings (entity names, document keys, vocabulary terms, cluster labels);
