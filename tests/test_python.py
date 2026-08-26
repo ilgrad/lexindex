@@ -275,3 +275,33 @@ def test_query_limit_truncates_and_matches_unlimited():
     assert si.subsequence("w0", limit=3) == s[:3]
     f = si.fuzzy("word-0100", 1)
     assert si.fuzzy("word-0100", 1, limit=2) == f[:2]
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [lexindex.StringIndex, lexindex.PerfectHashIndex, lexindex.CompactHashIndex],
+)
+def test_bulk_arguments_reject_non_strings(ctor):
+    """Keys are read as borrowed views of the Python `str` rather than copied into `String`.
+
+    That is a different extractor, so pin the type contract it must keep: `str` only, and a clear
+    `TypeError` — never a silent coercion of `bytes` or an integer.
+    """
+    idx = ctor(["delta", "alpha", "charlie", "bravo"])
+    with pytest.raises(TypeError):
+        ctor([1, 2])
+    with pytest.raises(TypeError):
+        ctor([b"alpha"])
+    with pytest.raises(TypeError):
+        idx.ids_of([b"alpha"])
+
+
+def test_multibyte_keys_survive_the_borrowed_path():
+    """The borrowed view is the Python string's UTF-8; non-ASCII must round-trip byte for byte."""
+    words = ["\u65e5\u672c\u8a9e", "\u0451\u0436", "na\u00efve", "a b"]
+    si = lexindex.StringIndex(words)
+    assert sorted(words) == [si.key(i) for i in range(len(si))]
+    assert si.ids_of(words) == [si.id(w) for w in words]
+
+    ph = lexindex.PerfectHashIndex(words)
+    assert ph.keys_of(ph.ids_of(words)) == words

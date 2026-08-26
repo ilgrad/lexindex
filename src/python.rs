@@ -14,10 +14,22 @@
 //! Single-key accessors (`id`, `key`, `contains`, `id_unchecked`, `successor`, `predecessor`,
 //! `__len__`) deliberately do **not** release it: they take well under a microsecond, and dropping
 //! and reacquiring the GIL would cost more than the work it protects.
+//!
+//! # Borrowing the caller's strings
+//!
+//! Every method taking many keys (the constructors and `ids_of`) reads them as [`PyBackedStr`], a
+//! view into the Python `str`, instead of copying each one into a `String`. `build` already copies
+//! the keys it keeps, so the owned `Vec<String>` in between was pure overhead — it cost a third of
+//! a build's peak RSS on the 479 823-word dictionary.
+//!
+//! [`PyBackedStr`] is `Send + Sync` (the string it views is immutable), so it crosses into
+//! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
+//! released with the GIL held.
 
 use crate::{IndexError, StringIndex};
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedStr;
 use pyo3::types::PyBytes;
 
 #[cfg(feature = "mph")]
@@ -40,8 +52,10 @@ pub struct PyStringIndex {
 impl PyStringIndex {
     /// Build from an iterable of strings (duplicates removed; ids are sorted rank).
     #[new]
-    fn new(py: Python<'_>, items: Vec<String>) -> PyResult<Self> {
-        let inner = py.detach(|| StringIndex::build(items)).map_err(to_py)?;
+    fn new(py: Python<'_>, items: Vec<PyBackedStr>) -> PyResult<Self> {
+        let inner = py
+            .detach(|| StringIndex::build(items.iter()))
+            .map_err(to_py)?;
         Ok(Self { inner })
     }
 
@@ -75,7 +89,7 @@ impl PyStringIndex {
     /// Batched [`id`](Self::id): one call for many keys, looping in Rust to amortise the Python↔Rust
     /// boundary. Returns a list aligned with `keys`, `None` where a key is absent. (Named `ids_of`, not
     /// `ids`/`keys`, so the class is not mistaken for a mapping by `dict(index)`.)
-    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u64>> {
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
         py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
@@ -244,9 +258,9 @@ pub struct PyPerfectHashIndex {
 impl PyPerfectHashIndex {
     /// Build from an iterable of strings (duplicates removed; ids are arbitrary dense slots).
     #[new]
-    fn new(py: Python<'_>, items: Vec<String>) -> PyResult<Self> {
+    fn new(py: Python<'_>, items: Vec<PyBackedStr>) -> PyResult<Self> {
         let inner = py
-            .detach(|| PerfectHashIndex::build(items))
+            .detach(|| PerfectHashIndex::build(items.iter()))
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -285,7 +299,7 @@ impl PyPerfectHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u32>> {
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
         py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
@@ -352,9 +366,9 @@ impl PyCompactHashIndex {
     /// (≈ 0.4% at 1 byte, ≈ 0.0015% at 2). Duplicates removed; ids are arbitrary dense slots.
     #[new]
     #[pyo3(signature = (items, fingerprint_bytes=1))]
-    fn new(py: Python<'_>, items: Vec<String>, fingerprint_bytes: usize) -> PyResult<Self> {
+    fn new(py: Python<'_>, items: Vec<PyBackedStr>, fingerprint_bytes: usize) -> PyResult<Self> {
         let inner = py
-            .detach(|| CompactHashIndex::build(items, fingerprint_bytes))
+            .detach(|| CompactHashIndex::build(items.iter(), fingerprint_bytes))
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -388,7 +402,7 @@ impl PyCompactHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u32>> {
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
         py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 

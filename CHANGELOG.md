@@ -27,6 +27,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The Python bindings borrow the caller's strings instead of copying them.** The constructors and
+  `ids_of` read their keys as `PyBackedStr` — a view into the Python `str` — where they previously
+  extracted an owned `Vec<String>`. `build` already copies the keys it keeps, so that intermediate
+  vector was pure overhead: on the 479 823-word dictionary the **peak RSS of a build drops from
+  44.6 MB to 29.9 MB (−33%)**, and the build itself is **1.08×** faster, `ids_of` **1.05×**
+  (both implementations compiled into one extension and alternated A-B-A-B; four independent
+  process pairs for the memory figure, which agreed to within 0.3 MB).
+  - **No API change.** `PyBackedStr` accepts exactly what `String` did; the observable contract —
+    accepted types, rejected types and every error message — was diffed against a build of the
+    previous code and is identical. Serialised sizes are unchanged (`CompactHashIndex` 1.301 /
+    2.301, `StringIndex` 5.953, `PerfectHashIndex` 17.625 bytes/key).
+
 - **The Python bindings release the GIL** (`Python::detach`) around building, bulk queries
   (`prefix` / `range` / `fuzzy` / `subsequence`), batch lookups (`ids_of` / `keys_of`) and
   persistence (`save` / `load` / `load_mmap` / `to_bytes` / `from_bytes`), so a threaded caller
