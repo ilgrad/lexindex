@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The rank-walk (`id → key`) picks each FST transition by binary search instead of a linear
+  scan.** Transitions are stored in increasing byte order, which makes their subtree-minimum ranks
+  non-decreasing — the walk's invariant already guaranteed the order, the scan just wasn't using
+  it. Near the root of a dictionary FST a node fans out ~50 ways, so the saving concentrates
+  exactly where every reverse lookup must pass: `StringIndex.keys_of` over the whole 479 823-word
+  dictionary drops from **775 to 423 ns/key (1.83×)**, measured back-to-back against the published
+  0.5.0 wheel on the same machine, with the reconstructed keys verified equal to the sorted
+  dictionary in both. Everything reverse benefits — `key`, `keys_of`, `dict(index)` iteration.
+
 - **The speed benchmark (`examples/bench.rs`) now uses real dictionary-word bigrams**, the same key
   generator as `bench/scale.py`, and refuses to run without a word list rather than substitute
   synthetic keys — the same rule `bench/compare.py` has always enforced. The old
