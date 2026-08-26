@@ -45,6 +45,9 @@ unchanged. Rust consumers need a 1.85 toolchain. Python users need nothing beyon
     idle machine). The controls that cannot touch the arena — `id_unchecked`, `StringIndex`,
     `std::HashMap`, `std::BTreeMap` — moved +0.0%, +0.2%, +0.7% and −0.3%, which is what makes the
     −3.7% readable as the change rather than the machine.
+  - Building is cheaper too, since the offset table is assembled in memory before it is written:
+    the peak RSS of a `PerfectHashIndex` build on the dictionary falls a further **38.1 → 29.9 MB**
+    on top of the saving below, for **~87 → 29.9 MB (−66%)** across the release.
   - **Breaking:** the `PerfectHashIndex` blob magic is now `BMP2`; blobs written by 0.1–0.4 must be
     rebuilt. `StringIndex` (`BIX4`) and `CompactHashIndex` (`BCH1`) blobs are untouched, as are
     their sizes.

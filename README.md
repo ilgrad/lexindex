@@ -243,16 +243,18 @@ tweak. `CompactHashIndex` takes the size crown the other way: by dropping the ke
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~171 ms | **~232 ns** | closed vocabulary, no membership check |
+| lexindex `PerfectHashIndex::id_unchecked` | ~156 ms | **~232 ns** | closed vocabulary, no membership check |
 | `std::HashMap<String, u32>` | ~205 ms | ~290 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~197 ms | ~377 ns | one extra cache line + key compare |
+| lexindex `PerfectHashIndex::id` (verified) | ~190 ms | ~373 ns | one extra cache line + key compare |
 | lexindex `StringIndex` (FST) | ~80 ms | ~386 ns | *and* prefix / range / fuzzy |
 | `std::BTreeMap<String, u32>` | ~39 ms | ~833 ns | in-RAM |
 
-<sub>The lexindex `build` column was re-measured after 0.5.0 stopped copying the corpus to sort it
-(min of 12 runs on an idle machine). The `std` rows and every `lookup` figure are the earlier
-measurement: no lookup path changed, and that machine builds the `std` maps *faster* than the one
-used for the new figures — so this comparison is, if anything, conservative against lexindex.</sub>
+<sub>The lexindex `build` column, and `PerfectHashIndex::id`'s lookup, were re-measured on 0.5.0
+(min of 12 runs on an idle machine): the build no longer copies the corpus to sort it, and `id` is
+the one lookup that reads the key arena, whose offsets 0.5.0 narrowed. The `std` rows and the other
+`lookup` figures are the earlier measurement — those paths did not change, and this machine measures
+the `std` maps *slower* than the earlier one did (`BTreeMap` build 39 → 55 ms), so carrying the old
+numbers forward keeps the comparison conservative against lexindex rather than flattering it.</sub>
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest** — ≈1.25× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
