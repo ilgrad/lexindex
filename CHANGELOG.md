@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Citation metadata** (`CITATION.cff` + `.zenodo.json`): GitHub shows "Cite this repository", and
+  once the repository is enabled in Zenodo's GitHub integration, each release from the next tag on
+  is archived with a DOI. Metadata validated against the CFF 1.2.0 schema.
+
 ### Changed
 
 - **The rank-walk (`id → key`) picks each FST transition by binary search instead of a linear

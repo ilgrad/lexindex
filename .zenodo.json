@@ -1,0 +1,41 @@
+{
+  "title": "lexindex: compact, immutable string-to-id indexes for huge catalogs",
+  "description": "<p>Compact, immutable string-to-id indexes for huge catalogs, with a Rust core and Python bindings. Three complementary build-once / query-many structures: an ordered FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; a minimal-perfect-hash dictionary with verified membership and reverse lookup; and a fingerprint-based minimal-perfect-hash map storing no keys at all (~1.3 bytes/key on real dictionary words). All serialise to flat, memory-mappable blobs.</p><p>Distributed on PyPI (<code>pip install lexindex</code>) and crates.io (<code>cargo add lexindex</code>); documentation at <a href=\"https://ilgrad.github.io/lexindex/\">ilgrad.github.io/lexindex</a>.</p>",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Gradina, Ilia"
+    }
+  ],
+  "keywords": [
+    "string-index",
+    "minimal-perfect-hash",
+    "finite-state-transducer",
+    "fst",
+    "dictionary-encoding",
+    "autocomplete",
+    "fuzzy-search",
+    "memory-mapped",
+    "rust",
+    "python"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://pypi.org/project/lexindex/",
+      "relation": "isSupplementedBy",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://crates.io/crates/lexindex",
+      "relation": "isSupplementedBy",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://ilgrad.github.io/lexindex/",
+      "relation": "isDocumentedBy",
+      "scheme": "url"
+    }
+  ]
+}
