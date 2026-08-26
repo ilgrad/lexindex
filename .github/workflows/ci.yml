@@ -94,3 +94,28 @@ jobs:
           wheel=$(ls dist/*.whl | head -1)
           uv run --python ${{ matrix.python-version }} --with mypy --with "$wheel" \
             python -m mypy.stubtest lexindex
+
+  msrv:
+    name: msrv (rust-version from Cargo.toml)
+    runs-on: ubuntu-latest
+    env:
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # Derive the toolchain from the manifest so the declared floor is the single source of
+      # truth and this job cannot silently drift away from it.
+      - id: msrv
+        run: echo "version=$(grep '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      # `check`, not `test`: MSRV is a compilation property, and the stable `rust` job already
+      # covers runtime behaviour. `--locked` matters here — without it cargo may re-resolve, and
+      # the result would then describe a dependency set that is not the committed one.
+      - name: check (default = mph + mmap)
+        run: cargo check --all-targets --locked
+      - name: check (no-default-features = fst only)
+        run: cargo check --no-default-features --all-targets --locked
+      - name: check (python bindings)
+        run: cargo check --features python --locked
