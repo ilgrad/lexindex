@@ -30,7 +30,7 @@ use crate::{IndexError, StringIndex};
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyString};
 
 #[cfg(feature = "mph")]
 use crate::{CompactHashIndex, PerfectHashIndex};
@@ -294,8 +294,8 @@ impl PyPerfectHashIndex {
     }
 
     /// Key for `id`, or `None` if out of range.
-    fn key(&self, id: u32) -> Option<String> {
-        self.inner.key(id).map(str::to_owned)
+    fn key<'py>(&self, py: Python<'py>, id: u32) -> Option<Bound<'py, PyString>> {
+        self.inner.key(id).map(|k| PyString::new(py, k))
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
@@ -304,12 +304,16 @@ impl PyPerfectHashIndex {
     }
 
     /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
-    fn keys_of(&self, py: Python<'_>, ids: Vec<u32>) -> Vec<Option<String>> {
-        py.detach(|| {
-            ids.iter()
-                .map(|&i| self.inner.key(i).map(str::to_owned))
-                .collect()
-        })
+    fn keys_of<'py>(&self, py: Python<'py>, ids: Vec<u32>) -> Vec<Option<Bound<'py, PyString>>> {
+        // Two passes on purpose: the lookups are pure Rust and run with the GIL released, then the
+        // arena slices become Python strings. Collecting `String`s in between would copy each key
+        // once more, only to free it on the next line.
+        let found: Vec<Option<&str>> =
+            py.detach(|| ids.iter().map(|&i| self.inner.key(i)).collect());
+        found
+            .into_iter()
+            .map(|k| k.map(|k| PyString::new(py, k)))
+            .collect()
     }
 
     /// Serialise to a `bytes` blob.

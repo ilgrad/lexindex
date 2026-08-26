@@ -39,6 +39,14 @@ All notable changes to this project are documented here. The format follows
     previous code and is identical. Serialised sizes are unchanged (`CompactHashIndex` 1.301 /
     2.301, `StringIndex` 5.953, `PerfectHashIndex` 17.625 bytes/key).
 
+- **`PerfectHashIndex.key` / `keys_of` no longer copy each key twice.** Its keys live in an arena,
+  so `key` returns a `&str`; both methods then copied that into a `String` only for PyO3 to copy it
+  again into a Python `str` and drop it. They now build the Python string straight from the arena
+  slice. `keys_of` is **1.29×** faster (250 -> 194 ns/key on the 479 823-word dictionary, A-B-A-B
+  in one extension) and allocates nothing per key; the single-key `key` is 1.03×, the rest of its
+  cost being the Python call itself. `keys_of` still runs its lookups under `Python::detach` — only
+  the string construction, which needs the GIL either way, happens with it held.
+
 - **The Python bindings release the GIL** (`Python::detach`) around building, bulk queries
   (`prefix` / `range` / `fuzzy` / `subsequence`), batch lookups (`ids_of` / `keys_of`) and
   persistence (`save` / `load` / `load_mmap` / `to_bytes` / `from_bytes`), so a threaded caller
