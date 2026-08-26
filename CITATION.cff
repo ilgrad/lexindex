@@ -12,6 +12,7 @@ abstract: >-
 authors:
   - family-names: Gradina
     given-names: Ilia
+    orcid: "https://orcid.org/0009-0008-0911-8765"
 license: MIT
 repository-code: "https://github.com/ilgrad/lexindex"
 url: "https://ilgrad.github.io/lexindex/"
