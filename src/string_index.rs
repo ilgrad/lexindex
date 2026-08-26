@@ -93,27 +93,43 @@ impl StringIndex {
 
     /// All `(key, id)` pairs whose key starts with `prefix`, in lexicographic order.
     pub fn prefix(&self, prefix: &str) -> Vec<(String, u64)> {
-        // The `fst` streamer borrows per-call, so the collection loop is inlined (it cannot be
-        // abstracted behind a helper returning owned data without a lifetime conflict).
-        let mut out = Vec::new();
+        self.prefix_iter(prefix).collect()
+    }
+
+    /// Like [`prefix`](Self::prefix) but **lazy**: one key is decoded per step, so an autocomplete
+    /// wanting the first handful never pays for the rest — `idx.prefix_iter("a").take(10)` walks ten
+    /// keys, where `prefix("a")` materialises every match.
+    pub fn prefix_iter<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = (String, u64)> + 'a {
         let mut stream = self
             .map
             .search(Str::new(prefix).starts_with())
             .into_stream();
-        while let Some((k, v)) = stream.next() {
-            out.push((String::from_utf8_lossy(k).into_owned(), v));
-        }
-        out
+        // `fst` streams are `Streamer`, not `Iterator`; adapt by moving the stream into the closure
+        // and decoding to owned data, so no borrow of the stream escapes.
+        std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        })
     }
 
     /// All `(key, id)` pairs with `lo ≤ key < hi`, in lexicographic order.
     pub fn range(&self, lo: &str, hi: &str) -> Vec<(String, u64)> {
-        let mut out = Vec::new();
+        self.range_iter(lo, hi).collect()
+    }
+
+    /// Like [`range`](Self::range) but **lazy** — see [`prefix_iter`](Self::prefix_iter).
+    pub fn range_iter<'a>(
+        &'a self,
+        lo: &'a str,
+        hi: &'a str,
+    ) -> impl Iterator<Item = (String, u64)> + 'a {
         let mut stream = self.map.range().ge(lo).lt(hi).into_stream();
-        while let Some((k, v)) = stream.next() {
-            out.push((String::from_utf8_lossy(k).into_owned(), v));
-        }
-        out
+        std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        })
     }
 
     /// All `(key, id)` pairs within Levenshtein edit distance `max_distance` of `query`, in
@@ -121,26 +137,46 @@ impl StringIndex {
     /// edit-distance automaton (no full scan of the key set). Returns [`IndexError::Automaton`] if the
     /// automaton for this `query` and `max_distance` would be too large (lower `max_distance`).
     pub fn fuzzy(&self, query: &str, max_distance: u32) -> Result<Vec<(String, u64)>, IndexError> {
+        Ok(self.fuzzy_iter(query, max_distance)?.collect())
+    }
+
+    /// Like [`fuzzy`](Self::fuzzy) but **lazy** — see [`prefix_iter`](Self::prefix_iter). The
+    /// automaton is built eagerly (so a too-large one still errors up front); only the walk is lazy.
+    pub fn fuzzy_iter(
+        &self,
+        query: &str,
+        max_distance: u32,
+    ) -> Result<impl Iterator<Item = (String, u64)> + '_, IndexError> {
         let lev = Levenshtein::new(query, max_distance)
             .map_err(|e| IndexError::Automaton(e.to_string()))?;
-        let mut out = Vec::new();
-        let mut stream = self.map.search(&lev).into_stream();
-        while let Some((k, v)) = stream.next() {
-            out.push((String::from_utf8_lossy(k).into_owned(), v));
-        }
-        Ok(out)
+        // Pass the automaton by value so the stream owns it — a `&lev` would borrow a local.
+        let mut stream = self.map.search(lev).into_stream();
+        Ok(std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        }))
     }
 
     /// All `(key, id)` pairs whose key contains `query` as a subsequence — its characters appear in
     /// order but not necessarily contiguously (e.g. `"ace"` matches `"abcde"`) — in lexicographic
     /// order. Useful for fuzzy/abbreviation matching.
     pub fn subsequence(&self, query: &str) -> Vec<(String, u64)> {
-        let mut out = Vec::new();
+        self.subsequence_iter(query).collect()
+    }
+
+    /// Like [`subsequence`](Self::subsequence) but **lazy** — see
+    /// [`prefix_iter`](Self::prefix_iter).
+    pub fn subsequence_iter<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> impl Iterator<Item = (String, u64)> + 'a {
         let mut stream = self.map.search(Subsequence::new(query)).into_stream();
-        while let Some((k, v)) = stream.next() {
-            out.push((String::from_utf8_lossy(k).into_owned(), v));
-        }
-        out
+        std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        })
     }
 
     /// The smallest `(key, id)` with `key >= query` (the *successor*), or `None` if every key is
@@ -341,6 +377,47 @@ mod tests {
         assert_eq!(empty.successor("x"), None);
         assert_eq!(empty.predecessor("x"), None);
         assert_eq!(empty.iter().count(), 0);
+    }
+
+    #[test]
+    fn lazy_iterators_match_their_eager_forms() {
+        let keys: Vec<String> = (0..300).map(|i| format!("item-{i:04}")).collect();
+        let idx = StringIndex::build(&keys).unwrap();
+
+        // Each *_iter is the same sequence as the Vec-returning form...
+        assert_eq!(
+            idx.prefix_iter("item-01").collect::<Vec<_>>(),
+            idx.prefix("item-01")
+        );
+        assert_eq!(
+            idx.range_iter("item-0010", "item-0020").collect::<Vec<_>>(),
+            idx.range("item-0010", "item-0020")
+        );
+        assert_eq!(
+            idx.subsequence_iter("i0").collect::<Vec<_>>(),
+            idx.subsequence("i0")
+        );
+        assert_eq!(
+            idx.fuzzy_iter("item-0100", 1).unwrap().collect::<Vec<_>>(),
+            idx.fuzzy("item-0100", 1).unwrap()
+        );
+
+        // ...and `.take(n)` is exactly its first n, which is what a bounded autocomplete needs.
+        let full = idx.prefix("item-01");
+        assert_eq!(full.len(), 100); // item-0100..item-0199
+        for n in [0usize, 1, 7, 100, 500] {
+            assert_eq!(
+                idx.prefix_iter("item-01").take(n).collect::<Vec<_>>(),
+                full[..n.min(full.len())]
+            );
+        }
+    }
+
+    #[test]
+    fn fuzzy_iter_reports_a_too_large_automaton_up_front() {
+        let idx = sample();
+        // The automaton is built eagerly, so an impossible distance errors before any walking.
+        assert!(idx.fuzzy_iter("abcdefghijklmnopqrstuvwxyz", 50).is_err());
     }
 
     #[test]

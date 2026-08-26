@@ -255,3 +255,23 @@ def test_build_releases_the_gil():
     during = ticks - before
     assert elapsed > 0.05, f"build too fast ({elapsed * 1e3:.0f} ms) to tell anything"
     assert during >= 5, f"GIL held during build: {during} ticks over {elapsed * 1e3:.0f} ms"
+
+
+def test_query_limit_truncates_and_matches_unlimited():
+    si = lexindex.StringIndex([f"word-{i:04d}" for i in range(500)])
+    full = si.prefix("word-01")
+    assert len(full) == 100  # word-0100..word-0199
+    # limit returns exactly the first n of the unlimited result, in the same order
+    for n in (0, 1, 7, 99, 100, 250):
+        assert si.prefix("word-01", limit=n) == full[:n]
+    # a limit larger than the match count is not an error, just everything
+    assert si.prefix("word-01", limit=10_000) == full
+    # limit=None is the default and means unlimited
+    assert si.prefix("word-01", limit=None) == full
+
+    r = si.range("word-0100", "word-0200")
+    assert si.range("word-0100", "word-0200", limit=5) == r[:5]
+    s = si.subsequence("w0")
+    assert si.subsequence("w0", limit=3) == s[:3]
+    f = si.fuzzy("word-0100", 1)
+    assert si.fuzzy("word-0100", 1, limit=2) == f[:2]

@@ -85,14 +85,37 @@ impl PyStringIndex {
         py.detach(|| ids.iter().map(|&i| self.inner.key(i)).collect())
     }
 
-    /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered.
-    fn prefix(&self, py: Python<'_>, prefix: &str) -> Vec<(String, u64)> {
-        py.detach(|| self.inner.prefix(prefix))
+    /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered. `limit` stops
+    /// after that many matches, walking no further — what autocomplete wants, since it needs ten of
+    /// them, not every match.
+    #[pyo3(signature = (prefix, limit=None))]
+    fn prefix(&self, py: Python<'_>, prefix: &str, limit: Option<usize>) -> Vec<(String, u64)> {
+        py.detach(|| {
+            let it = self.inner.prefix_iter(prefix);
+            match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            }
+        })
     }
 
-    /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered.
-    fn range(&self, py: Python<'_>, lo: &str, hi: &str) -> Vec<(String, u64)> {
-        py.detach(|| self.inner.range(lo, hi))
+    /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered. `limit` stops after that
+    /// many matches.
+    #[pyo3(signature = (lo, hi, limit=None))]
+    fn range(
+        &self,
+        py: Python<'_>,
+        lo: &str,
+        hi: &str,
+        limit: Option<usize>,
+    ) -> Vec<(String, u64)> {
+        py.detach(|| {
+            let it = self.inner.range_iter(lo, hi);
+            match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            }
+        })
     }
 
     /// The smallest `(key, id)` with `key >= query`, or `None` if every key is smaller.
@@ -106,19 +129,35 @@ impl PyStringIndex {
     }
 
     /// `(key, id)` pairs within Levenshtein edit distance `max_distance` of `query`.
+    #[pyo3(signature = (query, max_distance, limit=None))]
     fn fuzzy(
         &self,
         py: Python<'_>,
         query: &str,
         max_distance: u32,
+        limit: Option<usize>,
     ) -> PyResult<Vec<(String, u64)>> {
-        py.detach(|| self.inner.fuzzy(query, max_distance))
-            .map_err(to_py)
+        py.detach(|| {
+            let it = self.inner.fuzzy_iter(query, max_distance)?;
+            Ok(match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            })
+        })
+        .map_err(to_py)
     }
 
-    /// `(key, id)` pairs whose key contains `query` as a subsequence.
-    fn subsequence(&self, py: Python<'_>, query: &str) -> Vec<(String, u64)> {
-        py.detach(|| self.inner.subsequence(query))
+    /// `(key, id)` pairs whose key contains `query` as a subsequence. `limit` stops after that many
+    /// matches.
+    #[pyo3(signature = (query, limit=None))]
+    fn subsequence(&self, py: Python<'_>, query: &str, limit: Option<usize>) -> Vec<(String, u64)> {
+        py.detach(|| {
+            let it = self.inner.subsequence_iter(query);
+            match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            }
+        })
     }
 
     /// Iterate every `(key, id)` in lexicographic (= id) order, **lazily** — one rank-walk per step, so

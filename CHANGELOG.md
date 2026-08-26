@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Bounded and lazy queries on `StringIndex`.** Python `prefix` / `range` / `fuzzy` /
+  `subsequence` take a `limit`, and Rust gains `prefix_iter` / `range_iter` / `fuzzy_iter` /
+  `subsequence_iter` returning lazy iterators. An autocomplete asking for ten matches now walks ten
+  keys instead of materialising every match: on the 479 823-word dictionary,
+  `prefix("s", limit=10)` is **0.026 ms against 17.59 ms — 669× faster** — and allocates 10 tuples
+  rather than 45 064. `prefix("a", limit=10)` is 310×, `fuzzy("hello", 2, limit=5)` 3.7×.
+  - The eager forms are now `.collect()` over the lazy ones, so there is one walk implementation
+    rather than two. Measured with both variants compiled into one binary and alternated A-B-A-B
+    (the machine was loaded, and in-process alternation is what makes the comparison meaningful):
+    the change is **not** a regression — five runs gave −7.4 %, −0.3 %, −2.7 %, −1.6 %, −1.9 %.
+  - `fuzzy_iter` still builds its automaton eagerly, so a too-large edit distance errors up front
+    rather than on first use.
+
 - **`lexindex.__version__`** in the Python package, read from the installed distribution
   metadata (so it cannot drift from `pyproject.toml`) with a `0.0.0+unknown` fallback when
   imported from a source tree that was never installed.
