@@ -243,11 +243,16 @@ tweak. `CompactHashIndex` takes the size crown the other way: by dropping the ke
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~310 ms | **~232 ns** | closed vocabulary, no membership check |
+| lexindex `PerfectHashIndex::id_unchecked` | ~171 ms | **~232 ns** | closed vocabulary, no membership check |
 | `std::HashMap<String, u32>` | ~205 ms | ~290 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~376 ms | ~377 ns | one extra cache line + key compare |
-| lexindex `StringIndex` (FST) | ~138 ms | ~386 ns | *and* prefix / range / fuzzy |
+| lexindex `PerfectHashIndex::id` (verified) | ~197 ms | ~377 ns | one extra cache line + key compare |
+| lexindex `StringIndex` (FST) | ~80 ms | ~386 ns | *and* prefix / range / fuzzy |
 | `std::BTreeMap<String, u32>` | ~39 ms | ~833 ns | in-RAM |
+
+<sub>The lexindex `build` column was re-measured after 0.5.0 stopped copying the corpus to sort it
+(min of 12 runs on an idle machine). The `std` rows and every `lookup` figure are the earlier
+measurement: no lookup path changed, and that machine builds the `std` maps *faster* than the one
+used for the new figures — so this comparison is, if anything, conservative against lexindex.</sub>
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest** — ≈1.25× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
@@ -266,13 +271,15 @@ linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.30 bytes/ke
 
 | n | structure | build | bytes/key | peak RSS | lookup |
 |---|---|---:|---:|---:|---:|
-| 1 M | `CompactHashIndex` | 0.28 s | 1.30 | 176 MB | 232 ns |
-| 10 M | `CompactHashIndex` | 4.4 s | 1.30 | 1.5 GB | 397 ns |
-| 10 M | `StringIndex` | 4.7 s | 2.00\* | 1.3 GB | 797 ns |
+| 1 M | `CompactHashIndex` | 0.28 s | 1.30 | 162 MB | 232 ns |
+| 10 M | `CompactHashIndex` | 4.4 s | 1.30 | 1.35 GB | 397 ns |
+| 10 M | `StringIndex` | 4.7 s | 2.00\* | 1.08 GB | 797 ns |
 
 <sub>\* bigram keys share more prefixes than single words, so `StringIndex` compresses below its 5.95
 B/key on the raw dictionary — the honest single-word figure is in the size table above. Peak RSS
-includes the input key list. Linear extrapolation puts 100 M at ~50 s and ~15 GB (a big-memory box).</sub>
+includes the input key list, which dominates at this scale and is why the column falls by 8-17%
+rather than by the 47-73% the build itself dropped in 0.5.0. Linear extrapolation puts 100 M at
+~50 s and ~13.5 GB (a big-memory box).</sub>
 
 ## License
 
