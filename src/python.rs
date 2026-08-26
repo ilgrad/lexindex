@@ -2,6 +2,18 @@
 //!
 //! Thin wrappers over the Rust types — every method delegates to the core and maps [`IndexError`] to a
 //! Python exception. Built as an abi3 extension (CPython ≥ 3.11) under the `python` feature.
+//!
+//! # Releasing the GIL
+//!
+//! Building, bulk queries, batch lookups and persistence run under [`Python::detach`], so a
+//! threaded caller (a web worker, say) keeps making progress while a large index is built or
+//! searched. This is sound because all three core types are `Send + Sync`, and it stays sound
+//! without a separate assertion: each closure captures `&self`, so if a type ever lost `Sync` the
+//! reference would stop being `Send` and this module would fail to compile.
+//!
+//! Single-key accessors (`id`, `key`, `contains`, `id_unchecked`, `successor`, `predecessor`,
+//! `__len__`) deliberately do **not** release it: they take well under a microsecond, and dropping
+//! and reacquiring the GIL would cost more than the work it protects.
 
 use crate::{IndexError, StringIndex};
 use pyo3::exceptions::{PyIOError, PyValueError};
@@ -28,10 +40,9 @@ pub struct PyStringIndex {
 impl PyStringIndex {
     /// Build from an iterable of strings (duplicates removed; ids are sorted rank).
     #[new]
-    fn new(items: Vec<String>) -> PyResult<Self> {
-        Ok(Self {
-            inner: StringIndex::build(items).map_err(to_py)?,
-        })
+    fn new(py: Python<'_>, items: Vec<String>) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::build(items)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     fn __len__(&self) -> usize {
@@ -64,24 +75,24 @@ impl PyStringIndex {
     /// Batched [`id`](Self::id): one call for many keys, looping in Rust to amortise the Python↔Rust
     /// boundary. Returns a list aligned with `keys`, `None` where a key is absent. (Named `ids_of`, not
     /// `ids`/`keys`, so the class is not mistaken for a mapping by `dict(index)`.)
-    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u64>> {
-        keys.iter().map(|k| self.inner.id(k)).collect()
+    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u64>> {
+        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
     /// Batched [`key`](Self::key): one call for many ids. Returns a list aligned with `ids`, `None`
     /// where an id is out of range.
-    fn keys_of(&self, ids: Vec<u64>) -> Vec<Option<String>> {
-        ids.iter().map(|&i| self.inner.key(i)).collect()
+    fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
+        py.detach(|| ids.iter().map(|&i| self.inner.key(i)).collect())
     }
 
     /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered.
-    fn prefix(&self, prefix: &str) -> Vec<(String, u64)> {
-        self.inner.prefix(prefix)
+    fn prefix(&self, py: Python<'_>, prefix: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.prefix(prefix))
     }
 
     /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered.
-    fn range(&self, lo: &str, hi: &str) -> Vec<(String, u64)> {
-        self.inner.range(lo, hi)
+    fn range(&self, py: Python<'_>, lo: &str, hi: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.range(lo, hi))
     }
 
     /// The smallest `(key, id)` with `key >= query`, or `None` if every key is smaller.
@@ -95,13 +106,19 @@ impl PyStringIndex {
     }
 
     /// `(key, id)` pairs within Levenshtein edit distance `max_distance` of `query`.
-    fn fuzzy(&self, query: &str, max_distance: u32) -> PyResult<Vec<(String, u64)>> {
-        self.inner.fuzzy(query, max_distance).map_err(to_py)
+    fn fuzzy(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        max_distance: u32,
+    ) -> PyResult<Vec<(String, u64)>> {
+        py.detach(|| self.inner.fuzzy(query, max_distance))
+            .map_err(to_py)
     }
 
     /// `(key, id)` pairs whose key contains `query` as a subsequence.
-    fn subsequence(&self, query: &str) -> Vec<(String, u64)> {
-        self.inner.subsequence(query)
+    fn subsequence(&self, py: Python<'_>, query: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.subsequence(query))
     }
 
     /// Iterate every `(key, id)` in lexicographic (= id) order, **lazily** — one rank-walk per step, so
@@ -117,38 +134,36 @@ impl PyStringIndex {
 
     /// Serialise to a `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.inner.to_bytes())
+        let bytes = py.detach(|| self.inner.to_bytes());
+        PyBytes::new(py, &bytes)
     }
 
     /// Reconstruct from a [`PyStringIndex::to_bytes`] blob.
     #[staticmethod]
-    fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        Ok(Self {
-            inner: StringIndex::from_bytes(data).map_err(to_py)?,
-        })
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::from_bytes(data)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Write the index to `path`.
-    fn save(&self, path: &str) -> PyResult<()> {
-        self.inner.save(path).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        py.detach(|| self.inner.save(path)).map_err(to_py)
     }
 
     /// Load an index previously written with `save`.
     #[staticmethod]
-    fn load(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: StringIndex::load(path).map_err(to_py)?,
-        })
+    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::load(path)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Zero-copy load: memory-map the file and borrow the index from it — no read into RAM, so a
     /// multi-gigabyte index is ready instantly and its pages are shared across processes. The mapped
     /// file must not be modified while the index is alive.
     #[staticmethod]
-    fn load_mmap(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: StringIndex::load_mmap(path).map_err(to_py)?,
-        })
+    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::load_mmap(path)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 }
 
@@ -190,10 +205,11 @@ pub struct PyPerfectHashIndex {
 impl PyPerfectHashIndex {
     /// Build from an iterable of strings (duplicates removed; ids are arbitrary dense slots).
     #[new]
-    fn new(items: Vec<String>) -> PyResult<Self> {
-        Ok(Self {
-            inner: PerfectHashIndex::build(items).map_err(to_py)?,
-        })
+    fn new(py: Python<'_>, items: Vec<String>) -> PyResult<Self> {
+        let inner = py
+            .detach(|| PerfectHashIndex::build(items))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     fn __len__(&self) -> usize {
@@ -230,50 +246,54 @@ impl PyPerfectHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u32>> {
-        keys.iter().map(|k| self.inner.id(k)).collect()
+    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u32>> {
+        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
     /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
-    fn keys_of(&self, ids: Vec<u32>) -> Vec<Option<String>> {
-        ids.iter()
-            .map(|&i| self.inner.key(i).map(str::to_owned))
-            .collect()
+    fn keys_of(&self, py: Python<'_>, ids: Vec<u32>) -> Vec<Option<String>> {
+        py.detach(|| {
+            ids.iter()
+                .map(|&i| self.inner.key(i).map(str::to_owned))
+                .collect()
+        })
     }
 
     /// Serialise to a `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        Ok(PyBytes::new(py, &self.inner.to_bytes().map_err(to_py)?))
+        let bytes = py.detach(|| self.inner.to_bytes()).map_err(to_py)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
     #[staticmethod]
-    fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        Ok(Self {
-            inner: PerfectHashIndex::from_bytes(data).map_err(to_py)?,
-        })
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| PerfectHashIndex::from_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Write the dictionary to `path`.
-    fn save(&self, path: &str) -> PyResult<()> {
-        self.inner.save(path).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        py.detach(|| self.inner.save(path)).map_err(to_py)
     }
 
     /// Load a dictionary previously written with `save`.
     #[staticmethod]
-    fn load(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: PerfectHashIndex::load(path).map_err(to_py)?,
-        })
+    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py.detach(|| PerfectHashIndex::load(path)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Memory-map the file and borrow the key arena zero-copy (only the small MPH is read into RAM).
     /// The mapped file must not be modified while the dictionary is alive.
     #[staticmethod]
-    fn load_mmap(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: PerfectHashIndex::load_mmap(path).map_err(to_py)?,
-        })
+    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py
+            .detach(|| PerfectHashIndex::load_mmap(path))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 }
 
@@ -293,10 +313,11 @@ impl PyCompactHashIndex {
     /// (≈ 0.4% at 1 byte, ≈ 0.0015% at 2). Duplicates removed; ids are arbitrary dense slots.
     #[new]
     #[pyo3(signature = (items, fingerprint_bytes=1))]
-    fn new(items: Vec<String>, fingerprint_bytes: usize) -> PyResult<Self> {
-        Ok(Self {
-            inner: CompactHashIndex::build(items, fingerprint_bytes).map_err(to_py)?,
-        })
+    fn new(py: Python<'_>, items: Vec<String>, fingerprint_bytes: usize) -> PyResult<Self> {
+        let inner = py
+            .detach(|| CompactHashIndex::build(items, fingerprint_bytes))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     fn __len__(&self) -> usize {
@@ -328,42 +349,44 @@ impl PyCompactHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
-    fn ids_of(&self, keys: Vec<String>) -> Vec<Option<u32>> {
-        keys.iter().map(|k| self.inner.id(k)).collect()
+    fn ids_of(&self, py: Python<'_>, keys: Vec<String>) -> Vec<Option<u32>> {
+        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
     /// Serialise to a `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        Ok(PyBytes::new(py, &self.inner.to_bytes().map_err(to_py)?))
+        let bytes = py.detach(|| self.inner.to_bytes()).map_err(to_py)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.
     #[staticmethod]
-    fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        Ok(Self {
-            inner: CompactHashIndex::from_bytes(data).map_err(to_py)?,
-        })
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| CompactHashIndex::from_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Write the dictionary to `path`.
-    fn save(&self, path: &str) -> PyResult<()> {
-        self.inner.save(path).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        py.detach(|| self.inner.save(path)).map_err(to_py)
     }
 
     /// Load a dictionary previously written with `save`.
     #[staticmethod]
-    fn load(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: CompactHashIndex::load(path).map_err(to_py)?,
-        })
+    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py.detach(|| CompactHashIndex::load(path)).map_err(to_py)?;
+        Ok(Self { inner })
     }
 
     /// Zero-copy load: memory-map the file and borrow the fingerprint table.
     #[staticmethod]
-    fn load_mmap(path: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: CompactHashIndex::load_mmap(path).map_err(to_py)?,
-        })
+    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
+        let inner = py
+            .detach(|| CompactHashIndex::load_mmap(path))
+            .map_err(to_py)?;
+        Ok(Self { inner })
     }
 }
 

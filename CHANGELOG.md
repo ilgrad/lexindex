@@ -14,6 +14,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The Python bindings release the GIL** (`Python::detach`) around building, bulk queries
+  (`prefix` / `range` / `fuzzy` / `subsequence`), batch lookups (`ids_of` / `keys_of`) and
+  persistence (`save` / `load` / `load_mmap` / `to_bytes` / `from_bytes`), so a threaded caller
+  keeps making progress instead of freezing the interpreter. Previously a background thread got
+  **1 scheduler tick during a 268 ms build** of the 479 823-word dictionary; it now runs
+  throughout.
+  - Single-key accessors (`id`, `key`, `contains`, `id_unchecked`, `successor`, `predecessor`,
+    `__len__`) deliberately **keep** the GIL: they take well under a microsecond, so releasing and
+    reacquiring it would cost more than the work it protects. Their code is untouched, and the
+    serialised size of every index is unchanged (`CompactHashIndex` 1.30 B/key, `StringIndex`
+    5.95, `PerfectHashIndex` 17.62 — bit for bit, since no core or serialisation code was
+    modified).
+
 - **The minimum supported Rust version is now 1.85**, declared as `rust-version` in `Cargo.toml`
   and enforced by a CI job that derives its toolchain from that field, so the declaration cannot
   drift from what is actually built. The crate moved to **edition 2024**, whose floor is exactly

@@ -1,6 +1,7 @@
 """End-to-end tests of the lexindex Python bindings."""
 
 import random
+import time
 
 import lexindex
 import pytest
@@ -217,3 +218,40 @@ def test_version_is_exposed():
     v = lexindex.__version__
     assert isinstance(v, str) and v  # non-empty string
     assert v[0].isdigit() and "." in v  # looks like a real version (installed metadata)
+
+
+def test_build_releases_the_gil():
+    """A background thread must keep running while a large index is built.
+
+    Without ``Python::detach`` in the bindings the interpreter is frozen for the whole build and
+    the counter barely moves (measured: 1 tick over 268 ms). The threshold is deliberately loose
+    so a loaded CI runner cannot make this flaky -- it separates "released" from "not released",
+    not one speed from another.
+    """
+    import threading
+
+    keys = [f"gil-probe-{i:07d}" for i in range(400_000)]
+    ticks = 0
+    stop = threading.Event()
+
+    def spin():
+        nonlocal ticks
+        while not stop.is_set():
+            ticks += 1
+            time.sleep(0.001)
+
+    th = threading.Thread(target=spin, daemon=True)
+    th.start()
+    try:
+        time.sleep(0.05)  # let the spinner get going
+        before = ticks
+        start = time.perf_counter()
+        lexindex.StringIndex(keys)
+        elapsed = time.perf_counter() - start
+    finally:
+        stop.set()
+        th.join(timeout=5)
+
+    during = ticks - before
+    assert elapsed > 0.05, f"build too fast ({elapsed * 1e3:.0f} ms) to tell anything"
+    assert during >= 5, f"GIL held during build: {during} ticks over {elapsed * 1e3:.0f} ms"
