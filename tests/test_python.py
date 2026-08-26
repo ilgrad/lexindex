@@ -227,10 +227,14 @@ def test_build_releases_the_gil():
     the counter barely moves (measured: 1 tick over 268 ms). The threshold is deliberately loose
     so a loaded CI runner cannot make this flaky -- it separates "released" from "not released",
     not one speed from another.
+
+    The key count is sized so the build stays well above the "long enough to mean anything" guard
+    below; 400 000 keys used to take 268 ms and now take 49, so it was raised rather than letting
+    the test start passing vacuously.
     """
     import threading
 
-    keys = [f"gil-probe-{i:07d}" for i in range(400_000)]
+    keys = [f"gil-probe-{i:07d}" for i in range(1_500_000)]
     ticks = 0
     stop = threading.Event()
 

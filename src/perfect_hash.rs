@@ -33,9 +33,12 @@ impl PerfectHashIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut keys: Vec<String> = items.into_iter().map(|s| s.as_ref().to_owned()).collect();
-        keys.sort_unstable();
-        keys.dedup();
+        // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
+        // `String`s: the keys are copied once more into the structure below, so an intermediate
+        // copy of the whole corpus bought nothing.
+        let mut keys: Vec<S> = items.into_iter().collect();
+        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
         let n = keys.len();
         if n == 0 {
             return Ok(Self {
@@ -44,7 +47,7 @@ impl PerfectHashIndex {
                 n: 0,
             });
         }
-        let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k)).collect();
+        let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k.as_ref())).collect();
         let mut sorted = hashes.clone();
         sorted.sort_unstable();
         if sorted.windows(2).any(|w| w[0] == w[1]) {
@@ -53,7 +56,9 @@ impl PerfectHashIndex {
             ));
         }
         let mph: DefaultPtrHash = PtrHash::new(&hashes, PtrHashParams::default());
-        let mut by_slot: Vec<Option<String>> = (0..n).map(|_| None).collect();
+        // Slots hold borrowed keys: the arena copies them anyway, so cloning here would put a
+        // second copy of the corpus alongside `keys` for the length of the loop.
+        let mut by_slot: Vec<Option<&str>> = vec![None; n];
         for (k, h) in keys.iter().zip(&hashes) {
             let slot = mph.index(h);
             if slot >= n || by_slot[slot].is_some() {
@@ -61,7 +66,7 @@ impl PerfectHashIndex {
                     "perfect-hash: construction was not minimal/perfect",
                 ));
             }
-            by_slot[slot] = Some(k.clone());
+            by_slot[slot] = Some(k.as_ref());
         }
         let arena = StringArena::build(by_slot.into_iter().map(|o| o.unwrap()));
         Ok(Self {

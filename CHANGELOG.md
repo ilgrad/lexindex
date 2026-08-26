@@ -27,6 +27,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`build` no longer copies the corpus to sort it.** All three constructors collected their input
+  into an owned `Vec<String>` before sorting and deduplicating, even though every key is copied
+  again into the structure being built. They now sort the caller's items in place, comparing
+  through `AsRef<str>`. `PerfectHashIndex` additionally held a *third* copy: its slot table cloned
+  each key only for the arena to copy it once more, and now borrows instead. On the 479 823-word
+  dictionary (peak RSS of the build itself, one process per variant, order alternated across four
+  pairs; timings A-B-A-B with both implementations in one binary):
+
+  | | peak RSS | build |
+  |---|---|---|
+  | `StringIndex` | 29.9 → **8.0 MB** (−73%) | 1.04× |
+  | `PerfectHashIndex` | 72.5 → **38.1 MB** (−47%) | **1.99×** |
+
+  Rust callers get the same saving: passing `&[String]` or an iterator of `&str` now costs one
+  pointer per key instead of a copy of the corpus. Ids, key order and every serialised size are
+  unchanged — this only removes intermediates.
+  - `test_build_releases_the_gil` grew its key count: at 400 000 keys the build now takes 49 ms
+    rather than 268, which tripped the test's own "too fast to tell anything" guard. It refused to
+    pass vacuously, which is what that guard is for.
+
 - **The Python bindings borrow the caller's strings instead of copying them.** The constructors and
   `ids_of` read their keys as `PyBackedStr` — a view into the Python `str` — where they previously
   extracted an owned `Vec<String>`. `build` already copies the keys it keeps, so that intermediate

@@ -26,12 +26,15 @@ impl StringIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut keys: Vec<String> = items.into_iter().map(|s| s.as_ref().to_owned()).collect();
-        keys.sort_unstable();
-        keys.dedup();
+        // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
+        // `String`s: the keys are copied once more into the structure below, so an intermediate
+        // copy of the whole corpus bought nothing.
+        let mut keys: Vec<S> = items.into_iter().collect();
+        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
         let mut builder = MapBuilder::memory();
         for (i, k) in keys.iter().enumerate() {
-            builder.insert(k.as_bytes(), i as u64)?;
+            builder.insert(k.as_ref().as_bytes(), i as u64)?;
         }
         let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
         Ok(Self { map })
