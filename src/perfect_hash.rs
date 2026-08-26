@@ -17,7 +17,7 @@ use crate::arena::StringArena;
 use crate::blob::SharedBytes;
 use crate::hash::hash_key;
 use epserde::prelude::*;
-use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
+use ptr_hash::DefaultPtrHash;
 
 const MPH_MAGIC: &[u8; 4] = b"BMP2";
 
@@ -59,7 +59,7 @@ impl PerfectHashIndex {
                  set can never build - use StringIndex or change the keys",
             ));
         }
-        let mph: DefaultPtrHash = PtrHash::new(&hashes, PtrHashParams::default());
+        let mph = crate::hash::build_mph(&hashes);
         // Slots hold borrowed keys: the arena copies them anyway, so cloning here would put a
         // second copy of the corpus alongside `keys` for the length of the loop.
         let mut by_slot: Vec<Option<&str>> = vec![None; n];

@@ -13,7 +13,7 @@ use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::hash::{fingerprint, hash_key};
 use epserde::prelude::*;
-use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
+use ptr_hash::DefaultPtrHash;
 
 const MAGIC: &[u8; 4] = b"BCH1";
 const HEADER_LEN: usize = 24; // [magic 4][n u64][fp_bytes u32][mph_len u64]
@@ -64,7 +64,7 @@ impl CompactHashIndex {
                  set can never build - use StringIndex or change the keys",
             ));
         }
-        let mph: DefaultPtrHash = PtrHash::new(&hashes, PtrHashParams::default());
+        let mph = crate::hash::build_mph(&hashes);
         let mut fps = vec![0u8; n * fingerprint_bytes];
         let mut seen = vec![false; n];
         for (k, h) in keys.iter().zip(&hashes) {

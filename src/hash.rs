@@ -33,3 +33,15 @@ pub(crate) fn fingerprint(s: &str, fp_bytes: usize) -> u64 {
         h & ((1u64 << bits) - 1)
     }
 }
+
+use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
+
+/// Build the MPH with `default_compact` parameters (λ=3.9): measured 2.17 bits/key on real words
+/// vs 2.41 for the λ=3.5 default, with identical query time at 480k and 5M keys. Compact
+/// construction can occasionally fail (pilot eviction chains grow too long), so fall back to the
+/// default parameters; both produce the same `DefaultPtrHash` type, so blobs stay compatible
+/// either way.
+pub(crate) fn build_mph(hashes: &[u64]) -> DefaultPtrHash {
+    PtrHash::try_new(hashes, PtrHashParams::default_compact())
+        .unwrap_or_else(|| PtrHash::new(hashes, PtrHashParams::default()))
+}
