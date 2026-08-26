@@ -42,8 +42,9 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   held-out *real words* measured 0.310 % (z = −2.9) — at or slightly below theory in every case,
   so the advertised rate is a ceiling in practice, not an average that can be exceeded.
 
-Because the keys themselves are never stored, size is just the MPH (~0.3 B/key — PtrHash is ≈2.4
-bits/key) plus the fingerprints (`fingerprint_bytes` B/key): **1.30 B/key at 1 byte, 2.30 at 2** on real
+Because the keys themselves are never stored, size is just the MPH (~0.27 B/key — PtrHash is ≈2.2
+bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
+rare compact-construction failure, and both serialise identically) plus the fingerprints (`fingerprint_bytes` B/key): **1.27 B/key at 1 byte, 2.27 at 2** on real
 words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH1"][n][fp_bytes][mph length][mph epserde bytes][fingerprints]`.
 
@@ -68,7 +69,7 @@ where membership is already guaranteed. The serialised blob is `[magic "BMP2"][n
 epserde bytes][arena bytes]`, and the arena is `[n+1][offset width][offsets][data]`. Offsets are
 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
 (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
-whole structure to 13.63 B/key.
+whole structure to 13.60 B/key.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing

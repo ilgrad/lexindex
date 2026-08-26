@@ -23,7 +23,7 @@ Three complementary, build-once / query-many structures — pick by what you nee
   ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
   ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a small fingerprint per key, storing *no keys
-  at all*. **1.30 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`** and below
+  at all*. **1.27 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`** and below
   every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
   (a tunable `256^-k` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
   footprint is paramount and rare false positives are acceptable.
@@ -197,11 +197,11 @@ better; the capability columns are why you would still pick a larger one.
 
 | library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.30** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.30** |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.27** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.27** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.63 |
+| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.60 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
@@ -248,14 +248,14 @@ real keys in one session (min of 12 runs, idle machine). Absolute numbers are ma
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~277 ms | **~197 ns** | closed vocabulary, no membership check |
-| lexindex `CompactHashIndex::id` (fp=1) | ~224 ms | ~238 ns | fingerprint-verified, `256^-1` false-positive rate |
-| `std::HashMap<String, u32>` | ~214 ms | ~294 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~299 ms | ~324 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~268 ms | ~424 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~225 ms | ~949 ns | in-RAM |
+| lexindex `PerfectHashIndex::id_unchecked` | ~302 ms | **~189 ns** | closed vocabulary, no membership check |
+| lexindex `CompactHashIndex::id` (fp=1) | ~244 ms | ~237 ns | fingerprint-verified, `256^-1` false-positive rate |
+| `std::HashMap<String, u32>` | ~239 ms | ~298 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~323 ms | ~327 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~270 ms | ~424 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~231 ms | ~952 ns | in-RAM |
 
-<sub>Run-to-run spread was under 2% for every cell. Real keys move the numbers both ways versus the
+<sub>Run-to-run lookup spread was under 4% on every lexindex cell (builds vary more, up to ~12% on the `std` rows). Real keys move the numbers both ways versus the
 old synthetic table: lookups favour lexindex *more* (shorter, realistic keys make its byte-wise FNV
 cheaper relative to `HashMap`'s SipHash — the gap widened from ~1.25× to ~1.5×), while every `build`
 reads higher because real input is not pre-sorted and sorting is part of the build.</sub>
@@ -273,20 +273,20 @@ with nothing persisted.
 ### Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow
-linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.30 bytes/key holds constant** as
+linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.27 bytes/key holds constant** as
 `n` grows:
 
 | n | structure | build | bytes/key | peak RSS | lookup |
 |---|---|---:|---:|---:|---:|
-| 1 M | `StringIndex` | 0.33 s | 0.68\* | 126 MB | 279 ns |
-| 1 M | `CompactHashIndex` | 0.32 s | 1.30 | 162 MB | 199 ns |
-| 10 M | `StringIndex` | 5.0 s | 2.00\* | 1.08 GB | 899 ns |
-| 10 M | `CompactHashIndex` | 4.7 s | 1.30 | 1.35 GB | 382 ns |
+| 1 M | `StringIndex` | 0.33 s | 0.68\* | 126 MB | 280 ns |
+| 1 M | `CompactHashIndex` | 0.34 s | 1.27 | 161 MB | 209 ns |
+| 10 M | `StringIndex` | 5.1 s | 2.00\* | 1.08 GB | 873 ns |
+| 10 M | `CompactHashIndex` | 5.1 s | 1.27 | 1.35 GB | 372 ns |
 
 <sub>\* bigram keys share far more prefixes than single words — at 1 M the generator draws on only
 1 000 distinct words, which is why `StringIndex` compresses to an unrepresentative 0.68 B/key there;
 the honest single-word figure is in the size table above. The whole table is one measurement session
-on the 0.5.0 code (min of 3 runs per cell). Peak RSS includes the input key list, which dominates at
+on the 0.5.1 code (min of 3 runs per cell). Peak RSS includes the input key list, which dominates at
 this scale and is why the column falls by 8-17% rather than by the 47-73% the build itself dropped
 in 0.5.0. Linear extrapolation puts 100 M at ~50 s and ~13.5 GB (a big-memory box) — and at that
 scale note `PerfectHashIndex`'s quantified hash-collision odds above; `StringIndex` and

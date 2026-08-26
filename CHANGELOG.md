@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-08-27
+
 ### Added
 
 - **Citation metadata** (`CITATION.cff` + `.zenodo.json`): GitHub shows "Cite this repository", and
@@ -13,6 +15,16 @@ All notable changes to this project are documented here. The format follows
   is archived with a DOI. Metadata validated against the CFF 1.2.0 schema.
 
 ### Changed
+
+- **The minimal perfect hash is built with ptr_hash's `default_compact` parameters (λ=3.9).**
+  Tighter pilot buckets take the MPH from 2.41 to **2.17 bits/key** on the 479 823-word
+  dictionary: `CompactHashIndex` fp=1 drops **1.301 → 1.272 bytes/key** (2.34× smaller than
+  marisa-trie's 2.98), fp=2 2.301 → 2.272, `PerfectHashIndex` 13.625 → 13.596. Query time is
+  unchanged (A-B in one binary at 480 k and 5 M keys, plus process-level A-B-A-B with a
+  `std::HashMap` control); builds pay ~+10 ms per million keys (~3–4%) — a build-once/query-many
+  trade. Compact construction can occasionally fail (pilot eviction chains grow too long), so it
+  falls back to the default parameters automatically. Both parameter sets serialise the same type,
+  so **blobs stay compatible in both directions** — no format change.
 
 - **Batch `ids_of` on `PerfectHashIndex` and `CompactHashIndex` streams its MPH lookups.**
   Per-key `id()` walks hash → slot → verify serially, stalling on a cache miss at every step.

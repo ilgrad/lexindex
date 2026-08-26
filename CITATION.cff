@@ -27,5 +27,5 @@ keywords:
   - memory-mapped
   - rust
   - python
-version: 0.5.0
-date-released: "2026-08-26"
+version: 0.5.1
+date-released: "2026-08-27"
