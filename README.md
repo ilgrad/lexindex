@@ -200,7 +200,7 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.30** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 17.62 |
+| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.63 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
@@ -256,7 +256,7 @@ used for the new figures — so this comparison is, if anything, conservative ag
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest** — ≈1.25× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
-serialisable. `CompactHashIndex` shares that same MPH lookup while storing 13× less. Add membership
+serialisable. `CompactHashIndex` shares that same MPH lookup while storing 10× less. Add membership
 verification (`id`) and you pay one extra cache line + a key comparison; use `StringIndex` and you trade
 more latency for **ordered / prefix / range / fuzzy** queries the hash maps cannot answer at all. So:
 `CompactHashIndex` when footprint dominates and a rare false positive is fine; `PerfectHashIndex::id`

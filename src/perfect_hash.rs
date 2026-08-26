@@ -16,7 +16,7 @@ use crate::hash::hash_key;
 use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 
-const MPH_MAGIC: &[u8; 4] = b"BMP1";
+const MPH_MAGIC: &[u8; 4] = b"BMP2";
 
 /// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {
@@ -311,5 +311,17 @@ mod tests {
             .unwrap();
         good[0] = b'X'; // break the magic
         assert!(PerfectHashIndex::from_bytes(&good).is_err());
+    }
+
+    /// 0.5.0 narrowed the arena's offsets, so a blob written by 0.1-0.4 no longer describes this
+    /// layout. It must be refused by the magic, not silently misread as the new one.
+    #[test]
+    fn rejects_a_pre_0_5_blob() {
+        let mut old = PerfectHashIndex::build(["a", "b"])
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        old[0..4].copy_from_slice(b"BMP1");
+        assert!(PerfectHashIndex::from_bytes(&old).is_err());
     }
 }

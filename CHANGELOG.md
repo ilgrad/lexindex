@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0] — 2026-08-26
 
+**Upgrading:** rebuild any saved `PerfectHashIndex` blob — its format changed (see below) and 0.5.0
+rejects the old one rather than misreading it. `StringIndex` and `CompactHashIndex` blobs load
+unchanged. Rust consumers need a 1.85 toolchain. Python users need nothing beyond `pip install -U`.
+
 ### Added
 
 - **Bounded and lazy queries on `StringIndex`.** Python `prefix` / `range` / `fuzzy` /
@@ -26,6 +30,24 @@ All notable changes to this project are documented here. The format follows
   imported from a source tree that was never installed.
 
 ### Changed
+
+- **`PerfectHashIndex` is 23% smaller: its key arena now uses 4-byte offsets.** The arena addresses
+  each stored key by an offset into a flat buffer, and those offsets were `u64` — 8 bytes per key to
+  address a 4.9 MB buffer. They were the single largest part of the structure: **8.0 of its 17.625
+  bytes per key** on the 479 823-word dictionary. Offsets are now 4 bytes, taking the index to
+  **13.625 B/key (−22.7%)**.
+  - **The width is chosen per arena, not capped.** An arena above 4 GiB still gets 8-byte offsets,
+    recorded in a header byte, so no corpus that built before will fail to build now.
+  - **Lookups got faster, not slower.** Halving the offset table halves the cache footprint of the
+    two reads every verified lookup makes, which more than pays for the width branch — and the
+    branch is on a field fixed for the life of the index, so it predicts. `PerfectHashIndex::id`,
+    the only path that touches the arena, measured **−3.7%** (386.8 → 372.4 ns, min of 12 runs on an
+    idle machine). The controls that cannot touch the arena — `id_unchecked`, `StringIndex`,
+    `std::HashMap`, `std::BTreeMap` — moved +0.0%, +0.2%, +0.7% and −0.3%, which is what makes the
+    −3.7% readable as the change rather than the machine.
+  - **Breaking:** the `PerfectHashIndex` blob magic is now `BMP2`; blobs written by 0.1–0.4 must be
+    rebuilt. `StringIndex` (`BIX4`) and `CompactHashIndex` (`BCH1`) blobs are untouched, as are
+    their sizes.
 
 - **`build` no longer copies the corpus to sort it.** All three constructors collected their input
   into an owned `Vec<String>` before sorting and deduplicating, even though every key is copied
@@ -56,8 +78,8 @@ All notable changes to this project are documented here. The format follows
   process pairs for the memory figure, which agreed to within 0.3 MB).
   - **No API change.** `PyBackedStr` accepts exactly what `String` did; the observable contract —
     accepted types, rejected types and every error message — was diffed against a build of the
-    previous code and is identical. Serialised sizes are unchanged (`CompactHashIndex` 1.301 /
-    2.301, `StringIndex` 5.953, `PerfectHashIndex` 17.625 bytes/key).
+    previous code and is identical. This change left every serialised size untouched; the only size
+    that moves in this release is `PerfectHashIndex`, from the arena change above.
 
 - **`PerfectHashIndex.key` / `keys_of` no longer copy each key twice.** Its keys live in an arena,
   so `key` returns a `&str`; both methods then copied that into a `String` only for PyO3 to copy it
@@ -75,10 +97,8 @@ All notable changes to this project are documented here. The format follows
   throughout.
   - Single-key accessors (`id`, `key`, `contains`, `id_unchecked`, `successor`, `predecessor`,
     `__len__`) deliberately **keep** the GIL: they take well under a microsecond, so releasing and
-    reacquiring it would cost more than the work it protects. Their code is untouched, and the
-    serialised size of every index is unchanged (`CompactHashIndex` 1.30 B/key, `StringIndex`
-    5.95, `PerfectHashIndex` 17.62 — bit for bit, since no core or serialisation code was
-    modified).
+    reacquiring it would cost more than the work it protects. Their code is untouched, and this
+    change altered no serialised byte of any index.
 
 - **The minimum supported Rust version is now 1.85**, declared as `rust-version` in `Cargo.toml`
   and enforced by a CI job that derives its toolchain from that field, so the declaration cannot
@@ -86,7 +106,7 @@ All notable changes to this project are documented here. The format follows
   1.85; `cargo fix --edition` required no source changes in any feature configuration, so the
   only user-visible effect is the toolchain requirement itself.
   - **Rust consumers on a toolchain older than 1.85 must upgrade** — `cargo` will refuse to build
-    lexindex rather than fail obscurely. This is why the release is 0.5.0 and not 0.4.1.
+    lexindex rather than fail obscurely.
   - **Python users are unaffected.** The published wheels are abi3 and carry no toolchain
     requirement; `requires-python` is unchanged at `>=3.11`.
 

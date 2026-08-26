@@ -55,8 +55,11 @@ query. Build fails, rather than silently corrupting, on the astronomically rare 
 between two distinct keys.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP1"][n][mph length][mph
-epserde bytes][arena bytes]`.
+where membership is already guaranteed. The serialised blob is `[magic "BMP2"][n][mph length][mph
+epserde bytes][arena bytes]`, and the arena is `[n+1][offset width][offsets][data]`. Offsets are
+4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
+(8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
+whole structure to 13.63 B/key.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
