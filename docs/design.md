@@ -126,8 +126,19 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 and reads only the small MPH structure into memory, sidestepping the deserialiser's alignment concern entirely.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
-it. Parsing is fully bounds-checked, so loading a truncated or corrupt blob fails cleanly and never
-reads out of bounds.
+it.
+
+The load-time trust boundary is worth stating precisely, because it differs by index. Every blob's
+lexindex-owned framing is bounds-checked, and `StringIndex`'s owned `load`/`from_bytes` additionally
+verify the FST's stored checksum, so a truncated or single-byte-corrupted owned blob is rejected
+rather than read. The perfect-hash indexes go one step further into *trust-your-own-blob* territory:
+their embedded minimal-perfect-hash is an `epserde` region that `ptr_hash` reads **unchecked**, so a
+crafted payload can steer an out-of-bounds read no header check can catch. Two things narrow that: the
+32/36-byte header carries a checksum over its own framing so accidental corruption of `n` / `fp_bits`
+/ `mph_len` fails cleanly, and `overflow_cap` — the bound on the one otherwise-unchecked remap read —
+is **recomputed from the arena on every `PerfectHashIndex` load**, never trusted from the header. But
+the MPH payload itself, like `epserde`'s `from_bytes`, is only safe on a blob you produced. `load_mmap`
+skips the FST checksum scan by design, to keep mapping constant-time.
 
 ## Cargo features
 

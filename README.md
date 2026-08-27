@@ -161,8 +161,9 @@ assert_eq!(raw, id);
   stays `≤ id`, and returns the path once the outputs sum to exactly `id`. That is `O(key length)` and
   needs no auxiliary structure, so the serialised blob is just `[magic "BIX4"][fst]` — half the size of
   the 0.2.0 front-coded layout on real words (12.6 → 5.95 B/key) and simpler to reason about.
-  `from_bytes` validates the magic and hands the rest to `fst`, which is itself bounds-checked, so
-  loading an untrusted blob can fail but never corrupts.
+  `from_bytes`/`load` validate the magic and verify the FST's stored checksum, so a truncated or
+  corrupted owned blob is rejected at load rather than queried; `load_mmap` skips that `O(n)` scan to
+  keep mapping constant-time, so a mapped file is trusted to be intact.
 - **Perfect-hash ids are not reproducible across builds.** `ptr_hash`'s construction is randomised,
   so building the *same* key set twice assigns different slots — measured on 50 k keys, only ~53 % of
   them keep their id. Ids are stable across `save`/`load` of one built index, so persist the **blob**,

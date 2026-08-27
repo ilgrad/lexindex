@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`save` no longer follows a symlink planted at its temporary path.** The atomic write opened its
+  sibling temp with `File::create`, which follows an existing symlink — so an attacker able to write
+  to the target directory could pre-create a symlink at the predictable `<name>.<pid>.<seq>.tmp` and
+  redirect the write, truncating an arbitrary file the process could reach. The temp is now opened
+  `O_CREAT | O_EXCL` (`create_new`), which refuses any pre-existing path, symlink included; on a name
+  collision the write retries with the next counter (bounded, so a hostile racer cannot spin it).
+  On Unix the parent directory is now fsynced after the rename so the publish is durable across power
+  loss, and an existing file's permissions are preserved rather than reset to the umask default.
+- **`StringIndex` owned loads verify the FST checksum.** `from_bytes` / `load` handed the body to
+  `fst::Map::new`, which checks length and version but not the stored CRC, so a corrupt owned blob
+  could load and only fail — or mislead — on a later query. Owned loads now call `Fst::verify()`, an
+  `O(n)` CRC scan, and reject a bad blob at load; `load_mmap` still skips it to keep mapping
+  constant-time (a mapped file is trusted intact, as before).
+- **`PerfectHashIndex` never trusts the header's `overflow_cap`.** It is now recomputed from the
+  arena on every load, `BMP3` included, so a blob whose framing checksum was forged alongside a
+  crafted cap still cannot steer a query past the true remap length. `CompactHashIndex` stores no
+  keys and cannot recompute it, so it remains a *trust-your-own-blob* format (documented).
+
+### Added
+
+- **Golden hash-stability tests.** `hash_key` and `fingerprint_bits` pin exact outputs for a fixed
+  key set (ASCII and multibyte), so a silently changed constant — which would make every previously
+  saved MPH blob load wrong — fails CI loudly instead. Changing a hash is a format break that must
+  bump the magic, not the table.
+
+### Changed
+
+- **Trust-boundary wording made precise** in `README.md` and `docs/design.md`: lexindex framing is
+  bounds-checked and `StringIndex` owned loads verify the FST CRC, but the perfect-hash indexes'
+  embedded `epserde` MPH (which `ptr_hash` reads unchecked) stays a *trust-your-own-blob* payload —
+  the header checksum and recomputed `overflow_cap` guard accidental corruption, not a crafted blob.
+
 ## [0.7.0] — 2026-08-27
 
 ### Fixed
