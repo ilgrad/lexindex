@@ -6,6 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A 64-bit hash collision can no longer fail a build — any key set now builds.** Both perfect-hash
+  indexes build the MPH over one representative per distinct hash value; colliding leftovers get
+  tail ids served from a tiny **side table**, consulted only after the main lookup has already
+  missed, so an index without collisions (every index below ~10^8 keys, in practice) pays one
+  predictable branch and nothing more. `PerfectHashIndex` stays exact even for collided keys (the
+  side probe compares stored keys); `CompactHashIndex` matches side keys by fingerprint, leaving
+  only a pair colliding in *both* hashes at once (`2^-(64+fingerprint_bits)` per pair) to collapse
+  as if it were a duplicate. Previously such key sets failed the build permanently — the hash is
+  deterministic, so no retry could ever help; at 1 G keys that was a ~2.7 % build-failure rate.
+- **Whole-payload checksum on the perfect-hash blobs.** Owned `load`/`from_bytes` now verify a
+  streaming 64-bit hash over everything after the header, so a flipped byte anywhere — MPH region,
+  arena, fingerprint table, side table — is rejected at load instead of perturbing answers (or
+  aborting inside `epserde`) later. This makes the *accidental*-corruption story uniform across all
+  three indexes: every owned load verifies the entire blob. (`load_mmap` still trusts the mapped
+  file; a crafted blob remains outside the contract — the hashes are public and deterministic.)
+- **`CompactHashIndex::build`/`build_bits` stream.** One pass keeps a 16-byte `(hash, fingerprint)`
+  pair per key and never materialises the strings, so building from a lazy iterator peaks at
+  `16 × n` bytes over the input regardless of key length — and sorting pairs instead of strings
+  **halved build time** (249 → 120 ms at 1 M real-word bigrams, same-session A/B), putting it ~2×
+  below `std::HashMap`'s build. Lookup cost is unchanged (A/B: 245.2 vs 245.2 ns);
+  `PerfectHashIndex::id_unchecked` measured 8 % faster (193 → 178 ns) and the verified
+  `PerfectHashIndex::id` ~3 % slower (343 → 353 ns — the side-table entry branch, on the one path
+  that already pays a full key compare). Serialised sizes are unchanged to two decimals
+  (+4/+12 bytes per *blob*, not per key).
+- **Windows and macOS test jobs in CI.** The release workflow already shipped wheels for both;
+  their platform-specific paths (`save`'s rename-over-existing, permissions, mmap) now run the
+  test suite on every push, not just a cross-build on tags.
+
+### Changed
+
+- **Blob formats: `PerfectHashIndex` writes `BMP4`, `CompactHashIndex` writes `BCH4`** — the v3
+  layouts plus the side table and the payload checksum; `BMP4` also *drops* the stored
+  `overflow_cap`, which every load has recomputed from the arena since 0.7.1 anyway. 0.7 blobs
+  (`BMP3`/`BCH3`, and `BMP2` from 0.5/0.6) still load; `BCH1`/`BCH2` remain refused. Older
+  lexindex versions cannot read v4 blobs.
+- **`save` streams.** All three indexes write the blob section by section through the atomic
+  writer instead of assembling a serialised copy first, halving peak save memory; the bytes
+  written are identical to `to_bytes`.
+
 ### Fixed
 
 - **`save` no longer follows a symlink planted at its temporary path.** The atomic write opened its

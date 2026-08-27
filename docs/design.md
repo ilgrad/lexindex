@@ -50,11 +50,18 @@ Because the keys themselves are never stored, size is just the MPH (~0.27 B/key 
 bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
 rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
 (6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH3"][n][fp_bits][overflow_cap][mph length][check]
-[mph epserde bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits
-`[i·b, (i+1)·b)`, little-endian), with a 32-bit check over the lexindex header — `overflow_cap`
-bounds an otherwise unchecked read, so it is not taken on trust from a blob that lost bytes in
-transit. 0.5/0.6 blobs (`BCH1`/`BCH2`) are refused; see below.
+`id → key`. The serialised blob is `[magic "BCH4"][n][fp_bits][overflow_cap][mph length][side_len]
+[payload][check][mph epserde bytes][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
+*i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
+32-bit check over the lexindex header — `overflow_cap` bounds an otherwise unchecked read, so it is
+not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
+payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, fingerprint)` pair
+— 16 bytes — per key and never the strings, so peak build memory is `16·n` bytes over the input
+regardless of key length. Keys that collide in the 64-bit hash get tail ids in a side table, matched
+by fingerprint (see `PerfectHashIndex` below); the one silent case left is a pair colliding in *both*
+hashes at once (`2^-(64+b)` per pair), which is indistinguishable from a duplicate key by
+construction and collapses into one entry. 0.7 blobs (`BCH3`) still load; 0.5/0.6 blobs
+(`BCH1`/`BCH2`) are refused; see below.
 
 **The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
 raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
@@ -67,10 +74,11 @@ provably free, so no member can live there. Every query path is bounded by it, `
 included: that method skips the membership *comparison*, not the bounds.
 
 Blobs written before the cap existed cannot be loaded as they are, since that would reinstate the
-defect. `PerfectHashIndex` heals a `BMP2` blob instead — its arena holds every key, so the cap is
-recomputed exactly at load (O(n) hashes, paid once). `CompactHashIndex` stores no keys and has
-nothing to recompute from, so a `BCH1`/`BCH2` blob is refused with a message naming the fix.
-Soundness outranks compatibility with a two-day-old format.
+defect. `PerfectHashIndex` does not trust *any* stored cap — its arena holds every key, so the cap is
+recomputed exactly on every load (O(m) hashes, paid once; the v4 format does not even carry the
+field). `CompactHashIndex` stores no keys and has nothing to recompute from, so its checked header
+cap is trusted and a `BCH1`/`BCH2` blob (which predates the field) is refused with a message naming
+the fix. Soundness outranks compatibility with a two-day-old format.
 
 ## `PerfectHashIndex`
 
@@ -80,18 +88,25 @@ gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH with
 string (FNV-1a + a splitmix64 finalizer — not `std`'s `DefaultHasher`, which is not guaranteed stable
 and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
-query. Build fails, rather than silently corrupting, if two distinct keys collide in the 64-bit hash —
-and because the hash is deterministic and unseeded (that is what makes the serialised MPH reloadable),
-a colliding key set can *never* build: the fix is `StringIndex` or changing the keys, not retrying.
-The birthday bound `n(n-1)/2^65` says how often that happens (computed exactly, Maxima and PARI/GP
-agreeing): **6.2×10⁻⁹** for the 479 823-word dictionary, **2.7×10⁻⁸** at 1 M keys, **2.7×10⁻⁶** at
-10 M, **2.7×10⁻⁴** (1 in ~3 700) at 100 M, and **~2.7%** at 1 G — so "astronomically rare" is honest
-below ~10 M keys and a real design consideration at 10⁸–10⁹.
+query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
+deterministic and unseeded (that is what makes the serialised MPH reloadable), so a retry could never
+help — instead the MPH is built over one representative per distinct hash value and the colliding
+leftovers get tail ids `[m, n)` served from a **side table** (`(hash, id)` pairs, sorted), consulted
+only after the stored-key comparison has already missed. Members are still answered exactly — the
+side probe compares stored keys — and an index without collisions skips the probe with one
+predictable branch, so the hot path pays nothing. The birthday bound `n(n-1)/2^65` says how often the
+table is even non-empty (computed exactly, Maxima and PARI/GP agreeing): **6.2×10⁻⁹** for the
+479 823-word dictionary, **2.7×10⁻⁸** at 1 M keys, **2.7×10⁻⁶** at 10 M, **2.7×10⁻⁴** (1 in ~3 700)
+at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure mode at any scale.
+`CompactHashIndex` resolves collisions the same way, with the fingerprint standing in for the stored
+key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP3"][n][overflow_cap][mph
-length][check][mph epserde bytes][arena bytes]` (`BMP2` blobs from 0.5/0.6 load with the cap
-recomputed from the arena; the cap plays the same role as in `CompactHashIndex` above), and the arena is `[n+1][offset width][offsets][data]`. Offsets are
+where membership is already guaranteed. The serialised blob is `[magic "BMP4"][n][mph length]
+[side_len][payload][check][mph epserde bytes][arena bytes][side]` — the payload hash covers
+everything after the header and is verified on owned loads; `overflow_cap` is not stored at all,
+because every load recomputes it from the arena (`BMP2`/`BMP3` blobs from 0.5–0.7 load the same way).
+The arena is `[n+1][offset width][offsets][data]`. Offsets are
 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
 (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
 whole structure to 13.60 B/key.
@@ -128,17 +143,19 @@ and reads only the small MPH structure into memory, sidestepping the deserialise
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
 it.
 
-The load-time trust boundary is worth stating precisely, because it differs by index. Every blob's
-lexindex-owned framing is bounds-checked, and `StringIndex`'s owned `load`/`from_bytes` additionally
-verify the FST's stored checksum, so a truncated or single-byte-corrupted owned blob is rejected
-rather than read. The perfect-hash indexes go one step further into *trust-your-own-blob* territory:
-their embedded minimal-perfect-hash is an `epserde` region that `ptr_hash` reads **unchecked**, so a
-crafted payload can steer an out-of-bounds read no header check can catch. Two things narrow that: the
-32/36-byte header carries a checksum over its own framing so accidental corruption of `n` / `fp_bits`
-/ `mph_len` fails cleanly, and `overflow_cap` — the bound on the one otherwise-unchecked remap read —
-is **recomputed from the arena on every `PerfectHashIndex` load**, never trusted from the header. But
-the MPH payload itself, like `epserde`'s `from_bytes`, is only safe on a blob you produced. `load_mmap`
-skips the FST checksum scan by design, to keep mapping constant-time.
+The load-time trust boundary is worth stating precisely. Against **accidental** corruption — a
+truncated download, a flipped byte, a lost header field — every owned `load`/`from_bytes` fails
+cleanly: `StringIndex` verifies the FST's stored checksum, and the perfect-hash indexes verify a
+streaming hash of their whole payload plus a check over the header's framing fields, so a corrupted
+blob of any of the three is rejected rather than read. Against a **deliberately crafted** blob the
+perfect-hash indexes remain *trust-your-own-blob*: every checksum involved is public and
+deterministic (an attacker can recompute them), and the embedded minimal-perfect-hash is an `epserde`
+region that `ptr_hash` reads **unchecked**, so a crafted payload can steer an out-of-bounds read no
+checksum can catch. What narrows that: `overflow_cap` — the bound on the one otherwise-unchecked
+remap read — is **recomputed from the arena on every `PerfectHashIndex` load**, never trusted from
+any header. `CompactHashIndex` stores no keys to recompute from, so its cap is trusted from the
+checked header. `load_mmap` skips every checksum scan by design, trusting the mapped file outright to
+keep mapping time independent of blob size.
 
 ## Cargo features
 

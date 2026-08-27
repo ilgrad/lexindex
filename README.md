@@ -175,19 +175,26 @@ assert_eq!(raw, id);
   a non-member survives both only with probability `2^-b`, the tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH3"][n][fp_bits][overflow_cap][mph_len][check][mph][bit-packed fingerprints]`.
-  0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they predate the recorded remap bound and store no
-  keys to recompute it from, so loading one would reinstate an out-of-bounds read — rebuild instead.
+  is `[magic "BCH4"][n][fp_bits][overflow_cap][mph_len][side_len][payload][check][mph][bit-packed
+  fingerprints][side]` — the payload hash is verified on owned loads, so a corrupted blob fails
+  cleanly. Its build **streams**: only a 16-byte `(hash, fingerprint)` pair is kept per key, never
+  the strings. 0.7 blobs (`BCH3`) still load; 0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they
+  predate the recorded remap bound and store no keys to recompute it from, so loading one would
+  reinstate an out-of-bounds read — rebuild instead.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give
-  exact `id → key`. Build fails (rather than silently corrupting) if two distinct keys collide in
-  the 64-bit hash — `n(n-1)/2^65` ≈ 2.7×10⁻⁸ at 1 M keys, 2.7×10⁻⁴ at 100 M; the hash is unseeded,
-  so a colliding set needs `StringIndex`, not a retry. The hash is **version-stable** (FNV-1a + a splitmix64
-  finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH (the `ptr_hash` structure serialised via
-  [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and queries identically
-  on any build — the precondition for persistence. `CompactHashIndex` shares the same version-stable
-  slot hash plus a second independent one for the fingerprint.
+  exact `id → key`. Two distinct keys colliding in the 64-bit hash cannot fail the build: the MPH is
+  built over one representative per distinct hash value and the colliding leftovers are served — still
+  exactly — from a tiny side table consulted only after the stored-key comparison has missed, so the
+  hot path pays nothing. The expected number of colliding pairs is `n(n-1)/2^65` ≈ 2.7×10⁻⁸ at 1 M
+  keys, 2.7×10⁻⁴ at 100 M — the table is almost always empty. The hash is **version-stable** (FNV-1a
+  + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH (the `ptr_hash` structure
+  serialised via [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and
+  queries identically on any build — the precondition for persistence. `CompactHashIndex` shares the
+  same version-stable slot hash plus a second independent one for the fingerprint, and resolves hash
+  collisions the same way (matching side keys by fingerprint — so only a pair colliding in **both**
+  hashes at once, `2^-(64+b)`, would merge).
 - **Zero-copy `load_mmap`** (the default `mmap` feature, `memmap2`) memory-maps a saved blob and
   borrows the index directly from the mapped pages — no read into RAM, so a multi-gigabyte index is
   ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole FST;
@@ -262,30 +269,33 @@ tweak. `CompactHashIndex` takes the size crown the other way: by dropping the ke
 ### Point-lookup latency vs the standard library
 
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
-same key generator as `bench/scale.py`; mean key 10.9 bytes). Earlier editions of this table used
-synthetic `entity-000…N` keys, which arrive pre-sorted and hash-degenerate — they flattered every
-build time and violated this project's own benchmarking rule, so the whole table was re-measured on
-real keys in one session (min of 12 runs, idle machine). Absolute numbers are machine-dependent; the
-**ratios** are the point.
+same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
+`entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
+Measured on the 0.8.0 code in one session (min of 12 runs, idle machine). Absolute numbers are
+machine-dependent; the **ratios** are the point.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~302 ms | **~189 ns** | closed vocabulary, no membership check |
-| lexindex `CompactHashIndex::id` (fp=1) | ~244 ms | ~237 ns | fingerprint-verified, `2^-8` false-positive rate |
-| `std::HashMap<String, u32>` | ~239 ms | ~298 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~323 ms | ~327 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~270 ms | ~424 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~231 ms | ~952 ns | in-RAM |
+| lexindex `CompactHashIndex::id` (fp=1) | **~119 ms** | ~244 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~324 ms | **~178 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~234 ms | ~303 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~327 ms | ~311 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~269 ms | ~409 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~223 ms | ~960 ns | in-RAM |
 
-<sub>Run-to-run lookup spread was under 4% on every lexindex cell (builds vary more, up to ~12% on the `std` rows). Real keys move the numbers both ways versus the
-old synthetic table: lookups favour lexindex *more* (shorter, realistic keys make its byte-wise FNV
-cheaper relative to `HashMap`'s SipHash — the gap widened from ~1.25× to ~1.5×), while every `build`
-reads higher because real input is not pre-sorted and sorting is part of the build.</sub>
+<sub>Run-to-run lookup spread stayed under 7% on every cell except `PerfectHashIndex::id` (16% —
+it is the most cache-sensitive path; its same-session A/B against the 0.7 binary showed the 0.8
+side-table branch costs ~3% there, while `id_unchecked` measured 8% *faster* and
+`CompactHashIndex::id` was unchanged). `CompactHashIndex`'s build halved in 0.8: its streaming
+build sorts 16-byte `(hash, fingerprint)` pairs instead of strings, which also puts it 2× below
+`HashMap`'s build. Real keys move lookups in lexindex's favour versus synthetic ones (byte-wise
+FNV vs `HashMap`'s SipHash), while every `build` reads higher because real input is not pre-sorted
+and sorting is part of the build.</sub>
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
-**fastest** — ≈1.5× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
+**fastest** — ≈1.7× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
 serialisable. `CompactHashIndex::id` keeps a probabilistic membership check and *still* beats
-`HashMap` while storing 10× less than `PerfectHashIndex`. Full verification (`id`) pays one extra
+`HashMap` on lookup — and now builds ~2× faster than it. Full verification (`id`) pays one extra
 cache line + a key comparison; `StringIndex` trades more latency for **ordered / prefix / range /
 fuzzy** queries the hash maps cannot answer at all. So: `CompactHashIndex` when footprint dominates
 and a rare false positive is fine; `PerfectHashIndex::id` for exact membership + reverse;
@@ -310,10 +320,9 @@ linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.27 bytes/ke
 the honest single-word figure is in the size table above. The whole table is one measurement session
 on the 0.5.1 code (min of 3 runs per cell). Peak RSS includes the input key list, which dominates at
 this scale and is why the column falls by 8-17% rather than by the 47-73% the build itself dropped
-in 0.5.0. Linear extrapolation puts 100 M at ~50 s and ~13.5 GB (a big-memory box) — and at that
-scale note `PerfectHashIndex`'s quantified hash-collision odds above; `StringIndex` and
-`CompactHashIndex` are unaffected by them at any n (the fst build has no collision failure mode, and
-the compact index tolerates fingerprint collisions by design).</sub>
+in 0.5.0. Linear extrapolation puts 100 M at ~50 s and ~13.5 GB (a big-memory box). Hash collisions
+do not change the picture at any n: since 0.8 both perfect-hash indexes absorb them into a side
+table instead of failing the build, and the fst build has no collision failure mode at all.</sub>
 
 ## License
 
