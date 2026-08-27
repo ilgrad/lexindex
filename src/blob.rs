@@ -120,18 +120,19 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     let _ = (data, i);
 }
 
-/// Write `bytes` to `path` by writing a sibling temporary file and renaming it into place, so a
-/// crash, a full disk, or a power loss mid-write leaves the previous file intact rather than a
-/// truncated index that still has a valid magic. `rename` within a directory is atomic on both
-/// POSIX and Windows; the temporary is opened `O_EXCL` (never following a planted symlink), and on
-/// Unix the parent directory is fsynced so the rename itself is durable.
 // Process-wide temp-name counter (module scope so a test can predict the next name); keeps two
 // threads saving to one path from colliding.
 static WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-pub(crate) fn write_atomically(
+/// Write to `path` by streaming `write`'s output into a sibling temporary file and renaming it into
+/// place, so a crash, a full disk, or a power loss mid-write leaves the previous file intact rather
+/// than a truncated index that still has a valid magic. `rename` within a directory is atomic on
+/// both POSIX and Windows; the temporary is opened `O_EXCL` (never following a planted symlink),
+/// and on Unix the parent directory is fsynced so the rename itself is durable. Streaming section
+/// by section means `save` peaks at the index's own memory, not index + a full serialised copy.
+pub(crate) fn write_atomically_with(
     path: &std::path::Path,
-    bytes: &[u8],
+    write: impl FnOnce(&mut std::io::BufWriter<&mut std::fs::File>) -> std::io::Result<()>,
 ) -> Result<(), crate::IndexError> {
     use std::io::Write;
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -174,10 +175,14 @@ pub(crate) fn write_atomically(
         let _ = file.set_permissions(std::fs::Permissions::from_mode(meta.permissions().mode()));
     }
     // Ordered by what has to survive: bytes durable first, then the rename that publishes them.
-    let written = file
-        .write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| std::fs::rename(&tmp, path));
+    let written = (|| {
+        let mut w = std::io::BufWriter::new(&mut file);
+        write(&mut w)?;
+        w.flush()?;
+        drop(w);
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
     if written.is_err() {
         std::fs::remove_file(&tmp).ok();
     }
@@ -212,8 +217,8 @@ mod tests {
     fn atomic_write_replaces_and_leaves_no_temp() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("lexindex_atomic_{}.bin", std::process::id()));
-        write_atomically(&path, b"first").unwrap();
-        write_atomically(&path, b"second").unwrap();
+        write_atomically_with(&path, |w| std::io::Write::write_all(w, b"first")).unwrap();
+        write_atomically_with(&path, |w| std::io::Write::write_all(w, b"second")).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"second");
         let leftovers = std::fs::read_dir(&dir)
             .unwrap()
@@ -244,7 +249,7 @@ mod tests {
         let planted = dir.join(format!("catalog.bin.{}.{seq}.tmp", std::process::id()));
         std::os::unix::fs::symlink(&victim, &planted).unwrap();
 
-        write_atomically(&target, b"payload").unwrap();
+        write_atomically_with(&target, |w| std::io::Write::write_all(w, b"payload")).unwrap();
 
         assert_eq!(std::fs::read(&target).unwrap(), b"payload"); // save landed
         assert_eq!(std::fs::read(&victim).unwrap(), b"do not truncate me"); // victim untouched

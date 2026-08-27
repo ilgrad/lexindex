@@ -119,7 +119,15 @@ impl StringArena {
         std::str::from_utf8(self.blob.as_ref().get(span.0..span.1)?).ok()
     }
 
-    /// Serialise to the layout it already holds.
+    /// The serialised layout, borrowed: the arena already *is* its own blob, so writing it out
+    /// never needs a copy.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.blob.as_ref()
+    }
+
+    /// Serialise to the layout it already holds (a test convenience; production paths borrow
+    /// [`as_bytes`](Self::as_bytes)).
+    #[cfg(test)]
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.blob.as_ref().to_vec()
     }

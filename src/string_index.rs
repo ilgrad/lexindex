@@ -274,9 +274,14 @@ impl StringIndex {
         Ok(Self { map })
     }
 
-    /// Write the index to `path` (see [`StringIndex::to_bytes`]).
+    /// Write the index to `path` — the same bytes as [`to_bytes`](Self::to_bytes), streamed
+    /// straight from the FST's own buffer, so saving never assembles a serialised copy.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
-        crate::blob::write_atomically(path.as_ref(), &self.to_bytes())
+        crate::blob::write_atomically_with(path.as_ref(), |w| {
+            use std::io::Write;
+            w.write_all(MAGIC)?;
+            w.write_all(self.map.as_fst().as_bytes())
+        })
     }
 
     /// Load an index previously written with [`StringIndex::save`] (reads the whole file into memory).
