@@ -138,6 +138,18 @@ def test_compact_hash_fingerprint_bits():
         lexindex.CompactHashIndex(keys, 2, fingerprint_bits=8)  # ambiguous: both widths given
 
 
+def test_compact_hash_keeps_colliding_keys_distinct_at_any_width():
+    # This pair collides in the 64-bit slot hash (pinned in the Rust suite); the side table matches
+    # on the full second hash, so even a 1-bit fingerprint table must keep them two distinct ids —
+    # and a generator input exercises the streaming (hash-as-you-go) construction path.
+    a, b = "x5iojurfgtipm", "7gvob4sxctomf"
+    ch = lexindex.CompactHashIndex((k for k in [a, b, "filler"]), fingerprint_bits=1)
+    assert len(ch) == 3
+    assert ch.id(a) is not None
+    assert ch.id(b) is not None
+    assert ch.id(a) != ch.id(b)
+
+
 def test_compact_hash_persistence(tmp_path):
     ch = lexindex.CompactHashIndex(["GET", "POST", "PUT", "DELETE"], 2)
     ch2 = lexindex.CompactHashIndex.from_bytes(ch.to_bytes())

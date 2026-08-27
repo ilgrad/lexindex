@@ -47,6 +47,20 @@ fn collect_strs(items: &Bound<'_, PyAny>) -> PyResult<Vec<PyBackedStr>> {
     Ok(out)
 }
 
+/// Hash any Python iterable of `str` down to `CompactHashIndex` build pairs, one item at a time —
+/// each string is released as soon as its 16-byte pair is taken, so building from a generator over
+/// a huge corpus never materialises the strings on this side either (the other indexes must keep
+/// them: they store keys).
+#[cfg(feature = "mph")]
+fn collect_pairs(items: &Bound<'_, PyAny>) -> PyResult<Vec<(u64, u64)>> {
+    let mut out = Vec::with_capacity(items.len().unwrap_or(0));
+    for item in items.try_iter()? {
+        let s: PyBackedStr = item?.extract()?;
+        out.push((crate::hash::hash_key(&s), crate::hash::fingerprint_full(&s)));
+    }
+    Ok(out)
+}
+
 fn to_py(e: IndexError) -> PyErr {
     match e {
         IndexError::Io(_) => PyIOError::new_err(e.to_string()),
@@ -391,19 +405,36 @@ impl PyCompactHashIndex {
         fingerprint_bytes: usize,
         fingerprint_bits: Option<u32>,
     ) -> PyResult<Self> {
-        let items = collect_strs(items)?;
-        let inner = match fingerprint_bits {
+        let bits = match fingerprint_bits {
             Some(bits) => {
                 if fingerprint_bytes != 1 {
                     return Err(PyValueError::new_err(
                         "pass fingerprint_bytes or fingerprint_bits, not both",
                     ));
                 }
-                py.detach(|| CompactHashIndex::build_bits(items.iter(), bits))
+                bits
             }
-            None => py.detach(|| CompactHashIndex::build(items.iter(), fingerprint_bytes)),
+            None => {
+                if !matches!(fingerprint_bytes, 1 | 2 | 4) {
+                    return Err(to_py(IndexError::Format(
+                        "compact-hash: fingerprint_bytes must be 1, 2, or 4",
+                    )));
+                }
+                fingerprint_bytes as u32 * 8
+            }
+        };
+        if !(1..=64).contains(&bits) {
+            return Err(to_py(IndexError::Format(
+                "compact-hash: fingerprint_bits must be in 1..=64",
+            )));
         }
-        .map_err(to_py)?;
+        // Unlike the key-storing indexes, this one needs only 16 hashed bytes per key — so the
+        // items are hashed as they come off the iterator (under the GIL) and the strings dropped,
+        // keeping a generator-fed build streaming on the Python side too.
+        let pairs = collect_pairs(items)?;
+        let inner = py
+            .detach(|| CompactHashIndex::build_from_pairs(pairs, bits))
+            .map_err(to_py)?;
         Ok(Self { inner })
     }
 
