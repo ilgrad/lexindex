@@ -48,11 +48,22 @@ Because the keys themselves are never stored, size is just the MPH (~0.27 B/key 
 bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
 rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
 (6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH2"][n][fp_bits][mph length][mph epserde
-bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits `[i·b, (i+1)·b)`,
-little-endian). A 0.5.x `BCH1` blob still loads — including zero-copy under mmap — because its
-byte-aligned `k`-byte fingerprints are bit-identical to the packed layout at `8k` bits; new blobs
-are always `BCH2`, which 0.5.x cannot read.
+`id → key`. The serialised blob is `[magic "BCH3"][n][fp_bits][overflow_cap][mph length][mph
+epserde bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits
+`[i·b, (i+1)·b)`, little-endian). A 0.5.x `BCH1` blob still loads — including zero-copy under
+mmap — because its byte-aligned `k`-byte fingerprints are bit-identical to the packed layout at
+`8k` bits, and a 0.6.0 `BCH2` blob is `BCH3` minus the cap field; new blobs are always `BCH3`.
+
+**The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
+raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
+member-occupied one, and reads it *unchecked* (`cacheline-ef`'s `index_unchecked`). A non-member
+whose raw slot lands in the trailing free zone therefore indexes out of bounds — a debug assertion
+at best, undefined behaviour in release. The cap recorded at build time is the remap's exact length
+(the largest member `raw − n`, plus one, measured by streaming every member through
+`index_no_remap`), and queries answer `None` outright for raw slots past it: those slots are
+provably free, so no member can live there. Blobs from versions that did not record the cap
+(`BCH1`/`BCH2`/`BMP2`) load with the cap "unbounded" — exactly their original behaviour; rebuilding
+is what closes the window for them.
 
 ## `PerfectHashIndex`
 
@@ -71,8 +82,9 @@ agreeing): **6.2×10⁻⁹** for the 479 823-word dictionary, **2.7×10⁻⁸** 
 below ~10 M keys and a real design consideration at 10⁸–10⁹.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP2"][n][mph length][mph
-epserde bytes][arena bytes]`, and the arena is `[n+1][offset width][offsets][data]`. Offsets are
+where membership is already guaranteed. The serialised blob is `[magic "BMP3"][n][overflow_cap][mph
+length][mph epserde bytes][arena bytes]` (`BMP2` blobs from 0.5/0.6 still load; the cap plays the
+same role as in `CompactHashIndex` above), and the arena is `[n+1][offset width][offsets][data]`. Offsets are
 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
 (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
 whole structure to 13.60 B/key.

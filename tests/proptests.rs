@@ -136,11 +136,12 @@ mod mph {
             let _ = CompactHashIndex::from_bytes(&data);
         }
 
-        // Corrupting a lexindex-owned header field (`n` / `fingerprint_bytes`, bytes 4..16) or a
-        // fingerprint-tail byte must fail cleanly or stay valid — never panic. The epserde-owned MPH
-        // region and `mph_len` field are deliberately left intact: their structural integrity is a
-        // documented trust assumption (see `CompactHashIndex::from_bytes`), because a corrupt length
-        // inside the MPH can make epserde's deserialiser attempt an unbounded allocation.
+        // Corrupting a lexindex-owned header field (`n` / `fp_bits` / `overflow_cap`, bytes 4..24
+        // of the BCH3 layout) or a fingerprint-tail byte must fail cleanly or stay valid — never
+        // panic. The epserde-owned MPH region and `mph_len` field are deliberately left intact:
+        // their structural integrity is a documented trust assumption (see
+        // `CompactHashIndex::from_bytes`), because a corrupt length inside the MPH can make
+        // epserde's deserialiser attempt an unbounded allocation.
         #[test]
         fn compact_hash_corrupt_owned_bytes_never_panics(
             keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
@@ -150,8 +151,9 @@ mod mph {
             xor in 1u8..=255,
         ) {
             let mut blob = CompactHashIndex::build(&keys, fp).unwrap().to_bytes().unwrap();
-            let mph_len = u64::from_le_bytes(blob[16..24].try_into().unwrap()) as usize;
-            let (lo, hi) = if in_header { (4, 16) } else { (24 + mph_len, blob.len()) };
+            assert_eq!(&blob[0..4], b"BCH3");
+            let mph_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
+            let (lo, hi) = if in_header { (4, 24) } else { (32 + mph_len, blob.len()) };
             if lo < hi {
                 let pos = lo + at.index(hi - lo);
                 blob[pos] ^= xor;

@@ -45,3 +45,20 @@ pub(crate) fn build_mph(hashes: &[u64]) -> DefaultPtrHash {
     PtrHash::try_new(hashes, PtrHashParams::default_compact())
         .unwrap_or_else(|| PtrHash::new(hashes, PtrHashParams::default()))
 }
+
+/// The exact length of the MPH's internal remap vector: the largest member `raw_slot - n`, plus
+/// one. ptr_hash's `index()` reads that remap *unchecked* (cacheline-ef `index_unchecked`), and the
+/// remap only covers raw slots up to the last member-occupied one — so a non-member whose raw slot
+/// lands in the trailing free zone indexes out of bounds: a debug assertion at best, undefined
+/// behaviour in release. Queries bound the remap access with this cap and answer `None` outright
+/// past it — a provably free slot cannot hold a member.
+pub(crate) fn overflow_cap(mph: &DefaultPtrHash, hashes: &[u64], n: usize) -> u64 {
+    let mut cap: u64 = 0;
+    mph.index_stream::<32, false, _>(hashes.iter())
+        .for_each(|raw| {
+            if raw >= n {
+                cap = cap.max((raw - n + 1) as u64);
+            }
+        });
+    cap
+}

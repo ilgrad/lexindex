@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Non-member queries can no longer read ptr_hash's remap out of bounds** — a debug-build panic
+  and, in release builds, undefined behaviour (`get_unchecked` past the remap vector), present in
+  every version since the minimal-perfect-hash indexes shipped. ptr_hash's minimal `index()` remaps
+  raw slots ≥ n through an internal vector that only covers slots up to the last member-occupied
+  one, and reads it *unchecked*; a non-member key whose raw slot lands in the trailing free zone —
+  a zone that exists for a few percent of built indexes, depending on construction entropy —
+  indexed past it. Surfaced by CI as a flaky `assertion failed: rank < self.count_ones()` in the
+  new 4-bit fingerprint test (reproduced locally in 23 runs; the backtrace pins
+  `ptr_hash::pack::Packed::index` → `cacheline-ef::index_unchecked`). Both indexes now record the
+  remap's exact length at build time (`overflow_cap` — the largest member `raw slot − n`, plus
+  one) and answer `None` outright for raw slots past it: those slots are provably free, so no
+  member can live there. The repro loop went from 1 failure in 23 runs to 0 in 120; a regression
+  test rebuilds until the zone occurs and asserts the guard. Lookup cost is unchanged (A-B against
+  the 0.6.0 binary, `std::HashMap` control: PH 330 vs 331 ns, CHI 244 vs 244); builds pay ~1% for
+  measuring the cap (one streamed `index_no_remap` pass over the members).
+
+### Changed
+
+- **Blob formats: `PerfectHashIndex` writes `BMP3`, `CompactHashIndex` writes `BCH3`** — the same
+  layouts as before plus the `overflow_cap` field. `BMP2`, `BCH2` and `BCH1` blobs still load
+  (zero-copy under mmap included) with the cap treated as unbounded — exactly the behaviour they
+  were built with, so loading an old blob neither gains nor loses safety; **rebuilding** an index
+  on 0.7.0 is what closes the unchecked-remap window for it. 0.6.x cannot read the new formats,
+  hence the version bump.
+
 ## [0.6.0] — 2026-08-27
 
 ### Added

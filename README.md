@@ -169,8 +169,8 @@ assert_eq!(raw, id);
   a non-member survives both only with probability `2^-b`, the tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH2"][n][fp_bits][mph][bit-packed fingerprints]`; 0.5.x `BCH1` blobs still load,
-  zero-copy included.
+  is `[magic "BCH3"][n][fp_bits][overflow_cap][mph][bit-packed fingerprints]`; 0.5/0.6 blobs
+  (`BCH1`/`BCH2`) still load, zero-copy included.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give

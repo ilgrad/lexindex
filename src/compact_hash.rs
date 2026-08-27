@@ -18,7 +18,8 @@ use ptr_hash::DefaultPtrHash;
 
 const MAGIC_V1: &[u8; 4] = b"BCH1"; // width field counts bytes; fingerprints byte-aligned
 const MAGIC_V2: &[u8; 4] = b"BCH2"; // width field counts bits; fingerprints bit-packed
-const HEADER_LEN: usize = 24; // [magic 4][n u64][fp width u32][mph_len u64]
+const MAGIC_V3: &[u8; 4] = b"BCH3"; // BCH2 plus an overflow_cap u64 after the width field
+const HEADER_LEN: usize = 24; // v1/v2: [magic 4][n u64][fp width u32][mph_len u64]; v3 adds cap u64
 
 /// The smallest string→dense-id dictionary: a minimal perfect hash plus one small fingerprint per key.
 pub struct CompactHashIndex {
@@ -26,6 +27,9 @@ pub struct CompactHashIndex {
     fps: SharedBytes,            // n fingerprints of fp_bits each, bit-packed in slot order
     fp_bits: u32,                // 1..=64
     n: usize,
+    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); `u64::MAX` for blobs
+    // from versions that did not record it, meaning "unbounded" — the pre-0.7 behaviour.
+    overflow_cap: u64,
 }
 
 impl CompactHashIndex {
@@ -71,6 +75,7 @@ impl CompactHashIndex {
                 fps: SharedBytes::from_owned(Vec::new()),
                 fp_bits: fingerprint_bits,
                 n: 0,
+                overflow_cap: 0,
             });
         }
         let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k.as_ref())).collect();
@@ -101,12 +106,29 @@ impl CompactHashIndex {
                 crate::hash::fingerprint_bits(k.as_ref(), fingerprint_bits),
             );
         }
+        let overflow_cap = crate::hash::overflow_cap(&mph, &hashes, n);
         Ok(Self {
             mph: Some(mph),
             fps: SharedBytes::from_owned(fps),
             fp_bits: fingerprint_bits,
             n,
+            overflow_cap,
         })
+    }
+
+    /// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free
+    /// slot no member occupies, which ptr_hash's own `index()` would read out of bounds.
+    #[inline]
+    fn slot_for(&self, h: u64) -> Option<usize> {
+        let mph = self.mph.as_ref()?;
+        let raw = mph.index_no_remap(&h);
+        if raw < self.n {
+            Some(raw)
+        } else if (raw - self.n) as u64 >= self.overflow_cap {
+            None
+        } else {
+            Some(mph.index(&h)) // remapped; in bounds because the cap is the remap's exact length
+        }
     }
 
     /// Width of the stored fingerprints in bits; the membership false-positive rate is
@@ -128,8 +150,7 @@ impl CompactHashIndex {
     /// Dense id of `key`, or `None`. Membership is checked against the stored fingerprint, so a `Some`
     /// result is correct except for a `2^-fingerprint_bits` false-positive chance on a non-member.
     pub fn id(&self, key: &str) -> Option<u32> {
-        let mph = self.mph.as_ref()?;
-        let slot = mph.index(&hash_key(key));
+        let slot = self.slot_for(hash_key(key))?;
         if slot >= self.n {
             return None;
         }
@@ -169,15 +190,32 @@ impl CompactHashIndex {
         }
         // ptr_hash's stream iterator is internal-iteration only (`next()` is unimplemented by
         // design), so drain it with `for_each`.
+        // MINIMAL=false: raw slots, so the stream never touches the remap (see `slot_for`). Raw
+        // slots ≥ n are triaged here: past the cap they are provably non-members, otherwise the
+        // (rare, ~1%) per-key `index()` resolves the remapped slot.
         let mut slots = Vec::with_capacity(keys.len());
-        mph.index_stream::<32, true, _>(hashes.iter())
+        mph.index_stream::<32, false, _>(hashes.iter())
             .for_each(|s| slots.push(s));
+        for (i, slot) in slots.iter_mut().enumerate() {
+            if *slot >= self.n {
+                *slot = if (*slot - self.n) as u64 >= self.overflow_cap {
+                    usize::MAX // sentinel: definitely absent
+                } else {
+                    mph.index(&hashes[i])
+                };
+            }
+        }
         let fps = self.fps.as_ref();
         const AHEAD: usize = 32;
         (0..keys.len())
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {
-                    crate::blob::prefetch_byte(fps, (s as u64 * self.fp_bits as u64 / 8) as usize);
+                    if s < self.n {
+                        crate::blob::prefetch_byte(
+                            fps,
+                            (s as u64 * self.fp_bits as u64 / 8) as usize,
+                        );
+                    }
                 }
                 let slot = slots[i];
                 if slot >= self.n {
@@ -193,8 +231,8 @@ impl CompactHashIndex {
         self.id(key).is_some()
     }
 
-    /// Serialise to `[magic "BCH2"][n u64][fp_bits u32][mph_len u64][mph epserde bytes][bit-packed
-    /// fingerprints]`.
+    /// Serialise to `[magic "BCH3"][n u64][fp_bits u32][overflow_cap u64][mph_len u64][mph epserde
+    /// bytes][bit-packed fingerprints]`.
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let mut mph_buf = Vec::new();
         if let Some(mph) = &self.mph {
@@ -202,10 +240,11 @@ impl CompactHashIndex {
                 .map_err(|e| IndexError::Serde(e.to_string()))?;
         }
         let fp = self.fps.as_ref();
-        let mut out = Vec::with_capacity(HEADER_LEN + mph_buf.len() + fp.len());
-        out.extend_from_slice(MAGIC_V2);
+        let mut out = Vec::with_capacity(HEADER_LEN + 8 + mph_buf.len() + fp.len());
+        out.extend_from_slice(MAGIC_V3);
         out.extend_from_slice(&(self.n as u64).to_le_bytes());
         out.extend_from_slice(&self.fp_bits.to_le_bytes());
+        out.extend_from_slice(&self.overflow_cap.to_le_bytes());
         out.extend_from_slice(&(mph_buf.len() as u64).to_le_bytes());
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(fp);
@@ -227,12 +266,27 @@ impl CompactHashIndex {
     /// (the bulk) is borrowed zero-copy — so `load_mmap` never copies it.
     fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
-        if bytes.len() < HEADER_LEN || (&bytes[0..4] != MAGIC_V2 && &bytes[0..4] != MAGIC_V1) {
+        let magic_ok = bytes.len() >= 4
+            && (&bytes[0..4] == MAGIC_V3 || &bytes[0..4] == MAGIC_V2 || &bytes[0..4] == MAGIC_V1);
+        if bytes.len() < HEADER_LEN || !magic_ok {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let n = u64::from_le_bytes(bytes[4..12].try_into().unwrap()) as usize;
         let width = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
-        let mph_len = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
+        // v1/v2 blobs have no recorded cap: fall back to "unbounded", the behaviour they were
+        // built with. Rebuilding (not just re-saving) is what removes the unchecked-remap window.
+        let (overflow_cap, header) = if &bytes[0..4] == MAGIC_V3 {
+            if bytes.len() < HEADER_LEN + 8 {
+                return Err(IndexError::Format("bad magic or truncated header"));
+            }
+            (
+                u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+                HEADER_LEN + 8,
+            )
+        } else {
+            (u64::MAX, HEADER_LEN)
+        };
+        let mph_len = u64::from_le_bytes(bytes[header - 8..header].try_into().unwrap()) as usize;
         // A 0.5.x "BCH1" blob counts the width in bytes and stores each fingerprint byte-aligned
         // little-endian — bit-for-bit identical to the bit-packed layout at 8× the width, so the
         // same table is borrowed either way and mmap loads stay zero-copy.
@@ -250,14 +304,14 @@ impl CompactHashIndex {
                 width
             }
         };
-        let mph_end = HEADER_LEN
+        let mph_end = header
             .checked_add(mph_len)
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format("mph length out of range"))?;
         let mph = if n == 0 {
             None
         } else {
-            let mut reader = &bytes[HEADER_LEN..mph_end];
+            let mut reader = &bytes[header..mph_end];
             Some(
                 DefaultPtrHash::deserialize_full(&mut reader)
                     .map_err(|e| IndexError::Serde(e.to_string()))?,
@@ -284,6 +338,7 @@ impl CompactHashIndex {
             fps,
             fp_bits,
             n,
+            overflow_cap,
         })
     }
 
@@ -494,9 +549,12 @@ mod tests {
     #[test]
     fn a_0_5_bch1_blob_still_loads() {
         let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
-        let mut v1 = idx.to_bytes().unwrap();
-        assert_eq!(&v1[0..4], b"BCH2");
-        assert_eq!(v1[12], 16);
+        let v3 = idx.to_bytes().unwrap();
+        assert_eq!(&v3[0..4], b"BCH3");
+        assert_eq!(v3[12], 16);
+        // A real 0.5.x blob is the v3 bytes minus the cap field, with the byte-counting width.
+        let mut v1 = v3.clone();
+        v1.drain(16..24);
         v1[0..4].copy_from_slice(b"BCH1");
         v1[12] = 2;
         let restored = CompactHashIndex::from_bytes(&v1).unwrap();
@@ -505,6 +563,49 @@ mod tests {
             assert_eq!(restored.id(w), idx.id(w));
         }
         assert_eq!(restored.id("PATCH"), idx.id("PATCH"));
+
+        // And a 0.6.0 "BCH2" blob: same bytes, bit-counting width.
+        let mut v2 = v3.clone();
+        v2.drain(16..24);
+        v2[0..4].copy_from_slice(b"BCH2");
+        let restored = CompactHashIndex::from_bytes(&v2).unwrap();
+        assert_eq!(restored.fingerprint_bits(), 16);
+        for w in ["GET", "POST", "PUT", "DELETE", "PATCH"] {
+            assert_eq!(restored.id(w), idx.id(w));
+        }
+    }
+
+    /// The regression test for the unchecked-remap window: ptr_hash's `index()` reads its remap
+    /// out of bounds for a non-member whose raw slot lands past the last member-occupied one
+    /// (debug assertion / release UB). Rebuild many times (each build rolls new eviction
+    /// entropy), find a stranger in that zone via the raw slot, and require `id()` to answer
+    /// `None` instead of touching the remap. Requires the zone to occur at least once across the
+    /// rebuilds — if this ever fails with "no trailing free zone", raise `BUILDS` rather than
+    /// letting the test pass vacuously.
+    #[test]
+    fn strangers_past_the_remap_are_rejected_not_ub() {
+        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
+        let mut engaged = 0u32;
+        for round in 0..300 {
+            let idx = CompactHashIndex::build_bits(&members, 8).unwrap();
+            let mph = idx.mph.as_ref().unwrap();
+            for probe in 0..5_000 {
+                let s = format!("stranger-{round}-{probe}");
+                let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
+                if raw >= idx.n && (raw - idx.n) as u64 >= idx.overflow_cap {
+                    assert_eq!(idx.id(&s), None);
+                    assert_eq!(idx.ids_of(&[&s]), vec![None]);
+                    engaged += 1;
+                }
+            }
+            if engaged >= 20 {
+                break;
+            }
+        }
+        assert!(
+            engaged > 0,
+            "no trailing free zone in 300 builds - raise BUILDS"
+        );
     }
 
     /// Every width round-trips through build, serde and the batch path; the fingerprints for the

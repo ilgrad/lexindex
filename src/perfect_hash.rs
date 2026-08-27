@@ -3,8 +3,10 @@
 //! For a fixed set of `n` distinct strings, a minimal perfect hash maps each to a distinct slot in
 //! `[0, n)` with no gaps and near-`O(1)` lookup in tiny space. `ptr_hash` builds the MPH; we key it on
 //! a deterministic 64-bit hash of each string (so queries take `&str` without allocating) and keep a
-//! [`StringArena`] from slot → key. The arena doubles as a **membership check**: an MPH returns a slot
-//! for *any* input, so a query is only a hit if the stored key at that slot equals the query.
+//! [`StringArena`] from slot → key. The arena doubles as a **membership check**: an MPH maps *any*
+//! input to some slot, so a query is only a hit if the stored key at that slot equals the query.
+//! (ptr_hash's own minimal `index()` is unchecked past its remap for non-members — queries bound it
+//! with the recorded remap length; see `slot_for`.)
 //!
 //! Build fails (rather than silently corrupting) if two distinct keys collide in the 64-bit hash.
 //! The hash is deterministic and unseeded (that is what makes the serialised MPH reloadable), so a
@@ -19,13 +21,17 @@ use crate::hash::hash_key;
 use epserde::prelude::*;
 use ptr_hash::DefaultPtrHash;
 
-const MPH_MAGIC: &[u8; 4] = b"BMP2";
+const MAGIC_V2: &[u8; 4] = b"BMP2"; // header [magic 4][n u64][mph_len u64]
+const MAGIC_V3: &[u8; 4] = b"BMP3"; // header [magic 4][n u64][overflow_cap u64][mph_len u64]
 
 /// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {
     mph: Option<DefaultPtrHash>, // None iff empty (ptr_hash needs a non-empty key set)
     arena: StringArena,          // slot → key (also verifies membership)
     n: usize,
+    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); `u64::MAX` for blobs
+    // from versions that did not record it, meaning "unbounded" — the pre-0.7 behaviour.
+    overflow_cap: u64,
 }
 
 impl PerfectHashIndex {
@@ -48,6 +54,7 @@ impl PerfectHashIndex {
                 mph: None,
                 arena: StringArena::build(Vec::<&str>::new()), // offsets = [0]: a valid empty arena
                 n: 0,
+                overflow_cap: 0,
             });
         }
         let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k.as_ref())).collect();
@@ -73,11 +80,28 @@ impl PerfectHashIndex {
             by_slot[slot] = Some(k.as_ref());
         }
         let arena = StringArena::build(by_slot.into_iter().map(|o| o.unwrap()));
+        let overflow_cap = crate::hash::overflow_cap(&mph, &hashes, n);
         Ok(Self {
             mph: Some(mph),
             arena,
             n,
+            overflow_cap,
         })
+    }
+
+    /// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free
+    /// slot no member occupies, which ptr_hash's own `index()` would read out of bounds.
+    #[inline]
+    fn slot_for(&self, h: u64) -> Option<usize> {
+        let mph = self.mph.as_ref()?;
+        let raw = mph.index_no_remap(&h);
+        if raw < self.n {
+            Some(raw)
+        } else if (raw - self.n) as u64 >= self.overflow_cap {
+            None
+        } else {
+            Some(mph.index(&h)) // remapped; in bounds because the cap is the remap's exact length
+        }
     }
 
     /// Number of distinct keys.
@@ -92,8 +116,7 @@ impl PerfectHashIndex {
 
     /// Dense id of `key`, or `None` if absent (membership is verified against the stored key).
     pub fn id(&self, key: &str) -> Option<u32> {
-        let mph = self.mph.as_ref()?;
-        let slot = mph.index(&hash_key(key));
+        let slot = self.slot_for(hash_key(key))?;
         if slot < self.n && self.arena.get(slot) == Some(key) {
             Some(slot as u32)
         } else {
@@ -115,14 +138,29 @@ impl PerfectHashIndex {
         // ptr_hash's stream iterator is internal-iteration only (`next()` is unimplemented by
         // design), so drain it with `for_each`; then resolve arena spans with the offset lines
         // prefetched ahead, and compare with the data lines prefetched ahead.
+        // MINIMAL=false: raw slots, so the stream never touches the remap (see `slot_for` — the
+        // remap is unchecked in ptr_hash and only safe up to `overflow_cap`). Raw slots ≥ n are
+        // triaged here: past the cap they are provably non-members, otherwise the (rare, ~1%)
+        // per-key `index()` resolves the remapped slot.
         let mut slots = Vec::with_capacity(keys.len());
-        mph.index_stream::<32, true, _>(hashes.iter())
+        mph.index_stream::<32, false, _>(hashes.iter())
             .for_each(|s| slots.push(s));
+        for (i, slot) in slots.iter_mut().enumerate() {
+            if *slot >= self.n {
+                *slot = if (*slot - self.n) as u64 >= self.overflow_cap {
+                    usize::MAX // sentinel: definitely absent
+                } else {
+                    mph.index(&hashes[i])
+                };
+            }
+        }
         const AHEAD: usize = 16;
         let mut spans: Vec<Option<(usize, usize)>> = Vec::with_capacity(slots.len());
         for (i, &slot) in slots.iter().enumerate() {
             if let Some(&s) = slots.get(i + AHEAD) {
-                self.arena.prefetch_offsets(s);
+                if s < self.n {
+                    self.arena.prefetch_offsets(s);
+                }
             }
             spans.push(if slot < self.n {
                 self.arena.span(slot)
@@ -166,9 +204,9 @@ impl PerfectHashIndex {
         self.arena.get(id as usize)
     }
 
-    /// Serialise to a self-describing blob: `[magic 4][n u64][mph_len u64][mph epserde bytes][arena
-    /// bytes]`. The MPH is serialised with [`epserde`]; reloading queries correctly because the key
-    /// hash is version-stable.
+    /// Serialise to a self-describing blob: `[magic "BMP3"][n u64][overflow_cap u64][mph_len
+    /// u64][mph epserde bytes][arena bytes]`. The MPH is serialised with [`epserde`]; reloading
+    /// queries correctly because the key hash is version-stable.
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let mut mph_buf = Vec::new();
         if let Some(mph) = &self.mph {
@@ -176,9 +214,10 @@ impl PerfectHashIndex {
                 .map_err(|e| IndexError::Serde(e.to_string()))?;
         }
         let arena_buf = self.arena.to_bytes();
-        let mut out = Vec::with_capacity(20 + mph_buf.len() + arena_buf.len());
-        out.extend_from_slice(MPH_MAGIC);
+        let mut out = Vec::with_capacity(28 + mph_buf.len() + arena_buf.len());
+        out.extend_from_slice(MAGIC_V3);
         out.extend_from_slice(&(self.n as u64).to_le_bytes());
+        out.extend_from_slice(&self.overflow_cap.to_le_bytes());
         out.extend_from_slice(&(mph_buf.len() as u64).to_le_bytes());
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(&arena_buf);
@@ -199,19 +238,29 @@ impl PerfectHashIndex {
     /// memory-mapped load never copies it. Backs both `from_bytes` and `load_mmap`.
     fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
-        if bytes.len() < 20 || &bytes[0..4] != MPH_MAGIC {
+        if bytes.len() < 20 || (&bytes[0..4] != MAGIC_V3 && &bytes[0..4] != MAGIC_V2) {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let n = u64::from_le_bytes(bytes[4..12].try_into().unwrap()) as usize;
-        let mph_len = u64::from_le_bytes(bytes[12..20].try_into().unwrap()) as usize;
-        let mph_end = 20usize
+        // A 0.5/0.6 "BMP2" blob has no recorded cap: fall back to "unbounded", the behaviour it was
+        // built with. Rebuilding (not just re-saving) is what removes the unchecked-remap window.
+        let (overflow_cap, header) = if &bytes[0..4] == MAGIC_V3 {
+            if bytes.len() < 28 {
+                return Err(IndexError::Format("bad magic or truncated header"));
+            }
+            (u64::from_le_bytes(bytes[12..20].try_into().unwrap()), 28)
+        } else {
+            (u64::MAX, 20)
+        };
+        let mph_len = u64::from_le_bytes(bytes[header - 8..header].try_into().unwrap()) as usize;
+        let mph_end = header
             .checked_add(mph_len)
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format("mph length out of range"))?;
         let mph = if n == 0 {
             None
         } else {
-            let mut reader = &bytes[20..mph_end];
+            let mut reader = &bytes[header..mph_end];
             Some(
                 DefaultPtrHash::deserialize_full(&mut reader)
                     .map_err(|e| IndexError::Serde(e.to_string()))?,
@@ -224,7 +273,12 @@ impl PerfectHashIndex {
         if arena.len() != n {
             return Err(IndexError::Format("mph / arena length mismatch"));
         }
-        Ok(Self { mph, arena, n })
+        Ok(Self {
+            mph,
+            arena,
+            n,
+            overflow_cap,
+        })
     }
 
     /// Write the dictionary to `path` (see [`PerfectHashIndex::to_bytes`]).
@@ -377,6 +431,51 @@ mod tests {
 
     /// 0.5.0 narrowed the arena's offsets, so a blob written by 0.1-0.4 no longer describes this
     /// layout. It must be refused by the magic, not silently misread as the new one.
+    #[test]
+    fn a_0_6_bmp2_blob_still_loads() {
+        let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
+        let v3 = idx.to_bytes().unwrap();
+        assert_eq!(&v3[0..4], b"BMP3");
+        // A 0.5/0.6 blob is the v3 bytes minus the cap field.
+        let mut v2 = v3.clone();
+        v2.drain(12..20);
+        v2[0..4].copy_from_slice(b"BMP2");
+        let restored = PerfectHashIndex::from_bytes(&v2).unwrap();
+        for w in ["alpha", "beta", "gamma"] {
+            assert_eq!(restored.id(w), idx.id(w));
+            assert_eq!(restored.key(restored.id(w).unwrap()), Some(w));
+        }
+        assert_eq!(restored.id("delta"), None);
+    }
+
+    /// Same regression as `compact_hash::strangers_past_the_remap_are_rejected_not_ub`, for the
+    /// verified-membership index.
+    #[test]
+    fn strangers_past_the_remap_are_rejected_not_ub() {
+        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
+        let mut engaged = 0u32;
+        for round in 0..300 {
+            let idx = PerfectHashIndex::build(&members).unwrap();
+            let mph = idx.mph.as_ref().unwrap();
+            for probe in 0..5_000 {
+                let s = format!("stranger-{round}-{probe}");
+                let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
+                if raw >= idx.n && (raw - idx.n) as u64 >= idx.overflow_cap {
+                    assert_eq!(idx.id(&s), None);
+                    assert_eq!(idx.ids_of(&[&s]), vec![None]);
+                    engaged += 1;
+                }
+            }
+            if engaged >= 20 {
+                break;
+            }
+        }
+        assert!(
+            engaged > 0,
+            "no trailing free zone in 300 builds - raise BUILDS"
+        );
+    }
+
     #[test]
     fn rejects_a_pre_0_5_blob() {
         let mut old = PerfectHashIndex::build(["a", "b"])
