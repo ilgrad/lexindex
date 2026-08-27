@@ -32,8 +32,8 @@ pub struct PerfectHashIndex {
     mph: Option<DefaultPtrHash>, // None iff empty (ptr_hash needs a non-empty key set)
     arena: StringArena,          // slot → key (also verifies membership)
     n: usize,
-    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); recomputed from the
-    // arena when loading a blob written before 0.7 recorded it.
+    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); always recomputed from
+    // the arena on load, so the header's copy is never trusted for bounds.
     overflow_cap: u64,
 }
 
@@ -247,17 +247,16 @@ impl PerfectHashIndex {
             ));
         }
         let n = n64 as usize;
-        // A 0.5/0.6 "BMP2" blob predates the recorded remap bound. It is healed below rather than
-        // loaded unbounded: the arena holds every key, so the bound can be recomputed exactly.
-        let overflow_cap = if legacy {
-            0
-        } else {
+        // A v3 header carries a checksum over its framing fields (`n`, `overflow_cap`, `mph_len`);
+        // verify it so accidental corruption of those fails cleanly. The stored `overflow_cap` is
+        // deliberately *not* read here — it is recomputed from the arena below, so a wrong (even
+        // maliciously re-checksummed) cap cannot steer a query past the remap.
+        if !legacy {
             let check = u32::from_le_bytes(bytes[CHECKED_V3..HEADER_V3].try_into().unwrap());
             if check != crate::hash::hash_bytes(&bytes[..CHECKED_V3]) as u32 {
                 return Err(IndexError::Format("header checksum mismatch"));
             }
-            u64::from_le_bytes(bytes[12..20].try_into().unwrap())
-        };
+        }
         let len_at = if legacy { 12 } else { 20 }; // the u64 before the (v3-only) check
         let mph_len = u64::from_le_bytes(bytes[len_at..len_at + 8].try_into().unwrap()) as usize;
         let mph_end = header
@@ -285,11 +284,16 @@ impl PerfectHashIndex {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
         }
-        // Healing a legacy blob: recompute the remap bound from the stored keys, O(n) hashes on a
-        // load that would otherwise be O(1) past the arena. Only 0.5/0.6 blobs pay it. Chunked so
-        // the scratch buffer stays flat rather than growing with a corpus that may be huge.
-        let overflow_cap = match (&mph, legacy) {
-            (Some(mph), true) => {
+        // The remap bound is always recomputed from the stored keys, never taken from the header:
+        // the arena is bounds-validated, so hashing its keys yields the exact bound regardless of
+        // what the header claims. This closes the one out-of-bounds path a *genuine* MPH still had
+        // — a non-member whose raw slot lands past the remap — even for a blob whose `overflow_cap`
+        // field was tampered with and re-checksummed. (The embedded ptr_hash/epserde bytes remain a
+        // trust boundary; see `from_bytes`.) Chunked so the scratch buffer stays flat on a huge
+        // corpus. `CompactHashIndex` cannot do this — it stores no keys — which is why its cap is
+        // trusted from the header and its `from_bytes` is a stricter trust-your-own-blob contract.
+        let overflow_cap = match &mph {
+            Some(mph) => {
                 const CHUNK: usize = 1 << 16;
                 let mut hashes = Vec::with_capacity(CHUNK.min(n));
                 let mut cap = 0;
@@ -305,7 +309,7 @@ impl PerfectHashIndex {
                 }
                 cap
             }
-            _ => overflow_cap,
+            None => 0,
         };
         Ok(Self {
             mph,
@@ -547,6 +551,46 @@ mod tests {
         assert!(
             engaged > 0,
             "no trailing free zone in 300 builds - raise BUILDS"
+        );
+    }
+
+    /// A forged `overflow_cap` — set to `u64::MAX` with the header checksum re-computed so the
+    /// loader accepts it — must not re-open the out-of-bounds remap read: the cap is recomputed
+    /// from the arena on load, so the forged value is discarded and strangers past the *true* remap
+    /// are still rejected.
+    #[test]
+    fn a_tampered_cap_cannot_steer_a_query_past_the_remap() {
+        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
+        let mut engaged = 0u32;
+        for round in 0..300 {
+            let idx = PerfectHashIndex::build(&members).unwrap();
+            if idx.overflow_cap == 0 {
+                continue; // no trailing free zone this build; nothing to forge past
+            }
+            let mut blob = idx.to_bytes().unwrap();
+            assert_eq!(&blob[0..4], b"BMP3");
+            blob[12..20].copy_from_slice(&u64::MAX.to_le_bytes()); // forge the cap
+            let check = crate::hash::hash_bytes(&blob[..CHECKED_V3]) as u32;
+            blob[CHECKED_V3..HEADER_V3].copy_from_slice(&check.to_le_bytes()); // make it pass
+            let restored = PerfectHashIndex::from_bytes(&blob).unwrap();
+            assert_eq!(restored.overflow_cap, idx.overflow_cap); // recomputed, not the forged MAX
+            let mph = restored.mph.as_ref().unwrap();
+            for probe in 0..5_000 {
+                let s = format!("stranger-{round}-{probe}");
+                let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
+                if raw >= restored.n && (raw - restored.n) as u64 >= restored.overflow_cap {
+                    assert_eq!(restored.id(&s), None);
+                    assert_eq!(restored.ids_of(&[&s]), vec![None]);
+                    engaged += 1;
+                }
+            }
+            if engaged >= 20 {
+                break;
+            }
+        }
+        assert!(
+            engaged > 0,
+            "no trailing free zone in 300 builds - raise rounds"
         );
     }
 
