@@ -286,18 +286,24 @@ impl PerfectHashIndex {
             }
         }
         // Healing a legacy blob: recompute the remap bound from the stored keys, O(n) hashes on a
-        // load that would otherwise be O(1) past the arena. Only 0.5/0.6 blobs pay it.
+        // load that would otherwise be O(1) past the arena. Only 0.5/0.6 blobs pay it. Chunked so
+        // the scratch buffer stays flat rather than growing with a corpus that may be huge.
         let overflow_cap = match (&mph, legacy) {
             (Some(mph), true) => {
-                let hashes: Vec<u64> = (0..n)
-                    .map(|i| {
-                        arena
+                const CHUNK: usize = 1 << 16;
+                let mut hashes = Vec::with_capacity(CHUNK.min(n));
+                let mut cap = 0;
+                for start in (0..n).step_by(CHUNK) {
+                    hashes.clear();
+                    for i in start..(start + CHUNK).min(n) {
+                        let key = arena
                             .get(i)
-                            .map(hash_key)
-                            .ok_or(IndexError::Format("arena slot out of range"))
-                    })
-                    .collect::<Result<_, _>>()?;
-                crate::hash::overflow_cap(mph, &hashes, n)
+                            .ok_or(IndexError::Format("arena slot out of range"))?;
+                        hashes.push(hash_key(key));
+                    }
+                    cap = cap.max(crate::hash::overflow_cap(mph, &hashes, n));
+                }
+                cap
             }
             _ => overflow_cap,
         };
@@ -461,22 +467,28 @@ mod tests {
     /// healed value must equal what a fresh build records.
     #[test]
     fn a_0_6_bmp2_blob_is_healed_on_load() {
-        let words: Vec<String> = (0..2_000).map(|i| format!("word-{i:05}")).collect();
-        let idx = PerfectHashIndex::build(&words).unwrap();
-        let v3 = idx.to_bytes().unwrap();
-        assert_eq!(&v3[0..4], b"BMP3");
-        // A 0.5/0.6 blob is the v3 bytes minus the cap field and the header check.
-        let mut v2 = v3.clone();
-        v2.drain(CHECKED_V3..HEADER_V3);
-        v2.drain(12..20);
-        v2[0..4].copy_from_slice(b"BMP2");
-        let restored = PerfectHashIndex::from_bytes(&v2).unwrap();
-        assert_eq!(restored.overflow_cap, idx.overflow_cap);
-        for w in &words {
-            assert_eq!(restored.id(w), idx.id(w));
-            assert_eq!(restored.key(restored.id(w).unwrap()), Some(w.as_str()));
+        // Both sides of the heal's chunk boundary (64 Ki keys): one pass and several.
+        for n in [2_000usize, 70_000] {
+            let words: Vec<String> = (0..n).map(|i| format!("word-{i:05}")).collect();
+            let idx = PerfectHashIndex::build(&words).unwrap();
+            let v3 = idx.to_bytes().unwrap();
+            assert_eq!(&v3[0..4], b"BMP3");
+            // A 0.5/0.6 blob is the v3 bytes minus the cap field and the header check.
+            let mut v2 = v3.clone();
+            v2.drain(CHECKED_V3..HEADER_V3);
+            v2.drain(12..20);
+            v2[0..4].copy_from_slice(b"BMP2");
+            let restored = PerfectHashIndex::from_bytes(&v2).unwrap();
+            assert_eq!(
+                restored.overflow_cap, idx.overflow_cap,
+                "healed cap at n = {n}"
+            );
+            for w in &words {
+                assert_eq!(restored.id(w), idx.id(w));
+                assert_eq!(restored.key(restored.id(w).unwrap()), Some(w.as_str()));
+            }
+            assert_eq!(restored.id("delta"), None);
         }
-        assert_eq!(restored.id("delta"), None);
     }
 
     /// `overflow_cap` bounds a read that ptr_hash performs unchecked, so a header that lost bytes
