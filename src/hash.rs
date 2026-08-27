@@ -34,16 +34,24 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
 /// fingerprint is ever compared. `bits ∈ 1..=64`. Not a security primitive — both hashes are
 /// deterministic and unseeded, so an adversary who picks the queries can search for collisions.
 pub(crate) fn fingerprint_bits(s: &str, bits: u32) -> u64 {
-    let mut h: u64 = 0x0000_0100_0000_01b3; // distinct basis from hash_key
-    for &b in s.as_bytes() {
-        h = (h ^ b as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15); // golden-ratio odd multiplier
-    }
-    h ^= h >> 29;
+    let h = fingerprint_full(s);
     if bits >= 64 {
         h
     } else {
         h & ((1u64 << bits) - 1)
     }
+}
+
+/// The untruncated 64-bit second hash behind [`fingerprint_bits`]. The compact index's collision
+/// side table stores this full value rather than the table's truncated width, so two distinct keys
+/// merge only when they collide in *both* 64-bit hashes at once (~`2^-128` per pair) — not at the
+/// `2^-(64+bits)` a truncated side match would allow.
+pub(crate) fn fingerprint_full(s: &str) -> u64 {
+    let mut h: u64 = 0x0000_0100_0000_01b3; // distinct basis from hash_key
+    for &b in s.as_bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15); // golden-ratio odd multiplier
+    }
+    h ^ (h >> 29)
 }
 
 /// Streaming hash over a byte stream fed in arbitrary chunks — the whole-payload integrity check

@@ -176,7 +176,7 @@ mod mph {
 
         // Any single flipped byte — header field, MPH region or fingerprint table — must be
         // *rejected* by an owned load: the header carries a checksum because `overflow_cap` bounds
-        // an otherwise unchecked read inside the MPH, and since BCH4 the whole payload carries one
+        // an otherwise unchecked read inside the MPH, and since 0.8 the whole payload carries one
         // too, so even a flipped fingerprint bit (which would only have perturbed the probabilistic
         // membership answer) fails cleanly instead of loading corrupt.
         #[test]
@@ -188,7 +188,7 @@ mod mph {
         ) {
             let idx = CompactHashIndex::build(&keys, fp).unwrap();
             let mut blob = idx.to_bytes().unwrap();
-            assert_eq!(&blob[0..4], b"BCH4");
+            assert_eq!(&blob[0..4], b"BCH5");
             let pos = 4 + at.index(blob.len() - 4);
             blob[pos] ^= xor;
             prop_assert!(

@@ -12,14 +12,15 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::hash::{fingerprint_bits, hash_key};
+use crate::hash::{fingerprint_bits, fingerprint_full, hash_key};
 use epserde::prelude::*;
 use ptr_hash::DefaultPtrHash;
 
 const MAGIC_V1: &[u8; 4] = b"BCH1"; // 0.5.x: width counts bytes, fingerprints byte-aligned
 const MAGIC_V2: &[u8; 4] = b"BCH2"; // 0.6.0: width counts bits, fingerprints bit-packed
 const MAGIC_V3: &[u8; 4] = b"BCH3"; // 0.7: [magic 4][n u64][fp_bits u32][cap u64][mph_len u64][check u32]
-const MAGIC_V4: &[u8; 4] = b"BCH4"; // v3 + [side_len u32][payload u64] before the check
+const MAGIC_V4: &[u8; 4] = b"BCH4"; // 0.8.0: v3 + [side_len u32][payload u64] before the check
+const MAGIC_V5: &[u8; 4] = b"BCH5"; // same layout as v4; side fingerprints are the full 64-bit hash
 const HEADER_V3: usize = 36;
 const CHECKED_V3: usize = 32; // header bytes the trailing check covers
 const HEADER_V4: usize = 48;
@@ -38,8 +39,10 @@ pub struct CompactHashIndex {
     // Length of the MPH's internal remap (see `crate::hash::overflow_cap`). Blobs written before
     // 0.7 recorded it are refused: with no stored keys there is nothing to recompute it from.
     overflow_cap: u64,
-    // (hash, fingerprint, id) for every key whose 64-bit hash collides with another key's, sorted
-    // by hash; almost always empty. Keys here have tail ids [m, n) and no slot in the table above.
+    // (hash, full 64-bit second hash, id) for every key whose 64-bit hash collides with another
+    // key's, sorted; almost always empty. Keys here have tail ids [m, n) and no slot in the table
+    // above. The second hash is stored untruncated regardless of fp_bits, so keys sharing the
+    // collided hash are told apart with 64 fresh bits, not fp_bits of them.
     side: Vec<(u64, u64, u32)>,
 }
 
@@ -68,35 +71,45 @@ impl CompactHashIndex {
     /// [`PerfectHashIndex`](crate::PerfectHashIndex)'s, are not reproducible across builds — persist
     /// the blob, not the key list.
     ///
-    /// The build **streams**: only a `(hash, fingerprint)` pair — 16 bytes — is kept per key, never
+    /// The build **streams**: only a `(hash, second hash)` pair — 16 bytes — is kept per key, never
     /// the strings, so building from a lazy iterator costs `16 × n` bytes of peak memory no matter
-    /// how large the keys are. The flip side of never seeing the strings again: two *distinct* keys
-    /// that collide in both the 64-bit hash **and** the `fingerprint_bits`-bit fingerprint
-    /// (probability `2^-(64 + fingerprint_bits)` per pair) are indistinguishable from a duplicate
-    /// and collapse into one entry. Keys colliding in the hash alone are served exactly, from a
-    /// side table.
+    /// how large the keys are. Both hashes are kept at their full 64 bits here regardless of
+    /// `fingerprint_bits` (the width only governs what the fingerprint *table* stores), so the one
+    /// thing the build cannot tell from a duplicate is two *distinct* keys colliding in **both**
+    /// 64-bit hashes at once — `≈ 2^-128` per pair, negligible at any reachable scale. Keys
+    /// colliding in the slot hash alone are served exactly, from a side table keyed by the full
+    /// second hash.
     pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        let pairs = items
+            .into_iter()
+            .map(|k| {
+                let k = k.as_ref();
+                (hash_key(k), fingerprint_full(k))
+            })
+            .collect();
+        Self::build_from_pairs(pairs, fingerprint_bits)
+    }
+
+    /// [`build_bits`](Self::build_bits) after the hashing pass: `pairs` holds
+    /// `(hash_key, fingerprint_full)` per key, in any order. Split out so the Python binding can
+    /// hash items one at a time while it still holds the GIL and hand over only the 16-byte pairs.
+    pub(crate) fn build_from_pairs(
+        mut pairs: Vec<(u64, u64)>,
+        fingerprint_bits: u32,
+    ) -> Result<Self, IndexError> {
         if !(1..=64).contains(&fingerprint_bits) {
             return Err(IndexError::Format(
                 "compact-hash: fingerprint_bits must be in 1..=64",
             ));
         }
-        let mut pairs: Vec<(u64, u64)> = items
-            .into_iter()
-            .map(|k| {
-                let k = k.as_ref();
-                (
-                    hash_key(k),
-                    crate::hash::fingerprint_bits(k, fingerprint_bits),
-                )
-            })
-            .collect();
         pairs.sort_unstable();
-        pairs.dedup(); // duplicate keys produce identical pairs
+        // Duplicate keys produce identical pairs. Distinct keys deduplicate here only by colliding
+        // in both full 64-bit hashes at once — never because the fingerprint table is narrow.
+        pairs.dedup();
         let n = pairs.len();
         if n > u32::MAX as usize {
             return Err(IndexError::Format(
@@ -141,7 +154,12 @@ impl CompactHashIndex {
                 ));
             }
             seen[slot] = true;
-            write_fp(&mut fps, slot, fingerprint_bits, *fp);
+            write_fp(
+                &mut fps,
+                slot,
+                fingerprint_bits,
+                *fp & fp_mask(fingerprint_bits),
+            );
         }
         let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
         Ok(Self {
@@ -161,9 +179,12 @@ impl CompactHashIndex {
         self.n - self.side.len()
     }
 
-    /// Ids of keys whose 64-bit hash collides with another key's, matched by fingerprint — off the
-    /// hot path: the probe runs only after the main table has already missed (or, for
-    /// `id_unchecked`, only when the table is non-empty). Entries are sorted by hash.
+    /// Ids of keys whose 64-bit hash collides with another key's, matched by the **full** 64-bit
+    /// second hash — off the hot path: it runs only when the table is non-empty. Entries under one
+    /// hash carry pairwise-distinct second hashes (the build deduplicates on the pair), so the
+    /// match is unambiguous, and it must run *before* the fingerprint table is consulted: a side
+    /// key's truncated fingerprint may tie its representative's, and the table would then claim
+    /// the query for the representative's id. Entries are sorted.
     #[cold]
     fn side_lookup(&self, h: u64, fp: u64) -> Option<u32> {
         let start = self.side.partition_point(|e| e.0 < h);
@@ -211,17 +232,19 @@ impl CompactHashIndex {
     }
 
     /// [`id`](Self::id) for an index that contains at least one hash collision: the side probe
-    /// runs only after the fingerprint comparison has missed.
+    /// runs first (it is exact on the full second hash, and the truncated table could otherwise
+    /// answer for a side key whose fingerprint bits tie its representative's), then the ordinary
+    /// slot-and-fingerprint path.
     #[cold]
     fn id_with_side(&self, key: &str) -> Option<u32> {
         let h = hash_key(key);
-        let want = fingerprint_bits(key, self.fp_bits);
-        if let Some(slot) = self.slot_for(h) {
-            if read_fp(self.fps.as_ref(), slot, self.fp_bits) == Some(want) {
-                return Some(slot as u32);
-            }
+        let full = fingerprint_full(key);
+        if let Some(id) = self.side_lookup(h, full) {
+            return Some(id);
         }
-        self.side_lookup(h, want)
+        let slot = self.slot_for(h)?;
+        (read_fp(self.fps.as_ref(), slot, self.fp_bits)? == full & fp_mask(self.fp_bits))
+            .then_some(slot as u32)
     }
 
     /// Dense id **without** checking the fingerprint — `key` must be a member, or the result is an
@@ -229,13 +252,13 @@ impl CompactHashIndex {
     /// for a non-member whose slot falls past the MPH's remap (which is bounded rather than read
     /// unchecked — being unsafe on a wrong key is not one of the trade-offs this method makes). In
     /// the rare index that contains a 64-bit hash collision, keys sharing the collided hash resolve
-    /// through the side table (matched by fingerprint — exact for members even there); every other
-    /// index skips that with one predictable branch.
+    /// through the side table (matched by the full second hash — exact for members even there);
+    /// every other index skips that with one predictable branch.
     #[inline]
     pub fn id_unchecked(&self, key: &str) -> u32 {
         let h = hash_key(key);
         if !self.side.is_empty() {
-            if let Some(id) = self.side_lookup(h, fingerprint_bits(key, self.fp_bits)) {
+            if let Some(id) = self.side_lookup(h, fingerprint_full(key)) {
                 return id;
             }
         }
@@ -245,11 +268,16 @@ impl CompactHashIndex {
     /// Batched [`id`](Self::id): one call for many keys, aligned with the input (`None` where
     /// the fingerprint rejects). Slot resolution streams through the MPH with 32 queries' worth
     /// of software prefetch in flight, and the fingerprint lines are prefetched ahead of the
-    /// compare. Measured on real words: 1.1× the per-key loop at 480 k keys, 1.2× at 5 M.
+    /// compare. Measured on real words: 1.1× the per-key loop at 480 k keys, 1.2× at 5 M. The
+    /// rare index holding a hash collision takes the per-key path instead — the side probe must
+    /// precede the fingerprint compare, which defeats the batched layout.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u32>> {
         let Some(mph) = &self.mph else {
             return vec![None; keys.len()];
         };
+        if !self.side.is_empty() {
+            return keys.iter().map(|k| self.id_with_side(k.as_ref())).collect();
+        }
         // Both hashes are computed in one pass over the keys, so the verify pass below never
         // touches the strings again — it is a pure fingerprint-table compare with the lines
         // prefetched ahead.
@@ -279,16 +307,12 @@ impl CompactHashIndex {
                     }
                 }
                 let slot = slots[i];
-                let hit = if slot < m {
+                if slot < m {
                     read_fp(fps, slot, self.fp_bits)
                         .and_then(|f| (f == wanted[i]).then_some(slot as u32))
                 } else {
                     None
-                };
-                if hit.is_none() && !self.side.is_empty() {
-                    return self.side_lookup(hashes[i], wanted[i]);
                 }
-                hit
             })
             .collect()
     }
@@ -318,7 +342,7 @@ impl CompactHashIndex {
         payload.update(self.fps.as_ref());
         payload.update(&side_buf);
         let mut header = [0u8; HEADER_V4];
-        header[0..4].copy_from_slice(MAGIC_V4);
+        header[0..4].copy_from_slice(MAGIC_V5);
         header[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
         header[12..16].copy_from_slice(&self.fp_bits.to_le_bytes());
         header[16..24].copy_from_slice(&self.overflow_cap.to_le_bytes());
@@ -330,7 +354,7 @@ impl CompactHashIndex {
         Ok((header, mph_buf, side_buf))
     }
 
-    /// Serialise to `[magic "BCH4"][n u64][fp_bits u32][overflow_cap u64][mph_len u64][side_len u32]
+    /// Serialise to `[magic "BCH5"][n u64][fp_bits u32][overflow_cap u64][mph_len u64][side_len u32]
     /// [payload u64][check u32][mph epserde bytes][bit-packed fingerprints][side entries]`. `check`
     /// is a hash of the preceding header bytes — `overflow_cap` bounds an otherwise unchecked read
     /// inside the MPH, so it must not be taken on trust from a blob that lost bytes in transit —
@@ -381,7 +405,7 @@ impl CompactHashIndex {
         }
         let (header, checked) = match &bytes[0..4] {
             m if m == MAGIC_V3 => (HEADER_V3, CHECKED_V3),
-            m if m == MAGIC_V4 => (HEADER_V4, CHECKED_V4),
+            m if m == MAGIC_V4 || m == MAGIC_V5 => (HEADER_V4, CHECKED_V4),
             _ => return Err(IndexError::Format("bad magic or truncated header")),
         };
         if bytes.len() < header {
@@ -391,11 +415,11 @@ impl CompactHashIndex {
         if check != crate::hash::hash_bytes(&bytes[..checked]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
         }
-        let v4 = &bytes[0..4] == MAGIC_V4;
-        // Owned v4 loads verify the whole payload — one streaming pass over everything after the
-        // header — so a flipped byte in the MPH region, the fingerprint table or the side table is
-        // rejected here rather than perturbing answers (or aborting in epserde) later.
-        if verify && v4 {
+        let v45 = header == HEADER_V4;
+        // Owned v4/v5 loads verify the whole payload — one streaming pass over everything after
+        // the header — so a flipped byte in the MPH region, the fingerprint table or the side
+        // table is rejected here rather than perturbing answers (or aborting in epserde) later.
+        if verify && v45 {
             let stored = u64::from_le_bytes(bytes[36..44].try_into().unwrap());
             if stored != crate::hash::hash_block(&bytes[HEADER_V4..]) {
                 return Err(IndexError::Format("payload checksum mismatch"));
@@ -413,8 +437,12 @@ impl CompactHashIndex {
             return Err(IndexError::Format("compact-hash: bad fingerprint width"));
         }
         let overflow_cap = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-        let mph_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
-        let side_len = if v4 {
+        // `mph_len` and the side-byte count are header-supplied; convert and multiply checked so a
+        // fabricated length fails cleanly on every target width instead of truncating or wrapping
+        // on a 32-bit one.
+        let mph_len = usize::try_from(u64::from_le_bytes(bytes[24..32].try_into().unwrap()))
+            .map_err(|_| IndexError::Format("mph length out of range"))?;
+        let side_len = if v45 {
             u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize
         } else {
             0
@@ -422,10 +450,22 @@ impl CompactHashIndex {
         if side_len > n || (side_len == n && n > 0) {
             return Err(IndexError::Format("side table length out of range"));
         }
+        // A 0.8.0 side table stored fingerprints truncated to `fp_bits`, which cannot be widened
+        // after the fact (the keys are gone). Collision-free 0.8.0 blobs are bit-identical to v5
+        // and load fine; the astronomically rare collided one must be rebuilt.
+        if &bytes[0..4] == MAGIC_V4 && side_len > 0 {
+            return Err(IndexError::Format(
+                "compact-hash: this blob was written by lexindex 0.8.0 and contains a collision \
+                 side table with truncated fingerprints; rebuild the index with 0.8.1 or later",
+            ));
+        }
         let m = n - side_len;
+        let side_bytes = side_len
+            .checked_mul(SIDE_ENTRY)
+            .ok_or(IndexError::Format("side table length out of range"))?;
         let side_start = bytes
             .len()
-            .checked_sub(side_len * SIDE_ENTRY)
+            .checked_sub(side_bytes)
             .ok_or(IndexError::Format("side table length out of range"))?;
         let mph_end = header
             .checked_add(mph_len)
@@ -451,6 +491,16 @@ impl CompactHashIndex {
             })
             .collect();
         side.sort_unstable(); // restore the binary-search invariant regardless of the blob
+        // Side ids must be exactly the tail range [m, n): `id()` hands them out verbatim, so an
+        // unvalidated blob could otherwise answer with an id at or past `len()`. Checked
+        // structurally, not via the checksums — those only vouch for transport, not construction.
+        let mut ids: Vec<u32> = side.iter().map(|e| e.2).collect();
+        ids.sort_unstable();
+        if !ids.iter().copied().eq(m as u32..n as u32) {
+            return Err(IndexError::Format(
+                "compact-hash: side-table ids are not the tail id range",
+            ));
+        }
         let fps = blob
             .subslice(mph_end, side_start)
             .ok_or(IndexError::Format("fingerprint range out of range"))?;
@@ -700,7 +750,7 @@ mod tests {
     fn a_0_7_bch3_blob_still_loads() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 2).unwrap();
         let v4 = idx.to_bytes().unwrap();
-        assert_eq!(&v4[0..4], b"BCH4");
+        assert_eq!(&v4[0..4], b"BCH5");
         assert!(idx.side.is_empty());
         let mut v3 = Vec::with_capacity(v4.len() - HEADER_V4 + HEADER_V3);
         v3.extend_from_slice(b"BCH3");
@@ -721,7 +771,7 @@ mod tests {
     fn a_pre_0_7_blob_is_refused_with_a_rebuild_message() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
         let v4 = idx.to_bytes().unwrap();
-        assert_eq!(&v4[0..4], b"BCH4");
+        assert_eq!(&v4[0..4], b"BCH5");
         for (magic, width) in [(b"BCH1", 1u32), (b"BCH2", 8)] {
             // The 0.5/0.6 layout: [magic][n][width][mph_len][mph][fingerprints].
             let mut old = Vec::new();
@@ -793,14 +843,85 @@ mod tests {
         assert_eq!(restored.side, idx.side);
         assert_eq!(restored.id(a), Some(ia));
         assert_eq!(restored.id(b), Some(ib));
-        // Narrow widths may or may not distinguish the pair's fingerprints (a masked tie merges
-        // them like a duplicate) — but the build always succeeds and members never go missing.
-        for bits in [1u32, 4, 8, 16] {
+        // The side table stores the full second hash, so the table width must never decide whether
+        // the pair stays two keys: the pinned pair's low fingerprint bits tie at 1 bit, which the
+        // 0.8.0 truncated side table silently merged into one id.
+        for bits in [1u32, 2, 4, 8, 16] {
             let idx = CompactHashIndex::build_bits(&keys, bits).unwrap();
-            assert!(idx.len() == 502 || idx.len() == 501, "bits={bits}");
+            assert_eq!(idx.len(), 502, "bits={bits}");
+            assert_eq!(idx.side.len(), 1, "bits={bits}");
+            let (ia, ib) = (idx.id(a).unwrap(), idx.id(b).unwrap());
+            assert_ne!(ia, ib, "bits={bits}");
+            assert_eq!(idx.id_unchecked(a), ia, "bits={bits}");
+            assert_eq!(idx.id_unchecked(b), ib, "bits={bits}");
+            assert_eq!(idx.ids_of(&[a, b]), vec![Some(ia), Some(ib)], "bits={bits}");
             for k in &keys {
                 assert!(idx.contains(k), "false negative on {k:?} at {bits} bits");
             }
+            let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+            assert_eq!(restored.id(a), Some(ia), "bits={bits}");
+            assert_eq!(restored.id(b), Some(ib), "bits={bits}");
+        }
+    }
+
+    /// A 0.8.0 "BCH4" blob is bit-identical to v5 when its side table is empty — it must load.
+    /// One that *has* a side table stored truncated fingerprints there, which cannot be widened
+    /// without the keys — it must be refused with a message naming the rebuild.
+    #[test]
+    fn a_0_8_0_bch4_blob_loads_only_without_a_side_table() {
+        let rehash = |blob: &mut [u8]| {
+            let payload = crate::hash::hash_block(&blob[HEADER_V4..]);
+            blob[36..44].copy_from_slice(&payload.to_le_bytes());
+            let check = crate::hash::hash_bytes(&blob[..CHECKED_V4]) as u32;
+            blob[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
+        };
+
+        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 2).unwrap();
+        assert!(idx.side.is_empty());
+        let mut v4 = idx.to_bytes().unwrap();
+        v4[0..4].copy_from_slice(b"BCH4");
+        rehash(&mut v4);
+        let restored = CompactHashIndex::from_bytes(&v4).unwrap();
+        for w in ["alpha", "beta", "gamma"] {
+            assert_eq!(restored.id(w), idx.id(w));
+        }
+
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let idx = CompactHashIndex::build([a, b], 1).unwrap();
+        assert_eq!(idx.side.len(), 1);
+        let mut v4 = idx.to_bytes().unwrap();
+        v4[0..4].copy_from_slice(b"BCH4");
+        rehash(&mut v4);
+        let err = match CompactHashIndex::from_bytes(&v4) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("a 0.8.0 blob with a truncated side table was accepted"),
+        };
+        assert!(err.contains("rebuild the index with 0.8.1"), "{err}");
+    }
+
+    /// Side ids are handed out verbatim by `id()`, so the loader must pin them to the tail range
+    /// [m, n) structurally — the checksums vouch for transport, not for what was written. A blob
+    /// with a re-checksummed out-of-range or duplicate id is refused, never served.
+    #[test]
+    fn tampered_side_ids_are_refused_even_with_valid_checksums() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let idx = CompactHashIndex::build([a, b, "filler"], 1).unwrap();
+        assert_eq!(idx.side.len(), 1);
+        let good = idx.to_bytes().unwrap();
+        // The lone side entry's id lives in the blob's last 4 bytes.
+        for bad_id in [0u32, 1, 3, u32::MAX] {
+            let mut bad = good.clone();
+            let at = bad.len() - 4;
+            bad[at..].copy_from_slice(&bad_id.to_le_bytes());
+            let payload = crate::hash::hash_block(&bad[HEADER_V4..]);
+            bad[36..44].copy_from_slice(&payload.to_le_bytes());
+            let check = crate::hash::hash_bytes(&bad[..CHECKED_V4]) as u32;
+            bad[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
+            let err = match CompactHashIndex::from_bytes(&bad) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("side id {bad_id} was accepted"),
+            };
+            assert!(err.contains("side-table ids"), "{err}");
         }
     }
 

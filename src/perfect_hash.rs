@@ -386,10 +386,19 @@ impl PerfectHashIndex {
             return Err(IndexError::Format("side table length out of range"));
         }
         let m = n - side_len;
-        let mph_len = u64::from_le_bytes(bytes[len_at..len_at + 8].try_into().unwrap()) as usize;
+        // `mph_len` and the side-byte count are header-supplied; convert and multiply checked so a
+        // fabricated length fails cleanly on every target width instead of truncating or wrapping
+        // on a 32-bit one.
+        let mph_len = usize::try_from(u64::from_le_bytes(
+            bytes[len_at..len_at + 8].try_into().unwrap(),
+        ))
+        .map_err(|_| IndexError::Format("mph length out of range"))?;
+        let side_bytes = side_len
+            .checked_mul(SIDE_ENTRY)
+            .ok_or(IndexError::Format("side table length out of range"))?;
         let side_start = bytes
             .len()
-            .checked_sub(side_len * SIDE_ENTRY)
+            .checked_sub(side_bytes)
             .ok_or(IndexError::Format("side table length out of range"))?;
         let mph_end = header
             .checked_add(mph_len)
@@ -414,6 +423,16 @@ impl PerfectHashIndex {
             })
             .collect();
         side.sort_unstable(); // restore the binary-search invariant regardless of the blob
+        // Side ids must be exactly the tail range [m, n) — the arena rows the MPH does not cover.
+        // Checked structurally, not via the checksums: those only vouch for transport, and a wrong
+        // id here would alias two keys onto one row or dangle past the arena.
+        let mut ids: Vec<u32> = side.iter().map(|e| e.1).collect();
+        ids.sort_unstable();
+        if !ids.iter().copied().eq(m as u32..n as u32) {
+            return Err(IndexError::Format(
+                "perfect-hash: side-table ids are not the tail id range",
+            ));
+        }
         let arena = StringArena::from_shared(
             blob.subslice(mph_end, side_start)
                 .ok_or(IndexError::Format("arena range out of range"))?,
@@ -796,6 +815,32 @@ mod tests {
             assert_eq!(mapped.id(a), Some(ia));
             assert_eq!(mapped.id(b), Some(ib));
             std::fs::remove_file(&path).ok();
+        }
+    }
+
+    /// Side ids index the arena's tail rows, so the loader pins them to exactly [m, n)
+    /// structurally — the checksums vouch for transport, not for what was written. A blob with a
+    /// re-checksummed out-of-range or duplicate id is refused, never served.
+    #[test]
+    fn tampered_side_ids_are_refused_even_with_valid_checksums() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let idx = PerfectHashIndex::build([a, b, "filler"]).unwrap();
+        assert_eq!(idx.side.len(), 1);
+        let good = idx.to_bytes().unwrap();
+        // The lone side entry's id lives in the blob's last 4 bytes.
+        for bad_id in [0u32, 1, 3, u32::MAX] {
+            let mut bad = good.clone();
+            let at = bad.len() - 4;
+            bad[at..].copy_from_slice(&bad_id.to_le_bytes());
+            let payload = crate::hash::hash_block(&bad[HEADER_V4..]);
+            bad[24..32].copy_from_slice(&payload.to_le_bytes());
+            let check = crate::hash::hash_bytes(&bad[..CHECKED_V4]) as u32;
+            bad[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
+            let err = match PerfectHashIndex::from_bytes(&bad) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("side id {bad_id} was accepted"),
+            };
+            assert!(err.contains("side-table ids"), "{err}");
         }
     }
 
