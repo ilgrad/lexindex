@@ -26,10 +26,13 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
     h ^ (h >> 31)
 }
 
-/// A **fingerprint** of the low `bits` bits, from an *independent* hash of the key (a different
-/// basis/multiplier than [`hash_key`]). Independence from the slot hash is what makes the
-/// probability that a non-member both lands on a used slot and matches its fingerprint `2^-bits` —
-/// the tunable false-positive rate. `bits ∈ 1..=64`.
+/// A **fingerprint** of the low `bits` bits, from a *separate* hash of the key (a different
+/// basis/multiplier than [`hash_key`], so it is uncorrelated with the slot hash for well-distributed
+/// keys). That decorrelation is what makes the chance a non-member both lands on a used slot and
+/// matches its fingerprint about `2^-bits` — the tunable false-positive rate. It is an upper bound,
+/// not an equality: a non-member whose raw slot falls past the remap is rejected before the
+/// fingerprint is ever compared. `bits ∈ 1..=64`. Not a security primitive — both hashes are
+/// deterministic and unseeded, so an adversary who picks the queries can search for collisions.
 pub(crate) fn fingerprint_bits(s: &str, bits: u32) -> u64 {
     let mut h: u64 = 0x0000_0100_0000_01b3; // distinct basis from hash_key
     for &b in s.as_bytes() {
@@ -111,4 +114,44 @@ pub(crate) fn triage_slots(
         }
     }
     slots
+}
+
+#[cfg(test)]
+mod golden {
+    use super::{fingerprint_bits, hash_key};
+
+    /// Every serialised MPH blob is keyed on these hashes, so a hash that silently changed — a
+    /// tweaked constant, a reordered finalizer, a byte-order slip in a refactor — would make every
+    /// previously-saved index load wrong without any test failing. These pinned values turn that
+    /// into a loud CI failure instead. **Do not "fix" them to match new output: changing the hash
+    /// is a breaking blob-format change and must bump the format magic, not this table.**
+    #[test]
+    fn hash_key_is_stable() {
+        assert_eq!(hash_key(""), 0xf52a_15e9_a9b5_e89b);
+        assert_eq!(hash_key("a"), 0x02c0_bdbf_4814_20f8);
+        assert_eq!(hash_key("apple"), 0xba8e_799d_ceb3_bcb1);
+        assert_eq!(hash_key("GET"), 0xbc92_c6e8_93bb_a505);
+        assert_eq!(hash_key("é中🎉"), 0x27bc_4d93_237a_01bc);
+        assert_eq!(hash_key("member-00042"), 0xc0fb_e8c4_a80e_0db3);
+    }
+
+    #[test]
+    fn fingerprint_is_stable() {
+        assert_eq!(fingerprint_bits("", 64), 0x0000_0100_0000_09b3);
+        assert_eq!(fingerprint_bits("apple", 64), 0x627e_4f52_427c_b65d);
+        assert_eq!(fingerprint_bits("é中🎉", 64), 0x2a7b_2637_5d6e_2054);
+        assert_eq!(fingerprint_bits("GET", 4), 0x2);
+        assert_eq!(fingerprint_bits("member-00042", 16), 0x8fa1);
+        // A narrower width is exactly the low bits of the full 64-bit fingerprint.
+        for s in ["", "a", "apple", "GET", "é中🎉"] {
+            let full = fingerprint_bits(s, 64);
+            for b in [1u32, 4, 8, 16, 32] {
+                assert_eq!(
+                    fingerprint_bits(s, b),
+                    full & ((1u64 << b) - 1),
+                    "{s:?} b={b}"
+                );
+            }
+        }
+    }
 }
