@@ -18,19 +18,29 @@ use ptr_hash::DefaultPtrHash;
 
 const MAGIC_V1: &[u8; 4] = b"BCH1"; // 0.5.x: width counts bytes, fingerprints byte-aligned
 const MAGIC_V2: &[u8; 4] = b"BCH2"; // 0.6.0: width counts bits, fingerprints bit-packed
-const MAGIC_V3: &[u8; 4] = b"BCH3"; // [magic 4][n u64][fp_bits u32][cap u64][mph_len u64][check u32]
-const HEADER_LEN: usize = 36;
-const CHECKED_LEN: usize = 32; // header bytes the trailing check covers
+const MAGIC_V3: &[u8; 4] = b"BCH3"; // 0.7: [magic 4][n u64][fp_bits u32][cap u64][mph_len u64][check u32]
+const MAGIC_V4: &[u8; 4] = b"BCH4"; // v3 + [side_len u32][payload u64] before the check
+const HEADER_V3: usize = 36;
+const CHECKED_V3: usize = 32; // header bytes the trailing check covers
+const HEADER_V4: usize = 48;
+const CHECKED_V4: usize = 44;
+const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
+
+/// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
+type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
 
 /// The smallest string→dense-id dictionary: a minimal perfect hash plus one small fingerprint per key.
 pub struct CompactHashIndex {
-    mph: Option<DefaultPtrHash>, // None iff empty
-    fps: SharedBytes,            // n fingerprints of fp_bits each, bit-packed in slot order
+    mph: Option<DefaultPtrHash>, // over one hash per distinct hash value; None iff empty
+    fps: SharedBytes,            // m fingerprints of fp_bits each, bit-packed in slot order
     fp_bits: u32,                // 1..=64
     n: usize,
     // Length of the MPH's internal remap (see `crate::hash::overflow_cap`). Blobs written before
     // 0.7 recorded it are refused: with no stored keys there is nothing to recompute it from.
     overflow_cap: u64,
+    // (hash, fingerprint, id) for every key whose 64-bit hash collides with another key's, sorted
+    // by hash; almost always empty. Keys here have tail ids [m, n) and no slot in the table above.
+    side: Vec<(u64, u64, u32)>,
 }
 
 impl CompactHashIndex {
@@ -57,6 +67,14 @@ impl CompactHashIndex {
     /// are arbitrary dense slots in `[0, n)` (no defined order) and, like
     /// [`PerfectHashIndex`](crate::PerfectHashIndex)'s, are not reproducible across builds — persist
     /// the blob, not the key list.
+    ///
+    /// The build **streams**: only a `(hash, fingerprint)` pair — 16 bytes — is kept per key, never
+    /// the strings, so building from a lazy iterator costs `16 × n` bytes of peak memory no matter
+    /// how large the keys are. The flip side of never seeing the strings again: two *distinct* keys
+    /// that collide in both the 64-bit hash **and** the `fingerprint_bits`-bit fingerprint
+    /// (probability `2^-(64 + fingerprint_bits)` per pair) are indistinguishable from a duplicate
+    /// and collapse into one entry. Keys colliding in the hash alone are served exactly, from a
+    /// side table.
     pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -67,13 +85,19 @@ impl CompactHashIndex {
                 "compact-hash: fingerprint_bits must be in 1..=64",
             ));
         }
-        // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
-        // `String`s: the keys are copied once more into the structure below, so an intermediate
-        // copy of the whole corpus bought nothing.
-        let mut keys: Vec<S> = items.into_iter().collect();
-        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        let n = keys.len();
+        let mut pairs: Vec<(u64, u64)> = items
+            .into_iter()
+            .map(|k| {
+                let k = k.as_ref();
+                (
+                    hash_key(k),
+                    crate::hash::fingerprint_bits(k, fingerprint_bits),
+                )
+            })
+            .collect();
+        pairs.sort_unstable();
+        pairs.dedup(); // duplicate keys produce identical pairs
+        let n = pairs.len();
         if n > u32::MAX as usize {
             return Err(IndexError::Format(
                 "compact-hash: more than u32::MAX keys; ids are u32",
@@ -86,51 +110,74 @@ impl CompactHashIndex {
                 fp_bits: fingerprint_bits,
                 n: 0,
                 overflow_cap: 0,
+                side: Vec::new(),
             });
         }
-        let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k.as_ref())).collect();
-        let mut sorted = hashes.clone();
-        sorted.sort_unstable();
-        if sorted.windows(2).any(|w| w[0] == w[1]) {
-            return Err(IndexError::Format(
-                "compact-hash: two keys share a 64-bit hash; the deterministic hash means this key \
-                 set can never build - use StringIndex or change the keys",
-            ));
+        // One representative per distinct hash value builds the MPH and owns the slot; the (almost
+        // always zero) same-hash leftovers get tail ids [m, n) in the side table.
+        let mut mph_hashes = Vec::with_capacity(n);
+        let mut side: Vec<(u64, u64, u32)> = Vec::new();
+        let mut rep_fps = Vec::with_capacity(n);
+        for run in pairs.chunk_by(|a, b| a.0 == b.0) {
+            mph_hashes.push(run[0].0);
+            rep_fps.push(run[0].1);
+            for &(h, fp) in &run[1..] {
+                side.push((h, fp, 0)); // ids assigned once m is known
+            }
         }
-        let mph = crate::hash::build_mph(&hashes)?;
-        let table_len = (n as u64 * fingerprint_bits as u64).div_ceil(8) as usize;
+        let m = mph_hashes.len();
+        for (j, e) in side.iter_mut().enumerate() {
+            e.2 = (m + j) as u32;
+        }
+        let mph = crate::hash::build_mph(&mph_hashes)?;
+        let table_len = (m as u64 * fingerprint_bits as u64).div_ceil(8) as usize;
         let mut fps = vec![0u8; table_len];
-        let mut seen = vec![false; n];
-        for (k, h) in keys.iter().zip(&hashes) {
+        let mut seen = vec![false; m];
+        for (h, fp) in mph_hashes.iter().zip(&rep_fps) {
             let slot = mph.index(h);
-            if slot >= n || seen[slot] {
+            if slot >= m || seen[slot] {
                 return Err(IndexError::Format(
                     "compact-hash: construction was not minimal/perfect",
                 ));
             }
             seen[slot] = true;
-            write_fp(
-                &mut fps,
-                slot,
-                fingerprint_bits,
-                crate::hash::fingerprint_bits(k.as_ref(), fingerprint_bits),
-            );
+            write_fp(&mut fps, slot, fingerprint_bits, *fp);
         }
-        let overflow_cap = crate::hash::overflow_cap(&mph, &hashes, n);
+        let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
         Ok(Self {
             mph: Some(mph),
             fps: SharedBytes::from_owned(fps),
             fp_bits: fingerprint_bits,
             n,
             overflow_cap,
+            side,
         })
+    }
+
+    /// Number of MPH-resolved keys: `n` minus the side-table entries. Slots, the fingerprint table
+    /// and the remap are bounded by this, not by `n`.
+    #[inline]
+    fn m(&self) -> usize {
+        self.n - self.side.len()
+    }
+
+    /// Ids of keys whose 64-bit hash collides with another key's, matched by fingerprint — off the
+    /// hot path: the probe runs only after the main table has already missed (or, for
+    /// `id_unchecked`, only when the table is non-empty). Entries are sorted by hash.
+    #[cold]
+    fn side_lookup(&self, h: u64, fp: u64) -> Option<u32> {
+        let start = self.side.partition_point(|e| e.0 < h);
+        self.side[start..]
+            .iter()
+            .take_while(|e| e.0 == h)
+            .find_map(|e| (e.1 == fp).then_some(e.2))
     }
 
     /// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free
     /// slot no member occupies, which ptr_hash's own `index()` would read out of bounds.
     #[inline]
     fn slot_for(&self, h: u64) -> Option<usize> {
-        crate::hash::slot_for(self.mph.as_ref()?, self.n, self.overflow_cap, h)
+        crate::hash::slot_for(self.mph.as_ref()?, self.m(), self.overflow_cap, h)
     }
 
     /// Width of the stored fingerprints in bits; the membership false-positive rate is
@@ -152,24 +199,47 @@ impl CompactHashIndex {
     /// Dense id of `key`, or `None`. Membership is checked against the stored fingerprint, so a `Some`
     /// result is correct except for a `2^-fingerprint_bits` false-positive chance on a non-member.
     pub fn id(&self, key: &str) -> Option<u32> {
-        let slot = self.slot_for(hash_key(key))?;
-        if slot >= self.n {
-            return None;
+        if self.side.is_empty() {
+            // The overwhelming case (no hash collision anywhere in the index): one predicted
+            // branch, then exactly the side-free lookup.
+            let slot = self.slot_for(hash_key(key))?;
+            return (read_fp(self.fps.as_ref(), slot, self.fp_bits)?
+                == fingerprint_bits(key, self.fp_bits))
+            .then_some(slot as u32);
         }
-        if read_fp(self.fps.as_ref(), slot, self.fp_bits)? == fingerprint_bits(key, self.fp_bits) {
-            Some(slot as u32)
-        } else {
-            None
+        self.id_with_side(key)
+    }
+
+    /// [`id`](Self::id) for an index that contains at least one hash collision: the side probe
+    /// runs only after the fingerprint comparison has missed.
+    #[cold]
+    fn id_with_side(&self, key: &str) -> Option<u32> {
+        let h = hash_key(key);
+        let want = fingerprint_bits(key, self.fp_bits);
+        if let Some(slot) = self.slot_for(h) {
+            if read_fp(self.fps.as_ref(), slot, self.fp_bits) == Some(want) {
+                return Some(slot as u32);
+            }
         }
+        self.side_lookup(h, want)
     }
 
     /// Dense id **without** checking the fingerprint — `key` must be a member, or the result is an
     /// arbitrary valid slot. The fastest lookup for a closed vocabulary. Returns `0` when empty, and
     /// for a non-member whose slot falls past the MPH's remap (which is bounded rather than read
-    /// unchecked — being unsafe on a wrong key is not one of the trade-offs this method makes).
+    /// unchecked — being unsafe on a wrong key is not one of the trade-offs this method makes). In
+    /// the rare index that contains a 64-bit hash collision, keys sharing the collided hash resolve
+    /// through the side table (matched by fingerprint — exact for members even there); every other
+    /// index skips that with one predictable branch.
     #[inline]
     pub fn id_unchecked(&self, key: &str) -> u32 {
-        self.slot_for(hash_key(key)).unwrap_or(0) as u32
+        let h = hash_key(key);
+        if !self.side.is_empty() {
+            if let Some(id) = self.side_lookup(h, fingerprint_bits(key, self.fp_bits)) {
+                return id;
+            }
+        }
+        self.slot_for(h).unwrap_or(0) as u32
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with the input (`None` where
@@ -194,13 +264,14 @@ impl CompactHashIndex {
         // MINIMAL=false: raw slots, so the stream never touches the remap (see `slot_for`). Raw
         // slots ≥ n are triaged here: past the cap they are provably non-members, otherwise the
         // (rare, ~1%) per-key `index()` resolves the remapped slot.
-        let slots = crate::hash::triage_slots(mph, self.n, self.overflow_cap, &hashes);
+        let m = self.m();
+        let slots = crate::hash::triage_slots(mph, m, self.overflow_cap, &hashes);
         let fps = self.fps.as_ref();
         const AHEAD: usize = 32;
         (0..keys.len())
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {
-                    if s < self.n {
+                    if s < m {
                         crate::blob::prefetch_byte(
                             fps,
                             (s as u64 * self.fp_bits as u64 / 8) as usize,
@@ -208,10 +279,16 @@ impl CompactHashIndex {
                     }
                 }
                 let slot = slots[i];
-                if slot >= self.n {
-                    return None;
+                let hit = if slot < m {
+                    read_fp(fps, slot, self.fp_bits)
+                        .and_then(|f| (f == wanted[i]).then_some(slot as u32))
+                } else {
+                    None
+                };
+                if hit.is_none() && !self.side.is_empty() {
+                    return self.side_lookup(hashes[i], wanted[i]);
                 }
-                (read_fp(fps, slot, self.fp_bits)? == wanted[i]).then_some(slot as u32)
+                hit
             })
             .collect()
     }
@@ -221,44 +298,73 @@ impl CompactHashIndex {
         self.id(key).is_some()
     }
 
-    /// Serialise to `[magic "BCH3"][n u64][fp_bits u32][overflow_cap u64][mph_len u64][check u32]
-    /// [mph epserde bytes][bit-packed fingerprints]`. `check` is a hash of the preceding header
-    /// bytes: `overflow_cap` bounds an otherwise unchecked read inside the MPH, so it must not be
-    /// taken on trust from a blob that lost bytes in transit.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
+    /// Serialised header + owned sections (the fingerprint table is borrowed separately): shared by
+    /// [`to_bytes`](Self::to_bytes) and the streaming [`save`](Self::save) so the two emit
+    /// byte-identical blobs.
+    fn serialised_parts(&self) -> Result<SerialisedParts, IndexError> {
         let mut mph_buf = Vec::new();
         if let Some(mph) = &self.mph {
             mph.serialize(&mut mph_buf)
                 .map_err(|e| IndexError::Serde(e.to_string()))?;
         }
+        let mut side_buf = Vec::with_capacity(self.side.len() * SIDE_ENTRY);
+        for &(h, fp, id) in &self.side {
+            side_buf.extend_from_slice(&h.to_le_bytes());
+            side_buf.extend_from_slice(&fp.to_le_bytes());
+            side_buf.extend_from_slice(&id.to_le_bytes());
+        }
+        let mut payload = crate::hash::BlockHasher::new();
+        payload.update(&mph_buf);
+        payload.update(self.fps.as_ref());
+        payload.update(&side_buf);
+        let mut header = [0u8; HEADER_V4];
+        header[0..4].copy_from_slice(MAGIC_V4);
+        header[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
+        header[12..16].copy_from_slice(&self.fp_bits.to_le_bytes());
+        header[16..24].copy_from_slice(&self.overflow_cap.to_le_bytes());
+        header[24..32].copy_from_slice(&(mph_buf.len() as u64).to_le_bytes());
+        header[32..36].copy_from_slice(&(self.side.len() as u32).to_le_bytes());
+        header[36..44].copy_from_slice(&payload.finish().to_le_bytes());
+        let check = crate::hash::hash_bytes(&header[..CHECKED_V4]) as u32;
+        header[CHECKED_V4..].copy_from_slice(&check.to_le_bytes());
+        Ok((header, mph_buf, side_buf))
+    }
+
+    /// Serialise to `[magic "BCH4"][n u64][fp_bits u32][overflow_cap u64][mph_len u64][side_len u32]
+    /// [payload u64][check u32][mph epserde bytes][bit-packed fingerprints][side entries]`. `check`
+    /// is a hash of the preceding header bytes — `overflow_cap` bounds an otherwise unchecked read
+    /// inside the MPH, so it must not be taken on trust from a blob that lost bytes in transit —
+    /// and `payload` a streaming hash of everything after the header, verified on owned loads.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
+        let (header, mph_buf, side_buf) = self.serialised_parts()?;
         let fp = self.fps.as_ref();
-        let mut out = Vec::with_capacity(HEADER_LEN + mph_buf.len() + fp.len());
-        out.extend_from_slice(MAGIC_V3);
-        out.extend_from_slice(&(self.n as u64).to_le_bytes());
-        out.extend_from_slice(&self.fp_bits.to_le_bytes());
-        out.extend_from_slice(&self.overflow_cap.to_le_bytes());
-        out.extend_from_slice(&(mph_buf.len() as u64).to_le_bytes());
-        let check = crate::hash::hash_bytes(&out[..CHECKED_LEN]) as u32;
-        out.extend_from_slice(&check.to_le_bytes());
+        let mut out = Vec::with_capacity(HEADER_V4 + mph_buf.len() + fp.len() + side_buf.len());
+        out.extend_from_slice(&header);
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(fp);
+        out.extend_from_slice(&side_buf);
         Ok(out)
     }
 
     /// Reconstruct from [`CompactHashIndex::to_bytes`] output (copies the blob into owned memory).
     ///
-    /// The lexindex header and fingerprint table are fully bounds-validated, but the embedded minimal
-    /// perfect hash is deserialised by [`epserde`]: feed only blobs produced by
-    /// [`to_bytes`](Self::to_bytes) / [`save`](Self::save). A corrupted MPH region may abort on a failed
-    /// allocation rather than returning a clean error — the same "trust your own blob" contract as
-    /// [`load_mmap`](Self::load_mmap).
+    /// The lexindex header, fingerprint table and side table are fully bounds-validated, and owned
+    /// loads verify a streaming checksum of the whole payload, so *accidental* corruption anywhere
+    /// in the blob fails cleanly. The embedded minimal perfect hash is still deserialised by
+    /// [`epserde`], the stored `overflow_cap` has no keys to be recomputed from, and every hash
+    /// involved is public and deterministic — so a deliberately *crafted* blob remains outside the
+    /// contract: feed only blobs produced by [`to_bytes`](Self::to_bytes) / [`save`](Self::save).
+    /// The same "trust your own blob" contract as [`load_mmap`](Self::load_mmap), which also skips
+    /// the checksum scan.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
     /// Reconstruct from a shared source. The MPH is deserialised into memory; the fingerprint table
-    /// (the bulk) is borrowed zero-copy — so `load_mmap` never copies it.
-    fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
+    /// (the bulk) is borrowed zero-copy — so `load_mmap` never copies it. `verify` runs the
+    /// `O(blob)` payload-checksum pass — on for owned loads, off for mmap so mapping stays
+    /// proportional to the MPH alone.
+    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
         // 0.5/0.6 blobs predate the recorded remap bound and, unlike the arena-backed index, store
         // no keys to recompute it from — so there is nothing to heal and loading one unbounded is
@@ -270,12 +376,30 @@ impl CompactHashIndex {
                  on load - rebuild the index with 0.7 or later",
             ));
         }
-        if bytes.len() < HEADER_LEN || &bytes[0..4] != MAGIC_V3 {
+        if bytes.len() < 4 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
-        let check = u32::from_le_bytes(bytes[CHECKED_LEN..HEADER_LEN].try_into().unwrap());
-        if check != crate::hash::hash_bytes(&bytes[..CHECKED_LEN]) as u32 {
+        let (header, checked) = match &bytes[0..4] {
+            m if m == MAGIC_V3 => (HEADER_V3, CHECKED_V3),
+            m if m == MAGIC_V4 => (HEADER_V4, CHECKED_V4),
+            _ => return Err(IndexError::Format("bad magic or truncated header")),
+        };
+        if bytes.len() < header {
+            return Err(IndexError::Format("bad magic or truncated header"));
+        }
+        let check = u32::from_le_bytes(bytes[checked..checked + 4].try_into().unwrap());
+        if check != crate::hash::hash_bytes(&bytes[..checked]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
+        }
+        let v4 = &bytes[0..4] == MAGIC_V4;
+        // Owned v4 loads verify the whole payload — one streaming pass over everything after the
+        // header — so a flipped byte in the MPH region, the fingerprint table or the side table is
+        // rejected here rather than perturbing answers (or aborting in epserde) later.
+        if verify && v4 {
+            let stored = u64::from_le_bytes(bytes[36..44].try_into().unwrap());
+            if stored != crate::hash::hash_block(&bytes[HEADER_V4..]) {
+                return Err(IndexError::Format("payload checksum mismatch"));
+            }
         }
         let n64 = u64::from_le_bytes(bytes[4..12].try_into().unwrap());
         if n64 > u32::MAX as u64 {
@@ -289,11 +413,23 @@ impl CompactHashIndex {
             return Err(IndexError::Format("compact-hash: bad fingerprint width"));
         }
         let overflow_cap = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-        let header = HEADER_LEN;
         let mph_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
+        let side_len = if v4 {
+            u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize
+        } else {
+            0
+        };
+        if side_len > n || (side_len == n && n > 0) {
+            return Err(IndexError::Format("side table length out of range"));
+        }
+        let m = n - side_len;
+        let side_start = bytes
+            .len()
+            .checked_sub(side_len * SIDE_ENTRY)
+            .ok_or(IndexError::Format("side table length out of range"))?;
         let mph_end = header
             .checked_add(mph_len)
-            .filter(|&e| e <= bytes.len())
+            .filter(|&e| e <= side_start)
             .ok_or(IndexError::Format("mph length out of range"))?;
         let mph = if n == 0 {
             None
@@ -304,12 +440,23 @@ impl CompactHashIndex {
                     .map_err(|e| IndexError::Serde(e.to_string()))?,
             )
         };
+        let mut side: Vec<(u64, u64, u32)> = bytes[side_start..]
+            .chunks_exact(SIDE_ENTRY)
+            .map(|e| {
+                (
+                    u64::from_le_bytes(e[0..8].try_into().unwrap()),
+                    u64::from_le_bytes(e[8..16].try_into().unwrap()),
+                    u32::from_le_bytes(e[16..20].try_into().unwrap()),
+                )
+            })
+            .collect();
+        side.sort_unstable(); // restore the binary-search invariant regardless of the blob
         let fps = blob
-            .subslice(mph_end, blob.len())
+            .subslice(mph_end, side_start)
             .ok_or(IndexError::Format("fingerprint range out of range"))?;
         // `n` is untrusted (read from the header), so guard the multiply — a fabricated huge `n` would
         // otherwise overflow and panic in a debug build instead of failing cleanly.
-        let expected = (n as u64)
+        let expected = (m as u64)
             .checked_mul(fp_bits as u64)
             .map(|bits| bits.div_ceil(8))
             .ok_or(IndexError::Format(
@@ -321,7 +468,7 @@ impl CompactHashIndex {
             ));
         }
         if let Some(mph) = &mph {
-            if mph.n() != n {
+            if mph.n() != m {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
         }
@@ -331,27 +478,40 @@ impl CompactHashIndex {
             fp_bits,
             n,
             overflow_cap,
+            side,
         })
     }
 
-    /// Write the dictionary to `path`.
+    /// Write the dictionary to `path` — the same bytes as [`to_bytes`](Self::to_bytes), streamed
+    /// section by section, so saving peaks at the index's own memory plus the small MPH buffer
+    /// rather than a full serialised copy.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
-        crate::blob::write_atomically(path.as_ref(), &self.to_bytes()?)
+        let (header, mph_buf, side_buf) = self.serialised_parts()?;
+        crate::blob::write_atomically_with(path.as_ref(), |w| {
+            use std::io::Write;
+            w.write_all(&header)?;
+            w.write_all(&mph_buf)?;
+            w.write_all(self.fps.as_ref())?;
+            w.write_all(&side_buf)
+        })
     }
 
-    /// Load a dictionary previously written with [`CompactHashIndex::save`].
+    /// Load a dictionary previously written with [`CompactHashIndex::save`] (reads the whole file
+    /// and verifies the payload checksum — see [`from_bytes`](Self::from_bytes)).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?))
+        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
-    /// Memory-map the file and borrow the fingerprint table zero-copy (only the small MPH is read into
-    /// memory). See [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the immutability caveat.
+    /// Memory-map the file and borrow the fingerprint table zero-copy (only the small MPH is read
+    /// into memory). Skips the payload-checksum scan `load` performs — the mapped file is trusted
+    /// intact. See [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the immutability
+    /// caveat.
     #[cfg(feature = "mmap")]
     pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
         // SAFETY: the mapped file must not be mutated while it is mapped (see StringIndex::load_mmap).
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)))
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
 }
 
@@ -534,19 +694,42 @@ mod tests {
         ));
     }
 
+    /// A 0.7 "BCH3" blob (no side table, no payload checksum) still loads and answers like the
+    /// index that wrote it.
+    #[test]
+    fn a_0_7_bch3_blob_still_loads() {
+        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 2).unwrap();
+        let v4 = idx.to_bytes().unwrap();
+        assert_eq!(&v4[0..4], b"BCH4");
+        assert!(idx.side.is_empty());
+        let mut v3 = Vec::with_capacity(v4.len() - HEADER_V4 + HEADER_V3);
+        v3.extend_from_slice(b"BCH3");
+        v3.extend_from_slice(&v4[4..32]); // n, fp_bits, cap, mph_len
+        let check = crate::hash::hash_bytes(&v3[..CHECKED_V3]) as u32;
+        v3.extend_from_slice(&check.to_le_bytes());
+        v3.extend_from_slice(&v4[HEADER_V4..]); // mph + fingerprints (side is empty)
+        let restored = CompactHashIndex::from_bytes(&v3).unwrap();
+        for w in ["alpha", "beta", "gamma"] {
+            assert_eq!(restored.id(w), idx.id(w));
+        }
+        assert_eq!(restored.id("delta"), None);
+    }
+
     /// 0.5/0.6 blobs predate the recorded remap bound and store no keys to recompute it from, so
     /// they are refused with a message that names the fix rather than loaded unbounded.
     #[test]
     fn a_pre_0_7_blob_is_refused_with_a_rebuild_message() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
-        let v3 = idx.to_bytes().unwrap();
-        assert_eq!(&v3[0..4], b"BCH3");
+        let v4 = idx.to_bytes().unwrap();
+        assert_eq!(&v4[0..4], b"BCH4");
         for (magic, width) in [(b"BCH1", 1u32), (b"BCH2", 8)] {
-            let mut old = v3.clone();
-            old.drain(CHECKED_LEN..HEADER_LEN); // no header check
-            old.drain(16..24); // no overflow_cap
-            old[0..4].copy_from_slice(magic);
-            old[12..16].copy_from_slice(&width.to_le_bytes());
+            // The 0.5/0.6 layout: [magic][n][width][mph_len][mph][fingerprints].
+            let mut old = Vec::new();
+            old.extend_from_slice(magic);
+            old.extend_from_slice(&v4[4..12]); // n
+            old.extend_from_slice(&width.to_le_bytes());
+            old.extend_from_slice(&v4[24..32]); // mph_len
+            old.extend_from_slice(&v4[HEADER_V4..]);
             let err = match CompactHashIndex::from_bytes(&old) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("a pre-0.7 blob was accepted"),
@@ -555,14 +738,15 @@ mod tests {
         }
     }
 
-    /// `overflow_cap` bounds a read that ptr_hash performs unchecked, so a header that lost bytes
-    /// in transit must be refused rather than used to steer queries.
+    /// A header that lost bytes in transit must be refused rather than used to steer queries
+    /// (`overflow_cap` bounds an otherwise unchecked read), and — new in v4 — so must a flipped
+    /// byte anywhere in the payload, caught by the whole-payload checksum on owned loads.
     #[test]
-    fn a_corrupt_header_is_refused() {
+    fn corrupt_headers_and_payloads_are_refused() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
         let good = idx.to_bytes().unwrap();
         assert!(CompactHashIndex::from_bytes(&good).is_ok());
-        for pos in [4, 12, 16, 23, 24, 31, 32, 35] {
+        for pos in [4, 12, 16, 23, 24, 31, 32, 35, 36, 43, 44, 47] {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
             assert!(
@@ -570,6 +754,67 @@ mod tests {
                 "header byte {pos} was accepted"
             );
         }
+        for pos in (HEADER_V4..good.len()).step_by(5) {
+            let mut bad = good.clone();
+            bad[pos] ^= 0x40;
+            assert!(
+                CompactHashIndex::from_bytes(&bad).is_err(),
+                "payload byte {pos} was accepted"
+            );
+        }
+    }
+
+    /// A real 64-bit hash collision (the pinned pair from `crate::hash`) must build and resolve
+    /// both keys — the fingerprint stands in for the stored key in the side probe. Whatever the
+    /// width, no member may ever be a false negative.
+    #[test]
+    fn colliding_keys_build_and_resolve_by_fingerprint() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let mut keys: Vec<String> = (0..500).map(|i| format!("filler-{i:03}")).collect();
+        keys.push(a.to_string());
+        keys.push(b.to_string());
+        let idx = CompactHashIndex::build_bits(&keys, 64).unwrap();
+        assert_eq!(idx.len(), 502);
+        assert_eq!(idx.side.len(), 1);
+        let (ia, ib) = (idx.id(a).unwrap(), idx.id(b).unwrap());
+        assert_ne!(ia, ib);
+        assert_eq!(idx.id_unchecked(a), ia);
+        assert_eq!(idx.id_unchecked(b), ib);
+        assert_eq!(idx.ids_of(&[a, b]), vec![Some(ia), Some(ib)]);
+        let mut ids: Vec<u32> = keys.iter().map(|k| idx.id(k).unwrap()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            keys.len(),
+            "ids must stay a bijection onto [0, n)"
+        );
+        let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        assert_eq!(restored.side, idx.side);
+        assert_eq!(restored.id(a), Some(ia));
+        assert_eq!(restored.id(b), Some(ib));
+        // Narrow widths may or may not distinguish the pair's fingerprints (a masked tie merges
+        // them like a duplicate) — but the build always succeeds and members never go missing.
+        for bits in [1u32, 4, 8, 16] {
+            let idx = CompactHashIndex::build_bits(&keys, bits).unwrap();
+            assert!(idx.len() == 502 || idx.len() == 501, "bits={bits}");
+            for k in &keys {
+                assert!(idx.contains(k), "false negative on {k:?} at {bits} bits");
+            }
+        }
+    }
+
+    /// `save` streams sections instead of assembling one buffer; the file must still be
+    /// byte-identical to `to_bytes`.
+    #[test]
+    fn save_streams_the_same_bytes_as_to_bytes() {
+        let words: Vec<String> = (0..500).map(|i| format!("w{i}")).collect();
+        let idx = CompactHashIndex::build(&words, 2).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("lexindex_chstream_{}.bch", std::process::id()));
+        idx.save(&path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), idx.to_bytes().unwrap());
+        std::fs::remove_file(&path).ok();
     }
 
     /// `id_unchecked` skips the fingerprint comparison, not the remap bound.
@@ -602,7 +847,7 @@ mod tests {
             for probe in 0..5_000 {
                 let s = format!("stranger-{round}-{probe}");
                 let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
-                if raw >= idx.n && (raw - idx.n) as u64 >= idx.overflow_cap {
+                if raw >= idx.m() && (raw - idx.m()) as u64 >= idx.overflow_cap {
                     assert_eq!(idx.id(&s), None);
                     assert_eq!(idx.ids_of(&[&s]), vec![None]);
                     engaged += 1;

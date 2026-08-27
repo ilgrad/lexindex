@@ -174,39 +174,27 @@ mod mph {
             let _ = CompactHashIndex::from_bytes(&data);
         }
 
-        // Corrupting a lexindex-owned header field (`n` / `fp_bits` / `overflow_cap` / `mph_len`,
-        // bytes 4..32 of the BCH3 layout, or the trailing check itself) must be *rejected*: the
-        // header carries a checksum precisely because `overflow_cap` bounds an otherwise unchecked
-        // read inside the MPH. Corrupting the fingerprint tail is undetectable by design (it only
-        // perturbs the probabilistic membership answer) and must merely stay panic-free.
+        // Any single flipped byte — header field, MPH region or fingerprint table — must be
+        // *rejected* by an owned load: the header carries a checksum because `overflow_cap` bounds
+        // an otherwise unchecked read inside the MPH, and since BCH4 the whole payload carries one
+        // too, so even a flipped fingerprint bit (which would only have perturbed the probabilistic
+        // membership answer) fails cleanly instead of loading corrupt.
         #[test]
-        fn compact_hash_corrupt_owned_bytes_never_panics(
+        fn compact_hash_corrupt_blob_is_rejected(
             keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
             fp in prop::sample::select(vec![1usize, 2, 4]),
-            in_header in any::<bool>(),
             at in any::<prop::sample::Index>(),
             xor in 1u8..=255,
         ) {
             let idx = CompactHashIndex::build(&keys, fp).unwrap();
             let mut blob = idx.to_bytes().unwrap();
-            assert_eq!(&blob[0..4], b"BCH3");
-            let mph_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
-            let (lo, hi) = if in_header { (4, 36) } else { (36 + mph_len, blob.len()) };
-            if lo < hi {
-                let pos = lo + at.index(hi - lo);
-                blob[pos] ^= xor;
-                let restored = CompactHashIndex::from_bytes(&blob);
-                if in_header {
-                    assert!(restored.is_err(), "corrupt header byte {pos} was accepted");
-                } else {
-                    // A flipped fingerprint bit stays a well-formed index: queries must answer.
-                    let restored = restored.expect("fingerprint corruption is not a format error");
-                    for key in distinct_sorted(keys.clone()) {
-                        let _ = restored.id(&key);
-                    }
-                    let _ = restored.ids_of(&keys);
-                }
-            }
+            assert_eq!(&blob[0..4], b"BCH4");
+            let pos = 4 + at.index(blob.len() - 4);
+            blob[pos] ^= xor;
+            prop_assert!(
+                CompactHashIndex::from_bytes(&blob).is_err(),
+                "single-byte flip at {pos} (xor {xor}) was accepted by an owned load",
+            );
         }
     }
 }
