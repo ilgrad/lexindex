@@ -120,9 +120,15 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     let _ = (data, i);
 }
 
-/// Write `bytes` to `path` by writing a sibling temporary file and renaming it into place. A crash
-/// or a full disk mid-write then leaves the previous file intact instead of a truncated index that
-/// still has a valid magic; `rename` within a directory is atomic on both POSIX and Windows.
+/// Write `bytes` to `path` by writing a sibling temporary file and renaming it into place, so a
+/// crash, a full disk, or a power loss mid-write leaves the previous file intact rather than a
+/// truncated index that still has a valid magic. `rename` within a directory is atomic on both
+/// POSIX and Windows; the temporary is opened `O_EXCL` (never following a planted symlink), and on
+/// Unix the parent directory is fsynced so the rename itself is durable.
+// Process-wide temp-name counter (module scope so a test can predict the next name); keeps two
+// threads saving to one path from colliding.
+static WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn write_atomically(
     path: &std::path::Path,
     bytes: &[u8],
@@ -132,13 +138,41 @@ pub(crate) fn write_atomically(
     let stem = path
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("index"));
-    // pid + a process-wide counter: two threads saving to one path must not share a temporary.
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let mut tmp = dir.join(stem);
-    tmp.as_mut_os_string()
-        .push(format!(".{}.{seq}.tmp", std::process::id()));
-    let mut file = std::fs::File::create(&tmp)?;
+    // Open the temporary with O_CREAT|O_EXCL (`create_new`) rather than `File::create`: an attacker
+    // who plants a symlink at the — predictable — temp name in a shared directory would otherwise
+    // have it followed and the target truncated. `create_new` refuses any existing path, symlink
+    // included, so the write can only land on a fresh file we made. The pid+counter name keeps two
+    // threads (or a stale temp from a crashed run) from colliding; on the rare collision we retry
+    // with the next counter, bounded so a hostile racer cannot spin us forever.
+    let (tmp, mut file) = {
+        let mut attempt = Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+        for _ in 0..128 {
+            let seq = WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut tmp = dir.join(stem);
+            tmp.as_mut_os_string()
+                .push(format!(".{}.{seq}.tmp", std::process::id()));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+            {
+                Ok(f) => {
+                    attempt = Ok((tmp, f));
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        attempt?
+    };
+    // Replacing an existing file should keep its permissions, not silently widen them to the umask
+    // default (best effort, Unix only — ACLs and xattrs are out of scope).
+    #[cfg(unix)]
+    if let Ok(meta) = std::fs::metadata(path) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(meta.permissions().mode()));
+    }
     // Ordered by what has to survive: bytes durable first, then the rename that publishes them.
     let written = file
         .write_all(bytes)
@@ -148,6 +182,12 @@ pub(crate) fn write_atomically(
         std::fs::remove_file(&tmp).ok();
     }
     written?;
+    // fsync the directory so the rename entry itself — not just the file's bytes — survives a power
+    // loss. A no-op on Windows, where directories are not fsync targets and rename is durable.
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
     Ok(())
 }
 
@@ -186,6 +226,29 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0);
         std::fs::remove_file(&path).ok();
+    }
+
+    /// A symlink planted at the predictable temp name must not be followed and made to truncate its
+    /// target: `create_new` refuses the pre-existing path, so the save still lands correctly.
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_does_not_follow_a_planted_temp_symlink() {
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!("lexindex_symlink_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, b"do not truncate me").unwrap();
+        let target = dir.join("catalog.bin");
+        // Plant a symlink at the exact next temp name the writer will try.
+        let seq = WRITE_SEQ.load(Ordering::Relaxed);
+        let planted = dir.join(format!("catalog.bin.{}.{seq}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &planted).unwrap();
+
+        write_atomically(&target, b"payload").unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"payload"); // save landed
+        assert_eq!(std::fs::read(&victim).unwrap(), b"do not truncate me"); // victim untouched
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
