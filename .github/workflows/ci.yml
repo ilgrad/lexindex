@@ -38,6 +38,11 @@ jobs:
         run: cargo test
       - name: test (no-default-features)
         run: cargo test --no-default-features
+      # Debug and release are different programs here: `debug_assert!`s inside ptr_hash and
+      # cacheline-ef fire only in debug, and the optimiser is free to reorder the bounds reasoning
+      # they document. The regression tests for the remap bound are only meaningful in both.
+      - name: test (release)
+        run: cargo test --release
       - name: cargo audit
         run: cargo audit
       - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap)

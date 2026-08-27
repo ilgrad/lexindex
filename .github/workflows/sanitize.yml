@@ -1,0 +1,58 @@
+name: Sanitizers
+
+# Undefined behaviour does not show up in a normal `cargo test`: the defect this workflow exists to
+# catch (an out-of-bounds read past ptr_hash's remap) only tripped a debug assertion in one build out
+# of a few dozen, and was silent in release. Weekly rather than per-push because both tools are slow
+# and neither is a gate on a green PR.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # Mondays, 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  asan:
+    name: AddressSanitizer (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      # `--target` is required: without it the sanitizer flags also instrument build scripts and
+      # proc-macros, which then run under an uninstrumented host and fail to link.
+      # `--lib --tests` skips doctests: rustdoc does not link the sanitizer runtime into the
+      # snippets it compiles, so they fail with undefined `__asan_*` symbols before running.
+      - name: cargo test under ASan
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+        run: cargo +nightly test --target x86_64-unknown-linux-gnu --lib --tests
+
+  miri:
+    name: Miri (fst only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      # Deliberately narrow. The `mph` path pulls in ptr_hash's prefetch and SIMD intrinsics, which
+      # Miri does not support, and the interpreter is far too slow to build a perfect hash — ASan
+      # above covers that half. What is left for Miri is where lexindex does its own byte-range and
+      # pointer work: `blob` (the shared, range-limited views every index borrows from) and
+      # `subsequence` (the automaton's index arithmetic). Interpreting the whole fst suite would
+      # take hours and add nothing.
+      # Isolation off because these tests write real files; under Miri's default isolation those
+      # calls are refused rather than checked.
+      - name: cargo miri test (blob + subsequence)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: |
+          cargo +nightly miri test --no-default-features --lib blob::
+          cargo +nightly miri test --no-default-features --lib subsequence::
