@@ -92,9 +92,13 @@ proptest! {
         let _ = StringIndex::from_bytes(&data);
     }
 
-    // A single flipped byte in a real blob must also fail cleanly, never panic.
+    // A single flipped byte in a real blob must be *rejected* by an owned load, not merely survive
+    // it. Owned `from_bytes` runs the FST's CRC-32 checksum, which detects every single-byte error
+    // (a ≤8-bit burst) with certainty; a flip in the magic or the framing fails even earlier. So the
+    // guarantee is stronger than "no panic" — it is a clean `Err`, with no corrupt index ever handed
+    // back to be queried. (`load_mmap` deliberately skips this scan; it is not exercised here.)
     #[test]
-    fn string_index_corrupt_blob_never_panics(
+    fn string_index_corrupt_blob_is_rejected(
         keys in prop::collection::vec("[ab]{0,6}", 1..30),
         at in any::<prop::sample::Index>(),
         xor in 1u8..=255,
@@ -102,7 +106,10 @@ proptest! {
         let mut blob = StringIndex::build(&keys).unwrap().to_bytes();
         let pos = at.index(blob.len());
         blob[pos] ^= xor;
-        let _ = StringIndex::from_bytes(&blob);
+        prop_assert!(
+            StringIndex::from_bytes(&blob).is_err(),
+            "single-byte flip at {pos} (xor {xor}) was accepted by an owned load",
+        );
     }
 }
 

@@ -245,14 +245,21 @@ impl StringIndex {
     }
 
     /// Reconstruct an index from [`StringIndex::to_bytes`] output (copies the blob into owned memory).
+    ///
+    /// The whole FST is checksum-verified, so a corrupted blob returns an error rather than an index
+    /// that could panic mid-query — `fst`'s own reader validates only the framing and warns that a
+    /// structurally-plausible but corrupt body "will probably panic" on traversal. That costs one
+    /// `O(blob)` pass, which is the same order as the copy this method already makes;
+    /// [`load_mmap`](Self::load_mmap) skips it to stay instant (see its caveat).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
     /// Reconstruct from a shared byte source, borrowing the FST from it without copying. Backs both the
     /// owned [`from_bytes`](StringIndex::from_bytes) and the zero-copy
-    /// [`load_mmap`](StringIndex::load_mmap).
-    fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
+    /// [`load_mmap`](StringIndex::load_mmap). `verify` runs the FST's `O(blob)` checksum pass — on
+    /// for owned loads, off for mmap so it stays instant.
+    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
         if bytes.len() < 4 || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
@@ -261,6 +268,9 @@ impl StringIndex {
             blob.subslice(4, blob.len())
                 .ok_or(IndexError::Format("fst range out of range"))?,
         )?;
+        if verify {
+            map.as_fst().verify()?;
+        }
         Ok(Self { map })
     }
 
@@ -271,7 +281,7 @@ impl StringIndex {
 
     /// Load an index previously written with [`StringIndex::save`] (reads the whole file into memory).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?))
+        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
     /// **Zero-copy load**: memory-map the file and borrow the index directly from the mapped pages —
@@ -288,7 +298,7 @@ impl StringIndex {
         let file = std::fs::File::open(path)?;
         // SAFETY: see the caveat above — the mapped file must not be mutated while it is mapped.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)))
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
 }
 
