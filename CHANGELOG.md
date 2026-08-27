@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] — 2026-08-27
 
 ### Fixed
 
@@ -23,15 +23,54 @@ All notable changes to this project are documented here. The format follows
   test rebuilds until the zone occurs and asserts the guard. Lookup cost is unchanged (A-B against
   the 0.6.0 binary, `std::HashMap` control: PH 330 vs 331 ns, CHI 244 vs 244); builds pay ~1% for
   measuring the cap (one streamed `index_no_remap` pass over the members).
+- **`id_unchecked` is bounded too.** It documents skipping the membership *comparison*, not the
+  bounds, but it called `mph.index()` directly and so kept the defect above for any caller who
+  passed a key that was not in fact a member. It now resolves through the same guarded path and
+  returns a valid slot for any input.
+- **`subsequence` matches characters, not bytes.** `fst`'s `Subsequence` automaton advances one
+  byte at a time, so a query character matched if its bytes appeared anywhere in order:
+  `subsequence("é")` (`[C3 A9]`) matched `"àΩ"` (`[C3 A0 CE A9]`), which contains neither
+  character. Every non-ASCII subsequence query was affected. Replaced with an automaton that
+  rewinds a partial character on mismatch — exactly correct rather than conservative, because
+  UTF-8's lead and continuation byte classes are disjoint.
+- **`save` is atomic.** All three indexes write a sibling temporary and rename it into place, so a
+  crash or a full disk leaves the previous file intact instead of a truncated one that still has a
+  valid magic. `load` no longer copies the file buffer a second time.
 
 ### Changed
 
-- **Blob formats: `PerfectHashIndex` writes `BMP3`, `CompactHashIndex` writes `BCH3`** — the same
-  layouts as before plus the `overflow_cap` field. `BMP2`, `BCH2` and `BCH1` blobs still load
-  (zero-copy under mmap included) with the cap treated as unbounded — exactly the behaviour they
-  were built with, so loading an old blob neither gains nor loses safety; **rebuilding** an index
-  on 0.7.0 is what closes the unchecked-remap window for it. 0.6.x cannot read the new formats,
-  hence the version bump.
+- **Blob formats: `PerfectHashIndex` writes `BMP3`, `CompactHashIndex` writes `BCH3`** — the
+  previous layouts plus the `overflow_cap` field and a 32-bit check over the lexindex header. The
+  check is not decoration: `overflow_cap` *bounds an otherwise unchecked read*, so a header that
+  lost bytes in transit must fail loudly rather than steer queries.
+- **Blobs written before 0.7 are healed or refused, never loaded unbounded.** A `BMP2`
+  (`PerfectHashIndex`) blob is healed: its arena holds every key, so the bound is recomputed
+  exactly at load, costing O(n) hashes once. A `BCH1`/`BCH2` (`CompactHashIndex`) blob stores no
+  keys, cannot be repaired, and is refused with a message naming the fix — loading it would
+  reinstate the out-of-bounds read. Rebuild those indexes on 0.7.
+- **Construction failure is an error, not a panic.** `IndexError::Build` replaces the
+  `unwrap_or_else` fallback path when both parameter sets fail. Loading now also rejects a header
+  claiming more than `u32::MAX` keys (ids are `u32`) and cross-checks the deserialised MPH's own
+  key count against the header's.
+- **Python: any iterable of keys, any `os.PathLike` path.** Constructors took only sequences, so
+  building from a generator raised `TypeError`; paths took only `str`, so a `pathlib.Path` had to
+  be stringified at every call site. The stubs claimed `list[str]` where tuples were always
+  accepted, and were widened to match reality.
+- **Honest wording for measured behaviour.** Perfect-hash ids are documented as *not* reproducible
+  across builds (ptr_hash's construction is randomised — measured on 50 k keys, ~53 % keep their
+  id when the same key set is rebuilt); the fingerprint false-positive rate is documented as a
+  design rate against random non-members, not a defence against chosen queries (both hashes are
+  deterministic and unseeded); an `epserde` blob is documented as portable only across machines of
+  the same endianness and pointer width.
+- `bench/compare.py` timed each competitor's first `import` as part of its build, which flattered
+  lexindex — imported at module scope. Builds are now the median of five runs after a warm-up.
+
+### Added
+
+- A weekly `sanitize` workflow: AddressSanitizer over the whole suite (the class of defect fixed
+  above is invisible to a normal `cargo test`) and Miri over the fst-only build. CI also runs
+  `cargo test --release`, and a release preflight refuses a tag whose version does not match
+  `Cargo.toml`, `pyproject.toml`, `CITATION.cff` and a dated `CHANGELOG.md` section.
 
 ## [0.6.0] — 2026-08-27
 

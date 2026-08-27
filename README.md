@@ -92,9 +92,9 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 
 ```toml
 [dependencies]
-lexindex = { git = "https://github.com/ilgrad/lexindex" }
+lexindex = "0.7"
 # fst-only (drop the ptr_hash dependency):
-# lexindex = { git = "...", default-features = false }
+# lexindex = { version = "0.7", default-features = false }
 ```
 
 ## Usage
