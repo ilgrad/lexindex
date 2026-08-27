@@ -10,7 +10,10 @@ are stable for the same key set. It is backed by a single structure — a **fini
 
 - **`key → id`.** The FST stores the sorted keys as a minimised automaton, sharing common prefixes
   *and* suffixes, mapping each key to its rank (an output value). It drives prefix, range, fuzzy
-  (Levenshtein) and subsequence iteration by walking the automaton — never a full scan.
+  (Levenshtein) and subsequence iteration by walking the automaton — there is no separate
+  materialised key list to scan. Prefix and range queries seek directly; a broad fuzzy or
+  subsequence pattern can still visit most of the automaton's nodes, so those are linear in the
+  index in the worst case, just with no second copy of the keys.
 - **`id → key`: a rank-walk, with no stored reverse map.** Because a key's id equals the sum of the
   output values along its accepting path, `key(id)` reconstructs the key directly from the FST: start at
   the root with an accumulator of 0, and at each node take the **last** transition whose
@@ -50,18 +53,23 @@ Because the keys themselves are never stored, size is just the MPH (~0.27 B/key 
 bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
 rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
 (6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH4"][n][fp_bits][overflow_cap][mph length][side_len]
+`id → key`. The serialised blob is `[magic "BCH5"][n][fp_bits][overflow_cap][mph length][side_len]
 [payload][check][mph epserde bytes][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — `overflow_cap` bounds an otherwise unchecked read, so it is
 not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
-payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, fingerprint)` pair
+payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, second hash)` pair
 — 16 bytes — per key and never the strings, so peak build memory is `16·n` bytes over the input
-regardless of key length. Keys that collide in the 64-bit hash get tail ids in a side table, matched
-by fingerprint (see `PerfectHashIndex` below); the one silent case left is a pair colliding in *both*
-hashes at once (`2^-(64+b)` per pair), which is indistinguishable from a duplicate key by
-construction and collapses into one entry. 0.7 blobs (`BCH3`) still load; 0.5/0.6 blobs
-(`BCH1`/`BCH2`) are refused; see below.
+regardless of key length. Keys that collide in the 64-bit hash get tail ids in a side table (see
+`PerfectHashIndex` below) holding the **full 64-bit second hash** — not the table's truncated width —
+so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
+runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
+one silent case left is a pair colliding in *both* 64-bit hashes at once (`≈ 2^-128` per pair), which
+is indistinguishable from a duplicate key by construction and collapses into one entry. 0.7 blobs
+(`BCH3`) still load, as does a collision-free 0.8.0 `BCH4` (bit-identical to v5); a `BCH4` *with* a
+side table stored truncated side fingerprints and is refused with a rebuild message. 0.5/0.6 blobs
+(`BCH1`/`BCH2`) are refused; see below. On load, side-table ids are structurally required to be
+exactly the tail range `[m, n)` — the checksums vouch for transport, not construction.
 
 **The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
 raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
@@ -153,9 +161,13 @@ deterministic (an attacker can recompute them), and the embedded minimal-perfect
 region that `ptr_hash` reads **unchecked**, so a crafted payload can steer an out-of-bounds read no
 checksum can catch. What narrows that: `overflow_cap` — the bound on the one otherwise-unchecked
 remap read — is **recomputed from the arena on every `PerfectHashIndex` load**, never trusted from
-any header. `CompactHashIndex` stores no keys to recompute from, so its cap is trusted from the
-checked header. `load_mmap` skips every checksum scan by design, trusting the mapped file outright to
-keep mapping time independent of blob size.
+any header, and side-table ids are structurally required to be exactly the tail range `[m, n)` on
+every load, so no blob can hand `id()` a value at or past `len()`. `CompactHashIndex` stores no keys
+to recompute from, so its cap is trusted from the checked header. `StringIndex` sits differently: the
+FST checksum catches accidental corruption, and `fst` documents that even invalid input cannot
+violate memory safety — a crafted, re-checksummed FST can at worst panic or answer wrongly, never
+read out of bounds. `load_mmap` skips every checksum scan by design, trusting the mapped file
+outright to keep mapping time independent of blob size.
 
 ## Cargo features
 

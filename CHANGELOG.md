@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`CompactHashIndex` no longer merges two distinct keys that collide in the 64-bit slot hash when
+  their *truncated* fingerprints also tie.** The 0.8.0 build deduplicated on
+  `(hash, fingerprint_bits-wide fingerprint)`, so at narrow widths a genuine hash collision had a
+  `2^-fingerprint_bits` chance of silently collapsing into one id — the repository's own pinned
+  collision pair reproduces it at 1 bit (`len() == 501` for 502 distinct keys). The collision side
+  table now stores the **full 64-bit second hash** regardless of the table width (the build pairs
+  were already 16 bytes, so build memory is unchanged), and the side probe runs *before* the
+  fingerprint table, which could otherwise answer for a side key whose truncated bits tie its
+  representative's. Two distinct keys now merge only by colliding in **both** 64-bit hashes at once
+  (`≈ 2^-128` per pair), independent of `fingerprint_bits`. The blob magic moves to **`BCH5`** (same
+  layout): a collision-free 0.8.0 `BCH4` is bit-identical and still loads, one holding a side table
+  is refused with a message naming the rebuild — its truncated side fingerprints cannot be widened
+  without the keys.
+- **Side-table ids are validated on load.** Both perfect-hash loaders now require the side ids to be
+  exactly the tail range `[m, n)` — structurally, not via the checksums, which vouch for transport
+  rather than construction. A malformed blob could previously hand `CompactHashIndex::id()` an id at
+  or past `len()`.
+- **Header-length arithmetic is checked for 32-bit targets.** The side-table byte count is computed
+  with `checked_mul` and `mph_len` converted with a checked cast, so a fabricated length fails
+  cleanly instead of wrapping or truncating on a 32-bit build (the published wheels are 64-bit, but
+  the crate is not).
+
+### Changed
+
+- **The Python `CompactHashIndex` constructor streams.** Items are hashed to their 16-byte pair one
+  at a time as they come off the iterator (under the GIL) and each string is released immediately,
+  so a generator-fed build no longer materialises the whole corpus on the binding side. The other
+  two constructors still collect — those indexes store the keys.
+
 ## [0.8.0] — 2026-08-27
 
 ### Added

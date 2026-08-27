@@ -19,7 +19,9 @@ Three complementary, build-once / query-many structures — pick by what you nee
   ([`fst`](https://crates.io/crates/fst)). Exact `string → id` and `id → string`, plus **prefix**,
   **range**, **predecessor / successor** (nearest key ≤ / ≥ a query), **fuzzy** (bounded Levenshtein
   edit distance), **subsequence**, and **lazy full iteration** — all driven by automata over the FST,
-  never a full scan — in a compressed, serialisable, memory-mappable form. The only structure here that
+  with no separate key list to scan (exact/prefix/range seek directly; a broad fuzzy or subsequence
+  pattern may still traverse most of the automaton) — in a compressed, serialisable, memory-mappable
+  form. The only structure here that
   answers **ordered and typo-tolerant** queries. Use it for autocomplete, fuzzy search, browse, and
   ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
@@ -175,12 +177,14 @@ assert_eq!(raw, id);
   a non-member survives both only with probability `2^-b`, the tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH4"][n][fp_bits][overflow_cap][mph_len][side_len][payload][check][mph][bit-packed
+  is `[magic "BCH5"][n][fp_bits][overflow_cap][mph_len][side_len][payload][check][mph][bit-packed
   fingerprints][side]` — the payload hash is verified on owned loads, so a corrupted blob fails
-  cleanly. Its build **streams**: only a 16-byte `(hash, fingerprint)` pair is kept per key, never
-  the strings. 0.7 blobs (`BCH3`) still load; 0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they
-  predate the recorded remap bound and store no keys to recompute it from, so loading one would
-  reinstate an out-of-bounds read — rebuild instead.
+  cleanly. Its build **streams**: only a 16-byte `(hash, second hash)` pair is kept per key, never
+  the strings. 0.7 blobs (`BCH3`) still load, as does a collision-free 0.8.0 `BCH4` (bit-identical);
+  a `BCH4` holding a side table is refused — its side fingerprints were truncated — with a message
+  naming the rebuild. 0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they predate the recorded remap
+  bound and store no keys to recompute it from, so loading one would reinstate an out-of-bounds
+  read — rebuild instead.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give
@@ -193,8 +197,9 @@ assert_eq!(raw, id);
   serialised via [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and
   queries identically on any build — the precondition for persistence. `CompactHashIndex` shares the
   same version-stable slot hash plus a second independent one for the fingerprint, and resolves hash
-  collisions the same way (matching side keys by fingerprint — so only a pair colliding in **both**
-  hashes at once, `2^-(64+b)`, would merge).
+  collisions the same way — its side table keeps the second hash at its **full 64 bits** whatever
+  `fingerprint_bits` is set to, so only a pair colliding in **both** 64-bit hashes at once
+  (`≈ 2^-128` per pair) would merge.
 - **Zero-copy `load_mmap`** (the default `mmap` feature, `memmap2`) memory-maps a saved blob and
   borrows the index directly from the mapped pages — no read into RAM, so a multi-gigabyte index is
   ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole FST;

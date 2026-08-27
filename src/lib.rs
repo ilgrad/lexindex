@@ -6,7 +6,8 @@
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
 //!   `string → id` and `id → string` (the reverse reconstructed from the FST by a rank-walk, no stored
 //!   map), plus **prefix**, **range**, **fuzzy** (Levenshtein), and **subsequence** iteration
-//!   (automaton-driven, no full scan). Use it for autocomplete / fuzzy search / ordered scans.
+//!   (automaton-driven; no separate key list to scan). Use it for autocomplete / fuzzy search /
+//!   ordered scans.
 //! - [`CompactHashIndex`] — the **smallest** `string → dense id` map: a minimal perfect hash
 //!   ([`ptr_hash`], the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
 //!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
