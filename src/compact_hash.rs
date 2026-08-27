@@ -28,8 +28,8 @@ pub struct CompactHashIndex {
     fps: SharedBytes,            // n fingerprints of fp_bits each, bit-packed in slot order
     fp_bits: u32,                // 1..=64
     n: usize,
-    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); `u64::MAX` for blobs
-    // from versions that did not record it, meaning "unbounded" — the pre-0.7 behaviour.
+    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`). Blobs written before
+    // 0.7 recorded it are refused: with no stored keys there is nothing to recompute it from.
     overflow_cap: u64,
 }
 
@@ -50,9 +50,13 @@ impl CompactHashIndex {
     }
 
     /// Build storing exactly `fingerprint_bits` (1..=64) per key. Fewer bits ⇒ smaller index but a
-    /// higher false-positive rate on membership: exactly `2^-fingerprint_bits` (6.25% at 4 bits,
-    /// ≈ 0.4% at 8, ≈ 0.0015% at 16). Duplicates are removed; ids are arbitrary dense slots in
-    /// `[0, n)` (no defined order).
+    /// higher false-positive rate on membership: `2^-fingerprint_bits` by construction (6.25% at 4
+    /// bits, ≈ 0.4% at 8, ≈ 0.0015% at 16; measured 6.2530% at 4 bits over 2 M non-member probes).
+    /// That rate describes *random* non-members — both hashes are deterministic and unseeded, so it
+    /// is not a defence against an adversary who chooses the queries. Duplicates are removed; ids
+    /// are arbitrary dense slots in `[0, n)` (no defined order) and, like
+    /// [`PerfectHashIndex`](crate::PerfectHashIndex)'s, are not reproducible across builds — persist
+    /// the blob, not the key list.
     pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

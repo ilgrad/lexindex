@@ -36,7 +36,9 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   computed from a **second, independent** hash of the key. `id(key)` accepts the slot only if the
   query's fingerprint matches the stored one. Independence of the two hashes makes the chance a
   non-member both lands on a used slot and matches its fingerprint `2^-fingerprint_bits` — the
-  tunable false-positive rate — exactly `2^-8k`: 0.390 625 % at 1 byte, 0.001 526 % at 2. Verified
+  tunable false-positive rate — `2^-8k` by construction: 0.390 625 % at 1 byte, 0.001 526 % at 2.
+  That is a *design* rate, not a guarantee against an adversary: both hashes are deterministic and
+  unseeded, so anyone who can choose the queries can search for a false positive offline. Verified
   statistically on the 0.5.0 code, dictionary members with two non-member populations: 2 M random
   strings measured 0.384 % (z = −1.5 against theory) and 33/2 M at 2 bytes (z = +0.5); 50 000
   held-out *real words* measured 0.310 % (z = −2.9) — at or slightly below theory in every case,
@@ -50,9 +52,9 @@ rare compact-construction failure, and both serialise identically) plus the fing
 (6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH3"][n][fp_bits][overflow_cap][mph length][mph
 epserde bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits
-`[i·b, (i+1)·b)`, little-endian). A 0.5.x `BCH1` blob still loads — including zero-copy under
-mmap — because its byte-aligned `k`-byte fingerprints are bit-identical to the packed layout at
-`8k` bits, and a 0.6.0 `BCH2` blob is `BCH3` minus the cap field; new blobs are always `BCH3`.
+`[i·b, (i+1)·b)`, little-endian), with a 32-bit check over the lexindex header — `overflow_cap`
+bounds an otherwise unchecked read, so it is not taken on trust from a blob that lost bytes in
+transit. 0.5/0.6 blobs (`BCH1`/`BCH2`) are refused; see below.
 
 **The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
 raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
@@ -61,9 +63,14 @@ whose raw slot lands in the trailing free zone therefore indexes out of bounds �
 at best, undefined behaviour in release. The cap recorded at build time is the remap's exact length
 (the largest member `raw − n`, plus one, measured by streaming every member through
 `index_no_remap`), and queries answer `None` outright for raw slots past it: those slots are
-provably free, so no member can live there. Blobs from versions that did not record the cap
-(`BCH1`/`BCH2`/`BMP2`) load with the cap "unbounded" — exactly their original behaviour; rebuilding
-is what closes the window for them.
+provably free, so no member can live there. Every query path is bounded by it, `id_unchecked`
+included: that method skips the membership *comparison*, not the bounds.
+
+Blobs written before the cap existed cannot be loaded as they are, since that would reinstate the
+defect. `PerfectHashIndex` heals a `BMP2` blob instead — its arena holds every key, so the cap is
+recomputed exactly at load (O(n) hashes, paid once). `CompactHashIndex` stores no keys and has
+nothing to recompute from, so a `BCH1`/`BCH2` blob is refused with a message naming the fix.
+Soundness outranks compatibility with a two-day-old format.
 
 ## `PerfectHashIndex`
 
@@ -83,8 +90,8 @@ below ~10 M keys and a real design consideration at 10⁸–10⁹.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
 where membership is already guaranteed. The serialised blob is `[magic "BMP3"][n][overflow_cap][mph
-length][mph epserde bytes][arena bytes]` (`BMP2` blobs from 0.5/0.6 still load; the cap plays the
-same role as in `CompactHashIndex` above), and the arena is `[n+1][offset width][offsets][data]`. Offsets are
+length][check][mph epserde bytes][arena bytes]` (`BMP2` blobs from 0.5/0.6 load with the cap
+recomputed from the arena; the cap plays the same role as in `CompactHashIndex` above), and the arena is `[n+1][offset width][offsets][data]`. Offsets are
 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
 (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
 whole structure to 13.60 B/key.
@@ -92,6 +99,17 @@ whole structure to 13.60 B/key.
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
 between them is purely a size-vs-exactness trade, not a different lookup path.
+
+**Ids are not reproducible across builds.** The key *hash* is version-stable, but `ptr_hash`'s
+construction is randomised, so building the same key set twice assigns different slots — measured on
+50 000 keys, ~53 % kept their id. `save`/`load` of one built index is exact (the blob carries the
+MPH itself), so an id written down anywhere outside the index must be paired with the blob that
+produced it, never with the key list. `StringIndex` has no such caveat: its ids are the sorted rank.
+
+**Blob portability.** The MPH region is `epserde`, which stores an in-memory layout: a blob moves
+between machines of the same endianness and pointer width (every published wheel and CI target is
+64-bit little-endian), not to a big-endian target. `StringIndex`'s blob is the `fst`, whose encoding
+is little-endian by specification and byte-portable.
 
 ## Zero-copy `load_mmap`
 

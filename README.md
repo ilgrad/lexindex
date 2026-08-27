@@ -163,14 +163,20 @@ assert_eq!(raw, id);
   the 0.2.0 front-coded layout on real words (12.6 → 5.95 B/key) and simpler to reason about.
   `from_bytes` validates the magic and hands the rest to `fst`, which is itself bounds-checked, so
   loading an untrusted blob can fail but never corrupts.
+- **Perfect-hash ids are not reproducible across builds.** `ptr_hash`'s construction is randomised,
+  so building the *same* key set twice assigns different slots — measured on 50 k keys, only ~53 % of
+  them keep their id. Ids are stable across `save`/`load` of one built index, so persist the **blob**,
+  not the key list, whenever an id is written down anywhere else. `StringIndex` ids are the sorted
+  rank and are reproducible by construction.
 - **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
   slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's *independent*
   `b`-bit fingerprint against the stored one; a match is a hit. Because the two hashes are independent,
   a non-member survives both only with probability `2^-b`, the tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH3"][n][fp_bits][overflow_cap][mph][bit-packed fingerprints]`; 0.5/0.6 blobs
-  (`BCH1`/`BCH2`) still load, zero-copy included.
+  is `[magic "BCH3"][n][fp_bits][overflow_cap][mph_len][check][mph][bit-packed fingerprints]`.
+  0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they predate the recorded remap bound and store no
+  keys to recompute it from, so loading one would reinstate an out-of-bounds read — rebuild instead.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give
@@ -214,8 +220,11 @@ better; the capability columns are why you would still pick a larger one.
 
 Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` map — 2.3× below
 `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
-false-positive rate (exactly `2^-fingerprint_bits`: **6.25 %** at 4 bits, **≈0.4 %** at 8,
-**≈0.0015 %** at 16, which the benchmark confirms) and don't need `id → key`. It stays below
+false-positive rate (`2^-fingerprint_bits` by construction — the fingerprint hash is independent of
+the slot hash — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
+z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 16) and don't need
+`id → key`. It is not a security primitive: both hashes are deterministic and unseeded, so an
+adversary who chooses the queries can find false positives at will. It stays below
 marisa's 2.98 B/key at every width up to 21 bits — the [width guide](docs/usage.md) tables the
 trade-off. **`StringIndex` is the only
 structure that answers fuzzy and range queries at all**, at 4× below a plain DAWG. `marisa-trie`

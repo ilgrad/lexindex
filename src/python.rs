@@ -31,9 +31,21 @@ use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::types::{PyBytes, PyString};
+use std::path::PathBuf;
 
 #[cfg(feature = "mph")]
 use crate::{CompactHashIndex, PerfectHashIndex};
+
+/// Collect any Python iterable of `str` — list, tuple, generator, an open file — into borrowed
+/// strings. `Vec<PyBackedStr>` as a parameter would accept only sequences, which rules out building
+/// straight from a generator over a large corpus.
+fn collect_strs(items: &Bound<'_, PyAny>) -> PyResult<Vec<PyBackedStr>> {
+    let mut out = Vec::with_capacity(items.len().unwrap_or(0));
+    for item in items.try_iter()? {
+        out.push(item?.extract()?);
+    }
+    Ok(out)
+}
 
 fn to_py(e: IndexError) -> PyErr {
     match e {
@@ -52,7 +64,8 @@ pub struct PyStringIndex {
 impl PyStringIndex {
     /// Build from an iterable of strings (duplicates removed; ids are sorted rank).
     #[new]
-    fn new(py: Python<'_>, items: Vec<PyBackedStr>) -> PyResult<Self> {
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let items = collect_strs(items)?;
         let inner = py
             .detach(|| StringIndex::build(items.iter()))
             .map_err(to_py)?;
@@ -199,14 +212,14 @@ impl PyStringIndex {
     }
 
     /// Write the index to `path`.
-    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        py.detach(|| self.inner.save(path)).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
     }
 
     /// Load an index previously written with `save`.
     #[staticmethod]
-    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
-        let inner = py.detach(|| StringIndex::load(path)).map_err(to_py)?;
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::load(&path)).map_err(to_py)?;
         Ok(Self { inner })
     }
 
@@ -214,8 +227,8 @@ impl PyStringIndex {
     /// multi-gigabyte index is ready instantly and its pages are shared across processes. The mapped
     /// file must not be modified while the index is alive.
     #[staticmethod]
-    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
-        let inner = py.detach(|| StringIndex::load_mmap(path)).map_err(to_py)?;
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| StringIndex::load_mmap(&path)).map_err(to_py)?;
         Ok(Self { inner })
     }
 }
@@ -258,7 +271,8 @@ pub struct PyPerfectHashIndex {
 impl PyPerfectHashIndex {
     /// Build from an iterable of strings (duplicates removed; ids are arbitrary dense slots).
     #[new]
-    fn new(py: Python<'_>, items: Vec<PyBackedStr>) -> PyResult<Self> {
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let items = collect_strs(items)?;
         let inner = py
             .detach(|| PerfectHashIndex::build(items.iter()))
             .map_err(to_py)?;
@@ -332,23 +346,23 @@ impl PyPerfectHashIndex {
     }
 
     /// Write the dictionary to `path`.
-    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        py.detach(|| self.inner.save(path)).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
     }
 
     /// Load a dictionary previously written with `save`.
     #[staticmethod]
-    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
-        let inner = py.detach(|| PerfectHashIndex::load(path)).map_err(to_py)?;
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| PerfectHashIndex::load(&path)).map_err(to_py)?;
         Ok(Self { inner })
     }
 
     /// Memory-map the file and borrow the key arena zero-copy (only the small MPH is read into RAM).
     /// The mapped file must not be modified while the dictionary is alive.
     #[staticmethod]
-    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
         let inner = py
-            .detach(|| PerfectHashIndex::load_mmap(path))
+            .detach(|| PerfectHashIndex::load_mmap(&path))
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -373,10 +387,11 @@ impl PyCompactHashIndex {
     #[pyo3(signature = (items, fingerprint_bytes=1, *, fingerprint_bits=None))]
     fn new(
         py: Python<'_>,
-        items: Vec<PyBackedStr>,
+        items: &Bound<'_, PyAny>,
         fingerprint_bytes: usize,
         fingerprint_bits: Option<u32>,
     ) -> PyResult<Self> {
+        let items = collect_strs(items)?;
         let inner = match fingerprint_bits {
             Some(bits) => {
                 if fingerprint_bytes != 1 {
@@ -447,22 +462,22 @@ impl PyCompactHashIndex {
     }
 
     /// Write the dictionary to `path`.
-    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        py.detach(|| self.inner.save(path)).map_err(to_py)
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
     }
 
     /// Load a dictionary previously written with `save`.
     #[staticmethod]
-    fn load(py: Python<'_>, path: &str) -> PyResult<Self> {
-        let inner = py.detach(|| CompactHashIndex::load(path)).map_err(to_py)?;
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| CompactHashIndex::load(&path)).map_err(to_py)?;
         Ok(Self { inner })
     }
 
     /// Zero-copy load: memory-map the file and borrow the fingerprint table.
     #[staticmethod]
-    fn load_mmap(py: Python<'_>, path: &str) -> PyResult<Self> {
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
         let inner = py
-            .detach(|| CompactHashIndex::load_mmap(path))
+            .detach(|| CompactHashIndex::load_mmap(&path))
             .map_err(to_py)?;
         Ok(Self { inner })
     }

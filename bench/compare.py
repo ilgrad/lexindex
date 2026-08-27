@@ -7,10 +7,13 @@ report a misleading ~0 bytes/key; only a natural, high-entropy vocabulary measur
 
 The modern academic state of the art in *pure compression* (CoCo-trie, XCDAT, PDT, SuRF) is
 research-grade C++ with no Python bindings, so it is cited in the article, not benchmarked here.
-Among installable libraries this measures the axes that matter — build time and **serialised size**
-— and records which *capabilities* each one offers (ordered queries, reverse lookup, and crucially
-whether membership is **exact** or **probabilistic**). Point-lookup latency at the Python level is
-dominated by the call boundary and is reported only as a rough guide.
+Among installable libraries this measures the axes that matter — build time and **serialised
+size** — and records which *capabilities* each one offers (ordered queries, reverse lookup, and
+crucially whether membership is **exact** or **probabilistic**). Build time is the median of five
+runs after a discarded warm-up, so no library is charged for its own first import (lexindex is
+imported at the top of this file; the others import inside their build callable). Point-lookup
+latency at the Python level is dominated by the call boundary and is reported only as a rough
+guide.
 
 Run:
   uv run --with matplotlib --with marisa-trie --with datrie --with dawg2 \\
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import os
 import random
+import statistics
 import sys
 import tempfile
 import time
@@ -58,10 +62,21 @@ N = len(KEYS)
 RAW = sum(len(k.encode()) for k in KEYS) / N
 
 
+REPS = 5
+
+
 def _time(fn) -> tuple[object, float]:
-    t = time.perf_counter()
-    out = fn()
-    return out, (time.perf_counter() - t) * 1e3
+    """Median of `REPS` builds after a discarded warm-up. The warm-up matters for fairness: every
+    competitor imports its module inside its build callable, and charging that one-time import (and
+    the allocator's first growth) to the library would flatter lexindex, which is imported at the
+    top of this file. The median, not the mean, so one scheduling hiccup cannot move the bar."""
+    fn()
+    times = []
+    for _ in range(REPS):
+        t = time.perf_counter()
+        out = fn()
+        times.append((time.perf_counter() - t) * 1e3)
+    return out, statistics.median(times)
 
 
 def _serialised_size(obj) -> int | None:
@@ -182,7 +197,7 @@ def main() -> None:
         bpk = size / N if size else None
         rows.append((name, build_ms, bpk, caps))
         print(
-            f"{name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms   "
+            f"{name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms (median of {REPS})   "
             f"size {bpk if bpk is None else round(bpk, 2)} bytes/key"
         )
 

@@ -328,3 +328,30 @@ def test_multibyte_keys_survive_the_borrowed_path():
 
     ph = lexindex.PerfectHashIndex(words)
     assert ph.keys_of(ph.ids_of(words)) == words
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lambda items: lexindex.CompactHashIndex(items, 1),
+    ],
+)
+def test_builds_from_a_generator_and_takes_pathlike(ctor, tmp_path):
+    """Constructors take any iterable (a generator over a corpus, not just a materialised list),
+    and every path argument takes `os.PathLike` as well as `str`."""
+    words = ["delta", "alpha", "charlie", "bravo"]
+    idx = ctor(w for w in words)
+    assert len(idx) == 4
+    path = tmp_path / "idx.bin"  # a pathlib.Path, not a str
+    idx.save(path)
+    assert type(idx).load(path).id("alpha") == idx.id("alpha")
+    assert type(idx).load_mmap(path).id("alpha") == idx.id("alpha")
+
+
+def test_subsequence_matches_whole_characters():
+    """A multi-byte query character must not match its bytes scattered across two characters:
+    'é' is [C3 A9] and 'àΩ' is [C3 A0 CE A9]."""
+    idx = lexindex.StringIndex(["\u00e0\u03a9", "caf\u00e9", "\u00e8\u00e9"])
+    assert [k for k, _ in idx.subsequence("\u00e9")] == ["caf\u00e9", "\u00e8\u00e9"]

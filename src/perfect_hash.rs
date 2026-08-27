@@ -32,14 +32,19 @@ pub struct PerfectHashIndex {
     mph: Option<DefaultPtrHash>, // None iff empty (ptr_hash needs a non-empty key set)
     arena: StringArena,          // slot → key (also verifies membership)
     n: usize,
-    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); `u64::MAX` for blobs
-    // from versions that did not record it, meaning "unbounded" — the pre-0.7 behaviour.
+    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); recomputed from the
+    // arena when loading a blob written before 0.7 recorded it.
     overflow_cap: u64,
 }
 
 impl PerfectHashIndex {
     /// Build from a collection of strings. Duplicates are removed; ids are arbitrary slots in `[0, n)`
     /// (no defined order — use [`crate::StringIndex`] when order matters).
+    ///
+    /// Ids are **not reproducible**: the perfect hash's construction is randomised, so building the
+    /// same key set twice assigns different slots (measured on 50 k keys, ~53 % keep their id). Ids
+    /// survive [`save`](Self::save)/[`load`](Self::load) of one built index exactly, so persist the
+    /// blob — not the key list — whenever an id is stored outside the index.
     pub fn build<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

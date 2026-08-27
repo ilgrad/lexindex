@@ -128,7 +128,9 @@ dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zer
 ### Choosing the fingerprint width
 
 Size is the minimal perfect hash (~0.27 B/key) plus exactly `fingerprint_bits/8` bytes per key, and
-the membership false-positive rate is exactly `2^-fingerprint_bits` — every width is a point on the
+the membership false-positive rate is `2^-fingerprint_bits` by construction (measured 6.2530 % at
+4 bits and 1.5553 % at 6 over 2 M non-member probes; not a defence against an adversary who chooses
+the queries, since both hashes are deterministic and unseeded) — every width is a point on the
 same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 
 | `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
