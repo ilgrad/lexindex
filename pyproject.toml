@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "lexindex"
-version = "0.5.1"
+version = "0.6.0"
 description = "Compact, immutable string<->id indexes for huge catalogs: an ordered FST with prefix/range/fuzzy, plus minimal-perfect-hash dictionaries (the compact one is ~1.3 B/key)."
 readme = "README.md"
 requires-python = ">=3.11"
