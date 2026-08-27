@@ -218,8 +218,10 @@ better; the capability columns are why you would still pick a larger one.
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
-Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` map — 2.3× below
-`marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
+Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
+actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
+is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.3×
+below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
 false-positive rate (`2^-fingerprint_bits` by construction — the fingerprint hash is independent of
 the slot hash — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
 z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 16) and don't need

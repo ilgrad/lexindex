@@ -50,8 +50,8 @@ Because the keys themselves are never stored, size is just the MPH (~0.27 B/key 
 bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
 rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
 (6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH3"][n][fp_bits][overflow_cap][mph length][mph
-epserde bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits
+`id → key`. The serialised blob is `[magic "BCH3"][n][fp_bits][overflow_cap][mph length][check]
+[mph epserde bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits
 `[i·b, (i+1)·b)`, little-endian), with a 32-bit check over the lexindex header — `overflow_cap`
 bounds an otherwise unchecked read, so it is not taken on trust from a blob that lost bytes in
 transit. 0.5/0.6 blobs (`BCH1`/`BCH2`) are refused; see below.
