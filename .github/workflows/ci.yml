@@ -48,6 +48,26 @@ jobs:
       - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap)
         run: cargo llvm-cov --summary-only --fail-under-lines 95
 
+  # The release workflow ships wheels for Windows and macOS, so their platform-specific code paths
+  # — `save`'s rename-over-existing and permission handling, mmap — deserve a test run, not just a
+  # cross-build. Tests only: fmt/clippy/audit/coverage are platform-independent and stay on the
+  # Linux job above.
+  rust-platforms:
+    name: rust test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: test (default)
+        run: cargo test
+      - name: test (no-default-features)
+        run: cargo test --no-default-features
+
   python-build:
     name: python (ruff · clippy · build)
     runs-on: ubuntu-latest
