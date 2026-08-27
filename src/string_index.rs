@@ -8,7 +8,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use fst::automaton::{Automaton, Levenshtein, Str, Subsequence};
+use fst::automaton::{Automaton, Levenshtein, Str};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
 const MAGIC: &[u8; 4] = b"BIX4";
@@ -170,7 +170,12 @@ impl StringIndex {
 
     /// All `(key, id)` pairs whose key contains `query` as a subsequence — its characters appear in
     /// order but not necessarily contiguously (e.g. `"ace"` matches `"abcde"`) — in lexicographic
-    /// order. Useful for fuzzy/abbreviation matching.
+    /// order. Useful for fuzzy/abbreviation matching. Matching is by **character**, so a multi-byte
+    /// character matches only as a whole (`"é"` does not match `"àΩ"`, whose bytes contain both of
+    /// its own).
+    ///
+    /// Cost is not the `O(query length)` of the seeking queries: the automaton has no prefix to seek
+    /// on, so the traversal visits the FST's nodes and is linear in the index, not in the answer.
     pub fn subsequence(&self, query: &str) -> Vec<(String, u64)> {
         self.subsequence_iter(query).collect()
     }
@@ -181,7 +186,10 @@ impl StringIndex {
         &'a self,
         query: &'a str,
     ) -> impl Iterator<Item = (String, u64)> + 'a {
-        let mut stream = self.map.search(Subsequence::new(query)).into_stream();
+        let mut stream = self
+            .map
+            .search(crate::subsequence::UnicodeSubsequence::new(query))
+            .into_stream();
         std::iter::from_fn(move || {
             stream
                 .next()
@@ -264,7 +272,7 @@ impl StringIndex {
 
     /// Load an index previously written with [`StringIndex::save`] (reads the whole file into memory).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_bytes(&std::fs::read(path)?)
+        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?))
     }
 
     /// **Zero-copy load**: memory-map the file and borrow the index directly from the mapped pages —
@@ -356,6 +364,17 @@ mod tests {
         // "ae" matches apple (a…e) but not apricot (no trailing e)
         let ae: Vec<String> = idx.subsequence("ae").into_iter().map(|(k, _)| k).collect();
         assert_eq!(ae, vec!["apple"]);
+    }
+
+    /// A multi-byte query character must match a whole haystack character, not its bytes scattered
+    /// across two: `é` is `[C3 A9]` and `àΩ` is `[C3 A0 CE A9]`, which a byte-level subsequence
+    /// automaton (fst's own) accepts.
+    #[test]
+    fn subsequence_is_character_aligned() {
+        let idx = StringIndex::build(["àΩ", "café", "èé", "ĉ"]).unwrap();
+        let hits: Vec<String> = idx.subsequence("é").into_iter().map(|(k, _)| k).collect();
+        assert_eq!(hits, vec!["café".to_string(), "èé".to_string()]);
+        assert!(idx.subsequence("Ω").iter().any(|(k, _)| k == "àΩ")); // whole characters still match
     }
 
     #[test]

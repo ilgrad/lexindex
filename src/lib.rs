@@ -34,6 +34,7 @@
 
 mod blob;
 mod string_index;
+mod subsequence;
 
 pub use string_index::StringIndex;
 
@@ -73,6 +74,10 @@ pub enum IndexError {
     /// (De)serialisation of a [`PerfectHashIndex`] blob failed (corrupt or incompatible MPH bytes).
     #[cfg(feature = "mph")]
     Serde(String),
+    /// Constructing the minimal perfect hash failed after exhausting its retry seeds — extremely
+    /// rare; rebuilding with a different key set is the only recourse.
+    #[cfg(feature = "mph")]
+    Build(&'static str),
 }
 
 impl fmt::Display for IndexError {
@@ -84,6 +89,8 @@ impl fmt::Display for IndexError {
             IndexError::Automaton(m) => write!(f, "automaton error: {m}"),
             #[cfg(feature = "mph")]
             IndexError::Serde(m) => write!(f, "serde error: {m}"),
+            #[cfg(feature = "mph")]
+            IndexError::Build(m) => write!(f, "build error: {m}"),
         }
     }
 }
@@ -96,6 +103,8 @@ impl std::error::Error for IndexError {
             IndexError::Format(_) | IndexError::Automaton(_) => None,
             #[cfg(feature = "mph")]
             IndexError::Serde(_) => None,
+            #[cfg(feature = "mph")]
+            IndexError::Build(_) => None,
         }
     }
 }
