@@ -24,9 +24,10 @@ Three complementary, build-once / query-many structures — pick by what you nee
   ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
   ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a small fingerprint per key, storing *no keys
-  at all*. **1.27 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`** and below
+  at all*. **1.27 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`**, down to
+  **0.77 bytes/key** at a 4-bit fingerprint (`fingerprint_bits=4`, 6.25% false-positive rate) — below
   every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
-  (a tunable `256^-k` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
+  (a tunable `2^-bits` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
   footprint is paramount and rare false positives are acceptable.
 - **`PerfectHashIndex`** — a minimal-perfect-hash dictionary with **verified membership** (`id`) and
   **reverse lookup** (`key`); the arena stores full keys, so it is exact but larger. For a known-closed
@@ -57,7 +58,8 @@ list(idx)                    # [("apple", 0), ...]  — lazy iteration in sorted
 idx.ids_of(["apple", "x"])   # [0, None]  — batched: one FFI call, not one per key
 idx.save("catalog.bix")      # persist; StringIndex.load("catalog.bix") reloads it
 
-c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key at scale)
+c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~1.3 B/key at scale;
+#   fingerprint_bits=4 halves that to ~0.8 at a 6.25% false-positive rate)
 c.id("POST")                 # dense id in [0, n); probabilistic membership, no id->key
 c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 
@@ -140,7 +142,8 @@ assert_eq!(dict.id("POST"), Some(id));
 ```rust
 use lexindex::CompactHashIndex;           // requires the default `mph` feature
 
-// The smallest string->id map: 1 fingerprint byte/key ⇒ ~1.3 B/key, ~0.4% membership false-positive.
+// The smallest string->id map: an 8-bit fingerprint/key ⇒ ~1.3 B/key, ~0.4% membership
+// false-positive (build_bits(keys, 4) ⇒ ~0.8 B/key at 6.25%).
 let dict = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 1)?;
 let id = dict.id("POST").unwrap();             // Some(slot); a non-member may rarely read as present
 assert!(dict.contains("GET"));
@@ -162,10 +165,12 @@ assert_eq!(raw, id);
   loading an untrusted blob can fail but never corrupts.
 - **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
   slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's *independent*
-  `k`-byte fingerprint against the stored one; a match is a hit. Because the two hashes are independent,
-  a non-member survives both only with probability `256^-k`, the tunable false-positive rate. Dropping
-  the key arena is what takes it below `marisa-trie`; the price is that membership is probabilistic and
-  there is no `id → key`. The blob is `[magic "BCH1"][n][fp_bytes][mph][fingerprints]`.
+  `b`-bit fingerprint against the stored one; a match is a hit. Because the two hashes are independent,
+  a non-member survives both only with probability `2^-b`, the tunable false-positive rate
+  (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
+  `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
+  is `[magic "BCH2"][n][fp_bits][mph][bit-packed fingerprints]`; 0.5.x `BCH1` blobs still load,
+  zero-copy included.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give
@@ -198,6 +203,7 @@ better; the capability columns are why you would still pick a larger one.
 
 | library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.77** |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.27** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.27** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
@@ -207,8 +213,11 @@ better; the capability columns are why you would still pick a larger one.
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
 Two honest crowns. **`CompactHashIndex` is the smallest `string → dense id` map — 2.3× below
-`marisa-trie`** — when you can accept a bounded false-positive rate (`256^-k`: **≈0.4 %** at 1 byte,
-**≈0.0015 %** at 2, which the benchmark confirms) and don't need `id → key`. **`StringIndex` is the only
+`marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
+false-positive rate (exactly `2^-fingerprint_bits`: **6.25 %** at 4 bits, **≈0.4 %** at 8,
+**≈0.0015 %** at 16, which the benchmark confirms) and don't need `id → key`. It stays below
+marisa's 2.98 B/key at every width up to 21 bits — the [width guide](docs/usage.md) tables the
+trade-off. **`StringIndex` is the only
 structure that answers fuzzy and range queries at all**, at 4× below a plain DAWG. `marisa-trie`
 remains the pick when you need *exact* membership *and* ordering *and* the smallest such index —
 lexindex doesn't claim that particular cell (see below for why).
@@ -250,7 +259,7 @@ real keys in one session (min of 12 runs, idle machine). Absolute numbers are ma
 | structure | build | lookup | note |
 |---|---|---|---|
 | lexindex `PerfectHashIndex::id_unchecked` | ~302 ms | **~189 ns** | closed vocabulary, no membership check |
-| lexindex `CompactHashIndex::id` (fp=1) | ~244 ms | ~237 ns | fingerprint-verified, `256^-1` false-positive rate |
+| lexindex `CompactHashIndex::id` (fp=1) | ~244 ms | ~237 ns | fingerprint-verified, `2^-8` false-positive rate |
 | `std::HashMap<String, u32>` | ~239 ms | ~298 ns | in-RAM, not serialisable |
 | lexindex `PerfectHashIndex::id` (verified) | ~323 ms | ~327 ns | one extra cache line + full key compare |
 | lexindex `StringIndex` (FST) | ~270 ms | ~424 ns | *and* prefix / range / fuzzy |

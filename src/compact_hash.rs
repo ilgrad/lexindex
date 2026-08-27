@@ -1,35 +1,36 @@
 //! Fingerprint minimal-perfect-hash dictionary: the smallest `string → dense id` map.
 //!
 //! Like [`PerfectHashIndex`](crate::PerfectHashIndex) but it stores only a small **fingerprint** per
-//! key instead of the key itself, so it costs a few bytes per key rather than tens. Two trade-offs:
+//! key instead of the key itself, so it costs a byte-ish per key rather than tens. Two trade-offs:
 //! membership is **probabilistic** — a non-member query that hashes to a member's slot *and* whose
-//! fingerprint collides is a false positive, with probability `256^-fingerprint_bytes` (≈ 0.4% at 1
-//! byte, ≈ 0.0015% at 2) — and there is **no reverse `id → key`** (the keys are not stored). Use it
+//! fingerprint collides is a false positive, with probability `2^-fingerprint_bits` (6.25% at 4
+//! bits, ≈ 0.4% at 8, ≈ 0.0015% at 16) — and there is **no reverse `id → key`** (the keys are not
+//! stored). Use it
 //! for a fixed vocabulary where the tiniest footprint matters and rare false positives are acceptable;
 //! reach for [`PerfectHashIndex`](crate::PerfectHashIndex) (exact membership + reverse) or
 //! [`StringIndex`](crate::StringIndex) (ordered) otherwise.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::hash::{fingerprint, hash_key};
+use crate::hash::{fingerprint_bits, hash_key};
 use epserde::prelude::*;
 use ptr_hash::DefaultPtrHash;
 
-const MAGIC: &[u8; 4] = b"BCH1";
-const HEADER_LEN: usize = 24; // [magic 4][n u64][fp_bytes u32][mph_len u64]
+const MAGIC_V1: &[u8; 4] = b"BCH1"; // width field counts bytes; fingerprints byte-aligned
+const MAGIC_V2: &[u8; 4] = b"BCH2"; // width field counts bits; fingerprints bit-packed
+const HEADER_LEN: usize = 24; // [magic 4][n u64][fp width u32][mph_len u64]
 
 /// The smallest string→dense-id dictionary: a minimal perfect hash plus one small fingerprint per key.
 pub struct CompactHashIndex {
     mph: Option<DefaultPtrHash>, // None iff empty
-    fps: SharedBytes,            // n * fp_bytes fingerprints, in slot order
-    fp_bytes: usize,             // 1, 2, or 4
+    fps: SharedBytes,            // n fingerprints of fp_bits each, bit-packed in slot order
+    fp_bits: u32,                // 1..=64
     n: usize,
 }
 
 impl CompactHashIndex {
-    /// Build from a collection of strings, storing `fingerprint_bytes` (1, 2, or 4) per key. Fewer
-    /// bytes ⇒ smaller index but a higher false-positive rate on membership (`256^-fingerprint_bytes`).
-    /// Duplicates are removed; ids are arbitrary dense slots in `[0, n)` (no defined order).
+    /// Build from a collection of strings, storing `fingerprint_bytes` (1, 2, or 4) per key —
+    /// byte-granular sugar for [`build_bits`](Self::build_bits) with `8 × fingerprint_bytes`.
     pub fn build<I, S>(items: I, fingerprint_bytes: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -38,6 +39,23 @@ impl CompactHashIndex {
         if !matches!(fingerprint_bytes, 1 | 2 | 4) {
             return Err(IndexError::Format(
                 "compact-hash: fingerprint_bytes must be 1, 2, or 4",
+            ));
+        }
+        Self::build_bits(items, fingerprint_bytes as u32 * 8)
+    }
+
+    /// Build storing exactly `fingerprint_bits` (1..=64) per key. Fewer bits ⇒ smaller index but a
+    /// higher false-positive rate on membership: exactly `2^-fingerprint_bits` (6.25% at 4 bits,
+    /// ≈ 0.4% at 8, ≈ 0.0015% at 16). Duplicates are removed; ids are arbitrary dense slots in
+    /// `[0, n)` (no defined order).
+    pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if !(1..=64).contains(&fingerprint_bits) {
+            return Err(IndexError::Format(
+                "compact-hash: fingerprint_bits must be in 1..=64",
             ));
         }
         // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
@@ -51,7 +69,7 @@ impl CompactHashIndex {
             return Ok(Self {
                 mph: None,
                 fps: SharedBytes::from_owned(Vec::new()),
-                fp_bytes: fingerprint_bytes,
+                fp_bits: fingerprint_bits,
                 n: 0,
             });
         }
@@ -65,7 +83,8 @@ impl CompactHashIndex {
             ));
         }
         let mph = crate::hash::build_mph(&hashes);
-        let mut fps = vec![0u8; n * fingerprint_bytes];
+        let table_len = (n as u64 * fingerprint_bits as u64).div_ceil(8) as usize;
+        let mut fps = vec![0u8; table_len];
         let mut seen = vec![false; n];
         for (k, h) in keys.iter().zip(&hashes) {
             let slot = mph.index(h);
@@ -75,16 +94,25 @@ impl CompactHashIndex {
                 ));
             }
             seen[slot] = true;
-            let fp = fingerprint(k.as_ref(), fingerprint_bytes);
-            fps[slot * fingerprint_bytes..(slot + 1) * fingerprint_bytes]
-                .copy_from_slice(&fp.to_le_bytes()[..fingerprint_bytes]);
+            write_fp(
+                &mut fps,
+                slot,
+                fingerprint_bits,
+                crate::hash::fingerprint_bits(k.as_ref(), fingerprint_bits),
+            );
         }
         Ok(Self {
             mph: Some(mph),
             fps: SharedBytes::from_owned(fps),
-            fp_bytes: fingerprint_bytes,
+            fp_bits: fingerprint_bits,
             n,
         })
+    }
+
+    /// Width of the stored fingerprints in bits; the membership false-positive rate is
+    /// `2^-fingerprint_bits`.
+    pub fn fingerprint_bits(&self) -> u32 {
+        self.fp_bits
     }
 
     /// Number of distinct keys.
@@ -98,14 +126,14 @@ impl CompactHashIndex {
     }
 
     /// Dense id of `key`, or `None`. Membership is checked against the stored fingerprint, so a `Some`
-    /// result is correct except for a `256^-fingerprint_bytes` false-positive chance on a non-member.
+    /// result is correct except for a `2^-fingerprint_bits` false-positive chance on a non-member.
     pub fn id(&self, key: &str) -> Option<u32> {
         let mph = self.mph.as_ref()?;
         let slot = mph.index(&hash_key(key));
         if slot >= self.n {
             return None;
         }
-        if read_fp(self.fps.as_ref(), slot, self.fp_bytes)? == fingerprint(key, self.fp_bytes) {
+        if read_fp(self.fps.as_ref(), slot, self.fp_bits)? == fingerprint_bits(key, self.fp_bits) {
             Some(slot as u32)
         } else {
             None
@@ -137,7 +165,7 @@ impl CompactHashIndex {
         let mut wanted = Vec::with_capacity(keys.len());
         for k in keys {
             hashes.push(hash_key(k.as_ref()));
-            wanted.push(fingerprint(k.as_ref(), self.fp_bytes));
+            wanted.push(fingerprint_bits(k.as_ref(), self.fp_bits));
         }
         // ptr_hash's stream iterator is internal-iteration only (`next()` is unimplemented by
         // design), so drain it with `for_each`.
@@ -149,13 +177,13 @@ impl CompactHashIndex {
         (0..keys.len())
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {
-                    crate::blob::prefetch_byte(fps, s * self.fp_bytes);
+                    crate::blob::prefetch_byte(fps, (s as u64 * self.fp_bits as u64 / 8) as usize);
                 }
                 let slot = slots[i];
                 if slot >= self.n {
                     return None;
                 }
-                (read_fp(fps, slot, self.fp_bytes)? == wanted[i]).then_some(slot as u32)
+                (read_fp(fps, slot, self.fp_bits)? == wanted[i]).then_some(slot as u32)
             })
             .collect()
     }
@@ -165,7 +193,8 @@ impl CompactHashIndex {
         self.id(key).is_some()
     }
 
-    /// Serialise to `[magic 4][n u64][fp_bytes u32][mph_len u64][mph epserde bytes][fingerprints]`.
+    /// Serialise to `[magic "BCH2"][n u64][fp_bits u32][mph_len u64][mph epserde bytes][bit-packed
+    /// fingerprints]`.
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let mut mph_buf = Vec::new();
         if let Some(mph) = &self.mph {
@@ -174,9 +203,9 @@ impl CompactHashIndex {
         }
         let fp = self.fps.as_ref();
         let mut out = Vec::with_capacity(HEADER_LEN + mph_buf.len() + fp.len());
-        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(MAGIC_V2);
         out.extend_from_slice(&(self.n as u64).to_le_bytes());
-        out.extend_from_slice(&(self.fp_bytes as u32).to_le_bytes());
+        out.extend_from_slice(&self.fp_bits.to_le_bytes());
         out.extend_from_slice(&(mph_buf.len() as u64).to_le_bytes());
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(fp);
@@ -198,15 +227,29 @@ impl CompactHashIndex {
     /// (the bulk) is borrowed zero-copy — so `load_mmap` never copies it.
     fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
-        if bytes.len() < HEADER_LEN || &bytes[0..4] != MAGIC {
+        if bytes.len() < HEADER_LEN || (&bytes[0..4] != MAGIC_V2 && &bytes[0..4] != MAGIC_V1) {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let n = u64::from_le_bytes(bytes[4..12].try_into().unwrap()) as usize;
-        let fp_bytes = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        let width = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
         let mph_len = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
-        if !matches!(fp_bytes, 1 | 2 | 4) {
-            return Err(IndexError::Format("compact-hash: bad fingerprint width"));
-        }
+        // A 0.5.x "BCH1" blob counts the width in bytes and stores each fingerprint byte-aligned
+        // little-endian — bit-for-bit identical to the bit-packed layout at 8× the width, so the
+        // same table is borrowed either way and mmap loads stay zero-copy.
+        let fp_bits = match &bytes[0..4] {
+            b if b == MAGIC_V1 => {
+                if !matches!(width, 1 | 2 | 4) {
+                    return Err(IndexError::Format("compact-hash: bad fingerprint width"));
+                }
+                width * 8
+            }
+            _ => {
+                if !(1..=64).contains(&width) {
+                    return Err(IndexError::Format("compact-hash: bad fingerprint width"));
+                }
+                width
+            }
+        };
         let mph_end = HEADER_LEN
             .checked_add(mph_len)
             .filter(|&e| e <= bytes.len())
@@ -224,8 +267,14 @@ impl CompactHashIndex {
             .subslice(mph_end, blob.len())
             .ok_or(IndexError::Format("fingerprint range out of range"))?;
         // `n` is untrusted (read from the header), so guard the multiply — a fabricated huge `n` would
-        // otherwise overflow `usize` and panic in a debug build instead of failing cleanly.
-        if n.checked_mul(fp_bytes) != Some(fps.len()) {
+        // otherwise overflow and panic in a debug build instead of failing cleanly.
+        let expected = (n as u64)
+            .checked_mul(fp_bits as u64)
+            .map(|bits| bits.div_ceil(8))
+            .ok_or(IndexError::Format(
+                "compact-hash: fingerprint length mismatch",
+            ))?;
+        if expected != fps.len() as u64 {
             return Err(IndexError::Format(
                 "compact-hash: fingerprint length mismatch",
             ));
@@ -233,7 +282,7 @@ impl CompactHashIndex {
         Ok(Self {
             mph,
             fps,
-            fp_bytes,
+            fp_bits,
             n,
         })
     }
@@ -260,12 +309,66 @@ impl CompactHashIndex {
     }
 }
 
-fn read_fp(bytes: &[u8], slot: usize, fp_bytes: usize) -> Option<u64> {
-    let start = slot.checked_mul(fp_bytes)?;
-    let slice = bytes.get(start..start.checked_add(fp_bytes)?)?;
-    let mut buf = [0u8; 8];
-    buf[..fp_bytes].copy_from_slice(slice);
-    Some(u64::from_le_bytes(buf))
+#[inline(always)]
+fn fp_mask(bits: u32) -> u64 {
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    }
+}
+
+/// Fingerprint of `slot` from the bit-packed table, or `None` if the table is too short.
+#[inline(always)]
+fn read_fp(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
+    let bitpos = (slot as u64).checked_mul(bits as u64)?;
+    let byte = (bitpos / 8) as usize;
+    let off = (bitpos % 8) as u32;
+    if let Some(chunk) = bytes.get(byte..byte + 8) {
+        let w = u64::from_le_bytes(chunk.try_into().unwrap());
+        let v = if off + bits <= 64 {
+            w >> off
+        } else {
+            // off ≥ 1 here (bits ≤ 64), so the shift below is < 64
+            (w >> off) | ((*bytes.get(byte + 8)? as u64) << (64 - off))
+        };
+        Some(v & fp_mask(bits))
+    } else {
+        // Within 8 bytes of the table's end (≤ 7 bytes available from `byte`): accumulate the
+        // covering bytes without reading past the end. Only the last few slots ever land here.
+        let last = ((bitpos + bits as u64 - 1) / 8) as usize;
+        let mut v: u64 = 0;
+        for (j, i) in (byte..=last).enumerate() {
+            v |= (*bytes.get(i)? as u64) << (8 * j as u32);
+        }
+        Some((v >> off) & fp_mask(bits))
+    }
+}
+
+/// Write fingerprint `fp` (already masked to `bits`) for `slot` into the zeroed bit-packed table.
+#[inline]
+fn write_fp(fps: &mut [u8], slot: usize, bits: u32, fp: u64) {
+    if bits % 8 == 0 {
+        // Byte-aligned widths (including the 8-bit default) take a straight copy: the generic
+        // OR-in loop below costs a measurable ~2.5% of build time at 1 M keys.
+        let k = (bits / 8) as usize;
+        let start = slot * k;
+        fps[start..start + k].copy_from_slice(&fp.to_le_bytes()[..k]);
+        return;
+    }
+    let bitpos = slot as u64 * bits as u64;
+    let byte = (bitpos / 8) as usize;
+    let off = (bitpos % 8) as u32;
+    // Bytes of `fp << off` past the fingerprint's own span are zero, so skipping the ones that
+    // fall past the table's end drops nothing.
+    for (j, &b) in (fp << off).to_le_bytes().iter().enumerate() {
+        if let Some(dst) = fps.get_mut(byte + j) {
+            *dst |= b;
+        }
+    }
+    if off > 0 && off + bits > 64 {
+        fps[byte + 8] |= (fp >> (64 - off)) as u8;
+    }
 }
 
 #[cfg(test)]
@@ -360,19 +463,131 @@ mod tests {
             .to_bytes()
             .unwrap();
 
-        // The fingerprint-width field (u32 at bytes 12..16) set to an unsupported value is rejected.
-        let mut bad_width = good.clone();
-        bad_width[12] = 3;
+        // The width field (u32 at bytes 12..16) outside 1..=64 bits is rejected...
+        for w in [0u8, 65] {
+            let mut bad_width = good.clone();
+            bad_width[12] = w;
+            assert!(matches!(
+                CompactHashIndex::from_bytes(&bad_width),
+                Err(IndexError::Format(_))
+            ));
+        }
+        // ...and a BCH1 blob may only claim 1, 2 or 4 *bytes*.
+        let mut bad_v1 = good.clone();
+        bad_v1[0..4].copy_from_slice(b"BCH1");
+        bad_v1[12] = 3;
         assert!(matches!(
-            CompactHashIndex::from_bytes(&bad_width),
+            CompactHashIndex::from_bytes(&bad_v1),
             Err(IndexError::Format(_))
         ));
 
-        // Dropping a fingerprint byte makes the table length != n * fp_bytes.
+        // Dropping a byte makes the table length disagree with ceil(n * fp_bits / 8).
         assert!(matches!(
             CompactHashIndex::from_bytes(&good[..good.len() - 1]),
             Err(IndexError::Format(_))
         ));
+    }
+
+    /// A 0.5.x blob loads unchanged: its byte-aligned fingerprints are bit-identical to the packed
+    /// layout at 8× the width, so rewriting a BCH2 blob's magic and width field 16 → 2 *is* a real
+    /// BCH1 blob, byte for byte.
+    #[test]
+    fn a_0_5_bch1_blob_still_loads() {
+        let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
+        let mut v1 = idx.to_bytes().unwrap();
+        assert_eq!(&v1[0..4], b"BCH2");
+        assert_eq!(v1[12], 16);
+        v1[0..4].copy_from_slice(b"BCH1");
+        v1[12] = 2;
+        let restored = CompactHashIndex::from_bytes(&v1).unwrap();
+        assert_eq!(restored.fingerprint_bits(), 16);
+        for w in ["GET", "POST", "PUT", "DELETE"] {
+            assert_eq!(restored.id(w), idx.id(w));
+        }
+        assert_eq!(restored.id("PATCH"), idx.id("PATCH"));
+    }
+
+    /// Every width round-trips through build, serde and the batch path; the fingerprints for the
+    /// last slots sit within 8 bytes of the table's end, covering the tail read path.
+    #[test]
+    fn sub_byte_and_odd_widths_round_trip() {
+        let keys: Vec<String> = (0..300).map(|i| format!("key-{i:03}")).collect();
+        for bits in [1u32, 3, 4, 6, 8, 12, 33, 64] {
+            let idx = CompactHashIndex::build_bits(&keys, bits).unwrap();
+            assert_eq!(idx.fingerprint_bits(), bits);
+            let mut ids: Vec<u32> = keys.iter().map(|k| idx.id(k).expect("member")).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), keys.len(), "bits={bits}: ids not dense");
+            let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+            assert_eq!(restored.fingerprint_bits(), bits);
+            let probes: Vec<String> = keys
+                .iter()
+                .cloned()
+                .chain((0..100).map(|i| format!("miss-{i}")))
+                .collect();
+            let singular: Vec<Option<u32>> = probes.iter().map(|p| idx.id(p)).collect();
+            assert_eq!(restored.ids_of(&probes), singular, "bits={bits}");
+            assert_eq!(idx.ids_of(&probes), singular, "bits={bits}");
+        }
+        assert!(CompactHashIndex::build_bits(&keys, 0).is_err());
+        assert!(CompactHashIndex::build_bits(&keys, 65).is_err());
+    }
+
+    /// The packed table read back equals the reference: every fingerprint extracted at every
+    /// width, against a naive bit-by-bit reader.
+    #[test]
+    fn packed_table_matches_naive_reference() {
+        use proptest::prelude::*;
+        let mut runner = proptest::test_runner::TestRunner::default();
+        runner
+            .run(
+                &(1u32..=64, prop::collection::vec(any::<u64>(), 1..50)),
+                |(bits, raw)| {
+                    let masked: Vec<u64> = raw.iter().map(|f| f & fp_mask(bits)).collect();
+                    let n = masked.len();
+                    let mut table = vec![0u8; (n as u64 * bits as u64).div_ceil(8) as usize];
+                    for (i, &f) in masked.iter().enumerate() {
+                        write_fp(&mut table, i, bits, f);
+                    }
+                    for (i, &f) in masked.iter().enumerate() {
+                        prop_assert_eq!(
+                            read_fp(&table, i, bits),
+                            Some(f),
+                            "slot {} bits {}",
+                            i,
+                            bits
+                        );
+                        let mut naive: u64 = 0;
+                        for b in 0..bits as u64 {
+                            let pos = i as u64 * bits as u64 + b;
+                            let bit = (table[(pos / 8) as usize] >> (pos % 8)) & 1;
+                            naive |= (bit as u64) << b;
+                        }
+                        prop_assert_eq!(naive, f);
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+    }
+
+    /// At 4 bits the advertised false-positive rate is 2^-4 = 6.25%; check it statistically
+    /// (20 000 probes ⇒ expect 1 250, σ ≈ 34; the bound below is ≈ +7σ, far outside noise).
+    #[test]
+    fn four_bit_false_positive_rate_is_bounded() {
+        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
+        let idx = CompactHashIndex::build_bits(&members, 4).unwrap();
+        for m in &members {
+            assert!(idx.contains(m));
+        }
+        let fp = (0..20_000)
+            .filter(|i| idx.id(&format!("stranger-{i:06}")).is_some())
+            .count();
+        assert!(
+            fp < 1_500,
+            "false positives {fp}/20000 too high for a 4-bit fingerprint (expect ~1250)"
+        );
     }
 
     #[test]
@@ -392,6 +607,9 @@ mod tests {
 
     #[test]
     fn empty_round_trips() {
+        let empty = CompactHashIndex::build_bits(Vec::<String>::new(), 4).unwrap();
+        assert_eq!(empty.fingerprint_bits(), 4);
+        assert!(empty.is_empty() && empty.id("x").is_none());
         let empty = CompactHashIndex::build(Vec::<String>::new(), 1).unwrap();
         assert!(empty.is_empty() && empty.id("x").is_none() && empty.id_unchecked("x") == 0);
         let restored = CompactHashIndex::from_bytes(&empty.to_bytes().unwrap()).unwrap();

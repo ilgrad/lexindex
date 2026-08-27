@@ -32,21 +32,27 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
 - **`key → id`.** The MPH ([`ptr_hash`](https://crates.io/crates/ptr_hash)) maps the key's
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
-- **membership: a `k`-byte fingerprint.** Each slot stores a `fingerprint_bytes`-wide fingerprint
+- **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
   computed from a **second, independent** hash of the key. `id(key)` accepts the slot only if the
   query's fingerprint matches the stored one. Independence of the two hashes makes the chance a
-  non-member both lands on a used slot and matches its fingerprint `256^-fingerprint_bytes` — the
+  non-member both lands on a used slot and matches its fingerprint `2^-fingerprint_bits` — the
   tunable false-positive rate — exactly `2^-8k`: 0.390 625 % at 1 byte, 0.001 526 % at 2. Verified
   statistically on the 0.5.0 code, dictionary members with two non-member populations: 2 M random
   strings measured 0.384 % (z = −1.5 against theory) and 33/2 M at 2 bytes (z = +0.5); 50 000
   held-out *real words* measured 0.310 % (z = −2.9) — at or slightly below theory in every case,
-  so the advertised rate is a ceiling in practice, not an average that can be exceeded.
+  so the advertised rate is a ceiling in practice, not an average that can be exceeded. The
+  sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
+  measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
 Because the keys themselves are never stored, size is just the MPH (~0.27 B/key — PtrHash is ≈2.2
 bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
-rare compact-construction failure, and both serialise identically) plus the fingerprints (`fingerprint_bytes` B/key): **1.27 B/key at 1 byte, 2.27 at 2** on real
-words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH1"][n][fp_bytes][mph length][mph epserde bytes][fingerprints]`.
+rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
+(6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+`id → key`. The serialised blob is `[magic "BCH2"][n][fp_bits][mph length][mph epserde
+bytes][bit-packed fingerprints]` (`ceil(n·b/8)` bytes, fingerprint *i* at bits `[i·b, (i+1)·b)`,
+little-endian). A 0.5.x `BCH1` blob still loads — including zero-copy under mmap — because its
+byte-aligned `k`-byte fingerprints are bit-identical to the packed layout at `8k` bits; new blobs
+are always `BCH2`, which 0.5.x cannot read.
 
 ## `PerfectHashIndex`
 

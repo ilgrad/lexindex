@@ -8,8 +8,9 @@
 //!   map), plus **prefix**, **range**, **fuzzy** (Levenshtein), and **subsequence** iteration
 //!   (automaton-driven, no full scan). Use it for autocomplete / fuzzy search / ordered scans.
 //! - [`CompactHashIndex`] — the **smallest** `string → dense id` map: a minimal perfect hash
-//!   ([`ptr_hash`], the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key,
-//!   at the cost of probabilistic membership and no reverse lookup. Use it when footprint is paramount.
+//!   ([`ptr_hash`], the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
+//!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
+//!   no reverse lookup. Use it when footprint is paramount.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored). Fastest exact `string → dense id`; no ordering. Use it as a
 //!   fixed-vocabulary token↔id map on a hot path.

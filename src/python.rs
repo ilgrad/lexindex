@@ -355,7 +355,7 @@ impl PyPerfectHashIndex {
 }
 
 /// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
-/// probabilistic (false-positive rate `256 ** -fingerprint_bytes`) and there is no reverse `id -> key`.
+/// probabilistic (false-positive rate `2 ** -fingerprint_bits`) and there is no reverse `id -> key`.
 #[cfg(feature = "mph")]
 #[pyclass(name = "CompactHashIndex", module = "lexindex._core", frozen)]
 pub struct PyCompactHashIndex {
@@ -365,16 +365,37 @@ pub struct PyCompactHashIndex {
 #[cfg(feature = "mph")]
 #[pymethods]
 impl PyCompactHashIndex {
-    /// Build from an iterable of strings, storing `fingerprint_bytes` (1, 2, or 4) per key — fewer
-    /// bytes is smaller but raises the membership false-positive rate to `256 ** -fingerprint_bytes`
-    /// (≈ 0.4% at 1 byte, ≈ 0.0015% at 2). Duplicates removed; ids are arbitrary dense slots.
+    /// Build from an iterable of strings, storing `fingerprint_bytes` (1, 2, or 4) per key, or —
+    /// keyword-only — exactly `fingerprint_bits` (1..=64) per key. Fewer bits is smaller but raises
+    /// the membership false-positive rate to `2 ** -fingerprint_bits` (6.25% at 4 bits, ≈ 0.4% at 8,
+    /// ≈ 0.0015% at 16). Duplicates removed; ids are arbitrary dense slots.
     #[new]
-    #[pyo3(signature = (items, fingerprint_bytes=1))]
-    fn new(py: Python<'_>, items: Vec<PyBackedStr>, fingerprint_bytes: usize) -> PyResult<Self> {
-        let inner = py
-            .detach(|| CompactHashIndex::build(items.iter(), fingerprint_bytes))
-            .map_err(to_py)?;
+    #[pyo3(signature = (items, fingerprint_bytes=1, *, fingerprint_bits=None))]
+    fn new(
+        py: Python<'_>,
+        items: Vec<PyBackedStr>,
+        fingerprint_bytes: usize,
+        fingerprint_bits: Option<u32>,
+    ) -> PyResult<Self> {
+        let inner = match fingerprint_bits {
+            Some(bits) => {
+                if fingerprint_bytes != 1 {
+                    return Err(PyValueError::new_err(
+                        "pass fingerprint_bytes or fingerprint_bits, not both",
+                    ));
+                }
+                py.detach(|| CompactHashIndex::build_bits(items.iter(), bits))
+            }
+            None => py.detach(|| CompactHashIndex::build(items.iter(), fingerprint_bytes)),
+        }
+        .map_err(to_py)?;
         Ok(Self { inner })
+    }
+
+    /// Width of the stored fingerprints in bits; the false-positive rate is `2 ** -fingerprint_bits`.
+    #[getter]
+    fn fingerprint_bits(&self) -> u32 {
+        self.inner.fingerprint_bits()
     }
 
     fn __len__(&self) -> usize {

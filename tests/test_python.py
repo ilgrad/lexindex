@@ -119,6 +119,25 @@ def test_compact_hash_invalid_fingerprint_bytes():
         lexindex.CompactHashIndex(["a", "b"], 3)  # only 1, 2, 4 allowed
 
 
+def test_compact_hash_fingerprint_bits():
+    keys = [f"key-{i:03d}" for i in range(200)]
+    ch = lexindex.CompactHashIndex(keys, fingerprint_bits=4)
+    assert ch.fingerprint_bits == 4
+    assert sorted(ch.id(k) for k in keys) == list(range(200))  # no false negatives, dense ids
+    restored = lexindex.CompactHashIndex.from_bytes(ch.to_bytes())
+    assert restored.fingerprint_bits == 4
+    probes = keys + [f"miss-{i}" for i in range(50)]
+    assert restored.ids_of(probes) == [ch.id(p) for p in probes]
+    # bytes form reports its width in bits
+    assert lexindex.CompactHashIndex(keys, 2).fingerprint_bits == 16
+    with pytest.raises(ValueError):
+        lexindex.CompactHashIndex(keys, fingerprint_bits=0)
+    with pytest.raises(ValueError):
+        lexindex.CompactHashIndex(keys, fingerprint_bits=65)
+    with pytest.raises(ValueError):
+        lexindex.CompactHashIndex(keys, 2, fingerprint_bits=8)  # ambiguous: both widths given
+
+
 def test_compact_hash_persistence(tmp_path):
     ch = lexindex.CompactHashIndex(["GET", "POST", "PUT", "DELETE"], 2)
     ch2 = lexindex.CompactHashIndex.from_bytes(ch.to_bytes())

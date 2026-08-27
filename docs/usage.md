@@ -113,7 +113,8 @@ it returns an arbitrary (but valid) slot for an unknown key. Use `id` everywhere
 ```python
 from lexindex import CompactHashIndex
 
-# fingerprint_bytes ∈ {1, 2, 4}: 1 is smallest (~1.3 B/key) with a ~0.4% membership false-positive
+# fingerprint_bytes ∈ {1, 2, 4}; or a keyword-only fingerprint_bits ∈ 1..=64 for finer control.
+# 8 bits (the default) is ~1.3 B/key with a ~0.4% membership false-positive
 # rate; 2 → ~0.0015%; 4 → effectively exact. No keys are stored, so there is no id → key.
 dict_ = CompactHashIndex(["GET", "POST", "PUT", "DELETE"], fingerprint_bytes=1)
 i = dict_.id("POST")           # dense id in [0, n); a non-member may rarely read as present
@@ -124,7 +125,33 @@ dict_.save("verbs.bch")
 dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zero-copy
 ```
 
-`CompactHashIndex` trades exactness for size: membership is correct except for a `256^-fingerprint_bytes`
+### Choosing the fingerprint width
+
+Size is the minimal perfect hash (~0.27 B/key) plus exactly `fingerprint_bits/8` bytes per key, and
+the membership false-positive rate is exactly `2^-fingerprint_bits` — every width is a point on the
+same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
+
+| `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
+|---:|---:|---:|---:|
+| 4 | **0.77** | 6.25% | 62 500 |
+| 6 | 1.02 | 1.56% | 15 625 |
+| 8 (= `fingerprint_bytes=1`, default) | 1.27 | 0.39% | 3 906 |
+| 12 | 1.77 | 0.024% | 244 |
+| 16 (= `fingerprint_bytes=2`) | 2.27 | 0.0015% | 15 |
+| 32 (= `fingerprint_bytes=4`) | 4.27 | 2.3×10⁻⁸% | ~0 |
+
+Pick by the probe mix, not the key count: the rate is per *non-member* lookup, so a workload that
+only ever queries members never sees a false positive at any width, while a filter in front of a
+network hop wants the rate priced against the cost of a wasted hop. For scale: marisa-trie's exact
+index costs 2.98 B/key on this corpus — `CompactHashIndex` is below it at *every* width up to
+21 bits (rate 2⁻²¹ ≈ 5×10⁻⁵%).
+
+```python
+tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.77 B/key, 1-in-16 false positives
+tiny.fingerprint_bits                               # -> 4
+```
+
+`CompactHashIndex` trades exactness for size: membership is correct except for a `2^-fingerprint_bits`
 false-positive chance on a non-member, and it cannot map an id back to a string. Reach for it when a
 fixed vocabulary's on-disk / mmap footprint dominates; use `PerfectHashIndex` when you need exact
 membership or `id → key`, or `StringIndex` when you need order or fuzzy/prefix.
@@ -147,7 +174,8 @@ let idx = StringIndex::load_mmap("catalog.bix")?; // zero-copy; no read into RAM
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
 assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
 
-let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // smallest; ~1.3 B/key, no reverse
+let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // ~1.3 B/key, no reverse
+let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // ~0.8 B/key, 6.25% FP rate
 assert!(small.contains("POST"));
 # std::fs::remove_file("catalog.bix").ok();
 # Ok::<(), lexindex::IndexError>(())

@@ -17,16 +17,16 @@ pub(crate) fn hash_key(s: &str) -> u64 {
     h ^ (h >> 31)
 }
 
-/// A **fingerprint** of the low `fp_bytes` bytes, from an *independent* hash of the key (a different
-/// basis/multiplier than [`hash_key`]). Independence from the slot hash is what makes the collision
-/// probability of a non-member landing on a member's slot ≈ `256^-fp_bytes`. `fp_bytes ∈ {1, 2, 4}`.
-pub(crate) fn fingerprint(s: &str, fp_bytes: usize) -> u64 {
+/// A **fingerprint** of the low `bits` bits, from an *independent* hash of the key (a different
+/// basis/multiplier than [`hash_key`]). Independence from the slot hash is what makes the
+/// probability that a non-member both lands on a used slot and matches its fingerprint `2^-bits` —
+/// the tunable false-positive rate. `bits ∈ 1..=64`.
+pub(crate) fn fingerprint_bits(s: &str, bits: u32) -> u64 {
     let mut h: u64 = 0x0000_0100_0000_01b3; // distinct basis from hash_key
     for &b in s.as_bytes() {
         h = (h ^ b as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15); // golden-ratio odd multiplier
     }
     h ^= h >> 29;
-    let bits = fp_bytes * 8;
     if bits >= 64 {
         h
     } else {

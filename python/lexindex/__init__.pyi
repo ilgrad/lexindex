@@ -63,13 +63,21 @@ class PerfectHashIndex:
 
 @final
 class CompactHashIndex:
-    """Smallest string->dense id map: minimal perfect hash + k-byte fingerprints.
+    """Smallest string->dense id map: minimal perfect hash + per-key fingerprints.
 
-    Membership is probabilistic (false-positive rate ``256 ** -fingerprint_bytes``) and there is no
+    Membership is probabilistic (false-positive rate ``2 ** -fingerprint_bits``) and there is no
     reverse ``id -> key``. Use it when only ``string -> id`` is needed and size is paramount.
     """
 
-    def __new__(cls, items: list[str], fingerprint_bytes: int = 1) -> CompactHashIndex: ...
+    def __new__(
+        cls,
+        items: list[str],
+        fingerprint_bytes: int = 1,
+        *,
+        fingerprint_bits: int | None = None,
+    ) -> CompactHashIndex: ...
+    @property
+    def fingerprint_bits(self) -> int: ...
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...

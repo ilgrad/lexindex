@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-27
+
+### Added
+
+- **Sub-byte fingerprints: `CompactHashIndex::build_bits` / `fingerprint_bits=` (1..=64 bits).**
+  The fingerprint table is bit-packed, so size is exactly `fingerprint_bits/8` bytes per key on top
+  of the ~0.27 B/key minimal perfect hash, and the membership false-positive rate is exactly
+  `2^-fingerprint_bits`. On the 479 823-word dictionary: **0.77 B/key at 4 bits (6.25% FP, 3.9×
+  smaller than marisa-trie)**, 1.02 at 6 bits (1.56%), 1.77 at 12 bits (0.024%) — the existing
+  byte widths keep their exact sizes and rates (1.27 / 2.27 / 4.27 B/key at 8 / 16 / 32 bits).
+  `CompactHashIndex` stays below marisa-trie's 2.98 B/key at every width up to 21 bits. The
+  advertised rate is measured, not assumed: 2 M random non-member probes landed at 6.253 %
+  (z = +0.18) for 4 bits and 1.555 % (z = −0.83) for 6. Python: keyword-only `fingerprint_bits=`
+  on the constructor plus a `fingerprint_bits` property; `fingerprint_bytes` keeps its byte
+  semantics unchanged. The docs gained a width-choice table (rate priced per non-member probe).
+
+### Changed
+
+- **Blob format: `CompactHashIndex` now writes `BCH2`** (width field counts bits, table is
+  bit-packed). **0.5.x `BCH1` blobs still load — including zero-copy under mmap** — because their
+  byte-aligned fingerprints are bit-identical to the packed layout at 8× the width; 0.5.x cannot
+  read the new `BCH2` blobs, hence the 0.6.0 version bump. The default 8-bit path is not taxed by
+  the generality: byte-aligned widths take a straight byte-copy fast path when building, and A-B
+  against the 0.5.1 binary (12 alternated runs, `std::HashMap` control) put both build (222 vs
+  225 ms/1 M keys) and lookup (166.4 vs 166.0 ns) inside the control's noise. A 4-bit index
+  answers `id()` as fast as an 8-bit one (86.9 vs 87.7 ns on the dictionary) and streams `ids_of`
+  faster (47.6 vs 55.1 ns/key — half the table, better cache residency).
+
+
 ## [0.5.1] — 2026-08-27
 
 ### Added
