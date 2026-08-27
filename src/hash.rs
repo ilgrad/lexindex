@@ -41,9 +41,12 @@ use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 /// construction can occasionally fail (pilot eviction chains grow too long), so fall back to the
 /// default parameters; both produce the same `DefaultPtrHash` type, so blobs stay compatible
 /// either way.
-pub(crate) fn build_mph(hashes: &[u64]) -> DefaultPtrHash {
+pub(crate) fn build_mph(hashes: &[u64]) -> Result<DefaultPtrHash, crate::IndexError> {
     PtrHash::try_new(hashes, PtrHashParams::default_compact())
-        .unwrap_or_else(|| PtrHash::new(hashes, PtrHashParams::default()))
+        .or_else(|| PtrHash::try_new(hashes, PtrHashParams::default()))
+        .ok_or(crate::IndexError::Build(
+            "minimal-perfect-hash construction failed after exhausting its retry seeds",
+        ))
 }
 
 /// The exact length of the MPH's internal remap vector: the largest member `raw_slot - n`, plus
@@ -61,4 +64,56 @@ pub(crate) fn overflow_cap(mph: &DefaultPtrHash, hashes: &[u64], n: usize) -> u6
             }
         });
     cap
+}
+
+/// [`hash_key`] over raw bytes — used as a 32-bit integrity check (its low half) of the
+/// lexindex-owned blob header, so an accidentally corrupted `n` / width / `overflow_cap` fails
+/// cleanly at load instead of steering queries with a bogus bound.
+pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    h ^ (h >> 31)
+}
+
+/// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free slot
+/// no member occupies, which ptr_hash's own `index()` would read out of bounds (unchecked).
+/// This is the ONLY place `mph.index()` may be called on a possibly-non-member hash.
+#[inline]
+pub(crate) fn slot_for(mph: &DefaultPtrHash, n: usize, overflow_cap: u64, h: u64) -> Option<usize> {
+    let raw = mph.index_no_remap(&h);
+    if raw < n {
+        Some(raw)
+    } else if (raw - n) as u64 >= overflow_cap {
+        None
+    } else {
+        Some(mph.index(&h)) // remapped; in bounds because the cap is the remap's exact length
+    }
+}
+
+/// Batch [`slot_for`]: streams raw (non-remapped) slots with software prefetch, then triages the
+/// rare `raw ≥ n` cases — `usize::MAX` marks a definite non-member past the remap.
+pub(crate) fn triage_slots(
+    mph: &DefaultPtrHash,
+    n: usize,
+    overflow_cap: u64,
+    hashes: &[u64],
+) -> Vec<usize> {
+    let mut slots = Vec::with_capacity(hashes.len());
+    mph.index_stream::<32, false, _>(hashes.iter())
+        .for_each(|s| slots.push(s));
+    for (i, slot) in slots.iter_mut().enumerate() {
+        if *slot >= n {
+            *slot = if (*slot - n) as u64 >= overflow_cap {
+                usize::MAX
+            } else {
+                mph.index(&hashes[i])
+            };
+        }
+    }
+    slots
 }

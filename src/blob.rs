@@ -120,6 +120,37 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     let _ = (data, i);
 }
 
+/// Write `bytes` to `path` by writing a sibling temporary file and renaming it into place. A crash
+/// or a full disk mid-write then leaves the previous file intact instead of a truncated index that
+/// still has a valid magic; `rename` within a directory is atomic on both POSIX and Windows.
+pub(crate) fn write_atomically(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), crate::IndexError> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let stem = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("index"));
+    // pid + a process-wide counter: two threads saving to one path must not share a temporary.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut tmp = dir.join(stem);
+    tmp.as_mut_os_string()
+        .push(format!(".{}.{seq}.tmp", std::process::id()));
+    let mut file = std::fs::File::create(&tmp)?;
+    // Ordered by what has to survive: bytes durable first, then the rename that publishes them.
+    let written = file
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| std::fs::rename(&tmp, path));
+    if written.is_err() {
+        std::fs::remove_file(&tmp).ok();
+    }
+    written?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +166,26 @@ mod tests {
         assert_eq!(world.subslice(0, 3).unwrap().as_ref(), b"wor");
         assert!(world.subslice(0, 6).is_none()); // past the end of the view
         assert!(sb.subslice(5, 4).is_none()); // start > end
+    }
+
+    #[test]
+    fn atomic_write_replaces_and_leaves_no_temp() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("lexindex_atomic_{}.bin", std::process::id()));
+        write_atomically(&path, b"first").unwrap();
+        write_atomically(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("lexindex_atomic_") && name.ends_with(".tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

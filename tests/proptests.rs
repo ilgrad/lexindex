@@ -14,11 +14,22 @@ fn distinct_sorted(mut keys: Vec<String>) -> Vec<String> {
 /// pure-ASCII regex would never reach.
 fn multibyte_keys() -> impl Strategy<Value = Vec<String>> {
     let key = prop::collection::vec(
-        prop::sample::select(vec!['a', 'b', 'z', 'à', 'é', '中', '🎉']),
+        prop::sample::select(vec!['a', 'b', 'z', 'à', 'é', 'Ω', '中', '🎉']),
         0..6,
     )
     .prop_map(|cs| cs.into_iter().collect::<String>());
     prop::collection::vec(key, 0..40)
+}
+
+/// The query's characters appear in `haystack` in order, not necessarily contiguously.
+fn is_char_subsequence(query: &str, haystack: &str) -> bool {
+    let mut q = query.chars().peekable();
+    for c in haystack.chars() {
+        if q.peek() == Some(&c) {
+            q.next();
+        }
+    }
+    q.peek().is_none()
 }
 
 fn check_string_index_roundtrip(keys: &[String]) {
@@ -53,6 +64,26 @@ proptest! {
     #[test]
     fn string_index_roundtrip_multibyte(keys in multibyte_keys()) {
         check_string_index_roundtrip(&keys);
+    }
+
+    // The subsequence automaton must agree, key for key, with the character-level reference over
+    // an alphabet where characters are 1-4 bytes long and share leading bytes (`à`/`é` both start
+    // `C3`, `Ω`'s second byte is `é`'s second byte).
+    #[test]
+    fn subsequence_matches_the_character_reference(
+        keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
+        query in prop::collection::vec(
+            prop::sample::select(vec!['a', 'z', 'à', 'é', 'Ω', '中', '🎉']),
+            0..3,
+        ).prop_map(|cs| cs.into_iter().collect::<String>()),
+    ) {
+        let idx = StringIndex::build(&keys).unwrap();
+        let got: Vec<String> = idx.subsequence(&query).into_iter().map(|(k, _)| k).collect();
+        let want: Vec<String> = distinct_sorted(keys.clone())
+            .into_iter()
+            .filter(|k| is_char_subsequence(&query, k))
+            .collect();
+        prop_assert_eq!(got, want);
     }
 
     // Arbitrary bytes must never panic or read out of bounds — only `Ok`/`Err`.
@@ -136,12 +167,11 @@ mod mph {
             let _ = CompactHashIndex::from_bytes(&data);
         }
 
-        // Corrupting a lexindex-owned header field (`n` / `fp_bits` / `overflow_cap`, bytes 4..24
-        // of the BCH3 layout) or a fingerprint-tail byte must fail cleanly or stay valid — never
-        // panic. The epserde-owned MPH region and `mph_len` field are deliberately left intact:
-        // their structural integrity is a documented trust assumption (see
-        // `CompactHashIndex::from_bytes`), because a corrupt length inside the MPH can make
-        // epserde's deserialiser attempt an unbounded allocation.
+        // Corrupting a lexindex-owned header field (`n` / `fp_bits` / `overflow_cap` / `mph_len`,
+        // bytes 4..32 of the BCH3 layout, or the trailing check itself) must be *rejected*: the
+        // header carries a checksum precisely because `overflow_cap` bounds an otherwise unchecked
+        // read inside the MPH. Corrupting the fingerprint tail is undetectable by design (it only
+        // perturbs the probabilistic membership answer) and must merely stay panic-free.
         #[test]
         fn compact_hash_corrupt_owned_bytes_never_panics(
             keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
@@ -150,14 +180,25 @@ mod mph {
             at in any::<prop::sample::Index>(),
             xor in 1u8..=255,
         ) {
-            let mut blob = CompactHashIndex::build(&keys, fp).unwrap().to_bytes().unwrap();
+            let idx = CompactHashIndex::build(&keys, fp).unwrap();
+            let mut blob = idx.to_bytes().unwrap();
             assert_eq!(&blob[0..4], b"BCH3");
             let mph_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
-            let (lo, hi) = if in_header { (4, 24) } else { (32 + mph_len, blob.len()) };
+            let (lo, hi) = if in_header { (4, 36) } else { (36 + mph_len, blob.len()) };
             if lo < hi {
                 let pos = lo + at.index(hi - lo);
                 blob[pos] ^= xor;
-                let _ = CompactHashIndex::from_bytes(&blob);
+                let restored = CompactHashIndex::from_bytes(&blob);
+                if in_header {
+                    assert!(restored.is_err(), "corrupt header byte {pos} was accepted");
+                } else {
+                    // A flipped fingerprint bit stays a well-formed index: queries must answer.
+                    let restored = restored.expect("fingerprint corruption is not a format error");
+                    for key in distinct_sorted(keys.clone()) {
+                        let _ = restored.id(&key);
+                    }
+                    let _ = restored.ids_of(&keys);
+                }
             }
         }
     }

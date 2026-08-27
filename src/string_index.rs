@@ -266,8 +266,7 @@ impl StringIndex {
 
     /// Write the index to `path` (see [`StringIndex::to_bytes`]).
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
-        std::fs::write(path, self.to_bytes())?;
-        Ok(())
+        crate::blob::write_atomically(path.as_ref(), &self.to_bytes())
     }
 
     /// Load an index previously written with [`StringIndex::save`] (reads the whole file into memory).
