@@ -6,9 +6,18 @@
 
 /// FNV-1a over the bytes, then a splitmix64 finalizer for avalanche (so structured keys like
 /// `"key_0001"` still spread evenly across the MPH's buckets). This drives the perfect-hash **slot**.
+#[inline]
 pub(crate) fn hash_key(s: &str) -> u64 {
+    hash_bytes(s.as_bytes())
+}
+
+/// [`hash_key`] over raw bytes. Also used as a 32-bit integrity check (its low half) of the
+/// lexindex-owned blob header, so an accidentally corrupted `n` / width / `overflow_cap` fails
+/// cleanly at load instead of steering queries with a bogus bound.
+#[inline]
+pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
-    for &b in s.as_bytes() {
+    for &b in bytes {
         h ^= b as u64;
         h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a prime
     }
@@ -64,20 +73,6 @@ pub(crate) fn overflow_cap(mph: &DefaultPtrHash, hashes: &[u64], n: usize) -> u6
             }
         });
     cap
-}
-
-/// [`hash_key`] over raw bytes — used as a 32-bit integrity check (its low half) of the
-/// lexindex-owned blob header, so an accidentally corrupted `n` / width / `overflow_cap` fails
-/// cleanly at load instead of steering queries with a bogus bound.
-pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    h ^ (h >> 31)
 }
 
 /// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free slot
