@@ -294,14 +294,20 @@ impl StringIndex {
     /// processes by the OS page cache. `key(id)` still returns an owned `String`; all other queries
     /// borrow the map.
     ///
-    /// # Safety / caveat
-    /// Memory-mapping trusts the file to stay unchanged: another process truncating or overwriting it
-    /// while the index is alive would make the borrowed bytes unsound. lexindex blobs are written once
-    /// and are immutable — do not modify the file for the lifetime of the returned index.
+    /// # Safety
+    /// The mapped bytes are borrowed, not copied, so the file **must not be modified or truncated
+    /// by anyone — this process or another — for as long as the returned index (or anything derived
+    /// from it) is alive**. A concurrent write through any handle changes memory Rust believes is
+    /// immutable, and a truncation makes the mapping fault; neither is something this function can
+    /// check, which is why it is `unsafe` (`memmap2::Mmap::map` is `unsafe` for exactly this
+    /// reason). lexindex blobs are written once and never updated in place, so a normal
+    /// `save` → `load_mmap` workflow satisfies this; publishing new versions under new paths, or
+    /// [`load`](Self::load), keeps it safe without the obligation.
     #[cfg(feature = "mmap")]
-    pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+    pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: see the caveat above — the mapped file must not be mutated while it is mapped.
+        // SAFETY: forwarded to this function's own contract — the caller guarantees the file is
+        // not mutated while the mapping lives.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
@@ -492,7 +498,8 @@ mod tests {
         let idx = StringIndex::build(&keys).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_mmap_{}.bix", std::process::id()));
         idx.save(&path).unwrap();
-        let mapped = StringIndex::load_mmap(&path).unwrap();
+        // SAFETY: this test owns the file and does not touch it while the map is alive.
+        let mapped = unsafe { StringIndex::load_mmap(&path) }.unwrap();
         assert_eq!(mapped.len(), idx.len());
         for (i, k) in keys.iter().enumerate() {
             assert_eq!(mapped.id(k), Some(i as u64)); // forward borrows the mapped FST

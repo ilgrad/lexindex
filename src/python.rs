@@ -47,18 +47,29 @@ fn collect_strs(items: &Bound<'_, PyAny>) -> PyResult<Vec<PyBackedStr>> {
     Ok(out)
 }
 
-/// Hash any Python iterable of `str` down to `CompactHashIndex` build pairs, one item at a time —
-/// each string is released as soon as its 16-byte pair is taken, so building from a generator over
-/// a huge corpus never materialises the strings on this side either (the other indexes must keep
-/// them: they store keys).
+/// Hash any Python iterable of `str` down to `CompactHashIndex` build pairs — 16 bytes per key,
+/// after which the string is dropped, so building from a generator over a huge corpus never
+/// materialises the strings on this side either (the other indexes must keep them: they store
+/// keys). The hashing itself runs a chunk at a time with the GIL **released**, so other Python
+/// threads keep running through what is otherwise a long CPU-bound stretch; only pulling the next
+/// chunk out of the iterator (and dropping the previous one, which decrements refcounts) holds it.
 #[cfg(feature = "mph")]
 fn collect_pairs(items: &Bound<'_, PyAny>) -> PyResult<Vec<(u64, u64)>> {
+    const CHUNK: usize = 4096;
+    let py = items.py();
     let mut out = Vec::with_capacity(items.len().unwrap_or(0));
-    for item in items.try_iter()? {
-        let s: PyBackedStr = item?.extract()?;
-        out.push((crate::hash::hash_key(&s), crate::hash::fingerprint_full(&s)));
+    let mut chunk: Vec<PyBackedStr> = Vec::with_capacity(CHUNK);
+    let mut it = items.try_iter()?;
+    loop {
+        chunk.clear();
+        for item in it.by_ref().take(CHUNK) {
+            chunk.push(item?.extract()?);
+        }
+        if chunk.is_empty() {
+            return Ok(out);
+        }
+        py.detach(|| out.extend(chunk.iter().map(|s| crate::hash::hash_pair(s))));
     }
-    Ok(out)
 }
 
 fn to_py(e: IndexError) -> PyErr {
@@ -238,11 +249,20 @@ impl PyStringIndex {
     }
 
     /// Zero-copy load: memory-map the file and borrow the index from it — no read into RAM, so a
-    /// multi-gigabyte index is ready instantly and its pages are shared across processes. The mapped
-    /// file must not be modified while the index is alive.
+    /// multi-gigabyte index is ready instantly and its pages are shared across processes.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the index is alive:
+    /// the bytes are borrowed, not copied, so a concurrent write is undefined behaviour rather
+    /// than a stale answer. Python cannot express that obligation in the type system the way the
+    /// Rust API does (where this is an `unsafe fn`), so it is the caller's contract. Use `load` if
+    /// the file may change.
     #[staticmethod]
     fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        let inner = py.detach(|| StringIndex::load_mmap(&path)).map_err(to_py)?;
+        // SAFETY: forwarded to the caller, who is told in the docstring above that the file must
+        // stay unmodified for the index's lifetime. There is no way to enforce it from Python.
+        let inner = py
+            .detach(|| unsafe { StringIndex::load_mmap(&path) })
+            .map_err(to_py)?;
         Ok(Self { inner })
     }
 }
@@ -351,10 +371,14 @@ impl PyPerfectHashIndex {
     }
 
     /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
+    ///
+    /// The blob must have been produced by this library. Its framing is validated, but the embedded
+    /// perfect hash cannot be — a deliberately crafted blob is undefined behaviour.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
-            .detach(|| PerfectHashIndex::from_bytes(data))
+            .detach(|| unsafe { PerfectHashIndex::from_bytes(data) })
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -365,18 +389,28 @@ impl PyPerfectHashIndex {
     }
 
     /// Load a dictionary previously written with `save`.
+    ///
+    /// The file must have been written by this library — see `from_bytes` for why a crafted blob
+    /// cannot be rejected.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        let inner = py.detach(|| PerfectHashIndex::load(&path)).map_err(to_py)?;
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { PerfectHashIndex::load(&path) })
+            .map_err(to_py)?;
         Ok(Self { inner })
     }
 
     /// Memory-map the file and borrow the key arena zero-copy (only the small MPH is read into RAM).
-    /// The mapped file must not be modified while the dictionary is alive.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the dictionary is
+    /// alive — the bytes are borrowed, so a concurrent write is undefined behaviour. See
+    /// `StringIndex.load_mmap` for the full contract; use `load` if the file may change.
     #[staticmethod]
     fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
-            .detach(|| PerfectHashIndex::load_mmap(&path))
+            .detach(|| unsafe { PerfectHashIndex::load_mmap(&path) })
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -484,10 +518,14 @@ impl PyCompactHashIndex {
     }
 
     /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.
+    ///
+    /// The blob must have been produced by this library. Its framing is validated, but the embedded
+    /// perfect hash cannot be — a deliberately crafted blob is undefined behaviour.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
-            .detach(|| CompactHashIndex::from_bytes(data))
+            .detach(|| unsafe { CompactHashIndex::from_bytes(data) })
             .map_err(to_py)?;
         Ok(Self { inner })
     }
@@ -498,17 +536,28 @@ impl PyCompactHashIndex {
     }
 
     /// Load a dictionary previously written with `save`.
+    ///
+    /// The file must have been written by this library — see `from_bytes` for why a crafted blob
+    /// cannot be rejected.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        let inner = py.detach(|| CompactHashIndex::load(&path)).map_err(to_py)?;
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { CompactHashIndex::load(&path) })
+            .map_err(to_py)?;
         Ok(Self { inner })
     }
 
     /// Zero-copy load: memory-map the file and borrow the fingerprint table.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the dictionary is
+    /// alive — the bytes are borrowed, so a concurrent write is undefined behaviour. See
+    /// `StringIndex.load_mmap` for the full contract; use `load` if the file may change.
     #[staticmethod]
     fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
-            .detach(|| CompactHashIndex::load_mmap(&path))
+            .detach(|| unsafe { CompactHashIndex::load_mmap(&path) })
             .map_err(to_py)?;
         Ok(Self { inner })
     }

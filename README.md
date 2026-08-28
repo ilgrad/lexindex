@@ -122,7 +122,10 @@ assert_eq!(sub, ["apple", "apricot"]);
 
 // serialise to a flat blob, then reload — or `load_mmap` to borrow it zero-copy from the file
 idx.save("catalog.bix")?;
-let idx = StringIndex::load_mmap("catalog.bix")?; // no read into RAM; pages shared across processes
+// SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
+let idx = unsafe { StringIndex::load_mmap("catalog.bix") }?; // no read into RAM; pages shared
+# drop(idx);
+# std::fs::remove_file("catalog.bix").ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
@@ -136,8 +139,11 @@ assert_eq!(dict.id("PATCH"), None);            // membership is verified, not ju
 
 // persist the MPH and reload it (the dense ids are preserved across save/load)
 dict.save("verbs.bmp")?;
-let dict = PerfectHashIndex::load("verbs.bmp")?;
+// `load` is unsafe: the embedded perfect hash cannot be validated, so only blobs this library
+// wrote are in contract. See "Design notes" below.
+let dict = unsafe { PerfectHashIndex::load("verbs.bmp") }?;
 assert_eq!(dict.id("POST"), Some(id));
+# std::fs::remove_file("verbs.bmp").ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
@@ -172,9 +178,12 @@ assert_eq!(raw, id);
   not the key list, whenever an id is written down anywhere else. `StringIndex` ids are the sorted
   rank and are reproducible by construction.
 - **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
-  slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's *independent*
-  `b`-bit fingerprint against the stored one; a match is a hit. Because the two hashes are independent,
-  a non-member survives both only with probability `2^-b`, the tunable false-positive rate
+  slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's `b`-bit fingerprint —
+  from a *second* hash with a different basis and multiplier — against the stored one; a match is a
+  hit. The two hashes are uncorrelated for well-distributed keys, so a non-member survives both with
+  probability about `2^-b`: a design rate measured against, not a proof, and no guarantee at all
+  against queries chosen by an adversary (both hashes are deterministic and unseeded). It is the
+  tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
   is `[magic "BCH5"][n][fp_bits][overflow_cap][mph_len][side_len][payload][check][mph][bit-packed
@@ -196,7 +205,7 @@ assert_eq!(raw, id);
   + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH (the `ptr_hash` structure
   serialised via [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and
   queries identically on any build — the precondition for persistence. `CompactHashIndex` shares the
-  same version-stable slot hash plus a second independent one for the fingerprint, and resolves hash
+  same version-stable slot hash plus a second, uncorrelated one for the fingerprint, and resolves hash
   collisions the same way — its side table keeps the second hash at its **full 64 bits** whatever
   `fingerprint_bits` is set to, so only a pair colliding in **both** 64-bit hashes at once
   (`≈ 2^-128` per pair) would merge.
@@ -204,8 +213,21 @@ assert_eq!(raw, id);
   borrows the index directly from the mapped pages — no read into RAM, so a multi-gigabyte index is
   ready instantly and the OS shares its pages across processes. `StringIndex` maps the whole FST;
   `CompactHashIndex` maps its fingerprint table; `PerfectHashIndex` maps the key arena (the bulk) and
-  reads only the tiny MPH into memory. Every read is byte-wise, so there is no alignment gotcha; the one
-  caveat is the usual mmap contract — the file must not be mutated while an index borrows it.
+  reads only the tiny MPH into memory. Every read is byte-wise, so there is no alignment gotcha. It is
+  an **`unsafe fn`** — deliberately, since the mapped bytes are borrowed rather than copied, so a write
+  to the file from *any* process while the index is alive is undefined behaviour and nothing in the
+  library can check for it. lexindex blobs are written once and never updated in place, so publishing
+  new versions under new paths discharges the obligation; the Python binding, which has no way to
+  express it in the type system, states the same contract in its docstring.
+- **Loading a perfect-hash index is `unsafe` too — `from_bytes` and `load`, not just `load_mmap`.**
+  The blob framing is validated and checksummed, so accidental corruption is rejected cleanly, but the
+  embedded MPH is an `epserde` region whose pilot table `ptr_hash` reads unchecked, and the fields that
+  would bound that read are private to `ptr_hash` — no amount of checking downstream can make a crafted
+  blob safe. A function that is unsound for *some* input belongs behind `unsafe fn`, so both
+  perfect-hash indexes say so in their signatures rather than in a doc paragraph. Upstream agrees:
+  `epserde` 0.13 made `deserialize_full` an `unsafe fn`, and PtrHash declined a checked `try_index()`
+  on the same grounds. `StringIndex` keeps safe `from_bytes`/`load` — `fst` validates its own structure
+  and guarantees invalid input cannot violate memory safety.
 - `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst` (and keeps
   `StringIndex`). Enabling `mph` pulls `ptr_hash` and its dependency tree, which currently carries a few
   informational RustSec advisories (unmaintained / unsound) on transitive crates — `cargo audit`
@@ -235,8 +257,8 @@ Two honest crowns, both scoped to what is measured above — libraries a Python 
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
 is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.3×
 below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
-false-positive rate (`2^-fingerprint_bits` by construction — the fingerprint hash is independent of
-the slot hash — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
+false-positive rate (about `2^-fingerprint_bits` by design — the fingerprint comes from a second hash,
+uncorrelated with the slot hash for well-distributed keys — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
 z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 16) and don't need
 `id → key`. It is not a security primitive: both hashes are deterministic and unseeded, so an
 adversary who chooses the queries can find false positives at will. It stays below
@@ -276,31 +298,37 @@ tweak. `CompactHashIndex` takes the size crown the other way: by dropping the ke
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
-Measured on the 0.8.0 code in one session (min of 12 runs, idle machine). Absolute numbers are
-machine-dependent; the **ratios** are the point.
+Measured on the 0.9.0 code in one session (min of 12 runs, idle machine, four seconds between runs
+so clocks settle). Absolute numbers are machine-dependent — this session runs ~19% faster than the
+one that produced the 0.8.0 table, `std::HashMap` control included — so compare the **ratios**, and
+only within a column.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `CompactHashIndex::id` (fp=1) | **~119 ms** | ~244 ns | fingerprint-verified, `2^-8` false-positive rate |
-| lexindex `PerfectHashIndex::id_unchecked` | ~324 ms | **~178 ns** | closed vocabulary, no membership check |
-| `std::HashMap<String, u32>` | ~234 ms | ~303 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~327 ms | ~311 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~269 ms | ~409 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~223 ms | ~960 ns | in-RAM |
+| lexindex `CompactHashIndex::id` (fp=1) | **~114 ms** | ~151 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~291 ms | **~111 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~187 ms | ~246 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~294 ms | ~273 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~253 ms | ~337 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~201 ms | ~770 ns | in-RAM |
 
-<sub>Run-to-run lookup spread stayed under 7% on every cell except `PerfectHashIndex::id` (16% —
-it is the most cache-sensitive path; its same-session A/B against the 0.7 binary showed the 0.8
-side-table branch costs ~3% there, while `id_unchecked` measured 8% *faster* and
-`CompactHashIndex::id` was unchanged). `CompactHashIndex`'s build halved in 0.8: its streaming
-build sorts 16-byte `(hash, fingerprint)` pairs instead of strings, which also puts it 2× below
-`HashMap`'s build. Real keys move lookups in lexindex's favour versus synthetic ones (byte-wise
-FNV vs `HashMap`'s SipHash), while every `build` reads higher because real input is not pre-sorted
-and sorting is part of the build.</sub>
+<sub>Run-to-run lookup spread over the 12 runs: 1.9% for the `HashMap` control, 2.3% for
+`id_unchecked`, 5.4% `BTreeMap`, 7.1% `CompactHashIndex::id`, 8.0% `PerfectHashIndex::id`, 11.0%
+`StringIndex` — the control's tightness is what says the session was quiet. The ratio to `HashMap`
+is itself session-dependent: `id_unchecked` measured 2.2× here and 1.7× in the 0.8.0 session on the
+same machine, so read it as "roughly twice", not as a constant. 0.9's fused two-hash pass was
+verified separately by an interleaved A/B against the 0.8.1 binary in one session:
+`CompactHashIndex::id` 165 → 158 ns (−4.3%), build 117 → 116 ms, with `HashMap`, `BTreeMap` and both
+`PerfectHashIndex` rows flat. `CompactHashIndex`'s build halved back in 0.8: it sorts 16-byte
+`(hash, second hash)` pairs instead of strings, keeping it below `HashMap`'s build. Real keys move
+lookups in lexindex's favour versus synthetic ones (byte-wise FNV vs `HashMap`'s SipHash), while
+every `build` reads higher because real input is not pre-sorted and sorting is part of the
+build.</sub>
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
-**fastest** — ≈1.7× quicker than `HashMap` (no probing, no membership comparison) *and* compact +
-serialisable. `CompactHashIndex::id` keeps a probabilistic membership check and *still* beats
-`HashMap` on lookup — and now builds ~2× faster than it. Full verification (`id`) pays one extra
+**fastest** — roughly twice as quick as `HashMap` (1.7–2.2× depending on the session; no probing,
+no membership comparison) *and* compact + serialisable. `CompactHashIndex::id` keeps a probabilistic
+membership check and *still* beats `HashMap` on lookup (~1.6× here), and builds faster than it too. Full verification (`id`) pays one extra
 cache line + a key comparison; `StringIndex` trades more latency for **ordered / prefix / range /
 fuzzy** queries the hash maps cannot answer at all. So: `CompactHashIndex` when footprint dominates
 and a rare false positive is fine; `PerfectHashIndex::id` for exact membership + reverse;

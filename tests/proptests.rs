@@ -131,7 +131,8 @@ mod mph {
             seen[id] = true;
             assert_eq!(idx.key(id as u32), Some(key.as_str())); // exact reverse
         }
-        let restored = PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        // SAFETY: the blob comes straight from this index's own `to_bytes`.
+        let restored = unsafe { PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()) }.unwrap();
         for key in &expected {
             assert_eq!(restored.id(key), idx.id(key));
         }
@@ -164,14 +165,17 @@ mod mph {
             check_compact_no_false_negative(&keys, fp);
         }
 
+        // SAFETY (both): the loader's contract excludes crafted blobs, but arbitrary bytes cannot
+        // reach the MPH — the magic, the header checksum and the payload checksum all reject first.
+        // These cases assert exactly that: garbage fails cleanly rather than panicking.
         #[test]
         fn perfect_hash_from_bytes_never_panics(data in prop::collection::vec(any::<u8>(), 0..256)) {
-            let _ = PerfectHashIndex::from_bytes(&data);
+            let _ = unsafe { PerfectHashIndex::from_bytes(&data) };
         }
 
         #[test]
         fn compact_hash_from_bytes_never_panics(data in prop::collection::vec(any::<u8>(), 0..256)) {
-            let _ = CompactHashIndex::from_bytes(&data);
+            let _ = unsafe { CompactHashIndex::from_bytes(&data) };
         }
 
         // Any single flipped byte — header field, MPH region or fingerprint table — must be
@@ -191,8 +195,9 @@ mod mph {
             assert_eq!(&blob[0..4], b"BCH5");
             let pos = 4 + at.index(blob.len() - 4);
             blob[pos] ^= xor;
+            // SAFETY: a one-byte flip is caught by the payload checksum before the MPH is read.
             prop_assert!(
-                CompactHashIndex::from_bytes(&blob).is_err(),
+                unsafe { CompactHashIndex::from_bytes(&blob) }.is_err(),
                 "single-byte flip at {pos} (xor {xor}) was accepted by an owned load",
             );
         }

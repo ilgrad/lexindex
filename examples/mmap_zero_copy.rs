@@ -40,7 +40,7 @@ fn main() -> Result<(), IndexError> {
     let owned_us = t.elapsed().as_micros();
 
     let t = Instant::now();
-    let mapped = StringIndex::load_mmap(&si_path)?;
+    let mapped = unsafe { StringIndex::load_mmap(&si_path) }?;
     let mmap_us = t.elapsed().as_micros().max(1);
 
     println!("StringIndex::load       (read into RAM)   {owned_us:>8} µs");
@@ -57,7 +57,7 @@ fn main() -> Result<(), IndexError> {
 
     // PerfectHashIndex maps the key arena (the bulk) and reads only the tiny MPH into memory.
     let t = Instant::now();
-    let ph_mapped = PerfectHashIndex::load_mmap(&ph_path)?;
+    let ph_mapped = unsafe { PerfectHashIndex::load_mmap(&ph_path) }?;
     println!(
         "PerfectHashIndex::load_mmap               {:>8} µs",
         t.elapsed().as_micros()

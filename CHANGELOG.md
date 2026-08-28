@@ -4,6 +4,58 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`from_bytes` and `load` are now `unsafe fn` on `PerfectHashIndex` and `CompactHashIndex`**
+  (**breaking**). A function that is unsound for some input belongs behind `unsafe fn`, and these
+  accept arbitrary bytes: the blob framing is validated and checksummed — accidental corruption
+  still fails cleanly — but the embedded minimal perfect hash is an `epserde` region whose pilot
+  table `ptr_hash` reads unchecked, and the fields that would bound that read are private to
+  `ptr_hash`, so no validation on this side can reject a crafted blob. Upstream reached the same
+  conclusion independently: `epserde` 0.13 made `deserialize_full` an `unsafe fn`, and PtrHash
+  declined a checked `try_index()` for the same reason. `StringIndex::from_bytes`/`load` stay safe —
+  `fst` validates its own structure and guarantees invalid input cannot violate memory safety. The
+  Python bindings keep their signatures and state the contract in their docstrings.
+- **`load_mmap` is now an `unsafe fn`** on all three indexes (**breaking**). The mapped bytes are
+  borrowed, not copied, so a write to the file from any process while the index is alive is
+  undefined behaviour — which is exactly why `memmap2::Mmap::map` is itself `unsafe`. Wrapping it
+  in a safe function hid a precondition that ordinary safe code (another handle writing the same
+  path) can violate, so the obligation is now stated in a `# Safety` section and the call sites
+  carry it. `load` is unchanged and remains safe. The Python `load_mmap` keeps its signature —
+  Python has no way to express the obligation — and documents the same contract in its docstring.
+- **`CompactHashIndex` hashes each key once instead of twice.** Both of its hashes are now produced
+  by a single pass over the key's bytes, bit-for-bit identical to the two functions it replaces (a
+  golden test asserts the equality on 2 000 keys, so no stored blob changes meaning). Measured in
+  isolation: **21.3 → 18.2 ns/key** on real-word bigrams, **126 → 77 ns/key** on 80-byte URI-like
+  keys.
+- **The Python `CompactHashIndex` constructor releases the GIL while hashing.** Items are pulled in
+  4 096-key chunks and hashed with the GIL dropped, so other Python threads keep running through
+  what was previously one long GIL-held stretch; memory behaviour is unchanged (still 16 bytes per
+  key, strings released as they are consumed).
+
+### Fixed
+
+- **`build_bits` rejects a bad `fingerprint_bits` before touching the iterator.** Since 0.8.1 the
+  width was validated after the input had been collected, so an invalid width consumed (and hashed)
+  the entire iterator first — and never returned at all for an endless one.
+
+### Documentation
+
+- **The README's Rust examples are now compiled and run as doctests.** They had never been checked
+  by anything, so an API change could silently invalidate the first code a reader sees. A
+  `#[cfg(doctest)]` item includes the file, which runs the snippets without pulling the prose into
+  the API docs.
+- The fingerprint's false-positive rate is described as a design rate from two *uncorrelated*
+  hashes rather than as exact probability from *independent* ones, matching the more careful
+  wording already in the code.
+- **The point-lookup table is re-measured on this release's code** (min of 12 runs, idle machine,
+  four seconds between runs). The whole session runs ~19% faster than the 0.8.0 one — the
+  `std::HashMap` control moved with it — so the table now says which spreads were observed per row
+  and warns that the ratio to `HashMap` is session-dependent (`id_unchecked` measured 2.2× here,
+  1.7× before) rather than presenting it as a constant.
+
 ## [0.8.1] — 2026-08-27
 
 ### Fixed

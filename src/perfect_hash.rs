@@ -321,11 +321,16 @@ impl PerfectHashIndex {
     /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. The lexindex framing (magic, lengths,
     /// arena offsets, side table) is fully bounds-validated, and owned loads verify a streaming
     /// checksum of the whole payload, so *accidental* corruption anywhere in the blob fails cleanly.
-    /// The embedded minimal perfect hash is still deserialised by [`epserde`] and both hashes are
-    /// public and deterministic, so a deliberately *crafted* blob remains outside the contract: feed
-    /// only blobs produced by [`to_bytes`](Self::to_bytes) / [`save`](Self::save) — the same "trust
-    /// your own blob" contract as [`load_mmap`](Self::load_mmap), which also skips the checksum scan.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+    ///
+    /// # Safety
+    /// The embedded minimal perfect hash is deserialised by [`epserde`] and cannot be validated:
+    /// `ptr_hash` reads its pilot table unchecked, and the fields that would bound that read
+    /// (`parts`, `buckets`, the fast-modulo constants) are private, so no amount of checking on
+    /// this side can make a hostile blob safe. A crafted blob can therefore read out of bounds.
+    /// The caller must pass only bytes produced by [`to_bytes`](Self::to_bytes) /
+    /// [`save`](Self::save) — the same "trust your own blob" contract as
+    /// [`load_mmap`](Self::load_mmap), which additionally skips the checksum scan.
+    pub unsafe fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
@@ -496,19 +501,27 @@ impl PerfectHashIndex {
     }
 
     /// Load a dictionary previously written with [`PerfectHashIndex::save`] (reads the whole file
-    /// and verifies the payload checksum — see [`from_bytes`](Self::from_bytes)).
-    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+    /// and verifies the payload checksum).
+    ///
+    /// # Safety
+    /// The file must have been written by [`save`](Self::save) — see
+    /// [`from_bytes`](Self::from_bytes) for why a crafted blob cannot be rejected.
+    pub unsafe fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
     /// Memory-map the file and borrow the key arena (the bulk of the blob) zero-copy; only the small
     /// MPH structure is read into memory. Skips the payload-checksum scan `load` performs — the
-    /// mapped file is trusted intact. See
-    /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the immutability caveat.
+    /// mapped file is trusted intact.
+    ///
+    /// # Safety
+    /// The caller must guarantee the file is not modified or truncated by any process while the
+    /// returned index is alive — see [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for
+    /// the full contract.
     #[cfg(feature = "mmap")]
-    pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+    pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: the mapped file must not be mutated while it is mapped (see StringIndex::load_mmap).
+        // SAFETY: forwarded to this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
@@ -517,6 +530,14 @@ impl PerfectHashIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The loader is `unsafe` because a crafted blob cannot be rejected (see
+    /// [`PerfectHashIndex::from_bytes`]). Every blob below is either produced by this crate or a
+    /// deliberate corruption of the *validated* framing, which the loader rejects before the MPH is
+    /// touched.
+    fn from_bytes(bytes: &[u8]) -> Result<PerfectHashIndex, IndexError> {
+        unsafe { PerfectHashIndex::from_bytes(bytes) }
+    }
 
     #[test]
     fn forward_reverse_and_membership() {
@@ -565,7 +586,7 @@ mod tests {
     #[test]
     fn round_trips_through_bytes() {
         let idx = PerfectHashIndex::build(["alpha", "beta", "gamma", "delta"]).unwrap();
-        let restored = PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         assert_eq!(restored.len(), idx.len());
         for w in ["alpha", "beta", "gamma", "delta"] {
             // the serialised MPH yields the same slot, and reverse lookup matches
@@ -580,7 +601,7 @@ mod tests {
         let idx = PerfectHashIndex::build(["GET", "POST", "PUT", "DELETE"]).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_mph_{}.bmp", std::process::id()));
         idx.save(&path).unwrap();
-        let loaded = PerfectHashIndex::load(&path).unwrap();
+        let loaded = unsafe { PerfectHashIndex::load(&path) }.unwrap();
         for w in ["GET", "POST", "PUT", "DELETE"] {
             assert_eq!(loaded.id(w), idx.id(w));
         }
@@ -595,7 +616,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("lexindex_mph_mmap_{}.bmp", std::process::id()));
         idx.save(&path).unwrap();
-        let mapped = PerfectHashIndex::load_mmap(&path).unwrap();
+        let mapped = unsafe { PerfectHashIndex::load_mmap(&path) }.unwrap();
         assert_eq!(mapped.len(), idx.len());
         for w in &words {
             let id = mapped.id(w).expect("present"); // membership checks against the mapped arena
@@ -608,17 +629,17 @@ mod tests {
     #[test]
     fn empty_round_trips_and_rejects_corrupt() {
         let empty = PerfectHashIndex::build(Vec::<String>::new()).unwrap();
-        let restored = PerfectHashIndex::from_bytes(&empty.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&empty.to_bytes().unwrap()).unwrap();
         assert!(restored.is_empty());
         assert_eq!(restored.id("x"), None);
 
-        assert!(PerfectHashIndex::from_bytes(b"nope").is_err());
+        assert!(from_bytes(b"nope").is_err());
         let mut good = PerfectHashIndex::build(["a", "b"])
             .unwrap()
             .to_bytes()
             .unwrap();
         good[0] = b'X'; // break the magic
-        assert!(PerfectHashIndex::from_bytes(&good).is_err());
+        assert!(from_bytes(&good).is_err());
     }
 
     /// The streamed batch is the same function as the singular accessor, element for element —
@@ -646,7 +667,7 @@ mod tests {
         let words: Vec<String> = (0..2_000).map(|i| format!("word-{i:05}")).collect();
         let idx = PerfectHashIndex::build(&words).unwrap();
         let v3 = synthesize_v3(&idx, idx.overflow_cap);
-        let restored = PerfectHashIndex::from_bytes(&v3).unwrap();
+        let restored = from_bytes(&v3).unwrap();
         assert_eq!(restored.overflow_cap, idx.overflow_cap);
         for w in &words {
             assert_eq!(restored.id(w), idx.id(w));
@@ -672,7 +693,7 @@ mod tests {
             v2.extend_from_slice(&v4[4..12]); // n
             v2.extend_from_slice(&v4[12..20]); // mph_len
             v2.extend_from_slice(&v4[HEADER_V4..]); // mph + arena (side is empty)
-            let restored = PerfectHashIndex::from_bytes(&v2).unwrap();
+            let restored = from_bytes(&v2).unwrap();
             assert_eq!(
                 restored.overflow_cap, idx.overflow_cap,
                 "healed cap at n = {n}"
@@ -709,22 +730,16 @@ mod tests {
     fn corrupt_headers_and_payloads_are_refused() {
         let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
         let good = idx.to_bytes().unwrap();
-        assert!(PerfectHashIndex::from_bytes(&good).is_ok());
+        assert!(from_bytes(&good).is_ok());
         for pos in [4, 12, 19, 20, 27, 31, 32, 35] {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
-            assert!(
-                PerfectHashIndex::from_bytes(&bad).is_err(),
-                "header byte {pos} was accepted"
-            );
+            assert!(from_bytes(&bad).is_err(), "header byte {pos} was accepted");
         }
         for pos in (HEADER_V4..good.len()).step_by(7) {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
-            assert!(
-                PerfectHashIndex::from_bytes(&bad).is_err(),
-                "payload byte {pos} was accepted"
-            );
+            assert!(from_bytes(&bad).is_err(), "payload byte {pos} was accepted");
         }
     }
 
@@ -801,7 +816,7 @@ mod tests {
             "ids must stay a bijection onto [0, n)"
         );
         // The v4 blob carries the side section and reloads identically — owned and mapped.
-        let restored = PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         assert_eq!(restored.side, idx.side);
         assert_eq!(restored.id(a), Some(ia));
         assert_eq!(restored.id(b), Some(ib));
@@ -811,7 +826,7 @@ mod tests {
             let path =
                 std::env::temp_dir().join(format!("lexindex_side_{}.bmp", std::process::id()));
             idx.save(&path).unwrap();
-            let mapped = PerfectHashIndex::load_mmap(&path).unwrap();
+            let mapped = unsafe { PerfectHashIndex::load_mmap(&path) }.unwrap();
             assert_eq!(mapped.id(a), Some(ia));
             assert_eq!(mapped.id(b), Some(ib));
             std::fs::remove_file(&path).ok();
@@ -836,7 +851,7 @@ mod tests {
             bad[24..32].copy_from_slice(&payload.to_le_bytes());
             let check = crate::hash::hash_bytes(&bad[..CHECKED_V4]) as u32;
             bad[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
-            let err = match PerfectHashIndex::from_bytes(&bad) {
+            let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("side id {bad_id} was accepted"),
             };
@@ -869,7 +884,7 @@ mod tests {
             if idx.overflow_cap == 0 {
                 continue; // no trailing free zone this build; nothing to forge past
             }
-            let restored = PerfectHashIndex::from_bytes(&synthesize_v3(&idx, u64::MAX)).unwrap();
+            let restored = from_bytes(&synthesize_v3(&idx, u64::MAX)).unwrap();
             assert_eq!(restored.overflow_cap, idx.overflow_cap); // recomputed, not the forged MAX
             let mph = restored.mph.as_ref().unwrap();
             for probe in 0..5_000 {
@@ -898,6 +913,6 @@ mod tests {
             .to_bytes()
             .unwrap();
         old[0..4].copy_from_slice(b"BMP1");
-        assert!(PerfectHashIndex::from_bytes(&old).is_err());
+        assert!(from_bytes(&old).is_err());
     }
 }

@@ -36,10 +36,11 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
 - **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
-  computed from a **second, independent** hash of the key. `id(key)` accepts the slot only if the
-  query's fingerprint matches the stored one. Independence of the two hashes makes the chance a
-  non-member both lands on a used slot and matches its fingerprint `2^-fingerprint_bits` — the
-  tunable false-positive rate — `2^-8k` by construction: 0.390 625 % at 1 byte, 0.001 526 % at 2.
+  computed from a **second** hash of the key, with a different basis and multiplier. `id(key)` accepts
+  the slot only if the query's fingerprint matches the stored one. The two hashes are uncorrelated for
+  well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
+  fingerprint about `2^-fingerprint_bits` — the tunable false-positive rate — ≈`2^-8k` by design:
+  0.390 625 % at 1 byte, 0.001 526 % at 2.
   That is a *design* rate, not a guarantee against an adversary: both hashes are deterministic and
   unseeded, so anyone who can choose the queries can search for a false positive offline. Verified
   statistically on the 0.5.0 code, dictionary members with two non-member populations: 2 M random
@@ -149,7 +150,10 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 and reads only the small MPH structure into memory, sidestepping the deserialiser's alignment concern entirely.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
-it.
+it. That obligation is the caller's, so `load_mmap` is an **`unsafe fn`** on all three indexes —
+`memmap2::Mmap::map` is `unsafe` for precisely this reason, and wrapping it in a safe function would
+hide a precondition that a perfectly ordinary safe program (another handle writing to the same path)
+can violate.
 
 The load-time trust boundary is worth stating precisely. Against **accidental** corruption — a
 truncated download, a flipped byte, a lost header field — every owned `load`/`from_bytes` fails
@@ -168,6 +172,16 @@ FST checksum catches accidental corruption, and `fst` documents that even invali
 violate memory safety — a crafted, re-checksummed FST can at worst panic or answer wrongly, never
 read out of bounds. `load_mmap` skips every checksum scan by design, trusting the mapped file
 outright to keep mapping time independent of blob size.
+
+That asymmetry is what decides the signatures. A function must be an `unsafe fn` when some input
+makes it unsound, and `from_bytes(&[u8])` accepts every byte string there is — so on the two
+perfect-hash indexes `from_bytes` and `load` are **`unsafe fn`** alongside `load_mmap`. This is not a
+gap waiting to be closed by more validation: `ptr_hash` reads its pilot table unchecked, and the
+fields that would bound that read (`parts`, `buckets`, the fast-modulo constants) are private, so a
+downstream crate cannot check them at any price. Upstream reached the same conclusion independently —
+`epserde` 0.13 made `deserialize_full` an `unsafe fn`, and PtrHash declined a checked `try_index()`
+for exactly this reason. `StringIndex` keeps safe `from_bytes`/`load`: `fst` validates its own
+structure and documents that invalid input cannot violate memory safety.
 
 ## Cargo features
 

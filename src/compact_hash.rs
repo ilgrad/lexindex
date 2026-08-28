@@ -12,7 +12,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::hash::{fingerprint_bits, fingerprint_full, hash_key};
+use crate::hash::{fingerprint_full, hash_key, hash_pair};
 use epserde::prelude::*;
 use ptr_hash::DefaultPtrHash;
 
@@ -84,13 +84,10 @@ impl CompactHashIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let pairs = items
-            .into_iter()
-            .map(|k| {
-                let k = k.as_ref();
-                (hash_key(k), fingerprint_full(k))
-            })
-            .collect();
+        // Rejected before a single item is pulled: the iterator may be huge, or endless, and
+        // consuming it only to report a bad width would be a hang the caller cannot see into.
+        check_fingerprint_bits(fingerprint_bits)?;
+        let pairs = items.into_iter().map(|k| hash_pair(k.as_ref())).collect();
         Self::build_from_pairs(pairs, fingerprint_bits)
     }
 
@@ -101,11 +98,7 @@ impl CompactHashIndex {
         mut pairs: Vec<(u64, u64)>,
         fingerprint_bits: u32,
     ) -> Result<Self, IndexError> {
-        if !(1..=64).contains(&fingerprint_bits) {
-            return Err(IndexError::Format(
-                "compact-hash: fingerprint_bits must be in 1..=64",
-            ));
-        }
+        check_fingerprint_bits(fingerprint_bits)?;
         pairs.sort_unstable();
         // Duplicate keys produce identical pairs. Distinct keys deduplicate here only by colliding
         // in both full 64-bit hashes at once — never because the fingerprint table is narrow.
@@ -222,10 +215,13 @@ impl CompactHashIndex {
     pub fn id(&self, key: &str) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
-            // branch, then exactly the side-free lookup.
-            let slot = self.slot_for(hash_key(key))?;
+            // branch, then exactly the side-free lookup. Both hashes come from a single pass over
+            // the key — a hit needs both, and only a non-member landing past the remap (rarer than
+            // 1 in 100 queries) pays for a fingerprint it never compares.
+            let (h, full) = hash_pair(key);
+            let slot = self.slot_for(h)?;
             return (read_fp(self.fps.as_ref(), slot, self.fp_bits)?
-                == fingerprint_bits(key, self.fp_bits))
+                == full & fp_mask(self.fp_bits))
             .then_some(slot as u32);
         }
         self.id_with_side(key)
@@ -237,8 +233,7 @@ impl CompactHashIndex {
     /// slot-and-fingerprint path.
     #[cold]
     fn id_with_side(&self, key: &str) -> Option<u32> {
-        let h = hash_key(key);
-        let full = fingerprint_full(key);
+        let (h, full) = hash_pair(key);
         if let Some(id) = self.side_lookup(h, full) {
             return Some(id);
         }
@@ -283,9 +278,11 @@ impl CompactHashIndex {
         // prefetched ahead.
         let mut hashes = Vec::with_capacity(keys.len());
         let mut wanted = Vec::with_capacity(keys.len());
+        let mask = fp_mask(self.fp_bits);
         for k in keys {
-            hashes.push(hash_key(k.as_ref()));
-            wanted.push(fingerprint_bits(k.as_ref(), self.fp_bits));
+            let (h, full) = hash_pair(k.as_ref());
+            hashes.push(h);
+            wanted.push(full & mask);
         }
         // ptr_hash's stream iterator is internal-iteration only (`next()` is unimplemented by
         // design), so drain it with `for_each`.
@@ -374,13 +371,17 @@ impl CompactHashIndex {
     ///
     /// The lexindex header, fingerprint table and side table are fully bounds-validated, and owned
     /// loads verify a streaming checksum of the whole payload, so *accidental* corruption anywhere
-    /// in the blob fails cleanly. The embedded minimal perfect hash is still deserialised by
-    /// [`epserde`], the stored `overflow_cap` has no keys to be recomputed from, and every hash
-    /// involved is public and deterministic — so a deliberately *crafted* blob remains outside the
-    /// contract: feed only blobs produced by [`to_bytes`](Self::to_bytes) / [`save`](Self::save).
-    /// The same "trust your own blob" contract as [`load_mmap`](Self::load_mmap), which also skips
-    /// the checksum scan.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+    /// in the blob fails cleanly.
+    ///
+    /// # Safety
+    /// The embedded minimal perfect hash is deserialised by [`epserde`] and cannot be validated:
+    /// `ptr_hash` reads its pilot table unchecked, and the fields that would bound that read
+    /// (`parts`, `buckets`, the fast-modulo constants) are private, so no amount of checking on
+    /// this side can make a hostile blob safe. A crafted blob can therefore read out of bounds.
+    /// The caller must pass only bytes produced by [`to_bytes`](Self::to_bytes) /
+    /// [`save`](Self::save) — the same "trust your own blob" contract as
+    /// [`load_mmap`](Self::load_mmap), which additionally skips the checksum scan.
+    pub unsafe fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
@@ -547,21 +548,39 @@ impl CompactHashIndex {
     }
 
     /// Load a dictionary previously written with [`CompactHashIndex::save`] (reads the whole file
-    /// and verifies the payload checksum — see [`from_bytes`](Self::from_bytes)).
-    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+    /// and verifies the payload checksum).
+    ///
+    /// # Safety
+    /// The file must have been written by [`save`](Self::save) — see
+    /// [`from_bytes`](Self::from_bytes) for why a crafted blob cannot be rejected.
+    pub unsafe fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
     /// Memory-map the file and borrow the fingerprint table zero-copy (only the small MPH is read
     /// into memory). Skips the payload-checksum scan `load` performs — the mapped file is trusted
-    /// intact. See [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the immutability
-    /// caveat.
+    /// intact.
+    ///
+    /// # Safety
+    /// The caller must guarantee the file is not modified or truncated by any process while the
+    /// returned index is alive — see [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for
+    /// the full contract.
     #[cfg(feature = "mmap")]
-    pub fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+    pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: the mapped file must not be mutated while it is mapped (see StringIndex::load_mmap).
+        // SAFETY: forwarded to this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+    }
+}
+
+fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
+    if (1..=64).contains(&bits) {
+        Ok(())
+    } else {
+        Err(IndexError::Format(
+            "compact-hash: fingerprint_bits must be in 1..=64",
+        ))
     }
 }
 
@@ -630,6 +649,14 @@ fn write_fp(fps: &mut [u8], slot: usize, bits: u32, fp: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The loader is `unsafe` because a crafted blob cannot be rejected (see
+    /// [`CompactHashIndex::from_bytes`]). Every blob below is either produced by this crate or a
+    /// deliberate corruption of the *validated* framing, which the loader rejects before the MPH is
+    /// touched.
+    fn from_bytes(bytes: &[u8]) -> Result<CompactHashIndex, IndexError> {
+        unsafe { CompactHashIndex::from_bytes(bytes) }
+    }
 
     #[test]
     fn build_lookup_and_membership() {
@@ -703,12 +730,12 @@ mod tests {
     #[test]
     fn round_trips_and_rejects_corrupt() {
         let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
-        let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         for w in ["GET", "POST", "PUT", "DELETE"] {
             assert_eq!(restored.id(w), idx.id(w));
         }
         assert_eq!(restored.id("PATCH"), None);
-        assert!(CompactHashIndex::from_bytes(b"nope").is_err());
+        assert!(from_bytes(b"nope").is_err());
         assert!(CompactHashIndex::build(["a"], 3).is_err()); // bad fingerprint width
     }
 
@@ -723,23 +750,17 @@ mod tests {
         for w in [0u8, 65] {
             let mut bad_width = good.clone();
             bad_width[12] = w;
-            assert!(matches!(
-                CompactHashIndex::from_bytes(&bad_width),
-                Err(IndexError::Format(_))
-            ));
+            assert!(matches!(from_bytes(&bad_width), Err(IndexError::Format(_))));
         }
         // ...and a BCH1 blob may only claim 1, 2 or 4 *bytes*.
         let mut bad_v1 = good.clone();
         bad_v1[0..4].copy_from_slice(b"BCH1");
         bad_v1[12] = 3;
-        assert!(matches!(
-            CompactHashIndex::from_bytes(&bad_v1),
-            Err(IndexError::Format(_))
-        ));
+        assert!(matches!(from_bytes(&bad_v1), Err(IndexError::Format(_))));
 
         // Dropping a byte makes the table length disagree with ceil(n * fp_bits / 8).
         assert!(matches!(
-            CompactHashIndex::from_bytes(&good[..good.len() - 1]),
+            from_bytes(&good[..good.len() - 1]),
             Err(IndexError::Format(_))
         ));
     }
@@ -758,7 +779,7 @@ mod tests {
         let check = crate::hash::hash_bytes(&v3[..CHECKED_V3]) as u32;
         v3.extend_from_slice(&check.to_le_bytes());
         v3.extend_from_slice(&v4[HEADER_V4..]); // mph + fingerprints (side is empty)
-        let restored = CompactHashIndex::from_bytes(&v3).unwrap();
+        let restored = from_bytes(&v3).unwrap();
         for w in ["alpha", "beta", "gamma"] {
             assert_eq!(restored.id(w), idx.id(w));
         }
@@ -780,7 +801,7 @@ mod tests {
             old.extend_from_slice(&width.to_le_bytes());
             old.extend_from_slice(&v4[24..32]); // mph_len
             old.extend_from_slice(&v4[HEADER_V4..]);
-            let err = match CompactHashIndex::from_bytes(&old) {
+            let err = match from_bytes(&old) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("a pre-0.7 blob was accepted"),
             };
@@ -795,22 +816,16 @@ mod tests {
     fn corrupt_headers_and_payloads_are_refused() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
         let good = idx.to_bytes().unwrap();
-        assert!(CompactHashIndex::from_bytes(&good).is_ok());
+        assert!(from_bytes(&good).is_ok());
         for pos in [4, 12, 16, 23, 24, 31, 32, 35, 36, 43, 44, 47] {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
-            assert!(
-                CompactHashIndex::from_bytes(&bad).is_err(),
-                "header byte {pos} was accepted"
-            );
+            assert!(from_bytes(&bad).is_err(), "header byte {pos} was accepted");
         }
         for pos in (HEADER_V4..good.len()).step_by(5) {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
-            assert!(
-                CompactHashIndex::from_bytes(&bad).is_err(),
-                "payload byte {pos} was accepted"
-            );
+            assert!(from_bytes(&bad).is_err(), "payload byte {pos} was accepted");
         }
     }
 
@@ -839,7 +854,7 @@ mod tests {
             keys.len(),
             "ids must stay a bijection onto [0, n)"
         );
-        let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         assert_eq!(restored.side, idx.side);
         assert_eq!(restored.id(a), Some(ia));
         assert_eq!(restored.id(b), Some(ib));
@@ -858,10 +873,24 @@ mod tests {
             for k in &keys {
                 assert!(idx.contains(k), "false negative on {k:?} at {bits} bits");
             }
-            let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+            let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
             assert_eq!(restored.id(a), Some(ia), "bits={bits}");
             assert_eq!(restored.id(b), Some(ib), "bits={bits}");
         }
+    }
+
+    /// A bad fingerprint width is rejected before the iterator is touched — it may be endless, and
+    /// hashing it to completion just to report the width would hang instead of returning `Err`.
+    #[test]
+    fn a_bad_fingerprint_width_is_rejected_before_the_iterator_runs() {
+        let mut pulled = 0usize;
+        let items = std::iter::repeat_with(|| {
+            pulled += 1;
+            "x"
+        })
+        .take(1_000);
+        assert!(CompactHashIndex::build_bits(items, 0).is_err());
+        assert_eq!(pulled, 0, "the iterator must not be consumed");
     }
 
     /// A 0.8.0 "BCH4" blob is bit-identical to v5 when its side table is empty — it must load.
@@ -881,7 +910,7 @@ mod tests {
         let mut v4 = idx.to_bytes().unwrap();
         v4[0..4].copy_from_slice(b"BCH4");
         rehash(&mut v4);
-        let restored = CompactHashIndex::from_bytes(&v4).unwrap();
+        let restored = from_bytes(&v4).unwrap();
         for w in ["alpha", "beta", "gamma"] {
             assert_eq!(restored.id(w), idx.id(w));
         }
@@ -892,7 +921,7 @@ mod tests {
         let mut v4 = idx.to_bytes().unwrap();
         v4[0..4].copy_from_slice(b"BCH4");
         rehash(&mut v4);
-        let err = match CompactHashIndex::from_bytes(&v4) {
+        let err = match from_bytes(&v4) {
             Err(e) => e.to_string(),
             Ok(_) => panic!("a 0.8.0 blob with a truncated side table was accepted"),
         };
@@ -917,7 +946,7 @@ mod tests {
             bad[36..44].copy_from_slice(&payload.to_le_bytes());
             let check = crate::hash::hash_bytes(&bad[..CHECKED_V4]) as u32;
             bad[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
-            let err = match CompactHashIndex::from_bytes(&bad) {
+            let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("side id {bad_id} was accepted"),
             };
@@ -996,7 +1025,7 @@ mod tests {
             ids.sort_unstable();
             ids.dedup();
             assert_eq!(ids.len(), keys.len(), "bits={bits}: ids not dense");
-            let restored = CompactHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
+            let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
             assert_eq!(restored.fingerprint_bits(), bits);
             let probes: Vec<String> = keys
                 .iter()
@@ -1076,10 +1105,7 @@ mod tests {
             .to_bytes()
             .unwrap();
         blob[11] ^= 0x40; // n: 3 -> 2^62, so `n * 4` would wrap u64
-        assert!(matches!(
-            CompactHashIndex::from_bytes(&blob),
-            Err(IndexError::Format(_))
-        ));
+        assert!(matches!(from_bytes(&blob), Err(IndexError::Format(_))));
     }
 
     #[test]
@@ -1089,7 +1115,7 @@ mod tests {
         assert!(empty.is_empty() && empty.id("x").is_none());
         let empty = CompactHashIndex::build(Vec::<String>::new(), 1).unwrap();
         assert!(empty.is_empty() && empty.id("x").is_none() && empty.id_unchecked("x") == 0);
-        let restored = CompactHashIndex::from_bytes(&empty.to_bytes().unwrap()).unwrap();
+        let restored = from_bytes(&empty.to_bytes().unwrap()).unwrap();
         assert!(restored.is_empty());
     }
 
@@ -1098,7 +1124,10 @@ mod tests {
         let idx = CompactHashIndex::build(["a", "b", "c"], 1).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_ch_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
-        assert_eq!(CompactHashIndex::load(&path).unwrap().id("b"), idx.id("b"));
+        assert_eq!(
+            unsafe { CompactHashIndex::load(&path) }.unwrap().id("b"),
+            idx.id("b")
+        );
         std::fs::remove_file(&path).ok();
     }
 
@@ -1110,7 +1139,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("lexindex_ch_mmap_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
-        let mapped = CompactHashIndex::load_mmap(&path).unwrap();
+        let mapped = unsafe { CompactHashIndex::load_mmap(&path) }.unwrap();
         assert_eq!(mapped.len(), idx.len());
         for w in &words {
             assert_eq!(mapped.id(w), idx.id(w));

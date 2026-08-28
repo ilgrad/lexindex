@@ -58,6 +58,12 @@ pub use perfect_hash::PerfectHashIndex;
 #[cfg(feature = "python")]
 mod python;
 
+// Compiles and runs the README's Rust snippets as doctests without pulling its prose into the API
+// docs, so a signature change that invalidates an example fails the test suite rather than shipping.
+#[cfg(all(doctest, feature = "mph", feature = "mmap"))]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 use std::fmt;
 
 /// Errors from building, querying, or (de)serialising an index.

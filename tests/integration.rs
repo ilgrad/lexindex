@@ -58,7 +58,8 @@ fn zero_copy_mmap_load_round_trips() {
     idx.save(&path).unwrap();
 
     // load_mmap borrows the index from the mapped file — forward, reverse and prefix all work.
-    let mapped = StringIndex::load_mmap(&path).unwrap();
+    // SAFETY: this test owns the file and nothing writes to it while the map is alive.
+    let mapped = unsafe { StringIndex::load_mmap(&path) }.unwrap();
     assert_eq!(mapped.len(), names.len());
     for name in &names {
         let id = mapped.id(name).expect("present");
