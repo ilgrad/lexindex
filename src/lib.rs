@@ -36,6 +36,18 @@
 // own justification in an `unsafe {}` block rather than ride on the signature.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+// `ptr_hash` 1.1 depends on `sucds` unconditionally (for an Elias-Fano packing this crate never
+// selects), and `sucds` refuses any target whose pointer width is not 64. Without this the failure
+// surfaces as half a dozen errors inside a transitive dependency, which says nothing about what to
+// do; say it once, here, in terms of a feature the caller controls.
+#[cfg(all(feature = "mph", not(target_pointer_width = "64")))]
+compile_error!(
+    "lexindex's `mph` feature (PerfectHashIndex, CompactHashIndex) requires a 64-bit target: its \
+     minimal perfect hash comes from `ptr_hash`, whose `sucds` dependency refuses any other \
+     pointer width. Build with `--no-default-features` for the `fst`-only `StringIndex`, which \
+     supports 32-bit targets including `wasm32-unknown-unknown`."
+);
+
 mod blob;
 mod string_index;
 mod subsequence;
@@ -45,20 +57,23 @@ pub use string_index::StringIndex;
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash
 // and arena live behind the `mph` feature; `StringIndex` reconstructs `id → key` from the FST itself
 // and needs none of them.
-#[cfg(feature = "mph")]
+// The width is part of the gate because the modules below name `ptr_hash` and `epserde` types, and
+// those dependencies exist only on 64-bit targets (see the `compile_error!` above). Without it a
+// 32-bit build would report eight missing-crate errors on top of the one that explains itself.
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 mod arena;
-#[cfg(feature = "mph")]
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 mod compact_hash;
-#[cfg(feature = "mph")]
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 mod hash;
-#[cfg(feature = "mph")]
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 mod perfect_hash;
-#[cfg(feature = "mph")]
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 pub use compact_hash::CompactHashIndex;
-#[cfg(feature = "mph")]
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
 pub use perfect_hash::PerfectHashIndex;
 
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", target_pointer_width = "64"))]
 mod python;
 
 // Compiles and runs the README's Rust snippets as doctests without pulling its prose into the API

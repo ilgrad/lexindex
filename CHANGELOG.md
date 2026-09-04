@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **A 32-bit build with the `mph` feature now fails with one sentence naming the feature to turn
+  off.** `ptr_hash` 1.1 depends on `sucds` unconditionally, and `sucds` `compile_error!`s on any
+  pointer width other than 64, so the build used to die inside a transitive dependency with a
+  dozen errors that named neither lexindex nor anything the caller could change — and a
+  `compile_error!` of our own would never have been reached, because cargo compiles dependencies
+  first. The minimal-perfect-hash dependencies are therefore declared under
+  `[target.'cfg(target_pointer_width = "64")'.dependencies]`: off 64-bit they are simply not in
+  the graph, the modules that name their types are not compiled, and the only diagnostic is ours.
+  The dependency graph on 64-bit targets is unchanged (`Cargo.lock` untouched). The `fst`-only
+  build has no such constraint — checked for `i686-unknown-linux-gnu` and
+  `wasm32-unknown-unknown` — and README and the usage guide now say so.
+
 ## [0.9.1] — 2026-09-04
 
 ### Added

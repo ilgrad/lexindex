@@ -122,6 +122,36 @@ jobs:
           uv run --python ${{ matrix.python-version }} --with mypy --with "$wheel" \
             python -m mypy.stubtest lexindex
 
+  # Two claims in the README that nothing else would catch when they rot: the `fst`-only build
+  # works on 32-bit targets (wasm included), and turning `mph` on there fails with *our* one-line
+  # explanation rather than a cascade from inside `sucds`. `check`, not `test`: there is no 32-bit
+  # runner to execute on, and both are compilation properties.
+  targets:
+    name: targets (fst-only on 32-bit, mph guard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu, wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: check (fst-only, i686)
+        run: cargo check --no-default-features --target i686-unknown-linux-gnu
+      - name: check (fst-only, wasm32)
+        run: cargo check --no-default-features --target wasm32-unknown-unknown
+      - name: the mph feature explains itself off 64-bit
+        run: |
+          if cargo check --target i686-unknown-linux-gnu > check.log 2>&1; then
+            echo "::error::a 32-bit build with mph succeeded - the guard in src/lib.rs is stale"
+            exit 1
+          fi
+          grep -q "requires a 64-bit target" check.log || {
+            echo "::error::a 32-bit mph build failed without lexindex's own message"
+            cat check.log
+            exit 1
+          }
+          echo "ok: failed with our message, $(grep -c '^error' check.log) error lines total"
+
   msrv:
     name: msrv (rust-version from Cargo.toml)
     runs-on: ubuntu-latest

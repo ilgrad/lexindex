@@ -192,7 +192,9 @@ assert!(small.contains("POST"));
 ```
 
 Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
-`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies).
+`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies)
+and the only one that compiles for 32-bit targets, including `wasm32-unknown-unknown` — `mph` needs a
+64-bit pointer width and refuses anything else at compile time.
 
 ## Benchmark
 
