@@ -160,6 +160,18 @@ def test_compact_hash_persistence(tmp_path):
     assert lexindex.CompactHashIndex.load(p).id("POST") == ch.id("POST")
 
 
+def test_serialized_len_matches_to_bytes():
+    keys = ["alpha", "beta", "gamma"]
+    for idx in (
+        lexindex.StringIndex(keys),
+        lexindex.PerfectHashIndex(keys),
+        lexindex.CompactHashIndex(keys),
+        lexindex.StringIndex([]),
+        lexindex.CompactHashIndex([], 2),
+    ):
+        assert idx.serialized_len() == len(idx.to_bytes())
+
+
 def test_compact_hash_empty_and_corrupt():
     ch = lexindex.CompactHashIndex([])
     assert ch.is_empty() and ch.id("x") is None and "x" not in ch

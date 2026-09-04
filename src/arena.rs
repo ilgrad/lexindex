@@ -76,8 +76,8 @@ impl StringArena {
         }
         let bytes = self.blob.as_ref();
         let at = HEADER + i * self.width;
-        let lo = read_offset(bytes, at, self.width).ok()? as usize;
-        let hi = read_offset(bytes, at + self.width, self.width).ok()? as usize;
+        let lo = usize::try_from(read_offset(bytes, at, self.width).ok()?).ok()?;
+        let hi = usize::try_from(read_offset(bytes, at + self.width, self.width).ok()?).ok()?;
         let start = self.data_start.checked_add(lo)?;
         let end = self.data_start.checked_add(hi)?;
         std::str::from_utf8(bytes.get(start..end)?).ok()
@@ -101,8 +101,8 @@ impl StringArena {
         }
         let bytes = self.blob.as_ref();
         let at = HEADER + i * self.width;
-        let lo = read_offset(bytes, at, self.width).ok()? as usize;
-        let hi = read_offset(bytes, at + self.width, self.width).ok()? as usize;
+        let lo = usize::try_from(read_offset(bytes, at, self.width).ok()?).ok()?;
+        let hi = usize::try_from(read_offset(bytes, at + self.width, self.width).ok()?).ok()?;
         Some((
             self.data_start.checked_add(lo)?,
             self.data_start.checked_add(hi)?,
@@ -145,7 +145,10 @@ impl StringArena {
     /// memory-mapped load stays instant (no `O(n)` scan).
     pub(crate) fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
-        let n_off = read_u64(bytes, 0)? as usize;
+        // Header-supplied, so converted checked: a count that does not fit this platform's `usize`
+        // must fail here rather than truncate on a 32-bit target.
+        let n_off = usize::try_from(read_u64(bytes, 0)?)
+            .map_err(|_| IndexError::Format("arena: offset count out of range"))?;
         if n_off == 0 {
             return Err(IndexError::Format("arena: zero offsets (need at least 1)"));
         }
@@ -164,7 +167,7 @@ impl StringArena {
         let data_len = bytes.len() - data_start;
         let last = HEADER + (n_off - 1) * width;
         if read_offset(bytes, HEADER, width)? != 0
-            || read_offset(bytes, last, width)? as usize != data_len
+            || read_offset(bytes, last, width)? != data_len as u64
         {
             return Err(IndexError::Format("arena: offsets do not span the data"));
         }

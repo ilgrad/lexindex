@@ -11,9 +11,9 @@ Among installable libraries this measures the axes that matter — build time an
 size** — and records which *capabilities* each one offers (ordered queries, reverse lookup, and
 crucially whether membership is **exact** or **probabilistic**). Build time is the median of five
 runs after a discarded warm-up, so no library is charged for its own first import (lexindex is
-imported at the top of this file; the others import inside their build callable). Point-lookup
-latency at the Python level is dominated by the call boundary and is reported only as a rough
-guide.
+imported at the top of this file; the others import inside their build callable). Lookup latency
+is deliberately *not* measured here — at the Python level it is dominated by the call boundary;
+`cargo run --release --example bench` measures it in Rust.
 
 Run:
   uv run --with matplotlib --with marisa-trie --with datrie --with dawg2 \\
@@ -47,7 +47,10 @@ def _load_words() -> list[str]:
     for path in candidates:
         if path and Path(path).exists():
             with open(path, encoding="utf-8", errors="ignore") as f:
-                words = sorted({line.strip() for line in f if line.strip()})
+                words = list({line.strip() for line in f if line.strip()})
+            # Build-order independence is part of what is measured: the ordered index sorts anyway,
+            # and a hash index must not be handed the sorted list a dictionary file happens to be.
+            random.Random(0).shuffle(words)
             if words:
                 print(f"keys: {len(words):,} real words from {path}")
                 return words

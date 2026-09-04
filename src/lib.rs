@@ -32,6 +32,9 @@
 // `fst`-only build they can't, so silence the broken-link lint just there rather than downgrade the
 // links to plain code spans.
 #![cfg_attr(not(feature = "mph"), allow(rustdoc::broken_intra_doc_links))]
+// Edition 2024 already warns; deny so an `unsafe` operation inside an `unsafe fn` must name its
+// own justification in an `unsafe {}` block rather than ride on the signature.
+#![deny(unsafe_op_in_unsafe_fn)]
 
 mod blob;
 mod string_index;
@@ -63,6 +66,11 @@ mod python;
 #[cfg(all(doctest, feature = "mph", feature = "mmap"))]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
+
+// Same for the usage guide, whose Rust block exercises every index and the unsafe loaders.
+#[cfg(all(doctest, feature = "mph", feature = "mmap"))]
+#[doc = include_str!("../docs/usage.md")]
+struct UsageDoctests;
 
 use std::fmt;
 

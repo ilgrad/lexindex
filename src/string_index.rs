@@ -67,38 +67,10 @@ impl StringIndex {
     /// transition whose accumulated output is `<= id` (that subtree's minimum rank), stopping when a
     /// final state's total output equals `id`. This is `O(key length)` and needs no separate reverse
     /// map — the returned `String` is decoded on the fly (forward lookups borrow; this one rebuilds).
+    /// The outputs are read from the blob, so the rank sums are checked: a value that would
+    /// overflow answers `None` rather than wrapping into a wrong key.
     pub fn key(&self, id: u64) -> Option<String> {
-        let fst = self.map.as_fst();
-        let mut node = fst.root();
-        let mut acc: u64 = 0;
-        let mut key: Vec<u8> = Vec::new();
-        loop {
-            if node.is_final() && acc + node.final_output().value() == id {
-                return String::from_utf8(key).ok();
-            }
-            // Transitions are in increasing byte order — increasing subtree-minimum rank. The subtree
-            // holding `id` is the last one whose minimum (`acc + out`) does not exceed it; outputs
-            // are non-decreasing in transition order, so binary search finds it. Dictionary FSTs
-            // fan out ~50 ways near the root, where this beats the linear scan most (measured
-            // 1.77× on whole-dictionary `keys_of`).
-            let n = node.len();
-            let (mut lo, mut hi) = (0usize, n);
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                if acc + node.transition(mid).out.value() <= id {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
-                }
-            }
-            if lo == 0 {
-                return None; // no transition qualifies ⇒ `id` is out of range
-            }
-            let t = node.transition(lo - 1);
-            acc += t.out.value();
-            key.push(t.inp);
-            node = fst.node(t.addr);
-        }
+        rank_walk(self.map.as_fst(), id)
     }
 
     /// All `(key, id)` pairs whose key starts with `prefix`, in lexicographic order.
@@ -244,6 +216,12 @@ impl StringIndex {
         out
     }
 
+    /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it;
+    /// [`save`](Self::save) writes exactly this many.
+    pub fn serialized_len(&self) -> usize {
+        MAGIC.len() + self.map.as_fst().as_bytes().len()
+    }
+
     /// Reconstruct an index from [`StringIndex::to_bytes`] output (copies the blob into owned memory).
     ///
     /// The whole FST is checksum-verified, so a corrupted blob returns an error rather than an index
@@ -270,8 +248,31 @@ impl StringIndex {
         )?;
         if verify {
             map.as_fst().verify()?;
+            Self::verify_ranks(&map)?;
         }
         Ok(Self { map })
+    }
+
+    /// The lexindex invariant on top of a valid FST: the value stored for the `i`-th key in sorted
+    /// order is exactly `i`. `fst` guarantees memory safety for any structurally valid map, but a
+    /// map with other values would answer wrong ids and defeat the rank-walk. A full walk costs
+    /// ~80 ns/key (measured: 0.7 → 40 ms on the 479 823-word dictionary, 58× the owned load), so
+    /// this is a spot check at both ends instead: the first key's value must be 0 and the rank-walk
+    /// to `len - 1` must succeed, which pins the range of the outputs. A map whose values are a
+    /// *permutation* of the ranks still passes — and still cannot violate memory safety; it answers
+    /// wrong ids, and [`key`](Self::key) checks its arithmetic rather than trusting it.
+    fn verify_ranks(map: &Map<SharedBytes>) -> Result<(), IndexError> {
+        let len = map.len() as u64;
+        if len == 0 {
+            return Ok(());
+        }
+        let first = map.stream().next().map(|(_, v)| v);
+        if first != Some(0) || rank_walk(map.as_fst(), len - 1).is_none() {
+            return Err(IndexError::Format(
+                "string-index: FST values are not the sorted ranks",
+            ));
+        }
+        Ok(())
     }
 
     /// Write the index to `path` — the same bytes as [`to_bytes`](Self::to_bytes), streamed
@@ -310,6 +311,44 @@ impl StringIndex {
         // not mutated while the mapping lives.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+    }
+}
+
+/// The rank-walk behind [`StringIndex::key`], over the raw FST so the load-time rank check can run
+/// it before an index exists.
+fn rank_walk(fst: &fst::raw::Fst<SharedBytes>, id: u64) -> Option<String> {
+    let mut node = fst.root();
+    let mut acc: u64 = 0;
+    let mut key: Vec<u8> = Vec::new();
+    loop {
+        if node.is_final() && acc.checked_add(node.final_output().value()) == Some(id) {
+            return String::from_utf8(key).ok();
+        }
+        // Transitions are in increasing byte order — increasing subtree-minimum rank. The subtree
+        // holding `id` is the last one whose minimum (`acc + out`) does not exceed it; outputs
+        // are non-decreasing in transition order, so binary search finds it. Dictionary FSTs
+        // fan out ~50 ways near the root, where this beats the linear scan most (measured
+        // 1.77× on whole-dictionary `keys_of`).
+        let n = node.len();
+        let (mut lo, mut hi) = (0usize, n);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if acc
+                .checked_add(node.transition(mid).out.value())
+                .is_some_and(|min| min <= id)
+            {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if lo == 0 {
+            return None; // no transition qualifies ⇒ `id` is out of range
+        }
+        let t = node.transition(lo - 1);
+        acc = acc.checked_add(t.out.value())?;
+        key.push(t.inp);
+        node = fst.node(t.addr);
     }
 }
 
@@ -507,6 +546,43 @@ mod tests {
         }
         assert_eq!(mapped.prefix("entity-001").len(), 10); // 0010..0019
         std::fs::remove_file(&path).ok();
+    }
+
+    /// A blob whose FST is structurally valid — and CRC-correct, because it was built by `fst`
+    /// itself — but whose values are not the sorted ranks must be refused by an owned load. Both
+    /// cases the spot check covers: values shifted off zero, and values that never reach `n - 1`.
+    #[test]
+    fn owned_load_rejects_values_that_are_not_ranks() {
+        fn blob_with_values(values: &[u64]) -> Vec<u8> {
+            let mut b = fst::MapBuilder::memory();
+            for (i, &v) in values.iter().enumerate() {
+                b.insert(format!("key-{i:03}"), v).unwrap();
+            }
+            let mut out = b"BIX4".to_vec();
+            out.extend_from_slice(&b.into_inner().unwrap());
+            out
+        }
+        // Shifted by one: the first key's value is 1, not 0.
+        let shifted = blob_with_values(&[1, 2, 3, 4]);
+        assert!(StringIndex::from_bytes(&shifted).is_err());
+        // All zeros: the first value is right, but no path accumulates `n - 1`.
+        let flat = blob_with_values(&[0, 0, 0, 0]);
+        assert!(StringIndex::from_bytes(&flat).is_err());
+        // The same construction with the real ranks loads and answers correctly, so the check
+        // rejects the values, not the hand-built framing.
+        let good = blob_with_values(&[0, 1, 2, 3]);
+        let idx = StringIndex::from_bytes(&good).unwrap();
+        assert_eq!(idx.id("key-002"), Some(2));
+        // `load_mmap` skips the scan by design, so the same bytes map without complaint.
+        #[cfg(feature = "mmap")]
+        {
+            let path =
+                std::env::temp_dir().join(format!("lexindex_ranks_{}.bix", std::process::id()));
+            std::fs::write(&path, &shifted).unwrap();
+            // SAFETY: this test owns the file and nothing writes to it while the map is alive.
+            assert!(unsafe { StringIndex::load_mmap(&path) }.is_ok());
+            std::fs::remove_file(&path).ok();
+        }
     }
 
     #[test]

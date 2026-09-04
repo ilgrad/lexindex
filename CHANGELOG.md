@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-09-04
+
+### Added
+
+- **`serialized_len()`** on all three indexes: the byte length `to_bytes` / `save` would produce,
+  without producing it (the minimal perfect hash is measured through a discarding sink).
+- **`docs/usage.md` is compiled as doctests**, like the README, so its Rust block cannot drift from
+  the API again — it had been calling `load_mmap` without `unsafe` since 0.9.0.
+
+### Changed
+
+- **The unsafe loaders are split into a safe framing parser and the unsafe `epserde` step.**
+  `parse_frame` validates everything a query will trust — magic, header and payload checksums,
+  lengths, the side table, the fingerprint range or the arena — on *any* bytes, and the property
+  tests now fuzz exactly that half (plus every truncation of a real blob); the MPH region is
+  deserialised only afterwards, behind the caller's contract. The proptests that called the unsafe
+  loaders on arbitrary bytes are gone: they exercised what the contract excludes.
+- **`StringIndex` owned loads spot-check the rank invariant**: the first key's value must be 0 and
+  the rank-walk to `len - 1` must succeed. A full walk measured 0.7 → 40 ms on the 479 823-word
+  dictionary (58× the owned load), so a *permutation* of the ranks is deliberately not detected —
+  it cannot violate memory safety, and `key(id)` now uses checked arithmetic on the blob-supplied
+  outputs, answering `None` instead of wrapping.
+- **`UnicodeSubsequence` no longer allocates a per-byte rewind table**: the rewind target is found
+  by walking back over UTF-8 continuation bytes, the same answer with no allocation per query.
+- **Docs**: README's install snippet says `0.9` (0.9.0 shipped saying `0.8`; the release preflight
+  now checks it); "never a full scan" and "`2^-b` by construction" scoped honestly in the usage
+  guide and the site index, which no longer calls the core "from-scratch"; a note on Unicode
+  semantics (scalar values; no normalisation, case folding or grapheme segmentation); the MPH
+  `load_mmap` `# Safety` sections state the trusted-blob precondition alongside the immutability
+  one; `bench/compare.py` shuffles its keys instead of handing every library the pre-sorted
+  dictionary, and no longer claims to measure lookup latency; the `examples/bench.rs` probe stride
+  is documented as prime (full coverage for every `n` below it), not merely odd.
+
+### Fixed
+
+- **Width-dependent casts**: the fingerprint-table length in `build_bits`, the arena's offset count
+  and its per-key offsets are converted with `usize::try_from` instead of `as` casts, so a
+  header-supplied value that does not fit the platform's `usize` fails cleanly instead of
+  truncating (`mph_len` and the side-byte count already did). Defence in depth rather than a live
+  bug: a 32-bit build of the `mph` feature does not compile today — `ptr_hash` pulls `sucds`, which
+  refuses any target that is not 64-bit — and the `fst`-only build contains none of this code. The
+  `fst`-only build is checked for `i686-unknown-linux-gnu`.
+- **`release.yml`**: a `workflow_dispatch` run built neither wheels nor the sdist, because both
+  depended on the tag-only preflight and a skipped dependency skips its dependants; they now run
+  unless preflight actually failed. Tags are gated on the full CI matrix (fmt, clippy, tests on
+  Linux/macOS/Windows, Python 3.11–3.14, MSRV, coverage) through `workflow_call`, and the native
+  wheels are installed and exercised on their runner before anything is published.
+
 ## [0.9.0] — 2026-08-28
 
 ### Changed

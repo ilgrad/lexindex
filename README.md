@@ -94,9 +94,9 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 
 ```toml
 [dependencies]
-lexindex = "0.8"
+lexindex = "0.9"
 # fst-only (drop the ptr_hash dependency):
-# lexindex = { version = "0.8", default-features = false }
+# lexindex = { version = "0.9", default-features = false }
 ```
 
 ## Usage
@@ -169,9 +169,15 @@ assert_eq!(raw, id);
   stays `≤ id`, and returns the path once the outputs sum to exactly `id`. That is `O(key length)` and
   needs no auxiliary structure, so the serialised blob is just `[magic "BIX4"][fst]` — half the size of
   the 0.2.0 front-coded layout on real words (12.6 → 5.95 B/key) and simpler to reason about.
-  `from_bytes`/`load` validate the magic and verify the FST's stored checksum, so a truncated or
-  corrupted owned blob is rejected at load rather than queried; `load_mmap` skips that `O(n)` scan to
-  keep mapping constant-time, so a mapped file is trusted to be intact.
+  `from_bytes`/`load` validate the magic, verify the FST's stored checksum and spot-check the rank
+  invariant (first value 0, rank-walk to `n - 1` succeeds — a full walk would cost 58× the load), so
+  a truncated or corrupted owned blob is rejected at load rather than queried; `load_mmap` skips
+  that `O(n)` scan to keep mapping constant-time, so a mapped file is trusted to be intact.
+- **No Unicode normalisation, case folding, collation or grapheme segmentation.** Keys and queries
+  are compared as UTF-8 byte strings, and "character" means a Unicode scalar value: `é` and
+  `e\u{301}` are two different keys, an emoji ZWJ sequence is several characters to `fuzzy` and
+  `subsequence`, and ordering is byte order, not any locale's. Normalise (NFC/NFKC, casefold) before
+  building *and* before querying if the application needs it.
 - **Perfect-hash ids are not reproducible across builds.** `ptr_hash`'s construction is randomised,
   so building the *same* key set twice assigns different slots — measured on 50 k keys, only ~53 % of
   them keep their id. Ids are stable across `save`/`load` of one built index, so persist the **blob**,

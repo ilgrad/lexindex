@@ -16,13 +16,16 @@ idx.id("missing")        # None
 "cherry" in idx          # True
 idx.key(2)               # "banana"  (id → string)
 
-# ordered iteration — automaton-driven, never a full scan
+# ordered iteration — automaton-driven: prefix/range seek directly; a broad fuzzy or
+# subsequence pattern may still walk most of the FST
 idx.prefix("ap")         # [("apple", 0), ("apricot", 1)]
 idx.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]  — [lo, hi)
 idx.successor("ba")      # ("banana", 2)   — smallest key ≥ query
 idx.predecessor("ba")    # ("apricot", 1)  — largest key ≤ query
 idx.fuzzy("aple", 1)     # [("apple", 0)]  — Levenshtein edit distance ≤ 1
 idx.subsequence("ae")    # [("apple", 0)]  — "a…e" in order, not necessarily contiguous
+# "character" above means a Unicode scalar value: no normalisation, case folding or grapheme
+# segmentation is applied — normalise before building and querying if you need it
 
 # lazy iteration in sorted (= id) order — decodes one key at a time, never builds a giant list
 list(idx)                # [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
@@ -128,9 +131,10 @@ dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zer
 ### Choosing the fingerprint width
 
 Size is the minimal perfect hash (~0.27 B/key) plus exactly `fingerprint_bits/8` bytes per key, and
-the membership false-positive rate is `2^-fingerprint_bits` by construction (measured 6.2530 % at
-4 bits and 1.5553 % at 6 over 2 M non-member probes; not a defence against an adversary who chooses
-the queries, since both hashes are deterministic and unseeded) — every width is a point on the
+the membership false-positive rate is about `2^-fingerprint_bits` — a design rate for
+well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes;
+not a defence against an adversary who chooses the queries, since both hashes are deterministic and
+unseeded — every width is a point on the
 same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 
 | `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
@@ -170,8 +174,11 @@ assert_eq!(idx.prefix("ap").len(), 2);
 let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
 assert_eq!(near, ["apple"]);
 
-idx.save("catalog.bix")?;
-let idx = StringIndex::load_mmap("catalog.bix")?; // zero-copy; no read into RAM
+// `save` / `load` / `load_mmap` take anything that is `AsRef<Path>`.
+let path = std::env::temp_dir().join("lexindex-usage-catalog.bix");
+idx.save(&path)?;
+// SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
+let idx = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into RAM
 
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
 assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
@@ -179,7 +186,8 @@ assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse l
 let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // ~1.3 B/key, no reverse
 let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // ~0.8 B/key, 6.25% FP rate
 assert!(small.contains("POST"));
-# std::fs::remove_file("catalog.bix").ok();
+# drop(idx);
+# std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 

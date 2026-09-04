@@ -10,23 +10,25 @@ use fst::Automaton;
 
 pub(crate) struct UnicodeSubsequence<'a> {
     query: &'a [u8],
-    /// For each query byte, the offset of the character it belongs to — where a mismatch mid-character
-    /// rewinds to. At a character boundary this is the position itself, so `accept` stays branch-light.
-    char_start: Vec<u32>,
 }
 
 impl<'a> UnicodeSubsequence<'a> {
     pub(crate) fn new(query: &'a str) -> Self {
-        let mut char_start = vec![0u32; query.len()];
-        for (start, ch) in query.char_indices() {
-            for slot in &mut char_start[start..start + ch.len_utf8()] {
-                *slot = start as u32;
-            }
-        }
         Self {
             query: query.as_bytes(),
-            char_start,
         }
+    }
+
+    /// Offset of the character that query byte `pos` belongs to — where a mismatch mid-character
+    /// rewinds to. UTF-8 continuation bytes are exactly the `10xxxxxx` ones, so walking back over
+    /// them lands on the lead byte; at a boundary this is `pos` itself.
+    #[inline]
+    fn char_start(&self, pos: usize) -> usize {
+        let mut start = pos;
+        while start > 0 && self.query[start] & 0xC0 == 0x80 {
+            start -= 1;
+        }
+        start
     }
 }
 
@@ -54,7 +56,7 @@ impl Automaton for UnicodeSubsequence<'_> {
         state == self.query.len()
     }
 
-    /// Rewinding to `char_start[state]` — rather than staying put, as a byte automaton does — is what
+    /// Rewinding to `char_start(state)` — rather than staying put, as a byte automaton does — is what
     /// makes the match character-aligned, and it never drops a match: a mismatch at a non-boundary
     /// position is a mismatch against a *continuation* byte, so the byte that failed is itself a
     /// continuation byte of the haystack's character and can never equal the query's next character,
@@ -68,7 +70,7 @@ impl Automaton for UnicodeSubsequence<'_> {
         if byte == self.query[state] {
             state + 1
         } else {
-            self.char_start[state] as usize
+            self.char_start(state)
         }
     }
 }

@@ -30,6 +30,18 @@ const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
 
+/// The validated framing of a blob — every field a query will trust — with the MPH region located
+/// but not deserialised. Produced by the safe `parse_frame`, which any bytes may reach; consumed by
+/// the unsafe `from_shared`, the only place the `epserde` region is touched.
+struct Frame {
+    n: usize,
+    fp_bits: u32,
+    overflow_cap: u64,
+    mph: std::ops::Range<usize>, // the epserde region; ignored when `n == 0`
+    fps: SharedBytes,
+    side: Vec<(u64, u64, u32)>,
+}
+
 /// The smallest string→dense-id dictionary: a minimal perfect hash plus one small fingerprint per key.
 pub struct CompactHashIndex {
     mph: Option<DefaultPtrHash>, // over one hash per distinct hash value; None iff empty
@@ -136,7 +148,11 @@ impl CompactHashIndex {
             e.2 = (m + j) as u32;
         }
         let mph = crate::hash::build_mph(&mph_hashes)?;
-        let table_len = (m as u64 * fingerprint_bits as u64).div_ceil(8) as usize;
+        // `m ≤ u32::MAX` and `fingerprint_bits ≤ 64`, so the product fits a u64; whether the table
+        // fits this platform's address space is answered here, not by a truncating cast on a
+        // 32-bit target.
+        let table_len = usize::try_from((m as u64 * fingerprint_bits as u64).div_ceil(8))
+            .map_err(|_| IndexError::Format("compact-hash: fingerprint table too large"))?;
         let mut fps = vec![0u8; table_len];
         let mut seen = vec![false; m];
         for (h, fp) in mph_hashes.iter().zip(&rep_fps) {
@@ -367,6 +383,16 @@ impl CompactHashIndex {
         Ok(out)
     }
 
+    /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it — for sizing
+    /// a buffer or reporting bytes/key; [`save`](Self::save) writes exactly this many.
+    pub fn serialized_len(&self) -> Result<usize, IndexError> {
+        let mph = match &self.mph {
+            Some(mph) => crate::hash::mph_serialized_len(mph)?,
+            None => 0,
+        };
+        Ok(HEADER_V4 + mph + self.fps.len() + self.side.len() * SIDE_ENTRY)
+    }
+
     /// Reconstruct from [`CompactHashIndex::to_bytes`] output (copies the blob into owned memory).
     ///
     /// The lexindex header, fingerprint table and side table are fully bounds-validated, and owned
@@ -382,14 +408,16 @@ impl CompactHashIndex {
     /// [`save`](Self::save) — the same "trust your own blob" contract as
     /// [`load_mmap`](Self::load_mmap), which additionally skips the checksum scan.
     pub unsafe fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        // SAFETY: forwarded from this function's contract.
+        unsafe { Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true) }
     }
 
-    /// Reconstruct from a shared source. The MPH is deserialised into memory; the fingerprint table
-    /// (the bulk) is borrowed zero-copy — so `load_mmap` never copies it. `verify` runs the
-    /// `O(blob)` payload-checksum pass — on for owned loads, off for mmap so mapping stays
-    /// proportional to the MPH alone.
-    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+    /// The lexindex framing of `blob`, parsed and bounds-validated — magic, header checksum, the
+    /// payload checksum when `verify` (owned loads; off for mmap so mapping stays proportional to
+    /// the MPH alone), lengths, the side table and the fingerprint range — with the MPH region
+    /// located but **not** deserialised. Safe on arbitrary bytes: this is the half a property test
+    /// fuzzes, and everything `from_shared` trusts comes out of here.
+    fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
         // 0.5/0.6 blobs predate the recorded remap bound and, unlike the arena-backed index, store
         // no keys to recompute it from — so there is nothing to heal and loading one unbounded is
@@ -472,15 +500,6 @@ impl CompactHashIndex {
             .checked_add(mph_len)
             .filter(|&e| e <= side_start)
             .ok_or(IndexError::Format("mph length out of range"))?;
-        let mph = if n == 0 {
-            None
-        } else {
-            let mut reader = &bytes[header..mph_end];
-            Some(
-                DefaultPtrHash::deserialize_full(&mut reader)
-                    .map_err(|e| IndexError::Serde(e.to_string()))?,
-            )
-        };
         let mut side: Vec<(u64, u64, u32)> = bytes[side_start..]
             .chunks_exact(SIDE_ENTRY)
             .map(|e| {
@@ -518,18 +537,48 @@ impl CompactHashIndex {
                 "compact-hash: fingerprint length mismatch",
             ));
         }
-        if let Some(mph) = &mph {
+        Ok(Frame {
+            n,
+            fp_bits,
+            overflow_cap,
+            mph: header..mph_end,
+            fps,
+            side,
+        })
+    }
+
+    /// Reconstruct from a shared source: the validated framing from
+    /// [`parse_frame`](Self::parse_frame), then the MPH deserialised by `epserde` into memory; the
+    /// fingerprint table (the bulk) is borrowed zero-copy, so `load_mmap` never copies it.
+    ///
+    /// # Safety
+    /// The MPH region must be an `epserde` image this crate wrote — see
+    /// [`from_bytes`](Self::from_bytes): `ptr_hash` reads its pilot table unchecked, so a crafted
+    /// region is undefined behaviour and nothing here can reject it. The framing checks that run
+    /// first turn every *accidental* corruption into an error.
+    unsafe fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+        let frame = Self::parse_frame(&blob, verify)?;
+        let m = frame.n - frame.side.len();
+        let mph = if frame.n == 0 {
+            None
+        } else {
+            let mut reader = &blob.as_ref()[frame.mph];
+            // A safe fn in epserde 0.8 that is unsound for a crafted region: the caller's contract
+            // is what makes this call sound.
+            let mph = DefaultPtrHash::deserialize_full(&mut reader)
+                .map_err(|e| IndexError::Serde(e.to_string()))?;
             if mph.n() != m {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
-        }
+            Some(mph)
+        };
         Ok(Self {
             mph,
-            fps,
-            fp_bits,
-            n,
-            overflow_cap,
-            side,
+            fps: frame.fps,
+            fp_bits: frame.fp_bits,
+            n: frame.n,
+            overflow_cap: frame.overflow_cap,
+            side: frame.side,
         })
     }
 
@@ -554,7 +603,8 @@ impl CompactHashIndex {
     /// The file must have been written by [`save`](Self::save) — see
     /// [`from_bytes`](Self::from_bytes) for why a crafted blob cannot be rejected.
     pub unsafe fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
+        // SAFETY: forwarded from this function's contract.
+        unsafe { Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true) }
     }
 
     /// Memory-map the file and borrow the fingerprint table zero-copy (only the small MPH is read
@@ -562,15 +612,17 @@ impl CompactHashIndex {
     /// intact.
     ///
     /// # Safety
-    /// The caller must guarantee the file is not modified or truncated by any process while the
-    /// returned index is alive — see [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for
-    /// the full contract.
+    /// Two obligations. The file must have been written by [`save`](Self::save): the embedded
+    /// perfect hash cannot be validated, so a crafted file is undefined behaviour — see
+    /// [`from_bytes`](Self::from_bytes). And the caller must guarantee the file is not modified or
+    /// truncated by any process while the returned index is alive — see
+    /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
     #[cfg(feature = "mmap")]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: forwarded to this function's own contract.
+        // SAFETY: both forwarded from this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+        unsafe { Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false) }
     }
 }
 
@@ -656,6 +708,49 @@ mod tests {
     /// touched.
     fn from_bytes(bytes: &[u8]) -> Result<CompactHashIndex, IndexError> {
         unsafe { CompactHashIndex::from_bytes(bytes) }
+    }
+
+    /// The safe half of the loader must never panic on arbitrary bytes — only `Ok`/`Err` — which
+    /// is where the "garbage fails cleanly" property lives now that the loaders are `unsafe`.
+    #[test]
+    fn parse_frame_never_panics() {
+        use proptest::prelude::*;
+        let mut runner = proptest::test_runner::TestRunner::default();
+        runner
+            .run(&prop::collection::vec(any::<u8>(), 0..256), |data| {
+                let _ = CompactHashIndex::parse_frame(&SharedBytes::from_owned(data), true);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Every truncation of a real blob is rejected by the framing alone, with or without the
+    /// payload checksum — so the epserde region is never reached on a short read.
+    #[test]
+    fn parse_frame_rejects_every_truncation() {
+        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
+        let blob = idx.to_bytes().unwrap();
+        for verify in [true, false] {
+            for k in 0..blob.len() {
+                let cut = SharedBytes::from_owned(blob[..k].to_vec());
+                assert!(
+                    CompactHashIndex::parse_frame(&cut, verify).is_err(),
+                    "truncated to {k} bytes (verify={verify}) parsed"
+                );
+            }
+            assert!(
+                CompactHashIndex::parse_frame(&SharedBytes::from_owned(blob.clone()), verify)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn serialized_len_matches_to_bytes() {
+        for keys in [vec![], vec!["alpha"], vec!["alpha", "beta", "gamma"]] {
+            let idx = CompactHashIndex::build(&keys, 1).unwrap();
+            assert_eq!(idx.serialized_len().unwrap(), idx.to_bytes().unwrap().len());
+        }
     }
 
     #[test]

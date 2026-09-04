@@ -31,13 +31,20 @@ class StringIndex:
     def subsequence(self, query: str, limit: int | None = None) -> list[tuple[str, int]]: ...
     def __iter__(self) -> Iterator[tuple[str, int]]: ...
     def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
     @staticmethod
     def from_bytes(data: bytes) -> StringIndex: ...
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
     def load(path: str | os.PathLike[str]) -> StringIndex: ...
     @staticmethod
-    def load_mmap(path: str | os.PathLike[str]) -> StringIndex: ...
+    def load_mmap(path: str | os.PathLike[str]) -> StringIndex:
+        """Memory-map the file and borrow the index from it — no read into RAM.
+
+        The file must not be modified or truncated by any process while the index is alive: the
+        bytes are borrowed, not copied, so a concurrent write is undefined behaviour rather than a
+        stale answer (the Rust loader is ``unsafe fn``). Use ``load`` if the file may change.
+        """
 
 @final
 class PerfectHashIndex:
@@ -54,13 +61,28 @@ class PerfectHashIndex:
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
     @staticmethod
-    def from_bytes(data: bytes) -> PerfectHashIndex: ...
+    def from_bytes(data: bytes) -> PerfectHashIndex:
+        """Reconstruct from a ``to_bytes`` blob **written by this library**.
+
+        The framing is validated and checksummed, so accidental corruption fails cleanly, but the
+        embedded perfect hash cannot be validated: a deliberately crafted blob is undefined
+        behaviour (the Rust loader is ``unsafe fn``). Never pass bytes from an untrusted source.
+        """
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
-    def load(path: str | os.PathLike[str]) -> PerfectHashIndex: ...
+    def load(path: str | os.PathLike[str]) -> PerfectHashIndex:
+        """Load a file **written by this library's** ``save`` — see ``from_bytes`` for why a crafted
+        file cannot be rejected.
+        """
     @staticmethod
-    def load_mmap(path: str | os.PathLike[str]) -> PerfectHashIndex: ...
+    def load_mmap(path: str | os.PathLike[str]) -> PerfectHashIndex:
+        """Memory-map a file **written by this library's** ``save`` and borrow it zero-copy.
+
+        Two obligations: the file must be trusted (see ``from_bytes``), and it must not be modified
+        or truncated by any process while the index is alive (see ``StringIndex.load_mmap``).
+        """
 
 @final
 class CompactHashIndex:
@@ -87,10 +109,25 @@ class CompactHashIndex:
     def contains(self, key: str) -> bool: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
     @staticmethod
-    def from_bytes(data: bytes) -> CompactHashIndex: ...
+    def from_bytes(data: bytes) -> CompactHashIndex:
+        """Reconstruct from a ``to_bytes`` blob **written by this library**.
+
+        The framing is validated and checksummed, so accidental corruption fails cleanly, but the
+        embedded perfect hash cannot be validated: a deliberately crafted blob is undefined
+        behaviour (the Rust loader is ``unsafe fn``). Never pass bytes from an untrusted source.
+        """
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
-    def load(path: str | os.PathLike[str]) -> CompactHashIndex: ...
+    def load(path: str | os.PathLike[str]) -> CompactHashIndex:
+        """Load a file **written by this library's** ``save`` — see ``from_bytes`` for why a crafted
+        file cannot be rejected.
+        """
     @staticmethod
-    def load_mmap(path: str | os.PathLike[str]) -> CompactHashIndex: ...
+    def load_mmap(path: str | os.PathLike[str]) -> CompactHashIndex:
+        """Memory-map a file **written by this library's** ``save`` and borrow it zero-copy.
+
+        Two obligations: the file must be trusted (see ``from_bytes``), and it must not be modified
+        or truncated by any process while the index is alive (see ``StringIndex.load_mmap``).
+        """

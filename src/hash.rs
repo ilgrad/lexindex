@@ -137,6 +137,7 @@ pub(crate) fn hash_block(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
+use epserde::prelude::*;
 use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
 
 /// Build the MPH with `default_compact` parameters (λ=3.9): measured 2.17 bits/key on real words
@@ -150,6 +151,13 @@ pub(crate) fn build_mph(hashes: &[u64]) -> Result<DefaultPtrHash, crate::IndexEr
         .ok_or(crate::IndexError::Build(
             "minimal-perfect-hash construction failed after exhausting its retry seeds",
         ))
+}
+
+/// Byte length of `mph`'s `epserde` image without materialising it: `serialize` reports how many
+/// bytes it wrote, so a sink that discards them is enough.
+pub(crate) fn mph_serialized_len(mph: &DefaultPtrHash) -> Result<usize, crate::IndexError> {
+    mph.serialize(&mut std::io::sink())
+        .map_err(|e| crate::IndexError::Serde(e.to_string()))
 }
 
 /// Partition `hashes` (parallel to some key order) into the MPH's key set and the collided

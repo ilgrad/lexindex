@@ -39,12 +39,25 @@ jobs:
           check Cargo.toml "$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" "$ver"
           check pyproject.toml "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" "$ver"
           check CITATION.cff "$(grep -m1 '^version:' CITATION.cff | awk '{print $2}' | tr -d '"')" "$ver"
+          # The README install snippet is hand-maintained too: 0.9.0 shipped telling users "0.8".
+          minor="${ver%.*}"
+          grep -q "^lexindex = \"$minor\"" README.md \
+            || { echo "::error::README.md install snippet does not say lexindex = \"$minor\""; fail=1; }
+          grep -q "version = \"$minor\", default-features = false" README.md \
+            || { echo "::error::README.md fst-only snippet does not say version = \"$minor\""; fail=1; }
           grep -q "^## \[$ver\]" CHANGELOG.md \
             || { echo "::error::CHANGELOG.md has no '## [$ver]' section"; fail=1; }
           # An undated heading means the release notes were never finished.
           grep -qE "^## \[$ver\] . [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
             || { echo "::error::CHANGELOG.md '## [$ver]' heading carries no release date"; fail=1; }
           exit $fail
+
+  # The full CI matrix — fmt, clippy, tests on Linux/macOS/Windows, Python 3.11–3.14, MSRV,
+  # coverage — as a reusable workflow, so a tag cannot publish what a push to main would reject.
+  ci:
+    name: ci
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/ci.yml
 
   # The one thing a normal `cargo test` cannot see: an out-of-bounds read past ptr_hash's remap is
   # silent in release and only trips a debug assertion in a minority of builds. That defect is the
@@ -70,11 +83,15 @@ jobs:
     name: wheels ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
     runs-on: ${{ matrix.platform.runner }}
     needs: [preflight]
+    # preflight is tag-only; a skipped dependency skips its dependants by default, which is what
+    # left every `workflow_dispatch` run without wheels. Run unless preflight actually failed.
+    if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
         platform:
-          - { runner: ubuntu-latest, target: x86_64 }
+          # `smoke`: the wheel can execute on this runner (native target), so install and run it.
+          - { runner: ubuntu-latest, target: x86_64, smoke: true }
           - { runner: ubuntu-latest, target: aarch64 }
           # musl wheels for Alpine / musl-based (distroless) containers
           - { runner: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2 }
@@ -82,8 +99,8 @@ jobs:
           # macOS x86_64 is cross-built on the arm64 macos-14 runner: dedicated Intel (macos-13)
           # runners are scarce/deprecated. abi3 needs no interpreter at build time, so this is sound.
           - { runner: macos-14, target: x86_64 }
-          - { runner: macos-14, target: aarch64 }
-          - { runner: windows-latest, target: x64 }
+          - { runner: macos-14, target: aarch64, smoke: true }
+          - { runner: windows-latest, target: x64, smoke: true }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -96,6 +113,29 @@ jobs:
           args: --release --out dist
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
           sccache: "true"
+      # A wheel that builds is not a wheel that imports: install the artefact into the runner's
+      # interpreter from a directory outside the checkout (so the source tree cannot shadow it)
+      # and exercise every index through build, query, save and load.
+      - name: smoke test the wheel
+        if: matrix.platform.smoke
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist lexindex
+          cd "$RUNNER_TEMP"
+          python - <<'EOF'
+          import lexindex
+          idx = lexindex.StringIndex(["banana", "apple"])
+          assert idx.id("apple") == 0 and idx.key(1) == "banana"
+          idx.save("smoke.bix")
+          assert lexindex.StringIndex.load("smoke.bix").prefix("b") == [("banana", 1)]
+          c = lexindex.CompactHashIndex(["a", "b"])
+          assert c.contains("a")
+          assert lexindex.CompactHashIndex.from_bytes(c.to_bytes()).id("b") == c.id("b")
+          p = lexindex.PerfectHashIndex(["x", "y"])
+          p.save("smoke.bmp")
+          assert lexindex.PerfectHashIndex.load_mmap("smoke.bmp").key(p.id("y")) == "y"
+          print("smoke ok:", lexindex.__version__)
+          EOF
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
@@ -105,6 +145,7 @@ jobs:
     name: sdist
     runs-on: ubuntu-latest
     needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
     steps:
       - uses: actions/checkout@v4
       - name: Build sdist
@@ -120,7 +161,7 @@ jobs:
   publish:
     name: publish to PyPI
     runs-on: ubuntu-latest
-    needs: [asan, wheels, sdist]
+    needs: [ci, asan, wheels, sdist]
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi
     permissions:
@@ -136,7 +177,7 @@ jobs:
   crates-io:
     name: publish to crates.io
     runs-on: ubuntu-latest
-    needs: [asan, preflight]
+    needs: [ci, asan, preflight]
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       id-token: write # OIDC token for crates.io Trusted Publishing

@@ -1,5 +1,6 @@
 //! Property-based tests: the rank-walk `id <-> key` round-trip invariants, and deserialiser
-//! robustness — `from_bytes` on arbitrary or corrupted bytes must fail cleanly, never panic.
+//! robustness — `from_bytes` on arbitrary bytes (`StringIndex`, whose loader is safe) or on a
+//! corrupted self-produced blob (all three) must fail cleanly, never panic.
 
 use lexindex::StringIndex;
 use proptest::prelude::*;
@@ -165,18 +166,9 @@ mod mph {
             check_compact_no_false_negative(&keys, fp);
         }
 
-        // SAFETY (both): the loader's contract excludes crafted blobs, but arbitrary bytes cannot
-        // reach the MPH — the magic, the header checksum and the payload checksum all reject first.
-        // These cases assert exactly that: garbage fails cleanly rather than panicking.
-        #[test]
-        fn perfect_hash_from_bytes_never_panics(data in prop::collection::vec(any::<u8>(), 0..256)) {
-            let _ = unsafe { PerfectHashIndex::from_bytes(&data) };
-        }
-
-        #[test]
-        fn compact_hash_from_bytes_never_panics(data in prop::collection::vec(any::<u8>(), 0..256)) {
-            let _ = unsafe { CompactHashIndex::from_bytes(&data) };
-        }
+        // The never-panics property on arbitrary bytes lives with the *safe* framing parser in each
+        // index's own tests (`parse_frame_never_panics`): the unsafe loaders' contract excludes
+        // arbitrary input, so calling them on it would test the wrong thing.
 
         // Any single flipped byte — header field, MPH region or fingerprint table — must be
         // *rejected* by an owned load: the header carries a checksum because `overflow_cap` bounds

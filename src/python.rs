@@ -229,6 +229,11 @@ impl PyStringIndex {
         PyBytes::new(py, &bytes)
     }
 
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> usize {
+        self.inner.serialized_len()
+    }
+
     /// Reconstruct from a [`PyStringIndex::to_bytes`] blob.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
@@ -368,6 +373,11 @@ impl PyPerfectHashIndex {
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = py.detach(|| self.inner.to_bytes()).map_err(to_py)?;
         Ok(PyBytes::new(py, &bytes))
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> PyResult<usize> {
+        self.inner.serialized_len().map_err(to_py)
     }
 
     /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
@@ -515,6 +525,11 @@ impl PyCompactHashIndex {
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = py.detach(|| self.inner.to_bytes()).map_err(to_py)?;
         Ok(PyBytes::new(py, &bytes))
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> PyResult<usize> {
+        self.inner.serialized_len().map_err(to_py)
     }
 
     /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.

@@ -72,8 +72,9 @@ fn main() {
         .unwrap_or(1_000_000);
     let vocab = load_vocab();
     let keys = make_keys(n, &vocab);
-    // Non-sequential, full-coverage probe order (stride by a large odd constant, coprime with n).
-    const STEP: usize = 0x9E37_79B1; // ~golden-ratio odd constant → coprime with any power-of-two-ish n
+    // Non-sequential, full-coverage probe order: `i * STEP mod n` visits every index exactly once
+    // because STEP = 2 654 435 761 is prime, hence coprime with every n below it.
+    const STEP: usize = 0x9E37_79B1;
     let probe: Vec<usize> = (0..n).map(|i| (i.wrapping_mul(STEP)) % n).collect();
 
     let mean_len = keys.iter().map(String::len).sum::<usize>() as f64 / n as f64;

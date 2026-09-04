@@ -157,7 +157,8 @@ can violate.
 
 The load-time trust boundary is worth stating precisely. Against **accidental** corruption — a
 truncated download, a flipped byte, a lost header field — every owned `load`/`from_bytes` fails
-cleanly: `StringIndex` verifies the FST's stored checksum, and the perfect-hash indexes verify a
+cleanly: `StringIndex` verifies the FST's stored checksum and spot-checks that its values are the
+sorted ranks (first value 0, rank-walk to `n - 1`), and the perfect-hash indexes verify a
 streaming hash of their whole payload plus a check over the header's framing fields, so a corrupted
 blob of any of the three is rejected rather than read. Against a **deliberately crafted** blob the
 perfect-hash indexes remain *trust-your-own-blob*: every checksum involved is public and

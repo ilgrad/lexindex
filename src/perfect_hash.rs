@@ -36,6 +36,16 @@ const SIDE_ENTRY: usize = 12; // hash u64 + id u32
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
 
+/// The validated framing of a blob — every field a query will trust — with the MPH region located
+/// but not deserialised. Produced by the safe `parse_frame`, which any bytes may reach; consumed by
+/// the unsafe `from_shared`, the only place the `epserde` region is touched.
+struct Frame {
+    n: usize,
+    mph: std::ops::Range<usize>, // the epserde region; ignored when `n == 0`
+    arena: StringArena,
+    side: Vec<(u64, u32)>,
+}
+
 /// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {
     mph: Option<DefaultPtrHash>, // over one hash per distinct hash value; None iff empty
@@ -318,6 +328,16 @@ impl PerfectHashIndex {
         Ok(out)
     }
 
+    /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it — for sizing
+    /// a buffer or reporting bytes/key; [`save`](Self::save) writes exactly this many.
+    pub fn serialized_len(&self) -> Result<usize, IndexError> {
+        let mph = match &self.mph {
+            Some(mph) => crate::hash::mph_serialized_len(mph)?,
+            None => 0,
+        };
+        Ok(HEADER_V4 + mph + self.arena.as_bytes().len() + self.side.len() * SIDE_ENTRY)
+    }
+
     /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. The lexindex framing (magic, lengths,
     /// arena offsets, side table) is fully bounds-validated, and owned loads verify a streaming
     /// checksum of the whole payload, so *accidental* corruption anywhere in the blob fails cleanly.
@@ -331,15 +351,16 @@ impl PerfectHashIndex {
     /// [`save`](Self::save) — the same "trust your own blob" contract as
     /// [`load_mmap`](Self::load_mmap), which additionally skips the checksum scan.
     pub unsafe fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        // SAFETY: forwarded from this function's contract.
+        unsafe { Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true) }
     }
 
-    /// Reconstruct from a shared byte source. The MPH structure (a few bytes/key) is deserialised into
-    /// owned memory; the key arena — the bulk of the blob — is borrowed zero-copy from `blob`, so a
-    /// memory-mapped load never copies it. Backs both `from_bytes` and `load_mmap`. `verify` runs
-    /// the `O(blob)` payload-checksum pass — on for owned loads, off for mmap so mapping stays
-    /// proportional to the MPH alone.
-    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+    /// The lexindex framing of `blob`, parsed and bounds-validated — magic, header checksum, the
+    /// payload checksum when `verify` (owned loads; off for mmap so mapping stays proportional to
+    /// the MPH alone), lengths, the side table and the arena — with the MPH region located but
+    /// **not** deserialised. Safe on arbitrary bytes: this is the half a property test fuzzes, and
+    /// everything `from_shared` trusts comes out of here.
+    fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
         if bytes.len() < 4 {
             return Err(IndexError::Format("bad magic or truncated header"));
@@ -409,15 +430,6 @@ impl PerfectHashIndex {
             .checked_add(mph_len)
             .filter(|&e| e <= side_start)
             .ok_or(IndexError::Format("mph length out of range"))?;
-        let mph = if n == 0 {
-            None
-        } else {
-            let mut reader = &bytes[header..mph_end];
-            Some(
-                DefaultPtrHash::deserialize_full(&mut reader)
-                    .map_err(|e| IndexError::Serde(e.to_string()))?,
-            )
-        };
         let mut side: Vec<(u64, u32)> = bytes[side_start..]
             .chunks_exact(SIDE_ENTRY)
             .map(|e| {
@@ -445,11 +457,45 @@ impl PerfectHashIndex {
         if arena.len() != n {
             return Err(IndexError::Format("mph / arena length mismatch"));
         }
-        if let Some(mph) = &mph {
+        Ok(Frame {
+            n,
+            mph: header..mph_end,
+            arena,
+            side,
+        })
+    }
+
+    /// Reconstruct from a shared byte source: the validated framing from
+    /// [`parse_frame`](Self::parse_frame), then the MPH structure (a few bytes/key) deserialised
+    /// by `epserde` into owned memory; the key arena — the bulk of the blob — is borrowed zero-copy,
+    /// so a memory-mapped load never copies it. Backs `from_bytes`, `load` and `load_mmap`.
+    ///
+    /// # Safety
+    /// The MPH region must be an `epserde` image this crate wrote — see
+    /// [`from_bytes`](Self::from_bytes): `ptr_hash` reads its pilot table unchecked, so a crafted
+    /// region is undefined behaviour and nothing here can reject it. The framing checks that run
+    /// first turn every *accidental* corruption into an error.
+    unsafe fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+        let Frame {
+            n,
+            mph,
+            arena,
+            side,
+        } = Self::parse_frame(&blob, verify)?;
+        let m = n - side.len();
+        let mph = if n == 0 {
+            None
+        } else {
+            let mut reader = &blob.as_ref()[mph];
+            // A safe fn in epserde 0.8 that is unsound for a crafted region: the caller's contract
+            // is what makes this call sound.
+            let mph = DefaultPtrHash::deserialize_full(&mut reader)
+                .map_err(|e| IndexError::Serde(e.to_string()))?;
             if mph.n() != m {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
-        }
+            Some(mph)
+        };
         // The remap bound is always recomputed from the stored keys, never taken from a header:
         // the arena is bounds-validated, so hashing the MPH's own members — ids [0, m), the
         // representatives — yields the exact bound regardless of what any header claims. (Side
@@ -507,7 +553,8 @@ impl PerfectHashIndex {
     /// The file must have been written by [`save`](Self::save) — see
     /// [`from_bytes`](Self::from_bytes) for why a crafted blob cannot be rejected.
     pub unsafe fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
+        // SAFETY: forwarded from this function's contract.
+        unsafe { Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true) }
     }
 
     /// Memory-map the file and borrow the key arena (the bulk of the blob) zero-copy; only the small
@@ -515,15 +562,17 @@ impl PerfectHashIndex {
     /// mapped file is trusted intact.
     ///
     /// # Safety
-    /// The caller must guarantee the file is not modified or truncated by any process while the
-    /// returned index is alive — see [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for
-    /// the full contract.
+    /// Two obligations. The file must have been written by [`save`](Self::save): the embedded
+    /// perfect hash cannot be validated, so a crafted file is undefined behaviour — see
+    /// [`from_bytes`](Self::from_bytes). And the caller must guarantee the file is not modified or
+    /// truncated by any process while the returned index is alive — see
+    /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
     #[cfg(feature = "mmap")]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: forwarded to this function's own contract.
+        // SAFETY: both forwarded from this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+        unsafe { Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false) }
     }
 }
 
@@ -537,6 +586,49 @@ mod tests {
     /// touched.
     fn from_bytes(bytes: &[u8]) -> Result<PerfectHashIndex, IndexError> {
         unsafe { PerfectHashIndex::from_bytes(bytes) }
+    }
+
+    /// The safe half of the loader must never panic on arbitrary bytes — only `Ok`/`Err` — which
+    /// is where the "garbage fails cleanly" property lives now that the loaders are `unsafe`.
+    #[test]
+    fn parse_frame_never_panics() {
+        use proptest::prelude::*;
+        let mut runner = proptest::test_runner::TestRunner::default();
+        runner
+            .run(&prop::collection::vec(any::<u8>(), 0..256), |data| {
+                let _ = PerfectHashIndex::parse_frame(&SharedBytes::from_owned(data), true);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Every truncation of a real blob is rejected by the framing alone, with or without the
+    /// payload checksum — so the epserde region is never reached on a short read.
+    #[test]
+    fn parse_frame_rejects_every_truncation() {
+        let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
+        let blob = idx.to_bytes().unwrap();
+        for verify in [true, false] {
+            for k in 0..blob.len() {
+                let cut = SharedBytes::from_owned(blob[..k].to_vec());
+                assert!(
+                    PerfectHashIndex::parse_frame(&cut, verify).is_err(),
+                    "truncated to {k} bytes (verify={verify}) parsed"
+                );
+            }
+            assert!(
+                PerfectHashIndex::parse_frame(&SharedBytes::from_owned(blob.clone()), verify)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn serialized_len_matches_to_bytes() {
+        for keys in [vec![], vec!["alpha"], vec!["alpha", "beta", "gamma"]] {
+            let idx = PerfectHashIndex::build(&keys).unwrap();
+            assert_eq!(idx.serialized_len().unwrap(), idx.to_bytes().unwrap().len());
+        }
     }
 
     #[test]
