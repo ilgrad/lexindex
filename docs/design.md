@@ -77,6 +77,16 @@ side table stored truncated side fingerprints and is refused with a rebuild mess
 (`BCH1`/`BCH2`) are refused; see below. On load, side-table ids are structurally required to be
 exactly the tail range `[m, n)` — the checksums vouch for transport, not construction.
 
+**ptr_hash's load factor is not exposed, and that is a measurement, not an omission.** `alpha` sets
+the slot count to `n / alpha`; the natural expectation is that lowering it trades size for an easier
+build. It does at 1 M — 0.90 gives a 16 % cheaper build for a 12 % larger index — and the trade
+*inverts* by 10 M, where every setting below the default is both bigger and slower (0.93: 1.37 B/key
+in 10.6 s against 0.99's 1.27 in 6.8 s) and 0.90 does not construct at all, aborting on a 197-key
+bucket against a λ of 3.9. `default_compact()` ships alpha, λ and the cubic-eps bucket function as
+one tuned triple, so alpha is not independently movable; a knob whose only reachable settings are
+worse is not worth the API surface. Measured on word bigrams at 1 M and 10 M for both MPH indexes.
+`fingerprint_bits` is the knob that *does* have a monotone trade, and it is public.
+
 **The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
 raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
 member-occupied one, and reads it *unchecked* (`cacheline-ef`'s `index_unchecked`). A non-member
