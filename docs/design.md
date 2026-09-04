@@ -60,8 +60,13 @@ rare compact-construction failure, and both serialise identically) plus the fing
 32-bit check over the lexindex header — `overflow_cap` bounds an otherwise unchecked read, so it is
 not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
 payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, second hash)` pair
-— 16 bytes — per key and never the strings, so peak build memory is `16·n` bytes over the input
-regardless of key length. Keys that collide in the 64-bit hash get tail ids in a side table (see
+— 16 bytes — per key and never the strings, so build memory does not grow with key length. The pairs
+dominate the peak without being all of it: the perfect hash is built from a plain array of the
+representatives' hashes, lifted out of the pairs together with their truncated fingerprints before
+the pairs are dropped. Measured on 2 M real-word bigrams (`cargo run --release --example peak --
+compact`), the high-water mark on top of whatever holds the keys is **25.2 bytes per key** at the
+8-bit default, 27.3 at 16 bits and 29.2 at 32.
+Keys that collide in the 64-bit hash get tail ids in a side table (see
 `PerfectHashIndex` below) holding the **full 64-bit second hash** — not the table's truncated width —
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
@@ -171,7 +176,10 @@ every load, so no blob can hand `id()` a value at or past `len()`. `CompactHashI
 to recompute from, so its cap is trusted from the checked header. `StringIndex` sits differently: the
 FST checksum catches accidental corruption, and `fst` documents that even invalid input cannot
 violate memory safety — a crafted, re-checksummed FST can at worst panic or answer wrongly, never
-read out of bounds. `load_mmap` skips every checksum scan by design, trusting the mapped file
+read out of bounds. That is measured, not assumed: a libFuzzer target over `from_bytes` produced 44
+such bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. The
+`from_bytes` docstring used to promise the checksum ruled that out; it no longer does.
+`load_mmap` skips every checksum scan by design, trusting the mapped file
 outright to keep mapping time independent of blob size.
 
 That asymmetry is what decides the signatures. A function must be an `unsafe fn` when some input

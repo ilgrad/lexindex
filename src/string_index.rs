@@ -224,11 +224,20 @@ impl StringIndex {
 
     /// Reconstruct an index from [`StringIndex::to_bytes`] output (copies the blob into owned memory).
     ///
-    /// The whole FST is checksum-verified, so a corrupted blob returns an error rather than an index
-    /// that could panic mid-query — `fst`'s own reader validates only the framing and warns that a
-    /// structurally-plausible but corrupt body "will probably panic" on traversal. That costs one
-    /// `O(blob)` pass, which is the same order as the copy this method already makes;
-    /// [`load_mmap`](Self::load_mmap) skips it to stay instant (see its caveat).
+    /// The whole FST is checksum-verified, which costs one `O(blob)` pass — the same order as the
+    /// copy this method already makes; [`load_mmap`](Self::load_mmap) skips it to stay instant (see
+    /// its caveat). That pass rejects **accidental** corruption: `fst`'s own reader validates only
+    /// the framing and warns that a structurally-plausible but corrupt body "will probably panic"
+    /// on traversal, and a flipped or truncated byte fails the checksum long before any traversal.
+    ///
+    /// It is not a defence against a **crafted** blob, and this method does not promise one. The
+    /// checksum is public and deterministic, so bytes chosen to carry a matching one reach `fst`'s
+    /// node decoder with an invalid body: a 44-byte input found by the fuzz target that used to
+    /// live in `fuzz/` panics inside this crate's own rank spot-check, before the caller ever runs
+    /// a query. `fst` is safe Rust throughout, so the worst case stays a panic or a wrong answer,
+    /// never an out-of-bounds read — which is why this stays a safe `fn` while the perfect-hash
+    /// loaders are `unsafe`. Blobs from an untrusted source need a check this crate cannot make
+    /// for you.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
