@@ -1,0 +1,55 @@
+# libFuzzer targets for lexindex's *safe* blob parsers. Not published, not a workspace member of the
+# crate above it, and never built by the normal gate — `sanitize.yml` runs it on a schedule.
+[package]
+name = "lexindex-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# `fuzzing` exposes the framing parsers that arbitrary bytes actually reach; the unsafe loaders are
+# deliberately not fuzzed, since their contract excludes untrusted input in the first place.
+#
+# `StringIndex::from_bytes` was a third target and is deliberately gone. It found a real defect in
+# ten minutes — 44 bytes carrying a matching FST checksum panic in `fst`'s node decoder — but the
+# defect is in a claim, not in code this crate can fix: the checksum guards accidental corruption,
+# and `docs/design.md` already said a crafted, re-checksummed FST "can at worst panic or answer
+# wrongly". The docstring that promised otherwise is corrected; keeping a target that re-finds an
+# accepted, unfixable-downstream panic every week would only teach us to ignore a red job.
+[dependencies.lexindex]
+path = ".."
+features = ["fuzzing"]
+
+[[bin]]
+name = "parse_compact"
+path = "fuzz_targets/parse_compact.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_perfect"
+path = "fuzz_targets/parse_perfect.rs"
+test = false
+doc = false
+bench = false
+
+# Keeps cargo from trying to fold this package into the crate above it.
+[workspace]
+
+# Link-time optimisation has to stay off, and this block is only half of saying so: cargo lets a
+# `[profile.release]` in any `config.toml` in scope override a manifest profile, so a machine whose
+# cargo config sets `lto` needs `CARGO_PROFILE_RELEASE_LTO=false` in the environment as well (an env
+# override outranks both). Under LTO the dependency crates are re-codegen'd from bitcode, which does
+# not carry the coverage instrumentation rustc applied when it emitted their object code — measured,
+# `parse_compact` fell from 2 599 instrumented edges to 331, all of them in this crate, so a real
+# blob and a one-byte input reached the same 15 and the fuzzer explored nothing while still
+# reporting "no crashes".
+[profile.release]
+lto = false
+debug = 1

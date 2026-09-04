@@ -29,9 +29,15 @@ pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"], option
 # scoped to 64-bit targets, the dependency simply is not in the graph and `src/lib.rs` can say what
 # is wrong in one sentence.
 [target.'cfg(target_pointer_width = "64")'.dependencies]
-ptr_hash = { version = "1.1", optional = true }
+#
+# Both are bounded to a *minor* series (`~`), not the usual caret. The MPH's epserde image is
+# embedded verbatim in every `PerfectHashIndex` / `CompactHashIndex` blob this crate has ever
+# written, so a layout change in either crate does not break a build — it silently stops old files
+# from loading. Until lexindex owns that format outright, moving either minor version is a decision
+# with a golden-blob test attached, not something `cargo update` should be able to do.
+ptr_hash = { version = "~1.1", optional = true }
 # epserde serialises the ptr_hash MPH for `PerfectHashIndex` persistence (already in the ptr_hash tree).
-epserde = { version = "0.8", optional = true }
+epserde = { version = "~0.8", optional = true }
 
 [features]
 default = ["mph", "mmap"]
@@ -42,6 +48,9 @@ mph = ["dep:ptr_hash", "dep:epserde"]
 mmap = ["dep:memmap2"]
 # Python bindings (PyO3 abi3 extension module); pulls in `mph` + `mmap` for the full API surface.
 python = ["dep:pyo3", "mph", "mmap"]
+# Exposes `lexindex::fuzzing`, the safe framing parsers, to the libFuzzer targets in `fuzz/`.
+# Not public API and never enabled by a dependent — see the module's own documentation.
+fuzzing = ["mph"]
 
 # The benchmark compares PerfectHashIndex (mph) too, so it is skipped on a no-default-features build.
 [[example]]

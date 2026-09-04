@@ -76,6 +76,30 @@ pub use perfect_hash::PerfectHashIndex;
 #[cfg(all(feature = "python", target_pointer_width = "64"))]
 mod python;
 
+/// Entry points for the fuzz targets in `fuzz/`, and **not public API**: the `fuzzing` feature is
+/// off by default and this module may change or vanish in any release.
+///
+/// What it exposes is the *safe* half of the blob loaders — the framing parsers that validate magic,
+/// lengths, checksums, the side table and the fingerprint range before anything unsafe happens.
+/// Those are the functions arbitrary bytes actually reach, and they are `pub(crate)`; a libFuzzer
+/// target lives in its own crate and cannot see them. Fuzzing the unsafe loaders instead would test
+/// what their contract explicitly excludes.
+#[cfg(all(feature = "fuzzing", feature = "mph", target_pointer_width = "64"))]
+#[doc(hidden)]
+pub mod fuzzing {
+    /// Parse the framing of a `CompactHashIndex` blob; `true` if it was accepted. The verdict is
+    /// not the point — not panicking, hanging or reading out of bounds is.
+    pub fn parse_compact_frame(bytes: &[u8], verify: bool) -> bool {
+        crate::CompactHashIndex::fuzz_parse_frame(bytes, verify)
+    }
+
+    /// [`parse_compact_frame`] for a `PerfectHashIndex` blob, whose framing also has to validate an
+    /// arena of offsets.
+    pub fn parse_perfect_frame(bytes: &[u8], verify: bool) -> bool {
+        crate::PerfectHashIndex::fuzz_parse_frame(bytes, verify)
+    }
+}
+
 // Compiles and runs the README's Rust snippets as doctests without pulling its prose into the API
 // docs, so a signature change that invalidates an example fails the test suite rather than shipping.
 #[cfg(all(doctest, feature = "mph", feature = "mmap"))]

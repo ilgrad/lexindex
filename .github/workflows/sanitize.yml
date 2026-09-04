@@ -2,8 +2,9 @@ name: Sanitizers
 
 # Undefined behaviour does not show up in a normal `cargo test`: the defect this workflow exists to
 # catch (an out-of-bounds read past ptr_hash's remap) only tripped a debug assertion in one build out
-# of a few dozen, and was silent in release. Weekly rather than per-push because both tools are slow
-# and neither is a gate on a green PR.
+# of a few dozen, and was silent in release. The fuzz job below is here for the same reason from the
+# other side: the blob parsers are the only place untrusted bytes reach. Weekly rather than per-push
+# because all three are slow and none is a gate on a green PR.
 
 on:
   schedule:
@@ -56,3 +57,43 @@ jobs:
         run: |
           cargo +nightly miri test --no-default-features --lib blob::
           cargo +nightly miri test --no-default-features --lib subsequence::
+
+  fuzz:
+    name: libFuzzer (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parse_compact, parse_perfect]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target\nfuzz -> fuzz/target"
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      # The blobs `tests/golden.rs` checks are the seed corpus: reaching a valid header by chance is
+      # hopeless (magic, two checksums and a length that must agree), so without seeds the fuzzer
+      # only ever exercises the rejection paths. Ten minutes per target is the budget that keeps this
+      # job comparable to the two above; it is a regression net, not a campaign.
+      #
+      # LTO must stay off or the run is theatre: it re-codegens the lexindex crate from bitcode and
+      # drops the coverage instrumentation, leaving libFuzzer blind to everything outside the target
+      # crate. The manifest says so too, but a `config.toml` outranks a manifest profile and only an
+      # env override outranks both.
+      - name: fuzz ${{ matrix.target }} for 10 minutes
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            fuzz/corpus/${{ matrix.target }} tests/data \
+            -- -max_total_time=600 -print_final_stats=1
+      - name: upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
