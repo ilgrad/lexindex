@@ -1,9 +1,13 @@
 //! Peak resident memory of a single index build, measured in-process on Linux.
 //!
-//! Run with `cargo run --release --example peak -- <string|perfect|compact> [n] [fp_bytes]`
-//! (`fp_bytes` ∈ {1, 2, 4} applies to `compact` only). Peak RSS is a high-water mark, so one index
-//! per process: measuring two in one run would report only the larger one. The driver that fills
-//! the CHANGELOG table therefore invokes this example once per index.
+//! Run with `cargo run --release --example peak -- <string|string-sorted|perfect|compact> [n]
+//! [fp_bytes]` (`fp_bytes` ∈ {1, 2, 4} applies to `compact` only). Peak RSS is a high-water mark, so
+//! one index per process: measuring two in one run would report only the larger one. The driver that
+//! fills the CHANGELOG table therefore invokes this example once per index.
+//!
+//! `string-sorted` is the odd one out and the reason is the point of it: it never builds a key list
+//! at all, streaming an ascending generator through `build_sorted_to_file`, so its **keys** column is
+//! the process baseline rather than the corpus.
 //!
 //! `build` is the wall time of the single `build` call, on its own in a fresh process — the same
 //! operation `examples/bench.rs` times, but with nothing else in the address space to perturb the
@@ -57,6 +61,29 @@ fn load_vocab() -> Vec<String> {
     words
 }
 
+/// The same key shape as [`make_keys`] in **ascending** order, produced lazily — nothing
+/// materialises, which is the point: a sorted build that had to hold its input would not be a
+/// streaming build.
+///
+/// `v[i].v[j]` with `i` varying slowest is lexicographic *only if* no word can be extended past a
+/// prefix of another by a character below the separator. The system dictionary breaks that outright:
+/// `'tween-decks.&c` sorts before `'tween.ARU` because `-` (0x2D) is below `.` (0x2E), so a naive
+/// row-major walk hands the transducer a descending pair and the build rightly refuses it. Dropping
+/// the words that contain any byte at or below the separator restores the property for any
+/// vocabulary; on `/usr/share/dict/words` it costs the apostrophe and hyphen forms, and the keys
+/// that remain have the same shape as every other benchmark here.
+fn iter_sorted_keys(n: usize, vocab: &[String]) -> impl Iterator<Item = String> + '_ {
+    let mut v: Vec<&String> = vocab
+        .iter()
+        .filter(|w| w.bytes().all(|b| b > b'.'))
+        .collect();
+    let m = (n as f64).sqrt().ceil() as usize;
+    v.truncate(m.min(v.len()));
+    let w = v.len();
+    assert!(n <= w * w, "vocabulary too small for {n} distinct bigrams");
+    (0..n).map(move |k| format!("{}.{}", v[k / w], v[k % w]))
+}
+
 /// `n` distinct realistic compound keys `word_i.word_j` — natural prefix sharing, high entropy.
 fn make_keys(n: usize, vocab: &[String]) -> Vec<String> {
     let m = (n as f64).sqrt().ceil() as usize;
@@ -97,6 +124,25 @@ fn main() {
     #[cfg(feature = "mph")]
     let fp_bytes: usize = args.next().and_then(|a| a.parse().ok()).unwrap_or(1);
 
+    // The streaming build is measured before any key list exists, so its peak is its own and the
+    // `keys` floor every other mode reports is genuinely zero here.
+    if which == "string-sorted" {
+        let vocab = load_vocab();
+        let keys_rss = peak_rss();
+        let path = std::env::temp_dir().join(format!("lexindex_peak_{}.bix", std::process::id()));
+        let t0 = std::time::Instant::now();
+        let written =
+            StringIndex::build_sorted_to_file(iter_sorted_keys(n, &vocab), &path).unwrap();
+        let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let blob = std::fs::metadata(&path)
+            .map(|m| m.len() as usize)
+            .unwrap_or(0);
+        assert_eq!(written, n, "the grid generator must not repeat a key");
+        report("StringIndex/str", n, keys_rss, blob, build_ms);
+        std::fs::remove_file(&path).ok();
+        return;
+    }
+
     let keys = make_keys(n, &load_vocab());
     let keys_rss = peak_rss();
 
@@ -134,7 +180,9 @@ fn main() {
             std::hint::black_box(idx);
         }
         other => {
-            eprintln!("unknown index {other:?}; expected string, perfect or compact");
+            eprintln!(
+                "unknown index {other:?}; expected string, string-sorted, perfect or compact"
+            );
             std::process::exit(1);
         }
     }

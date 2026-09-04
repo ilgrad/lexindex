@@ -40,6 +40,95 @@ impl StringIndex {
         Ok(Self { map })
     }
 
+    /// Build from keys that are **already in ascending order**, without materialising them.
+    ///
+    /// [`build`](Self::build) has to collect its input into a `Vec` before it can sort it, so a
+    /// caller who already has the keys ordered — a sorted file, a database cursor, the output of an
+    /// external sort — pays for a second copy of the corpus it does not need. This one streams
+    /// straight into the transducer. Adjacent duplicates are dropped exactly as `build` drops them
+    /// after sorting, so for the same key set the two produce **byte-identical** blobs.
+    ///
+    /// The ordering is the caller's precondition and is checked anyway: the transducer builder
+    /// refuses a key that does not exceed its predecessor, so an unsorted input returns an error
+    /// naming the pair rather than building an index that answers wrongly. Ordering is by *bytes*,
+    /// which for UTF-8 is the same as `str`'s `Ord` — a list sorted by a locale collation is not
+    /// sorted for this purpose.
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let idx = StringIndex::build_sorted(["apple", "apricot", "apricot", "banana"]).unwrap();
+    /// assert_eq!(idx.len(), 3);
+    /// assert_eq!(idx.id("banana"), Some(2));
+    /// ```
+    pub fn build_sorted<I, S>(items: I) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut builder = MapBuilder::memory();
+        Self::insert_sorted(&mut builder, items)?;
+        let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
+        Ok(Self { map })
+    }
+
+    /// [`build_sorted`](Self::build_sorted) writing the blob straight to `path`, so the finished
+    /// index never has to fit in memory either. Returns the number of distinct keys written.
+    ///
+    /// The bytes are exactly what [`to_bytes`](Self::to_bytes) would produce, written through the
+    /// same atomic replace [`save`](Self::save) uses — a crash leaves either the previous file or
+    /// nothing, never a half-written index. What is *not* held is the corpus and the transducer:
+    /// `fst`'s builder keeps a bounded node registry and the rest goes to the writer, so peak memory
+    /// is independent of the key count.
+    ///
+    /// The count is returned rather than left to a subsequent [`load`](Self::load) because a caller
+    /// streaming keys it does not retain has no other way to learn how many were distinct.
+    pub fn build_sorted_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut n = 0;
+        crate::blob::write_atomically_with(path.as_ref(), |w| {
+            use std::io::Write;
+            w.write_all(MAGIC)?;
+            let mut builder = MapBuilder::new(&mut *w)?;
+            n = Self::insert_sorted(&mut builder, items)?;
+            builder.finish()?;
+            Ok(())
+        })?;
+        Ok(n)
+    }
+
+    /// Feed an ascending key stream into `builder`, dropping adjacent duplicates and numbering what
+    /// survives from 0. Returns how many keys were inserted.
+    ///
+    /// `prev` is a reused buffer rather than a clone per key: the duplicate test needs the previous
+    /// key to outlive the item that produced it, and this is a streaming builder whose whole point
+    /// is not allocating per key.
+    fn insert_sorted<W, I, S>(builder: &mut MapBuilder<W>, items: I) -> Result<usize, IndexError>
+    where
+        W: std::io::Write,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut n = 0usize;
+        let mut prev = String::new();
+        for key in items {
+            let key = key.as_ref();
+            if n > 0 && key == prev {
+                continue;
+            }
+            builder.insert(key.as_bytes(), n as u64)?;
+            prev.clear();
+            prev.push_str(key);
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Number of distinct keys.
     pub fn len(&self) -> usize {
         self.map.len()
@@ -290,7 +379,8 @@ impl StringIndex {
         crate::blob::write_atomically_with(path.as_ref(), |w| {
             use std::io::Write;
             w.write_all(MAGIC)?;
-            w.write_all(self.map.as_fst().as_bytes())
+            w.write_all(self.map.as_fst().as_bytes())?;
+            Ok(())
         })
     }
 
@@ -592,6 +682,75 @@ mod tests {
             assert!(unsafe { StringIndex::load_mmap(&path) }.is_ok());
             std::fs::remove_file(&path).ok();
         }
+    }
+
+    /// The claim `build_sorted` makes is not "similar" but *byte-identical*, which is the only form
+    /// of it that lets a caller switch between the two without republishing blobs: ids are ranks,
+    /// so any disagreement about ordering or deduplication would renumber every key after the first
+    /// difference.
+    #[test]
+    fn build_sorted_is_byte_identical_to_build() {
+        let unsorted = [
+            "banana",
+            "apple",
+            "apricot",
+            "cherry",
+            "apple",
+            "",
+            "é中🎉",
+            "ap",
+        ];
+        let mut sorted: Vec<&str> = unsorted.to_vec();
+        sorted.sort_unstable();
+        let streamed = StringIndex::build_sorted(&sorted).unwrap();
+        assert_eq!(
+            streamed.to_bytes(),
+            StringIndex::build(unsorted).unwrap().to_bytes()
+        );
+        // Duplicates were adjacent in the sorted input and had to be dropped, not inserted twice.
+        assert_eq!(streamed.len(), 7);
+        assert_eq!(streamed.id(""), Some(0));
+        assert_eq!(streamed.key(6).as_deref(), Some("é中🎉"));
+    }
+
+    /// The precondition the caller cannot be trusted with: an unsorted stream must fail, not build
+    /// an index whose ids are not ranks.
+    #[test]
+    fn build_sorted_refuses_input_that_is_not_ascending() {
+        let Err(err) = StringIndex::build_sorted(["banana", "apple"]) else {
+            panic!("a descending pair must not build");
+        };
+        assert!(matches!(err, IndexError::Fst(_)), "{err}");
+        // A repeated key that is *not* adjacent is the same violation, not a duplicate to drop.
+        assert!(StringIndex::build_sorted(["a", "b", "a"]).is_err());
+    }
+
+    #[test]
+    fn build_sorted_to_file_writes_the_blob_build_would_have() {
+        let keys = ["ant", "ant", "bee", "cicada"];
+        let path = std::env::temp_dir().join(format!("lexindex_stream_{}.bix", std::process::id()));
+        let n = StringIndex::build_sorted_to_file(keys, &path).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            StringIndex::build(keys).unwrap().to_bytes()
+        );
+        let loaded = StringIndex::load(&path).unwrap();
+        assert_eq!(loaded.id("cicada"), Some(2));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn build_sorted_accepts_an_empty_stream() {
+        let idx = StringIndex::build_sorted(Vec::<String>::new()).unwrap();
+        assert!(idx.is_empty());
+        let path = std::env::temp_dir().join(format!("lexindex_empty_{}.bix", std::process::id()));
+        assert_eq!(
+            StringIndex::build_sorted_to_file(Vec::<String>::new(), &path).unwrap(),
+            0
+        );
+        assert!(StringIndex::load(&path).unwrap().is_empty());
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

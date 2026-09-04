@@ -621,7 +621,8 @@ impl PerfectHashIndex {
             w.write_all(&header)?;
             w.write_all(&mph_buf)?;
             w.write_all(self.arena.as_bytes())?;
-            w.write_all(&side_buf)
+            w.write_all(&side_buf)?;
+            Ok(())
         })
     }
 

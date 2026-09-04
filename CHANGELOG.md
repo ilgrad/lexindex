@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`StringIndex::build_sorted` and `build_sorted_to_file`** — build from keys that are already in
+  ascending order, without materialising them. `build` has to collect its input into a `Vec` before
+  it can sort it, so a caller who already has the keys ordered (a sorted file, a database cursor, an
+  external sort) pays for a second copy of the corpus; these stream straight into the transducer, and
+  `build_sorted_to_file` streams the finished index to disk as well, so neither the corpus nor the
+  index has to fit in memory. Measured with `examples/peak.rs` on the same word-bigram grid: at 10 M
+  keys the streaming build peaks at **49.8 MB against `build`'s 722.2** (14.5×; 15.1 MB of build
+  memory against 119.0 plus a 603 MB key list), and **100 M keys build in 52 s with a 63.3 MB peak**,
+  of which 34.3 MB is the loaded word list — 32× under the 2 GB the task set as its bar. Adjacent
+  duplicates are dropped exactly as `build` drops them after sorting, so the two produce byte-identical
+  blobs for the same key set, which is what a test asserts rather than a similarity check: ids are
+  ranks, so any disagreement would renumber every key after the first difference. An input that is not
+  ascending is refused by the transducer builder rather than producing an index that answers wrongly.
+
 ## [0.10.0] — 2026-09-04
 
 ### Added

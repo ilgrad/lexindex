@@ -610,7 +610,8 @@ impl CompactHashIndex {
             w.write_all(&header)?;
             w.write_all(&mph_buf)?;
             w.write_all(self.fps.as_ref())?;
-            w.write_all(&side_buf)
+            w.write_all(&side_buf)?;
+            Ok(())
         })
     }
 
