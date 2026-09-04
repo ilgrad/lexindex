@@ -13,7 +13,47 @@
 
 use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::time::Instant;
+
+/// The `rustc`/Firefox FxHash, written out rather than pulled in as a dependency (it is ~10 lines,
+/// and this example must not add one to the crate). A plain `std::collections::HashMap` is a
+/// **SipHash** map: hardened against hash-flooding and correspondingly slow on short keys, which
+/// makes it the wrong single number to compare a perfect hash against. Swapping in FxHash keeps
+/// everything else about the map identical and isolates what the index actually buys.
+#[derive(Default)]
+struct FxHasher {
+    hash: u64,
+}
+
+impl FxHasher {
+    const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+
+    #[inline]
+    fn add(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(Self::SEED);
+    }
+}
+
+impl Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for w in &mut words {
+            self.add(u64::from_le_bytes(w.try_into().unwrap()));
+        }
+        let mut tail = 0u64;
+        for (i, &b) in words.remainder().iter().enumerate() {
+            tail |= (b as u64) << (8 * i);
+        }
+        self.add(tail);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
 
 fn load_vocab() -> Vec<String> {
     let path = std::env::var("LEXINDEX_BENCH_WORDS")
@@ -127,6 +167,22 @@ fn main() {
                 .enumerate()
                 .map(|(i, k)| (k.clone(), i as u32))
                 .collect::<HashMap<_, _>>()
+        },
+        |m| {
+            probe
+                .iter()
+                .map(|&i| m.get(&keys[i]).copied().map_or(0, u64::from))
+                .sum()
+        },
+    );
+    bench(
+        "HashMap<String,u32> FxHash",
+        n,
+        || {
+            keys.iter()
+                .enumerate()
+                .map(|(i, k)| (k.clone(), i as u32))
+                .collect::<HashMap<_, _, BuildHasherDefault<FxHasher>>>()
         },
         |m| {
             probe
