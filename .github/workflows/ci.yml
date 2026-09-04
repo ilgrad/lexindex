@@ -150,7 +150,9 @@ jobs:
             cat check.log
             exit 1
           }
-          echo "ok: failed with our message, $(grep -c '^error' check.log) error lines total"
+          # `CARGO_TERM_COLOR: always` puts escape codes ahead of every "error", so counting them
+          # here would report nonsense; the two assertions above are the check.
+          echo "ok: the 32-bit build failed carrying lexindex's own explanation"
 
   msrv:
     name: msrv (rust-version from Cargo.toml)
