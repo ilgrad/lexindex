@@ -33,35 +33,89 @@ pub(crate) struct StringArena {
 }
 
 impl StringArena {
-    /// Build from strings in index order (`items[i]` becomes key `i`).
+    /// Build from strings in index order (`items[i]` becomes key `i`), deriving the count and the
+    /// total byte length from a first pass over the iterator — hence the `Clone` bound.
+    ///
+    /// Knowing both totals up front is what lets the arena be assembled in one exactly-sized buffer
+    /// with the offsets written in place. Collecting the data and the offsets separately and
+    /// concatenating them afterwards, as this did before 0.10, held two copies of the whole corpus
+    /// alive across the concatenation — on a 2 M-key
+    /// [`PerfectHashIndex`](crate::PerfectHashIndex) build that was 36 MB of the peak.
+    ///
+    /// A caller that already knows the totals should use [`build_exact`](Self::build_exact): the
+    /// first pass looks cheap (it reads string *lengths*, never their bytes) but it follows the
+    /// caller's permutation, so it is one cache miss per key.
     pub(crate) fn build<I, S>(items: I) -> Self
     where
         I: IntoIterator<Item = S>,
+        I::IntoIter: Clone,
         S: AsRef<str>,
     {
-        let mut data = Vec::new();
-        let mut offsets = vec![0u64];
-        for s in items {
-            data.extend_from_slice(s.as_ref().as_bytes());
-            offsets.push(data.len() as u64);
+        let items = items.into_iter();
+        let (n, data_len) = items.clone().fold((0usize, 0usize), |(n, len), s| {
+            (n + 1, len + s.as_ref().len())
+        });
+        Self::assemble(items, n, data_len).expect("totals came from the iterator itself")
+    }
+
+    /// [`build`](Self::build) for a caller that already knows how many strings there are and how
+    /// many bytes they hold. `PerfectHashIndex` does: both fall out of the hashing pass it runs
+    /// anyway, so handing them over removes a whole permuted walk over the keys.
+    ///
+    /// The totals are a shortcut, not a promise the arena relies on. If they turn out not to match
+    /// what the iterator yields, the assembly is discarded and [`build`](Self::build) redoes it
+    /// from the iterator alone — a wrong hint costs time, never a malformed arena.
+    pub(crate) fn build_exact<I, S>(items: I, n: usize, data_len: usize) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        I::IntoIter: Clone,
+        S: AsRef<str>,
+    {
+        let items = items.into_iter();
+        match Self::assemble(items.clone(), n, data_len) {
+            Some(arena) => arena,
+            None => Self::build(items),
         }
-        let width = if data.len() <= u32::MAX as usize {
+    }
+
+    /// Write the whole arena into one buffer sized for `n` strings holding `data_len` bytes, with
+    /// each offset written as soon as its string lands. `None` if the iterator disagrees with
+    /// either total — the caller decides what to do about it.
+    fn assemble<I, S>(items: I, n: usize, data_len: usize) -> Option<Self>
+    where
+        I: Iterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let width = if data_len <= u32::MAX as usize {
             NARROW
         } else {
             WIDE
         };
-        let n_off = offsets.len();
-        let mut blob = Vec::with_capacity(HEADER + n_off * width + data.len());
+        let n_off = n + 1;
+        let data_start = HEADER + n_off * width;
+        let mut blob = Vec::with_capacity(data_start + data_len);
         blob.extend_from_slice(&(n_off as u64).to_le_bytes());
         blob.push(width as u8);
-        for o in &offsets {
-            match width {
-                NARROW => blob.extend_from_slice(&(*o as u32).to_le_bytes()),
-                _ => blob.extend_from_slice(&o.to_le_bytes()),
+        blob.resize(data_start, 0); // offset table, filled in as the data lands after it
+        write_offset(&mut blob, HEADER, width, 0);
+        let mut count = 0usize;
+        for s in items {
+            blob.extend_from_slice(s.as_ref().as_bytes());
+            count += 1;
+            if count > n {
+                return None; // more strings than the table was sized for
             }
+            let end = (blob.len() - data_start) as u64;
+            write_offset(&mut blob, HEADER + count * width, width, end);
         }
-        blob.extend_from_slice(&data);
-        Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid")
+        // A narrow table that turned out to need wide offsets has silently truncated them, so the
+        // width is re-derived from what was actually written rather than from the promise.
+        if count != n || (width == NARROW && blob.len() - data_start > u32::MAX as usize) {
+            return None;
+        }
+        Some(
+            Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
+        )
     }
 
     /// Number of stored strings.
@@ -180,6 +234,15 @@ impl StringArena {
     }
 }
 
+/// Write one offset of the arena's own width. Only [`StringArena::build`] calls this, into the
+/// table it has already reserved, so an out-of-range `at` is a bug in this file.
+fn write_offset(bytes: &mut [u8], at: usize, width: usize, off: u64) {
+    match width {
+        NARROW => bytes[at..at + NARROW].copy_from_slice(&(off as u32).to_le_bytes()),
+        _ => bytes[at..at + WIDE].copy_from_slice(&off.to_le_bytes()),
+    }
+}
+
 fn read_offset(bytes: &[u8], at: usize, width: usize) -> Result<u64, IndexError> {
     let end = at
         .checked_add(width)
@@ -222,12 +285,53 @@ mod tests {
         assert_eq!(StringArena::from_bytes(&arena.to_bytes()).unwrap().len(), 0);
     }
 
+    /// The serialised layout is a format, not an implementation detail: every blob any released
+    /// version wrote is parsed by [`from_shared`](StringArena::from_shared) above, so a build that
+    /// quietly changed a byte would break `load` on existing files. Pinned in full rather than by
+    /// length — the 0.10 rewrite that assembles the arena in one buffer, offsets written in place,
+    /// had to prove it produced exactly what the two-buffer version did.
     #[test]
     fn small_arenas_use_narrow_offsets() {
         let arena = StringArena::build(["apple", "banana"]);
         assert_eq!(arena.width, NARROW);
-        // header + 3 narrow offsets + "applebanana"
-        assert_eq!(arena.to_bytes().len(), HEADER + 3 * NARROW + 11);
+        let mut want = Vec::new();
+        want.extend_from_slice(&3u64.to_le_bytes()); // n_off = 2 keys + 1
+        want.push(NARROW as u8);
+        for o in [0u32, 5, 11] {
+            want.extend_from_slice(&o.to_le_bytes());
+        }
+        want.extend_from_slice(b"applebanana");
+        assert_eq!(arena.to_bytes(), want);
+        assert_eq!(want.len(), HEADER + 3 * NARROW + 11);
+    }
+
+    /// The totals a caller passes to `build_exact` are a shortcut, not a promise: whatever they
+    /// say, the arena must come out exactly as `build` would have derived it. A count that is too
+    /// small is caught mid-fill, one that is too large at the end, and a byte total that is merely
+    /// wrong only mis-sizes the initial allocation.
+    #[test]
+    fn a_wrong_hint_never_changes_the_arena() {
+        let items = ["apple", "banana", "", "cherry"]; // 17 bytes over 4 strings
+        let want = StringArena::build(items).to_bytes();
+        for (n, data_len) in [(4, 17), (3, 17), (5, 17), (0, 0), (4, 0), (4, 999)] {
+            let got = StringArena::build_exact(items, n, data_len);
+            assert_eq!(got.to_bytes(), want, "hint n={n}, data_len={data_len}");
+            assert_eq!(got.get(3), Some("cherry"));
+        }
+    }
+
+    /// An empty entry between two others, and one at each end: the offset written for key `i` is
+    /// the *end* of its bytes, so a zero-length key is the case where two consecutive offsets are
+    /// equal and an off-by-one in the fill loop would not otherwise show.
+    #[test]
+    fn empty_keys_keep_their_slots() {
+        let arena = StringArena::build(["", "a", "", "bc", ""]);
+        assert_eq!(arena.len(), 5);
+        let got: Vec<Option<&str>> = (0..6).map(|i| arena.get(i)).collect();
+        assert_eq!(
+            got,
+            [Some(""), Some("a"), Some(""), Some("bc"), Some(""), None]
+        );
     }
 
     /// The wide path cannot be reached by building a >4 GiB arena in a test, so drive it through

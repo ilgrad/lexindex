@@ -32,6 +32,9 @@ const CHECKED_V3: usize = 28; // header bytes the trailing check covers
 const HEADER_V4: usize = 36;
 const CHECKED_V4: usize = 32;
 const SIDE_ENTRY: usize = 12; // hash u64 + id u32
+/// "No key assigned to this slot yet" while a build fills its slot → key-index table. Never a real
+/// index: `build` rejects `n > u32::MAX`, so the largest index a key can have is `u32::MAX - 1`.
+const NO_KEY: u32 = u32::MAX;
 
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
@@ -92,9 +95,73 @@ impl PerfectHashIndex {
                 side: Vec::new(),
             });
         }
-        let hashes: Vec<u64> = keys.iter().map(|k| hash_key(k.as_ref())).collect();
-        // One representative per distinct hash value builds the MPH; the (almost always zero)
-        // colliding leftovers get tail ids [m, n) and are found through the side table instead.
+        // The arena holds every key exactly once, so the sum of the key lengths *is* its data
+        // length — free here, because this pass already has each key in hand, and it saves the
+        // arena a walk in slot order that would otherwise cost a cache miss per key.
+        let mut data_len = 0usize;
+        let hashes: Vec<u64> = keys
+            .iter()
+            .map(|k| {
+                let key = k.as_ref();
+                data_len += key.len();
+                hash_key(key)
+            })
+            .collect();
+        // A sorted copy answers whether *any* two keys share a hash, and — when none does — is
+        // also what the MPH is built from. Feeding it rather than `hashes` is free (it exists
+        // either way) and keeps the MPH's input in the same order the pre-0.10 code gave it, so
+        // nothing about construction changes. The alternative it replaces — always partitioning
+        // `(hash, index)` pairs — allocated 16 bytes per key more, and held them across the MPH
+        // build, to describe a situation that essentially never arises: a 64-bit collision among n
+        // keys needs n ≈ 10^8 to reach probability 1e-4.
+        let mut sorted = hashes.clone();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|w| w[0] == w[1]) {
+            return Self::build_with_collisions(keys, hashes, data_len);
+        }
+        // No collision: every key is its own representative, and `hashes` — still in key order —
+        // maps each slot back to its key with no further indirection.
+        let mph = crate::hash::build_mph(&sorted)?;
+        let mut by_slot: Vec<u32> = vec![NO_KEY; n];
+        for (i, h) in hashes.iter().enumerate() {
+            let slot = mph.index(h);
+            if slot >= n || by_slot[slot] != NO_KEY {
+                return Err(IndexError::Format(
+                    "perfect-hash: construction was not minimal/perfect",
+                ));
+            }
+            by_slot[slot] = i as u32;
+        }
+        let overflow_cap = crate::hash::overflow_cap(&mph, &sorted, n);
+        // Before the arena allocates: neither hash vector is needed alongside it.
+        drop(sorted);
+        drop(hashes);
+        let arena = StringArena::build_exact(
+            by_slot.iter().map(|&i| keys[i as usize].as_ref()),
+            n,
+            data_len,
+        );
+        Ok(Self {
+            mph: Some(mph),
+            arena,
+            n,
+            overflow_cap,
+            side: Vec::new(),
+        })
+    }
+
+    /// The build path for a key set in which at least two distinct keys share a [`hash_key`]
+    /// value. One representative per distinct hash value builds the MPH; the colliding leftovers
+    /// get tail ids `[m, n)` and are found through the side table instead. Split out of
+    /// [`build`](Self::build) because it costs memory — the `(hash, index)` partition — that the
+    /// overwhelmingly common case must not pay.
+    #[cold]
+    fn build_with_collisions<S: AsRef<str>>(
+        keys: Vec<S>,
+        hashes: Vec<u64>,
+        data_len: usize,
+    ) -> Result<Self, IndexError> {
+        let n = keys.len();
         let (mph_hashes, extras) = crate::hash::split_collisions(&hashes);
         let m = mph_hashes.len();
         let mph = crate::hash::build_mph(&mph_hashes)?;
@@ -102,26 +169,31 @@ impl PerfectHashIndex {
         for &(_, i) in &extras {
             is_extra[i as usize] = true;
         }
-        // Slots hold borrowed keys: the arena copies them anyway, so cloning here would put a
-        // second copy of the corpus alongside `keys` for the length of the loop.
-        let mut by_slot: Vec<Option<&str>> = vec![None; m];
-        for (i, (k, h)) in keys.iter().zip(&hashes).enumerate() {
+        // Slots hold key indices, not the keys: the arena copies the bytes anyway, and 4 bytes a
+        // slot rather than a 16-byte `Option<&str>` is 12 bytes per key off the build's peak.
+        let mut by_slot: Vec<u32> = vec![NO_KEY; m];
+        for (i, h) in hashes.iter().enumerate() {
             if is_extra[i] {
                 continue;
             }
             let slot = mph.index(h);
-            if slot >= m || by_slot[slot].is_some() {
+            if slot >= m || by_slot[slot] != NO_KEY {
                 return Err(IndexError::Format(
                     "perfect-hash: construction was not minimal/perfect",
                 ));
             }
-            by_slot[slot] = Some(k.as_ref());
+            by_slot[slot] = i as u32;
         }
-        let arena = StringArena::build(
+        let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
+        drop(hashes);
+        drop(mph_hashes);
+        let arena = StringArena::build_exact(
             by_slot
-                .into_iter()
-                .map(|o| o.unwrap())
+                .iter()
+                .map(|&i| keys[i as usize].as_ref())
                 .chain(extras.iter().map(|&(_, i)| keys[i as usize].as_ref())),
+            n,
+            data_len,
         );
         let mut side: Vec<(u64, u32)> = extras
             .iter()
@@ -129,7 +201,6 @@ impl PerfectHashIndex {
             .map(|(j, &(h, _))| (h, (m + j) as u32))
             .collect();
         side.sort_unstable(); // by hash, for the binary search in `side_lookup`
-        let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
         Ok(Self {
             mph: Some(mph),
             arena,
@@ -360,6 +431,14 @@ impl PerfectHashIndex {
     /// the MPH alone), lengths, the side table and the arena — with the MPH region located but
     /// **not** deserialised. Safe on arbitrary bytes: this is the half a property test fuzzes, and
     /// everything `from_shared` trusts comes out of here.
+    /// Whether the framing of `bytes` parses. Exists for the libFuzzer target in `fuzz/`, which
+    /// lives in its own crate and so cannot reach `parse_frame` (private, and returning a private
+    /// type). See the `lexindex::fuzzing` module.
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn fuzz_parse_frame(bytes: &[u8], verify: bool) -> bool {
+        Self::parse_frame(&SharedBytes::from_owned(bytes.to_vec()), verify).is_ok()
+    }
+
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
         if bytes.len() < 4 {

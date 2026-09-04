@@ -84,10 +84,15 @@ impl CompactHashIndex {
     /// the blob, not the key list.
     ///
     /// The build **streams**: only a `(hash, second hash)` pair — 16 bytes — is kept per key, never
-    /// the strings, so building from a lazy iterator costs `16 × n` bytes of peak memory no matter
-    /// how large the keys are. Both hashes are kept at their full 64 bits here regardless of
-    /// `fingerprint_bits` (the width only governs what the fingerprint *table* stores), so the one
-    /// thing the build cannot tell from a duplicate is two *distinct* keys colliding in **both**
+    /// the strings, so building from a lazy iterator costs the same whatever the keys weigh. Those
+    /// pairs dominate the peak but are not all of it: the perfect hash is built from a plain array
+    /// of the representatives' hashes, extracted from the pairs alongside their truncated
+    /// fingerprints. The measured high-water mark, on top of whatever holds the keys, is **25.2
+    /// bytes per key** at n = 2 M with the 8-bit default, 27.3 at 16 bits and 29.2 at 32
+    /// (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
+    /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
+    /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys
+    /// colliding in **both**
     /// 64-bit hashes at once — `≈ 2^-128` per pair, negligible at any reachable scale. Keys
     /// colliding in the slot hash alone are served exactly, from a side table keyed by the full
     /// second hash.
@@ -132,13 +137,23 @@ impl CompactHashIndex {
             });
         }
         // One representative per distinct hash value builds the MPH and owns the slot; the (almost
-        // always zero) same-hash leftovers get tail ids [m, n) in the side table.
+        // always zero) same-hash leftovers get tail ids [m, n) in the side table. The second half
+        // of the build needs only the representatives' hashes and their *truncated* fingerprints,
+        // so those are extracted here — the truncated ones into a bit-packed table of the same
+        // width the index will ship — and `pairs` is dropped before the perfect hash is built. It
+        // used to stay live alongside a full 64-bit fingerprint per key, which put 24 bytes per key
+        // next to ptr_hash's own construction memory instead of 8 + `fingerprint_bits`/8.
         let mut mph_hashes = Vec::with_capacity(n);
         let mut side: Vec<(u64, u64, u32)> = Vec::new();
-        let mut rep_fps = Vec::with_capacity(n);
+        let mut rep_fps = vec![0u8; fp_table_len(n, fingerprint_bits)?];
         for run in pairs.chunk_by(|a, b| a.0 == b.0) {
+            write_fp(
+                &mut rep_fps,
+                mph_hashes.len(),
+                fingerprint_bits,
+                run[0].1 & fp_mask(fingerprint_bits),
+            );
             mph_hashes.push(run[0].0);
-            rep_fps.push(run[0].1);
             for &(h, fp) in &run[1..] {
                 side.push((h, fp, 0)); // ids assigned once m is known
             }
@@ -147,28 +162,23 @@ impl CompactHashIndex {
         for (j, e) in side.iter_mut().enumerate() {
             e.2 = (m + j) as u32;
         }
+        drop(pairs);
         let mph = crate::hash::build_mph(&mph_hashes)?;
-        // `m ≤ u32::MAX` and `fingerprint_bits ≤ 64`, so the product fits a u64; whether the table
-        // fits this platform's address space is answered here, not by a truncating cast on a
-        // 32-bit target.
-        let table_len = usize::try_from((m as u64 * fingerprint_bits as u64).div_ceil(8))
-            .map_err(|_| IndexError::Format("compact-hash: fingerprint table too large"))?;
-        let mut fps = vec![0u8; table_len];
-        let mut seen = vec![false; m];
-        for (h, fp) in mph_hashes.iter().zip(&rep_fps) {
+        let mut fps = vec![0u8; fp_table_len(m, fingerprint_bits)?];
+        // One bit per slot, not one byte: this only has to catch a construction that was not
+        // minimal/perfect, and at 100 M keys a `Vec<bool>` would be 100 MB of the peak.
+        let mut seen = vec![0u64; m.div_ceil(64)];
+        for (i, h) in mph_hashes.iter().enumerate() {
             let slot = mph.index(h);
-            if slot >= m || seen[slot] {
+            if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
                 return Err(IndexError::Format(
                     "compact-hash: construction was not minimal/perfect",
                 ));
             }
-            seen[slot] = true;
-            write_fp(
-                &mut fps,
-                slot,
-                fingerprint_bits,
-                *fp & fp_mask(fingerprint_bits),
-            );
+            seen[slot / 64] |= 1 << (slot % 64);
+            let fp = read_fp(&rep_fps, i, fingerprint_bits)
+                .expect("the representative table was sized for every representative");
+            write_fp(&mut fps, slot, fingerprint_bits, fp);
         }
         let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
         Ok(Self {
@@ -417,6 +427,14 @@ impl CompactHashIndex {
     /// the MPH alone), lengths, the side table and the fingerprint range — with the MPH region
     /// located but **not** deserialised. Safe on arbitrary bytes: this is the half a property test
     /// fuzzes, and everything `from_shared` trusts comes out of here.
+    /// Whether the framing of `bytes` parses. Exists for the libFuzzer target in `fuzz/`, which
+    /// lives in its own crate and so cannot reach `parse_frame` (private, and returning a private
+    /// type). See the `lexindex::fuzzing` module.
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn fuzz_parse_frame(bytes: &[u8], verify: bool) -> bool {
+        Self::parse_frame(&SharedBytes::from_owned(bytes.to_vec()), verify).is_ok()
+    }
+
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
         // 0.5/0.6 blobs predate the recorded remap bound and, unlike the arena-backed index, store
@@ -634,6 +652,14 @@ fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
             "compact-hash: fingerprint_bits must be in 1..=64",
         ))
     }
+}
+
+/// Bytes a bit-packed table of `count` fingerprints of `bits` bits occupies. `count ≤ u32::MAX`
+/// and `bits ≤ 64`, so the product fits a `u64`; whether the table fits *this platform's* address
+/// space is answered here rather than by a truncating cast on a 32-bit target.
+fn fp_table_len(count: usize, bits: u32) -> Result<usize, IndexError> {
+    usize::try_from((count as u64 * bits as u64).div_ceil(8))
+        .map_err(|_| IndexError::Format("compact-hash: fingerprint table too large"))
 }
 
 #[inline(always)]
