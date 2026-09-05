@@ -287,10 +287,21 @@ impl CompactHashIndex {
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with the input (`None` where
-    /// the fingerprint rejects). Slot resolution streams through the MPH with 32 queries' worth
-    /// of software prefetch in flight, and the fingerprint lines are prefetched ahead of the
-    /// compare. Measured on real words: 1.1× the per-key loop at 480 k keys, 1.2× at 5 M. The
-    /// rare index holding a hash collision takes the per-key path instead — the side probe must
+    /// the fingerprint rejects). Three prefetch pipelines run ahead of three dependent misses —
+    /// the *key bytes* before hashing, the MPH's own stream (32 queries in flight), and the
+    /// fingerprint line before the compare — so what a one-at-a-time loop serialises, this
+    /// overlaps.
+    ///
+    /// **How much that wins depends on where the caller's keys live**, and the honest number says
+    /// so. Real-word bigrams at 10 M, against the per-key loop: **2.9×** when the batch's strings
+    /// are scattered in memory (a `Vec<String>` accumulated over time, keys pulled out of a map,
+    /// anything not allocated in probe order), holding at 3.0× at 1 M and 2.8× at 5 M. When they
+    /// are contiguous the hardware prefetcher already sees them coming, the batch runs at
+    /// ~50 ns/key either way, and this method's advantage is the one FFI crossing rather than the
+    /// prefetch. Non-members do not change the picture — a 50/50 batch measures the same, because
+    /// the cost being hidden is reaching the key at all, not what is done with it.
+    ///
+    /// The rare index holding a hash collision takes the per-key path instead — the side probe must
     /// precede the fingerprint compare, which defeats the batched layout.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u32>> {
         let Some(mph) = &self.mph else {
@@ -302,10 +313,20 @@ impl CompactHashIndex {
         // Both hashes are computed in one pass over the keys, so the verify pass below never
         // touches the strings again — it is a pure fingerprint-table compare with the lines
         // prefetched ahead.
+        // Prefetch distance, shared by the hashing pass and the fingerprint compare below: far
+        // enough ahead that a DRAM miss has time to land, near enough that the line is still there.
+        const AHEAD: usize = 32;
         let mut hashes = Vec::with_capacity(keys.len());
         let mut wanted = Vec::with_capacity(keys.len());
         let mask = fp_mask(self.fp_bits);
-        for k in keys {
+        for (i, k) in keys.iter().enumerate() {
+            // The slice holds the `String` headers contiguously, but their bytes are wherever the
+            // allocator put them, so hashing a batch is one dependent cache miss per key and the
+            // hashes cannot start until each arrives. Pulling a later key's first line in now is
+            // the one prefetch the per-key `id` cannot make — it has no next key to look at.
+            if let Some(next) = keys.get(i + AHEAD) {
+                crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
+            }
             let (h, full) = hash_pair(k.as_ref());
             hashes.push(h);
             wanted.push(full & mask);
@@ -318,7 +339,6 @@ impl CompactHashIndex {
         let m = self.m();
         let slots = crate::hash::triage_slots(mph, m, self.overflow_cap, &hashes);
         let fps = self.fps.as_ref();
-        const AHEAD: usize = 32;
         (0..keys.len())
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {

@@ -31,6 +31,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`ids_of` prefetches the key bytes, not just the tables it looks them up in** — **2.6×** on
+  `CompactHashIndex` and **2.1×** on `PerfectHashIndex` over 10 M real-word bigrams, A-B-A-B against
+  the unmodified tree with the per-key `id` loops as controls (both flat: 200 → 203 ns/key and
+  427 → 416). Against that per-key loop the batch is now **2.9×** and **3.6×**, where it was 1.1×
+  and 1.8×: batching a `CompactHashIndex` lookup used to buy essentially nothing.
+
+  The missing prefetch was the first one. A batch's `String` headers are contiguous but their bytes
+  are wherever the allocator put them, so the hashing pass was one dependent cache miss per key with
+  nothing overlapping it, and the careful prefetching downstream was hiding the cheaper halves of
+  the problem. The per-key `id` cannot make this prefetch at all — it has no next key to look at —
+  which is what the batched form is *for*.
+
+  **The number depends on where the caller's keys live, and the docs now say so.** Contiguous keys —
+  a `Vec` built in probe order — are already visible to the hardware prefetcher: that batch runs at
+  ~50 ns/key with or without the change (−6 % to +2 % across 1 M / 5 M / 10 M, no consistent
+  direction), and the win there is the single FFI crossing. A 50/50 member/non-member batch measures
+  the same as an all-member one, because what is being hidden is reaching the key at all.
+
 - **`StringIndex.__iter__` (Python) streams the transducer instead of rank-walking every key** —
   **2.9× faster** over 1 M real-word bigrams (635 → 221 ns/key, three rounds each; the control,
   `id()` on the same index, held at 367 ns across both). It buffers 1 024 pairs per refill and resumes through
