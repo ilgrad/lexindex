@@ -31,6 +31,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The ns/op table the 0.10 sessions could not take** (`local/latency/`): every lookup form of both
+  hash indexes over four member/non-member mixes and two key layouts, `std::HashMap` as the
+  stability control, all forms alternated inside each round. Two findings reached the README. First,
+  **~90 ns of every published lookup number is reaching the probe key**: `examples/bench.rs` probes
+  the original allocations in strided order, and handing the same index a contiguous probe list
+  takes `PerfectHashIndex::id_unchecked` from 109 to **18 ns/op** at 1 M while `ids_of` does not move
+  at all (39.5 scattered against 38.2 contiguous — the software prefetch does for scattered keys what
+  the hardware does for contiguous ones). Second, **on misses `std::HashMap` wins until its table
+  outgrows the cache** — 32 ns against `CompactHashIndex::id`'s 41 at 1 M, reversing to 105 against
+  56 at 10 M. The harness also reproduces the README's own table from different code: at 1 M
+  scattered it measures 125.6 / 261.8 / 108.9 / 237.2 ns against the published ~151 / ~273 / ~111 /
+  ~246.
+
 - **`ids_of` prefetches the key bytes, not just the tables it looks them up in** — **2.6×** on
   `CompactHashIndex` and **2.1×** on `PerfectHashIndex` over 10 M real-word bigrams, A-B-A-B against
   the unmodified tree with the per-key `id` loops as controls (both flat: 200 → 203 ns/key and

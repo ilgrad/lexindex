@@ -384,6 +384,24 @@ latency advantage is gone; what it still offers is the footprint and the seriali
 memory-mappable blob. (The table above stands for this version: 0.10 changed how the indexes are
 *built*, not a single byte of the blob or a single instruction of a lookup.)
 
+**Two things the table above cannot show, both measured on 0.11 with an independent harness
+(`local/latency/`, one process, all forms alternated per round, min of 12):**
+
+- **Roughly 90 ns of every number in it is reaching the probe key, not looking it up.** The bench
+  probes `keys[i * STEP % n]` — the original allocations in strided order, which is what a
+  long-lived key list looks like. Hand the same index a probe list allocated in probe order and
+  `PerfectHashIndex::id_unchecked` falls from 109 to **18 ns/op** at 1 M, `CompactHashIndex::id`
+  from 126 to 33, while `PerfectHashIndex::id` barely moves (262 → 192; it fetches a stored key
+  either way). The batched `ids_of` is layout-insensitive by construction — 39.5 scattered against
+  38.2 contiguous — because its software prefetch does for scattered keys what the hardware does for
+  contiguous ones. So read any sub-100 ns lookup figure, here or anywhere, as a statement about the
+  caller's key layout as much as about the index.
+- **On a miss-heavy workload `std::HashMap` wins, until its table outgrows the cache.** An absent key
+  costs the SipHash map 32 ns at 1 M against `CompactHashIndex::id`'s 41 — it fails on an empty
+  bucket after one cache line, while a fingerprint index runs the whole perfect hash and reads a
+  fingerprint before it can say no. At 10 M the map's table no longer fits and the order reverses
+  (105 ns against 56 for `ids_of`). lexindex's lookup advantage is on **members**, and at scale.
+
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
 **fastest of the structures in the table above** — roughly twice as quick as the SipHash `HashMap`
 (1.7–2.2× depending on the session; no probing, no membership comparison) *and* compact +
