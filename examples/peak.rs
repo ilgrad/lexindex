@@ -9,6 +9,9 @@
 //! at all, streaming an ascending generator through `build_sorted_to_file`, so its **keys** column is
 //! the process baseline rather than the corpus.
 //!
+//! The high-water mark is reset once the word list is loaded, so **keys** and **peak** measure this
+//! run's own allocations rather than the transient the vocabulary load leaves behind.
+//!
 //! `build` is the wall time of the single `build` call, on its own in a fresh process — the same
 //! operation `examples/bench.rs` times, but with nothing else in the address space to perturb the
 //! allocator. Two memory numbers follow. **keys** is the high-water mark after the input
@@ -39,6 +42,20 @@ fn peak_rss() -> u64 {
         }
     }
     panic!("no VmHWM line in /proc/self/status");
+}
+
+/// Reset the kernel's high-water mark to the current RSS (`CLEAR_REFS_MM_HIWATER_RSS`).
+///
+/// Without this the baseline is not a baseline: loading the word list reads the whole file into one
+/// `String` and splits it into ~480 000 more, so its *transient* peak sits well above the steady
+/// state it leaves behind, and every later allocation smaller than that headroom is invisible. That
+/// is not a rounding error — it is the difference between "the generator costs nothing" and "the
+/// generator costs less than the slack the vocabulary load happened to leave".
+fn reset_peak_rss() {
+    // Best effort: the file exists on Linux ≥ 4.0 and this is a Linux-only example, but a refusal
+    // must not fail the run — it only means the baseline keeps the load's transient in it, which is
+    // the behaviour every measurement here had before.
+    let _ = std::fs::write("/proc/self/clear_refs", b"5");
 }
 
 fn load_vocab() -> Vec<String> {
@@ -84,6 +101,45 @@ fn iter_sorted_keys(n: usize, vocab: &[String]) -> impl Iterator<Item = String> 
     (0..n).map(move |k| format!("{}.{}", v[k / w], v[k % w]))
 }
 
+/// splitmix64, so the sparse generator below picks the same second words on every run.
+fn mix(a: u64, b: u64) -> u64 {
+    let mut z = a
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(b.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// Ascending keys that are **not** a cross product: every word of the filtered vocabulary gets a
+/// pseudo-random handful of second words rather than all of them.
+///
+/// [`iter_sorted_keys`] is the grid the rest of this repo benchmarks on, and `docs/design.md` now
+/// says outright that a grid is the most favourable set a transducer can be handed. A memory claim
+/// measured only there would be a claim about the corpus, so this generator exists to check the same
+/// number on a set with the regularity taken out — still lazily ascending, because the first word
+/// ascends and the second words within it are sorted.
+fn iter_sparse_sorted_keys(n: usize, vocab: &[String]) -> impl Iterator<Item = String> + '_ {
+    let v: Vec<&String> = vocab
+        .iter()
+        .filter(|w| w.bytes().all(|b| b > b'.'))
+        .collect();
+    let w = v.len();
+    assert!(w > 0, "no vocabulary left after filtering");
+    let per = n.div_ceil(w);
+    (0..w).flat_map(move |i| {
+        let mut js: Vec<usize> = (0..per)
+            .map(|t| (mix(i as u64, t as u64) % w as u64) as usize)
+            .collect();
+        js.sort_unstable();
+        js.dedup();
+        js.into_iter()
+            .map(|j| format!("{}.{}", v[i], v[j]))
+            .collect::<Vec<_>>()
+            .into_iter()
+    })
+}
+
 /// `n` distinct realistic compound keys `word_i.word_j` — natural prefix sharing, high entropy.
 fn make_keys(n: usize, vocab: &[String]) -> Vec<String> {
     let m = (n as f64).sqrt().ceil() as usize;
@@ -93,6 +149,16 @@ fn make_keys(n: usize, vocab: &[String]) -> Vec<String> {
     (0..n)
         .map(|k| format!("{}.{}", v[k % w], v[(k / w) % w]))
         .collect()
+}
+
+/// Consume a key stream without building anything, returning how many keys went past.
+fn drain_keys(keys: impl Iterator<Item = String>) -> usize {
+    let mut n = 0;
+    for k in keys {
+        std::hint::black_box(&k);
+        n += 1;
+    }
+    n
 }
 
 fn report(label: &str, n: usize, keys_rss: u64, blob: usize, build_ms: f64) {
@@ -124,26 +190,69 @@ fn main() {
     #[cfg(feature = "mph")]
     let fp_bytes: usize = args.next().and_then(|a| a.parse().ok()).unwrap_or(1);
 
-    // The streaming build is measured before any key list exists, so its peak is its own and the
-    // `keys` floor every other mode reports is genuinely zero here.
-    if which == "string-sorted" {
+    // Two dispatches, split by the thing being measured: the streaming modes below never let a key
+    // list exist, so their `keys` column is the process baseline and not the corpus. The
+    // materialising modes after them all start from one.
+    if let Some(sorted) = which.strip_prefix("string-sorted") {
+        let sparse = sorted.starts_with("-sparse");
+        let drain = sorted.ends_with("-gen");
         let vocab = load_vocab();
+        reset_peak_rss();
         let keys_rss = peak_rss();
-        let path = std::env::temp_dir().join(format!("lexindex_peak_{}.bix", std::process::id()));
+        // `LEXINDEX_PEAK_DIR` because `temp_dir()` is tmpfs on many Linux systems, and a
+        // "streamed to disk" claim measured with the bytes landing in RAM invites the obvious
+        // objection — process RSS is the same either way, but the run should be reproducible on a
+        // real filesystem.
+        let dir = std::env::var("LEXINDEX_PEAK_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        let path = dir.join(format!("lexindex_peak_{}.bix", std::process::id()));
         let t0 = std::time::Instant::now();
-        let written =
-            StringIndex::build_sorted_to_file(iter_sorted_keys(n, &vocab), &path).unwrap();
+        // `-gen` drains the generator and builds nothing. A generator that allocates a `String` per
+        // key leaves the allocator holding freed arenas, and that retention is charged to the
+        // process just as the builder's own memory is; measuring it separately is the only way to
+        // say which of the two the streaming build's peak actually is.
+        let (written, blob) = match (sparse, drain) {
+            (false, true) => (drain_keys(iter_sorted_keys(n, &vocab)), 0),
+            (true, true) => (drain_keys(iter_sparse_sorted_keys(n, &vocab).take(n)), 0),
+            (false, false) => {
+                let w =
+                    StringIndex::build_sorted_to_file(iter_sorted_keys(n, &vocab), &path).unwrap();
+                (
+                    w,
+                    std::fs::metadata(&path).map(|m| m.len() as usize).unwrap(),
+                )
+            }
+            (true, false) => {
+                let w = StringIndex::build_sorted_to_file(
+                    iter_sparse_sorted_keys(n, &vocab).take(n),
+                    &path,
+                )
+                .unwrap();
+                (
+                    w,
+                    std::fs::metadata(&path).map(|m| m.len() as usize).unwrap(),
+                )
+            }
+        };
         let build_ms = t0.elapsed().as_secs_f64() * 1e3;
-        let blob = std::fs::metadata(&path)
-            .map(|m| m.len() as usize)
-            .unwrap_or(0);
-        assert_eq!(written, n, "the grid generator must not repeat a key");
-        report("StringIndex/str", n, keys_rss, blob, build_ms);
+        let label = match (sparse, drain) {
+            (false, false) => "sorted/grid",
+            (true, false) => "sorted/sparse",
+            (false, true) => "generator/grid",
+            (true, true) => "generator/sparse",
+        };
+        report(label, written, keys_rss, blob, build_ms);
         std::fs::remove_file(&path).ok();
         return;
     }
 
-    let keys = make_keys(n, &load_vocab());
+    let vocab = load_vocab();
+    let keys = make_keys(n, &vocab);
+    // The vocabulary is dead once the keys exist, and the reset comes after both facts so that
+    // `keys_rss` is the key list at rest rather than the largest the process ever happened to be.
+    drop(vocab);
+    reset_peak_rss();
     let keys_rss = peak_rss();
 
     match which.as_str() {
@@ -181,7 +290,8 @@ fn main() {
         }
         other => {
             eprintln!(
-                "unknown index {other:?}; expected string, string-sorted, perfect or compact"
+                "unknown index {other:?}; expected string, string-sorted[-sparse][-gen], \
+                 perfect or compact"
             );
             std::process::exit(1);
         }

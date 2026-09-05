@@ -64,8 +64,11 @@ payload, verified on owned loads. The build **streams**: one pass keeps a `(hash
 dominate the peak without being all of it: the perfect hash is built from a plain array of the
 representatives' hashes, lifted out of the pairs together with their truncated fingerprints before
 the pairs are dropped. Measured on 2 M real-word bigrams (`cargo run --release --example peak --
-compact`), the high-water mark on top of whatever holds the keys is **25.2 bytes per key** at the
-8-bit default, 27.3 at 16 bits and 29.2 at 32.
+compact`), the high-water mark on top of whatever holds the keys is **30.9 bytes per key** at the
+8-bit default, 33.0 at 16 bits and 34.9 at 32 — the width shows up in the peak because the
+fingerprints are staged truncated, so a wider one is wider everywhere. (`peak.rs` resets `VmHWM`
+after the key list is built; without that reset the transient of loading the corpus stays in the
+mark and the build appears 11 MB cheaper than it is, which is how the 0.10.0 figures were taken.)
 Keys that collide in the 64-bit hash get tail ids in a side table (see
 `PerfectHashIndex` below) holding the **full 64-bit second hash** — not the table's truncated width —
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe

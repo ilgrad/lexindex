@@ -87,8 +87,8 @@ impl CompactHashIndex {
     /// the strings, so building from a lazy iterator costs the same whatever the keys weigh. Those
     /// pairs dominate the peak but are not all of it: the perfect hash is built from a plain array
     /// of the representatives' hashes, extracted from the pairs alongside their truncated
-    /// fingerprints. The measured high-water mark, on top of whatever holds the keys, is **25.2
-    /// bytes per key** at n = 2 M with the 8-bit default, 27.3 at 16 bits and 29.2 at 32
+    /// fingerprints. The measured high-water mark, on top of whatever holds the keys, is **30.9
+    /// bytes per key** at n = 2 M with the 8-bit default, 33.0 at 16 bits and 34.9 at 32
     /// (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
     /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
     /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys

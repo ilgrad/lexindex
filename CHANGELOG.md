@@ -14,13 +14,51 @@ All notable changes to this project are documented here. The format follows
   external sort) pays for a second copy of the corpus; these stream straight into the transducer, and
   `build_sorted_to_file` streams the finished index to disk as well, so neither the corpus nor the
   index has to fit in memory. Measured with `examples/peak.rs` on the same word-bigram grid: at 10 M
-  keys the streaming build peaks at **49.8 MB against `build`'s 722.2** (14.5×; 15.1 MB of build
-  memory against 119.0 plus a 603 MB key list), and **100 M keys build in 52 s with a 63.3 MB peak**,
-  of which 34.3 MB is the loaded word list — 32× under the 2 GB the task set as its bar. Adjacent
+  keys the streaming build peaks at **49.6 MB against `build`'s 721.9** (14.6×; 20.0 MB of build
+  memory against 129.5 plus a 592 MB key list), and **100 M keys build with a 63.3 MB peak**, of
+  which 29.6 MB is the loaded word list — 32× under the 2 GB the task set as its bar. The peaks
+  reproduce to the tenth of a megabyte across runs; the wall time does not, and is left out for that
+  reason (the same 100 M build took 52 s on an idle machine and 101 s under a load average of 7). Adjacent
   duplicates are dropped exactly as `build` drops them after sorting, so the two produce byte-identical
   blobs for the same key set, which is what a test asserts rather than a similarity check: ids are
   ranks, so any disagreement would renumber every key after the first difference. An input that is not
   ascending is refused by the transducer builder rather than producing an index that answers wrongly.
+
+### Fixed
+
+- **The 0.10.0 build-memory figures were measured against a masked baseline and are corrected here,
+  not silently swapped.** `examples/peak.rs` reports `VmHWM − (VmHWM at the moment the key list is
+  ready)`, and `VmHWM` is a high-water mark: the transient of loading the word list and sorting the
+  bigrams stayed in it, so every build had to climb past that transient before it registered. The
+  example now resets the mark (`echo 5 > /proc/self/clear_refs`) once the key list is built. The
+  understatement is a constant 11.0–11.8 MB in every cell — flat in `n` and in the structure, which
+  is what identifies it as the corpus transient rather than anything about the builds. Re-measured
+  with the corrected baseline on both sides (0.9.1 built from the same example), bytes per key above
+  the key list:
+
+  | build | published 0.10.0 | corrected |
+  |---|---|---|
+  | `PerfectHashIndex`, 2 M | 79.0 → 44.9 (−43 %) | 83.0 → **50.8** (−38.8 %) |
+  | `PerfectHashIndex`, 10 M | 84.7 → 50.8 (−40 %) | 85.9 → **51.9** (−39.6 %) |
+  | `CompactHashIndex` 8-bit, 2 M | 42.5 → 25.2 (−41 %) | 48.2 → **30.9** (−35.9 %) |
+  | `CompactHashIndex` 8-bit, 10 M | 47.6 → 24.6 (−48 %) | 48.7 → **25.7** (−47.2 %) |
+  | `CompactHashIndex` 16-bit, 2 M | → 27.3 | 48.2 → **33.0** |
+  | `CompactHashIndex` 32-bit, 2 M | → 29.2 | 48.2 → **34.9** |
+
+  The *absolute* savings are unchanged, because the constant cancels in a difference: 340 MB off a
+  10 M `PerfectHashIndex` build (published 338) and 230 MB off a 10 M `CompactHashIndex` build
+  (published 230). What moves is every per-key figure and therefore every percentage, by 1–5 points.
+  `docs/design.md` and the `CompactHashIndex::build_bits` docstring carry the corrected numbers; the
+  0.10.0 section below is left as it was published. One 0.10.0 claim gains rather than loses: the
+  build peak was said to rise with the fingerprint width, and on the corrected baseline the 0.9.1
+  build does not move with it at all (48.2 B/key at 8, 16 and 32 bits), so the width-proportional
+  staging is visible only in the new code.
+
+- **The README's `dict` build cost had the same defect from the Python side** — `local/positioning.py`
+  took its baseline right after `_random_pairs` returned, while the dict that generator uses to
+  deduplicate was still counted in the high-water mark. It resets the mark too now: a `dict` costs
+  **71–95 bytes per key** above the key list on the three corpora in the README's table, not the
+  35–96 the range said, and 58–60 at 10 M.
 
 ## [0.10.0] — 2026-09-04
 

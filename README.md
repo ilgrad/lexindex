@@ -335,8 +335,9 @@ So, in decision order:
 - **Do the keys share a lot of structure** (a path namespace, a versioned catalogue, a cross product)?
   Then measure before choosing: that is the regime where an FST can beat a keyless hash outright.
 - **A `dict` / `HashMap` is not in the table** because it has no serialised form to measure. It cost
-  35–96 bytes per key above the key list itself across these corpora, and it has to be rebuilt from
-  the keys on every process start; every structure here is mapped from a file instead.
+  71–95 bytes per key above the key list itself across these corpora (58–60 at 10 M, where the table
+  amortises better), and it has to be rebuilt from the keys on every process start; every structure
+  here is mapped from a file instead.
 
 ### Point-lookup latency vs the standard library
 
