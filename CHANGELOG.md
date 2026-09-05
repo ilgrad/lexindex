@@ -24,12 +24,57 @@ All notable changes to this project are documented here. The format follows
   ranks, so any disagreement would renumber every key after the first difference. An input that is not
   ascending is refused by the transducer builder rather than producing an index that answers wrongly.
 
+- **`PerfectHashIndex::build_to_file`** — builds straight to a file **without ever holding the
+  keys**, for a corpus that does not fit in memory. Measured on the same key set both ways
+  (`examples/peak.rs`): the process peaks at **471 MB at 10 M keys against 1 272 MB** for `build`
+  handed a list of those keys, 87 against 146 at 1 M. Of the streamed build's 44.1 bytes per key,
+  23.5 are the output file itself — the arena is filled through a mapping, so its pages stay
+  resident until the kernel writes them back; the anonymous part is 20.6 bytes per key and flat in
+  `n`, which is what the design predicts (eight for the hash, four for the length, eight for the
+  sorted copy that looks for collisions).
+
+  `source` is a **factory**, called twice, and that is the shape of the problem rather than an
+  inconvenience: the arena stores keys in slot order, slot order needs the perfect hash, and the
+  perfect hash needs every key's hash first. Pass one hashes and records lengths, the offset table
+  follows from the lengths alone, pass two replays the corpus and writes each key into its place. A
+  one-shot iterator cannot be passed by construction — the signature states the requirement instead
+  of documenting it — and a source that replays different keys is refused rather than silently
+  mis-built.
+
+  **Keys must be distinct**, unlike `build`, which sorts and deduplicates. A repeated hash in pass
+  one is either a duplicate key or a genuine 64-bit collision, and which one it is changes `n`, the
+  tail ids and therefore every offset already computed. Requiring distinct keys makes a repeat a
+  collision by definition; a duplicate is caught by comparing the two written entries, and the file
+  is never published.
+
+- **`StringIndex.from_sorted` and `StringIndex.build_sorted_to_file` in Python**, the binding for
+  the sorted streaming builds above. This is where the case is strongest: a Python list of 10 M keys
+  is 1 076 MB of `str` objects before any index exists, so the caller who most needs a build that
+  never materialises its input was the one who could not reach it. Handed a generator, the streamed
+  build peaks at **11.6 MB against the list build's 1053.4** at 10 M (91×) and 4.2 against 105.4 at
+  1 M, measured with `VmHWM` reset after the corpus loader so the baseline is the steady state.
+
+  A Python iterable that raises halfway is indistinguishable, from Rust, from one that ended, so
+  `build_sorted_to_file` asks a caller-supplied check **inside** the atomic write and before the
+  rename that publishes the file. Without it a generator that blew up mid-corpus would have left a
+  truncated but perfectly valid index at `path`, over whatever was there, with the exception
+  arriving afterwards. A test asserts the file is byte-identical to what it was before the failed
+  build, and that no temporary is left behind.
+
 - **`StringIndex.iter_after`** (Rust) — `iter()` resumed after a cursor key, which is the one range
   the existing API could not express: `range_iter(lo, hi)` needs an upper bound and `prefix_iter("")`
   cannot skip. It exists because the Python iterator needs it, and it is public because a caller
   paginating a scan across requests needs exactly the same thing.
 
 ### Changed
+
+- **`docs/design.md` records that `ptr_hash` construction is not deterministic.** Two
+  `PerfectHashIndex::build` calls over the same key set, in one process, serialise to different
+  bytes. The index is equally correct and every key answers, but the ids are not stable across
+  builds, so a blob cannot be checksummed against a rebuild and two nodes building the same corpus
+  will not agree on ids. Found while writing a byte-identity test for `build_to_file` that could
+  never have passed — byte-identity is not a property `build` itself has. Anything that needs stable
+  ids must build once and distribute the blob.
 
 - **The ns/op table the 0.10 sessions could not take** (`local/latency/`): every lookup form of both
   hash indexes over four member/non-member mixes and two key layouts, `std::HashMap` as the

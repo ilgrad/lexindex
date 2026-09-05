@@ -118,6 +118,38 @@ impl StringArena {
         )
     }
 
+    /// The arena's fixed prefix — `[n_off u64][width u8][offsets]` — for strings whose lengths are
+    /// known in index order but whose bytes are not yet available. Returns the prefix, the data
+    /// length the offsets describe, and the offset width.
+    ///
+    /// This is what lets a builder place the keys without ever holding them: the offset table is
+    /// derivable from the lengths alone, so the bytes can be written afterwards, out of order,
+    /// straight into a mapped file. Read one back with [`offset_at`](Self::offset_at).
+    pub(crate) fn prefix_for_lengths(lens: &[u32]) -> (Vec<u8>, usize, usize) {
+        let data_len: usize = lens.iter().map(|&l| l as usize).sum();
+        let width = if data_len <= u32::MAX as usize {
+            NARROW
+        } else {
+            WIDE
+        };
+        let n_off = lens.len() + 1;
+        let mut blob = vec![0u8; HEADER + n_off * width];
+        blob[..8].copy_from_slice(&(n_off as u64).to_le_bytes());
+        blob[8] = width as u8;
+        let mut at = 0u64;
+        write_offset(&mut blob, HEADER, width, 0);
+        for (i, &l) in lens.iter().enumerate() {
+            at += l as u64;
+            write_offset(&mut blob, HEADER + (i + 1) * width, width, at);
+        }
+        (blob, data_len, width)
+    }
+
+    /// Offset `i` out of a prefix built by [`prefix_for_lengths`](Self::prefix_for_lengths).
+    pub(crate) fn offset_at(prefix: &[u8], width: usize, i: usize) -> u64 {
+        read_offset(prefix, HEADER + i * width, width).unwrap_or(0)
+    }
+
     /// Number of stored strings.
     pub(crate) fn len(&self) -> usize {
         self.n

@@ -80,6 +80,15 @@ side table stored truncated side fingerprints and is refused with a rebuild mess
 (`BCH1`/`BCH2`) are refused; see below. On load, side-table ids are structurally required to be
 exactly the tail range `[m, n)` — the checksums vouch for transport, not construction.
 
+**ptr_hash construction is not deterministic, so a blob is not a reproducible artefact.** Two
+`PerfectHashIndex::build` calls over the same key set, in one process, serialise to *different*
+bytes — the pilots differ. The index is equally correct either way and every key answers, but the
+ids a key gets are not stable across builds, so a blob cannot be checksummed against a rebuild and
+two nodes building the same corpus will not agree on ids. Anything that needs stable ids must build
+once and distribute the blob. This is why `PerfectHashIndex::build_to_file` is tested against the
+in-memory index by behaviour — every key present, ids a permutation of `[0, n)`, non-members
+rejected — and not byte for byte: byte-identity is not a property `build` itself has.
+
 **ptr_hash's load factor is not exposed, and that is a measurement, not an omission.** `alpha` sets
 the slot count to `n / alpha`; the natural expectation is that lowering it trades size for an easier
 build. It does at 1 M — 0.90 gives a 16 % cheaper build for a 12 % larger index — and the trade

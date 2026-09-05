@@ -157,6 +157,11 @@ pub(crate) fn write_atomically_with(
                 .push(format!(".{}.{seq}.tmp", std::process::id()));
             match std::fs::OpenOptions::new()
                 .write(true)
+                // Read access too, not because anything reads the temporary but because
+                // `MmapMut::map_mut` needs an `O_RDWR` descriptor, and the streaming
+                // `PerfectHashIndex::build_to_file` fills its arena through a mapping. The file is
+                // ours alone until the rename, so the wider descriptor is not wider exposure.
+                .read(true)
                 .create_new(true)
                 .open(&tmp)
             {

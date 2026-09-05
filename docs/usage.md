@@ -199,6 +199,35 @@ assert!(small.contains("POST"));
 # Ok::<(), lexindex::IndexError>(())
 ```
 
+### Building a corpus that does not fit in memory
+
+Every index has a build that never holds the keys, and each takes the shape its structure allows:
+
+```rust
+use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
+# let dir = std::env::temp_dir();
+# let (bix, bmp) = (dir.join("lexindex-usage-stream.bix"), dir.join("lexindex-usage-stream.bmp"));
+
+// `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do.
+let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
+
+// `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
+StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
+
+// `PerfectHashIndex` stores its keys in slot order, and slot order is only known once the perfect
+// hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
+PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
+# assert!(small.contains("a"));
+# std::fs::remove_file(&bix).ok();
+# std::fs::remove_file(&bmp).ok();
+# Ok::<(), lexindex::IndexError>(())
+```
+
+At 10 M real-word pairs the streamed `PerfectHashIndex` build peaks at 471 MB against 1 272 MB for
+the same keys handed to `build` as a list; the streamed `StringIndex` build peaks at 49.6 MB against
+721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
+anonymous memory is 20.6 bytes per key and does not grow with `n`.
+
 Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
 `load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies)
 and the only one that compiles for 32-bit targets, including `wasm32-unknown-unknown` — `mph` needs a

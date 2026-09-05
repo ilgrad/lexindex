@@ -193,6 +193,47 @@ fn main() {
     // Two dispatches, split by the thing being measured: the streaming modes below never let a key
     // list exist, so their `keys` column is the process baseline and not the corpus. The
     // materialising modes after them all start from one.
+    // The streaming perfect hash: the keys never exist as a list, so the `keys` column is the
+    // process baseline. Unlike the sorted `StringIndex` build this one replays the generator, which
+    // is why it takes a factory.
+    // The same keys the streaming mode below uses, but materialised, so the two peaks are
+    // comparable. `perfect` uses a different generator and is not an A/B against either.
+    #[cfg(feature = "mph")]
+    if which == "perfect-listed" {
+        let vocab = load_vocab();
+        let keys: Vec<String> = iter_sparse_sorted_keys(n, &vocab).take(n).collect();
+        drop(vocab);
+        reset_peak_rss();
+        let keys_rss = peak_rss();
+        let t0 = std::time::Instant::now();
+        let idx = PerfectHashIndex::build(&keys).unwrap();
+        let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let blob = idx.serialized_len().unwrap();
+        report("PerfectListed", keys.len(), keys_rss, blob, build_ms);
+        std::hint::black_box(idx);
+        return;
+    }
+
+    #[cfg(all(feature = "mph", feature = "mmap"))]
+    if which == "perfect-stream" {
+        let vocab = load_vocab();
+        reset_peak_rss();
+        let keys_rss = peak_rss();
+        let dir = std::env::var("LEXINDEX_PEAK_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        let path = dir.join(format!("lexindex_peak_{}.bmp", std::process::id()));
+        let t0 = std::time::Instant::now();
+        let written =
+            PerfectHashIndex::build_to_file(&path, || iter_sparse_sorted_keys(n, &vocab).take(n))
+                .unwrap();
+        let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let blob = std::fs::metadata(&path).map(|m| m.len() as usize).unwrap();
+        std::fs::remove_file(&path).ok();
+        report("PerfectStream", written, keys_rss, blob, build_ms);
+        return;
+    }
+
     if let Some(sorted) = which.strip_prefix("string-sorted") {
         let sparse = sorted.starts_with("-sparse");
         let drain = sorted.ends_with("-gen");

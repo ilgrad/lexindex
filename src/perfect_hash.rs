@@ -36,6 +36,21 @@ const SIDE_ENTRY: usize = 12; // hash u64 + id u32
 /// index: `build` rejects `n > u32::MAX`, so the largest index a key can have is `u32::MAX - 1`.
 const NO_KEY: u32 = u32::MAX;
 
+/// The v4 header, from the four values that vary. Shared by [`PerfectHashIndex::to_bytes`] and the
+/// streaming [`build_to_file`](PerfectHashIndex::build_to_file), which assembles the same blob
+/// without ever holding the index — one writer of this layout, so the two cannot drift.
+fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V4] {
+    let mut header = [0u8; HEADER_V4];
+    header[0..4].copy_from_slice(MAGIC_V4);
+    header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
+    header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
+    header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
+    header[24..32].copy_from_slice(&payload.to_le_bytes());
+    let check = crate::hash::hash_bytes(&header[..CHECKED_V4]) as u32;
+    header[CHECKED_V4..].copy_from_slice(&check.to_le_bytes());
+    header
+}
+
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
 
@@ -390,14 +405,7 @@ impl PerfectHashIndex {
         payload.update(&mph_buf);
         payload.update(self.arena.as_bytes());
         payload.update(&side_buf);
-        let mut header = [0u8; HEADER_V4];
-        header[0..4].copy_from_slice(MAGIC_V4);
-        header[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
-        header[12..20].copy_from_slice(&(mph_buf.len() as u64).to_le_bytes());
-        header[20..24].copy_from_slice(&(self.side.len() as u32).to_le_bytes());
-        header[24..32].copy_from_slice(&payload.finish().to_le_bytes());
-        let check = crate::hash::hash_bytes(&header[..CHECKED_V4]) as u32;
-        header[CHECKED_V4..].copy_from_slice(&check.to_le_bytes());
+        let header = header_bytes(self.n, mph_buf.len(), self.side.len(), payload.finish());
         Ok((header, mph_buf, side_buf))
     }
 
@@ -645,6 +653,196 @@ impl PerfectHashIndex {
         })
     }
 
+    /// Build straight to `path` **without ever holding the keys**, for a corpus that does not fit
+    /// in memory. Returns the number of keys written; the file is byte-identical to what
+    /// [`build`](Self::build) + [`save`](Self::save) would have produced for the same key set.
+    ///
+    /// `source` is a *factory*, not an iterator, and it is called **twice**. That is the shape the
+    /// problem has, not an inconvenience: the arena stores keys in slot order, slot order is only
+    /// known once the perfect hash is built, and the perfect hash needs every key's hash first.
+    /// Pass one hashes the corpus and records lengths (12 bytes per key, nothing else); the offset
+    /// table follows from the lengths alone; pass two replays the corpus and writes each key
+    /// straight into its place in the mapped file. A one-shot iterator cannot be passed by
+    /// construction, which is the point — the signature states the requirement instead of
+    /// documenting it.
+    ///
+    /// **Keys must be distinct.** [`build`](Self::build) sorts and deduplicates, which this cannot
+    /// do: a repeated hash in pass one is either a duplicate key or a genuine 64-bit collision, and
+    /// which one it is changes `n`, the tail ids and therefore every offset already computed — a
+    /// third pass. With distinct keys required, a repeat is by definition a collision, and a
+    /// duplicate is caught (by comparing the two written entries) before the file is published.
+    ///
+    /// Measured on the same key set both ways (`examples/peak.rs`, real-word pairs): the whole
+    /// process peaks at **471 MB at 10 M keys against 1 272 MB** for `build` handed a list of the
+    /// same keys, and 87 against 146 at 1 M. Of the streamed build's 44.1 bytes per key, 23.5 are
+    /// the output file itself — the arena is written through a mapping, so its pages are resident
+    /// until the kernel writes them back (reclaimable page cache, not anonymous memory). The
+    /// anonymous part is 20.6 bytes per key, flat in `n`, which is what the design predicts: eight
+    /// for the hash, four for the length, eight for the sorted copy that looks for collisions.
+    #[cfg(feature = "mmap")]
+    pub fn build_to_file<F, I, S>(
+        path: impl AsRef<std::path::Path>,
+        mut source: F,
+    ) -> Result<usize, IndexError>
+    where
+        F: FnMut() -> I,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut hashes: Vec<u64> = Vec::new();
+        let mut lens: Vec<u32> = Vec::new();
+        for item in source() {
+            let key = item.as_ref();
+            lens.push(u32::try_from(key.len()).map_err(|_| {
+                IndexError::Format("perfect-hash: a key is longer than u32::MAX bytes")
+            })?);
+            hashes.push(hash_key(key));
+        }
+        let n = hashes.len();
+        if n > u32::MAX as usize {
+            return Err(IndexError::Format(
+                "perfect-hash: more than u32::MAX keys; ids are u32",
+            ));
+        }
+        if n == 0 {
+            return Self::build(Vec::<&str>::new())?.save(path).map(|()| 0);
+        }
+        // Same shape as `build`: a sorted copy answers whether any two keys share a hash and, when
+        // none does, is what the MPH is built from. The `(hash, index)` partition is 16 bytes per
+        // key and is only paid for when a collision actually exists.
+        let mut sorted = hashes.clone();
+        sorted.sort_unstable();
+        let collided = sorted.windows(2).any(|w| w[0] == w[1]);
+        let (mph_hashes, extras) = if collided {
+            drop(sorted);
+            crate::hash::split_collisions(&hashes)
+        } else {
+            (sorted, Vec::new())
+        };
+        let m = mph_hashes.len();
+        let mph = crate::hash::build_mph(&mph_hashes)?;
+
+        // Where each *input* key goes: its MPH slot, or a tail id for the rare extra. Both
+        // side tables below are allocated only when a collision actually exists, which needs
+        // n ≈ 10^8 to reach a probability of 1e-4.
+        let mut is_extra = Vec::new();
+        let mut collided_hashes = std::collections::HashSet::new();
+        if collided {
+            is_extra = vec![false; n];
+            for &(h, i) in &extras {
+                is_extra[i as usize] = true;
+                collided_hashes.insert(h);
+            }
+        }
+        let mut slot_of: Vec<u32> = vec![NO_KEY; n];
+        let mut taken = vec![false; m];
+        let mut rep_of: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+        for (i, h) in hashes.iter().enumerate() {
+            if collided && is_extra[i] {
+                continue;
+            }
+            let slot = mph.index(h);
+            if slot >= m || taken[slot] {
+                return Err(IndexError::Format(
+                    "perfect-hash: construction was not minimal/perfect",
+                ));
+            }
+            taken[slot] = true;
+            slot_of[i] = slot as u32;
+            if collided_hashes.contains(h) {
+                rep_of.insert(*h, i as u32);
+            }
+        }
+        for (j, &(_, i)) in extras.iter().enumerate() {
+            slot_of[i as usize] = (m + j) as u32;
+        }
+        drop(taken);
+        drop(is_extra);
+        drop(mph_hashes);
+
+        let mut len_by_slot = vec![0u32; n];
+        for (i, &slot) in slot_of.iter().enumerate() {
+            len_by_slot[slot as usize] = lens[i];
+        }
+        drop(lens);
+        let (arena_prefix, data_len, width) = StringArena::prefix_for_lengths(&len_by_slot);
+        drop(len_by_slot);
+
+        let mut side: Vec<(u64, u32)> = extras
+            .iter()
+            .enumerate()
+            .map(|(j, &(h, _))| (h, (m + j) as u32))
+            .collect();
+        side.sort_unstable();
+        let mut side_buf = Vec::with_capacity(side.len() * SIDE_ENTRY);
+        for &(h, id) in &side {
+            side_buf.extend_from_slice(&h.to_le_bytes());
+            side_buf.extend_from_slice(&id.to_le_bytes());
+        }
+        let mut mph_buf = Vec::new();
+        mph.serialize(&mut mph_buf)
+            .map_err(|e| IndexError::Serde(e.to_string()))?;
+        drop(mph);
+
+        let arena_start = HEADER_V4 + mph_buf.len();
+        let data_start = arena_start + arena_prefix.len();
+        let total = data_start + data_len + side_buf.len();
+        crate::blob::write_atomically_with(path.as_ref(), |w| {
+            let file: &mut std::fs::File = w.get_mut();
+            file.set_len(total as u64)?;
+            // SAFETY: the file was created exclusively by `write_atomically_with` under a name no
+            // other process knows yet, and nothing else touches it until the rename below.
+            let mut map = unsafe { memmap2::MmapMut::map_mut(&*file)? };
+            map[HEADER_V4..arena_start].copy_from_slice(&mph_buf);
+            map[arena_start..data_start].copy_from_slice(&arena_prefix);
+            map[data_start + data_len..].copy_from_slice(&side_buf);
+
+            let mut i = 0usize;
+            for item in source() {
+                let key = item.as_ref();
+                if i >= n || hash_key(key) != hashes[i] {
+                    return Err(IndexError::Build(
+                        "perfect-hash: the source did not replay the same keys in the same order",
+                    ));
+                }
+                let at = data_start
+                    + StringArena::offset_at(&arena_prefix, width, slot_of[i] as usize) as usize;
+                map[at..at + key.len()].copy_from_slice(key.as_bytes());
+                i += 1;
+            }
+            if i != n {
+                return Err(IndexError::Build(
+                    "perfect-hash: the source did not replay the same keys in the same order",
+                ));
+            }
+            // Every extra shares a hash with its representative. Distinct keys make that a genuine
+            // 64-bit collision, which the side table handles; equal keys mean the caller broke the
+            // one precondition this build has, and the file must not be published.
+            let span = |slot: usize| {
+                let lo = data_start + StringArena::offset_at(&arena_prefix, width, slot) as usize;
+                let hi =
+                    data_start + StringArena::offset_at(&arena_prefix, width, slot + 1) as usize;
+                lo..hi
+            };
+            for &(h, i) in &extras {
+                let rep = rep_of[&h] as usize;
+                if map[span(slot_of[i as usize] as usize)] == map[span(slot_of[rep] as usize)] {
+                    return Err(IndexError::Build(
+                        "perfect-hash: build_to_file needs distinct keys and the source repeated one",
+                    ));
+                }
+            }
+
+            let mut payload = crate::hash::BlockHasher::new();
+            payload.update(&map[HEADER_V4..]);
+            let header = header_bytes(n, mph_buf.len(), side.len(), payload.finish());
+            map[..HEADER_V4].copy_from_slice(&header);
+            map.flush()?;
+            Ok(())
+        })?;
+        Ok(n)
+    }
+
     /// Load a dictionary previously written with [`PerfectHashIndex::save`] (reads the whole file
     /// and verifies the payload checksum).
     ///
@@ -672,6 +870,155 @@ impl PerfectHashIndex {
         // SAFETY: both forwarded from this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         unsafe { Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false) }
+    }
+}
+
+#[cfg(all(test, feature = "mmap"))]
+mod stream_build_tests {
+    use super::*;
+
+    /// A directory of this test's own. Shared temp names would be enough for the files themselves,
+    /// but one test below asserts that *no* `.tmp` is left behind, and the tests run in parallel:
+    /// scanning a shared directory would see a sibling's temporary and fail at random.
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("lexindex_bmpstream_{}_{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("index.bmp")
+    }
+
+    #[test]
+    fn build_to_file_builds_an_index_indistinguishable_from_the_in_memory_one() {
+        // Keys deliberately of different lengths and not in sorted order: the streaming build has
+        // to place them by slot, which is neither input nor sorted order.
+        let keys: Vec<String> = (0..2_000)
+            .map(|i| format!("key-{i}-{}", "x".repeat(i % 17)))
+            .collect();
+        let path = tmp("same.bmp");
+        let n = PerfectHashIndex::build_to_file(&path, || keys.iter()).unwrap();
+        assert_eq!(n, keys.len());
+
+        // Not compared byte for byte against `build` + `save`, because that is not a property
+        // either of them has: `ptr_hash` construction is not deterministic, and two in-memory
+        // builds of the same key set already differ in their serialised pilots. What must hold is
+        // that the file is a valid blob answering exactly like the index built in memory.
+        // SAFETY: written by this crate a line above.
+        let idx = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+        assert_eq!(idx.len(), keys.len());
+        let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
+        for k in &keys {
+            let id = idx.id(k).expect("every key is a member");
+            assert_eq!(idx.key(id), Some(k.as_str()));
+            ids.push(id);
+        }
+        ids.sort_unstable();
+        assert!(
+            ids.iter().copied().eq(0..keys.len() as u32),
+            "ids are exactly the dense range [0, n)"
+        );
+        assert_eq!(idx.id("not-a-key"), None);
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn build_to_file_matches_the_in_memory_index_key_for_key() {
+        let keys: Vec<String> = (0..500).map(|i| format!("k{i:04}")).collect();
+        let path = tmp("cross.bmp");
+        PerfectHashIndex::build_to_file(&path, || keys.iter()).unwrap();
+        // SAFETY: written by this crate a line above.
+        let file = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+        let mem = PerfectHashIndex::build(keys.iter()).unwrap();
+        // The *ids* may differ (see above), but the round trip and the membership answers may not.
+        for k in &keys {
+            assert!(file.contains(k) && mem.contains(k));
+            assert_eq!(file.key(file.id(k).unwrap()), Some(k.as_str()));
+        }
+        for miss in ["", "k9999", "K0000", "k0000 "] {
+            assert_eq!(file.id(miss), None, "{miss}");
+            assert_eq!(mem.id(miss), None, "{miss}");
+        }
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn build_to_file_handles_an_empty_source() {
+        let path = tmp("empty.bmp");
+        assert_eq!(
+            PerfectHashIndex::build_to_file(&path, Vec::<&str>::new).unwrap(),
+            0
+        );
+        // SAFETY: written by this crate a line above.
+        assert_eq!(unsafe { PerfectHashIndex::load(&path) }.unwrap().len(), 0);
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn build_to_file_refuses_a_duplicate_key_and_leaves_the_target_alone() {
+        let path = tmp("dupe.bmp");
+        PerfectHashIndex::build_to_file(&path, || ["a", "b"]).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let err = PerfectHashIndex::build_to_file(&path, || ["x", "y", "x"]).unwrap_err();
+        assert!(
+            format!("{err}").contains("distinct keys"),
+            "unexpected error: {err}"
+        );
+        // The precondition is caught before the rename, so the previous index survives intact and
+        // no temporary is left behind.
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name())
+            .filter(|f| f.to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temporaries left behind: {leftovers:?}"
+        );
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn build_to_file_refuses_a_source_that_does_not_replay() {
+        let path = tmp("drift.bmp");
+        let mut round = 0;
+        let err = PerfectHashIndex::build_to_file(&path, || {
+            round += 1;
+            if round == 1 {
+                vec!["a", "b", "c"]
+            } else {
+                vec!["a", "different", "c"]
+            }
+        })
+        .unwrap_err();
+        assert!(
+            format!("{err}").contains("replay"),
+            "unexpected error: {err}"
+        );
+        assert!(!path.exists());
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn build_to_file_refuses_a_source_that_replays_short() {
+        let path = tmp("short.bmp");
+        let mut round = 0;
+        let err = PerfectHashIndex::build_to_file(&path, || {
+            round += 1;
+            if round == 1 {
+                vec!["a", "b", "c"]
+            } else {
+                vec!["a", "b"]
+            }
+        })
+        .unwrap_err();
+        assert!(
+            format!("{err}").contains("replay"),
+            "unexpected error: {err}"
+        );
+        assert!(!path.exists());
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }
 
