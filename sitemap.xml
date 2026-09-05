@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://ilgrad.github.io/lexindex/</loc>
+         <lastmod>2026-09-05</lastmod>
+    </url>
+    <url>
+         <loc>https://ilgrad.github.io/lexindex/api/</loc>
+         <lastmod>2026-09-05</lastmod>
+    </url>
+    <url>
+         <loc>https://ilgrad.github.io/lexindex/changelog/</loc>
+         <lastmod>2026-09-05</lastmod>
+    </url>
+    <url>
+         <loc>https://ilgrad.github.io/lexindex/design/</loc>
+         <lastmod>2026-09-05</lastmod>
+    </url>
+    <url>
+         <loc>https://ilgrad.github.io/lexindex/usage/</loc>
+         <lastmod>2026-09-05</lastmod>
+    </url>
+</urlset>

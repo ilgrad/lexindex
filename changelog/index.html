@@ -1,0 +1,2761 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Compact, immutable string↔id indexes for huge catalogs — a Rust core with Python bindings">
+      
+      
+      
+        <link rel="canonical" href="https://ilgrad.github.io/lexindex/changelog/">
+      
+      
+        <link rel="prev" href="../api/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Changelog - lexindex</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lexindex" class="md-header__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lexindex
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lexindex" class="md-nav__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lexindex
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Unreleased]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0100-2026-09-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.10.0] — 2026-09-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.10.0] — 2026-09-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#091-2026-09-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.9.1] — 2026-09-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.9.1] — 2026-09-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#090-2026-08-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.9.0] — 2026-08-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.9.0] — 2026-08-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#081-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.8.1] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.8.1] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#080-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.8.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.8.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.7.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.7.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.6.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.6.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#051-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.1] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.1] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-08-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.0] — 2026-08-26
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.0] — 2026-08-26">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2026-07-06" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.4.0] — 2026-07-06
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.4.0] — 2026-07-06">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-07-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.3.0] — 2026-07-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.3.0] — 2026-07-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-07-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.2.0] — 2026-07-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.2.0] — 2026-07-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-06-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.0] — 2026-06-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.0] — 2026-06-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [Unreleased]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[Unreleased]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0100-2026-09-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.10.0] — 2026-09-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.10.0] — 2026-09-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#091-2026-09-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.9.1] — 2026-09-04
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.9.1] — 2026-09-04">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#090-2026-08-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.9.0] — 2026-08-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.9.0] — 2026-08-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#081-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.8.1] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.8.1] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#080-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.8.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.8.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#070-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.7.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.7.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixed_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#060-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.6.0] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.6.0] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#051-2026-08-27" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.1] — 2026-08-27
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.1] — 2026-08-27">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#050-2026-08-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.5.0] — 2026-08-26
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.5.0] — 2026-08-26">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#040-2026-07-06" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.4.0] — 2026-07-06
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.4.0] — 2026-07-06">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-07-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.3.0] — 2026-07-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.3.0] — 2026-07-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-07-05" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.2.0] — 2026-07-05
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.2.0] — 2026-07-05">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-06-28" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [0.1.0] — 2026-06-28
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[0.1.0] — 2026-06-28">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!-- Rendered from the repository-root CHANGELOG.md via pymdownx.snippets — single source of truth. -->
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<p>All notable changes to this project are documented here. The format follows
+<a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a> and the project adheres to
+<a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
+<h2 id="unreleased">[Unreleased]<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong><code>StringIndex::build_sorted</code> and <code>build_sorted_to_file</code></strong> — build from keys that are already in
+  ascending order, without materialising them. <code>build</code> has to collect its input into a <code>Vec</code> before
+  it can sort it, so a caller who already has the keys ordered (a sorted file, a database cursor, an
+  external sort) pays for a second copy of the corpus; these stream straight into the transducer, and
+  <code>build_sorted_to_file</code> streams the finished index to disk as well, so neither the corpus nor the
+  index has to fit in memory. Measured with <code>examples/peak.rs</code> on the same word-bigram grid: at 10 M
+  keys the streaming build peaks at <strong>49.6 MB against <code>build</code>'s 721.9</strong> (14.6×; 20.0 MB of build
+  memory against 129.5 plus a 592 MB key list), and <strong>100 M keys build with a 63.3 MB peak</strong>, of
+  which 29.6 MB is the loaded word list — 32× under the 2 GB the task set as its bar. The peaks
+  reproduce to the tenth of a megabyte across runs; the wall time does not, and is left out for that
+  reason (the same 100 M build took 52 s on an idle machine and 101 s under a load average of 7). Adjacent
+  duplicates are dropped exactly as <code>build</code> drops them after sorting, so the two produce byte-identical
+  blobs for the same key set, which is what a test asserts rather than a similarity check: ids are
+  ranks, so any disagreement would renumber every key after the first difference. An input that is not
+  ascending is refused by the transducer builder rather than producing an index that answers wrongly.</p>
+</li>
+<li>
+<p><strong><code>PerfectHashIndex::build_to_file</code></strong> — builds straight to a file <strong>without ever holding the
+  keys</strong>, for a corpus that does not fit in memory. Measured on the same key set both ways
+  (<code>examples/peak.rs</code>): the process peaks at <strong>471 MB at 10 M keys against 1 272 MB</strong> for <code>build</code>
+  handed a list of those keys, 87 against 146 at 1 M. Of the streamed build's 44.1 bytes per key,
+  23.5 are the output file itself — the arena is filled through a mapping, so its pages stay
+  resident until the kernel writes them back; the anonymous part is 20.6 bytes per key and flat in
+  <code>n</code>, which is what the design predicts (eight for the hash, four for the length, eight for the
+  sorted copy that looks for collisions).</p>
+</li>
+</ul>
+<p><code>source</code> is a <strong>factory</strong>, called twice, and that is the shape of the problem rather than an
+  inconvenience: the arena stores keys in slot order, slot order needs the perfect hash, and the
+  perfect hash needs every key's hash first. Pass one hashes and records lengths, the offset table
+  follows from the lengths alone, pass two replays the corpus and writes each key into its place. A
+  one-shot iterator cannot be passed by construction — the signature states the requirement instead
+  of documenting it — and a source that replays different keys is refused rather than silently
+  mis-built.</p>
+<p><strong>Keys must be distinct</strong>, unlike <code>build</code>, which sorts and deduplicates. A repeated hash in pass
+  one is either a duplicate key or a genuine 64-bit collision, and which one it is changes <code>n</code>, the
+  tail ids and therefore every offset already computed. Requiring distinct keys makes a repeat a
+  collision by definition; a duplicate is caught by comparing the two written entries, and the file
+  is never published.</p>
+<ul>
+<li><strong><code>StringIndex.from_sorted</code> and <code>StringIndex.build_sorted_to_file</code> in Python</strong>, the binding for
+  the sorted streaming builds above. This is where the case is strongest: a Python list of 10 M keys
+  is 1 076 MB of <code>str</code> objects before any index exists, so the caller who most needs a build that
+  never materialises its input was the one who could not reach it. Handed a generator, the streamed
+  build peaks at <strong>11.6 MB against the list build's 1053.4</strong> at 10 M (91×) and 4.2 against 105.4 at
+  1 M, measured with <code>VmHWM</code> reset after the corpus loader so the baseline is the steady state.</li>
+</ul>
+<p>A Python iterable that raises halfway is indistinguishable, from Rust, from one that ended, so
+  <code>build_sorted_to_file</code> asks a caller-supplied check <strong>inside</strong> the atomic write and before the
+  rename that publishes the file. Without it a generator that blew up mid-corpus would have left a
+  truncated but perfectly valid index at <code>path</code>, over whatever was there, with the exception
+  arriving afterwards. A test asserts the file is byte-identical to what it was before the failed
+  build, and that no temporary is left behind.</p>
+<ul>
+<li><strong><code>StringIndex.iter_after</code></strong> (Rust) — <code>iter()</code> resumed after a cursor key, which is the one range
+  the existing API could not express: <code>range_iter(lo, hi)</code> needs an upper bound and <code>prefix_iter("")</code>
+  cannot skip. It exists because the Python iterator needs it, and it is public because a caller
+  paginating a scan across requests needs exactly the same thing.</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong><code>docs/design.md</code> records that <code>ptr_hash</code> construction is not deterministic.</strong> Two
+  <code>PerfectHashIndex::build</code> calls over the same key set, in one process, serialise to different
+  bytes. The index is equally correct and every key answers, but the ids are not stable across
+  builds, so a blob cannot be checksummed against a rebuild and two nodes building the same corpus
+  will not agree on ids. Found while writing a byte-identity test for <code>build_to_file</code> that could
+  never have passed — byte-identity is not a property <code>build</code> itself has. Anything that needs stable
+  ids must build once and distribute the blob.</p>
+</li>
+<li>
+<p><strong>The ns/op table the 0.10 sessions could not take</strong> (<code>local/latency/</code>): every lookup form of both
+  hash indexes over four member/non-member mixes and two key layouts, <code>std::HashMap</code> as the
+  stability control, all forms alternated inside each round. Two findings reached the README. First,
+  <strong>~90 ns of every published lookup number is reaching the probe key</strong>: <code>examples/bench.rs</code> probes
+  the original allocations in strided order, and handing the same index a contiguous probe list
+  takes <code>PerfectHashIndex::id_unchecked</code> from 109 to <strong>18 ns/op</strong> at 1 M while <code>ids_of</code> does not move
+  at all (39.5 scattered against 38.2 contiguous — the software prefetch does for scattered keys what
+  the hardware does for contiguous ones). Second, <strong>on misses <code>std::HashMap</code> wins until its table
+  outgrows the cache</strong> — 32 ns against <code>CompactHashIndex::id</code>'s 41 at 1 M, reversing to 105 against
+  56 at 10 M. The harness also reproduces the README's own table from different code: at 1 M
+  scattered it measures 125.6 / 261.8 / 108.9 / 237.2 ns against the published ~151 / ~273 / ~111 /
+  ~246.</p>
+</li>
+<li>
+<p><strong><code>ids_of</code> prefetches the key bytes, not just the tables it looks them up in</strong> — <strong>2.6×</strong> on
+  <code>CompactHashIndex</code> and <strong>2.1×</strong> on <code>PerfectHashIndex</code> over 10 M real-word bigrams, A-B-A-B against
+  the unmodified tree with the per-key <code>id</code> loops as controls (both flat: 200 → 203 ns/key and
+  427 → 416). Against that per-key loop the batch is now <strong>2.9×</strong> and <strong>3.6×</strong>, where it was 1.1×
+  and 1.8×: batching a <code>CompactHashIndex</code> lookup used to buy essentially nothing.</p>
+</li>
+</ul>
+<p>The missing prefetch was the first one. A batch's <code>String</code> headers are contiguous but their bytes
+  are wherever the allocator put them, so the hashing pass was one dependent cache miss per key with
+  nothing overlapping it, and the careful prefetching downstream was hiding the cheaper halves of
+  the problem. The per-key <code>id</code> cannot make this prefetch at all — it has no next key to look at —
+  which is what the batched form is <em>for</em>.</p>
+<p><strong>The number depends on where the caller's keys live, and the docs now say so.</strong> Contiguous keys —
+  a <code>Vec</code> built in probe order — are already visible to the hardware prefetcher: that batch runs at
+  ~50 ns/key with or without the change (−6 % to +2 % across 1 M / 5 M / 10 M, no consistent
+  direction), and the win there is the single FFI crossing. A 50/50 member/non-member batch measures
+  the same as an all-member one, because what is being hidden is reaching the key at all.</p>
+<ul>
+<li><strong><code>StringIndex.__iter__</code> (Python) streams the transducer instead of rank-walking every key</strong> —
+  <strong>2.9× faster</strong> over 1 M real-word bigrams (635 → 221 ns/key, three rounds each; the control,
+  <code>id()</code> on the same index, held at 367 ns across both). It buffers 1 024 pairs per refill and resumes through
+  <code>iter_after</code>, because a <code>#[pyclass]</code> cannot hold a stream that borrows the index across <code>__next__</code>.</li>
+</ul>
+<p>The plan asked for 10× and 2.9× is what the ceiling allows, which the measurement says rather than
+  the estimate that set the bar: on the Rust side the same walk is <strong>569 → 97 ns/key (5.9×)</strong>, and
+  the binding adds ~127 ns/key of CPython <code>str</code> and tuple construction that no iteration strategy
+  removes — <code>prefix("")</code>, which builds the whole list in one call with no per-item <code>__next__</code> at all,
+  costs <em>more</em> (399 ns/key) than the lazy iterator. So the rank-walk is gone entirely and what is
+  left is object construction. Setting the bar as a round multiple, without a measured floor, is the
+  same defect as the 2 GB bar in the entry above, from the other side.</p>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The 0.10.0 build-memory figures were measured against a masked baseline and are corrected here,
+  not silently swapped.</strong> <code>examples/peak.rs</code> reports <code>VmHWM − (VmHWM at the moment the key list is
+  ready)</code>, and <code>VmHWM</code> is a high-water mark: the transient of loading the word list and sorting the
+  bigrams stayed in it, so every build had to climb past that transient before it registered. The
+  example now resets the mark (<code>echo 5 &gt; /proc/self/clear_refs</code>) once the key list is built. The
+  understatement is a constant 11.0–11.8 MB in every cell — flat in <code>n</code> and in the structure, which
+  is what identifies it as the corpus transient rather than anything about the builds. Re-measured
+  with the corrected baseline on both sides (0.9.1 built from the same example), bytes per key above
+  the key list:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>build</th>
+<th>published 0.10.0</th>
+<th>corrected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PerfectHashIndex</code>, 2 M</td>
+<td>79.0 → 44.9 (−43 %)</td>
+<td>83.0 → <strong>50.8</strong> (−38.8 %)</td>
+</tr>
+<tr>
+<td><code>PerfectHashIndex</code>, 10 M</td>
+<td>84.7 → 50.8 (−40 %)</td>
+<td>85.9 → <strong>51.9</strong> (−39.6 %)</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> 8-bit, 2 M</td>
+<td>42.5 → 25.2 (−41 %)</td>
+<td>48.2 → <strong>30.9</strong> (−35.9 %)</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> 8-bit, 10 M</td>
+<td>47.6 → 24.6 (−48 %)</td>
+<td>48.7 → <strong>25.7</strong> (−47.2 %)</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> 16-bit, 2 M</td>
+<td>→ 27.3</td>
+<td>48.2 → <strong>33.0</strong></td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> 32-bit, 2 M</td>
+<td>→ 29.2</td>
+<td>48.2 → <strong>34.9</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The <em>absolute</em> savings are unchanged, because the constant cancels in a difference: 340 MB off a
+  10 M <code>PerfectHashIndex</code> build (published 338) and 230 MB off a 10 M <code>CompactHashIndex</code> build
+  (published 230). What moves is every per-key figure and therefore every percentage, by 1–5 points.
+  <code>docs/design.md</code> and the <code>CompactHashIndex::build_bits</code> docstring carry the corrected numbers; the
+  0.10.0 section below is left as it was published. One 0.10.0 claim gains rather than loses: the
+  build peak was said to rise with the fingerprint width, and on the corrected baseline the 0.9.1
+  build does not move with it at all (48.2 B/key at 8, 16 and 32 bits), so the width-proportional
+  staging is visible only in the new code.</p>
+<ul>
+<li><strong>The README's <code>dict</code> build cost had the same defect from the Python side</strong> — <code>local/positioning.py</code>
+  took its baseline right after <code>_random_pairs</code> returned, while the dict that generator uses to
+  deduplicate was still counted in the high-water mark. It resets the mark too now: a <code>dict</code> costs
+  <strong>71–95 bytes per key</strong> above the key list on the three corpora in the README's table, not the
+  35–96 the range said, and 58–60 at 10 M.</li>
+</ul>
+<h2 id="0100-2026-09-04">[0.10.0] — 2026-09-04<a class="headerlink" href="#0100-2026-09-04" title="Permanent link">&para;</a></h2>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Golden blobs from every published format</strong> (<code>tests/data/</code>, regenerated by <code>local/gen_golden.py</code>
+  from the PyPI wheels of 0.5.1, 0.7.0, 0.8.0, 0.8.1 and 0.9.1) are loaded and queried by
+  <code>tests/golden.rs</code>. Every other test in the repo writes a blob and reads it back with the same
+  code, so all of them would keep passing if a dependency bump changed the <code>epserde</code> image embedded
+  in an MPH blob. These cover <code>BMP2</code>/<code>BMP3</code>/<code>BMP4</code> and <code>BCH1</code>/<code>BCH3</code>/<code>BCH4</code>/<code>BCH5</code>, including the
+  documented <em>refusal</em> of a 0.5.1 <code>BCH1</code>.</li>
+<li><strong><code>examples/peak.rs</code></strong> reports the peak resident memory (<code>VmHWM</code>) and wall time of a single build,
+  one index per process, on the same real-word bigrams <code>examples/bench.rs</code> uses. The build-memory
+  numbers below were measured with it.</li>
+<li><strong><code>examples/bench.rs</code> gained an FxHash baseline.</strong> <code>std::collections::HashMap</code> is a SipHash map,
+  which is the wrong single number to compare a perfect hash against; the same map with the
+  <code>rustc</code>/Firefox hash (written out in the example, not added as a dependency) is the honest one.</li>
+<li><strong>libFuzzer targets for the blob framing parsers</strong> (<code>fuzz/</code>, run weekly by <code>sanitize.yml</code>,
+  seeded from <code>tests/data/</code>). They cover the safe half of the MPH loaders — the code that validates
+  magic, versions, lengths, both checksums, the collision side table, the fingerprint width and the
+  arena's offset table before anything unsafe happens, which is the only place untrusted bytes reach
+  code this crate owns. 29.0 M and 37.5 M executions with no crash on the first run.</li>
+<li><strong>A positioning section in the README: which index to pick, and how much the corpus decides it.</strong>
+  Five structures — a bare <code>ptr_hash</code> MPHF, <code>CompactHashIndex</code>, <code>marisa-trie</code>, <code>StringIndex</code>,
+  <code>PerfectHashIndex</code> — over three corpora built from the same word list, at 479 823 / 1 M / 10 M keys.
+  The structures that store no keys are flat at 1.27 and 0.27 bytes per key on every corpus; the ones
+  that do swing 3–8× (<code>marisa</code> 2.12 to 6.21, <code>StringIndex</code> 0.68 to 16.57), so the section says which
+  corpus each number comes from and what shared key structure buys.</li>
+<li><strong><code>bench/scale.py</code> measures a list and a generator separately.</strong> Passing a list puts the corpus in
+  the peak, which is what a caller holding the keys pays; passing a generator is what
+  <code>CompactHashIndex</code>'s streaming build exists for and is the only way to see its own footprint.</li>
+</ul>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong><code>StringIndex::from_bytes</code> no longer claims that checksum verification rules out a panic.</strong> It
+  guards accidental corruption, which is all a public, deterministic checksum can do; a blob crafted
+  to carry a matching one reaches <code>fst</code>'s node decoder with an invalid body. A third fuzz target
+  demonstrated it in ten minutes with 44 bytes that panic inside the load's own rank spot-check, and
+  that target is deliberately not kept: <code>docs/design.md</code> already documented this as the accepted
+  limit of the <code>StringIndex</code> trust boundary, so the defect was in the docstring, not in the code.
+  <code>fst</code> is safe Rust throughout, so the worst case remains a panic or a wrong answer rather than an
+  out-of-bounds read — which is why this loader stays safe while the perfect-hash ones are <code>unsafe</code>.</p>
+</li>
+<li>
+<p><strong><code>PerfectHashIndex</code> builds in 43 % less memory</strong> — 79.0 → 44.9 bytes per key above the input at
+  2 M real-word bigrams, and 84.7 → 50.8 at 10 M, where it is <strong>338 MB</strong> off the peak of a single
+  build. Four changes, none of which touch the blob: the slot table holds a <code>u32</code> key index instead
+  of a 16-byte <code>Option&lt;&amp;str&gt;</code>; the <code>(hash, index)</code> partition that existed to find hash collisions is
+  gone from the common path, replaced by a sorted scratch copy that also feeds the perfect hash and
+  is dropped before the arena is built (a real collision falls back to the old partition, on a
+  <code>#[cold]</code> path); the arena is assembled in one exactly-sized buffer with its offsets written in
+  place, instead of collecting the data and the offsets separately and concatenating them, which
+  held two copies of the corpus across the concatenation; and the arena takes its two totals from
+  the build's own hashing pass rather than re-deriving them in slot order, which measured 4 M extra
+  data-TLB misses at 2 M keys. The build also retires 5.6 % fewer instructions and takes 11 % fewer
+  page faults than 0.9.1 (<code>perf stat</code>, three runs).</p>
+</li>
+<li><strong><code>CompactHashIndex</code> builds in 41 % less memory</strong> — 42.5 → 25.2 bytes per key above the input at
+  the 8-bit default, and 47.6 → 24.6 at 10 M (<strong>230 MB</strong> off a single build). The representatives'
+  hashes and their <em>truncated</em> fingerprints are lifted out of the <code>(hash, second hash)</code> pairs before
+  the perfect hash is built, so the pairs are dropped first rather than sitting next to ptr_hash's
+  construction memory alongside a full 64-bit fingerprint per key. The documentation claimed <code>16 · n</code>
+  for the peak, which was the pairs alone: the measured high-water mark is 25.2 bytes per key at the
+  8-bit default, rising with the fingerprint width (27.3 at 16 bits, 29.2 at 32), and the docs now
+  say so.</li>
+<li><strong>README: "roughly twice as quick as <code>HashMap</code>" is now scoped to the SipHash map it was measured
+  against.</strong> <code>std::collections::HashMap</code> hashes with SipHash; the same map with FxHash measured
+  196 / 200 ns against <code>PerfectHashIndex::id_unchecked</code>'s 216 / 216 in two independent 12-run
+  sessions. Against a fast-hashed map lexindex's lookup advantage is gone, and the README says so —
+  what remains is the footprint and the serialisable, memory-mappable blob. The scale table is
+  regenerated on this code with both key sources; the streamed <code>CompactHashIndex</code> at 10 M peaks at
+  <strong>304 MB against 988</strong> for the same build handed a list.</li>
+<li><strong><code>ptr_hash</code> and <code>epserde</code> are bounded to a minor series (<code>~1.1</code>, <code>~0.8</code>).</strong> Their layout is
+  embedded verbatim in every MPH blob this crate has written, so a change there does not break a
+  build — it stops old files from loading. Moving either is now a decision with a golden-blob test
+  attached rather than something <code>cargo update</code> can do.</li>
+<li><strong>A 32-bit build with the <code>mph</code> feature now fails with one sentence naming the feature to turn
+  off.</strong> <code>ptr_hash</code> 1.1 depends on <code>sucds</code> unconditionally, and <code>sucds</code> <code>compile_error!</code>s on any
+  pointer width other than 64, so the build used to die inside a transitive dependency with a
+  dozen errors that named neither lexindex nor anything the caller could change — and a
+  <code>compile_error!</code> of our own would never have been reached, because cargo compiles dependencies
+  first. The minimal-perfect-hash dependencies are therefore declared under
+  <code>[target.'cfg(target_pointer_width = "64")'.dependencies]</code>: off 64-bit they are simply not in
+  the graph, the modules that name their types are not compiled, and the only diagnostic is ours.
+  The dependency graph on 64-bit targets is unchanged (<code>Cargo.lock</code> untouched). The <code>fst</code>-only
+  build has no such constraint — checked for <code>i686-unknown-linux-gnu</code> and
+  <code>wasm32-unknown-unknown</code> — and README and the usage guide now say so.</li>
+</ul>
+<h2 id="091-2026-09-04">[0.9.1] — 2026-09-04<a class="headerlink" href="#091-2026-09-04" title="Permanent link">&para;</a></h2>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>serialized_len()</code></strong> on all three indexes: the byte length <code>to_bytes</code> / <code>save</code> would produce,
+  without producing it (the minimal perfect hash is measured through a discarding sink).</li>
+<li><strong><code>docs/usage.md</code> is compiled as doctests</strong>, like the README, so its Rust block cannot drift from
+  the API again — it had been calling <code>load_mmap</code> without <code>unsafe</code> since 0.9.0.</li>
+</ul>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The unsafe loaders are split into a safe framing parser and the unsafe <code>epserde</code> step.</strong>
+  <code>parse_frame</code> validates everything a query will trust — magic, header and payload checksums,
+  lengths, the side table, the fingerprint range or the arena — on <em>any</em> bytes, and the property
+  tests now fuzz exactly that half (plus every truncation of a real blob); the MPH region is
+  deserialised only afterwards, behind the caller's contract. The proptests that called the unsafe
+  loaders on arbitrary bytes are gone: they exercised what the contract excludes.</li>
+<li><strong><code>StringIndex</code> owned loads spot-check the rank invariant</strong>: the first key's value must be 0 and
+  the rank-walk to <code>len - 1</code> must succeed. A full walk measured 0.7 → 40 ms on the 479 823-word
+  dictionary (58× the owned load), so a <em>permutation</em> of the ranks is deliberately not detected —
+  it cannot violate memory safety, and <code>key(id)</code> now uses checked arithmetic on the blob-supplied
+  outputs, answering <code>None</code> instead of wrapping.</li>
+<li><strong><code>UnicodeSubsequence</code> no longer allocates a per-byte rewind table</strong>: the rewind target is found
+  by walking back over UTF-8 continuation bytes, the same answer with no allocation per query.</li>
+<li><strong>Docs</strong>: README's install snippet says <code>0.9</code> (0.9.0 shipped saying <code>0.8</code>; the release preflight
+  now checks it); "never a full scan" and "<code>2^-b</code> by construction" scoped honestly in the usage
+  guide and the site index, which no longer calls the core "from-scratch"; a note on Unicode
+  semantics (scalar values; no normalisation, case folding or grapheme segmentation); the MPH
+  <code>load_mmap</code> <code># Safety</code> sections state the trusted-blob precondition alongside the immutability
+  one; <code>bench/compare.py</code> shuffles its keys instead of handing every library the pre-sorted
+  dictionary, and no longer claims to measure lookup latency; the <code>examples/bench.rs</code> probe stride
+  is documented as prime (full coverage for every <code>n</code> below it), not merely odd.</li>
+</ul>
+<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Width-dependent casts</strong>: the fingerprint-table length in <code>build_bits</code>, the arena's offset count
+  and its per-key offsets are converted with <code>usize::try_from</code> instead of <code>as</code> casts, so a
+  header-supplied value that does not fit the platform's <code>usize</code> fails cleanly instead of
+  truncating (<code>mph_len</code> and the side-byte count already did). Defence in depth rather than a live
+  bug: a 32-bit build of the <code>mph</code> feature does not compile today — <code>ptr_hash</code> pulls <code>sucds</code>, which
+  refuses any target that is not 64-bit — and the <code>fst</code>-only build contains none of this code. The
+  <code>fst</code>-only build is checked for <code>i686-unknown-linux-gnu</code>.</li>
+<li><strong><code>release.yml</code></strong>: a <code>workflow_dispatch</code> run built neither wheels nor the sdist, because both
+  depended on the tag-only preflight and a skipped dependency skips its dependants; they now run
+  unless preflight actually failed. Tags are gated on the full CI matrix (fmt, clippy, tests on
+  Linux/macOS/Windows, Python 3.11–3.14, MSRV, coverage) through <code>workflow_call</code>, and the native
+  wheels are installed and exercised on their runner before anything is published.</li>
+</ul>
+<h2 id="090-2026-08-28">[0.9.0] — 2026-08-28<a class="headerlink" href="#090-2026-08-28" title="Permanent link">&para;</a></h2>
+<h3 id="changed_3">Changed<a class="headerlink" href="#changed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>from_bytes</code> and <code>load</code> are now <code>unsafe fn</code> on <code>PerfectHashIndex</code> and <code>CompactHashIndex</code></strong>
+  (<strong>breaking</strong>). A function that is unsound for some input belongs behind <code>unsafe fn</code>, and these
+  accept arbitrary bytes: the blob framing is validated and checksummed — accidental corruption
+  still fails cleanly — but the embedded minimal perfect hash is an <code>epserde</code> region whose pilot
+  table <code>ptr_hash</code> reads unchecked, and the fields that would bound that read are private to
+  <code>ptr_hash</code>, so no validation on this side can reject a crafted blob. Upstream reached the same
+  conclusion independently: <code>epserde</code> 0.13 made <code>deserialize_full</code> an <code>unsafe fn</code>, and PtrHash
+  declined a checked <code>try_index()</code> for the same reason. <code>StringIndex::from_bytes</code>/<code>load</code> stay safe —
+  <code>fst</code> validates its own structure and guarantees invalid input cannot violate memory safety. The
+  Python bindings keep their signatures and state the contract in their docstrings.</li>
+<li><strong><code>load_mmap</code> is now an <code>unsafe fn</code></strong> on all three indexes (<strong>breaking</strong>). The mapped bytes are
+  borrowed, not copied, so a write to the file from any process while the index is alive is
+  undefined behaviour — which is exactly why <code>memmap2::Mmap::map</code> is itself <code>unsafe</code>. Wrapping it
+  in a safe function hid a precondition that ordinary safe code (another handle writing the same
+  path) can violate, so the obligation is now stated in a <code># Safety</code> section and the call sites
+  carry it. <code>load</code> is unchanged and remains safe. The Python <code>load_mmap</code> keeps its signature —
+  Python has no way to express the obligation — and documents the same contract in its docstring.</li>
+<li><strong><code>CompactHashIndex</code> hashes each key once instead of twice.</strong> Both of its hashes are now produced
+  by a single pass over the key's bytes, bit-for-bit identical to the two functions it replaces (a
+  golden test asserts the equality on 2 000 keys, so no stored blob changes meaning). Measured in
+  isolation: <strong>21.3 → 18.2 ns/key</strong> on real-word bigrams, <strong>126 → 77 ns/key</strong> on 80-byte URI-like
+  keys.</li>
+<li><strong>The Python <code>CompactHashIndex</code> constructor releases the GIL while hashing.</strong> Items are pulled in
+  4 096-key chunks and hashed with the GIL dropped, so other Python threads keep running through
+  what was previously one long GIL-held stretch; memory behaviour is unchanged (still 16 bytes per
+  key, strings released as they are consumed).</li>
+</ul>
+<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>build_bits</code> rejects a bad <code>fingerprint_bits</code> before touching the iterator.</strong> Since 0.8.1 the
+  width was validated after the input had been collected, so an invalid width consumed (and hashed)
+  the entire iterator first — and never returned at all for an endless one.</li>
+</ul>
+<h3 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The README's Rust examples are now compiled and run as doctests.</strong> They had never been checked
+  by anything, so an API change could silently invalidate the first code a reader sees. A
+  <code>#[cfg(doctest)]</code> item includes the file, which runs the snippets without pulling the prose into
+  the API docs.</li>
+<li>The fingerprint's false-positive rate is described as a design rate from two <em>uncorrelated</em>
+  hashes rather than as exact probability from <em>independent</em> ones, matching the more careful
+  wording already in the code.</li>
+<li><strong>The point-lookup table is re-measured on this release's code</strong> (min of 12 runs, idle machine,
+  four seconds between runs). The whole session runs ~19% faster than the 0.8.0 one — the
+  <code>std::HashMap</code> control moved with it — so the table now says which spreads were observed per row
+  and warns that the ratio to <code>HashMap</code> is session-dependent (<code>id_unchecked</code> measured 2.2× here,
+  1.7× before) rather than presenting it as a constant.</li>
+</ul>
+<h2 id="081-2026-08-27">[0.8.1] — 2026-08-27<a class="headerlink" href="#081-2026-08-27" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_3">Fixed<a class="headerlink" href="#fixed_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>CompactHashIndex</code> no longer merges two distinct keys that collide in the 64-bit slot hash when
+  their <em>truncated</em> fingerprints also tie.</strong> The 0.8.0 build deduplicated on
+  <code>(hash, fingerprint_bits-wide fingerprint)</code>, so at narrow widths a genuine hash collision had a
+  <code>2^-fingerprint_bits</code> chance of silently collapsing into one id — the repository's own pinned
+  collision pair reproduces it at 1 bit (<code>len() == 501</code> for 502 distinct keys). The collision side
+  table now stores the <strong>full 64-bit second hash</strong> regardless of the table width (the build pairs
+  were already 16 bytes, so build memory is unchanged), and the side probe runs <em>before</em> the
+  fingerprint table, which could otherwise answer for a side key whose truncated bits tie its
+  representative's. Two distinct keys now merge only by colliding in <strong>both</strong> 64-bit hashes at once
+  (<code>≈ 2^-128</code> per pair), independent of <code>fingerprint_bits</code>. The blob magic moves to <strong><code>BCH5</code></strong> (same
+  layout): a collision-free 0.8.0 <code>BCH4</code> is bit-identical and still loads, one holding a side table
+  is refused with a message naming the rebuild — its truncated side fingerprints cannot be widened
+  without the keys.</li>
+<li><strong>Side-table ids are validated on load.</strong> Both perfect-hash loaders now require the side ids to be
+  exactly the tail range <code>[m, n)</code> — structurally, not via the checksums, which vouch for transport
+  rather than construction. A malformed blob could previously hand <code>CompactHashIndex::id()</code> an id at
+  or past <code>len()</code>.</li>
+<li><strong>Header-length arithmetic is checked for 32-bit targets.</strong> The side-table byte count is computed
+  with <code>checked_mul</code> and <code>mph_len</code> converted with a checked cast, so a fabricated length fails
+  cleanly instead of wrapping or truncating on a 32-bit build (the published wheels are 64-bit, but
+  the crate is not).</li>
+</ul>
+<h3 id="changed_4">Changed<a class="headerlink" href="#changed_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The Python <code>CompactHashIndex</code> constructor streams.</strong> Items are hashed to their 16-byte pair one
+  at a time as they come off the iterator (under the GIL) and each string is released immediately,
+  so a generator-fed build no longer materialises the whole corpus on the binding side. The other
+  two constructors still collect — those indexes store the keys.</li>
+</ul>
+<h2 id="080-2026-08-27">[0.8.0] — 2026-08-27<a class="headerlink" href="#080-2026-08-27" title="Permanent link">&para;</a></h2>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A 64-bit hash collision can no longer fail a build — any key set now builds.</strong> Both perfect-hash
+  indexes build the MPH over one representative per distinct hash value; colliding leftovers get
+  tail ids served from a tiny <strong>side table</strong>, consulted only after the main lookup has already
+  missed, so an index without collisions (every index below ~10^8 keys, in practice) pays one
+  predictable branch and nothing more. <code>PerfectHashIndex</code> stays exact even for collided keys (the
+  side probe compares stored keys); <code>CompactHashIndex</code> matches side keys by fingerprint, leaving
+  only a pair colliding in <em>both</em> hashes at once (<code>2^-(64+fingerprint_bits)</code> per pair) to collapse
+  as if it were a duplicate. Previously such key sets failed the build permanently — the hash is
+  deterministic, so no retry could ever help; at 1 G keys that was a ~2.7 % build-failure rate.</li>
+<li><strong>Whole-payload checksum on the perfect-hash blobs.</strong> Owned <code>load</code>/<code>from_bytes</code> now verify a
+  streaming 64-bit hash over everything after the header, so a flipped byte anywhere — MPH region,
+  arena, fingerprint table, side table — is rejected at load instead of perturbing answers (or
+  aborting inside <code>epserde</code>) later. This makes the <em>accidental</em>-corruption story uniform across all
+  three indexes: every owned load verifies the entire blob. (<code>load_mmap</code> still trusts the mapped
+  file; a crafted blob remains outside the contract — the hashes are public and deterministic.)</li>
+<li><strong><code>CompactHashIndex::build</code>/<code>build_bits</code> stream.</strong> One pass keeps a 16-byte <code>(hash, fingerprint)</code>
+  pair per key and never materialises the strings, so building from a lazy iterator peaks at
+  <code>16 × n</code> bytes over the input regardless of key length — and sorting pairs instead of strings
+  <strong>halved build time</strong> (249 → 120 ms at 1 M real-word bigrams, same-session A/B), putting it ~2×
+  below <code>std::HashMap</code>'s build. Lookup cost is unchanged (A/B: 245.2 vs 245.2 ns);
+  <code>PerfectHashIndex::id_unchecked</code> measured 8 % faster (193 → 178 ns) and the verified
+  <code>PerfectHashIndex::id</code> ~3 % slower (343 → 353 ns — the side-table entry branch, on the one path
+  that already pays a full key compare). Serialised sizes are unchanged to two decimals
+  (+4/+12 bytes per <em>blob</em>, not per key).</li>
+<li><strong>Windows and macOS test jobs in CI.</strong> The release workflow already shipped wheels for both;
+  their platform-specific paths (<code>save</code>'s rename-over-existing, permissions, mmap) now run the
+  test suite on every push, not just a cross-build on tags.</li>
+</ul>
+<h3 id="changed_5">Changed<a class="headerlink" href="#changed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Blob formats: <code>PerfectHashIndex</code> writes <code>BMP4</code>, <code>CompactHashIndex</code> writes <code>BCH4</code></strong> — the v3
+  layouts plus the side table and the payload checksum; <code>BMP4</code> also <em>drops</em> the stored
+  <code>overflow_cap</code>, which every load has recomputed from the arena since 0.7.1 anyway. 0.7 blobs
+  (<code>BMP3</code>/<code>BCH3</code>, and <code>BMP2</code> from 0.5/0.6) still load; <code>BCH1</code>/<code>BCH2</code> remain refused. Older
+  lexindex versions cannot read v4 blobs.</li>
+<li><strong><code>save</code> streams.</strong> All three indexes write the blob section by section through the atomic
+  writer instead of assembling a serialised copy first, halving peak save memory; the bytes
+  written are identical to <code>to_bytes</code>.</li>
+</ul>
+<h3 id="fixed_4">Fixed<a class="headerlink" href="#fixed_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>save</code> no longer follows a symlink planted at its temporary path.</strong> The atomic write opened its
+  sibling temp with <code>File::create</code>, which follows an existing symlink — so an attacker able to write
+  to the target directory could pre-create a symlink at the predictable <code>&lt;name&gt;.&lt;pid&gt;.&lt;seq&gt;.tmp</code> and
+  redirect the write, truncating an arbitrary file the process could reach. The temp is now opened
+  <code>O_CREAT | O_EXCL</code> (<code>create_new</code>), which refuses any pre-existing path, symlink included; on a name
+  collision the write retries with the next counter (bounded, so a hostile racer cannot spin it).
+  On Unix the parent directory is now fsynced after the rename so the publish is durable across power
+  loss, and an existing file's permissions are preserved rather than reset to the umask default.</li>
+<li><strong><code>StringIndex</code> owned loads verify the FST checksum.</strong> <code>from_bytes</code> / <code>load</code> handed the body to
+  <code>fst::Map::new</code>, which checks length and version but not the stored CRC, so a corrupt owned blob
+  could load and only fail — or mislead — on a later query. Owned loads now call <code>Fst::verify()</code>, an
+  <code>O(n)</code> CRC scan, and reject a bad blob at load; <code>load_mmap</code> still skips it to keep mapping
+  constant-time (a mapped file is trusted intact, as before).</li>
+<li><strong><code>PerfectHashIndex</code> never trusts the header's <code>overflow_cap</code>.</strong> It is now recomputed from the
+  arena on every load, <code>BMP3</code> included, so a blob whose framing checksum was forged alongside a
+  crafted cap still cannot steer a query past the true remap length. <code>CompactHashIndex</code> stores no
+  keys and cannot recompute it, so it remains a <em>trust-your-own-blob</em> format (documented).</li>
+</ul>
+<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Golden hash-stability tests.</strong> <code>hash_key</code> and <code>fingerprint_bits</code> pin exact outputs for a fixed
+  key set (ASCII and multibyte), so a silently changed constant — which would make every previously
+  saved MPH blob load wrong — fails CI loudly instead. Changing a hash is a format break that must
+  bump the magic, not the table.</li>
+</ul>
+<h3 id="changed_6">Changed<a class="headerlink" href="#changed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Trust-boundary wording made precise</strong> in <code>README.md</code> and <code>docs/design.md</code>: lexindex framing is
+  bounds-checked and <code>StringIndex</code> owned loads verify the FST CRC, but the perfect-hash indexes'
+  embedded <code>epserde</code> MPH (which <code>ptr_hash</code> reads unchecked) stays a <em>trust-your-own-blob</em> payload —
+  the header checksum and recomputed <code>overflow_cap</code> guard accidental corruption, not a crafted blob.</li>
+</ul>
+<h2 id="070-2026-08-27">[0.7.0] — 2026-08-27<a class="headerlink" href="#070-2026-08-27" title="Permanent link">&para;</a></h2>
+<h3 id="fixed_5">Fixed<a class="headerlink" href="#fixed_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Non-member queries can no longer read ptr_hash's remap out of bounds</strong> — a debug-build panic
+  and, in release builds, undefined behaviour (<code>get_unchecked</code> past the remap vector), present in
+  every version since the minimal-perfect-hash indexes shipped. ptr_hash's minimal <code>index()</code> remaps
+  raw slots ≥ n through an internal vector that only covers slots up to the last member-occupied
+  one, and reads it <em>unchecked</em>; a non-member key whose raw slot lands in the trailing free zone —
+  a zone that exists for a few percent of built indexes, depending on construction entropy —
+  indexed past it. Surfaced by CI as a flaky <code>assertion failed: rank &lt; self.count_ones()</code> in the
+  new 4-bit fingerprint test (reproduced locally in 23 runs; the backtrace pins
+  <code>ptr_hash::pack::Packed::index</code> → <code>cacheline-ef::index_unchecked</code>). Both indexes now record the
+  remap's exact length at build time (<code>overflow_cap</code> — the largest member <code>raw slot − n</code>, plus
+  one) and answer <code>None</code> outright for raw slots past it: those slots are provably free, so no
+  member can live there. The repro loop went from 1 failure in 23 runs to 0 in 120; a regression
+  test rebuilds until the zone occurs and asserts the guard. Lookup cost is unchanged (A-B against
+  the 0.6.0 binary, <code>std::HashMap</code> control: PH 330 vs 331 ns, CHI 244 vs 244); builds pay ~1% for
+  measuring the cap (one streamed <code>index_no_remap</code> pass over the members).</li>
+<li><strong><code>id_unchecked</code> is bounded too.</strong> It documents skipping the membership <em>comparison</em>, not the
+  bounds, but it called <code>mph.index()</code> directly and so kept the defect above for any caller who
+  passed a key that was not in fact a member. It now resolves through the same guarded path and
+  returns a valid slot for any input.</li>
+<li><strong><code>subsequence</code> matches characters, not bytes.</strong> <code>fst</code>'s <code>Subsequence</code> automaton advances one
+  byte at a time, so a query character matched if its bytes appeared anywhere in order:
+  <code>subsequence("é")</code> (<code>[C3 A9]</code>) matched <code>"àΩ"</code> (<code>[C3 A0 CE A9]</code>), which contains neither
+  character. Every non-ASCII subsequence query was affected. Replaced with an automaton that
+  rewinds a partial character on mismatch — exactly correct rather than conservative, because
+  UTF-8's lead and continuation byte classes are disjoint.</li>
+<li><strong><code>save</code> is atomic.</strong> All three indexes write a sibling temporary and rename it into place, so a
+  crash or a full disk leaves the previous file intact instead of a truncated one that still has a
+  valid magic. <code>load</code> no longer copies the file buffer a second time.</li>
+</ul>
+<h3 id="changed_7">Changed<a class="headerlink" href="#changed_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Blob formats: <code>PerfectHashIndex</code> writes <code>BMP3</code>, <code>CompactHashIndex</code> writes <code>BCH3</code></strong> — the
+  previous layouts plus the <code>overflow_cap</code> field and a 32-bit check over the lexindex header. The
+  check is not decoration: <code>overflow_cap</code> <em>bounds an otherwise unchecked read</em>, so a header that
+  lost bytes in transit must fail loudly rather than steer queries.</li>
+<li><strong>Blobs written before 0.7 are healed or refused, never loaded unbounded.</strong> A <code>BMP2</code>
+  (<code>PerfectHashIndex</code>) blob is healed: its arena holds every key, so the bound is recomputed
+  exactly at load, costing O(n) hashes once. A <code>BCH1</code>/<code>BCH2</code> (<code>CompactHashIndex</code>) blob stores no
+  keys, cannot be repaired, and is refused with a message naming the fix — loading it would
+  reinstate the out-of-bounds read. Rebuild those indexes on 0.7.</li>
+<li><strong>Construction failure is an error, not a panic.</strong> <code>IndexError::Build</code> replaces the
+  <code>unwrap_or_else</code> fallback path when both parameter sets fail. Loading now also rejects a header
+  claiming more than <code>u32::MAX</code> keys (ids are <code>u32</code>) and cross-checks the deserialised MPH's own
+  key count against the header's.</li>
+<li><strong>Python: any iterable of keys, any <code>os.PathLike</code> path.</strong> Constructors took only sequences, so
+  building from a generator raised <code>TypeError</code>; paths took only <code>str</code>, so a <code>pathlib.Path</code> had to
+  be stringified at every call site. The stubs claimed <code>list[str]</code> where tuples were always
+  accepted, and were widened to match reality.</li>
+<li><strong>Honest wording for measured behaviour.</strong> Perfect-hash ids are documented as <em>not</em> reproducible
+  across builds (ptr_hash's construction is randomised — measured on 50 k keys, ~53 % keep their
+  id when the same key set is rebuilt); the fingerprint false-positive rate is documented as a
+  design rate against random non-members, not a defence against chosen queries (both hashes are
+  deterministic and unseeded); an <code>epserde</code> blob is documented as portable only across machines of
+  the same endianness and pointer width.</li>
+<li><code>bench/compare.py</code> timed each competitor's first <code>import</code> as part of its build, which flattered
+  lexindex — imported at module scope. Builds are now the median of five runs after a warm-up.</li>
+</ul>
+<h3 id="added_5">Added<a class="headerlink" href="#added_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A weekly <code>sanitize</code> workflow: AddressSanitizer over the whole suite (the class of defect fixed
+  above is invisible to a normal <code>cargo test</code>) and Miri over the fst-only build. CI also runs
+  <code>cargo test --release</code>, and a release preflight refuses a tag whose version does not match
+  <code>Cargo.toml</code>, <code>pyproject.toml</code>, <code>CITATION.cff</code> and a dated <code>CHANGELOG.md</code> section.</li>
+</ul>
+<h2 id="060-2026-08-27">[0.6.0] — 2026-08-27<a class="headerlink" href="#060-2026-08-27" title="Permanent link">&para;</a></h2>
+<h3 id="added_6">Added<a class="headerlink" href="#added_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Sub-byte fingerprints: <code>CompactHashIndex::build_bits</code> / <code>fingerprint_bits=</code> (1..=64 bits).</strong>
+  The fingerprint table is bit-packed, so size is exactly <code>fingerprint_bits/8</code> bytes per key on top
+  of the ~0.27 B/key minimal perfect hash, and the membership false-positive rate is exactly
+  <code>2^-fingerprint_bits</code>. On the 479 823-word dictionary: <strong>0.77 B/key at 4 bits (6.25% FP, 3.9×
+  smaller than marisa-trie)</strong>, 1.02 at 6 bits (1.56%), 1.77 at 12 bits (0.024%) — the existing
+  byte widths keep their exact sizes and rates (1.27 / 2.27 / 4.27 B/key at 8 / 16 / 32 bits).
+  <code>CompactHashIndex</code> stays below marisa-trie's 2.98 B/key at every width up to 21 bits. The
+  advertised rate is measured, not assumed: 2 M random non-member probes landed at 6.253 %
+  (z = +0.18) for 4 bits and 1.555 % (z = −0.83) for 6. Python: keyword-only <code>fingerprint_bits=</code>
+  on the constructor plus a <code>fingerprint_bits</code> property; <code>fingerprint_bytes</code> keeps its byte
+  semantics unchanged. The docs gained a width-choice table (rate priced per non-member probe).</li>
+</ul>
+<h3 id="changed_8">Changed<a class="headerlink" href="#changed_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Blob format: <code>CompactHashIndex</code> now writes <code>BCH2</code></strong> (width field counts bits, table is
+  bit-packed). <strong>0.5.x <code>BCH1</code> blobs still load — including zero-copy under mmap</strong> — because their
+  byte-aligned fingerprints are bit-identical to the packed layout at 8× the width; 0.5.x cannot
+  read the new <code>BCH2</code> blobs, hence the 0.6.0 version bump. The default 8-bit path is not taxed by
+  the generality: byte-aligned widths take a straight byte-copy fast path when building, and A-B
+  against the 0.5.1 binary (12 alternated runs, <code>std::HashMap</code> control) put both build (222 vs
+  225 ms/1 M keys) and lookup (166.4 vs 166.0 ns) inside the control's noise. A 4-bit index
+  answers <code>id()</code> as fast as an 8-bit one (86.9 vs 87.7 ns on the dictionary) and streams <code>ids_of</code>
+  faster (47.6 vs 55.1 ns/key — half the table, better cache residency).</li>
+</ul>
+<h2 id="051-2026-08-27">[0.5.1] — 2026-08-27<a class="headerlink" href="#051-2026-08-27" title="Permanent link">&para;</a></h2>
+<h3 id="added_7">Added<a class="headerlink" href="#added_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Citation metadata</strong> (<code>CITATION.cff</code> + <code>.zenodo.json</code>): GitHub shows "Cite this repository", and
+  once the repository is enabled in Zenodo's GitHub integration, each release from the next tag on
+  is archived with a DOI. Metadata validated against the CFF 1.2.0 schema.</li>
+</ul>
+<h3 id="changed_9">Changed<a class="headerlink" href="#changed_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>The minimal perfect hash is built with ptr_hash's <code>default_compact</code> parameters (λ=3.9).</strong>
+  Tighter pilot buckets take the MPH from 2.41 to <strong>2.17 bits/key</strong> on the 479 823-word
+  dictionary: <code>CompactHashIndex</code> fp=1 drops <strong>1.301 → 1.272 bytes/key</strong> (2.34× smaller than
+  marisa-trie's 2.98), fp=2 2.301 → 2.272, <code>PerfectHashIndex</code> 13.625 → 13.596. Query time is
+  unchanged (A-B in one binary at 480 k and 5 M keys, plus process-level A-B-A-B with a
+  <code>std::HashMap</code> control); builds pay ~+10 ms per million keys (~3–4%) — a build-once/query-many
+  trade. Compact construction can occasionally fail (pilot eviction chains grow too long), so it
+  falls back to the default parameters automatically. Both parameter sets serialise the same type,
+  so <strong>blobs stay compatible in both directions</strong> — no format change.</p>
+</li>
+<li>
+<p><strong>Batch <code>ids_of</code> on <code>PerfectHashIndex</code> and <code>CompactHashIndex</code> streams its MPH lookups.</strong>
+  Per-key <code>id()</code> walks hash → slot → verify serially, stalling on a cache miss at every step.
+  The batch path now drives ptr_hash's <code>index_stream</code> (software-prefetched slot resolution) and
+  prefetches the verification data (arena offsets and spans, fingerprint bytes) a fixed distance
+  ahead, so the memory latency of key <em>i+16</em> overlaps the compare of key <em>i</em>. Measured against the
+  per-key loop in the same binary: <code>PerfectHashIndex.ids_of</code> <strong>1.55×</strong> on the 479 823-word
+  dictionary and <strong>1.83×</strong> on 5 M real-word bigrams; <code>CompactHashIndex.ids_of</code> <strong>1.10×</strong> /
+  <strong>1.21×</strong> (its fingerprint compare was already a single byte load, so only the slot stream and
+  fingerprint prefetch help). The Python <code>ids_of</code> of both classes routes through the streamed core
+  with the GIL released; misses still come back as <code>None</code>, pinned by tests on both sides.</p>
+</li>
+<li>
+<p><strong>The rank-walk (<code>id → key</code>) picks each FST transition by binary search instead of a linear
+  scan.</strong> Transitions are stored in increasing byte order, which makes their subtree-minimum ranks
+  non-decreasing — the walk's invariant already guaranteed the order, the scan just wasn't using
+  it. Near the root of a dictionary FST a node fans out ~50 ways, so the saving concentrates
+  exactly where every reverse lookup must pass: <code>StringIndex.keys_of</code> over the whole 479 823-word
+  dictionary drops from <strong>775 to 423 ns/key (1.83×)</strong>, measured back-to-back against the published
+  0.5.0 wheel on the same machine, with the reconstructed keys verified equal to the sorted
+  dictionary in both. Everything reverse benefits — <code>key</code>, <code>keys_of</code>, <code>dict(index)</code> iteration.</p>
+</li>
+<li>
+<p><strong>The speed benchmark (<code>examples/bench.rs</code>) now uses real dictionary-word bigrams</strong>, the same key
+  generator as <code>bench/scale.py</code>, and refuses to run without a word list rather than substitute
+  synthetic keys — the same rule <code>bench/compare.py</code> has always enforced. The old
+  <code>entity-000…N</code> keys arrived pre-sorted and hash-degenerate, flattering every build time. On real
+  keys the README table moved both ways and was re-measured whole (one session, min of 12 runs):
+  every <code>build</code> reads higher because sorting real input is part of the job, while the lookup gap
+  over <code>std::HashMap</code> <strong>widened from ~1.25× to ~1.5×</strong> (realistic short keys make the byte-wise FNV
+  hash cheaper relative to SipHash). A <code>CompactHashIndex::id</code> row was added — measured <strong>~238 ns</strong>,
+  it beats <code>HashMap</code> while keeping its fingerprint membership check.</p>
+</li>
+</ul>
+<h3 id="fixed_6">Fixed<a class="headerlink" href="#fixed_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The hash-collision build error no longer suggests a retry that cannot work.</strong> Both MPH builds
+  said "64-bit key-hash collision; rebuild or use StringIndex" — but the hash is deterministic and
+  unseeded (that is what makes a serialised MPH reloadable), so rebuilding the same key set fails
+  identically, forever. The message now says so and points at <code>StringIndex</code> or changing the keys.</li>
+</ul>
+<h3 id="documentation_1">Documentation<a class="headerlink" href="#documentation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>The collision odds behind "build fails on a 64-bit hash collision" are now quantified</strong> instead
+  of called astronomically rare: <code>n(n-1)/2^65</code>, computed exactly (Maxima and PARI/GP agreeing) —
+  6.2×10⁻⁹ for the dictionary, 2.7×10⁻⁶ at 10 M keys, <strong>2.7×10⁻⁴ at 100 M</strong>, ~2.7% at 1 G. Honest
+  below ~10 M; a real design consideration at 10⁸–10⁹, where <code>StringIndex</code> has no such failure mode.</p>
+</li>
+<li>
+<p><strong>The <code>256^-k</code> false-positive rate is now statistically verified, not just asserted.</strong> On the
+  0.5.0 code, dictionary members with two non-member populations: 2 M random strings measured
+  0.384% at fp=1 (z = −1.5 against the exact 0.390 625%) and 33/2 M at fp=2 (z = +0.5); 50 000
+  held-out real words measured 0.310% (z = −2.9). At or below theory in every case — the advertised
+  rate is a ceiling in practice.</p>
+</li>
+<li>
+<p><strong>The usage guide now explains what <code>limit</code> buys — and what it cannot</strong> (<a href="docs/usage.md">"What <code>limit</code> buys"</a>),
+  replacing 0.5.0's single headline number with the measured behaviour. The speedup is the work <em>not
+  done</em>, so it spans three regimes: prefix/range scale with <code>matches ÷ limit</code> (measured ~3 000× for
+  <code>prefix("s", limit=10)</code> on an idle machine — the 669× in the 0.5.0 notes was the same query on a
+  loaded one, i.e. conservative), subsequence gains ~80× because early stop saves the expensive
+  traversal itself, and fuzzy gains only ~6× because the eagerly-built Levenshtein automaton is a
+  fixed cost <code>limit</code> cannot skip. Also documented: the ~3 µs per-call floor (asking for 1 match
+  costs the same as 10), and that consuming <em>all</em> matches gains nothing by construction.</p>
+</li>
+</ul>
+<h2 id="050-2026-08-26">[0.5.0] — 2026-08-26<a class="headerlink" href="#050-2026-08-26" title="Permanent link">&para;</a></h2>
+<p><strong>Upgrading:</strong> rebuild any saved <code>PerfectHashIndex</code> blob — its format changed (see below) and 0.5.0
+rejects the old one rather than misreading it. <code>StringIndex</code> and <code>CompactHashIndex</code> blobs load
+unchanged. Rust consumers need a 1.85 toolchain. Python users need nothing beyond <code>pip install -U</code>.</p>
+<h3 id="added_8">Added<a class="headerlink" href="#added_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Bounded and lazy queries on <code>StringIndex</code>.</strong> Python <code>prefix</code> / <code>range</code> / <code>fuzzy</code> /
+  <code>subsequence</code> take a <code>limit</code>, and Rust gains <code>prefix_iter</code> / <code>range_iter</code> / <code>fuzzy_iter</code> /
+  <code>subsequence_iter</code> returning lazy iterators. An autocomplete asking for ten matches now walks ten
+  keys instead of materialising every match: on the 479 823-word dictionary,
+  <code>prefix("s", limit=10)</code> is <strong>0.026 ms against 17.59 ms — 669× faster</strong> — and allocates 10 tuples
+  rather than 45 064. <code>prefix("a", limit=10)</code> is 310×, <code>fuzzy("hello", 2, limit=5)</code> 3.7×.</li>
+<li>The eager forms are now <code>.collect()</code> over the lazy ones, so there is one walk implementation
+    rather than two. Measured with both variants compiled into one binary and alternated A-B-A-B
+    (the machine was loaded, and in-process alternation is what makes the comparison meaningful):
+    the change is <strong>not</strong> a regression — five runs gave −7.4 %, −0.3 %, −2.7 %, −1.6 %, −1.9 %.</li>
+<li>
+<p><code>fuzzy_iter</code> still builds its automaton eagerly, so a too-large edit distance errors up front
+    rather than on first use.</p>
+</li>
+<li>
+<p><strong><code>lexindex.__version__</code></strong> in the Python package, read from the installed distribution
+  metadata (so it cannot drift from <code>pyproject.toml</code>) with a <code>0.0.0+unknown</code> fallback when
+  imported from a source tree that was never installed.</p>
+</li>
+</ul>
+<h3 id="changed_10">Changed<a class="headerlink" href="#changed_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>PerfectHashIndex</code> is 23% smaller: its key arena now uses 4-byte offsets.</strong> The arena addresses
+  each stored key by an offset into a flat buffer, and those offsets were <code>u64</code> — 8 bytes per key to
+  address a 4.9 MB buffer. They were the single largest part of the structure: <strong>8.0 of its 17.625
+  bytes per key</strong> on the 479 823-word dictionary. Offsets are now 4 bytes, taking the index to
+  <strong>13.625 B/key (−22.7%)</strong>.</li>
+<li><strong>The width is chosen per arena, not capped.</strong> An arena above 4 GiB still gets 8-byte offsets,
+    recorded in a header byte, so no corpus that built before will fail to build now.</li>
+<li><strong>Lookups got faster, not slower.</strong> Halving the offset table halves the cache footprint of the
+    two reads every verified lookup makes, which more than pays for the width branch — and the
+    branch is on a field fixed for the life of the index, so it predicts. <code>PerfectHashIndex::id</code>,
+    the only path that touches the arena, measured <strong>−3.7%</strong> (386.8 → 372.4 ns, min of 12 runs on an
+    idle machine). The controls that cannot touch the arena — <code>id_unchecked</code>, <code>StringIndex</code>,
+    <code>std::HashMap</code>, <code>std::BTreeMap</code> — moved +0.0%, +0.2%, +0.7% and −0.3%, which is what makes the
+    −3.7% readable as the change rather than the machine.</li>
+<li>Building is cheaper too, since the offset table is assembled in memory before it is written:
+    the peak RSS of a <code>PerfectHashIndex</code> build on the dictionary falls a further <strong>38.1 → 29.9 MB</strong>
+    on top of the saving below, for <strong>~87 → 29.9 MB (−66%)</strong> across the release.</li>
+<li>
+<p><strong>Breaking:</strong> the <code>PerfectHashIndex</code> blob magic is now <code>BMP2</code>; blobs written by 0.1–0.4 must be
+    rebuilt. <code>StringIndex</code> (<code>BIX4</code>) and <code>CompactHashIndex</code> (<code>BCH1</code>) blobs are untouched, as are
+    their sizes.</p>
+</li>
+<li>
+<p><strong><code>build</code> no longer copies the corpus to sort it.</strong> All three constructors collected their input
+  into an owned <code>Vec&lt;String&gt;</code> before sorting and deduplicating, even though every key is copied
+  again into the structure being built. They now sort the caller's items in place, comparing
+  through <code>AsRef&lt;str&gt;</code>. <code>PerfectHashIndex</code> additionally held a <em>third</em> copy: its slot table cloned
+  each key only for the arena to copy it once more, and now borrows instead. On the 479 823-word
+  dictionary (peak RSS of the build itself, one process per variant, order alternated across four
+  pairs; timings A-B-A-B with both implementations in one binary):</p>
+</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>peak RSS</th>
+<th>build</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>StringIndex</code></td>
+<td>29.9 → <strong>8.0 MB</strong> (−73%)</td>
+<td>1.04×</td>
+</tr>
+<tr>
+<td><code>PerfectHashIndex</code></td>
+<td>72.5 → <strong>38.1 MB</strong> (−47%)</td>
+<td><strong>1.99×</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Rust callers get the same saving: passing <code>&amp;[String]</code> or an iterator of <code>&amp;str</code> now costs one
+  pointer per key instead of a copy of the corpus. Ids, key order and every serialised size are
+  unchanged — this only removes intermediates.
+  - <code>test_build_releases_the_gil</code> grew its key count: at 400 000 keys the build now takes 49 ms
+    rather than 268, which tripped the test's own "too fast to tell anything" guard. It refused to
+    pass vacuously, which is what that guard is for.</p>
+<ul>
+<li><strong>The Python bindings borrow the caller's strings instead of copying them.</strong> The constructors and
+  <code>ids_of</code> read their keys as <code>PyBackedStr</code> — a view into the Python <code>str</code> — where they previously
+  extracted an owned <code>Vec&lt;String&gt;</code>. <code>build</code> already copies the keys it keeps, so that intermediate
+  vector was pure overhead: on the 479 823-word dictionary the <strong>peak RSS of a build drops from
+  44.6 MB to 29.9 MB (−33%)</strong>, and the build itself is <strong>1.08×</strong> faster, <code>ids_of</code> <strong>1.05×</strong>
+  (both implementations compiled into one extension and alternated A-B-A-B; four independent
+  process pairs for the memory figure, which agreed to within 0.3 MB).</li>
+<li>
+<p><strong>No API change.</strong> <code>PyBackedStr</code> accepts exactly what <code>String</code> did; the observable contract —
+    accepted types, rejected types and every error message — was diffed against a build of the
+    previous code and is identical. This change left every serialised size untouched; the only size
+    that moves in this release is <code>PerfectHashIndex</code>, from the arena change above.</p>
+</li>
+<li>
+<p><strong><code>PerfectHashIndex.key</code> / <code>keys_of</code> no longer copy each key twice.</strong> Its keys live in an arena,
+  so <code>key</code> returns a <code>&amp;str</code>; both methods then copied that into a <code>String</code> only for PyO3 to copy it
+  again into a Python <code>str</code> and drop it. They now build the Python string straight from the arena
+  slice. <code>keys_of</code> is <strong>1.29×</strong> faster (250 -&gt; 194 ns/key on the 479 823-word dictionary, A-B-A-B
+  in one extension) and allocates nothing per key; the single-key <code>key</code> is 1.03×, the rest of its
+  cost being the Python call itself. <code>keys_of</code> still runs its lookups under <code>Python::detach</code> — only
+  the string construction, which needs the GIL either way, happens with it held.</p>
+</li>
+<li>
+<p><strong>The Python bindings release the GIL</strong> (<code>Python::detach</code>) around building, bulk queries
+  (<code>prefix</code> / <code>range</code> / <code>fuzzy</code> / <code>subsequence</code>), batch lookups (<code>ids_of</code> / <code>keys_of</code>) and
+  persistence (<code>save</code> / <code>load</code> / <code>load_mmap</code> / <code>to_bytes</code> / <code>from_bytes</code>), so a threaded caller
+  keeps making progress instead of freezing the interpreter. Previously a background thread got
+  <strong>1 scheduler tick during a 268 ms build</strong> of the 479 823-word dictionary; it now runs
+  throughout.</p>
+</li>
+<li>
+<p>Single-key accessors (<code>id</code>, <code>key</code>, <code>contains</code>, <code>id_unchecked</code>, <code>successor</code>, <code>predecessor</code>,
+    <code>__len__</code>) deliberately <strong>keep</strong> the GIL: they take well under a microsecond, so releasing and
+    reacquiring it would cost more than the work it protects. Their code is untouched, and this
+    change altered no serialised byte of any index.</p>
+</li>
+<li>
+<p><strong>The minimum supported Rust version is now 1.85</strong>, declared as <code>rust-version</code> in <code>Cargo.toml</code>
+  and enforced by a CI job that derives its toolchain from that field, so the declaration cannot
+  drift from what is actually built. The crate moved to <strong>edition 2024</strong>, whose floor is exactly
+  1.85; <code>cargo fix --edition</code> required no source changes in any feature configuration, so the
+  only user-visible effect is the toolchain requirement itself.</p>
+</li>
+<li><strong>Rust consumers on a toolchain older than 1.85 must upgrade</strong> — <code>cargo</code> will refuse to build
+    lexindex rather than fail obscurely.</li>
+<li><strong>Python users are unaffected.</strong> The published wheels are abi3 and carry no toolchain
+    requirement; <code>requires-python</code> is unchanged at <code>&gt;=3.11</code>.</li>
+</ul>
+<h2 id="040-2026-07-06">[0.4.0] — 2026-07-06<a class="headerlink" href="#040-2026-07-06" title="Permanent link">&para;</a></h2>
+<h3 id="added_9">Added<a class="headerlink" href="#added_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Ordered navigation on <code>StringIndex</code></strong> — <code>successor(query)</code> (smallest key <code>&gt;=</code> query) and
+  <code>predecessor(query)</code> (largest key <code>&lt;=</code> query), each <code>O(query length)</code> by seeking the FST (no scan),
+  plus <strong>lazy iteration</strong>: <code>for key, id in index</code> in Rust <code>StringIndex::iter()</code> decodes one key per step
+  by the rank-walk, so it never materialises the whole key set the way <code>prefix("")</code> would.</li>
+<li><strong>Batched lookups</strong> — <code>ids_of(keys)</code> and <code>keys_of(ids)</code> on <code>StringIndex</code> and <code>PerfectHashIndex</code>, plus
+  <code>ids_of(keys)</code> on <code>CompactHashIndex</code>. Each loops in Rust and crosses the Python↔Rust boundary once
+  instead of per key, so a bulk <code>string → id</code> / <code>id → string</code> mapping avoids the per-call FFI overhead.
+  Returns a list aligned with the input, <code>None</code> where a key/id is absent. Named <code>ids_of</code>/<code>keys_of</code> (not
+  <code>keys</code>) so a class is never mistaken for a mapping — <code>dict(index)</code> builds <code>{key: id}</code> from the
+  iterator instead.</li>
+<li><strong><code>musllinux_1_2</code> wheels</strong> (x86_64 + aarch64) for Alpine / musl-based containers, alongside the
+  existing manylinux, macOS, and Windows wheels.</li>
+<li><strong>Scale benchmark</strong> (<code>bench/scale.py</code>) measuring build time, peak memory, and lookup latency from 1M
+  to 100M real keys.</li>
+</ul>
+<h3 id="fixed_7">Fixed<a class="headerlink" href="#fixed_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>CompactHashIndex::from_bytes</code> guards the fingerprint-table length check with a checked multiply, so a
+  corrupt blob with a fabricated huge <code>n</code> fails cleanly instead of overflowing <code>usize</code> (a debug-build
+  panic; release builds already wrapped to a clean error). Documented the trust boundary shared by both
+  minimal-perfect-hash blobs: <code>from_bytes</code> / <code>load</code> validate the lexindex framing but deserialise the
+  embedded MPH via <code>epserde</code>, which does not bound-check a corrupted MPH region — feed only blobs you
+  produced (the same contract as <code>load_mmap</code>). <code>StringIndex</code> blobs are fully validated and unaffected.</li>
+</ul>
+<h3 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Property-based tests</strong> (<code>proptest</code>, dev-dependency only): the rank-walk <code>id ↔ key</code> round-trip over
+  random prefix-nested and multibyte key sets; the <code>PerfectHashIndex</code> bijection onto <code>[0, n)</code>;
+  <code>CompactHashIndex</code> never false-negatives a member; and every <code>from_bytes</code> deserialiser rejects
+  arbitrary or (for lexindex-owned bytes) single-byte-flipped input cleanly — never panics or reads out
+  of bounds. Line coverage rose to 97.0%.</li>
+</ul>
+<h2 id="030-2026-07-05">[0.3.0] — 2026-07-05<a class="headerlink" href="#030-2026-07-05" title="Permanent link">&para;</a></h2>
+<h3 id="added_10">Added<a class="headerlink" href="#added_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>CompactHashIndex</code> — the smallest <code>string → dense id</code> map, and smaller than any installable
+  alternative.</strong> A minimal perfect hash (<a href="https://crates.io/crates/ptr_hash"><code>ptr_hash</code></a>) plus a
+  <code>k</code>-byte fingerprint per key, storing <strong>no keys at all</strong>. On the real <code>/usr/share/dict/words</code>
+  (479 823 words) it serialises to <strong>1.30 bytes/key</strong> at <code>fingerprint_bytes=1</code> and <strong>2.30</strong> at <code>2</code> —
+  <strong>2.3× smaller than <code>marisa-trie</code> (2.98)</strong> and far below every trie benchmarked. The trade-offs are
+  explicit: membership is <strong>probabilistic</strong> (a non-member reads as present with probability
+  <code>256^-fingerprint_bytes</code> — measured 0.36 % at 1 byte, 0.001 % at 2) and there is <strong>no reverse
+  <code>id → key</code></strong> (the keys are not stored). Reach for it when a fixed vocabulary's footprint is paramount
+  and rare false positives are acceptable; use <code>PerfectHashIndex</code> for exact membership + reverse, or
+  <code>StringIndex</code> for ordered/fuzzy queries. Exposed to Python as
+  <code>CompactHashIndex(items, fingerprint_bytes=1)</code> with <code>id</code> / <code>id_unchecked</code> / <code>contains</code> / <code>to_bytes</code> /
+  <code>from_bytes</code> / <code>save</code> / <code>load</code> / <code>load_mmap</code>; in Rust behind the default <code>mph</code> feature.</li>
+</ul>
+<h3 id="changed_11">Changed<a class="headerlink" href="#changed_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>StringIndex</code> dropped its stored reverse map — <code>id → key</code> is now reconstructed from the FST by a
+  rank-walk.</strong> Each id is the key's rank, i.e. the FST's output, so <code>key(id)</code> walks the automaton from
+  the root, at each node taking the last transition whose accumulated output stays <code>≤ id</code>, and returns
+  the path once the outputs sum to exactly <code>id</code> (<code>O(key length)</code>, no auxiliary structure). This
+  <strong>deletes the front-coded reverse dictionary</strong> added in 0.2.0: the serialised blob is now just
+  <code>[magic][fst]</code>. The effect on real-world size is large — on <code>/usr/share/dict/words</code> the <code>StringIndex</code>
+  blob shrinks from <strong>12.61 to 5.95 bytes/key (−53 %)</strong>, because 0.2.0's front-coded map only reached
+  its advertised "~6 B/key" on <em>structured</em> keys that share long prefixes, not on a natural vocabulary.
+  Full prefix / range / fuzzy / subsequence are retained.</li>
+<li><strong>Breaking:</strong> the on-disk blob magic is now <code>BIX4</code>; <code>StringIndex</code> blobs written by 0.1.x / 0.2.0
+    must be rebuilt. <code>PerfectHashIndex</code> blobs are unchanged.</li>
+<li><strong>Benchmarks are now measured on real English words</strong>, not a synthetic <code>entity-{i}</code> catalog.
+  Sequential structured keys collapse the FST to a near-regular automaton and report a misleading ~0
+  bytes/key; <code>bench/compare.py</code> refuses synthetic keys and compares <code>size</code> and <code>build</code> against
+  <code>marisa-trie</code>, DAWG and datrie on <code>/usr/share/dict/words</code>.</li>
+</ul>
+<h2 id="020-2026-07-05">[0.2.0] — 2026-07-05<a class="headerlink" href="#020-2026-07-05" title="Permanent link">&para;</a></h2>
+<h3 id="added_11">Added<a class="headerlink" href="#added_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Zero-copy <code>load_mmap</code></strong> on <code>StringIndex</code> and <code>PerfectHashIndex</code> (new default <code>mmap</code> feature, backed
+  by <code>memmap2</code>): memory-map a saved blob and borrow the index from the mapped pages instead of reading
+  it into RAM, so a multi-gigabyte index loads instantly and its pages are shared across processes.
+  <code>StringIndex</code> maps the whole blob (FST + front-coded dictionary); <code>PerfectHashIndex</code> maps the key
+  arena (the bulk) and reads only the small MPH into memory. Exposed to Python as
+  <code>StringIndex.load_mmap</code> / <code>PerfectHashIndex.load_mmap</code>. Reads are byte-wise (no alignment
+  requirement); the mapped file must stay immutable while an index borrows it. <code>--no-default-features</code>
+  (the <code>fst</code>-only build) omits it.</li>
+<li><strong>MkDocs documentation site</strong> at <a href="https://ilgrad.github.io/lexindex/">https://ilgrad.github.io/lexindex/</a> (Material + mkdocstrings API
+  reference), and a <code>mmap_zero_copy</code> example that times the owned <code>load</code> against the zero-copy
+  <code>load_mmap</code>.</li>
+<li>CI now enforces a <strong>95% line-coverage floor</strong> (<code>cargo llvm-cov</code>) on the Rust core.</li>
+</ul>
+<h3 id="changed_12">Changed<a class="headerlink" href="#changed_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>StringIndex</code>'s reverse map (<code>id → key</code>) is now a front-coded string dictionary</strong> instead of a flat
+  arena of raw bytes + one 8-byte offset per key. Because ids are the sorted rank, keys are stored
+  sorted and delta-encoded against their bucket predecessor (<code>(shared-prefix length, suffix)</code>, one
+  pointer per 8-key bucket), so on a structured sorted catalog the serialised <code>StringIndex</code> blob shrinks
+  from <strong>~27 to ~6 bytes/key — below the raw key bytes</strong>. <code>PerfectHashIndex</code> (unordered MPH slots, which
+  cannot share prefixes) keeps the flat arena and is unchanged.</li>
+<li><strong>Breaking:</strong> <code>StringIndex::key(id)</code> now returns <code>Option&lt;String&gt;</code> (reconstructed on the fly) rather
+    than <code>Option&lt;&amp;str&gt;</code>; the Python <code>StringIndex.key</code> is unaffected (still returns <code>str | None</code>).</li>
+<li><strong>Breaking:</strong> the on-disk blob magic is now <code>BIX2</code>; <code>StringIndex</code> blobs written by 0.1.0 must be
+    rebuilt (<code>PerfectHashIndex</code> blobs are unchanged).</li>
+</ul>
+<h2 id="010-2026-06-28">[0.1.0] — 2026-06-28<a class="headerlink" href="#010-2026-06-28" title="Permanent link">&para;</a></h2>
+<p>First public release — compact, immutable string&lt;-&gt;id indexes for huge catalogs; a standalone Rust +
+Python library that also pairs with <code>betula-cluster</code> (map string ids to cluster ids and back).</p>
+<h3 id="added_12">Added<a class="headerlink" href="#added_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>StringIndex</code></strong> — ordered, FST-backed index: exact <code>string &lt;-&gt; id</code>, plus prefix, range, fuzzy
+  (bounded Levenshtein edit distance), and subsequence iteration — all automaton-driven over the FST,
+  never a full scan. Serialises to a flat, relocatable blob (<code>save</code> / <code>load</code> / <code>to_bytes</code> /
+  <code>from_bytes</code>) with fully length- and offset-validated parsing (safe on untrusted input).</li>
+<li><strong><code>PerfectHashIndex</code></strong> — minimal-perfect-hash dictionary (<code>ptr_hash</code>): verified-membership <code>id</code>,
+  a faster <code>id_unchecked</code> for closed vocabularies (~1.25× faster than <code>std::HashMap</code> on point lookup),
+  reverse lookup, and persistence (<code>save</code> / <code>load</code>) via <code>epserde</code>, keyed on a version-stable hash
+  (FNV-1a + splitmix64) so a serialised MPH reloads and queries identically on any build.</li>
+<li><strong>Python bindings</strong> (PyO3 abi3 extension, CPython 3.11+): <code>pip install lexindex</code>, zero runtime
+  dependencies, typed (<code>py.typed</code> + stubs).</li>
+<li><strong>Feature gating</strong> — <code>mph</code> (default) provides <code>PerfectHashIndex</code> (pulls <code>ptr_hash</code> + <code>epserde</code>);
+  <code>--no-default-features</code> is an <code>fst</code>-only build, free of the informational RustSec advisories on the
+  <code>ptr_hash</code> dependency tree. <code>fst</code>'s <code>levenshtein</code> is always on for fuzzy search.</li>
+<li><strong>Benchmark</strong> — <code>cargo run --release --example bench</code> compares both indexes against
+  <code>std::HashMap</code> / <code>BTreeMap</code> (build time, lookup latency, serialised size).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT-licensed · a Rust core (FST + minimal perfect hash) with Python bindings
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

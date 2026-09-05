@@ -1,0 +1,866 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Compact, immutable string↔id indexes for huge catalogs — a Rust core with Python bindings">
+      
+      
+      
+        <link rel="canonical" href="https://ilgrad.github.io/lexindex/design/">
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Design - lexindex</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lexindex" class="md-header__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lexindex
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lexindex" class="md-nav__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lexindex
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#stringindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StringIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compacthashindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CompactHashIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#perfecthashindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PerfectHashIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zero-copy-load_mmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zero-copy load_mmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cargo-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cargo features
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#stringindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StringIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compacthashindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CompactHashIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#perfecthashindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PerfectHashIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zero-copy-load_mmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zero-copy load_mmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cargo-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cargo features
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h1>
+<p>lexindex is three build-once / query-many indexes over a set of strings, each a flat, relocatable blob.</p>
+<h2 id="stringindex"><code>StringIndex</code><a class="headerlink" href="#stringindex" title="Permanent link">&para;</a></h2>
+<p>Keys are sorted and deduplicated on build, and each key's id is its <strong>rank in sorted order</strong>, so ids
+are stable for the same key set. It is backed by a single structure — a <strong>finite-state transducer</strong>
+(<a href="https://crates.io/crates/fst"><code>fst</code></a>) — that serves <em>both</em> directions:</p>
+<ul>
+<li><strong><code>key → id</code>.</strong> The FST stores the sorted keys as a minimised automaton, sharing common prefixes
+  <em>and</em> suffixes, mapping each key to its rank (an output value). It drives prefix, range, fuzzy
+  (Levenshtein) and subsequence iteration by walking the automaton — there is no separate
+  materialised key list to scan. Prefix and range queries seek directly; a broad fuzzy or
+  subsequence pattern can still visit most of the automaton's nodes, so those are linear in the
+  index in the worst case, just with no second copy of the keys.</li>
+<li><strong><code>id → key</code>: a rank-walk, with no stored reverse map.</strong> Because a key's id equals the sum of the
+  output values along its accepting path, <code>key(id)</code> reconstructs the key directly from the FST: start at
+  the root with an accumulator of 0, and at each node take the <strong>last</strong> transition whose
+  <code>accumulator + transition output ≤ id</code> (transitions are ordered, so their output prefix-sums are
+  monotone); append that transition's byte, add its output, and descend. When a final state is reached
+  with <code>accumulator + final output == id</code>, the accumulated bytes are the key. This is <code>O(key length)</code>
+  and needs no auxiliary structure.</li>
+</ul>
+<p>Dropping the separate reverse dictionary (a front-coded map in 0.2.0) roughly halves the real-world
+blob — <code>/usr/share/dict/words</code> goes from <strong>12.6 to 5.95 bytes/key</strong> — because that map only reached its
+advertised size on structured keys that share long prefixes, not on a natural vocabulary. The
+serialised blob is now simply <code>[magic "BIX4"][fst bytes]</code>.</p>
+<h2 id="compacthashindex"><code>CompactHashIndex</code><a class="headerlink" href="#compacthashindex" title="Permanent link">&para;</a></h2>
+<p>The smallest <code>string → dense id</code> map, and smaller than any installable trie. It pairs a minimal
+perfect hash with <strong>one small fingerprint per key and no stored keys at all</strong>:</p>
+<ul>
+<li><strong><code>key → id</code>.</strong> The MPH (<a href="https://crates.io/crates/ptr_hash"><code>ptr_hash</code></a>) maps the key's
+  version-stable 64-bit hash to a slot in <code>[0, n)</code>. That slot <em>is</em> the id — but an MPH returns a slot
+  for any input, so a membership check is needed.</li>
+<li><strong>membership: a <code>b</code>-bit fingerprint.</strong> Each slot stores a <code>fingerprint_bits</code>-wide fingerprint
+  computed from a <strong>second</strong> hash of the key, with a different basis and multiplier. <code>id(key)</code> accepts
+  the slot only if the query's fingerprint matches the stored one. The two hashes are uncorrelated for
+  well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
+  fingerprint about <code>2^-fingerprint_bits</code> — the tunable false-positive rate — ≈<code>2^-8k</code> by design:
+  0.390 625 % at 1 byte, 0.001 526 % at 2.
+  That is a <em>design</em> rate, not a guarantee against an adversary: both hashes are deterministic and
+  unseeded, so anyone who can choose the queries can search for a false positive offline. Verified
+  statistically on the 0.5.0 code, dictionary members with two non-member populations: 2 M random
+  strings measured 0.384 % (z = −1.5 against theory) and 33/2 M at 2 bytes (z = +0.5); 50 000
+  held-out <em>real words</em> measured 0.310 % (z = −2.9) — at or slightly below theory in every case,
+  so the advertised rate is a ceiling in practice, not an average that can be exceeded. The
+  sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
+  measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).</li>
+</ul>
+<p>Because the keys themselves are never stored, size is just the MPH (~0.27 B/key — PtrHash is ≈2.2
+bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
+rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly <code>fingerprint_bits/8</code> B/key: <strong>0.77 B/key at 4 bits
+(6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)</strong> on real words — below <code>marisa-trie</code>'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+<code>id → key</code>. The serialised blob is <code>[magic "BCH5"][n][fp_bits][overflow_cap][mph length][side_len]
+[payload][check][mph epserde bytes][bit-packed fingerprints][side]</code> (<code>ceil(m·b/8)</code> bytes, fingerprint
+<em>i</em> at bits <code>[i·b, (i+1)·b)</code>, little-endian, where <code>m</code> = <code>n</code> minus the side-table entries), with a
+32-bit check over the lexindex header — <code>overflow_cap</code> bounds an otherwise unchecked read, so it is
+not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
+payload, verified on owned loads. The build <strong>streams</strong>: one pass keeps a <code>(hash, second hash)</code> pair
+— 16 bytes — per key and never the strings, so build memory does not grow with key length. The pairs
+dominate the peak without being all of it: the perfect hash is built from a plain array of the
+representatives' hashes, lifted out of the pairs together with their truncated fingerprints before
+the pairs are dropped. Measured on 2 M real-word bigrams (<code>cargo run --release --example peak --
+compact</code>), the high-water mark on top of whatever holds the keys is <strong>30.9 bytes per key</strong> at the
+8-bit default, 33.0 at 16 bits and 34.9 at 32 — the width shows up in the peak because the
+fingerprints are staged truncated, so a wider one is wider everywhere. (<code>peak.rs</code> resets <code>VmHWM</code>
+after the key list is built; without that reset the transient of loading the corpus stays in the
+mark and the build appears 11 MB cheaper than it is, which is how the 0.10.0 figures were taken.)
+Keys that collide in the 64-bit hash get tail ids in a side table (see
+<code>PerfectHashIndex</code> below) holding the <strong>full 64-bit second hash</strong> — not the table's truncated width —
+so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
+runs <em>before</em> the fingerprint table (a side key's truncated bits may tie its representative's). The
+one silent case left is a pair colliding in <em>both</em> 64-bit hashes at once (<code>≈ 2^-128</code> per pair), which
+is indistinguishable from a duplicate key by construction and collapses into one entry. 0.7 blobs
+(<code>BCH3</code>) still load, as does a collision-free 0.8.0 <code>BCH4</code> (bit-identical to v5); a <code>BCH4</code> <em>with</em> a
+side table stored truncated side fingerprints and is refused with a rebuild message. 0.5/0.6 blobs
+(<code>BCH1</code>/<code>BCH2</code>) are refused; see below. On load, side-table ids are structurally required to be
+exactly the tail range <code>[m, n)</code> — the checksums vouch for transport, not construction.</p>
+<p><strong>ptr_hash construction is not deterministic, so a blob is not a reproducible artefact.</strong> Two
+<code>PerfectHashIndex::build</code> calls over the same key set, in one process, serialise to <em>different</em>
+bytes — the pilots differ. The index is equally correct either way and every key answers, but the
+ids a key gets are not stable across builds, so a blob cannot be checksummed against a rebuild and
+two nodes building the same corpus will not agree on ids. Anything that needs stable ids must build
+once and distribute the blob. This is why <code>PerfectHashIndex::build_to_file</code> is tested against the
+in-memory index by behaviour — every key present, ids a permutation of <code>[0, n)</code>, non-members
+rejected — and not byte for byte: byte-identity is not a property <code>build</code> itself has.</p>
+<p><strong>ptr_hash's load factor is not exposed, and that is a measurement, not an omission.</strong> <code>alpha</code> sets
+the slot count to <code>n / alpha</code>; the natural expectation is that lowering it trades size for an easier
+build. It does at 1 M — 0.90 gives a 16 % cheaper build for a 12 % larger index — and the trade
+<em>inverts</em> by 10 M, where every setting below the default is both bigger and slower (0.93: 1.37 B/key
+in 10.6 s against 0.99's 1.27 in 6.8 s) and 0.90 does not construct at all, aborting on a 197-key
+bucket against a λ of 3.9. <code>default_compact()</code> ships alpha, λ and the cubic-eps bucket function as
+one tuned triple, so alpha is not independently movable; a knob whose only reachable settings are
+worse is not worth the API surface. Measured on word bigrams at 1 M and 10 M for both MPH indexes.
+<code>fingerprint_bits</code> is the knob that <em>does</em> have a monotone trade, and it is public.</p>
+<p><strong>The <code>overflow_cap</code> field guards ptr_hash's unchecked remap.</strong> ptr_hash's minimal <code>index()</code> remaps
+raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
+member-occupied one, and reads it <em>unchecked</em> (<code>cacheline-ef</code>'s <code>index_unchecked</code>). A non-member
+whose raw slot lands in the trailing free zone therefore indexes out of bounds — a debug assertion
+at best, undefined behaviour in release. The cap recorded at build time is the remap's exact length
+(the largest member <code>raw − n</code>, plus one, measured by streaming every member through
+<code>index_no_remap</code>), and queries answer <code>None</code> outright for raw slots past it: those slots are
+provably free, so no member can live there. Every query path is bounded by it, <code>id_unchecked</code>
+included: that method skips the membership <em>comparison</em>, not the bounds.</p>
+<p>Blobs written before the cap existed cannot be loaded as they are, since that would reinstate the
+defect. <code>PerfectHashIndex</code> does not trust <em>any</em> stored cap — its arena holds every key, so the cap is
+recomputed exactly on every load (O(m) hashes, paid once; the v4 format does not even carry the
+field). <code>CompactHashIndex</code> stores no keys and has nothing to recompute from, so its checked header
+cap is trusted and a <code>BCH1</code>/<code>BCH2</code> blob (which predates the field) is refused with a message naming
+the fix. Soundness outranks compatibility with a two-day-old format.</p>
+<h2 id="perfecthashindex"><code>PerfectHashIndex</code><a class="headerlink" href="#perfecthashindex" title="Permanent link">&para;</a></h2>
+<p>A minimal perfect hash maps a <em>fixed</em> set of <code>n</code> distinct strings to distinct slots <code>[0, n)</code> with no
+gaps and near-<code>O(1)</code> lookup in tiny space. lexindex builds the MPH with
+<a href="https://crates.io/crates/ptr_hash"><code>ptr_hash</code></a>, keyed on a <strong>version-stable</strong> 64-bit hash of each
+string (FNV-1a + a splitmix64 finalizer — not <code>std</code>'s <code>DefaultHasher</code>, which is not guaranteed stable
+and so cannot back a <em>serialised</em> MPH). A flat <code>slot → key</code> arena doubles as the membership check: an
+MPH returns a slot for <em>any</em> input, so a query is a hit only if the stored key at that slot equals the
+query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
+deterministic and unseeded (that is what makes the serialised MPH reloadable), so a retry could never
+help — instead the MPH is built over one representative per distinct hash value and the colliding
+leftovers get tail ids <code>[m, n)</code> served from a <strong>side table</strong> (<code>(hash, id)</code> pairs, sorted), consulted
+only after the stored-key comparison has already missed. Members are still answered exactly — the
+side probe compares stored keys — and an index without collisions skips the probe with one
+predictable branch, so the hot path pays nothing. The birthday bound <code>n(n-1)/2^65</code> says how often the
+table is even non-empty (computed exactly, Maxima and PARI/GP agreeing): <strong>6.2×10⁻⁹</strong> for the
+479 823-word dictionary, <strong>2.7×10⁻⁸</strong> at 1 M keys, <strong>2.7×10⁻⁶</strong> at 10 M, <strong>2.7×10⁻⁴</strong> (1 in ~3 700)
+at 100 M, and <strong>~2.7%</strong> at 1 G — almost always empty, and no longer a failure mode at any scale.
+<code>CompactHashIndex</code> resolves collisions the same way, with the fingerprint standing in for the stored
+key in the side probe.</p>
+<p><code>id_unchecked</code> skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
+where membership is already guaranteed. The serialised blob is <code>[magic "BMP4"][n][mph length]
+[side_len][payload][check][mph epserde bytes][arena bytes][side]</code> — the payload hash covers
+everything after the header and is verified on owned loads; <code>overflow_cap</code> is not stored at all,
+because every load recomputes it from the arena (<code>BMP2</code>/<code>BMP3</code> blobs from 0.5–0.7 load the same way).
+The arena is <code>[n+1][offset width][offsets][data]</code>. Offsets are
+4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
+(8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
+whole structure to 13.60 B/key.</p>
+<p><code>PerfectHashIndex</code> stores full keys (exact membership + <code>id → key</code>) where <code>CompactHashIndex</code> stores only
+a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
+between them is purely a size-vs-exactness trade, not a different lookup path.</p>
+<p><strong>Ids are not reproducible across builds.</strong> The key <em>hash</em> is version-stable, but <code>ptr_hash</code>'s
+construction is randomised, so building the same key set twice assigns different slots — measured on
+50 000 keys, ~53 % kept their id. <code>save</code>/<code>load</code> of one built index is exact (the blob carries the
+MPH itself), so an id written down anywhere outside the index must be paired with the blob that
+produced it, never with the key list. <code>StringIndex</code> has no such caveat: its ids are the sorted rank.</p>
+<p><strong>Blob portability.</strong> The MPH region is <code>epserde</code>, which stores an in-memory layout: a blob moves
+between machines of the same endianness and pointer width (every published wheel and CI target is
+64-bit little-endian), not to a big-endian target. <code>StringIndex</code>'s blob is the <code>fst</code>, whose encoding
+is little-endian by specification and byte-portable.</p>
+<h2 id="zero-copy-load_mmap">Zero-copy <code>load_mmap</code><a class="headerlink" href="#zero-copy-load_mmap" title="Permanent link">&para;</a></h2>
+<p>All three indexes load two ways. <code>load</code> reads the whole blob into memory; <code>load_mmap</code> memory-maps the
+file and <strong>borrows</strong> the index from the mapped pages — no read, no copy — so load time is independent of
+the index size and the OS shares the pages across processes.</p>
+<p>The mechanism is a single <code>SharedBytes</code> byte source: an owned <code>Arc&lt;[u8]&gt;</code> <strong>or</strong> an <code>Arc&lt;memmap2::Mmap&gt;</code>,
+exposed as <code>AsRef&lt;[u8]&gt;</code> and <code>'static</code>. It backs the FST (<code>Map&lt;SharedBytes&gt;</code>), the fingerprint table and
+the key arena, so <code>from_bytes</code> (owned) and <code>load_mmap</code> (mapped) share one code path with no
+self-referential borrow and no <code>unsafe</code> beyond the single <code>Mmap::map</code>. Every field is read byte-wise
+(<code>u64::from_le_bytes</code>, varints), so there is no alignment requirement — for <code>PerfectHashIndex</code> and
+<code>CompactHashIndex</code>, <code>load_mmap</code> borrows the arena / fingerprint table (the bulk of the blob) zero-copy
+and reads only the small MPH structure into memory, sidestepping the deserialiser's alignment concern entirely.</p>
+<p>The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
+it. That obligation is the caller's, so <code>load_mmap</code> is an <strong><code>unsafe fn</code></strong> on all three indexes —
+<code>memmap2::Mmap::map</code> is <code>unsafe</code> for precisely this reason, and wrapping it in a safe function would
+hide a precondition that a perfectly ordinary safe program (another handle writing to the same path)
+can violate.</p>
+<p>The load-time trust boundary is worth stating precisely. Against <strong>accidental</strong> corruption — a
+truncated download, a flipped byte, a lost header field — every owned <code>load</code>/<code>from_bytes</code> fails
+cleanly: <code>StringIndex</code> verifies the FST's stored checksum and spot-checks that its values are the
+sorted ranks (first value 0, rank-walk to <code>n - 1</code>), and the perfect-hash indexes verify a
+streaming hash of their whole payload plus a check over the header's framing fields, so a corrupted
+blob of any of the three is rejected rather than read. Against a <strong>deliberately crafted</strong> blob the
+perfect-hash indexes remain <em>trust-your-own-blob</em>: every checksum involved is public and
+deterministic (an attacker can recompute them), and the embedded minimal-perfect-hash is an <code>epserde</code>
+region that <code>ptr_hash</code> reads <strong>unchecked</strong>, so a crafted payload can steer an out-of-bounds read no
+checksum can catch. What narrows that: <code>overflow_cap</code> — the bound on the one otherwise-unchecked
+remap read — is <strong>recomputed from the arena on every <code>PerfectHashIndex</code> load</strong>, never trusted from
+any header, and side-table ids are structurally required to be exactly the tail range <code>[m, n)</code> on
+every load, so no blob can hand <code>id()</code> a value at or past <code>len()</code>. <code>CompactHashIndex</code> stores no keys
+to recompute from, so its cap is trusted from the checked header. <code>StringIndex</code> sits differently: the
+FST checksum catches accidental corruption, and <code>fst</code> documents that even invalid input cannot
+violate memory safety — a crafted, re-checksummed FST can at worst panic or answer wrongly, never
+read out of bounds. That is measured, not assumed: a libFuzzer target over <code>from_bytes</code> produced 44
+such bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. The
+<code>from_bytes</code> docstring used to promise the checksum ruled that out; it no longer does.
+<code>load_mmap</code> skips every checksum scan by design, trusting the mapped file
+outright to keep mapping time independent of blob size.</p>
+<p>That asymmetry is what decides the signatures. A function must be an <code>unsafe fn</code> when some input
+makes it unsound, and <code>from_bytes(&amp;[u8])</code> accepts every byte string there is — so on the two
+perfect-hash indexes <code>from_bytes</code> and <code>load</code> are <strong><code>unsafe fn</code></strong> alongside <code>load_mmap</code>. This is not a
+gap waiting to be closed by more validation: <code>ptr_hash</code> reads its pilot table unchecked, and the
+fields that would bound that read (<code>parts</code>, <code>buckets</code>, the fast-modulo constants) are private, so a
+downstream crate cannot check them at any price. Upstream reached the same conclusion independently —
+<code>epserde</code> 0.13 made <code>deserialize_full</code> an <code>unsafe fn</code>, and PtrHash declined a checked <code>try_index()</code>
+for exactly this reason. <code>StringIndex</code> keeps safe <code>from_bytes</code>/<code>load</code>: <code>fst</code> validates its own
+structure and documents that invalid input cannot violate memory safety.</p>
+<h2 id="cargo-features">Cargo features<a class="headerlink" href="#cargo-features" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>mph</code> (default) — <code>PerfectHashIndex</code> and <code>CompactHashIndex</code> (pulls <code>ptr_hash</code> + <code>epserde</code>).</li>
+<li><code>mmap</code> (default) — the zero-copy <code>load_mmap</code> path (pulls <code>memmap2</code>).</li>
+<li><code>python</code> — the PyO3 abi3 extension module.</li>
+<li><code>--no-default-features</code> — an <code>fst</code>-only build: <code>StringIndex</code> with prefix/range/fuzzy/subsequence and
+  owned <code>save</code>/<code>load</code>, depending on nothing but <code>fst</code>. It is also free of the informational RustSec
+  advisories (unmaintained / unsound) that <code>ptr_hash</code>'s transitive dependency tree currently carries —
+  <code>cargo audit</code> reports those as warnings, not vulnerabilities.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT-licensed · a Rust core (FST + minimal perfect hash) with Python bindings
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
