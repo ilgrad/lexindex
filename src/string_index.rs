@@ -54,6 +54,13 @@ impl StringIndex {
     /// which for UTF-8 is the same as `str`'s `Ord` — a list sorted by a locale collation is not
     /// sorted for this purpose.
     ///
+    /// One trap is worth naming because it is the natural use of this method: **keys composed from
+    /// sorted parts are not themselves sorted** unless the separator is below every byte that can
+    /// follow a part. Joining a sorted word list to itself with `.` produces `'tween-decks.&c`
+    /// before `'tween.ARU`, because `-` (0x2D) is below `.` (0x2E) — walking the pairs in
+    /// component order then hands this method a descending pair. A separator below every byte in
+    /// the components (`\0` always qualifies) makes the composition order-preserving.
+    ///
     /// ```
     /// use lexindex::StringIndex;
     /// let idx = StringIndex::build_sorted(["apple", "apricot", "apricot", "banana"]).unwrap();
