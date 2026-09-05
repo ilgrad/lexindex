@@ -1,5 +1,6 @@
 """End-to-end tests of the lexindex Python bindings."""
 
+import itertools
 import random
 import time
 
@@ -255,6 +256,25 @@ def test_string_index_iter():
     assert [k for k, _ in si] == ["apple", "apricot", "banana", "cherry"]
     assert dict(si)["banana"] == 2
     assert list(lexindex.StringIndex([])) == []
+
+
+def test_string_index_iter_crosses_the_refill_boundary():
+    # The iterator streams the transducer a chunk at a time and resumes from the last key it handed
+    # out, so the seam between chunks is the edge case: a key repeated or dropped there would be
+    # invisible on the four-key index above. 2 500 keys crosses it twice.
+    keys = [f"item-{i:05}" for i in range(2500)]
+    si = lexindex.StringIndex(keys)
+    assert list(si) == [(k, i) for i, k in enumerate(sorted(keys))]
+    # Still lazy: taking the first few must not walk the rest.
+    assert list(itertools.islice(iter(si), 3)) == [
+        ("item-00000", 0),
+        ("item-00001", 1),
+        ("item-00002", 2),
+    ]
+    # Exactly one chunk, and one key past it, are the off-by-one candidates.
+    for n in (1023, 1024, 1025, 2048, 2049):
+        assert len(lexindex.StringIndex(keys[:n]).__iter__().__next__()) == 2
+        assert len(list(lexindex.StringIndex(keys[:n]))) == n
 
 
 def test_version_is_exposed():

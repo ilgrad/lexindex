@@ -212,14 +212,15 @@ impl PyStringIndex {
         })
     }
 
-    /// Iterate every `(key, id)` in lexicographic (= id) order, **lazily** — one rank-walk per step, so
-    /// no giant list is materialised the way `prefix("")` would.
+    /// Iterate every `(key, id)` in lexicographic (= id) order, **lazily** — a chunk of the
+    /// transducer stream at a time, so no giant list is materialised the way `prefix("")` would.
     fn __iter__(slf: Bound<'_, Self>) -> StringIndexIterator {
-        let len = slf.borrow().inner.len() as u64;
+        let remaining = slf.borrow().inner.len() as u64;
         StringIndexIterator {
             parent: slf.unbind(),
-            pos: 0,
-            len,
+            buf: Vec::new().into_iter(),
+            resume: None,
+            remaining,
         }
     }
 
@@ -272,13 +273,51 @@ impl PyStringIndex {
     }
 }
 
+/// How many pairs one refill decodes. A `#[pyclass]` cannot hold an `fst` stream borrowing the
+/// index across `__next__` calls, so the alternative to buffering is a rank-walk per key — which is
+/// what this iterator used to do, at `O(key length)` each and no reuse between neighbours. One
+/// refill costs a single `O(key length)` seek and then streams, so the chunk size only has to be
+/// large enough to amortise that seek; 1024 pairs keeps the buffer well under a megabyte on any
+/// realistic key.
+const ITER_CHUNK: usize = 1024;
+
 /// Lazy `(key, id)` iterator over a [`PyStringIndex`], in sorted order. Holds a reference to the parent
-/// index and decodes one key per step by the rank-walk, so it never materialises the whole key set.
+/// index and streams it a chunk at a time, so it never materialises the whole key set.
 #[pyclass(name = "StringIndexIterator", module = "lexindex._core")]
 pub struct StringIndexIterator {
     parent: Py<PyStringIndex>,
-    pos: u64,
-    len: u64,
+    buf: std::vec::IntoIter<(String, u64)>,
+    /// Last key handed out, where the next refill resumes. `None` before the first one.
+    resume: Option<String>,
+    /// How many pairs may still be yielded — `len()` at the start, counted down by every refill.
+    ///
+    /// It is the termination proof, not an optimisation. The cursor is a `String`, so a key that is
+    /// not valid UTF-8 — only reachable from a blob that was crafted or corrupted, which
+    /// `from_bytes` does not promise to reject — comes back through `from_utf8_lossy` as a
+    /// *different* byte string, and seeking past a cursor that sorts below the key it names would
+    /// hand out that key again forever. Bounding the count turns that into a short answer, which is
+    /// the failure mode the loader already documents, instead of a hang.
+    remaining: u64,
+}
+
+impl StringIndexIterator {
+    /// Decode the next chunk, at most `remaining` pairs, and count them off.
+    fn refill(&mut self, py: Python<'_>) {
+        let want = ITER_CHUNK.min(self.remaining as usize);
+        let parent = self.parent.clone_ref(py);
+        let chunk: Vec<(String, u64)> = {
+            let idx = parent.borrow(py);
+            match &self.resume {
+                Some(after) => idx.inner.iter_after(after).take(want).collect(),
+                None => idx.inner.iter().take(want).collect(),
+            }
+        };
+        self.remaining -= chunk.len() as u64;
+        if let Some((last, _)) = chunk.last() {
+            self.resume = Some(last.clone());
+        }
+        self.buf = chunk.into_iter();
+    }
 }
 
 #[pymethods]
@@ -288,13 +327,21 @@ impl StringIndexIterator {
     }
 
     fn __next__(&mut self, py: Python<'_>) -> Option<(String, u64)> {
-        if self.pos >= self.len {
-            return None;
+        loop {
+            if let Some(item) = self.buf.next() {
+                return Some(item);
+            }
+            if self.remaining == 0 {
+                return None;
+            }
+            // Every trip either yields, or strictly decreases `remaining`, or stops here — the
+            // stream running dry before `len()` says it should is a malformed index, not a retry.
+            let before = self.remaining;
+            self.refill(py);
+            if self.remaining == before {
+                return None;
+            }
         }
-        let key = self.parent.borrow(py).inner.key(self.pos)?;
-        let item = (key, self.pos);
-        self.pos += 1;
-        Some(item)
     }
 }
 

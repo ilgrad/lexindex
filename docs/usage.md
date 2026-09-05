@@ -27,7 +27,8 @@ idx.subsequence("ae")    # [("apple", 0)]  — "a…e" in order, not necessarily
 # "character" above means a Unicode scalar value: no normalisation, case folding or grapheme
 # segmentation is applied — normalise before building and querying if you need it
 
-# lazy iteration in sorted (= id) order — decodes one key at a time, never builds a giant list
+# lazy iteration in sorted (= id) order — streams the transducer a chunk at a time, so it never
+# builds a giant list and never decodes a key twice
 list(idx)                # [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
 dict(idx)                # {"apple": 0, "apricot": 1, "banana": 2, "cherry": 3}
 

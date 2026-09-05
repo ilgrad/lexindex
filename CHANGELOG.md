@@ -24,6 +24,26 @@ All notable changes to this project are documented here. The format follows
   ranks, so any disagreement would renumber every key after the first difference. An input that is not
   ascending is refused by the transducer builder rather than producing an index that answers wrongly.
 
+- **`StringIndex.iter_after`** (Rust) — `iter()` resumed after a cursor key, which is the one range
+  the existing API could not express: `range_iter(lo, hi)` needs an upper bound and `prefix_iter("")`
+  cannot skip. It exists because the Python iterator needs it, and it is public because a caller
+  paginating a scan across requests needs exactly the same thing.
+
+### Changed
+
+- **`StringIndex.__iter__` (Python) streams the transducer instead of rank-walking every key** —
+  **2.9× faster** over 1 M real-word bigrams (635 → 221 ns/key, three rounds each; the control,
+  `id()` on the same index, held at 367 ns across both). It buffers 1 024 pairs per refill and resumes through
+  `iter_after`, because a `#[pyclass]` cannot hold a stream that borrows the index across `__next__`.
+
+  The plan asked for 10× and 2.9× is what the ceiling allows, which the measurement says rather than
+  the estimate that set the bar: on the Rust side the same walk is **569 → 97 ns/key (5.9×)**, and
+  the binding adds ~127 ns/key of CPython `str` and tuple construction that no iteration strategy
+  removes — `prefix("")`, which builds the whole list in one call with no per-item `__next__` at all,
+  costs *more* (399 ns/key) than the lazy iterator. So the rank-walk is gone entirely and what is
+  left is object construction. Setting the bar as a round multiple, without a measured floor, is the
+  same defect as the 2 GB bar in the entry above, from the other side.
+
 ### Fixed
 
 - **The 0.10.0 build-memory figures were measured against a masked baseline and are corrected here,

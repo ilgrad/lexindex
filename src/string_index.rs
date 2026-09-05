@@ -289,13 +289,35 @@ impl StringIndex {
             .and_then(|r| self.key(r).map(|k| (k, r)))
     }
 
-    /// All `(key, id)` pairs in lexicographic (= id) order, **lazily**: keys are decoded one at a time
-    /// by the rank-walk, so nothing is materialised up front. Prefer this to `prefix("")` when the index
-    /// is large. Each step is `O(key length)`.
+    /// All `(key, id)` pairs in lexicographic (= id) order, **lazily**: the transducer is streamed
+    /// once, so nothing is materialised up front and no key is decoded twice. Prefer this to
+    /// `prefix("")` when the index is large.
     pub fn iter(&self) -> impl Iterator<Item = (String, u64)> + '_ {
         // `fst` streams are `Streamer`, not `Iterator`; adapt one via `from_fn`, decoding to owned data
         // so no borrow of the stream escapes.
         let mut stream = self.map.stream();
+        std::iter::from_fn(move || {
+            stream
+                .next()
+                .map(|(k, v)| (String::from_utf8_lossy(k).into_owned(), v))
+        })
+    }
+
+    /// [`iter`](Self::iter) resumed **after** `after`, which is excluded even when it is in the
+    /// index — the cursor form: hand back the last key you processed and get the rest.
+    /// [`range_iter`](Self::range_iter) covers a bounded range; this is the one that runs to the
+    /// end. Seeking is `O(after.len())` and the stream then runs at full speed, so a scan split
+    /// into chunks pays one seek per chunk instead of a walk per key, which is what the Python
+    /// `__iter__` does (a `#[pyclass]` cannot hold a stream borrowing the index across `__next__`).
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let idx = StringIndex::build(["apple", "apricot", "banana"]).unwrap();
+    /// let rest: Vec<_> = idx.iter_after("apricot").collect();
+    /// assert_eq!(rest, [("banana".to_string(), 2)]);
+    /// ```
+    pub fn iter_after<'a>(&'a self, after: &'a str) -> impl Iterator<Item = (String, u64)> + 'a {
+        let mut stream = self.map.range().gt(after).into_stream();
         std::iter::from_fn(move || {
             stream
                 .next()
@@ -605,6 +627,51 @@ mod tests {
                 full[..n.min(full.len())]
             );
         }
+    }
+
+    #[test]
+    fn iter_after_resumes_a_scan_without_repeating_the_cursor() {
+        let keys: Vec<String> = (0..300).map(|i| format!("item-{i:04}")).collect();
+        let idx = StringIndex::build(&keys).unwrap();
+        let all = idx.iter().collect::<Vec<_>>();
+
+        // Chunking a scan through the cursor reproduces the whole sequence exactly once, which is
+        // the property the Python `__iter__` depends on: no key repeated at a chunk seam, none lost.
+        for chunk in [1usize, 7, 299, 300, 1000] {
+            let mut seen = Vec::new();
+            let mut resume: Option<String> = None;
+            loop {
+                let batch: Vec<_> = match &resume {
+                    Some(after) => idx.iter_after(after).take(chunk).collect(),
+                    None => idx.iter().take(chunk).collect(),
+                };
+                if batch.is_empty() {
+                    break;
+                }
+                resume = Some(batch[batch.len() - 1].0.clone());
+                seen.extend(batch);
+            }
+            assert_eq!(seen, all, "chunk size {chunk}");
+        }
+
+        // The cursor is exclusive whether or not it is a key, and a cursor past the end is empty.
+        assert_eq!(
+            idx.iter_after("item-0000").next(),
+            Some(("item-0001".into(), 1))
+        );
+        assert_eq!(
+            idx.iter_after("item-0000!").next(),
+            Some(("item-0001".into(), 1))
+        );
+        assert_eq!(idx.iter_after("").count(), 300);
+        assert_eq!(idx.iter_after("zzz").count(), 0);
+        assert_eq!(
+            StringIndex::build([] as [&str; 0])
+                .unwrap()
+                .iter_after("")
+                .count(),
+            0
+        );
     }
 
     #[test]
