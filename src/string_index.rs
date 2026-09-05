@@ -97,12 +97,34 @@ impl StringIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        Self::build_sorted_to_file_checked(items, path, || Ok(()))
+    }
+
+    /// [`build_sorted_to_file`](Self::build_sorted_to_file) with a last word from the caller,
+    /// asked **inside** the atomic write and before the rename that publishes the file.
+    ///
+    /// It exists for a source that cannot report failure through its `Iterator`: the Python binding
+    /// adapts an arbitrary iterable, and an iterable that raises halfway simply stops. Without this
+    /// hook the builder would see a stream that ended, finish a truncated index and rename it over
+    /// whatever was at `path`, and the error would arrive after the damage. Returning `Err` here
+    /// aborts the write with the temporary file removed and the target untouched.
+    pub(crate) fn build_sorted_to_file_checked<I, S, C>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnOnce() -> Result<(), IndexError>,
+    {
         let mut n = 0;
         crate::blob::write_atomically_with(path.as_ref(), |w| {
             use std::io::Write;
             w.write_all(MAGIC)?;
             let mut builder = MapBuilder::new(&mut *w)?;
             n = Self::insert_sorted(&mut builder, items)?;
+            check()?;
             builder.finish()?;
             Ok(())
         })?;

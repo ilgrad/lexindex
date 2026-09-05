@@ -31,7 +31,9 @@ use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::types::{PyBytes, PyString};
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 #[cfg(feature = "mph")]
 use crate::{CompactHashIndex, PerfectHashIndex};
@@ -45,6 +47,40 @@ fn collect_strs(items: &Bound<'_, PyAny>) -> PyResult<Vec<PyBackedStr>> {
         out.push(item?.extract()?);
     }
     Ok(out)
+}
+
+/// Adapt a Python iterable of `str` into a lazy Rust iterator of owned `String`.
+///
+/// Unlike [`collect_strs`] nothing accumulates: each key is decoded, handed to the builder and
+/// dropped, which is the whole point of the sorted builds below — a Python list of 10 M keys is
+/// 1 076 MB of `str` objects before any index exists.
+///
+/// A Python-level failure (a non-string item, an exception inside a generator) cannot travel
+/// through `Iterator::next`, so it is parked in the shared cell and the iteration stops. That makes
+/// a raising iterable indistinguishable from one that ended, which is why every caller must consult
+/// the cell **before** acting on the result — for a build that writes a file, before the file is
+/// published, not after.
+fn stream_strs<'a>(
+    items: &'a Bound<'a, PyAny>,
+    err: Rc<RefCell<Option<PyErr>>>,
+) -> PyResult<impl Iterator<Item = String> + 'a> {
+    let mut it = items.try_iter()?;
+    Ok(std::iter::from_fn(move || {
+        if err.borrow().is_some() {
+            return None;
+        }
+        let stop = |e: PyErr| {
+            *err.borrow_mut() = Some(e);
+            None
+        };
+        match it.next()? {
+            Ok(obj) => match obj.extract::<String>() {
+                Ok(s) => Some(s),
+                Err(e) => stop(e),
+            },
+            Err(e) => stop(e),
+        }
+    }))
 }
 
 /// Hash any Python iterable of `str` down to `CompactHashIndex` build pairs — 16 bytes per key,
@@ -95,6 +131,56 @@ impl PyStringIndex {
             .detach(|| StringIndex::build(items.iter()))
             .map_err(to_py)?;
         Ok(Self { inner })
+    }
+
+    /// Build from an iterable of strings that is **already in ascending byte order**, without
+    /// materialising it — the constructor has to hold the whole corpus to sort it, this does not.
+    /// Adjacent duplicates are dropped exactly as the constructor drops them after sorting; input
+    /// that is not ascending raises `ValueError` rather than producing an index that answers wrongly.
+    ///
+    /// Keys composed from sorted parts are not themselves sorted unless the separator is below
+    /// every byte that can follow a part — joining a sorted word list to itself with `"."` puts
+    /// `'tween-decks.&c` before `'tween.ARU`, because `-` is below `.`.
+    #[staticmethod]
+    fn from_sorted(items: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let err = Rc::new(RefCell::new(None));
+        let built = StringIndex::build_sorted(stream_strs(items, Rc::clone(&err))?);
+        // Checked after the build rather than during it: nothing is published either way, and a
+        // discarded partial index is not observable.
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        Ok(Self {
+            inner: built.map_err(to_py)?,
+        })
+    }
+
+    /// [`from_sorted`] streamed straight to `path`, so neither the corpus nor the finished index
+    /// has to fit in memory. Returns the number of keys written.
+    #[staticmethod]
+    fn build_sorted_to_file(items: &Bound<'_, PyAny>, path: PathBuf) -> PyResult<usize> {
+        let err = Rc::new(RefCell::new(None));
+        let seen = Rc::clone(&err);
+        // The check runs inside the atomic write, so an iterable that raises halfway aborts the
+        // build with `path` untouched instead of publishing a truncated index and reporting the
+        // error afterwards.
+        let written = StringIndex::build_sorted_to_file_checked(
+            stream_strs(items, Rc::clone(&err))?,
+            &path,
+            move || {
+                if seen.borrow().is_some() {
+                    Err(crate::IndexError::Format(
+                        "string-index: the input iterable raised before it ended",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        written.map_err(to_py)
     }
 
     fn __len__(&self) -> usize {

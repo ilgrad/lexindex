@@ -13,6 +13,28 @@ class StringIndex:
     """Ordered string<->id index (FST) with prefix / range / fuzzy / subsequence queries."""
 
     def __new__(cls, items: Iterable[str]) -> StringIndex: ...
+    @staticmethod
+    def from_sorted(items: Iterable[str]) -> StringIndex:
+        """Build from keys already in ascending byte order, without materialising them.
+
+        The constructor has to hold the whole corpus to sort it; this consumes the iterable lazily,
+        so a generator over a large corpus never exists as a list. Adjacent duplicates are dropped
+        exactly as the constructor drops them after sorting, and input that is not ascending raises
+        `ValueError` rather than producing an index that answers wrongly.
+
+        Keys composed from sorted parts are not themselves sorted unless the separator is below
+        every byte that can follow a part: joining a sorted word list to itself with "." puts
+        "'tween-decks.&c" before "'tween.ARU", because "-" is below ".".
+        """
+
+    @staticmethod
+    def build_sorted_to_file(items: Iterable[str], path: str | os.PathLike[str]) -> int:
+        """`from_sorted` streamed straight to `path`; returns the number of keys written.
+
+        Neither the corpus nor the finished index has to fit in memory. If the iterable raises, the
+        build is abandoned with `path` untouched.
+        """
+
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...

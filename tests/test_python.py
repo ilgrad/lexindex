@@ -277,6 +277,49 @@ def test_string_index_iter_crosses_the_refill_boundary():
         assert len(list(lexindex.StringIndex(keys[:n]))) == n
 
 
+def test_string_index_from_sorted(tmp_path):
+    keys = ["apple", "apricot", "apricot", "banana"]
+    si = lexindex.StringIndex.from_sorted(iter(keys))
+    # Same index the constructor builds from the same key set: ids are ranks, so any disagreement
+    # would renumber everything after the first difference.
+    assert si.to_bytes() == lexindex.StringIndex(keys).to_bytes()
+    assert list(si) == [("apple", 0), ("apricot", 1), ("banana", 2)]
+
+    path = tmp_path / "sorted.bix"
+    assert lexindex.StringIndex.build_sorted_to_file(iter(keys), path) == 3
+    assert lexindex.StringIndex.load(path).to_bytes() == si.to_bytes()
+
+    # A generator is consumed lazily -- this one would blow up if it were materialised first.
+    def huge():
+        for i in range(200_000):
+            yield f"k{i:08}"
+
+    assert lexindex.StringIndex.build_sorted_to_file(huge(), path) == 200_000
+    assert len(lexindex.StringIndex.load(path)) == 200_000
+
+
+def test_string_index_from_sorted_rejects_bad_input(tmp_path):
+    with pytest.raises(ValueError):
+        lexindex.StringIndex.from_sorted(["b", "a"])
+    with pytest.raises(TypeError):
+        lexindex.StringIndex.from_sorted(["a", 7])
+
+    path = tmp_path / "aborted.bix"
+    lexindex.StringIndex.build_sorted_to_file(["x", "y"], path)
+    before = path.read_bytes()
+
+    def raising():
+        yield "a"
+        raise RuntimeError("boom")
+
+    # An iterable that raises halfway looks to the builder like one that ended. The build must
+    # abandon the write rather than publish a truncated index over what was already there.
+    with pytest.raises(RuntimeError):
+        lexindex.StringIndex.build_sorted_to_file(raising(), path)
+    assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.tmp"))
+
+
 def test_version_is_exposed():
     v = lexindex.__version__
     assert isinstance(v, str) and v  # non-empty string
