@@ -97,9 +97,9 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 
 ```toml
 [dependencies]
-lexindex = "0.10"
+lexindex = "0.11"
 # fst-only (drop the ptr_hash dependency):
-# lexindex = { version = "0.10", default-features = false }
+# lexindex = { version = "0.11", default-features = false }
 ```
 
 ## Usage
@@ -422,8 +422,9 @@ means anything, and the control's run-to-run spread was 9–10% against the 1.9%
 `HashMap` + FxHash came out at **196 / 200 ns**, `PerfectHashIndex::id_unchecked` at **216 / 216**
 and the SipHash `HashMap` at **341 / 347**. Against a fast-hashed map, in other words, lexindex's
 latency advantage is gone; what it still offers is the footprint and the serialisable,
-memory-mappable blob. (The table above stands for this version: 0.10 changed how the indexes are
-*built*, not a single byte of the blob or a single instruction of a lookup.)
+memory-mappable blob. (The table above still stands: 0.10 changed how the indexes are
+*built* and 0.11 added new build paths and a faster batched `ids_of`, but neither touched a byte of
+the blob or an instruction of the single-key lookups measured here.)
 
 **Two things the table above cannot show, both measured on 0.11 with an independent harness
 (`local/latency/`, one process, all forms alternated per round, min of 12):**
