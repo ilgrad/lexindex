@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from typing import final
+from typing import ClassVar, final
 
 __all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]
 
@@ -42,6 +42,21 @@ class StringIndex:
     def contains(self, key: str) -> bool: ...
     def key(self, id: int) -> str | None: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
+        """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
+
+        One 8-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
+        copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
+        """
+
+    ID_DTYPE: ClassVar[str]
+    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64 here); the width differs between
+    the index types, so read it from the class rather than hardcoding one."""
+
+    MISSING_ID: ClassVar[int]
+    """The :meth:`ids_of_bytes` item standing for an absent key."""
+
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def prefix(self, prefix: str, limit: int | None = None) -> list[tuple[str, int]]: ...
     def range(self, lo: str, hi: str, limit: int | None = None) -> list[tuple[str, int]]: ...
@@ -95,6 +110,21 @@ class PerfectHashIndex:
     def contains(self, key: str) -> bool: ...
     def key(self, id: int) -> str | None: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
+        """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
+
+        One 4-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
+        copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
+        """
+
+    ID_DTYPE: ClassVar[str]
+    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
+    the index types, so read it from the class rather than hardcoding one."""
+
+    MISSING_ID: ClassVar[int]
+    """The :meth:`ids_of_bytes` item standing for an absent key."""
+
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def to_bytes(self) -> bytes: ...
     def serialized_len(self) -> int: ...
@@ -144,6 +174,21 @@ class CompactHashIndex:
     def id_unchecked(self, key: str) -> int: ...
     def contains(self, key: str) -> bool: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
+        """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
+
+        One 4-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
+        copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
+        """
+
+    ID_DTYPE: ClassVar[str]
+    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
+    the index types, so read it from the class rather than hardcoding one."""
+
+    MISSING_ID: ClassVar[int]
+    """The :meth:`ids_of_bytes` item standing for an absent key."""
+
     def to_bytes(self) -> bytes: ...
     def serialized_len(self) -> int: ...
     @staticmethod

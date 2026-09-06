@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`ids_of_bytes` on all three Python index classes** — the batched `id` packed into a `bytes`
+  buffer instead of a list. `ids_of` has to build one Python `int` per key, which for a batch headed
+  straight into `numpy` is the whole cost; `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the
+  memory instead. One native-endian fixed-width item per key, aligned with the input, with the new
+  `MISSING_ID` class attribute where a key is absent — a buffer cannot carry `None`. `ID_DTYPE` and
+  `MISSING_ID` are class attributes rather than one module constant because the width differs
+  between the index types (`StringIndex` ids are 64-bit, the hash indexes' are 32-bit), so generic
+  code can read them off the class. On the one index size where the sentinel would be a real id —
+  exactly `u32::MAX + 1` keys — the method refuses instead of silently aliasing.
+
+  Returned as `bytes` rather than as a buffer-protocol `#[pyclass]`. Both work under `abi3-py311`
+  (`Py_bf_getbuffer` has been in the limited API since 3.11), so the choice is surface, not
+  portability: `bytes` adds no public class and no exported-buffer lifetime to get wrong, and it is
+  immutable, which is what an answer should be. What it costs is one `memcpy` of 4 bytes per key,
+  a small fraction of what a Python `int` per key costs. The ns/key figures are owed: the machine
+  was not quiet enough to publish them and they are queued with the rest of the measurement batch.
+
 - **`Overlay<I>`** — edits on top of any of the three indexes without rebuilding them. All three are
   immutable by construction: an FST and a minimal perfect hash are both built once from the whole key
   set, so adding one key has always meant rebuilding for the whole corpus. An overlay wraps a base

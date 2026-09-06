@@ -173,6 +173,26 @@ false-positive chance on a non-member, and it cannot map an id back to a string.
 fixed vocabulary's on-disk / mmap footprint dominates; use `PerfectHashIndex` when you need exact
 membership or `id → key`, or `StringIndex` when you need order or fuzzy/prefix.
 
+### Batched lookups into a buffer
+
+`ids_of` returns a list, which means one Python `int` per key. When the ids are headed for `numpy`
+or `array` rather than for a loop, `ids_of_bytes` skips that: it returns the same answers packed as
+native-endian fixed-width items, and `np.frombuffer` shares the memory instead of copying it.
+
+```python
+import numpy as np
+
+buf = idx.ids_of_bytes(probes)              # 4 bytes/key here, 8 for StringIndex
+ids = np.frombuffer(buf, dtype=idx.ID_DTYPE)
+found = ids[ids != idx.MISSING_ID]          # absent keys come back as MISSING_ID
+```
+
+`ID_DTYPE` and `MISSING_ID` are class attributes because the width differs between the index types
+(`StringIndex` ids are 64-bit, the hash indexes' are 32-bit) — read them from the class rather than
+hardcoding one. A buffer cannot carry `None`, so `MISSING_ID` stands in for an absent key; it is the
+largest value of the width, which is never a real id, and `ids_of_bytes` refuses outright on the one
+index size where it would be.
+
 ## Rust
 
 ```rust

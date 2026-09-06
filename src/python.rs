@@ -216,6 +216,36 @@ impl PyStringIndex {
         py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
+    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    ///
+    /// One `8`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
+    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
+    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    ///
+    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
+    /// it, not for the wire.
+    fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 8);
+            for k in &keys {
+                out.extend_from_slice(&self.inner.id(k).unwrap_or(u64::MAX).to_ne_bytes());
+            }
+            out
+        });
+        PyBytes::new(py, &packed)
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
+    /// buffer without hardcoding a width that differs between the index types.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint64";
+
+    /// The [`ids_of_bytes`](Self::ids_of_bytes) item standing for an absent key. Ids are ranks below
+    /// `len()`, and a `StringIndex` cannot hold `u64::MAX` keys, so the sentinel is never an id.
+    #[classattr]
+    const MISSING_ID: u64 = u64::MAX;
+
     /// Batched [`key`](Self::key): one call for many ids. Returns a list aligned with `ids`, `None`
     /// where an id is out of range.
     fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
@@ -536,6 +566,46 @@ impl PyPerfectHashIndex {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
+    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    ///
+    /// One `4`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
+    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
+    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    ///
+    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
+    /// it, not for the wire.
+    fn ids_of_bytes<'py>(
+        &self,
+        py: Python<'py>,
+        keys: Vec<PyBackedStr>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 4);
+            for id in self.inner.ids_of(&keys) {
+                out.extend_from_slice(&id.unwrap_or(u32::MAX).to_ne_bytes());
+            }
+            out
+        });
+        Ok(PyBytes::new(py, &packed))
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
+    /// buffer without hardcoding a width that differs between the index types.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint32";
+
+    /// The [`ids_of_bytes`](Self::ids_of_bytes) item standing for an absent key. Ids are below
+    /// `len()`, so this is a real id only for an index of exactly `u32::MAX + 1` keys, which
+    /// [`ids_of_bytes`](Self::ids_of_bytes) refuses rather than silently aliasing.
+    #[classattr]
+    const MISSING_ID: u32 = u32::MAX;
+
     /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
     fn keys_of<'py>(&self, py: Python<'py>, ids: Vec<u32>) -> Vec<Option<Bound<'py, PyString>>> {
         // Two passes on purpose: the lookups are pure Rust and run with the GIL released, then the
@@ -700,6 +770,46 @@ impl PyCompactHashIndex {
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
         py.detach(|| self.inner.ids_of(&keys))
     }
+
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
+    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    ///
+    /// One `4`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
+    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
+    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    ///
+    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
+    /// it, not for the wire.
+    fn ids_of_bytes<'py>(
+        &self,
+        py: Python<'py>,
+        keys: Vec<PyBackedStr>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 4);
+            for id in self.inner.ids_of(&keys) {
+                out.extend_from_slice(&id.unwrap_or(u32::MAX).to_ne_bytes());
+            }
+            out
+        });
+        Ok(PyBytes::new(py, &packed))
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
+    /// buffer without hardcoding a width that differs between the index types.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint32";
+
+    /// The [`ids_of_bytes`](Self::ids_of_bytes) item standing for an absent key. Ids are below
+    /// `len()`, so this is a real id only for an index of exactly `u32::MAX + 1` keys, which
+    /// [`ids_of_bytes`](Self::ids_of_bytes) refuses rather than silently aliasing.
+    #[classattr]
+    const MISSING_ID: u32 = u32::MAX;
 
     /// Serialise to a `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {

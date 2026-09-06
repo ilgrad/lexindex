@@ -2,6 +2,7 @@
 
 import itertools
 import random
+import sys
 import time
 
 import lexindex
@@ -507,3 +508,48 @@ def test_subsequence_matches_whole_characters():
     'é' is [C3 A9] and 'àΩ' is [C3 A0 CE A9]."""
     idx = lexindex.StringIndex(["\u00e0\u03a9", "caf\u00e9", "\u00e8\u00e9"])
     assert [k for k, _ in idx.subsequence("\u00e9")] == ["caf\u00e9", "\u00e8\u00e9"]
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lambda items: lexindex.CompactHashIndex(items, 4),
+    ],
+)
+def test_ids_of_bytes_matches_ids_of(ctor):
+    """The packed buffer carries the same answers as the list, with MISSING_ID for absent keys."""
+    words = ["alpha", "bravo", "charlie", "delta"]
+    idx = ctor(words)
+    probes = ["delta", "zulu", "alpha", "bravo"]
+    cls = type(idx)
+    width = 8 if cls.ID_DTYPE == "uint64" else 4
+    raw = idx.ids_of_bytes(probes)
+    assert len(raw) == len(probes) * width
+    unpacked = [
+        int.from_bytes(raw[i * width : (i + 1) * width], sys.byteorder) for i in range(len(probes))
+    ]
+    expected = [cls.MISSING_ID if i is None else i for i in idx.ids_of(probes)]
+    assert unpacked == expected
+    assert unpacked[1] == cls.MISSING_ID  # "zulu" was never a key
+
+
+def test_ids_of_bytes_is_empty_for_no_keys():
+    idx = lexindex.PerfectHashIndex(["alpha"])
+    assert idx.ids_of_bytes([]) == b""
+
+
+def test_ids_of_bytes_reads_zero_copy_through_numpy():
+    np = pytest.importorskip("numpy")
+    words = [f"w{i}" for i in range(1000)]
+    idx = lexindex.PerfectHashIndex(words)
+    probes = [*words[::3], "absent"]
+    buf = idx.ids_of_bytes(probes)
+    arr = np.frombuffer(buf, dtype=idx.ID_DTYPE)
+    assert arr.shape == (len(probes),)
+    assert arr[-1] == idx.MISSING_ID
+    present = arr[arr != idx.MISSING_ID]
+    assert present.tolist() == [idx.id(k) for k in probes if idx.id(k) is not None]
+    # `frombuffer` shares the bytes rather than copying them.
+    assert arr.base is buf
