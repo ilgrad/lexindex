@@ -173,6 +173,36 @@ false-positive chance on a non-member, and it cannot map an id back to a string.
 fixed vocabulary's on-disk / mmap footprint dominates; use `PerfectHashIndex` when you need exact
 membership or `id → key`, or `StringIndex` when you need order or fuzzy/prefix.
 
+## `Overlay` — edits without a rebuild
+
+All three indexes are built once from the whole key set, so adding a single key has always meant
+rebuilding for the whole corpus. An overlay wraps one with the keys added since and the ids retired
+from it. The base is shared, not copied: it stays usable, and several overlays can sit on one index.
+
+```python
+from lexindex import Overlay, PerfectHashIndex
+
+base = PerfectHashIndex.load_mmap("vocab.bmp")   # untouched by anything below
+ov = Overlay(base)
+new_id = ov.add("neologism")                     # ids continue above len(base)
+ov.remove("typo")                                # the id is retired, nothing is renumbered
+ov.save("vocab.ovl")
+
+back = Overlay.load("vocab.ovl", PerfectHashIndex)   # pass the base class, not an instance
+folded = back.compact()                              # rebuild the base; this renumbers
+```
+
+An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning until
+`compact()` — which is explicit for exactly that reason. `load` and `from_bytes` take the base class
+because each index loads itself; the blob records which base wrote it, so passing the wrong class is
+an error rather than an unchecked read of bytes meant for something else.
+
+`key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
+overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
+a compile error, since the methods live on a trait the keyless index cannot implement. Removal over
+that base also inherits its false-positive rate: a `contains` that was never true of a real key can
+retire an id, so remove by a key you know is present.
+
 ### Batched lookups into a buffer
 
 `ids_of` returns a list, which means one Python `int` per key. When the ids are headed for `numpy`
@@ -289,6 +319,10 @@ the overlay's lifetime; `compact()` is the one call that breaks that, and it is 
 that reason. Lookups cost one base lookup plus a bitset probe, and a miss in the base costs a hash
 map probe on top.
 
+The base may be shared: `OverlayBase` is implemented for `Arc<I>`, so `Overlay<Arc<StringIndex>>`
+leaves the index usable and lets several overlays sit on one base. That is what the Python bindings
+use.
+
 `from_bytes_with` takes the base's loader rather than picking one, because the bases do not agree on
 safety: `StringIndex::from_bytes` is safe, while the perfect-hash loaders are `unsafe fn`. A
 `PerfectHashIndex` base is loaded as `Overlay::from_bytes_with(&blob, |b| unsafe {
@@ -300,7 +334,9 @@ overlay over it answers membership and nothing else, and the absence is a compil
 runtime one. Removal over that base also inherits its false-positive rate: a `contains` that was
 never true of a real key can retire an id, so remove by a key you know is present.
 
-Overlays are Rust-only for now; the Python bindings do not expose them yet.
+The blob records which base wrote it, so `from_bytes_with` refuses a mismatch before calling the
+loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by
+mistake.
 
 ## Benchmark
 

@@ -41,12 +41,23 @@ All notable changes to this project are documented here. The format follows
   that base's false-positive rate — a `contains` that was never true of a real key can retire an id —
   which is documented on `remove` and is why the property test excludes it.
 
+  The base may be shared: `OverlayBase` is implemented for `Arc<I>`, so an overlay can wrap an index
+  the caller still holds and several overlays can sit on one base.
+
   `to_bytes`/`save` serialise the base blob, the additions and the tombstones together; `from_bytes_with`/
   `load_with` take the base's own loader as a closure. That is deliberate: `StringIndex::from_bytes`
   is safe while the perfect-hash loaders are `unsafe fn`, and a single generic loader would have had
   to be `unsafe` for all three to accommodate two of them. Neither `len` nor the live/dead split is
   stored — both are derived on load, so a blob cannot disagree with itself about how many keys it
-  holds — and a malformed blob is rejected with a named `Format` error rather than half-loaded.
+  holds — and a malformed blob is rejected with a named `Format` error rather than half-loaded. The
+  header records which base wrote the blob and the loader checks it *before* handing the bytes over,
+  so a perfect-hash loader is never pointed at bytes written by something else.
+
+  Exposed to Python as `lexindex.Overlay`, taking any of the three index classes. A `#[pyclass]`
+  cannot be generic, so the base is a runtime tag there and `key`/`keys`/`compact` raise `TypeError`
+  on a `CompactHashIndex` base where Rust refuses to compile. `Overlay.load(path, base)` and
+  `Overlay.from_bytes(data, base)` take the base *class*, since each index loads itself; the base
+  tag turns the wrong class into an error instead of an unchecked read.
 
 ## [0.11.0] — 2026-09-06
 

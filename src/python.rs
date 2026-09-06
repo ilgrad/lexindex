@@ -26,14 +26,15 @@
 //! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
 //! released with the GIL held.
 
-use crate::{IndexError, StringIndex};
-use pyo3::exceptions::{PyIOError, PyValueError};
+use crate::{IndexError, Overlay, StringIndex};
+use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyBytes, PyIterator, PyString};
+use pyo3::types::{PyBytes, PyIterator, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[cfg(feature = "mph")]
 use crate::{CompactHashIndex, PerfectHashIndex};
@@ -117,7 +118,7 @@ fn to_py(e: IndexError) -> PyErr {
 /// Ordered string↔id index (FST) with prefix / range / fuzzy / subsequence queries.
 #[pyclass(name = "StringIndex", module = "lexindex._core", frozen)]
 pub struct PyStringIndex {
-    inner: StringIndex,
+    inner: Arc<StringIndex>,
 }
 
 #[pymethods]
@@ -129,7 +130,9 @@ impl PyStringIndex {
         let inner = py
             .detach(|| StringIndex::build(items.iter()))
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Build from an iterable of strings that is **already in ascending byte order**, without
@@ -150,7 +153,7 @@ impl PyStringIndex {
             return Err(e);
         }
         Ok(Self {
-            inner: built.map_err(to_py)?,
+            inner: Arc::new(built.map_err(to_py)?),
         })
     }
 
@@ -354,7 +357,9 @@ impl PyStringIndex {
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
         let inner = py.detach(|| StringIndex::from_bytes(data)).map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Write the index to `path`.
@@ -366,7 +371,9 @@ impl PyStringIndex {
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
         let inner = py.detach(|| StringIndex::load(&path)).map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Zero-copy load: memory-map the file and borrow the index from it — no read into RAM, so a
@@ -384,7 +391,9 @@ impl PyStringIndex {
         let inner = py
             .detach(|| unsafe { StringIndex::load_mmap(&path) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 }
 
@@ -464,7 +473,7 @@ impl StringIndexIterator {
 #[cfg(feature = "mph")]
 #[pyclass(name = "PerfectHashIndex", module = "lexindex._core", frozen)]
 pub struct PyPerfectHashIndex {
-    inner: PerfectHashIndex,
+    inner: Arc<PerfectHashIndex>,
 }
 
 #[cfg(feature = "mph")]
@@ -477,7 +486,9 @@ impl PyPerfectHashIndex {
         let inner = py
             .detach(|| PerfectHashIndex::build(items.iter()))
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Build straight to `path` **without ever holding the keys**, for a corpus that does not fit
@@ -640,7 +651,9 @@ impl PyPerfectHashIndex {
         let inner = py
             .detach(|| unsafe { PerfectHashIndex::from_bytes(data) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Write the dictionary to `path`.
@@ -658,7 +671,9 @@ impl PyPerfectHashIndex {
         let inner = py
             .detach(|| unsafe { PerfectHashIndex::load(&path) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Memory-map the file and borrow the key arena zero-copy (only the small MPH is read into RAM).
@@ -672,7 +687,9 @@ impl PyPerfectHashIndex {
         let inner = py
             .detach(|| unsafe { PerfectHashIndex::load_mmap(&path) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 }
 
@@ -681,7 +698,7 @@ impl PyPerfectHashIndex {
 #[cfg(feature = "mph")]
 #[pyclass(name = "CompactHashIndex", module = "lexindex._core", frozen)]
 pub struct PyCompactHashIndex {
-    inner: CompactHashIndex,
+    inner: Arc<CompactHashIndex>,
 }
 
 #[cfg(feature = "mph")]
@@ -729,7 +746,9 @@ impl PyCompactHashIndex {
         let inner = py
             .detach(|| CompactHashIndex::build_from_pairs(pairs, bits))
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Width of the stored fingerprints in bits; the false-positive rate is `2 ** -fingerprint_bits`.
@@ -832,7 +851,9 @@ impl PyCompactHashIndex {
         let inner = py
             .detach(|| unsafe { CompactHashIndex::from_bytes(data) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Write the dictionary to `path`.
@@ -850,7 +871,9 @@ impl PyCompactHashIndex {
         let inner = py
             .detach(|| unsafe { CompactHashIndex::load(&path) })
             .map_err(to_py)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 
     /// Zero-copy load: memory-map the file and borrow the fingerprint table.
@@ -864,6 +887,249 @@ impl PyCompactHashIndex {
         let inner = py
             .detach(|| unsafe { CompactHashIndex::load_mmap(&path) })
             .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
+/// The three bases an [`PyOverlay`] can sit on. `Overlay<I>` is generic and a `#[pyclass]` cannot
+/// be, so the choice becomes a runtime tag — and with it, `key`/`keys`/`compact` become a runtime
+/// `TypeError` on a `CompactHashIndex` base where Rust refuses at compile time.
+enum OverlayInner {
+    String(Overlay<Arc<StringIndex>>),
+    Perfect(Overlay<Arc<PerfectHashIndex>>),
+    Compact(Overlay<Arc<CompactHashIndex>>),
+}
+
+/// Run `$body` against whichever overlay is inside. Every arm has to typecheck on its own, which is
+/// what keeps the base-specific methods below from reaching the keyless base.
+macro_rules! on_base {
+    ($this:expr, |$ov:ident| $body:expr) => {
+        match &$this.inner {
+            OverlayInner::String($ov) => $body,
+            OverlayInner::Perfect($ov) => $body,
+            OverlayInner::Compact($ov) => $body,
+        }
+    };
+    (mut $this:expr, |$ov:ident| $body:expr) => {
+        match &mut $this.inner {
+            OverlayInner::String($ov) => $body,
+            OverlayInner::Perfect($ov) => $body,
+            OverlayInner::Compact($ov) => $body,
+        }
+    };
+}
+
+/// Same, for the two bases that store their keys; the third answers with the error it earns.
+macro_rules! on_keyed_base {
+    ($this:expr, |$ov:ident| $body:expr) => {
+        match &$this.inner {
+            OverlayInner::String($ov) => Ok($body),
+            OverlayInner::Perfect($ov) => Ok($body),
+            OverlayInner::Compact(_) => Err(no_keys()),
+        }
+    };
+}
+
+fn no_keys() -> PyErr {
+    PyTypeError::new_err(
+        "a CompactHashIndex stores no keys, so an overlay over it has no key(), keys() or compact()",
+    )
+}
+
+/// Edits on top of an index that is expensive to rebuild.
+#[pyclass(name = "Overlay", module = "lexindex")]
+pub struct PyOverlay {
+    inner: OverlayInner,
+}
+
+#[pymethods]
+impl PyOverlay {
+    /// Wrap `index`. The index stays usable and is shared, not copied or taken.
+    #[new]
+    fn new(index: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if let Ok(i) = index.cast::<PyStringIndex>() {
+            let base = Arc::clone(&i.borrow().inner);
+            return Ok(Self {
+                inner: OverlayInner::String(Overlay::new(base)),
+            });
+        }
+        if let Ok(i) = index.cast::<PyPerfectHashIndex>() {
+            let base = Arc::clone(&i.borrow().inner);
+            return Ok(Self {
+                inner: OverlayInner::Perfect(Overlay::new(base)),
+            });
+        }
+        if let Ok(i) = index.cast::<PyCompactHashIndex>() {
+            let base = Arc::clone(&i.borrow().inner);
+            return Ok(Self {
+                inner: OverlayInner::Compact(Overlay::new(base)),
+            });
+        }
+        Err(PyTypeError::new_err(
+            "Overlay takes a StringIndex, a PerfectHashIndex or a CompactHashIndex",
+        ))
+    }
+
+    /// How many keys are live: base keys plus additions, less what has been removed.
+    fn __len__(&self) -> usize {
+        on_base!(self, |ov| ov.len())
+    }
+
+    /// Whether every key has been removed (or there were none).
+    fn is_empty(&self) -> bool {
+        on_base!(self, |ov| ov.is_empty())
+    }
+
+    /// How many ids have ever been issued. `key(id)` is `None` at or above this.
+    fn id_space(&self) -> u64 {
+        on_base!(self, |ov| ov.id_space())
+    }
+
+    /// The id of `key`, or `None` if it is absent or has been removed.
+    fn id(&self, key: &str) -> Option<u64> {
+        on_base!(self, |ov| ov.id(key))
+    }
+
+    /// Whether `key` is live.
+    fn contains(&self, key: &str) -> bool {
+        on_base!(self, |ov| ov.contains(key))
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.contains(key)
+    }
+
+    /// Add `key` and return its id. An already-live key keeps the id it has; a removed one is
+    /// revived with the id it had, rather than being issued a second one.
+    fn add(&mut self, key: &str) -> u64 {
+        on_base!(mut self, |ov| ov.add(key))
+    }
+
+    /// Remove `key`, returning whether it was there. The id is retired, never reissued.
+    ///
+    /// Over a `CompactHashIndex` base this inherits that index's false-positive rate: a `contains`
+    /// that was never true of a real key can retire an id. Remove by a key you know is present.
+    fn remove(&mut self, key: &str) -> bool {
+        on_base!(mut self, |ov| ov.remove(key))
+    }
+
+    /// Key for `id`, or `None` if it is out of range or retired. Raises `TypeError` on a
+    /// `CompactHashIndex` base, which stores no keys.
+    fn key(&self, id: u64) -> PyResult<Option<String>> {
+        on_keyed_base!(self, |ov| ov.key(id))
+    }
+
+    /// Every live key, base keys first. Raises `TypeError` on a `CompactHashIndex` base.
+    fn keys(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        py.detach(|| on_keyed_base!(self, |ov| ov.keys()))
+    }
+
+    /// Fold the edits into a fresh base and return the result. This is the one operation that
+    /// renumbers: ids do not survive it. Raises `TypeError` on a `CompactHashIndex` base.
+    fn compact(&self, py: Python<'_>) -> PyResult<Self> {
+        py.detach(|| match &self.inner {
+            OverlayInner::String(ov) => Ok(Self {
+                inner: OverlayInner::String(ov.clone().compact().map_err(to_py)?),
+            }),
+            OverlayInner::Perfect(ov) => Ok(Self {
+                inner: OverlayInner::Perfect(ov.clone().compact().map_err(to_py)?),
+            }),
+            OverlayInner::Compact(_) => Err(no_keys()),
+        })
+    }
+
+    /// The index underneath, unchanged and shared with this overlay.
+    fn base(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(match &self.inner {
+            OverlayInner::String(ov) => Py::new(
+                py,
+                PyStringIndex {
+                    inner: Arc::clone(ov.base()),
+                },
+            )?
+            .into_any(),
+            OverlayInner::Perfect(ov) => Py::new(
+                py,
+                PyPerfectHashIndex {
+                    inner: Arc::clone(ov.base()),
+                },
+            )?
+            .into_any(),
+            OverlayInner::Compact(ov) => Py::new(
+                py,
+                PyCompactHashIndex {
+                    inner: Arc::clone(ov.base()),
+                },
+            )?
+            .into_any(),
+        })
+    }
+
+    /// Serialise the base, the additions and the retired ids to one `bytes` blob.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = py
+            .detach(|| on_base!(self, |ov| ov.to_bytes()))
+            .map_err(to_py)?;
+        Ok(PyBytes::new(py, &bytes))
+    }
+
+    /// Write [`to_bytes`](Self::to_bytes) to `path`.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| on_base!(self, |ov| ov.save(&path)))
+            .map_err(to_py)
+    }
+
+    /// Read a blob written by [`to_bytes`](Self::to_bytes), rebuilding the base with `base`'s own
+    /// loader — pass the class, not an instance.
+    ///
+    /// The blob records which base wrote it and a mismatch is refused, so the wrong class is an
+    /// error rather than an unchecked read of bytes meant for something else. As with the index
+    /// loaders, a blob from an untrusted source is not something this can make safe.
+    #[staticmethod]
+    fn from_bytes(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
+        Self::load_blob(py, data, base)
+    }
+
+    /// [`from_bytes`](Self::from_bytes) from a file.
+    #[staticmethod]
+    fn load(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
+        let data = py
+            .detach(|| std::fs::read(&path))
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+        Self::load_blob(py, &data, base)
+    }
+}
+
+impl PyOverlay {
+    fn load_blob(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
+        let inner = if base.is(py.get_type::<PyStringIndex>()) {
+            OverlayInner::String(
+                Overlay::from_bytes_with(data, |b| StringIndex::from_bytes(b).map(Arc::new))
+                    .map_err(to_py)?,
+            )
+        } else if base.is(py.get_type::<PyPerfectHashIndex>()) {
+            OverlayInner::Perfect(
+                // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+                Overlay::from_bytes_with(data, |b| unsafe {
+                    PerfectHashIndex::from_bytes(b).map(Arc::new)
+                })
+                .map_err(to_py)?,
+            )
+        } else if base.is(py.get_type::<PyCompactHashIndex>()) {
+            OverlayInner::Compact(
+                // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+                Overlay::from_bytes_with(data, |b| unsafe {
+                    CompactHashIndex::from_bytes(b).map(Arc::new)
+                })
+                .map_err(to_py)?,
+            )
+        } else {
+            return Err(PyTypeError::new_err(
+                "base must be StringIndex, PerfectHashIndex or CompactHashIndex (the class itself)",
+            ));
+        };
         Ok(Self { inner })
     }
 }
@@ -876,5 +1142,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPerfectHashIndex>()?;
     #[cfg(feature = "mph")]
     m.add_class::<PyCompactHashIndex>()?;
+    m.add_class::<PyOverlay>()?;
     Ok(())
 }

@@ -34,6 +34,14 @@ pub trait OverlayBase {
 
     /// The base's own serialised form, embedded verbatim in [`Overlay::to_bytes`].
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError>;
+
+    /// Which base produced a blob, recorded in its header.
+    ///
+    /// [`Overlay::from_bytes_with`] checks this against the base being loaded *before* calling the
+    /// loader, so handing a `StringIndex` blob to a perfect-hash loader is a named error rather
+    /// than an unchecked deserialisation of the wrong bytes. Tags `0..=15` are reserved for this
+    /// crate; an outside implementation should pick above that.
+    const BASE_TAG: u8;
 }
 
 /// A base that stores its keys, and so can answer `id → key` and be rebuilt from its own contents.
@@ -236,7 +244,39 @@ impl<I: OverlayKeys> Overlay<I> {
     }
 }
 
+/// Share one base between several overlays, and let a caller hold on to it as well.
+///
+/// The Python bindings need exactly this: `Overlay(index)` must not take the index away from the
+/// object the caller still holds, and cloning a `PerfectHashIndex` is not on offer.
+impl<T: OverlayBase> OverlayBase for std::sync::Arc<T> {
+    const BASE_TAG: u8 = T::BASE_TAG;
+
+    fn base_len(&self) -> usize {
+        (**self).base_len()
+    }
+
+    fn base_id(&self, key: &str) -> Option<u64> {
+        (**self).base_id(key)
+    }
+
+    fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
+        (**self).base_to_bytes()
+    }
+}
+
+impl<T: OverlayKeys> OverlayKeys for std::sync::Arc<T> {
+    fn base_key(&self, id: u64) -> Option<String> {
+        (**self).base_key(id)
+    }
+
+    fn rebuild(keys: Vec<String>) -> Result<Self, IndexError> {
+        Ok(std::sync::Arc::new(T::rebuild(keys)?))
+    }
+}
+
 impl OverlayBase for crate::StringIndex {
+    const BASE_TAG: u8 = 1;
+
     fn base_len(&self) -> usize {
         self.len()
     }
@@ -262,6 +302,8 @@ impl OverlayKeys for crate::StringIndex {
 
 #[cfg(all(feature = "mph", target_pointer_width = "64"))]
 impl OverlayBase for crate::PerfectHashIndex {
+    const BASE_TAG: u8 = 2;
+
     fn base_len(&self) -> usize {
         self.len()
     }
@@ -288,6 +330,8 @@ impl OverlayKeys for crate::PerfectHashIndex {
 
 #[cfg(all(feature = "mph", target_pointer_width = "64"))]
 impl OverlayBase for crate::CompactHashIndex {
+    const BASE_TAG: u8 = 3;
+
     fn base_len(&self) -> usize {
         self.len()
     }
@@ -305,8 +349,11 @@ impl OverlayBase for crate::CompactHashIndex {
 /// everywhere else in this crate; a change to the layout below bumps it.
 const OVERLAY_MAGIC: &[u8; 4] = b"OVL1";
 
+/// `[magic 4][base tag 1][base blob len 8][additions 8]`.
+const OVERLAY_HEADER: usize = 4 + 1 + 8 + 8;
+
 impl<I: OverlayBase> Overlay<I> {
-    /// Serialise to `[magic 4][base blob len u64][additions u64][base blob][additions][tombstones]`.
+    /// Serialise to `[magic 4][base tag u8][base blob len u64][additions u64][base blob][additions][tombstones]`.
     ///
     /// Additions are length-prefixed (`u32` length, then the bytes) in id order; tombstones are a
     /// `u64` word count followed by the words, little-endian throughout. Neither `len` nor the
@@ -318,8 +365,10 @@ impl<I: OverlayBase> Overlay<I> {
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let base = self.base.base_to_bytes()?;
         let added: usize = self.added_keys.iter().map(|k| 4 + k.len()).sum();
-        let mut out = Vec::with_capacity(4 + 16 + base.len() + added + 8 + self.dead.len() * 8);
+        let mut out =
+            Vec::with_capacity(OVERLAY_HEADER + base.len() + added + 8 + self.dead.len() * 8);
         out.extend_from_slice(OVERLAY_MAGIC);
+        out.push(I::BASE_TAG);
         out.extend_from_slice(&(base.len() as u64).to_le_bytes());
         out.extend_from_slice(&(self.added_keys.len() as u64).to_le_bytes());
         out.extend_from_slice(&base);
@@ -375,12 +424,17 @@ impl<I: OverlayBase> Overlay<I> {
         bytes: &[u8],
         load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
     ) -> Result<Self, IndexError> {
-        let header = 4 + 8 + 8;
+        let header = OVERLAY_HEADER;
         if bytes.len() < header || &bytes[..4] != OVERLAY_MAGIC {
             return Err(IndexError::Format("bad overlay magic or truncated header"));
         }
-        let base_len = read_u64(bytes, 4) as usize;
-        let added_count = read_u64(bytes, 12) as usize;
+        if bytes[4] != I::BASE_TAG {
+            return Err(IndexError::Format(
+                "overlay blob was written over a different base index",
+            ));
+        }
+        let base_len = read_u64(bytes, 5) as usize;
+        let added_count = read_u64(bytes, 13) as usize;
         let base_end = header
             .checked_add(base_len)
             .filter(|end| *end <= bytes.len())
@@ -480,6 +534,7 @@ mod tests {
     fn craft(base: &StringIndex, additions: &[&[u8]], dead: &[u64]) -> Vec<u8> {
         let base = base.to_bytes();
         let mut out = b"OVL1".to_vec();
+        out.push(<StringIndex as OverlayBase>::BASE_TAG);
         out.extend_from_slice(&(base.len() as u64).to_le_bytes());
         out.extend_from_slice(&(additions.len() as u64).to_le_bytes());
         out.extend_from_slice(&base);
@@ -550,9 +605,14 @@ mod tests {
                 b
             }),
             ("bad overlay magic or truncated header", good[..12].to_vec()),
+            ("overlay blob was written over a different base index", {
+                let mut b = good.clone();
+                b[4] = 99;
+                b
+            }),
             ("overlay base blob out of range", {
                 let mut b = good.clone();
-                b[4..12].copy_from_slice(&u64::MAX.to_le_bytes());
+                b[5..13].copy_from_slice(&u64::MAX.to_le_bytes());
                 b
             }),
             ("overlay addition out of range", {
@@ -601,6 +661,55 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[test]
+    fn a_blob_refuses_the_wrong_base_before_the_loader_runs() {
+        use crate::PerfectHashIndex;
+        let ov = Overlay::new(StringIndex::build(["a", "b"]).unwrap());
+        let blob = ov.to_bytes().unwrap();
+        let mut called = false;
+        let got = Overlay::<PerfectHashIndex>::from_bytes_with(&blob, |b| {
+            called = true;
+            // SAFETY: never reached -- the tag check rejects the blob first, which is the point.
+            unsafe { PerfectHashIndex::from_bytes(b) }
+        });
+        assert!(
+            matches!(
+                got,
+                Err(IndexError::Format(
+                    "overlay blob was written over a different base index"
+                ))
+            ),
+            "a StringIndex blob was accepted for a perfect-hash base"
+        );
+        assert!(
+            !called,
+            "the base loader ran on bytes that were never written for it"
+        );
+    }
+
+    /// An overlay over a shared base answers as one over an owned base, which is what lets the
+    /// Python bindings wrap an index the caller still holds.
+    #[test]
+    fn an_overlay_over_a_shared_base_behaves_the_same() {
+        let base = std::sync::Arc::new(StringIndex::build(["a", "b"]).unwrap());
+        let mut ov = Overlay::new(std::sync::Arc::clone(&base));
+        ov.add("c");
+        assert!(ov.remove("a"));
+        assert_eq!(ov.keys(), vec!["b".to_string(), "c".into()]);
+        assert_eq!(
+            base.len(),
+            2,
+            "the base is untouched and still the caller's"
+        );
+        let blob = ov.to_bytes().unwrap();
+        let back = Overlay::from_bytes_with(&blob, |b| {
+            StringIndex::from_bytes(b).map(std::sync::Arc::new)
+        })
+        .unwrap();
+        assert_eq!(back.keys(), ov.keys());
+        assert_eq!(back.compact().unwrap().len(), 2);
+    }
     #[cfg(all(feature = "mph", target_pointer_width = "64"))]
     #[test]
     fn a_perfect_hash_overlay_round_trips_through_its_own_loader() {

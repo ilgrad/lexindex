@@ -553,3 +553,112 @@ def test_ids_of_bytes_reads_zero_copy_through_numpy():
     assert present.tolist() == [idx.id(k) for k in probes if idx.id(k) is not None]
     # `frombuffer` shares the bytes rather than copying them.
     assert arr.base is buf
+
+
+def test_overlay_core():
+    ov = lexindex.Overlay(lexindex.StringIndex(["apple", "banana"]))
+    cherry = ov.add("cherry")
+    assert cherry == 2 and len(ov) == 3 and ov.id_space() == 3
+    assert ov.key(cherry) == "cherry" and "cherry" in ov
+    assert ov.remove("apple") and ov.id("apple") is None and len(ov) == 2
+    assert not ov.remove("apple")  # removing twice is not a second removal
+    assert ov.keys() == ["banana", "cherry"]
+    assert ov.add("durian") == 3, "a retired id is never handed to the next addition"
+    assert ov.add("apple") == 0, "re-adding revives the original id"
+
+
+def test_overlay_shares_the_base_rather_than_taking_it():
+    si = lexindex.StringIndex(["apple", "banana"])
+    ov = lexindex.Overlay(si)
+    ov.remove("apple")
+    assert si.id("apple") == 0, "the base the caller still holds is untouched"
+    assert len(si) == 2
+    assert isinstance(ov.base(), lexindex.StringIndex)
+    assert ov.base().id("apple") == 0
+
+
+def test_overlay_rejects_something_that_is_not_an_index():
+    with pytest.raises(TypeError):
+        lexindex.Overlay(["apple"])
+
+
+@pytest.mark.parametrize(
+    "ctor", [lexindex.StringIndex, lexindex.PerfectHashIndex], ids=["string", "perfect"]
+)
+def test_overlay_matches_a_set_through_every_edit(ctor):
+    """The Python mirror of the Rust property test, on a fixed seed.
+
+    A rebuilt index numbers differently by construction, so "equals the index rebuilt from the same
+    operations" is not checkable. What is, and what a caller relies on: the key set matches, every
+    live key reads back through its id, and an id once issued never comes to mean a different key.
+    """
+    rng = random.Random(20260906)
+    universe = [f"k{i}" for i in range(12)]
+    initial = universe[:5]
+    ov = lexindex.Overlay(ctor(initial))
+    model = set(initial)
+    issued = {ov.id(k): k for k in initial}
+
+    for _ in range(200):
+        key = rng.choice(universe)
+        if rng.random() < 0.5:
+            issued.setdefault(ov.add(key), key)
+            model.add(key)
+        else:
+            assert ov.remove(key) == (key in model)
+            model.discard(key)
+        assert len(ov) == len(model)
+        for k in universe:
+            assert (k in ov) == (k in model)
+            if (i := ov.id(k)) is not None:
+                assert ov.key(i) == k
+        for i, k in issued.items():
+            back = ov.key(i)
+            assert back == k or (back is None and k not in model)
+
+    assert set(ov.keys()) == model
+    assert set(ov.compact().keys()) == model
+
+
+@pytest.mark.parametrize(
+    "ctor", [lexindex.StringIndex, lexindex.PerfectHashIndex], ids=["string", "perfect"]
+)
+def test_overlay_blob_round_trips(ctor, tmp_path):
+    ov = lexindex.Overlay(ctor(["apple", "banana", "cherry"]))
+    ov.add("durian")
+    assert ov.remove("banana")
+    for back in (
+        lexindex.Overlay.from_bytes(ov.to_bytes(), ctor),
+        _saved_and_loaded(ov, tmp_path / "ov.bin", ctor),
+    ):
+        assert len(back) == len(ov)
+        assert back.id_space() == ov.id_space(), "the retired ids survive the blob"
+        assert back.keys() == ov.keys()
+        assert back.id("banana") is None
+        assert back.add("elderberry") == ov.id_space()
+
+
+def _saved_and_loaded(ov, path, ctor):
+    ov.save(path)
+    return lexindex.Overlay.load(path, ctor)
+
+
+def test_overlay_blob_refuses_the_wrong_base():
+    ov = lexindex.Overlay(lexindex.StringIndex(["apple"]))
+    blob = ov.to_bytes()
+    with pytest.raises(ValueError, match="different base index"):
+        lexindex.Overlay.from_bytes(blob, lexindex.PerfectHashIndex)
+    with pytest.raises(TypeError):
+        lexindex.Overlay.from_bytes(blob, dict)
+
+
+def test_overlay_over_a_compact_hash_has_membership_and_nothing_else():
+    ov = lexindex.Overlay(lexindex.CompactHashIndex(["alpha", "beta"], 4))
+    assert ov.add("gamma") == 2
+    assert ov.remove("alpha") and ov.id("alpha") is None and len(ov) == 2
+    assert "beta" in ov and "gamma" in ov
+    for call in (lambda: ov.key(0), ov.keys, ov.compact):
+        with pytest.raises(TypeError, match="stores no keys"):
+            call()
+    back = lexindex.Overlay.from_bytes(ov.to_bytes(), lexindex.CompactHashIndex)
+    assert len(back) == 2 and back.id("alpha") is None

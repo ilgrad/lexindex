@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import ClassVar, final
 
-__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]
+__all__ = ["CompactHashIndex", "Overlay", "PerfectHashIndex", "StringIndex", "__version__"]
 
 __version__: str
 
@@ -212,3 +212,69 @@ class CompactHashIndex:
         Two obligations: the file must be trusted (see ``from_bytes``), and it must not be modified
         or truncated by any process while the index is alive (see ``StringIndex.load_mmap``).
         """
+
+@final
+class Overlay:
+    """Add and remove keys on top of an index that is expensive to rebuild.
+
+    All three indexes are built once from the whole key set, so adding one key has always meant
+    rebuilding for the whole corpus. An overlay wraps one with the keys added since and the ids
+    retired from it, leaving the base untouched and still usable.
+
+    Ids are stable: an id is never reissued, removing a key does not renumber anything, and
+    re-adding a removed key revives its original id. :meth:`compact` is the one operation that
+    renumbers.
+    """
+
+    def __new__(cls, index: StringIndex | PerfectHashIndex | CompactHashIndex) -> Overlay: ...
+    def __len__(self) -> int: ...
+    def __contains__(self, key: str, /) -> bool: ...
+    def is_empty(self) -> bool: ...
+    def id_space(self) -> int:
+        """How many ids have ever been issued; :meth:`key` is ``None`` at or above this."""
+
+    def id(self, key: str) -> int | None: ...
+    def contains(self, key: str) -> bool: ...
+    def add(self, key: str) -> int:
+        """Add ``key`` and return its id, reviving the id a removed key used to have."""
+
+    def remove(self, key: str) -> bool:
+        """Remove ``key``, returning whether it was there.
+
+        Over a :class:`CompactHashIndex` base this inherits that index's false-positive rate: a
+        ``contains`` that was never true of a real key can retire an id.
+        """
+
+    def key(self, id: int) -> str | None:
+        """Key for ``id``. Raises ``TypeError`` on a :class:`CompactHashIndex` base, which stores
+        no keys."""
+
+    def keys(self) -> list[str]:
+        """Every live key. Raises ``TypeError`` on a :class:`CompactHashIndex` base."""
+
+    def compact(self) -> Overlay:
+        """Fold the edits into a fresh base. This renumbers: ids do not survive it. Raises
+        ``TypeError`` on a :class:`CompactHashIndex` base."""
+
+    def base(self) -> StringIndex | PerfectHashIndex | CompactHashIndex:
+        """The index underneath, unchanged and shared with this overlay."""
+
+    def to_bytes(self) -> bytes: ...
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @staticmethod
+    def from_bytes(
+        data: bytes, base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex]
+    ) -> Overlay:
+        """Read a blob, rebuilding the base with ``base``'s own loader — pass the class itself.
+
+        The blob records which base wrote it and a mismatch is refused, so the wrong class is an
+        error rather than an unchecked read of bytes meant for something else. As with the index
+        loaders, a blob from an untrusted source is not something this can make safe.
+        """
+
+    @staticmethod
+    def load(
+        path: str | os.PathLike[str],
+        base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
+    ) -> Overlay:
+        """:meth:`from_bytes` from a file."""

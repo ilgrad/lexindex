@@ -10,15 +10,17 @@ many times:
 
 All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge
 index and borrow it instantly).
+
+- :class:`Overlay` — add and remove keys on top of any of them without rebuilding.
 """
 
 from importlib.metadata import PackageNotFoundError, version
 
-from lexindex._core import CompactHashIndex, PerfectHashIndex, StringIndex
+from lexindex._core import CompactHashIndex, Overlay, PerfectHashIndex, StringIndex
 
 try:
     __version__ = version("lexindex")
 except PackageNotFoundError:  # pragma: no cover - source tree without install metadata
     __version__ = "0.0.0+unknown"
 
-__all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]
+__all__ = ["CompactHashIndex", "Overlay", "PerfectHashIndex", "StringIndex", "__version__"]
