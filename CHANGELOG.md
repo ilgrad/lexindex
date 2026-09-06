@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`Overlay<I>`** — edits on top of any of the three indexes without rebuilding them. All three are
+  immutable by construction: an FST and a minimal perfect hash are both built once from the whole key
+  set, so adding one key has always meant rebuilding for the whole corpus. An overlay wraps a base
+  index with a map of keys added since and a bitset of ids retired from it, so `add` and `remove` are
+  O(1) and the base is untouched. Ids span both in one `u64` space — base ids keep their values,
+  additions continue above `base.len()` — and are stable: an id is never reissued, removal never
+  renumbers anything, and re-adding a removed key revives its original id rather than issuing a
+  second one for the same string. `compact()` rebuilds the base from the live keys when the additions
+  have grown enough to be worth folding in, and is the one operation that renumbers.
+
+  What a base can do is expressed in the type rather than in a runtime error: `key`, `keys` and
+  `compact` need `OverlayKeys`, which `CompactHashIndex` cannot implement because it stores no keys,
+  so an overlay over it offers membership and nothing else. Removal over a probabilistic base carries
+  that base's false-positive rate — a `contains` that was never true of a real key can retire an id —
+  which is documented on `remove` and is why the property test excludes it.
+
+  `to_bytes`/`save` serialise the base blob, the additions and the tombstones together; `from_bytes_with`/
+  `load_with` take the base's own loader as a closure. That is deliberate: `StringIndex::from_bytes`
+  is safe while the perfect-hash loaders are `unsafe fn`, and a single generic loader would have had
+  to be `unsafe` for all three to accommodate two of them. Neither `len` nor the live/dead split is
+  stored — both are derived on load, so a blob cannot disagree with itself about how many keys it
+  holds — and a malformed blob is rejected with a named `Format` error rather than half-loaded.
+
 ## [0.11.0] — 2026-09-06
 
 ### Added

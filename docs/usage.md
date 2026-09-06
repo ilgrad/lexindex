@@ -241,6 +241,47 @@ Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; 
 and the only one that compiles for 32-bit targets, including `wasm32-unknown-unknown` — `mph` needs a
 64-bit pointer width and refuses anything else at compile time.
 
+### Editing without a rebuild — `Overlay`
+
+All three indexes are built once from the whole key set, so adding a single key has always meant
+rebuilding for the whole corpus. `Overlay<I>` wraps one with the keys added since and the ids retired
+from it, making `add` and `remove` O(1) while the base stays untouched:
+
+```rust
+use lexindex::{Overlay, StringIndex};
+let mut ov = Overlay::new(StringIndex::build(["apple", "banana"])?);
+let cherry = ov.add("cherry");            // ids continue above base.len()
+assert!(ov.remove("apple"));              // the id is retired, nothing is renumbered
+assert_eq!(ov.id("apple"), None);
+assert_eq!(ov.key(cherry).as_deref(), Some("cherry"));
+
+let blob = ov.to_bytes()?;                // base + additions + tombstones in one file
+let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes)?;
+assert_eq!(back.len(), 2);
+
+let folded = back.compact()?;             // rebuild the base from the live keys — this renumbers
+assert_eq!(folded.len(), 2);
+# Ok::<(), lexindex::IndexError>(())
+```
+
+An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning for
+the overlay's lifetime; `compact()` is the one call that breaks that, and it is explicit for exactly
+that reason. Lookups cost one base lookup plus a bitset probe, and a miss in the base costs a hash
+map probe on top.
+
+`from_bytes_with` takes the base's loader rather than picking one, because the bases do not agree on
+safety: `StringIndex::from_bytes` is safe, while the perfect-hash loaders are `unsafe fn`. A
+`PerfectHashIndex` base is loaded as `Overlay::from_bytes_with(&blob, |b| unsafe {
+PerfectHashIndex::from_bytes(b) })`, and the `unsafe` sits on the part that actually carries the
+obligation.
+
+`key`, `keys` and `compact` need the base to store its keys, which `CompactHashIndex` does not — an
+overlay over it answers membership and nothing else, and the absence is a compile error rather than a
+runtime one. Removal over that base also inherits its false-positive rate: a `contains` that was
+never true of a real key can retire an id, so remove by a key you know is present.
+
+Overlays are Rust-only for now; the Python bindings do not expose them yet.
+
 ## Benchmark
 
 `python bench/compare.py` measures **serialised size** on real dictionary words against `marisa-trie`,

@@ -49,9 +49,11 @@ compile_error!(
 );
 
 mod blob;
+mod overlay;
 mod string_index;
 mod subsequence;
 
+pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;
 
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash

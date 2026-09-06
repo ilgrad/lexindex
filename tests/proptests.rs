@@ -2,8 +2,9 @@
 //! robustness — `from_bytes` on arbitrary bytes (`StringIndex`, whose loader is safe) or on a
 //! corrupted self-produced blob (all three) must fail cleanly, never panic.
 
-use lexindex::StringIndex;
+use lexindex::{Overlay, StringIndex};
 use proptest::prelude::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn distinct_sorted(mut keys: Vec<String>) -> Vec<String> {
     keys.sort();
@@ -52,8 +53,121 @@ fn check_string_index_roundtrip(keys: &[String]) {
     }
 }
 
+#[derive(Debug, Clone)]
+enum Op {
+    Add(String),
+    Remove(String),
+}
+
+impl Op {
+    fn key(&self) -> &str {
+        match self {
+            Op::Add(k) | Op::Remove(k) => k,
+        }
+    }
+}
+
+/// A base and a sequence of edits over the *same* tiny alphabet, so additions collide with base
+/// keys, removals hit live keys, and re-additions of removed keys all happen often rather than by
+/// luck.
+fn overlay_ops() -> impl Strategy<Value = (Vec<String>, Vec<Op>)> {
+    let key = || "[ab]{0,4}".prop_map(String::from);
+    (
+        prop::collection::vec(key(), 0..12),
+        prop::collection::vec(
+            prop_oneof![key().prop_map(Op::Add), key().prop_map(Op::Remove)],
+            0..40,
+        ),
+    )
+}
+
+/// The overlay against a `BTreeSet` applying the same edits.
+///
+/// The plan's phrasing was "overlay ≡ the index rebuilt from the same operation sequence", and that
+/// is not checkable as written: a rebuilt `StringIndex` numbers by sorted rank, so its ids are a
+/// different numbering by construction. What is checkable, and is what a caller actually relies on,
+/// is that the *key set* matches, that `key(id(k)) == k` for every live key, and that an id once
+/// issued never comes to mean a different key.
+fn check_overlay_matches_a_set(initial: &[String], ops: &[Op]) {
+    let mut ov = Overlay::new(StringIndex::build(initial).unwrap());
+    let mut model: BTreeSet<String> = initial.iter().cloned().collect();
+    let mut issued: BTreeMap<u64, String> = (0..ov.id_space())
+        .map(|id| {
+            (
+                id,
+                ov.key(id).expect("every base id is live before any edit"),
+            )
+        })
+        .collect();
+    let universe: BTreeSet<String> = initial
+        .iter()
+        .cloned()
+        .chain(ops.iter().map(|o| o.key().to_owned()))
+        .collect();
+
+    for op in ops {
+        match op {
+            Op::Add(k) => {
+                let id = ov.add(k);
+                // `or_insert` and not `insert`: an id handed back for a revived or already-present
+                // key must keep the key it was issued for, which is the invariant being tested.
+                issued.entry(id).or_insert_with(|| k.clone());
+                model.insert(k.clone());
+            }
+            Op::Remove(k) => {
+                assert_eq!(ov.remove(k), model.remove(k), "remove({k:?})");
+            }
+        }
+        assert_eq!(ov.len(), model.len(), "len after {op:?}");
+        for k in &universe {
+            assert_eq!(
+                ov.contains(k),
+                model.contains(k),
+                "contains({k:?}) after {op:?}"
+            );
+            if let Some(id) = ov.id(k) {
+                assert_eq!(ov.key(id).as_deref(), Some(k.as_str()), "key(id({k:?}))");
+            }
+        }
+        for (&id, k) in &issued {
+            match ov.key(id) {
+                Some(back) => assert_eq!(&back, k, "id {id} came to mean a different key"),
+                None => assert!(!model.contains(k), "live key {k:?} lost its id {id}"),
+            }
+        }
+    }
+
+    assert_eq!(ov.keys().into_iter().collect::<BTreeSet<_>>(), model);
+
+    // A blob has to survive the edits, not just the key set: the retired ids are what decides
+    // where the next addition lands, and they exist nowhere else in the file.
+    let blob = ov.to_bytes().unwrap();
+    let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes).unwrap();
+    assert_eq!(back.len(), ov.len());
+    assert_eq!(back.id_space(), ov.id_space());
+    for k in &universe {
+        assert_eq!(back.id(k), ov.id(k), "id({k:?}) after a round trip");
+    }
+    for id in 0..ov.id_space() {
+        assert_eq!(back.key(id), ov.key(id), "key({id}) after a round trip");
+    }
+
+    let compacted = ov.compact().unwrap();
+    assert_eq!(compacted.len(), model.len());
+    assert_eq!(compacted.keys().into_iter().collect::<BTreeSet<_>>(), model);
+    for k in &model {
+        let id = compacted.id(k).expect("every live key survives a compact");
+        assert_eq!(compacted.key(id).as_deref(), Some(k.as_str()));
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn overlay_matches_a_set_through_every_edit((initial, ops) in overlay_ops()) {
+        check_overlay_matches_a_set(&initial, &ops);
+    }
 
     // Prefix-nested keys over a 2-symbol alphabet: many keys are prefixes of others (the hardest
     // case for the rank-walk, where a node is both final and has out-transitions).
