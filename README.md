@@ -483,8 +483,11 @@ its code has not changed since 0.5.1 and it reads 1.6× slower than it did on an
 `peak RSS` and `bytes/key` columns, which are not clock-dependent, and read the times only against
 each other. Peak RSS in the *list* rows is dominated by the Python key list; the *generator* rows are
 the index's own cost, which is why `CompactHashIndex` falls 3.3× there and `StringIndex` barely
-moves — it has to keep the keys. Linear extrapolation puts 100 M at ~35 s and ~3 GB for a streamed
-`CompactHashIndex`. Hash collisions do not change the picture at any n: since 0.8 both perfect-hash
+moves — it has to keep the keys. The extrapolation this table used to end on — ~35 s and ~3 GB for a
+streamed `CompactHashIndex` at 100 M — has since been measured instead of left standing: **35.9 /
+36.1 s at a 2 452 MB peak**, the same **1.27 B/key**, and a point lookup that does not move with `n`
+(298–344 ns against 302–330 at 10 M). That is a separate and quieter session on 0.11 code, which is
+why it is stated here rather than added as a row above. Hash collisions do not change the picture at any n: since 0.8 both perfect-hash
 indexes absorb them into a side table instead of failing the build, and the fst build has no
 collision failure mode at all.</sub>
 

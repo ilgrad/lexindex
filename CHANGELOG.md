@@ -78,6 +78,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The whole build table at 100 M keys**, which is the row the streamed perfect-hash build had to
+  be fixed before anyone could take. One process per cell, on a real filesystem, page cache drained
+  before every run:
+
+  | build | keys | wall | peak RSS | blob |
+  |---|---|---|---|---|
+  | `PerfectHashIndex::build_to_file` | streamed | 94.2 / 97.6 / 102.3 s | 4 070–4 080 MB | 23.44 B/key |
+  | `CompactHashIndex::build` (fp = 1) | list | 18.3 s | 8 371 MB | **1.27 B/key** |
+  | `StringIndex::build_sorted_to_file`, word grid | streamed | 29.9 / 31.6 s | **62.6 MB** | 4.39 B/key |
+  | `StringIndex::build_sorted_to_file`, sparse pairs | streamed | 92.9 / 99.4 s | 77.2 / 77.3 MB | 12.51 B/key |
+  | the generator alone, building nothing | streamed | 32.6 / 33.0 s | 33.5 MB | — |
+
+  Two design claims survive a tenfold extrapolation past the largest `n` previously measured.
+  `CompactHashIndex` holds **1.27 bytes per key at 1 M, 10 M and 100 M**, to three digits, and the
+  memory its build adds above the key list is 25.0 B/key against 25.7 at 10 M — 2.7 % *below*, where
+  the claim was flatness within 10 %. The streamed transducer build peaks at **0.6 bytes per key** at
+  100 M, half of which is the loaded word list.
+
+  The two `StringIndex` corpora are listed separately on purpose: the 63.3 MB published for this
+  build in 0.11 is the **word grid**, and the sparse-pair generator gives 77.2 MB and a 2.8× larger
+  blob for the same `n`. Every trie number is a statement about its corpus, and a table that folded
+  the two together would read as a contradiction.
+
+  The `PerfectHashIndex` row is also a correctness result: 100 M keys built across 74 arena windows,
+  then **every one of them checked** — `id` answers, `key(id)` returns the key, and the ids are
+  exactly the dense range `[0, n)`.
+
+  From Python, through the same `bench/scale.py` cell the published table uses, a `CompactHashIndex`
+  built from a **generator** of 100 M keys takes **35.9 / 36.1 s at a 2 452 MB peak** — which
+  retires the extrapolation the README's scale table used to end on (~35 s, ~3 GB) by measuring it.
+  The point lookup does not move with `n`: 298–344 ns at 100 M against 302–330 at 10 M.
+
 - **`docs/design.md` records that `ptr_hash` construction is not deterministic.** Two
   `PerfectHashIndex::build` calls over the same key set, in one process, serialise to different
   bytes. The index is equally correct and every key answers, but the ids are not stable across
@@ -85,6 +117,13 @@ All notable changes to this project are documented here. The format follows
   will not agree on ids. Found while writing a byte-identity test for `build_to_file` that could
   never have passed — byte-identity is not a property `build` itself has. Anything that needs stable
   ids must build once and distribute the blob.
+
+  **`build_to_file`'s own documentation said the opposite** — that the file it writes is
+  byte-identical to what `build` + `save` would have produced — and shipped that way in 0.10. It now
+  says what is true: the blob answers exactly the same, key for key, but the bytes and the ids
+  differ. Two neighbouring claims that read as byte-identity are *correct* and were left alone:
+  `to_bytes` against `save` (one index, two serialisation paths) and `StringIndex::build_sorted`
+  against `build` (the transducer is deterministic, and a test asserts it).
 
 - **The Python lookup table, owed since 0.10 and finally taken** (`local/latency_py.py`, new README
   section): `dict`, `marisa-trie` and all three indexes over three corpora and three member/miss
