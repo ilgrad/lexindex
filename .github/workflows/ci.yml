@@ -122,6 +122,35 @@ jobs:
           uv run --python ${{ matrix.python-version }} --with mypy --with "$wheel" \
             python -m mypy.stubtest lexindex
 
+  # The free-threaded build needs its own wheel: the module declares `Py_MOD_GIL_NOT_USED`, and
+  # free-threaded CPython has no stable ABI before 3.15, so the abi3 wheel `python-build` produces
+  # will not load on `3.14t` at all. Without this job the threading guarantee in `docs/usage.md`
+  # rots the first time the bindings are touched -- the two concurrency tests cannot fail on a GIL
+  # build, because the GIL is what stops the interleaving they are about.
+  python-freethreaded:
+    name: python (pytest · py3.14t, free-threaded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - name: install a free-threaded interpreter
+        run: uv python install 3.14t
+      # maturin sees the free-threaded interpreter, warns that abi3 does not support it yet, and
+      # builds version-specific off the same `python` feature -- no separate feature is needed.
+      - name: build for 3.14t
+        run: |
+          uv run --python 3.14t --with maturin --no-project \
+            maturin build --release --out dist-ft --interpreter python3.14t
+      - name: pytest (GIL disabled)
+        env:
+          PYTHON_GIL: "0"
+        run: |
+          wheel=$(ls dist-ft/*.whl | head -1)
+          uv run --python 3.14t --no-project --with pytest --with "$wheel" \
+            pytest tests/test_python.py -q
+
   # Two claims in the README that nothing else would catch when they rot: the `fst`-only build
   # works on 32-bit targets (wasm included), and turning `mph` on there fails with *our* one-line
   # explanation rather than a cascade from inside `sucds`. `check`, not `test`: there is no 32-bit
