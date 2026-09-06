@@ -30,7 +30,7 @@ use crate::{IndexError, StringIndex};
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyBytes, PyString};
+use pyo3::types::{PyBytes, PyIterator, PyString};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -60,12 +60,11 @@ fn collect_strs(items: &Bound<'_, PyAny>) -> PyResult<Vec<PyBackedStr>> {
 /// a raising iterable indistinguishable from one that ended, which is why every caller must consult
 /// the cell **before** acting on the result — for a build that writes a file, before the file is
 /// published, not after.
-fn stream_strs<'a>(
-    items: &'a Bound<'a, PyAny>,
+fn stream_strs<'py>(
+    mut it: Bound<'py, PyIterator>,
     err: Rc<RefCell<Option<PyErr>>>,
-) -> PyResult<impl Iterator<Item = String> + 'a> {
-    let mut it = items.try_iter()?;
-    Ok(std::iter::from_fn(move || {
+) -> impl Iterator<Item = String> + 'py {
+    std::iter::from_fn(move || {
         if err.borrow().is_some() {
             return None;
         }
@@ -80,7 +79,7 @@ fn stream_strs<'a>(
             },
             Err(e) => stop(e),
         }
-    }))
+    })
 }
 
 /// Hash any Python iterable of `str` down to `CompactHashIndex` build pairs — 16 bytes per key,
@@ -144,7 +143,7 @@ impl PyStringIndex {
     #[staticmethod]
     fn from_sorted(items: &Bound<'_, PyAny>) -> PyResult<Self> {
         let err = Rc::new(RefCell::new(None));
-        let built = StringIndex::build_sorted(stream_strs(items, Rc::clone(&err))?);
+        let built = StringIndex::build_sorted(stream_strs(items.try_iter()?, Rc::clone(&err)));
         // Checked after the build rather than during it: nothing is published either way, and a
         // discarded partial index is not observable.
         if let Some(e) = err.borrow_mut().take() {
@@ -165,7 +164,7 @@ impl PyStringIndex {
         // build with `path` untouched instead of publishing a truncated index and reporting the
         // error afterwards.
         let written = StringIndex::build_sorted_to_file_checked(
-            stream_strs(items, Rc::clone(&err))?,
+            stream_strs(items.try_iter()?, Rc::clone(&err)),
             &path,
             move || {
                 if seen.borrow().is_some() {
@@ -449,6 +448,54 @@ impl PyPerfectHashIndex {
             .detach(|| PerfectHashIndex::build(items.iter()))
             .map_err(to_py)?;
         Ok(Self { inner })
+    }
+
+    /// Build straight to `path` **without ever holding the keys**, for a corpus that does not fit
+    /// in memory. Returns the number of keys written.
+    ///
+    /// `source` is a zero-argument callable returning an iterable of `str`, and it is **called
+    /// twice**: the build hashes every key first and can only place a key once the perfect hash
+    /// exists, so a one-shot generator cannot serve — hand it `lambda: open(path)`-style factories,
+    /// never the iterable itself (that is a `TypeError`). Keys must be distinct; a repeated key, or
+    /// a second pass that yields different keys, is refused with `ValueError` and `path` is left
+    /// untouched. Runs with the GIL held throughout: every key comes from a Python iterator.
+    #[staticmethod]
+    fn build_to_file<'py>(source: &Bound<'py, PyAny>, path: PathBuf) -> PyResult<usize> {
+        if !source.is_callable() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "build_to_file() takes a zero-argument callable that returns an iterable of str \
+                 (it is called twice), not the iterable itself",
+            ));
+        }
+        let err: Rc<RefCell<Option<PyErr>>> = Rc::new(RefCell::new(None));
+        let seen = Rc::clone(&err);
+        let replay = || -> Box<dyn Iterator<Item = String> + 'py> {
+            // After a Python-level failure there is nothing to replay: an empty pass makes the
+            // build stop, and the recorded exception is what the caller sees.
+            if err.borrow().is_some() {
+                return Box::new(std::iter::empty());
+            }
+            match source.call0().and_then(|iterable| iterable.try_iter()) {
+                Ok(it) => Box::new(stream_strs(it, Rc::clone(&err))),
+                Err(e) => {
+                    *err.borrow_mut() = Some(e);
+                    Box::new(std::iter::empty())
+                }
+            }
+        };
+        let written = PerfectHashIndex::build_to_file_checked(&path, replay, || {
+            if seen.borrow().is_some() {
+                Err(IndexError::Format(
+                    "perfect-hash: the source raised before it ended",
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        written.map_err(to_py)
     }
 
     fn __len__(&self) -> usize {

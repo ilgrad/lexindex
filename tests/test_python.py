@@ -320,6 +320,71 @@ def test_string_index_from_sorted_rejects_bad_input(tmp_path):
     assert not list(path.parent.glob("*.tmp"))
 
 
+def test_perfect_hash_build_to_file(tmp_path):
+    words = [f"w{i:05}.{i * 7919 % 1000:03}" for i in range(5_000)]
+    path = tmp_path / "streamed.bmp"
+    calls = 0
+
+    def source():
+        nonlocal calls
+        calls += 1
+        return (w for w in words)
+
+    # The factory is called twice: once to hash the keys, once to place them.
+    assert lexindex.PerfectHashIndex.build_to_file(source, path) == len(words)
+    assert calls == 2
+    idx = lexindex.PerfectHashIndex.load(path)
+    assert len(idx) == len(words)
+    ids = [idx.id(w) for w in words]
+    assert sorted(ids) == list(range(len(words)))  # every key present, ids a permutation
+    assert all(idx.key(i) == w for w, i in zip(words, ids, strict=True))
+    assert idx.id("w99999.000") is None
+    assert lexindex.PerfectHashIndex.load_mmap(path).id(words[0]) == ids[0]
+    assert lexindex.PerfectHashIndex.build_to_file(lambda: iter(()), tmp_path / "empty.bmp") == 0
+
+
+def test_perfect_hash_build_to_file_rejects_bad_input(tmp_path):
+    path = tmp_path / "kept.bmp"
+    lexindex.PerfectHashIndex.build_to_file(lambda: ["x", "y"], path)
+    before = path.read_bytes()
+
+    # The iterable itself instead of a factory is the likely mistake, and the message names it.
+    with pytest.raises(TypeError, match="callable"):
+        lexindex.PerfectHashIndex.build_to_file(["a", "b"], path)
+    with pytest.raises(ValueError, match="distinct"):
+        lexindex.PerfectHashIndex.build_to_file(lambda: ["a", "b", "a"], path)
+    with pytest.raises(TypeError):
+        lexindex.PerfectHashIndex.build_to_file(lambda: ["a", 7], path)
+
+    # A second pass that yields different keys cannot be placed and must be refused.
+    passes = iter([["a", "b"], ["a", "c"]])
+    with pytest.raises(ValueError, match="replay"):
+        lexindex.PerfectHashIndex.build_to_file(lambda: next(passes), path)
+
+    # An exception in either pass propagates as itself, and the target stays byte-identical.
+    def raising_first():
+        yield "a"
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        lexindex.PerfectHashIndex.build_to_file(raising_first, path)
+
+    calls = 0
+
+    def raising_second():
+        nonlocal calls
+        calls += 1
+        yield "a"
+        yield "b"
+        if calls == 2:
+            raise RuntimeError("late boom")
+
+    with pytest.raises(RuntimeError, match="late boom"):
+        lexindex.PerfectHashIndex.build_to_file(raising_second, path)
+    assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.tmp"))
+
+
 def test_version_is_exposed():
     v = lexindex.__version__
     assert isinstance(v, str) and v  # non-empty string

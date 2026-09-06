@@ -61,6 +61,16 @@ All notable changes to this project are documented here. The format follows
   arriving afterwards. A test asserts the file is byte-identical to what it was before the failed
   build, and that no temporary is left behind.
 
+- **`PerfectHashIndex.build_to_file(source, path)` in Python**, the binding for the streaming
+  build above. `source` is a zero-argument callable returning an iterable and it is called twice —
+  the factory shape the Rust signature enforces, spelled the Python way (`lambda: open(path)`).
+  A Python exception in either pass surfaces as that exception with the file at `path` left
+  byte-identical, through the same in-write check the sorted build uses — a deterministic failure
+  would otherwise stop both passes at the same key, and the two passes would agree on a truncated
+  index. A second pass that yields different keys, or a repeated key, is refused with
+  `ValueError`; handing it the iterable instead of a factory is the likely mistake, so that is a
+  `TypeError` naming the fix.
+
 - **`StringIndex.iter_after`** (Rust) — `iter()` resumed after a cursor key, which is the one range
   the existing API could not express: `range_iter(lo, hi)` needs an upper bound and `prefix_iter("")`
   cannot skip. It exists because the Python iterator needs it, and it is public because a caller

@@ -1,7 +1,7 @@
 """Type stubs for lexindex."""
 
 import os
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import final
 
 __all__ = ["CompactHashIndex", "PerfectHashIndex", "StringIndex", "__version__"]
@@ -73,6 +73,17 @@ class PerfectHashIndex:
     """Minimal-perfect-hash dictionary: fastest exact string->dense id, with persistence."""
 
     def __new__(cls, items: Iterable[str]) -> PerfectHashIndex: ...
+    @staticmethod
+    def build_to_file(source: Callable[[], Iterable[str]], path: str | os.PathLike[str]) -> int:
+        """Build straight to ``path`` without ever holding the keys; returns the number written.
+
+        ``source`` is a zero-argument callable returning an iterable of ``str`` and is **called
+        twice** -- the keys are hashed first and can only be placed once the perfect hash exists --
+        so pass ``lambda: open(path)``-style factories, never the iterable itself (``TypeError``).
+        Keys must be distinct; a repeated key, or a second pass yielding different keys, raises
+        ``ValueError`` with ``path`` untouched. An exception raised by the iterable propagates as
+        itself, also with ``path`` untouched.
+        """
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...

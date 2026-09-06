@@ -114,6 +114,9 @@ dict_.id_unchecked("GET")      # fastest lookup; skips verification (closed-voca
 
 dict_.save("verbs.bmp")
 dict_ = PerfectHashIndex.load_mmap("verbs.bmp")   # arena mapped zero-copy; tiny MPH read into RAM
+
+# a corpus that does not fit in memory: hand it a factory — it is called twice — never the iterable
+n = PerfectHashIndex.build_to_file(lambda: (line.rstrip("\n") for line in open("keys.txt")), "keys.bmp")
 ```
 
 Use `id_unchecked` only for a **fixed / closed vocabulary** where membership is already guaranteed —

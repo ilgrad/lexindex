@@ -682,12 +682,37 @@ impl PerfectHashIndex {
     #[cfg(feature = "mmap")]
     pub fn build_to_file<F, I, S>(
         path: impl AsRef<std::path::Path>,
-        mut source: F,
+        source: F,
     ) -> Result<usize, IndexError>
     where
         F: FnMut() -> I,
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
+    {
+        Self::build_to_file_checked(path, source, || Ok(()))
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked after each
+    /// pass over the source — the second time **inside** the atomic write, before the rename that
+    /// publishes the file.
+    ///
+    /// It exists for a source that cannot report failure through its iterator: the Python binding
+    /// adapts an arbitrary iterable, and one that raises halfway simply stops. Without this hook a
+    /// deterministic failure would stop both passes at the same key, the two passes would agree,
+    /// and a truncated index would be renamed over whatever was at `path`. Returning `Err` after
+    /// pass one abandons the build before the perfect hash is even built; after pass two it aborts
+    /// the write with the temporary removed and the target untouched.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn build_to_file_checked<F, I, S, C>(
+        path: impl AsRef<std::path::Path>,
+        mut source: F,
+        mut check: C,
+    ) -> Result<usize, IndexError>
+    where
+        F: FnMut() -> I,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
     {
         let mut hashes: Vec<u64> = Vec::new();
         let mut lens: Vec<u32> = Vec::new();
@@ -698,6 +723,7 @@ impl PerfectHashIndex {
             })?);
             hashes.push(hash_key(key));
         }
+        check()?;
         let n = hashes.len();
         if n > u32::MAX as usize {
             return Err(IndexError::Format(
@@ -832,6 +858,8 @@ impl PerfectHashIndex {
                     ));
                 }
             }
+
+            check()?;
 
             let mut payload = crate::hash::BlockHasher::new();
             payload.update(&map[HEADER_V4..]);
