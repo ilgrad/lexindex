@@ -54,6 +54,221 @@ fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8;
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
 
+/// The largest slice of the arena that may be dirty at once during a streamed build.
+///
+/// The streamed build writes each key at its perfect-hash slot, which is random with respect to
+/// file offset, so a direct fill dirties 4 KB pages across the whole mapping for the whole pass. A
+/// page holds ~178 keys at typical lengths, so once writeback starts cleaning pages the pass keeps
+/// re-dirtying them and the build writes its own file dozens of times over — measured 55-91x the
+/// output size and 2.7x the wall time from 5 M keys up, and at 100 M it did not finish in fifty
+/// minutes. Confining the dirty set to one window fixes it. 32 MB is the largest window that held
+/// 1.0x reproducibly on a real filesystem; 64 MB measured 1.4-2.3x and 128 MB 2.9-23x.
+#[cfg(feature = "mmap")]
+const SPILL_WINDOW: usize = 32 << 20;
+
+/// How much a window accumulates before its buffer is written out. Buffers grow on demand, so this
+/// is an upper bound per window rather than an up-front cost — 4.7 MB for a 2.3 GB arena. It is
+/// also why the spill is one file written at computed offsets rather than one file per window: a
+/// file per window would be a file descriptor per window.
+#[cfg(feature = "mmap")]
+const SPILL_BUF: usize = 64 << 10;
+
+/// Bytes of slot tag in front of each spilled key. The key's *length* is not stored: the arena
+/// prefix already knows it, so the spill costs four bytes per key and nothing else.
+#[cfg(feature = "mmap")]
+const SLOT_TAG: usize = 4;
+
+/// Process-wide counter for spill names, so two threads building to the same directory cannot
+/// collide on one.
+#[cfg(feature = "mmap")]
+static SPILL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Where the arena sits in the output being written and how its offsets are encoded.
+///
+/// Grouped rather than passed as four positional arguments, and it owns `span` so the arena fill
+/// and the duplicate check cannot disagree about where a slot lives.
+#[cfg(feature = "mmap")]
+struct ArenaLayout<'a> {
+    prefix: &'a [u8],
+    width: usize,
+    data_start: usize,
+    data_len: usize,
+    /// [`SPILL_WINDOW`] in every build; a handful of bytes in the tests, so the windowed fill is
+    /// exercised by the same code path rather than by a `cfg(test)` copy of it.
+    window: usize,
+}
+
+#[cfg(feature = "mmap")]
+impl ArenaLayout<'_> {
+    /// The byte range slot `slot` occupies in the file.
+    fn span(&self, slot: usize) -> std::ops::Range<usize> {
+        let lo = self.data_start + StringArena::offset_at(self.prefix, self.width, slot) as usize;
+        let hi =
+            self.data_start + StringArena::offset_at(self.prefix, self.width, slot + 1) as usize;
+        lo..hi
+    }
+
+    /// Which window slot `slot` is filled in. Clamped because a zero-length key at the very end of
+    /// the arena starts exactly at `data_len`, one past the last window.
+    fn window_of(&self, slot: usize, windows: usize) -> usize {
+        let off = StringArena::offset_at(self.prefix, self.width, slot) as usize;
+        (off / self.window).min(windows - 1)
+    }
+}
+
+/// A sibling temporary holding pass two's records until each window can be scattered.
+///
+/// Opened `O_CREAT|O_EXCL` under a pid-and-counter name for the same reason the output temporary
+/// is — the name is predictable, and a planted symlink at it must not be followed — and removed on
+/// every exit path, error paths included, by `Drop`. A hard kill leaks it, exactly as it leaks the
+/// output temporary.
+#[cfg(feature = "mmap")]
+struct Spill {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+}
+
+#[cfg(feature = "mmap")]
+impl Spill {
+    fn create(target: &std::path::Path) -> Result<Self, IndexError> {
+        let dir = target.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let stem = target
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("index"));
+        for _ in 0..128 {
+            let seq = SPILL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut path = dir.join(stem);
+            path.as_mut_os_string()
+                .push(format!(".{}.{seq}.spill", std::process::id()));
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => return Ok(Self { path, file }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(IndexError::Io(std::io::Error::from(
+            std::io::ErrorKind::AlreadyExists,
+        )))
+    }
+
+    fn write_at(&mut self, at: usize, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::{Seek, Write};
+        self.file.seek(std::io::SeekFrom::Start(at as u64))?;
+        self.file.write_all(bytes)
+    }
+
+    fn reader_at(&mut self, at: usize) -> std::io::Result<std::io::BufReader<&std::fs::File>> {
+        use std::io::Seek;
+        self.file.seek(std::io::SeekFrom::Start(at as u64))?;
+        Ok(std::io::BufReader::with_capacity(SPILL_BUF, &self.file))
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl Drop for Spill {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.path).ok();
+    }
+}
+
+/// Fill the arena from a second pass over `source`, never leaving more than one [`SPILL_WINDOW`]
+/// dirty.
+///
+/// Pass two appends each key to the spill region of the window its slot falls in — all sequential
+/// writes — and each window is then read back sequentially and scattered inside itself, small
+/// enough to stay dirty until it is flushed. The extra disk traffic is one arena-sized write plus
+/// one read; the alternative of re-reading the source once per window was measured and rejected,
+/// because one pass over a 100 M source costs 33 s and the windows number in the dozens.
+///
+/// Returns how many keys the source produced, so the caller reports a short replay the same way it
+/// does for the direct fill.
+#[cfg(feature = "mmap")]
+fn fill_arena_windowed<F, I, S>(
+    map: &mut memmap2::MmapMut,
+    layout: &ArenaLayout<'_>,
+    hashes: &[u64],
+    slot_of: &[u32],
+    source: &mut F,
+    target: &std::path::Path,
+) -> Result<usize, IndexError>
+where
+    F: FnMut() -> I,
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    use std::io::Read;
+
+    let n = hashes.len();
+    let windows = layout.data_len.div_ceil(layout.window);
+    // Every region's size is known before a single key is read back: the arena prefix already says
+    // where each slot lands and how long it is, so the spill can be one file at computed offsets
+    // instead of a file per window.
+    let mut region_len = vec![0usize; windows];
+    for slot in 0..n {
+        region_len[layout.window_of(slot, windows)] += SLOT_TAG + layout.span(slot).len();
+    }
+    let mut region_at = Vec::with_capacity(windows);
+    let mut acc = 0usize;
+    for &len in &region_len {
+        region_at.push(acc);
+        acc += len;
+    }
+
+    let mut spill = Spill::create(target)?;
+    let mut buf: Vec<Vec<u8>> = vec![Vec::new(); windows];
+    let mut cursor = vec![0usize; windows];
+    let mut i = 0usize;
+    for item in source() {
+        let key = item.as_ref();
+        if i >= n || hash_key(key) != hashes[i] {
+            return Err(IndexError::Build(
+                "perfect-hash: the source did not replay the same keys in the same order",
+            ));
+        }
+        let slot = slot_of[i];
+        let w = layout.window_of(slot as usize, windows);
+        let out = &mut buf[w];
+        out.extend_from_slice(&slot.to_le_bytes());
+        out.extend_from_slice(key.as_bytes());
+        if out.len() >= SPILL_BUF {
+            spill.write_at(region_at[w] + cursor[w], out)?;
+            cursor[w] += out.len();
+            out.clear();
+        }
+        i += 1;
+    }
+    if i != n {
+        return Ok(i);
+    }
+    for (w, out) in buf.iter().enumerate() {
+        if !out.is_empty() {
+            spill.write_at(region_at[w] + cursor[w], out)?;
+        }
+    }
+    drop(buf);
+
+    for w in 0..windows {
+        let mut left = region_len[w];
+        let mut reader = spill.reader_at(region_at[w])?;
+        let mut tag = [0u8; SLOT_TAG];
+        while left > 0 {
+            reader.read_exact(&mut tag)?;
+            let span = layout.span(u32::from_le_bytes(tag) as usize);
+            left -= SLOT_TAG + span.len();
+            reader.read_exact(&mut map[span])?;
+        }
+        let from = layout.data_start + w * layout.window;
+        let len = layout.data_len.min((w + 1) * layout.window) - w * layout.window;
+        map.flush_range(from, len)?;
+    }
+    Ok(n)
+}
+
 /// The validated framing of a blob — every field a query will trust — with the MPH region located
 /// but not deserialised. Produced by the safe `parse_frame`, which any bytes may reach; consumed by
 /// the unsafe `from_shared`, the only place the `epserde` region is touched.
@@ -679,6 +894,15 @@ impl PerfectHashIndex {
     /// until the kernel writes them back (reclaimable page cache, not anonymous memory). The
     /// anonymous part is 20.6 bytes per key, flat in `n`, which is what the design predicts: eight
     /// for the hash, four for the length, eight for the sorted copy that looks for collisions.
+    ///
+    /// **Transient disk space**: an output whose key arena exceeds 32 MB is filled through a spill
+    /// file alongside it, so the build needs roughly 2.2x the output size free in the target
+    /// directory until it finishes. Filling the arena directly instead is what made the build write
+    /// its file dozens of times over — the arena is filled in perfect-hash slot order, which is
+    /// random with respect to file offset, so the whole mapping stays dirty for the whole pass and
+    /// the kernel writes it back over and over. The spill is written sequentially,
+    /// removed on every exit path, and on a machine with memory to spare it never reaches the disk
+    /// at all.
     #[cfg(feature = "mmap")]
     pub fn build_to_file<F, I, S>(
         path: impl AsRef<std::path::Path>,
@@ -705,8 +929,29 @@ impl PerfectHashIndex {
     #[cfg(feature = "mmap")]
     pub(crate) fn build_to_file_checked<F, I, S, C>(
         path: impl AsRef<std::path::Path>,
+        source: F,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        F: FnMut() -> I,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        Self::build_to_file_windowed(path, source, check, SPILL_WINDOW)
+    }
+
+    /// [`build_to_file_checked`](Self::build_to_file_checked) with the arena window size exposed.
+    ///
+    /// Only the tests pass anything but [`SPILL_WINDOW`]: an arena large enough to need more than
+    /// one 32 MB window is far too large to build in a unit test, and a windowing bug that only
+    /// appears past 32 MB of keys is exactly the kind this has to catch.
+    #[cfg(feature = "mmap")]
+    fn build_to_file_windowed<F, I, S, C>(
+        path: impl AsRef<std::path::Path>,
         mut source: F,
         mut check: C,
+        window: usize,
     ) -> Result<usize, IndexError>
     where
         F: FnMut() -> I,
@@ -823,19 +1068,40 @@ impl PerfectHashIndex {
             map[arena_start..data_start].copy_from_slice(&arena_prefix);
             map[data_start + data_len..].copy_from_slice(&side_buf);
 
-            let mut i = 0usize;
-            for item in source() {
-                let key = item.as_ref();
-                if i >= n || hash_key(key) != hashes[i] {
-                    return Err(IndexError::Build(
-                        "perfect-hash: the source did not replay the same keys in the same order",
-                    ));
+            let layout = ArenaLayout {
+                prefix: &arena_prefix,
+                width,
+                data_start,
+                data_len,
+                window,
+            };
+            // An arena that fits in one window is already confined, so it is filled straight
+            // through the mapping and no temporary is created; past that the fill goes through a
+            // spill so the dirty set stays one window wide. See [`SPILL_WINDOW`] for the
+            // measurements behind the threshold.
+            let i = if data_len <= window {
+                let mut i = 0usize;
+                for item in source() {
+                    let key = item.as_ref();
+                    if i >= n || hash_key(key) != hashes[i] {
+                        return Err(IndexError::Build(
+                            "perfect-hash: the source did not replay the same keys in the same order",
+                        ));
+                    }
+                    map[layout.span(slot_of[i] as usize)].copy_from_slice(key.as_bytes());
+                    i += 1;
                 }
-                let at = data_start
-                    + StringArena::offset_at(&arena_prefix, width, slot_of[i] as usize) as usize;
-                map[at..at + key.len()].copy_from_slice(key.as_bytes());
-                i += 1;
-            }
+                i
+            } else {
+                fill_arena_windowed(
+                    &mut map,
+                    &layout,
+                    &hashes,
+                    &slot_of,
+                    &mut source,
+                    path.as_ref(),
+                )?
+            };
             if i != n {
                 return Err(IndexError::Build(
                     "perfect-hash: the source did not replay the same keys in the same order",
@@ -844,15 +1110,11 @@ impl PerfectHashIndex {
             // Every extra shares a hash with its representative. Distinct keys make that a genuine
             // 64-bit collision, which the side table handles; equal keys mean the caller broke the
             // one precondition this build has, and the file must not be published.
-            let span = |slot: usize| {
-                let lo = data_start + StringArena::offset_at(&arena_prefix, width, slot) as usize;
-                let hi =
-                    data_start + StringArena::offset_at(&arena_prefix, width, slot + 1) as usize;
-                lo..hi
-            };
             for &(h, i) in &extras {
                 let rep = rep_of[&h] as usize;
-                if map[span(slot_of[i as usize] as usize)] == map[span(slot_of[rep] as usize)] {
+                if map[layout.span(slot_of[i as usize] as usize)]
+                    == map[layout.span(slot_of[rep] as usize)]
+                {
                     return Err(IndexError::Build(
                         "perfect-hash: build_to_file needs distinct keys and the source repeated one",
                     ));
@@ -946,6 +1208,194 @@ mod stream_build_tests {
         );
         assert_eq!(idx.id("not-a-key"), None);
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// `window_of` is asked for a slot whose offset is exactly `data_len`, which is what a
+    /// zero-length key in the last arena position produces; without the clamp that indexes one
+    /// past the last window. The public build cannot be steered into it — which slot the empty key
+    /// lands in is the perfect hash's choice — so the invariant is pinned directly.
+    #[test]
+    fn window_of_clamps_a_zero_length_key_at_the_end_of_the_arena() {
+        let (prefix, data_len, width) = StringArena::prefix_for_lengths(&[4, 4, 0]);
+        assert_eq!(data_len, 8);
+        let layout = ArenaLayout {
+            prefix: &prefix,
+            width,
+            data_start: 0,
+            data_len,
+            window: 4,
+        };
+        let windows = data_len.div_ceil(layout.window);
+        assert_eq!(windows, 2);
+        assert_eq!(layout.window_of(2, windows), windows - 1);
+        assert!(layout.span(2).is_empty());
+    }
+
+    /// Nothing in a unit test can build a 32 MB arena, so the window is shrunk instead and the
+    /// production path runs unchanged over hundreds of windows.
+    #[test]
+    fn build_to_file_windowed_answers_exactly_like_the_single_window_build() {
+        let keys: Vec<String> = (0..2_000)
+            .map(|i| format!("key-{i}-{}", "x".repeat(i % 17)))
+            .collect();
+        let wide = tmp("win_wide.bmp");
+        let narrow = tmp("win_narrow.bmp");
+        PerfectHashIndex::build_to_file(&wide, || keys.iter()).unwrap();
+        let n = PerfectHashIndex::build_to_file_windowed(&narrow, || keys.iter(), || Ok(()), 64)
+            .unwrap();
+        assert_eq!(n, keys.len());
+
+        // SAFETY: both written by this crate a line above.
+        let (a, b) = unsafe {
+            (
+                PerfectHashIndex::load(&wide).unwrap(),
+                PerfectHashIndex::load(&narrow).unwrap(),
+            )
+        };
+        assert_eq!(b.len(), keys.len());
+        let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
+        for k in &keys {
+            // Ids may differ between two builds (ptr_hash construction is not deterministic), but
+            // membership and the slot → key round trip may not.
+            assert!(a.contains(k) && b.contains(k), "{k}");
+            let id = b.id(k).expect("every key is a member");
+            assert_eq!(b.key(id), Some(k.as_str()));
+            ids.push(id);
+        }
+        ids.sort_unstable();
+        assert!(
+            ids.iter().copied().eq(0..keys.len() as u32),
+            "ids are exactly the dense range [0, n)"
+        );
+        assert_eq!(b.id("not-a-key"), None);
+        std::fs::remove_dir_all(wide.parent().unwrap()).ok();
+        std::fs::remove_dir_all(narrow.parent().unwrap()).ok();
+    }
+
+    /// An empty key at the end of the arena starts exactly at `data_len`, one past the last
+    /// window, which is why `window_of` clamps. Keys of length zero and one also make the windows
+    /// land mid-key, so a record can straddle a boundary.
+    #[test]
+    fn build_to_file_windowed_handles_empty_and_boundary_keys() {
+        let mut keys: Vec<String> = (0..200).map(|i| format!("{i:03}")).collect();
+        keys.push(String::new());
+        keys.push("z".to_string());
+        let path = tmp("win_edge.bmp");
+        for window in [1usize, 2, 3, 7, 64] {
+            PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), window)
+                .unwrap();
+            // SAFETY: written by this crate a line above.
+            let idx = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+            for k in &keys {
+                let id = idx
+                    .id(k)
+                    .unwrap_or_else(|| panic!("{k:?} at window {window}"));
+                assert_eq!(idx.key(id), Some(k.as_str()), "window {window}");
+            }
+            assert_eq!(idx.id("nope"), None);
+        }
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    /// The window buffers flush mid-pass once a window has accumulated `SPILL_BUF`, and that is
+    /// the branch every real build spends its time in while the small-window tests above never
+    /// reach it. Enough keys to overflow a window several times, and a window large enough that
+    /// they land in only a few.
+    #[test]
+    fn build_to_file_windowed_flushes_buffers_mid_pass() {
+        let keys: Vec<String> = (0..10_000)
+            .map(|i| format!("key-{i:06}-{}", "y".repeat(i % 23)))
+            .collect();
+        let direct = tmp("win_flush_direct.bmp");
+        let windowed = tmp("win_flush_windowed.bmp");
+        PerfectHashIndex::build_to_file(&direct, || keys.iter()).unwrap();
+        PerfectHashIndex::build_to_file_windowed(&windowed, || keys.iter(), || Ok(()), 128 << 10)
+            .unwrap();
+        // SAFETY: both written by this crate a line above.
+        let (a, b) = unsafe {
+            (
+                PerfectHashIndex::load(&direct).unwrap(),
+                PerfectHashIndex::load(&windowed).unwrap(),
+            )
+        };
+        for k in &keys {
+            assert!(a.contains(k), "{k}");
+            let id = b
+                .id(k)
+                .unwrap_or_else(|| panic!("{k} lost by the windowed fill"));
+            assert_eq!(b.key(id), Some(k.as_str()));
+        }
+        std::fs::remove_dir_all(direct.parent().unwrap()).ok();
+        std::fs::remove_dir_all(windowed.parent().unwrap()).ok();
+    }
+
+    /// A second pass that simply *stops early* is the failure the replay check cannot see key by
+    /// key — every key it did produce matched — so the windowed fill reports the count back and
+    /// the caller refuses on the total.
+    #[test]
+    fn build_to_file_windowed_refuses_a_source_that_replays_short() {
+        let keys: Vec<String> = (0..300).map(|i| format!("k{i:04}")).collect();
+        let path = tmp("win_short.bmp");
+        let dir = path.parent().unwrap().to_path_buf();
+        let mut pass = 0;
+        let err = PerfectHashIndex::build_to_file_windowed(
+            &path,
+            || {
+                pass += 1;
+                let take = if pass > 1 { keys.len() - 5 } else { keys.len() };
+                keys[..take].to_vec()
+            },
+            || Ok(()),
+            16,
+        )
+        .unwrap_err();
+        assert!(matches!(err, IndexError::Build(_)), "{err}");
+        assert!(!path.exists(), "a short replay must not publish a file");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".spill") || n.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The spill is a second temporary next to the target, so it gets the same guarantee the
+    /// output temporary already has: gone on success, and gone when the build refuses.
+    #[test]
+    fn build_to_file_windowed_leaves_no_spill_behind() {
+        let keys: Vec<String> = (0..300).map(|i| format!("k{i:04}")).collect();
+        let path = tmp("win_spill.bmp");
+        let dir = path.parent().unwrap().to_path_buf();
+        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 16).unwrap();
+
+        // A source that replays a different key set: pass two fails after the spill exists.
+        let mut pass = 0;
+        let err = PerfectHashIndex::build_to_file_windowed(
+            &path,
+            || {
+                pass += 1;
+                let mut k = keys.clone();
+                if pass > 1 {
+                    k[7] = "different".to_string();
+                }
+                k
+            },
+            || Ok(()),
+            16,
+        )
+        .unwrap_err();
+        assert!(matches!(err, IndexError::Build(_)), "{err}");
+
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".spill") || name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

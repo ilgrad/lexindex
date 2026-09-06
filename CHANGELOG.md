@@ -156,6 +156,51 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`PerfectHashIndex::build_to_file` wrote its own output file dozens of times over.** The arena
+  stores keys in perfect-hash slot order, and pass two walked the *source*, writing each key
+  straight to its slot — an order that is random with respect to file offset, so the pass dirtied
+  4 KB pages across the whole mapping for its whole duration. A page holds ~178 keys at these
+  lengths, so once the kernel began writing pages back the pass kept re-dirtying them. Measured on
+  a real filesystem, drained before every run: **55–91× the output size in bytes actually written
+  to the disk, and 2.7× the wall time, on every streamed build from 5 M keys up**. At 100 M it did
+  not finish at all — killed after fifty minutes at 18 % CPU, having written 187.7 GiB for a 2.34 GB
+  file.
+
+  The fix keeps the dirty set to one window. Pass two now appends each key to the region of a
+  sibling spill file belonging to the 32 MB window its slot falls in, and each window is then read
+  back sequentially and filled inside itself before being flushed. Every write is an append or is
+  confined to one window, and the spill — four bytes per key on top of the key itself, because the
+  arena's offset table already knows every length — usually never reaches the disk at all, being
+  written and consumed within seconds. An arena that already fits in one window is filled directly
+  and creates no temporary.
+
+  | keys | before | after | bytes written / output size |
+  |---|---|---|---|
+  | 5 M | 12.2–16.4 s | **4.2–5.2 s** | 55–75× → **1.00–1.01×** |
+  | 10 M | 25.3–34.2 s | **8.5–8.6 s** | 55–91× → **1.00×** |
+  | 20 M | 60.6–61.4 s | **17.7–17.9 s** | 68–72× → **1.00–1.01×** |
+  | 100 M | did not finish in 50 min | **94.2 s** | 86× and climbing → **1.85×** |
+
+  The API, the blob format and the build's memory profile are all unchanged — peak RSS matches the
+  published figures to a tenth of a megabyte — and the new times are *below* what the same builds
+  measured writing into a RAM filesystem before the change (4.2 / 8.5 / 17.7 against 5.2 / 10.7 /
+  22.6), because filling one window at a time is easier on the TLB as well as on the disk.
+
+  **Two attributions were wrong before the controlled experiment settled it**, and both are the
+  kind that would have been fixed in the wrong place: the writeback timer (writes begin the instant
+  pass two starts, not fifteen seconds in) and the filesystem's copy-on-write and compression (the
+  same build measured 1.0× on that filesystem and 87× on one without either). What identifies the
+  cause is a control holding everything fixed but the order — the same file, the same offsets, the
+  same bytes — where sequential takes 1.0 s and scattered 155–167 s at 140–151×, while on a RAM
+  filesystem the same reordering costs 1.7× and no I/O at all. 32 MB is the largest window that
+  held 1.0× reproducibly; 64 MB measured 1.4–2.3× and 128 MB 2.9–23×. The simpler fix of re-reading
+  the source once per window was measured and rejected: one pass over a 100 M source costs 32.8 s
+  and a 2.3 GB arena needs 74 windows, which is the failure it was meant to repair.
+
+  `StringIndex::build_sorted_to_file` never had this — it writes in ascending key order through a
+  buffered writer, measured at 1.02× at 100 M on the same filesystem the same day — and
+  `CompactHashIndex` has no arena to fill.
+
 - **The 0.10.0 build-memory figures were measured against a masked baseline and are corrected here,
   not silently swapped.** `examples/peak.rs` reports `VmHWM − (VmHWM at the moment the key list is
   ready)`, and `VmHWM` is a high-water mark: the transient of loading the word list and sorting the
