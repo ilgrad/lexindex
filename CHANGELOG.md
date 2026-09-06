@@ -86,6 +86,30 @@ All notable changes to this project are documented here. The format follows
   never have passed — byte-identity is not a property `build` itself has. Anything that needs stable
   ids must build once and distribute the blob.
 
+- **The Python lookup table, owed since 0.10 and finally taken** (`local/latency_py.py`, new README
+  section): `dict`, `marisa-trie` and all three indexes over three corpora and three member/miss
+  mixes. `CompactHashIndex.id` answers a present key in **0.61–0.71×** a `dict`'s time and a missing
+  one in **0.32–0.36×**; batched `ids_of` in 0.31–0.38× and 0.20–0.29×. `PerfectHashIndex.id`
+  trades level on members (1.05–1.33×) and wins on misses (0.83–0.96×); `marisa-trie` costs
+  1.85–4.29× and `StringIndex` 1.06–2.61×.
+
+  **Three protocol defects had to be fixed before any of it was publishable, and the third
+  invalidates the criterion the plan had been using.** The harness gated on `dict`'s round-to-round
+  spread as its stability control, and that spread was 19–79 % while `StringIndex` sat at 7 % on the
+  very same rounds — not machine noise, which moves every column alike, but `dict` itself: at these
+  sizes its table straddles the L3 boundary (~16 MB at 480 k keys) where `CompactHashIndex` is
+  0.6 MB and fully resident. The least stable object in the table had been made its control. Second,
+  the forms were alternated in a fixed order, so whichever ran first paid to pull the probe list
+  back into cache after the previous set displaced it; they are rotated now. Third and decisive,
+  **an idle machine is not a quiet one**: a cache-resident integer loop touching no memory drifts
+  13.7 % over twelve rounds, climbing monotonically as the CPU heats, so the "control spread under
+  2 %" bar was unreachable here whatever the load average said, and four sessions of blaming a
+  sibling process were half wrong. The estimator is now the minimum over rounds and the criterion is
+  **agreement between two independent runs** — worst 7.3 %, median 1.0 % on the published numbers.
+  A fourth would-be defect was caught by that criterion rather than by inspection: the first run of
+  a corpus, minutes after a build, disagreed by up to 24 % on two cells, so a settling period is
+  real and the run is excluded.
+
 - **The ns/op table the 0.10 sessions could not take** (`local/latency/`): every lookup form of both
   hash indexes over four member/non-member mixes and two key layouts, `std::HashMap` as the
   stability control, all forms alternated inside each round. Two findings reached the README. First,

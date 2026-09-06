@@ -339,6 +339,47 @@ So, in decision order:
   amortises better), and it has to be rebuilt from the keys on every process start; every structure
   here is mapped from a file instead.
 
+### Lookup speed from Python, against `dict` and `marisa-trie`
+
+`local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
+forms rotated inside each round so none keeps the position that pays to warm the probe list,
+minimum over 11 rounds. Ratios are **quotients of the minima against `dict` on the same probe
+set**, which is the quantity that reproduces: two independent runs agree to 7.3 % at worst and
+1.0 % at the median (`grid`: 2.1 % / 0.8 %).
+
+| probe set | structure | 479 823 words | 1 M random pairs | 1 M grid pairs |
+|---|---|---:|---:|---:|
+| members | `marisa-trie` | 1.85× | 4.20× | 2.50× |
+| | `StringIndex.id` | 1.38× | 2.61× | 1.41× |
+| | `PerfectHashIndex.id` | 1.05× | 1.32× | 1.33× |
+| | **`CompactHashIndex.id`** | **0.61×** | **0.71×** | **0.61×** |
+| | `PerfectHashIndex.ids_of` | 0.47× | 0.49× | 0.54× |
+| | **`CompactHashIndex.ids_of`** | **0.31×** | **0.38×** | **0.38×** |
+| absent | `marisa-trie` | 2.34× | 4.29× | 2.16× |
+| | `StringIndex.id` | 1.47× | 2.37× | 1.06× |
+| | `PerfectHashIndex.id` | 0.83× | 0.95× | 0.96× |
+| | **`CompactHashIndex.id`** | **0.36×** | **0.33×** | **0.32×** |
+| | **`CompactHashIndex.ids_of`** | **0.29×** | **0.21×** | **0.20×** |
+
+Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in about
+two-thirds the time of a `dict` and a **missing** one in about a third, batched `ids_of` in a
+quarter to a third — while occupying 1.27 bytes per key on disk against the `dict`'s 71–95 bytes
+per key in RAM. `PerfectHashIndex` trades level with `dict` on members and wins on misses;
+`marisa-trie` costs 1.9–4.3× and `StringIndex` 1.1–2.6×, and both swing with the corpus exactly as
+their sizes do. Absolute figures for the word corpus, for scale: `dict` 327.9 ns, `CompactHashIndex`
+200.8, its `ids_of` 102.0, `marisa` 605.8.
+
+<sub>Read the ratios, not the absolutes. This machine drifts 3–11 % within a single run and 13.7 %
+over twelve rounds **while idle** — measured with a cache-resident integer loop that touches no
+memory, whose time climbs monotonically as the CPU heats — so absolute nanoseconds here are a
+statement about one laptop's thermal envelope. The ratios divide that out. Two caveats in `dict`'s
+favour, both deliberate: CPython caches a string's hash inside the object, so a repeated probe over
+the same `str` skips rehashing where lexindex hashes the bytes every call (~23 ns of the gap at
+1 M); and every column pays the same per-call binding overhead, which flatters the slower ones. The
+first run of a corpus, taken minutes after a build, disagreed with the two settled runs by up to
+24 % on two cells and is excluded — the machine needs to settle, and cross-run agreement is what
+says when it has.</sub>
+
 ### Point-lookup latency vs the standard library
 
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
