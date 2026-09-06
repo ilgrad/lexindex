@@ -231,6 +231,11 @@ the same keys handed to `build` as a list; the streamed `StringIndex` build peak
 721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
 
+The perfect hash also needs **transient disk space**: an output whose key arena exceeds 32 MB is
+filled window by window through a spill file next to it, so about 2.2× the output size has to be
+free in the target directory until the build finishes. Filling the arena in one pass instead is
+what made the build rewrite its own file dozens of times over.
+
 Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
 `load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies)
 and the only one that compiles for 32-bit targets, including `wasm32-unknown-unknown` — `mph` needs a

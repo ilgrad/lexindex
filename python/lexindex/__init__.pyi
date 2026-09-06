@@ -83,6 +83,9 @@ class PerfectHashIndex:
         Keys must be distinct; a repeated key, or a second pass yielding different keys, raises
         ``ValueError`` with ``path`` untouched. An exception raised by the iterable propagates as
         itself, also with ``path`` untouched.
+
+        An output whose key arena exceeds 32 MB is written through a spill file alongside it, so
+        roughly 2.2x the output size must be free in the target directory until the build finishes.
         """
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...

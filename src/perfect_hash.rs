@@ -510,7 +510,7 @@ impl PerfectHashIndex {
     /// Real-word bigrams at 10 M, against the per-key loop: **3.6×** when the batch's strings are
     /// scattered in memory (3.3× at 1 M, 3.2× at 5 M). Keys allocated in probe order are already
     /// visible to the hardware prefetcher, and there the win is the single FFI crossing rather
-    /// than the prefetching. See [`CompactHashIndex::ids_of`] for the same measurement in more
+    /// than the prefetching. See [`crate::CompactHashIndex::ids_of`] for the same measurement in more
     /// detail — this index pays for the stored keys it compares against, which is why it is the
     /// slower of the two either way.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u32>> {
@@ -869,17 +869,21 @@ impl PerfectHashIndex {
     }
 
     /// Build straight to `path` **without ever holding the keys**, for a corpus that does not fit
-    /// in memory. Returns the number of keys written; the file is byte-identical to what
-    /// [`build`](Self::build) + [`save`](Self::save) would have produced for the same key set.
+    /// in memory. Returns the number of keys written.
+    ///
+    /// The file is a blob that answers exactly as [`build`](Self::build) + [`save`](Self::save)
+    /// would have for the same key set — every key a member, every `key(id)` round trip intact —
+    /// but **not the same bytes**, and the ids are not the same ids: `ptr_hash` construction is not
+    /// deterministic, so even two in-memory builds of one key set serialise differently. Anything
+    /// that needs stable ids has to build once and distribute the blob.
     ///
     /// `source` is a *factory*, not an iterator, and it is called **twice**. That is the shape the
     /// problem has, not an inconvenience: the arena stores keys in slot order, slot order is only
     /// known once the perfect hash is built, and the perfect hash needs every key's hash first.
     /// Pass one hashes the corpus and records lengths (12 bytes per key, nothing else); the offset
-    /// table follows from the lengths alone; pass two replays the corpus and writes each key
-    /// straight into its place in the mapped file. A one-shot iterator cannot be passed by
-    /// construction, which is the point — the signature states the requirement instead of
-    /// documenting it.
+    /// table follows from the lengths alone; pass two replays the corpus and places each key. A
+    /// one-shot iterator cannot be passed by construction, which is the point — the signature
+    /// states the requirement instead of documenting it.
     ///
     /// **Keys must be distinct.** [`build`](Self::build) sorts and deduplicates, which this cannot
     /// do: a repeated hash in pass one is either a duplicate key or a genuine 64-bit collision, and
