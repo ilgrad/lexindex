@@ -30,6 +30,7 @@ use crate::{IndexError, Overlay, StringIndex};
 use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
+use pyo3::sync::MutexExt;
 use pyo3::types::{PyBytes, PyIterator, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -336,9 +337,11 @@ impl PyStringIndex {
         let remaining = slf.borrow().inner.len() as u64;
         StringIndexIterator {
             parent: slf.unbind(),
-            buf: Vec::new().into_iter(),
-            resume: None,
-            remaining,
+            state: std::sync::Mutex::new(IterState {
+                buf: Vec::new().into_iter(),
+                resume: None,
+                remaining,
+            }),
         }
     }
 
@@ -407,9 +410,17 @@ const ITER_CHUNK: usize = 1024;
 
 /// Lazy `(key, id)` iterator over a [`PyStringIndex`], in sorted order. Holds a reference to the parent
 /// index and streams it a chunk at a time, so it never materialises the whole key set.
-#[pyclass(name = "StringIndexIterator", module = "lexindex._core")]
+#[pyclass(frozen, name = "StringIndexIterator", module = "lexindex._core")]
 pub struct StringIndexIterator {
     parent: Py<PyStringIndex>,
+    /// Behind a lock because the class is `frozen`, and `frozen` because it must not be: on a
+    /// free-threaded interpreter PyO3's borrow flag turns two threads calling `__next__` on one
+    /// iterator into `RuntimeError: Already borrowed` -- measured, 7 of 8 threads. Sharing an
+    /// iterator is a strange thing to do, but raising is a worse answer than serialising.
+    state: std::sync::Mutex<IterState>,
+}
+
+struct IterState {
     buf: std::vec::IntoIter<(String, u64)>,
     /// Last key handed out, where the next refill resumes. `None` before the first one.
     resume: Option<String>,
@@ -424,11 +435,11 @@ pub struct StringIndexIterator {
     remaining: u64,
 }
 
-impl StringIndexIterator {
+impl IterState {
     /// Decode the next chunk, at most `remaining` pairs, and count them off.
-    fn refill(&mut self, py: Python<'_>) {
+    fn refill(&mut self, py: Python<'_>, parent: &Py<PyStringIndex>) {
         let want = ITER_CHUNK.min(self.remaining as usize);
-        let parent = self.parent.clone_ref(py);
+        let parent = parent.clone_ref(py);
         let chunk: Vec<(String, u64)> = {
             let idx = parent.borrow(py);
             match &self.resume {
@@ -450,19 +461,23 @@ impl StringIndexIterator {
         slf
     }
 
-    fn __next__(&mut self, py: Python<'_>) -> Option<(String, u64)> {
+    fn __next__(&self, py: Python<'_>) -> Option<(String, u64)> {
+        let mut state = self
+            .state
+            .lock_py_attached(py)
+            .expect("iterator state poisoned by an earlier panic");
         loop {
-            if let Some(item) = self.buf.next() {
+            if let Some(item) = state.buf.next() {
                 return Some(item);
             }
-            if self.remaining == 0 {
+            if state.remaining == 0 {
                 return None;
             }
             // Every trip either yields, or strictly decreases `remaining`, or stops here — the
             // stream running dry before `len()` says it should is a malformed index, not a retry.
-            let before = self.remaining;
-            self.refill(py);
-            if self.remaining == before {
+            let before = state.remaining;
+            state.refill(py, &self.parent);
+            if state.remaining == before {
                 return None;
             }
         }
@@ -905,15 +920,15 @@ enum OverlayInner {
 /// Run `$body` against whichever overlay is inside. Every arm has to typecheck on its own, which is
 /// what keeps the base-specific methods below from reaching the keyless base.
 macro_rules! on_base {
-    ($this:expr, |$ov:ident| $body:expr) => {
-        match &$this.inner {
+    ($held:expr, |$ov:ident| $body:expr) => {
+        match &*$held {
             OverlayInner::String($ov) => $body,
             OverlayInner::Perfect($ov) => $body,
             OverlayInner::Compact($ov) => $body,
         }
     };
-    (mut $this:expr, |$ov:ident| $body:expr) => {
-        match &mut $this.inner {
+    (mut $held:expr, |$ov:ident| $body:expr) => {
+        match &mut *$held {
             OverlayInner::String($ov) => $body,
             OverlayInner::Perfect($ov) => $body,
             OverlayInner::Compact($ov) => $body,
@@ -923,8 +938,8 @@ macro_rules! on_base {
 
 /// Same, for the two bases that store their keys; the third answers with the error it earns.
 macro_rules! on_keyed_base {
-    ($this:expr, |$ov:ident| $body:expr) => {
-        match &$this.inner {
+    ($held:expr, |$ov:ident| $body:expr) => {
+        match &*$held {
             OverlayInner::String($ov) => Ok($body),
             OverlayInner::Perfect($ov) => Ok($body),
             OverlayInner::Compact(_) => Err(no_keys()),
@@ -939,9 +954,30 @@ fn no_keys() -> PyErr {
 }
 
 /// Edits on top of an index that is expensive to rebuild.
-#[pyclass(name = "Overlay", module = "lexindex")]
+///
+/// `frozen` with the state behind a lock, not a plain `#[pyclass]` with `&mut self` methods: on a
+/// free-threaded interpreter PyO3's borrow flag turns two threads calling `add` on one overlay into
+/// `RuntimeError: Already borrowed` — measured, 7 of 8 threads. Concurrent edits to one overlay are
+/// a reasonable thing for a Python caller to do, so they are serialised instead.
+#[pyclass(frozen, name = "Overlay", module = "lexindex")]
 pub struct PyOverlay {
-    inner: OverlayInner,
+    inner: std::sync::Mutex<OverlayInner>,
+}
+
+impl PyOverlay {
+    fn wrap(inner: OverlayInner) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(inner),
+        }
+    }
+
+    /// Take the lock without deadlocking against the interpreter: `lock_py_attached` detaches
+    /// before blocking, so a thread waiting here is not holding the runtime hostage.
+    fn lock<'a>(&'a self, py: Python<'_>) -> std::sync::MutexGuard<'a, OverlayInner> {
+        self.inner
+            .lock_py_attached(py)
+            .expect("overlay state poisoned by an earlier panic")
+    }
 }
 
 #[pymethods]
@@ -951,21 +987,15 @@ impl PyOverlay {
     fn new(index: &Bound<'_, PyAny>) -> PyResult<Self> {
         if let Ok(i) = index.cast::<PyStringIndex>() {
             let base = Arc::clone(&i.borrow().inner);
-            return Ok(Self {
-                inner: OverlayInner::String(Overlay::new(base)),
-            });
+            return Ok(Self::wrap(OverlayInner::String(Overlay::new(base))));
         }
         if let Ok(i) = index.cast::<PyPerfectHashIndex>() {
             let base = Arc::clone(&i.borrow().inner);
-            return Ok(Self {
-                inner: OverlayInner::Perfect(Overlay::new(base)),
-            });
+            return Ok(Self::wrap(OverlayInner::Perfect(Overlay::new(base))));
         }
         if let Ok(i) = index.cast::<PyCompactHashIndex>() {
             let base = Arc::clone(&i.borrow().inner);
-            return Ok(Self {
-                inner: OverlayInner::Compact(Overlay::new(base)),
-            });
+            return Ok(Self::wrap(OverlayInner::Compact(Overlay::new(base))));
         }
         Err(PyTypeError::new_err(
             "Overlay takes a StringIndex, a PerfectHashIndex or a CompactHashIndex",
@@ -973,76 +1003,82 @@ impl PyOverlay {
     }
 
     /// How many keys are live: base keys plus additions, less what has been removed.
-    fn __len__(&self) -> usize {
-        on_base!(self, |ov| ov.len())
+    fn __len__(&self, py: Python<'_>) -> usize {
+        on_base!(self.lock(py), |ov| ov.len())
     }
 
     /// Whether every key has been removed (or there were none).
-    fn is_empty(&self) -> bool {
-        on_base!(self, |ov| ov.is_empty())
+    fn is_empty(&self, py: Python<'_>) -> bool {
+        on_base!(self.lock(py), |ov| ov.is_empty())
     }
 
     /// How many ids have ever been issued. `key(id)` is `None` at or above this.
-    fn id_space(&self) -> u64 {
-        on_base!(self, |ov| ov.id_space())
+    fn id_space(&self, py: Python<'_>) -> u64 {
+        on_base!(self.lock(py), |ov| ov.id_space())
     }
 
     /// The id of `key`, or `None` if it is absent or has been removed.
-    fn id(&self, key: &str) -> Option<u64> {
-        on_base!(self, |ov| ov.id(key))
+    fn id(&self, py: Python<'_>, key: &str) -> Option<u64> {
+        on_base!(self.lock(py), |ov| ov.id(key))
     }
 
     /// Whether `key` is live.
-    fn contains(&self, key: &str) -> bool {
-        on_base!(self, |ov| ov.contains(key))
+    fn contains(&self, py: Python<'_>, key: &str) -> bool {
+        on_base!(self.lock(py), |ov| ov.contains(key))
     }
 
-    fn __contains__(&self, key: &str) -> bool {
-        self.contains(key)
+    fn __contains__(&self, py: Python<'_>, key: &str) -> bool {
+        self.contains(py, key)
     }
 
     /// Add `key` and return its id. An already-live key keeps the id it has; a removed one is
     /// revived with the id it had, rather than being issued a second one.
-    fn add(&mut self, key: &str) -> u64 {
-        on_base!(mut self, |ov| ov.add(key))
+    fn add(&self, py: Python<'_>, key: &str) -> u64 {
+        on_base!(mut self.lock(py), |ov| ov.add(key))
     }
 
     /// Remove `key`, returning whether it was there. The id is retired, never reissued.
     ///
     /// Over a `CompactHashIndex` base this inherits that index's false-positive rate: a `contains`
     /// that was never true of a real key can retire an id. Remove by a key you know is present.
-    fn remove(&mut self, key: &str) -> bool {
-        on_base!(mut self, |ov| ov.remove(key))
+    fn remove(&self, py: Python<'_>, key: &str) -> bool {
+        on_base!(mut self.lock(py), |ov| ov.remove(key))
     }
 
     /// Key for `id`, or `None` if it is out of range or retired. Raises `TypeError` on a
     /// `CompactHashIndex` base, which stores no keys.
-    fn key(&self, id: u64) -> PyResult<Option<String>> {
-        on_keyed_base!(self, |ov| ov.key(id))
+    fn key(&self, py: Python<'_>, id: u64) -> PyResult<Option<String>> {
+        on_keyed_base!(self.lock(py), |ov| ov.key(id))
     }
 
     /// Every live key, base keys first. Raises `TypeError` on a `CompactHashIndex` base.
     fn keys(&self, py: Python<'_>) -> PyResult<Vec<String>> {
-        py.detach(|| on_keyed_base!(self, |ov| ov.keys()))
+        let guard = self.lock(py);
+        let inner = &*guard;
+        py.detach(|| on_keyed_base!(inner, |ov| ov.keys()))
     }
 
     /// Fold the edits into a fresh base and return the result. This is the one operation that
     /// renumbers: ids do not survive it. Raises `TypeError` on a `CompactHashIndex` base.
     fn compact(&self, py: Python<'_>) -> PyResult<Self> {
-        py.detach(|| match &self.inner {
-            OverlayInner::String(ov) => Ok(Self {
-                inner: OverlayInner::String(ov.clone().compact().map_err(to_py)?),
-            }),
-            OverlayInner::Perfect(ov) => Ok(Self {
-                inner: OverlayInner::Perfect(ov.clone().compact().map_err(to_py)?),
-            }),
-            OverlayInner::Compact(_) => Err(no_keys()),
+        let guard = self.lock(py);
+        let inner = &*guard;
+        py.detach(|| {
+            Ok(Self::wrap(match inner {
+                OverlayInner::String(ov) => {
+                    OverlayInner::String(ov.clone().compact().map_err(to_py)?)
+                }
+                OverlayInner::Perfect(ov) => {
+                    OverlayInner::Perfect(ov.clone().compact().map_err(to_py)?)
+                }
+                OverlayInner::Compact(_) => return Err(no_keys()),
+            }))
         })
     }
 
     /// The index underneath, unchanged and shared with this overlay.
     fn base(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        Ok(match &self.inner {
+        Ok(match &*self.lock(py) {
             OverlayInner::String(ov) => Py::new(
                 py,
                 PyStringIndex {
@@ -1069,15 +1105,19 @@ impl PyOverlay {
 
     /// Serialise the base, the additions and the retired ids to one `bytes` blob.
     fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let guard = self.lock(py);
+        let inner = &*guard;
         let bytes = py
-            .detach(|| on_base!(self, |ov| ov.to_bytes()))
+            .detach(|| on_base!(inner, |ov| ov.to_bytes()))
             .map_err(to_py)?;
         Ok(PyBytes::new(py, &bytes))
     }
 
     /// Write [`to_bytes`](Self::to_bytes) to `path`.
     fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
-        py.detach(|| on_base!(self, |ov| ov.save(&path)))
+        let guard = self.lock(py);
+        let inner = &*guard;
+        py.detach(|| on_base!(inner, |ov| ov.save(&path)))
             .map_err(to_py)
     }
 
@@ -1130,11 +1170,18 @@ impl PyOverlay {
                 "base must be StringIndex, PerfectHashIndex or CompactHashIndex (the class itself)",
             ));
         };
-        Ok(Self { inner })
+        Ok(Self::wrap(inner))
     }
 }
 
-#[pymodule]
+/// `gil_used = false` is spelled out rather than left to PyO3's default, which is already `false`:
+/// the claim ships either way, so it should be one somebody checked. What backs it, measured on
+/// CPython 3.14t with eight threads: the three index types are immutable after building and are
+/// `Send + Sync`, so sharing one and calling `id`/`contains`/`ids_of` from every thread is sound and
+/// raises nothing; the two types that do hold mutable state — the `StringIndex` iterator and
+/// `Overlay` — are `frozen` with that state behind a lock, so sharing one of those serialises
+/// instead of raising `Already borrowed`.
+#[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
     m.add_class::<StringIndexIterator>()?;

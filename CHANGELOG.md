@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Free-threading audit, and the two fixes it turned up.** PyO3 0.29 declares
+  `Py_MOD_GIL_NOT_USED` for a `#[pymodule]` by default, so the extension has been telling
+  free-threaded CPython it does not need the GIL without anyone having checked. Measured on 3.14t
+  with eight threads: sharing any of the three index types is sound — they are immutable after
+  building and nothing raised — but sharing a `StringIndex` iterator or an `Overlay` failed in seven
+  threads out of eight with `RuntimeError: Already borrowed`, PyO3's borrow flag refusing two
+  simultaneous `&mut self` calls.
+
+  Both are now `#[pyclass(frozen)]` with their mutable state behind a lock taken through PyO3's
+  `lock_py_attached`, which detaches from the interpreter before blocking and so cannot deadlock
+  against it. Sharing one of them serialises instead of raising: a shared iterator hands each key to
+  exactly one thread, and concurrent `Overlay.add` calls each get their own id. `gil_used = false`
+  is now spelled out in the source next to the reasoning that backs it, rather than left to a
+  default. The suite runs on 3.14t as well as 3.14, and the two new concurrency tests fail against
+  the previous build.
+
 - **`ids_of_bytes` on all three Python index classes** — the batched `id` packed into a `bytes`
   buffer instead of a list. `ids_of` has to build one Python `int` per key, which for a batch headed
   straight into `numpy` is the whole cost; `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the

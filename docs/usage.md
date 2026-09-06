@@ -223,6 +223,26 @@ hardcoding one. A buffer cannot carry `None`, so `MISSING_ID` stands in for an a
 largest value of the width, which is never a real id, and `ids_of_bytes` refuses outright on the one
 index size where it would be.
 
+### Threads, including free-threaded CPython
+
+The module tells CPython it does not need the GIL, and the guarantee behind that is:
+
+- **The three index types are immutable after building.** Share one across as many threads as you
+  like and call `id`, `contains`, `key`, `ids_of` from all of them. Building, batch lookups and
+  persistence release the GIL, so other threads keep running while a large index is built or queried.
+- **The two types that hold mutable state — the `StringIndex` iterator and `Overlay` — serialise.**
+  Sharing one of those between threads is safe: the calls take an internal lock and queue up rather
+  than raising. A shared iterator hands each key to exactly one thread; concurrent `Overlay.add`
+  calls each get their own id.
+
+Verified on CPython 3.14t with eight threads. Without the lock, PyO3's borrow flag turns a shared
+iterator or overlay into `RuntimeError: Already borrowed` on a free-threaded build — seven of eight
+threads failed before the fix, which is what `tests/test_python.py` now pins.
+
+The published wheels are `abi3` and free-threaded CPython has no stable ABI before 3.15, so on a
+`3.13t` / `3.14t` interpreter today the extension is built from the sdist. That build is
+version-specific, and everything above holds for it.
+
 ## Rust
 
 ```rust

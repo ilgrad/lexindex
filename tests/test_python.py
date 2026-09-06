@@ -3,6 +3,7 @@
 import itertools
 import random
 import sys
+import threading
 import time
 
 import lexindex
@@ -662,3 +663,81 @@ def test_overlay_over_a_compact_hash_has_membership_and_nothing_else():
             call()
     back = lexindex.Overlay.from_bytes(ov.to_bytes(), lexindex.CompactHashIndex)
     assert len(back) == 2 and back.id("alpha") is None
+
+
+def _hammer(fn, threads=8):
+    """Run `fn(worker_index)` on `threads` threads released together, re-raising the first failure.
+
+    On a free-threaded interpreter these run genuinely in parallel; on a GIL build they interleave.
+    The tests below are written to hold either way, so one suite covers both.
+    """
+    barrier = threading.Barrier(threads)
+    failures = []
+    results = [None] * threads
+
+    def run(i):
+        try:
+            barrier.wait()
+            results[i] = fn(i)
+        except BaseException as e:  # re-raised below, in the caller's thread
+            failures.append(e)
+
+    workers = [threading.Thread(target=run, args=(i,)) for i in range(threads)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    if failures:
+        raise failures[0]
+    return results
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lambda items: lexindex.CompactHashIndex(items, 4),
+    ],
+)
+def test_an_index_is_safe_to_share_across_threads(ctor):
+    """The indexes are immutable after building, which is what lets the module tell CPython it does
+    not need the GIL. Eight threads querying one index must all get the right answers."""
+    words = [f"w{i:04d}" for i in range(2000)]
+    idx = ctor(words)
+
+    def query(_):
+        return [idx.id(w) for w in words[::20]]
+
+    seen = _hammer(query)
+    assert all(r == seen[0] for r in seen)
+    assert None not in seen[0]
+
+
+def test_a_shared_iterator_serialises_rather_than_raising():
+    """A shared iterator is a strange thing to build, but `RuntimeError: Already borrowed` is a
+    worse answer than serialising: every key comes out exactly once, split across the threads."""
+    words = [f"w{i:04d}" for i in range(2000)]
+    it = iter(lexindex.StringIndex(words))
+
+    def drain(_):
+        out = []
+        while (item := next(it, None)) is not None:
+            out.append(item[0])
+        return out
+
+    taken = [k for chunk in _hammer(drain) for k in chunk]
+    assert sorted(taken) == words
+    assert len(taken) == len(set(taken)), "a key was handed out twice"
+
+
+def test_a_shared_overlay_serialises_its_edits():
+    ov = lexindex.Overlay(lexindex.StringIndex(["seed"]))
+
+    def edit(i):
+        return [ov.add(f"t{i}-{j}") for j in range(50)]
+
+    ids = [i for chunk in _hammer(edit) for i in chunk]
+    assert len(ids) == len(set(ids)), "two threads were handed the same id"
+    assert len(ov) == 1 + 8 * 50
+    assert ov.id_space() == 1 + 8 * 50
