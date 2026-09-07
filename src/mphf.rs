@@ -369,12 +369,12 @@ impl Mphf {
             queue.clear();
             queue.extend(order.iter().copied());
 
-            // Displacement is bounded so a part that livelocks is retried instead of looping.
-            // The bound is tight on purpose, because the two cases separate cleanly: measured at
-            // 10 M keys, every part that finished did so in 1.2–1.9 pops per bucket, while the
-            // four that circulated burned 64 each before the old loose bound gave up — and every
-            // one of them placed on the next seed. Four times the bucket count is twice the worst
-            // healthy part and a thirtieth of a stuck one.
+            // Displacement is bounded so a part that livelocks is retried instead of looping, and
+            // the bound is tight on purpose because the two populations barely overlap. Over 425
+            // parts at 10 M and 100 M keys every one that finished did so in 1.028 to 1.269 pops
+            // per bucket, mean 1.109 — while a part that circulates burns 64 before any loose bound
+            // gives up, and places on the next seed. Four times the bucket count sits 3.15× above
+            // the worst healthy part and a sixteenth of a stuck one.
             let mut budget = 4 * lay.buckets_per_part + 4096;
             // A cuckoo table cycles when two buckets keep taking each other's slots. The standard
             // guard is to refuse to evict anything displaced in the last few steps; 16 is what
@@ -568,7 +568,6 @@ impl Mphf {
         // `per_part * parts >= n` and `slots_per_part >= per_part`, so the table holds every key.
         debug_assert!(slots >= n);
 
-        let t0 = std::time::Instant::now();
         // By part first. A histogram over every bucket is 10 MB at 10 M keys and every increment is
         // a cache miss; a histogram over the parts is a few dozen counters that never leave L1. Once
         // the keys are grouped by part, each part sorts its own into its own buckets — in parallel,
@@ -635,7 +634,6 @@ impl Mphf {
         }
         start[buckets as usize] = n as u32;
 
-        let t1 = std::time::Instant::now();
         // Who owns each slot, so a colliding bucket can be evicted rather than the pilot grown.
         // `u32::MAX` is the empty marker; a part has fewer buckets than that by construction.
         let mut owner = vec![u32::MAX; slots as usize];
@@ -649,7 +647,6 @@ impl Mphf {
         let mut placed = vec![false; buckets as usize];
         let mut part_seed = vec![0u64; parts as usize];
 
-        let t2 = std::time::Instant::now();
         // One thread per group of parts, and the groups are contiguous so every table splits with
         // `chunks_mut`. A group that cannot place one of its parts sets the flag and stops; there is
         // nothing to unwind, because the next seed rebuilds everything anyway.
@@ -696,7 +693,6 @@ impl Mphf {
                 });
             }
         });
-        let t3 = std::time::Instant::now();
         if stalled.load(std::sync::atomic::Ordering::Relaxed) {
             return None;
         }
@@ -722,13 +718,6 @@ impl Mphf {
             remap_off[i] = u16::try_from(hole - remap_base[i / REMAP_BLOCK]).ok()?;
         }
 
-        eprintln!(
-            "PHASE csr {:>6.0} alloc {:>6.0} place {:>6.0} remap {:>6.0} ms (threads {threads}, parts {parts})",
-            (t1 - t0).as_secs_f64() * 1e3,
-            (t2 - t1).as_secs_f64() * 1e3,
-            (t3 - t2).as_secs_f64() * 1e3,
-            t3.elapsed().as_secs_f64() * 1e3,
-        );
         Some(Self {
             n,
             slots,
