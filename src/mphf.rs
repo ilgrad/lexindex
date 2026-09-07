@@ -199,11 +199,15 @@ impl Mphf {
         if dense == 0 {
             return scale(hl, buckets);
         }
-        if hl < (u64::MAX / 5) * 3 {
-            scale(hl.rotate_left(23), dense)
+        // Branchless on purpose. The split is 60/40, which is as close to unpredictable as a branch
+        // gets, and `index` is on the hot path of every lookup — select the two operands, then do
+        // the one multiply, rather than let the compiler choose between two multiplies.
+        let (lo, span) = if hl < (u64::MAX / 5) * 3 {
+            (0, dense)
         } else {
-            dense + scale(hl.rotate_left(23), buckets - dense)
-        }
+            (dense, buckets - dense)
+        };
+        lo + scale(hl.rotate_left(23), span)
     }
 
     /// Where a key's window under base function `j` starts, within its part.
