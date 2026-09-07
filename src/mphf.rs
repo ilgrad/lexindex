@@ -27,6 +27,9 @@
 
 use crate::IndexError;
 
+/// The one error every overflow check below reports; naming it keeps the arithmetic readable.
+const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in memory");
+
 /// Keys per bucket, and the table's fill. Together they set both the size — `8/λ` bits per key plus
 /// `16.125·(1−α)/α` for the remap — and the whole cost of construction, and the two do not trade the
 /// way an independent pilot per bucket would suggest. A window pilot is not 256 independent tries but
@@ -141,6 +144,19 @@ const MUL: [u64; 4] = [
 /// Slots past a part's last window base, so `base + shift` never reaches the next part.
 const GUARD: u64 = 64;
 
+/// Magic of a standalone minimal-perfect-hash blob.
+const MAGIC: &[u8; 4] = b"MPH1";
+
+/// Blob format version. [`REMAP_BLOCK`] and the six-bit shift field are part of it: a blob written
+/// under different values does not fail some subtle way, it fails the length check below.
+const FORMAT: u16 = 1;
+
+/// Magic 4, version 2, reserved 2, eight `u64` scalars, then a `u32` check over all of that.
+const HEADER: usize = 4 + 2 + 2 + 8 * 8 + 4;
+
+/// Header bytes the trailing check covers.
+const CHECKED: usize = HEADER - 4;
+
 /// Remap entries per block base.
 ///
 /// The remap is a *non-decreasing* sequence: the holes below `n` are handed out in increasing order,
@@ -223,6 +239,11 @@ impl Mphf {
     }
 
     /// The id of `h` in `[0, n)`.
+    ///
+    /// # Panics
+    ///
+    /// If the table is empty. `[0, 0)` has no inhabitant, so there is no answer to return and no
+    /// degenerate table that could produce one; callers check `n() != 0` first.
     #[inline(always)]
     pub fn index(&self, h: u64) -> u64 {
         let hb = spread(h, self.seed);
@@ -258,6 +279,204 @@ impl Mphf {
         }
         ((self.pilots.len() + self.remap_base.len() * 4 + self.remap_off.len() * 2) * 8) as f64
             / self.n as f64
+    }
+
+    /// Bytes [`to_bytes`](Self::to_bytes) will write.
+    pub fn byte_len(&self) -> usize {
+        HEADER
+            + self.part_seed.len() * 8
+            + self.pilots.len()
+            + self.remap_base.len() * 4
+            + self.remap_off.len() * 2
+    }
+
+    /// Serialise to a self-describing blob.
+    ///
+    /// Every section length is *derived* from the eight scalars in the header rather than written
+    /// beside them, which is stronger than recording it: a loader that recomputes the lengths
+    /// cannot be told a length that disagrees with the table it describes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.byte_len());
+        let mut header = [0u8; HEADER];
+        header[0..4].copy_from_slice(MAGIC);
+        header[4..6].copy_from_slice(&FORMAT.to_le_bytes());
+        // Reserved; written zero and required to be zero, so a later flag cannot be read as absent.
+        header[6..8].copy_from_slice(&0u16.to_le_bytes());
+        for (i, v) in [
+            self.n,
+            self.slots,
+            self.parts,
+            self.buckets_per_part,
+            self.slots_per_part,
+            self.stride,
+            self.dense_buckets,
+            self.seed,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            header[8 + i * 8..16 + i * 8].copy_from_slice(&v.to_le_bytes());
+        }
+        let check = crate::hash::hash_bytes(&header[..CHECKED]) as u32;
+        header[CHECKED..].copy_from_slice(&check.to_le_bytes());
+        out.extend_from_slice(&header);
+
+        for &s in &self.part_seed {
+            out.extend_from_slice(&s.to_le_bytes());
+        }
+        out.extend_from_slice(&self.pilots);
+        for &b in &self.remap_base {
+            out.extend_from_slice(&b.to_le_bytes());
+        }
+        for &o in &self.remap_off {
+            out.extend_from_slice(&o.to_le_bytes());
+        }
+        debug_assert_eq!(out.len(), self.byte_len());
+        out
+    }
+
+    /// Reconstruct from [`to_bytes`](Self::to_bytes) output.
+    ///
+    /// **Safe on arbitrary bytes**, which is the whole reason this hash exists. Every read
+    /// [`index`](Self::index) makes is bounded by a scalar in the header, so the checks below are
+    /// exactly that list: each one rules out an index that could otherwise leave its table. What is
+    /// *not* checked is that the table is a bijection over any particular key set — that needs the
+    /// keys, and a blob that is merely wrong rather than malformed answers wrong ids, not unsound
+    /// ones.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        if bytes.len() < HEADER || &bytes[0..4] != MAGIC {
+            return Err(IndexError::Format("mphf: bad magic or truncated header"));
+        }
+        let check = u32::from_le_bytes(bytes[CHECKED..HEADER].try_into().expect("4 bytes"));
+        if check != crate::hash::hash_bytes(&bytes[..CHECKED]) as u32 {
+            return Err(IndexError::Format("mphf: header checksum mismatch"));
+        }
+        if u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")) != FORMAT {
+            return Err(IndexError::Format("mphf: unsupported format version"));
+        }
+        if u16::from_le_bytes(bytes[6..8].try_into().expect("2 bytes")) != 0 {
+            return Err(IndexError::Format(
+                "mphf: reserved header field is not zero",
+            ));
+        }
+        let at = |i: usize| u64::from_le_bytes(bytes[8 + i * 8..16 + i * 8].try_into().expect("8"));
+        let (n, slots, parts) = (at(0), at(1), at(2));
+        let (buckets_per_part, slots_per_part, stride) = (at(3), at(4), at(5));
+        let (dense_buckets, seed) = (at(6), at(7));
+
+        if n == 0 {
+            if bytes.len() != HEADER
+                || (slots | parts | buckets_per_part | slots_per_part | stride | dense_buckets) != 0
+            {
+                return Err(IndexError::Format(
+                    "mphf: empty table with a non-empty shape",
+                ));
+            }
+            return Ok(Self {
+                n: 0,
+                slots: 0,
+                parts: 0,
+                buckets_per_part: 0,
+                slots_per_part: 0,
+                stride: 0,
+                dense_buckets: 0,
+                part_seed: Vec::new(),
+                pilots: Vec::new(),
+                remap_base: Vec::new(),
+                remap_off: Vec::new(),
+                seed,
+            });
+        }
+
+        // `index` reaches `pilots[part * buckets_per_part + bucket_in_part(..)]`, and
+        // `bucket_in_part` stays below `buckets_per_part` only while the skew boundary is inside it.
+        if parts == 0 || buckets_per_part == 0 || slots_per_part == 0 {
+            return Err(IndexError::Format("mphf: a table dimension is zero"));
+        }
+        if dense_buckets >= buckets_per_part {
+            return Err(IndexError::Format(
+                "mphf: skew boundary outside the bucket range",
+            ));
+        }
+        // A slot is `part * stride + base + shift` with `base < slots_per_part` and `shift <= 63`,
+        // so a part's slots stay inside its own stride only with this much room; and the occupancy
+        // map is split on word boundaries, which is where the multiple of 64 comes from.
+        if stride % 64 != 0 || stride < slots_per_part + 63 {
+            return Err(IndexError::Format(
+                "mphf: stride too small for a key's window",
+            ));
+        }
+        if stride.checked_mul(parts) != Some(slots) || n > slots {
+            return Err(IndexError::Format(
+                "mphf: slot count disagrees with the parts",
+            ));
+        }
+
+        let entries = (slots - n) as usize;
+        let bucket_count = usize::try_from(
+            parts
+                .checked_mul(buckets_per_part)
+                .ok_or(IndexError::Format("mphf: bucket count out of range"))?,
+        )
+        .map_err(|_| IndexError::Format("mphf: bucket count out of range"))?;
+        let seeds = usize::try_from(parts)
+            .map_err(|_| IndexError::Format("mphf: part count out of range"))?;
+        let blocks = entries.div_ceil(REMAP_BLOCK);
+        let want = HEADER
+            .checked_add(seeds.checked_mul(8).ok_or(SIZE)?)
+            .and_then(|v| v.checked_add(bucket_count))
+            .and_then(|v| v.checked_add(blocks.checked_mul(4)?))
+            .and_then(|v| v.checked_add(entries.checked_mul(2)?))
+            .ok_or(SIZE)?;
+        if bytes.len() != want {
+            return Err(IndexError::Format(
+                "mphf: blob length disagrees with the header",
+            ));
+        }
+
+        let mut at = HEADER;
+        let part_seed: Vec<u64> = bytes[at..at + seeds * 8]
+            .chunks_exact(8)
+            .map(|w| u64::from_le_bytes(w.try_into().expect("8 bytes")))
+            .collect();
+        at += seeds * 8;
+        let pilots = bytes[at..at + bucket_count].to_vec();
+        at += bucket_count;
+        let remap_base: Vec<u32> = bytes[at..at + blocks * 4]
+            .chunks_exact(4)
+            .map(|w| u32::from_le_bytes(w.try_into().expect("4 bytes")))
+            .collect();
+        at += blocks * 4;
+        let remap_off: Vec<u16> = bytes[at..]
+            .chunks_exact(2)
+            .map(|w| u16::from_le_bytes(w.try_into().expect("2 bytes")))
+            .collect();
+
+        // The one check that costs more than a comparison, and the one that makes the image a
+        // promise rather than a hope: a remapped slot must land below `n`. Callers index their own
+        // arrays by what `index` returns, so an id outside `[0, n)` is their unsoundness, not ours.
+        for (i, &off) in remap_off.iter().enumerate() {
+            if u64::from(remap_base[i / REMAP_BLOCK]) + u64::from(off) >= n {
+                return Err(IndexError::Format(
+                    "mphf: a remap entry points outside the image",
+                ));
+            }
+        }
+
+        Ok(Self {
+            n,
+            slots,
+            parts,
+            buckets_per_part,
+            slots_per_part,
+            stride,
+            dense_buckets,
+            part_seed,
+            pilots,
+            remap_base,
+            remap_off,
+            seed,
+        })
     }
 
     /// Build over `hashes`, which must already be distinct.
@@ -850,6 +1069,216 @@ mod tests {
     fn it_holds_at_the_boundaries_of_its_own_word_size() {
         for n in [63usize, 64, 65, 127, 128, 129, 255, 256, 257] {
             assert_bijection(&hashes(n));
+        }
+    }
+
+    /// One table big enough to have several parts and a non-empty remap, built once: every blob
+    /// test below mutates *this* blob rather than random bytes, because random bytes never spell
+    /// `MPH1` and would only ever exercise the first line of the loader.
+    fn reference() -> &'static (Vec<u64>, Vec<u8>) {
+        static REF: std::sync::OnceLock<(Vec<u64>, Vec<u8>)> = std::sync::OnceLock::new();
+        REF.get_or_init(|| {
+            let hs = hashes((KEYS_PER_PART + 1000) as usize);
+            let blob = Mphf::build(&hs).expect("build").to_bytes();
+            (hs, blob)
+        })
+    }
+
+    /// Rewrite one of the eight header scalars and re-checksum, which is what an adversary does:
+    /// the checksum catches corruption, not intent, so every field-level check has to stand on its
+    /// own.
+    fn with_scalar(blob: &[u8], field: usize, value: u64) -> Vec<u8> {
+        let mut out = blob.to_vec();
+        out[8 + field * 8..16 + field * 8].copy_from_slice(&value.to_le_bytes());
+        let check = crate::hash::hash_bytes(&out[..CHECKED]) as u32;
+        out[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn a_blob_round_trips_to_the_same_table() {
+        for n in [0usize, 1, 2, 63, 64, 65, 1000, 100_000] {
+            let hs = hashes(n);
+            let mphf = Mphf::build(&hs).expect("build");
+            let blob = mphf.to_bytes();
+            assert_eq!(blob.len(), mphf.byte_len());
+            let back = Mphf::from_bytes(&blob).expect("its own blob loads");
+            assert_eq!(back.to_bytes(), blob, "n = {n}");
+            assert_eq!(back.n(), mphf.n());
+            for &h in &hs {
+                assert_eq!(back.index(h), mphf.index(h), "n = {n}");
+            }
+        }
+    }
+
+    /// A cut blob has a header that still checksums; only the derived total length catches it.
+    #[test]
+    fn a_truncated_blob_is_refused() {
+        let (_, blob) = reference();
+        for cut in [
+            0,
+            1,
+            HEADER - 1,
+            HEADER,
+            HEADER + 1,
+            blob.len() / 2,
+            blob.len() - 1,
+        ] {
+            assert!(
+                Mphf::from_bytes(&blob[..cut]).is_err(),
+                "a blob cut to {cut} bytes was accepted"
+            );
+        }
+        let mut long = blob.clone();
+        long.push(0);
+        assert!(Mphf::from_bytes(&long).is_err(), "a trailing byte passed");
+    }
+
+    /// Every scalar the loader relies on, driven to the value that would break the read it bounds.
+    #[test]
+    fn each_header_invariant_is_enforced() {
+        let (_, blob) = reference();
+        let at = |i: usize| u64::from_le_bytes(blob[8 + i * 8..16 + i * 8].try_into().unwrap());
+        let (n, parts, stride) = (at(0), at(2), at(5));
+        let (buckets_per_part, slots_per_part) = (at(3), at(4));
+        // field, value, what it would have broken
+        let cases: [(usize, u64, &str); 10] = [
+            (0, n + 1, "n above the slot count"),
+            (1, 0, "slots disagreeing with parts * stride"),
+            (2, 0, "zero parts"),
+            (3, 0, "zero buckets"),
+            (4, 0, "zero slots per part"),
+            (5, stride + 1, "a stride that is not a multiple of 64"),
+            (5, stride * 2, "a stride disagreeing with the slot count"),
+            (4, stride - 62, "a part whose keys reach past its stride"),
+            (6, buckets_per_part, "a skew boundary at the bucket count"),
+            (6, u64::MAX, "a skew boundary past the bucket count"),
+        ];
+        for (field, value, what) in cases {
+            assert!(
+                Mphf::from_bytes(&with_scalar(blob, field, value)).is_err(),
+                "accepted {what}"
+            );
+        }
+        // `slots_per_part` names no section length, so any value inside the window bound loads —
+        // the table then hands out ids the builder never would, which is a wrong blob, not an
+        // unsound one. That split is the whole contract: validated for soundness, trusted for
+        // correctness.
+        assert!(slots_per_part <= stride - 63);
+        assert!(Mphf::from_bytes(&with_scalar(blob, 4, stride - 63)).is_ok());
+        // A header that checksums but was written by a different version of this file.
+        let mut wrong_version = blob.clone();
+        wrong_version[4..6].copy_from_slice(&(FORMAT + 1).to_le_bytes());
+        let check = crate::hash::hash_bytes(&wrong_version[..CHECKED]) as u32;
+        wrong_version[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
+        assert!(Mphf::from_bytes(&wrong_version).is_err(), "accepted v2");
+        assert!(parts > 1, "the reference table should have several parts");
+    }
+
+    #[test]
+    fn a_flipped_header_bit_is_caught_by_the_checksum() {
+        let (_, blob) = reference();
+        for byte in 0..CHECKED {
+            for bit in 0..8 {
+                let mut bad = blob.clone();
+                bad[byte] ^= 1 << bit;
+                assert!(
+                    Mphf::from_bytes(&bad).is_err(),
+                    "bit {bit} of header byte {byte} passed"
+                );
+            }
+        }
+    }
+
+    /// The soundness property, and the reason `from_bytes` can be safe: **whatever** the body says,
+    /// an accepted table answers inside `[0, n)`. The body is deliberately not checksummed — the
+    /// pilots are unconstrained by construction, and the remap is validated by value on load — so
+    /// this holds for arbitrary bytes rather than only for corruption-free ones.
+    #[test]
+    fn an_arbitrary_body_still_answers_inside_the_image() {
+        let (hs, blob) = reference();
+        let mut rng = 0x243F_6A88_85A3_08D3u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        let mut accepted = 0;
+        for _ in 0..64 {
+            let mut bad = blob.clone();
+            for _ in 0..32 {
+                let i = HEADER + (next() as usize) % (bad.len() - HEADER);
+                bad[i] = next() as u8;
+            }
+            let Ok(mphf) = Mphf::from_bytes(&bad) else {
+                continue;
+            };
+            accepted += 1;
+            for &h in hs.iter().take(4096) {
+                assert!(mphf.index(h) < mphf.n(), "an id escaped the image");
+            }
+            for _ in 0..4096 {
+                assert!(mphf.index(next()) < mphf.n(), "an id escaped the image");
+            }
+        }
+        assert!(
+            accepted > 0,
+            "no mutated body was accepted, so nothing was tested"
+        );
+    }
+
+    /// The remap is the one table whose contents can point outside the image, so it is the one
+    /// table checked by value. Drive an entry past `n` and the blob must be refused.
+    #[test]
+    fn a_remap_entry_outside_the_image_is_refused() {
+        let (_, blob) = reference();
+        let mut bad = blob.clone();
+        let len = bad.len();
+        // The last two bytes are the final `remap_off`; `u16::MAX` on top of its block base is far
+        // past `n` for any table this size.
+        bad[len - 2..].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert!(
+            Mphf::from_bytes(&bad).is_err(),
+            "a remap entry past the image was accepted"
+        );
+    }
+
+    #[test]
+    fn an_empty_blob_is_only_accepted_with_an_empty_shape() {
+        let empty = Mphf::build(&[]).expect("build").to_bytes();
+        assert_eq!(empty.len(), HEADER);
+        assert_eq!(Mphf::from_bytes(&empty).expect("loads").n(), 0);
+        // n = 0 with a shape claimed anyway: the loader must not read the tables that shape names.
+        assert!(Mphf::from_bytes(&with_scalar(&empty, 2, 1)).is_err());
+        assert!(Mphf::from_bytes(&with_scalar(&empty, 5, 64)).is_err());
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+        /// Arbitrary bytes are a weak fuzzer here — they never spell the magic — but the first
+        /// lines of the loader are exactly where a length check is easiest to get wrong.
+        #[test]
+        fn arbitrary_bytes_never_panic(
+            data in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..512),
+        ) {
+            let _ = Mphf::from_bytes(&data);
+        }
+
+        /// Any single scalar replaced by any value at all, re-checksummed. Accepting is allowed;
+        /// panicking, allocating by a claimed length, or answering outside `[0, n)` is not.
+        #[test]
+        fn any_crafted_header_scalar_is_safe(
+            field in 0usize..8,
+            value in proptest::prelude::any::<u64>(),
+            probe in proptest::prelude::any::<u64>(),
+        ) {
+            let (_, blob) = reference();
+            if let Ok(mphf) = Mphf::from_bytes(&with_scalar(blob, field, value)) {
+                proptest::prop_assert!(mphf.n() > 0);
+                proptest::prop_assert!(mphf.index(probe) < mphf.n());
+            }
         }
     }
 }

@@ -36,8 +36,14 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: clippy (no-default-features = fst only)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
+      # `own-mphf` is off by default and not published as API, but it is a feature in the manifest,
+      # so anyone can turn it on. A feature no job builds is a feature that breaks quietly.
+      - name: clippy (own-mphf = the in-crate MPH)
+        run: cargo clippy --features own-mphf --all-targets -- -D warnings
       - name: test (default)
         run: cargo test
+      - name: test (own-mphf)
+        run: cargo test --features own-mphf
       - name: test (no-default-features)
         run: cargo test --no-default-features
       # Debug and release are different programs here: `debug_assert!`s inside ptr_hash and
@@ -211,5 +217,7 @@ jobs:
         run: cargo check --all-targets --locked
       - name: check (no-default-features = fst only)
         run: cargo check --no-default-features --all-targets --locked
+      - name: check (own-mphf = the in-crate MPH)
+        run: cargo check --features own-mphf --all-targets --locked
       - name: check (python bindings)
         run: cargo check --features python --locked
