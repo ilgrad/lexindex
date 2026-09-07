@@ -240,11 +240,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
-        with:
-          tool: actionlint
+      # actionlint is a Go binary, not a crate: `taiki-e/install-action` does not carry it, and its
+      # cargo-binstall fallback looks it up on crates.io and does not find it either. Fetched from
+      # the release instead, pinned by version *and* sha256 -- the same posture as the action SHA
+      # pins this job exists to protect.
+      - name: install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tgz" | sha256sum -c -
+          tar xzf actionlint.tgz actionlint
       - name: actionlint
-        run: actionlint -color
+        run: ./actionlint -color
 
   msrv:
     name: msrv (rust-version from Cargo.toml)
