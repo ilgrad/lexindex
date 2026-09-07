@@ -15,6 +15,15 @@
 //! `__len__`) deliberately do **not** release it: they take well under a microsecond, and dropping
 //! and reacquiring the GIL would cost more than the work it protects.
 //!
+//! # Threads
+//!
+//! Every class here is `#[pyclass(frozen)]`, which is what makes the module's `gil_used = false`
+//! declaration hold and keeps it holding: `frozen` rejects a `&mut self` method at compile time
+//! (`type mismatch resolving <T as PyClass>::Frozen == False`), and a `&mut self` method is exactly
+//! what raised `RuntimeError: Already borrowed` in seven threads out of eight on CPython 3.14t
+//! before the iterator and [`PyOverlay`] moved their state behind a lock. The invariant is in the
+//! type system rather than in a review checklist, so it cannot be given up by accident.
+//!
 //! # Borrowing the caller's strings
 //!
 //! Every method taking many keys (the constructors and `ids_of`) reads them as [`PyBackedStr`], a

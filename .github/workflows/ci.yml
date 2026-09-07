@@ -111,10 +111,15 @@ jobs:
           name: wheel
           path: dist
       # Install-only: the single abi3 wheel must import and pass on every supported interpreter.
+      # `numpy` is not decoration: the only check that `ids_of_bytes` is actually zero-copy reads
+      # `np.frombuffer(...).base`, and without numpy installed it skipped here silently for as long
+      # as it existed. `LEXINDEX_REQUIRE_NUMPY` turns that skip back into a failure.
       - name: pytest
+        env:
+          LEXINDEX_REQUIRE_NUMPY: "1"
         run: |
           wheel=$(ls dist/*.whl | head -1)
-          uv run --python ${{ matrix.python-version }} --with pytest --with "$wheel" \
+          uv run --python ${{ matrix.python-version }} --with pytest --with numpy --with "$wheel" \
             pytest tests/test_python.py -q
       - name: stubtest
         run: |
@@ -146,9 +151,10 @@ jobs:
       - name: pytest (GIL disabled)
         env:
           PYTHON_GIL: "0"
+          LEXINDEX_REQUIRE_NUMPY: "1"
         run: |
           wheel=$(ls dist-ft/*.whl | head -1)
-          uv run --python 3.14t --no-project --with pytest --with "$wheel" \
+          uv run --python 3.14t --no-project --with pytest --with numpy --with "$wheel" \
             pytest tests/test_python.py -q
 
   # Two claims in the README that nothing else would catch when they rot: the `fst`-only build

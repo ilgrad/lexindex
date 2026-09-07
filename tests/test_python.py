@@ -1,6 +1,7 @@
 """End-to-end tests of the lexindex Python bindings."""
 
 import itertools
+import os
 import random
 import sys
 import threading
@@ -8,6 +9,21 @@ import time
 
 import lexindex
 import pytest
+
+
+def _numpy_or_skip():
+    """Import numpy, or skip — unless the environment says numpy must be there.
+
+    `importorskip` alone made the zero-copy check an untested claim: neither CI nor the gate
+    command installed numpy, so the one test that verifies `np.frombuffer` shares the buffer was
+    skipped in every automated environment and nobody saw it. CI now installs numpy and sets
+    `LEXINDEX_REQUIRE_NUMPY`, which turns a skip back into a failure if the job ever loses it.
+    """
+    if os.environ.get("LEXINDEX_REQUIRE_NUMPY"):
+        import numpy
+
+        return numpy
+    return pytest.importorskip("numpy")
 
 
 def test_string_index_core():
@@ -542,7 +558,7 @@ def test_ids_of_bytes_is_empty_for_no_keys():
 
 
 def test_ids_of_bytes_reads_zero_copy_through_numpy():
-    np = pytest.importorskip("numpy")
+    np = _numpy_or_skip()
     words = [f"w{i}" for i in range(1000)]
     idx = lexindex.PerfectHashIndex(words)
     probes = [*words[::3], "absent"]
