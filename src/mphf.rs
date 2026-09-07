@@ -803,6 +803,52 @@ mod tests {
         }
     }
 
+    /// Structured hashes, which is what an adversary who controls the keys can reach for. The
+    /// contract is not that every set builds — it is that construction either produces a bijection
+    /// or says `Build`, and never loops, panics or hands out an id twice.
+    #[test]
+    fn structured_hash_sets_either_build_or_refuse() {
+        let n = 5000u64;
+        type Family = (&'static str, fn(u64) -> u64);
+        let families: [Family; 7] = [
+            ("sequential", |i| i),
+            ("strided high", |i| i << 40),
+            ("strided low", |i| i << 3),
+            ("shared top half", |i| 0xFFFF_FFFF_0000_0000 | i),
+            ("shared low half", |i| (i << 32) | 0x0000_0000_DEAD_BEEF),
+            ("mirrored", |i| i ^ (i << 32)),
+            ("sparse bits", |i| i.wrapping_mul(0x0101_0101_0101_0101)),
+        ];
+        for (name, f) in families {
+            let mut hs: Vec<u64> = (0..n).map(f).collect();
+            hs.sort_unstable();
+            hs.dedup();
+            match Mphf::build(&hs) {
+                Ok(m) => {
+                    let mut seen = vec![false; hs.len()];
+                    for &h in &hs {
+                        let id = m.index(h) as usize;
+                        assert!(id < hs.len(), "{name}: id {id} out of range");
+                        assert!(!seen[id], "{name}: id {id} handed out twice");
+                        seen[id] = true;
+                    }
+                }
+                Err(IndexError::Build(_)) => {}
+                Err(e) => panic!("{name}: unexpected error {e}"),
+            }
+        }
+    }
+
+    /// Sizes around the part boundary, where a table goes from one part to two and the last part is
+    /// a different size from the rest.
+    #[test]
+    fn it_holds_where_the_parts_divide() {
+        let k = super::KEYS_PER_PART;
+        for n in [k - 1, k, k + 1, 2 * k - 1, 2 * k, 2 * k + 1] {
+            assert_bijection(&hashes(n as usize));
+        }
+    }
+
     #[test]
     fn an_empty_set_builds_and_answers_nothing() {
         let mphf = Mphf::build(&[]).unwrap();
@@ -894,6 +940,47 @@ mod spike {
                 m.remap_off.len(),
             );
         }
+    }
+
+    /// Peak resident memory of a build, which is the question 10 M cannot answer: `owner` alone is
+    /// four bytes for every slot. Reported next to the size so a redesign has a number to beat.
+    #[test]
+    #[ignore = "measurement, not a test"]
+    fn peak_memory_at_100m() {
+        let n = 100_000_000usize;
+        let hs = bigram_hashes(n);
+        let after_keys = peak_rss_mb();
+        let t = std::time::Instant::now();
+        let m = Mphf::build(&hs).expect("own build");
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "n {n}  bits/key {:>6.3}  build {ms:>8.0} ms  peak RSS {:>6} MB ({:>5.1} B/key, {:>5.1} of it the keys)",
+            m.bits_per_key(),
+            peak_rss_mb(),
+            peak_rss_mb() as f64 * 1e6 / n as f64,
+            after_keys as f64 * 1e6 / n as f64,
+        );
+        let mut seen = vec![false; n];
+        for &h in &hs {
+            let id = m.index(h) as usize;
+            assert!(id < n && !seen[id], "not a bijection at n = {n}");
+            seen[id] = true;
+        }
+    }
+
+    /// `VmHWM` — the high-water mark, not the current size, so a freed peak still shows up.
+    fn peak_rss_mb() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmHWM:"))?
+                    .split_whitespace()
+                    .nth(1)?
+                    .parse::<u64>()
+                    .ok()
+            })
+            .map_or(0, |kb| kb / 1024)
     }
 
     /// The spike's whole case: size, build time and lookup against the shipped `ptr_hash` alias,
