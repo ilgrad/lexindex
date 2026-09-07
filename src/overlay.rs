@@ -417,10 +417,11 @@ impl<I: OverlayBase> Overlay<I> {
     /// base from its slice of the blob.
     ///
     /// The base loader is the caller's because the bases do not agree on safety:
-    /// [`StringIndex::from_bytes`](crate::StringIndex::from_bytes) is safe, while the perfect-hash
-    /// loaders are `unsafe fn` — a deserialised `ptr_hash` MPH cannot be validated from outside.
-    /// Taking a closure keeps that distinction where the language already puts it instead of
-    /// making every overlay load `unsafe` to accommodate two of the three bases:
+    /// [`StringIndex::from_bytes`](crate::StringIndex::from_bytes) and
+    /// [`PerfectHashIndex::from_bytes`](crate::PerfectHashIndex::from_bytes) are safe, while
+    /// [`CompactHashIndex::from_bytes`](crate::CompactHashIndex::from_bytes) is still an
+    /// `unsafe fn`. Taking a closure keeps that distinction where the language already puts it
+    /// instead of making every overlay load `unsafe` to accommodate one of the three bases:
     ///
     /// ```
     /// # use lexindex::{Overlay, StringIndex};
@@ -435,10 +436,10 @@ impl<I: OverlayBase> Overlay<I> {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     ///
-    /// A `PerfectHashIndex` base is the same call with the `unsafe` the base's own loader demands:
-    /// `unsafe { Overlay::from_bytes_with(&blob, |b| PerfectHashIndex::from_bytes(b)) }` — the
-    /// closure body is what needs the block, so the surrounding call stays honest about which part
-    /// carries the obligation.
+    /// A `CompactHashIndex` base is the same call with the `unsafe` that base's own loader
+    /// demands: `Overlay::from_bytes_with(&blob, |b| unsafe { CompactHashIndex::from_bytes(b) })` —
+    /// the closure body is what needs the block, so the surrounding call stays honest about which
+    /// part carries the obligation.
     ///
     /// Additions are checked for duplicates and, over a base whose membership is exact
     /// ([`EXACT_MEMBERSHIP`](OverlayBase::EXACT_MEMBERSHIP)), against the base itself; tombstones
@@ -449,9 +450,9 @@ impl<I: OverlayBase> Overlay<I> {
     /// **This function is safe; `load_base` is where the caller's trust decision lives.** Every
     /// count in the overlay's own framing is validated against the bytes that are actually present,
     /// so no header field can steer an index or an allocation. The base region is then handed to
-    /// `load_base` unexamined — with `StringIndex::from_bytes` that is a checked parse, while the
-    /// two hash indexes' loaders are `unsafe` and validate nothing, so an overlay over them is only
-    /// as trustworthy as the blob it came from.
+    /// `load_base` unexamined — with `StringIndex::from_bytes` or `PerfectHashIndex::from_bytes`
+    /// that is a checked parse, while `CompactHashIndex::from_bytes` is `unsafe` and validates
+    /// nothing, so an overlay over that base is only as trustworthy as the blob it came from.
     pub fn from_bytes_with(
         bytes: &[u8],
         load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
@@ -774,8 +775,7 @@ mod tests {
         let mut called = false;
         let got = Overlay::<PerfectHashIndex>::from_bytes_with(&blob, |b| {
             called = true;
-            // SAFETY: never reached -- the tag check rejects the blob first, which is the point.
-            unsafe { PerfectHashIndex::from_bytes(b) }
+            PerfectHashIndex::from_bytes(b)
         });
         assert!(
             matches!(
@@ -823,8 +823,7 @@ mod tests {
         assert!(ov.remove("two"));
         let blob = ov.to_bytes().unwrap();
         // SAFETY: the blob was produced by `to_bytes` in this process and has not left it.
-        let back = Overlay::from_bytes_with(&blob, |b| unsafe { PerfectHashIndex::from_bytes(b) })
-            .unwrap();
+        let back = Overlay::from_bytes_with(&blob, PerfectHashIndex::from_bytes).unwrap();
         assert_eq!(back.len(), 2);
         assert_eq!(back.id("two"), None);
         for k in ["one", "three"] {
@@ -973,7 +972,7 @@ mod tests {
         let perfect = PerfectHashIndex::build(["one", "two"]).unwrap();
         let blob = craft_over::<PerfectHashIndex>(&perfect.to_bytes().unwrap(), b"one");
         // SAFETY: the base blob was produced by `to_bytes` in this process and has not left it.
-        match Overlay::from_bytes_with(&blob, |b| unsafe { PerfectHashIndex::from_bytes(b) }) {
+        match Overlay::from_bytes_with(&blob, PerfectHashIndex::from_bytes) {
             Err(IndexError::Format(msg)) => {
                 assert_eq!(msg, "overlay addition duplicates a base key")
             }

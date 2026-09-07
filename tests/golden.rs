@@ -1,16 +1,20 @@
-//! Blobs written by *published* lexindex versions must still load and answer correctly.
+//! Blobs written by *published* lexindex versions, held to whatever this version promises about
+//! them — that they still load and answer correctly, or that they are refused for a stated reason.
 //!
 //! Every other test in this repo builds an index and reads it back with the same code, so all of
 //! them would keep passing if a dependency bump silently changed the `epserde` image embedded in an
 //! MPH blob, or if a framing field moved. The files in `tests/data/` were written by 0.5.1, 0.7.0,
-//! 0.8.0, 0.8.1 and 0.9.1 through their PyPI wheels (`local/gen_golden.py` regenerates them) and
-//! cover every on-disk format the current loader claims to accept: `BMP2`/`BMP3`/`BMP4` and
-//! `BCH1`/`BCH3`/`BCH4`/`BCH5`.
+//! 0.8.0, 0.8.1 and 0.9.1 through their PyPI wheels (`local/gen_golden.py` regenerates them).
 //!
-//! Ids from a minimal perfect hash are not reproducible across builds, so the assertions are the
-//! invariants a correct load must satisfy — a bijection onto `[0, n)`, an exact reverse where the
-//! index has one — rather than pinned id values. A blob that loaded but deserialised to a different
-//! structure would fail them.
+//! 1.0 replaced the minimal perfect hash with one this crate owns, so every `BMP*` blob written
+//! before it is unreadable — the crate that could decode the embedded image is no longer linked.
+//! That is the promise now under test for `PerfectHashIndex`: refused, by a message that says the
+//! blob is *old* rather than corrupt.
+//!
+//! Ids from the pre-1.0 minimal perfect hash were not reproducible across builds, so the
+//! assertions are the invariants a correct load must satisfy — a bijection onto `[0, n)`, an exact
+//! reverse where the index has one — rather than pinned id values. A blob that loaded but
+//! deserialised to a different structure would fail them.
 
 use std::path::PathBuf;
 
@@ -77,35 +81,40 @@ fn string_index_blobs_from_every_published_version_load() {
 mod mph {
     use super::{VERSIONS, data, keys, non_members};
 
+    /// The refusal has to be *legible*: someone with a five-year-old blob and a fresh lexindex
+    /// gets one message, and it must tell them the file is old and rebuildable rather than send
+    /// them looking for disk corruption.
     #[test]
-    fn perfect_hash_blobs_from_every_published_version_load() {
-        let keys = keys();
+    fn perfect_hash_blobs_from_every_published_version_are_refused_by_name() {
         for version in VERSIONS {
             let path = data(&format!("golden-{version}-perfect.bmp"));
-            // SAFETY: the blob is a committed file this repo generated with its own published
-            // wheels — the trusted-source obligation the loader documents.
-            let idx = unsafe { lexindex::PerfectHashIndex::load(&path) }
-                .unwrap_or_else(|e| panic!("{version}: {e}"));
-            assert_eq!(idx.len(), keys.len(), "{version}");
+            let err = match lexindex::PerfectHashIndex::load(&path) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{version}: a pre-1.0 blob was accepted"),
+            };
+            assert!(err.contains("lexindex < 1.0"), "{version}: {err}");
+            assert!(err.contains("rebuild"), "{version}: {err}");
+        }
+    }
 
-            let mut seen = vec![false; keys.len()];
-            for key in &keys {
-                let id = idx
-                    .id(key)
-                    .unwrap_or_else(|| panic!("{version}: member {key:?} not found"));
-                assert!((id as usize) < keys.len(), "{version}: id out of range");
-                assert!(!seen[id as usize], "{version}: id {id} handed out twice");
-                seen[id as usize] = true;
-                // The reverse map is exact, so a mis-deserialised arena shows up here.
-                assert_eq!(idx.key(id), Some(key.as_str()), "{version}: key({id})");
-            }
-            for absent in non_members() {
-                assert_eq!(
-                    idx.id(&absent),
-                    None,
-                    "{version}: {absent:?} is not a member"
-                );
-            }
+    /// A blob this version writes reloads exactly — and, because construction is deterministic
+    /// since 1.0, reloads to the *same ids* a fresh build assigns. The pinned golden file for the
+    /// 1.0 format lands with the rest of the format bundle; until then the round trip is what
+    /// guards the new loader.
+    #[test]
+    fn a_1_0_perfect_hash_blob_round_trips_exactly() {
+        let keys = keys();
+        let idx = lexindex::PerfectHashIndex::build(&keys).unwrap();
+        let blob = idx.to_bytes().unwrap();
+        assert_eq!(&blob[0..4], b"BMP5");
+        let back = lexindex::PerfectHashIndex::from_bytes(&blob).expect("its own blob loads");
+        for key in &keys {
+            let id = idx.id(key).expect("member");
+            assert_eq!(back.id(key), Some(id));
+            assert_eq!(back.key(id), Some(key.as_str()));
+        }
+        for absent in non_members() {
+            assert_eq!(back.id(&absent), None, "{absent:?} is not a member");
         }
     }
 
@@ -152,20 +161,14 @@ mod mph {
     fn the_newest_blobs_also_load_zero_copy() {
         let keys = keys();
         // SAFETY: committed blobs, and nothing in this process writes to them while mapped.
-        let perfect =
-            unsafe { lexindex::PerfectHashIndex::load_mmap(data("golden-0.9.1-perfect.bmp")) }
-                .expect("mmap load");
         let compact =
             unsafe { lexindex::CompactHashIndex::load_mmap(data("golden-0.9.1-compact.bch")) }
                 .expect("mmap load");
         let string = unsafe { lexindex::StringIndex::load_mmap(data("golden-0.9.1-string.bix")) }
             .expect("mmap load");
-        assert_eq!(perfect.len(), keys.len());
         assert_eq!(compact.len(), keys.len());
         assert_eq!(string.len(), keys.len());
         for key in keys.iter().take(50) {
-            let id = perfect.id(key).expect("member");
-            assert_eq!(perfect.key(id), Some(key.as_str()));
             assert!(compact.contains(key));
             assert!(string.id(key).is_some());
         }

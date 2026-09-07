@@ -238,6 +238,18 @@ impl Mphf {
         scale((h ^ part_seed).wrapping_mul(MUL[j]), slots)
     }
 
+    /// Which part `h` falls in and which of that part's buckets, as a flat index into `pilots`.
+    ///
+    /// `bucket_in_part` stays below `buckets_per_part`, so the result stays below `pilots.len()`.
+    #[inline(always)]
+    fn locate(&self, h: u64) -> (u64, u64) {
+        let hb = spread(h, self.seed);
+        let part = scale(hb, self.parts);
+        let b = part * self.buckets_per_part
+            + Self::bucket_in_part(hb, self.buckets_per_part, self.dense_buckets);
+        (part, b)
+    }
+
     /// The id of `h` in `[0, n)`.
     ///
     /// # Panics
@@ -246,11 +258,7 @@ impl Mphf {
     /// degenerate table that could produce one; callers check `n() != 0` first.
     #[inline(always)]
     pub fn index(&self, h: u64) -> u64 {
-        let hb = spread(h, self.seed);
-        let part = scale(hb, self.parts);
-        // `bucket_in_part` stays below `buckets_per_part`, so this stays below `pilots.len()`.
-        let b = part * self.buckets_per_part
-            + Self::bucket_in_part(hb, self.buckets_per_part, self.dense_buckets);
+        let (part, b) = self.locate(h);
         let pilot = self.pilots[b as usize];
         let base = Self::base(
             h,
@@ -267,12 +275,35 @@ impl Mphf {
         }
     }
 
+    /// [`index`](Self::index) over a batch, with the pilot byte a later key will need pulled into
+    /// cache while the current key resolves.
+    ///
+    /// The pilot table is the only access in `index` that is random over more than a page, and at
+    /// ~2 bits a key it outgrows L2 somewhere around a million keys — from there every lookup pays
+    /// a miss whose latency nothing else in the query can hide. A batch can see the next key's
+    /// bucket and a single lookup cannot, which is the whole of the difference; recomputing that
+    /// bucket to issue the prefetch costs two multiplies against the miss it hides.
+    pub fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
+        const AHEAD: usize = 16;
+        let mut out = Vec::with_capacity(hashes.len());
+        for (i, &h) in hashes.iter().enumerate() {
+            if let Some(&next) = hashes.get(i + AHEAD) {
+                crate::blob::prefetch_byte(&self.pilots, self.locate(next).1 as usize);
+            }
+            out.push(self.index(h));
+        }
+        out
+    }
+
     /// How many keys are in the image.
     pub fn n(&self) -> u64 {
         self.n
     }
 
-    /// Bits per key, the number the whole spike is judged on.
+    /// Bits per key: what the table costs, and the number its design is judged on. Only the
+    /// measurements read it — a caller sizing a blob wants `PerfectHashIndex::serialized_len`,
+    /// which counts the arena too.
+    #[cfg(test)]
     pub fn bits_per_key(&self) -> f64 {
         if self.n == 0 {
             return 0.0;

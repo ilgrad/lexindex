@@ -49,9 +49,8 @@ compile_error!(
 );
 
 mod blob;
-/// Spike (1.0-01): an own minimal perfect hash. Not wired into either index yet — see the module.
-#[cfg(feature = "own-mphf")]
-pub mod mphf;
+#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+mod mphf;
 mod overlay;
 mod string_index;
 mod subsequence;

@@ -299,7 +299,7 @@ mod mph {
             assert_eq!(idx.key(id as u32), Some(key.as_str())); // exact reverse
         }
         // SAFETY: the blob comes straight from this index's own `to_bytes`.
-        let restored = unsafe { PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()) }.unwrap();
+        let restored = PerfectHashIndex::from_bytes(&idx.to_bytes().unwrap()).unwrap();
         for key in &expected {
             assert_eq!(restored.id(key), idx.id(key));
         }

@@ -667,13 +667,13 @@ impl PyPerfectHashIndex {
 
     /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
     ///
-    /// The blob must have been produced by this library. Its framing is validated, but the embedded
-    /// perfect hash cannot be — a deliberately crafted blob is undefined behaviour.
+    /// Every length the index will read is validated against the bytes present, so arbitrary input
+    /// raises rather than misbehaving. A blob written before 1.0 is refused: its perfect hash came
+    /// from a crate this version no longer links, and the index has to be rebuilt from its keys.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
-        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
-            .detach(|| unsafe { PerfectHashIndex::from_bytes(data) })
+            .detach(|| PerfectHashIndex::from_bytes(data))
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
@@ -685,16 +685,10 @@ impl PyPerfectHashIndex {
         py.detach(|| self.inner.save(&path)).map_err(to_py)
     }
 
-    /// Load a dictionary previously written with `save`.
-    ///
-    /// The file must have been written by this library — see `from_bytes` for why a crafted blob
-    /// cannot be rejected.
+    /// Load a dictionary previously written with `save`. Validated like `from_bytes`.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
-        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
-        let inner = py
-            .detach(|| unsafe { PerfectHashIndex::load(&path) })
-            .map_err(to_py)?;
+        let inner = py.detach(|| PerfectHashIndex::load(&path)).map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -1169,11 +1163,8 @@ impl PyOverlay {
             )
         } else if base.is(py.get_type::<PyPerfectHashIndex>()) {
             OverlayInner::Perfect(
-                // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
-                Overlay::from_bytes_with(data, |b| unsafe {
-                    PerfectHashIndex::from_bytes(b).map(Arc::new)
-                })
-                .map_err(to_py)?,
+                Overlay::from_bytes_with(data, |b| PerfectHashIndex::from_bytes(b).map(Arc::new))
+                    .map_err(to_py)?,
             )
         } else if base.is(py.get_type::<PyCompactHashIndex>()) {
             OverlayInner::Compact(

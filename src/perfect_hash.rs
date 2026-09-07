@@ -1,12 +1,11 @@
-//! Minimal-perfect-hash dictionary backed by [`ptr_hash`].
+//! Minimal-perfect-hash dictionary.
 //!
 //! For a fixed set of `n` distinct strings, a minimal perfect hash maps each to a distinct slot in
-//! `[0, n)` with no gaps and near-`O(1)` lookup in tiny space. `ptr_hash` builds the MPH; we key it on
-//! a deterministic 64-bit hash of each string (so queries take `&str` without allocating) and keep a
-//! [`StringArena`] from slot → key. The arena doubles as a **membership check**: an MPH maps *any*
-//! input to some slot, so a query is only a hit if the stored key at that slot equals the query.
-//! (ptr_hash's own minimal `index()` is unchecked past its remap for non-members — queries bound it
-//! with the recorded remap length; see `slot_for`.)
+//! `[0, n)` with no gaps and near-`O(1)` lookup in tiny space. [`crate::mphf::Mphf`] builds the MPH;
+//! we key it on a deterministic 64-bit hash of each string (so queries take `&str` without
+//! allocating) and keep a [`StringArena`] from slot → key. The arena doubles as a **membership
+//! check**: an MPH maps *any* input to some slot, so a query is only a hit if the stored key at that
+//! slot equals the query.
 //!
 //! Two distinct keys colliding in the 64-bit hash cannot fail the build (the hash is deterministic
 //! and unseeded — that is what makes the serialised MPH reloadable — so a retry could never help).
@@ -20,39 +19,38 @@ use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
 use crate::hash::hash_key;
-use epserde::prelude::*;
-use ptr_hash::DefaultPtrHash;
+use crate::mphf::Mphf;
 
-const MAGIC_V2: &[u8; 4] = b"BMP2"; // 0.5/0.6: [magic 4][n u64][mph_len u64]
-const MAGIC_V3: &[u8; 4] = b"BMP3"; // 0.7: [magic 4][n u64][overflow_cap u64][mph_len u64][check u32]
-const MAGIC_V4: &[u8; 4] = b"BMP4"; // [magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]
-const HEADER_V2: usize = 20;
-const HEADER_V3: usize = 32;
-const CHECKED_V3: usize = 28; // header bytes the trailing check covers
-const HEADER_V4: usize = 36;
-const CHECKED_V4: usize = 32;
+/// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
+/// loader could validate. 1.0 replaced the backend precisely so that a blob could be checked, and
+/// the old images cannot be read without the crate that is now gone — so they are refused by name
+/// rather than half-supported.
+const LEGACY_MAGICS: [&[u8; 4]; 3] = [b"BMP2", b"BMP3", b"BMP4"];
+const MAGIC_V5: &[u8; 4] = b"BMP5"; // [magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]
+const HEADER_V5: usize = 36;
+const CHECKED_V5: usize = 32;
 const SIDE_ENTRY: usize = 12; // hash u64 + id u32
 /// "No key assigned to this slot yet" while a build fills its slot → key-index table. Never a real
 /// index: `build` rejects `n > u32::MAX`, so the largest index a key can have is `u32::MAX - 1`.
 const NO_KEY: u32 = u32::MAX;
 
-/// The v4 header, from the four values that vary. Shared by [`PerfectHashIndex::to_bytes`] and the
+/// The v5 header, from the four values that vary. Shared by [`PerfectHashIndex::to_bytes`] and the
 /// streaming [`build_to_file`](PerfectHashIndex::build_to_file), which assembles the same blob
 /// without ever holding the index — one writer of this layout, so the two cannot drift.
-fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V4] {
-    let mut header = [0u8; HEADER_V4];
-    header[0..4].copy_from_slice(MAGIC_V4);
+fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V5] {
+    let mut header = [0u8; HEADER_V5];
+    header[0..4].copy_from_slice(MAGIC_V5);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
     header[24..32].copy_from_slice(&payload.to_le_bytes());
-    let check = crate::hash::hash_bytes(&header[..CHECKED_V4]) as u32;
-    header[CHECKED_V4..].copy_from_slice(&check.to_le_bytes());
+    let check = crate::hash::hash_bytes(&header[..CHECKED_V5]) as u32;
+    header[CHECKED_V5..].copy_from_slice(&check.to_le_bytes());
     header
 }
 
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
-type SerialisedParts = ([u8; HEADER_V4], Vec<u8>, Vec<u8>);
+type SerialisedParts = ([u8; HEADER_V5], Vec<u8>, Vec<u8>);
 
 /// The largest slice of the arena that may be dirty at once during a streamed build.
 ///
@@ -299,23 +297,20 @@ where
 }
 
 /// The validated framing of a blob — every field a query will trust — with the MPH region located
-/// but not deserialised. Produced by the safe `parse_frame`, which any bytes may reach; consumed by
-/// the unsafe `from_shared`, the only place the `epserde` region is touched.
+/// but not parsed. Produced by `parse_frame` and consumed by `from_shared`; both are safe, because
+/// the MPH region validates itself (see [`Mphf::from_bytes`]).
 struct Frame {
     n: usize,
-    mph: std::ops::Range<usize>, // the epserde region; ignored when `n == 0`
+    mph: std::ops::Range<usize>, // the `MPH1` region; ignored when `n == 0`
     arena: StringArena,
     side: Vec<(u64, u32)>,
 }
 
 /// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {
-    mph: Option<DefaultPtrHash>, // over one hash per distinct hash value; None iff empty
+    mph: Option<Mphf>,  // over one hash per distinct hash value; None iff empty
     arena: StringArena, // id → key (also verifies membership); ids [m, n) are the side keys
     n: usize,
-    // Length of the MPH's internal remap (see `crate::hash::overflow_cap`); always recomputed from
-    // the arena on load, so the header's copy is never trusted for bounds.
-    overflow_cap: u64,
     // (hash, id) for every key whose hash collides with another key's, sorted; almost always empty.
     side: Vec<(u64, u32)>,
 }
@@ -324,10 +319,10 @@ impl PerfectHashIndex {
     /// Build from a collection of strings. Duplicates are removed; ids are arbitrary slots in `[0, n)`
     /// (no defined order — use [`crate::StringIndex`] when order matters).
     ///
-    /// Ids are **not reproducible**: the perfect hash's construction is randomised, so building the
-    /// same key set twice assigns different slots (measured on 50 k keys, ~53 % keep their id). Ids
-    /// survive [`save`](Self::save)/[`load`](Self::load) of one built index exactly, so persist the
-    /// blob — not the key list — whenever an id is stored outside the index.
+    /// Ids are **reproducible**: the same key set always produces the same blob, byte for byte,
+    /// on any thread count. They are still arbitrary — nothing about a key predicts its id — and
+    /// they change whenever the key set does, so persist the blob rather than re-deriving it if an
+    /// id is stored outside the index.
     pub fn build<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -350,7 +345,6 @@ impl PerfectHashIndex {
                 mph: None,
                 arena: StringArena::build(Vec::<&str>::new()), // offsets = [0]: a valid empty arena
                 n: 0,
-                overflow_cap: 0,
                 side: Vec::new(),
             });
         }
@@ -380,10 +374,10 @@ impl PerfectHashIndex {
         }
         // No collision: every key is its own representative, and `hashes` — still in key order —
         // maps each slot back to its key with no further indirection.
-        let mph = crate::hash::build_mph(&sorted)?;
+        let mph = Mphf::build(&sorted)?;
         let mut by_slot: Vec<u32> = vec![NO_KEY; n];
         for (i, h) in hashes.iter().enumerate() {
-            let slot = mph.index(h);
+            let slot = mph.index(*h) as usize;
             if slot >= n || by_slot[slot] != NO_KEY {
                 return Err(IndexError::Format(
                     "perfect-hash: construction was not minimal/perfect",
@@ -391,7 +385,6 @@ impl PerfectHashIndex {
             }
             by_slot[slot] = i as u32;
         }
-        let overflow_cap = crate::hash::overflow_cap(&mph, &sorted, n);
         // Before the arena allocates: neither hash vector is needed alongside it.
         drop(sorted);
         drop(hashes);
@@ -404,7 +397,6 @@ impl PerfectHashIndex {
             mph: Some(mph),
             arena,
             n,
-            overflow_cap,
             side: Vec::new(),
         })
     }
@@ -423,7 +415,7 @@ impl PerfectHashIndex {
         let n = keys.len();
         let (mph_hashes, extras) = crate::hash::split_collisions(&hashes);
         let m = mph_hashes.len();
-        let mph = crate::hash::build_mph(&mph_hashes)?;
+        let mph = Mphf::build(&mph_hashes)?;
         let mut is_extra = vec![false; n];
         for &(_, i) in &extras {
             is_extra[i as usize] = true;
@@ -435,7 +427,7 @@ impl PerfectHashIndex {
             if is_extra[i] {
                 continue;
             }
-            let slot = mph.index(h);
+            let slot = mph.index(*h) as usize;
             if slot >= m || by_slot[slot] != NO_KEY {
                 return Err(IndexError::Format(
                     "perfect-hash: construction was not minimal/perfect",
@@ -443,7 +435,6 @@ impl PerfectHashIndex {
             }
             by_slot[slot] = i as u32;
         }
-        let overflow_cap = crate::hash::overflow_cap(&mph, &mph_hashes, m);
         drop(hashes);
         drop(mph_hashes);
         let arena = StringArena::build_exact(
@@ -464,16 +455,8 @@ impl PerfectHashIndex {
             mph: Some(mph),
             arena,
             n,
-            overflow_cap,
             side,
         })
-    }
-
-    /// Number of MPH-resolved keys: `n` minus the side-table entries. Slots and the remap are
-    /// bounded by this, not by `n`.
-    #[inline]
-    fn m(&self) -> usize {
-        self.n - self.side.len()
     }
 
     /// Ids of keys whose 64-bit hash collides with another key's live here, off the hot path: the
@@ -488,11 +471,12 @@ impl PerfectHashIndex {
             .find_map(|e| (self.arena.get(e.1 as usize) == Some(key)).then_some(e.1))
     }
 
-    /// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free
-    /// slot no member occupies, which ptr_hash's own `index()` would read out of bounds.
+    /// Slot for a key hash; `None` only for an empty index. The MPH's remap covers every slot it
+    /// can produce, so the answer is always a valid arena row and membership is decided by the
+    /// stored key alone.
     #[inline]
     fn slot_for(&self, h: u64) -> Option<usize> {
-        crate::hash::slot_for(self.mph.as_ref()?, self.m(), self.overflow_cap, h)
+        Some(self.mph.as_ref()?.index(h) as usize)
     }
 
     /// Number of distinct keys.
@@ -558,27 +542,16 @@ impl PerfectHashIndex {
             }
             hashes.push(hash_key(k.as_ref()));
         }
-        // ptr_hash's stream iterator is internal-iteration only (`next()` is unimplemented by
-        // design), so drain it with `for_each`; then resolve arena spans with the offset lines
-        // prefetched ahead, and compare with the data lines prefetched ahead.
-        // MINIMAL=false: raw slots, so the stream never touches the remap (see `slot_for` — the
-        // remap is unchecked in ptr_hash and only safe up to `overflow_cap`). Raw slots ≥ n are
-        // triaged here: past the cap they are provably non-members, otherwise the (rare, ~1%)
-        // per-key `index()` resolves the remapped slot.
-        let m = self.m();
-        let slots = crate::hash::triage_slots(mph, m, self.overflow_cap, &hashes);
+        // Every slot is a real arena row — the MPH's remap covers its whole slot range — so the
+        // three passes are just a pipeline: pilots prefetched inside `index_all`, then the arena's
+        // offset lines prefetched ahead of the span pass, then its data lines ahead of the compare.
+        let slots = mph.index_all(&hashes);
         let mut spans: Vec<Option<(usize, usize)>> = Vec::with_capacity(slots.len());
         for (i, &slot) in slots.iter().enumerate() {
             if let Some(&s) = slots.get(i + AHEAD) {
-                if s < m {
-                    self.arena.prefetch_offsets(s);
-                }
+                self.arena.prefetch_offsets(s as usize);
             }
-            spans.push(if slot < m {
-                self.arena.span(slot)
-            } else {
-                None
-            });
+            spans.push(self.arena.span(slot as usize));
         }
         (0..keys.len())
             .map(|i| {
@@ -635,11 +608,10 @@ impl PerfectHashIndex {
     /// [`to_bytes`](Self::to_bytes) and the streaming [`save`](Self::save) so the two emit
     /// byte-identical blobs.
     fn serialised_parts(&self) -> Result<SerialisedParts, IndexError> {
-        let mut mph_buf = Vec::new();
-        if let Some(mph) = &self.mph {
-            mph.serialize(&mut mph_buf)
-                .map_err(|e| IndexError::Serde(e.to_string()))?;
-        }
+        let mph_buf = match &self.mph {
+            Some(mph) => mph.to_bytes(),
+            None => Vec::new(),
+        };
         let mut side_buf = Vec::with_capacity(self.side.len() * SIDE_ENTRY);
         for &(h, id) in &self.side {
             side_buf.extend_from_slice(&h.to_le_bytes());
@@ -653,16 +625,16 @@ impl PerfectHashIndex {
         Ok((header, mph_buf, side_buf))
     }
 
-    /// Serialise to a self-describing blob: `[magic "BMP4"][n u64][mph_len u64][side_len u32]
-    /// [payload u64][check u32][mph epserde bytes][arena bytes][side entries]`. The MPH is
-    /// serialised with [`epserde`]; reloading queries correctly because the key hash is
-    /// version-stable. `check` is a hash of the preceding header bytes and `payload` a streaming
-    /// hash of everything after the header, so a blob that lost bytes in transit fails cleanly at
-    /// load. (`overflow_cap` is not stored: it is recomputed from the arena on every load.)
+    /// Serialise to a self-describing blob: `[magic "BMP5"][n u64][mph_len u64][side_len u32]
+    /// [payload u64][check u32][MPH1 blob][arena bytes][side entries]`. Reloading queries correctly
+    /// because the key hash is version-stable. `check` is a hash of the preceding header bytes and
+    /// `payload` a streaming hash of everything after the header, so a blob that lost bytes in
+    /// transit fails cleanly at load; the MPH region carries its own header and validates its own
+    /// lengths, which is what makes [`from_bytes`](Self::from_bytes) a safe fn.
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let (header, mph_buf, side_buf) = self.serialised_parts()?;
         let arena = self.arena.as_bytes();
-        let mut out = Vec::with_capacity(HEADER_V4 + mph_buf.len() + arena.len() + side_buf.len());
+        let mut out = Vec::with_capacity(HEADER_V5 + mph_buf.len() + arena.len() + side_buf.len());
         out.extend_from_slice(&header);
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(arena);
@@ -674,27 +646,21 @@ impl PerfectHashIndex {
     /// a buffer or reporting bytes/key; [`save`](Self::save) writes exactly this many.
     pub fn serialized_len(&self) -> Result<usize, IndexError> {
         let mph = match &self.mph {
-            Some(mph) => crate::hash::mph_serialized_len(mph)?,
+            Some(mph) => mph.byte_len(),
             None => 0,
         };
-        Ok(HEADER_V4 + mph + self.arena.as_bytes().len() + self.side.len() * SIDE_ENTRY)
+        Ok(HEADER_V5 + mph + self.arena.as_bytes().len() + self.side.len() * SIDE_ENTRY)
     }
 
-    /// Reconstruct from [`PerfectHashIndex::to_bytes`] output. The lexindex framing (magic, lengths,
-    /// arena offsets, side table) is fully bounds-validated, and owned loads verify a streaming
-    /// checksum of the whole payload, so *accidental* corruption anywhere in the blob fails cleanly.
+    /// Reconstruct from [`PerfectHashIndex::to_bytes`] output.
     ///
-    /// # Safety
-    /// The embedded minimal perfect hash is deserialised by [`epserde`] and cannot be validated:
-    /// `ptr_hash` reads its pilot table unchecked, and the fields that would bound that read
-    /// (`parts`, `buckets`, the fast-modulo constants) are private, so no amount of checking on
-    /// this side can make a hostile blob safe. A crafted blob can therefore read out of bounds.
-    /// The caller must pass only bytes produced by [`to_bytes`](Self::to_bytes) /
-    /// [`save`](Self::save) — the same "trust your own blob" contract as
-    /// [`load_mmap`](Self::load_mmap), which additionally skips the checksum scan.
-    pub unsafe fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        // SAFETY: forwarded from this function's contract.
-        unsafe { Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true) }
+    /// Safe on arbitrary bytes. Every array the index will read is bounded by a length this crate
+    /// wrote and checks here — the framing (magic, lengths, arena offsets, side ids) and the MPH's
+    /// own header alike — so a crafted blob is at worst *wrong*, never unsound. Owned loads also
+    /// verify a streaming checksum of the whole payload, which is what turns accidental corruption
+    /// into a clean error rather than a wrong answer.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
     /// The lexindex framing of `blob`, parsed and bounds-validated — magic, header checksum, the
@@ -715,43 +681,31 @@ impl PerfectHashIndex {
         if bytes.len() < 4 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
-        let (header, n_at, len_at) = match &bytes[0..4] {
-            m if m == MAGIC_V2 => (HEADER_V2, 4, 12),
-            m if m == MAGIC_V3 => (HEADER_V3, 4, 20),
-            m if m == MAGIC_V4 => (HEADER_V4, 4, 12),
-            _ => return Err(IndexError::Format("bad magic or truncated header")),
-        };
-        if bytes.len() < header {
+        if LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes")) {
+            return Err(IndexError::Format(
+                "perfect-hash: blob written by lexindex < 1.0, whose minimal perfect hash came \
+                 from a crate this version no longer links; rebuild the index from its keys",
+            ));
+        }
+        if &bytes[0..4] != MAGIC_V5 || bytes.len() < HEADER_V5 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
-        // v3/v4 headers carry a checksum over their framing fields; verify it so accidental
-        // corruption of those fails cleanly. The v3 `overflow_cap` field is deliberately *not*
-        // read — the cap is recomputed from the arena below, so a wrong (even maliciously
-        // re-checksummed) cap cannot steer a query past the remap.
-        let (checked, side_len) = match &bytes[0..4] {
-            m if m == MAGIC_V3 => (Some(CHECKED_V3), 0usize),
-            m if m == MAGIC_V4 => (
-                Some(CHECKED_V4),
-                u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize,
-            ),
-            _ => (None, 0),
-        };
-        if let Some(c) = checked {
-            let check = u32::from_le_bytes(bytes[c..c + 4].try_into().unwrap());
-            if check != crate::hash::hash_bytes(&bytes[..c]) as u32 {
-                return Err(IndexError::Format("header checksum mismatch"));
-            }
+        let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
+        if check != crate::hash::hash_bytes(&bytes[..CHECKED_V5]) as u32 {
+            return Err(IndexError::Format("header checksum mismatch"));
         }
-        // Owned v4 loads verify the whole payload — one streaming pass over everything after the
+        let side_len = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+        // Owned loads verify the whole payload — one streaming pass over everything after the
         // header — so a flipped byte in the MPH region, the arena or the side table is rejected
-        // here rather than surfacing as a wrong answer (or an epserde abort) later.
-        if verify && &bytes[0..4] == MAGIC_V4 {
+        // here rather than surfacing as a wrong answer later.
+        if verify {
             let stored = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
-            if stored != crate::hash::hash_block(&bytes[HEADER_V4..]) {
+            if stored != crate::hash::hash_block(&bytes[HEADER_V5..]) {
                 return Err(IndexError::Format("payload checksum mismatch"));
             }
         }
-        let n64 = u64::from_le_bytes(bytes[n_at..n_at + 8].try_into().unwrap());
+        let (header, len_at) = (HEADER_V5, 12);
+        let n64 = u64::from_le_bytes(bytes[4..12].try_into().unwrap());
         if n64 > u32::MAX as u64 {
             return Err(IndexError::Format(
                 "perfect-hash: header claims more than u32::MAX keys",
@@ -816,16 +770,10 @@ impl PerfectHashIndex {
     }
 
     /// Reconstruct from a shared byte source: the validated framing from
-    /// [`parse_frame`](Self::parse_frame), then the MPH structure (a few bytes/key) deserialised
-    /// by `epserde` into owned memory; the key arena — the bulk of the blob — is borrowed zero-copy,
-    /// so a memory-mapped load never copies it. Backs `from_bytes`, `load` and `load_mmap`.
-    ///
-    /// # Safety
-    /// The MPH region must be an `epserde` image this crate wrote — see
-    /// [`from_bytes`](Self::from_bytes): `ptr_hash` reads its pilot table unchecked, so a crafted
-    /// region is undefined behaviour and nothing here can reject it. The framing checks that run
-    /// first turn every *accidental* corruption into an error.
-    unsafe fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+    /// [`parse_frame`](Self::parse_frame), then the MPH structure (a few bytes/key) copied into
+    /// owned memory; the key arena — the bulk of the blob — is borrowed zero-copy, so a
+    /// memory-mapped load never copies it. Backs `from_bytes`, `load` and `load_mmap`.
+    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let Frame {
             n,
             mph,
@@ -836,48 +784,16 @@ impl PerfectHashIndex {
         let mph = if n == 0 {
             None
         } else {
-            let mut reader = &blob.as_ref()[mph];
-            // A safe fn in epserde 0.8 that is unsound for a crafted region: the caller's contract
-            // is what makes this call sound.
-            let mph = DefaultPtrHash::deserialize_full(&mut reader)
-                .map_err(|e| IndexError::Serde(e.to_string()))?;
-            if mph.n() != m {
+            let mph = Mphf::from_bytes(&blob.as_ref()[mph])?;
+            if mph.n() != m as u64 {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
             Some(mph)
-        };
-        // The remap bound is always recomputed from the stored keys, never taken from a header:
-        // the arena is bounds-validated, so hashing the MPH's own members — ids [0, m), the
-        // representatives — yields the exact bound regardless of what any header claims. (Side
-        // keys are deliberately excluded: they are not MPH members, and folding their raw slots
-        // in could only inflate the bound back over the remap's true end.) Chunked so the scratch
-        // buffer stays flat on a huge corpus. `CompactHashIndex` cannot do this — it stores no
-        // keys — which is why its cap is trusted from its checked header and its `from_bytes` is
-        // a stricter trust-your-own-blob contract.
-        let overflow_cap = match &mph {
-            Some(mph) => {
-                const CHUNK: usize = 1 << 16;
-                let mut hashes = Vec::with_capacity(CHUNK.min(m));
-                let mut cap = 0;
-                for start in (0..m).step_by(CHUNK) {
-                    hashes.clear();
-                    for i in start..(start + CHUNK).min(m) {
-                        let key = arena
-                            .get(i)
-                            .ok_or(IndexError::Format("arena slot out of range"))?;
-                        hashes.push(hash_key(key));
-                    }
-                    cap = cap.max(crate::hash::overflow_cap(mph, &hashes, m));
-                }
-                cap
-            }
-            None => 0,
         };
         Ok(Self {
             mph,
             arena,
             n,
-            overflow_cap,
             side,
         })
     }
@@ -1024,7 +940,7 @@ impl PerfectHashIndex {
             (sorted, Vec::new())
         };
         let m = mph_hashes.len();
-        let mph = crate::hash::build_mph(&mph_hashes)?;
+        let mph = Mphf::build(&mph_hashes)?;
 
         // Where each *input* key goes: its MPH slot, or a tail id for the rare extra. Both
         // side tables below are allocated only when a collision actually exists, which needs
@@ -1045,7 +961,7 @@ impl PerfectHashIndex {
             if collided && is_extra[i] {
                 continue;
             }
-            let slot = mph.index(h);
+            let slot = mph.index(*h) as usize;
             if slot >= m || taken[slot] {
                 return Err(IndexError::Format(
                     "perfect-hash: construction was not minimal/perfect",
@@ -1083,12 +999,10 @@ impl PerfectHashIndex {
             side_buf.extend_from_slice(&h.to_le_bytes());
             side_buf.extend_from_slice(&id.to_le_bytes());
         }
-        let mut mph_buf = Vec::new();
-        mph.serialize(&mut mph_buf)
-            .map_err(|e| IndexError::Serde(e.to_string()))?;
+        let mph_buf = mph.to_bytes();
         drop(mph);
 
-        let arena_start = HEADER_V4 + mph_buf.len();
+        let arena_start = HEADER_V5 + mph_buf.len();
         let data_start = arena_start + arena_prefix.len();
         let total = data_start + data_len + side_buf.len();
         crate::blob::write_atomically_with(path.as_ref(), |w| {
@@ -1097,7 +1011,7 @@ impl PerfectHashIndex {
             // SAFETY: the file was created exclusively by `write_atomically_with` under a name no
             // other process knows yet, and nothing else touches it until the rename below.
             let mut map = unsafe { memmap2::MmapMut::map_mut(&*file)? };
-            map[HEADER_V4..arena_start].copy_from_slice(&mph_buf);
+            map[HEADER_V5..arena_start].copy_from_slice(&mph_buf);
             map[arena_start..data_start].copy_from_slice(&arena_prefix);
             map[data_start + data_len..].copy_from_slice(&side_buf);
 
@@ -1156,9 +1070,9 @@ impl PerfectHashIndex {
             check()?;
 
             let mut payload = crate::hash::BlockHasher::new();
-            payload.update(&map[HEADER_V4..]);
+            payload.update(&map[HEADER_V5..]);
             let header = header_bytes(n, mph_buf.len(), side.len(), payload.finish());
-            map[..HEADER_V4].copy_from_slice(&header);
+            map[..HEADER_V5].copy_from_slice(&header);
             map.flush()?;
             Ok(())
         })?;
@@ -1166,14 +1080,10 @@ impl PerfectHashIndex {
     }
 
     /// Load a dictionary previously written with [`PerfectHashIndex::save`] (reads the whole file
-    /// and verifies the payload checksum).
-    ///
-    /// # Safety
-    /// The file must have been written by [`save`](Self::save) — see
-    /// [`from_bytes`](Self::from_bytes) for why a crafted blob cannot be rejected.
-    pub unsafe fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        // SAFETY: forwarded from this function's contract.
-        unsafe { Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true) }
+    /// and verifies the payload checksum). Safe on any file — see
+    /// [`from_bytes`](Self::from_bytes).
+    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
     /// Memory-map the file and borrow the key arena (the bulk of the blob) zero-copy; only the small
@@ -1181,17 +1091,17 @@ impl PerfectHashIndex {
     /// mapped file is trusted intact.
     ///
     /// # Safety
-    /// Two obligations. The file must have been written by [`save`](Self::save): the embedded
-    /// perfect hash cannot be validated, so a crafted file is undefined behaviour — see
-    /// [`from_bytes`](Self::from_bytes). And the caller must guarantee the file is not modified or
-    /// truncated by any process while the returned index is alive — see
+    /// One obligation, and it is not about the bytes: the file must not be modified or truncated by
+    /// any process while the returned index is alive, because the index borrows the mapping. A
+    /// crafted file is *not* undefined behaviour here — the same validation
+    /// [`from_bytes`](Self::from_bytes) performs runs on the mapping — it is merely wrong. See
     /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
     #[cfg(feature = "mmap")]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
-        // SAFETY: both forwarded from this function's own contract.
+        // SAFETY: forwarded from this function's own contract.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        unsafe { Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false) }
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
 }
 
@@ -1225,7 +1135,7 @@ mod stream_build_tests {
         // builds of the same key set already differ in their serialised pilots. What must hold is
         // that the file is a valid blob answering exactly like the index built in memory.
         // SAFETY: written by this crate a line above.
-        let idx = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+        let idx = PerfectHashIndex::load(&path).unwrap();
         assert_eq!(idx.len(), keys.len());
         let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
         for k in &keys {
@@ -1310,18 +1220,15 @@ mod stream_build_tests {
             .unwrap();
         assert_eq!(n, keys.len());
 
-        // SAFETY: both written by this crate a line above.
-        let (a, b) = unsafe {
-            (
-                PerfectHashIndex::load(&wide).unwrap(),
-                PerfectHashIndex::load(&narrow).unwrap(),
-            )
-        };
+        let (a, b) = (
+            PerfectHashIndex::load(&wide).unwrap(),
+            PerfectHashIndex::load(&narrow).unwrap(),
+        );
         assert_eq!(b.len(), keys.len());
         let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
         for k in &keys {
-            // Ids may differ between two builds (ptr_hash construction is not deterministic), but
-            // membership and the slot → key round trip may not.
+            // Two builds over the same keys agree exactly, but this pair has different arena
+            // widths, so assert only what the widths cannot change.
             assert!(a.contains(k) && b.contains(k), "{k}");
             let id = b.id(k).expect("every key is a member");
             assert_eq!(b.key(id), Some(k.as_str()));
@@ -1350,7 +1257,7 @@ mod stream_build_tests {
             PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), window)
                 .unwrap();
             // SAFETY: written by this crate a line above.
-            let idx = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+            let idx = PerfectHashIndex::load(&path).unwrap();
             for k in &keys {
                 let id = idx
                     .id(k)
@@ -1376,13 +1283,10 @@ mod stream_build_tests {
         PerfectHashIndex::build_to_file(&direct, || keys.iter()).unwrap();
         PerfectHashIndex::build_to_file_windowed(&windowed, || keys.iter(), || Ok(()), 128 << 10)
             .unwrap();
-        // SAFETY: both written by this crate a line above.
-        let (a, b) = unsafe {
-            (
-                PerfectHashIndex::load(&direct).unwrap(),
-                PerfectHashIndex::load(&windowed).unwrap(),
-            )
-        };
+        let (a, b) = (
+            PerfectHashIndex::load(&direct).unwrap(),
+            PerfectHashIndex::load(&windowed).unwrap(),
+        );
         for k in &keys {
             assert!(a.contains(k), "{k}");
             let id = b
@@ -1469,7 +1373,7 @@ mod stream_build_tests {
         let path = tmp("cross.bmp");
         PerfectHashIndex::build_to_file(&path, || keys.iter()).unwrap();
         // SAFETY: written by this crate a line above.
-        let file = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+        let file = PerfectHashIndex::load(&path).unwrap();
         let mem = PerfectHashIndex::build(keys.iter()).unwrap();
         // The *ids* may differ (see above), but the round trip and the membership answers may not.
         for k in &keys {
@@ -1491,7 +1395,7 @@ mod stream_build_tests {
             0
         );
         // SAFETY: written by this crate a line above.
-        assert_eq!(unsafe { PerfectHashIndex::load(&path) }.unwrap().len(), 0);
+        assert_eq!(PerfectHashIndex::load(&path).unwrap().len(), 0);
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
@@ -1569,16 +1473,15 @@ mod stream_build_tests {
 mod tests {
     use super::*;
 
-    /// The loader is `unsafe` because a crafted blob cannot be rejected (see
-    /// [`PerfectHashIndex::from_bytes`]). Every blob below is either produced by this crate or a
-    /// deliberate corruption of the *validated* framing, which the loader rejects before the MPH is
-    /// touched.
+    /// Shorthand: the loader is safe now, and every blob below is either produced by this crate
+    /// or a deliberate corruption of one.
     fn from_bytes(bytes: &[u8]) -> Result<PerfectHashIndex, IndexError> {
-        unsafe { PerfectHashIndex::from_bytes(bytes) }
+        PerfectHashIndex::from_bytes(bytes)
     }
 
-    /// The safe half of the loader must never panic on arbitrary bytes — only `Ok`/`Err` — which
-    /// is where the "garbage fails cleanly" property lives now that the loaders are `unsafe`.
+    /// Arbitrary bytes must never panic — only `Ok`/`Err`. The whole loader has this property
+    /// since 1.0; `parse_frame` is fuzzed separately because it is the half a libFuzzer target can
+    /// reach without building an index first.
     #[test]
     fn parse_frame_never_panics() {
         use proptest::prelude::*;
@@ -1682,7 +1585,7 @@ mod tests {
         let idx = PerfectHashIndex::build(["GET", "POST", "PUT", "DELETE"]).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_mph_{}.bmp", std::process::id()));
         idx.save(&path).unwrap();
-        let loaded = unsafe { PerfectHashIndex::load(&path) }.unwrap();
+        let loaded = PerfectHashIndex::load(&path).unwrap();
         for w in ["GET", "POST", "PUT", "DELETE"] {
             assert_eq!(loaded.id(w), idx.id(w));
         }
@@ -1743,65 +1646,24 @@ mod tests {
 
     /// A 0.7 "BMP3" blob (header keeps a now-ignored `overflow_cap` field) still loads: the bound
     /// is recomputed from the arena, and every lookup matches the source index.
+    ///
+    /// Every pre-1.0 blob embedded a `ptr_hash` image this crate can no longer read. The refusal
+    /// has to *name* that — a bare "bad magic" would send someone hunting for a corrupt file when
+    /// the file is intact and merely old.
     #[test]
-    fn a_0_7_bmp3_blob_still_loads() {
-        let words: Vec<String> = (0..2_000).map(|i| format!("word-{i:05}")).collect();
-        let idx = PerfectHashIndex::build(&words).unwrap();
-        let v3 = synthesize_v3(&idx, idx.overflow_cap);
-        let restored = from_bytes(&v3).unwrap();
-        assert_eq!(restored.overflow_cap, idx.overflow_cap);
-        for w in &words {
-            assert_eq!(restored.id(w), idx.id(w));
+    fn a_pre_1_0_blob_is_refused_by_name() {
+        let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
+        let good = idx.to_bytes().unwrap();
+        for magic in LEGACY_MAGICS {
+            let mut old = good.clone();
+            old[0..4].copy_from_slice(magic);
+            let err = match from_bytes(&old) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
+            };
+            assert!(err.contains("lexindex < 1.0"), "{err}");
+            assert!(err.contains("rebuild"), "{err}");
         }
-        assert_eq!(restored.id("delta"), None);
-    }
-
-    /// A 0.5/0.6 "BMP2" blob predates the recorded remap bound, but stores every key — so the load
-    /// path recomputes the bound instead of falling back to the unbounded (unsound) behaviour. The
-    /// healed value must equal what a fresh build records.
-    #[test]
-    fn a_0_6_bmp2_blob_is_healed_on_load() {
-        // Both sides of the heal's chunk boundary (64 Ki keys): one pass and several.
-        for n in [2_000usize, 70_000] {
-            let words: Vec<String> = (0..n).map(|i| format!("word-{i:05}")).collect();
-            let idx = PerfectHashIndex::build(&words).unwrap();
-            let v4 = idx.to_bytes().unwrap();
-            assert_eq!(&v4[0..4], b"BMP4");
-            assert!(idx.side.is_empty(), "sequential keys must not collide");
-            // A 0.5/0.6 blob is `[magic][n][mph_len]` + the same mph and arena bytes.
-            let mut v2 = Vec::with_capacity(v4.len() - HEADER_V4 + HEADER_V2);
-            v2.extend_from_slice(b"BMP2");
-            v2.extend_from_slice(&v4[4..12]); // n
-            v2.extend_from_slice(&v4[12..20]); // mph_len
-            v2.extend_from_slice(&v4[HEADER_V4..]); // mph + arena (side is empty)
-            let restored = from_bytes(&v2).unwrap();
-            assert_eq!(
-                restored.overflow_cap, idx.overflow_cap,
-                "healed cap at n = {n}"
-            );
-            for w in &words {
-                assert_eq!(restored.id(w), idx.id(w));
-                assert_eq!(restored.key(restored.id(w).unwrap()), Some(w.as_str()));
-            }
-            assert_eq!(restored.id("delta"), None);
-        }
-    }
-
-    /// Rebuild a 0.7 "BMP3" blob from a (side-free) v4 index, with the cap field set to `cap`
-    /// and a valid header checksum.
-    fn synthesize_v3(idx: &PerfectHashIndex, cap: u64) -> Vec<u8> {
-        let v4 = idx.to_bytes().unwrap();
-        assert_eq!(&v4[0..4], b"BMP4");
-        assert!(idx.side.is_empty());
-        let mut v3 = Vec::with_capacity(v4.len() - HEADER_V4 + HEADER_V3);
-        v3.extend_from_slice(b"BMP3");
-        v3.extend_from_slice(&v4[4..12]); // n
-        v3.extend_from_slice(&cap.to_le_bytes());
-        v3.extend_from_slice(&v4[12..20]); // mph_len
-        let check = crate::hash::hash_bytes(&v3[..CHECKED_V3]) as u32;
-        v3.extend_from_slice(&check.to_le_bytes());
-        v3.extend_from_slice(&v4[HEADER_V4..]); // mph + arena (side is empty)
-        v3
     }
 
     /// A header that lost bytes in transit must be refused rather than used to frame sections,
@@ -1817,53 +1679,26 @@ mod tests {
             bad[pos] ^= 0x40;
             assert!(from_bytes(&bad).is_err(), "header byte {pos} was accepted");
         }
-        for pos in (HEADER_V4..good.len()).step_by(7) {
+        for pos in (HEADER_V5..good.len()).step_by(7) {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
             assert!(from_bytes(&bad).is_err(), "payload byte {pos} was accepted");
         }
     }
 
-    /// `id_unchecked` skips the stored-key comparison, not the remap bound: a stranger past the
-    /// remap must still return a valid slot rather than reading out of bounds.
+    /// A non-member is a valid input to a minimal perfect hash — it simply lands on some other
+    /// key's slot. Every path must therefore stay inside the arena for a stranger, and the two
+    /// membership-verifying paths must agree that it is absent.
     #[test]
-    fn id_unchecked_is_bounded_for_strangers() {
+    fn strangers_land_on_a_real_row_and_are_rejected() {
         let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
-        for round in 0..60 {
-            let idx = PerfectHashIndex::build(&members).unwrap();
-            for probe in 0..2_000 {
-                let s = format!("stranger-{round}-{probe}");
-                assert!((idx.id_unchecked(&s) as usize) < idx.len());
-            }
+        let idx = PerfectHashIndex::build(&members).unwrap();
+        let strangers: Vec<String> = (0..20_000).map(|i| format!("stranger-{i:05}")).collect();
+        for s in &strangers {
+            assert!((idx.id_unchecked(s) as usize) < idx.len());
+            assert_eq!(idx.id(s), None);
         }
-    }
-
-    /// Same regression as `compact_hash::strangers_past_the_remap_are_rejected_not_ub`, for the
-    /// verified-membership index.
-    #[test]
-    fn strangers_past_the_remap_are_rejected_not_ub() {
-        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
-        let mut engaged = 0u32;
-        for round in 0..300 {
-            let idx = PerfectHashIndex::build(&members).unwrap();
-            let mph = idx.mph.as_ref().unwrap();
-            for probe in 0..5_000 {
-                let s = format!("stranger-{round}-{probe}");
-                let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
-                if raw >= idx.m() && (raw - idx.m()) as u64 >= idx.overflow_cap {
-                    assert_eq!(idx.id(&s), None);
-                    assert_eq!(idx.ids_of(&[&s]), vec![None]);
-                    engaged += 1;
-                }
-            }
-            if engaged >= 20 {
-                break;
-            }
-        }
-        assert!(
-            engaged > 0,
-            "no trailing free zone in 300 builds - raise BUILDS"
-        );
+        assert_eq!(idx.ids_of(&strangers), vec![None; strangers.len()]);
     }
 
     /// A real 64-bit hash collision (the pinned pair from `crate::hash`) must build, keep ids a
@@ -1896,7 +1731,7 @@ mod tests {
             keys.len(),
             "ids must stay a bijection onto [0, n)"
         );
-        // The v4 blob carries the side section and reloads identically — owned and mapped.
+        // The blob carries the side section and reloads identically — owned and mapped.
         let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         assert_eq!(restored.side, idx.side);
         assert_eq!(restored.id(a), Some(ia));
@@ -1928,10 +1763,10 @@ mod tests {
             let mut bad = good.clone();
             let at = bad.len() - 4;
             bad[at..].copy_from_slice(&bad_id.to_le_bytes());
-            let payload = crate::hash::hash_block(&bad[HEADER_V4..]);
+            let payload = crate::hash::hash_block(&bad[HEADER_V5..]);
             bad[24..32].copy_from_slice(&payload.to_le_bytes());
-            let check = crate::hash::hash_bytes(&bad[..CHECKED_V4]) as u32;
-            bad[CHECKED_V4..HEADER_V4].copy_from_slice(&check.to_le_bytes());
+            let check = crate::hash::hash_bytes(&bad[..CHECKED_V5]) as u32;
+            bad[CHECKED_V5..HEADER_V5].copy_from_slice(&check.to_le_bytes());
             let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("side id {bad_id} was accepted"),
@@ -1952,39 +1787,14 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    /// A forged v3 `overflow_cap` — set to `u64::MAX` with the header checksum re-computed so the
-    /// loader accepts it — must not re-open the out-of-bounds remap read: the cap is recomputed
-    /// from the arena on load (v4 does not even store one), so the forged value is discarded and
-    /// strangers past the *true* remap are still rejected.
+    /// Construction is deterministic, and that is a promise `build`'s docstring now makes: the
+    /// same keys must produce the same blob, byte for byte, however many threads the machine has.
     #[test]
-    fn a_tampered_cap_cannot_steer_a_query_past_the_remap() {
-        let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
-        let mut engaged = 0u32;
-        for round in 0..300 {
-            let idx = PerfectHashIndex::build(&members).unwrap();
-            if idx.overflow_cap == 0 {
-                continue; // no trailing free zone this build; nothing to forge past
-            }
-            let restored = from_bytes(&synthesize_v3(&idx, u64::MAX)).unwrap();
-            assert_eq!(restored.overflow_cap, idx.overflow_cap); // recomputed, not the forged MAX
-            let mph = restored.mph.as_ref().unwrap();
-            for probe in 0..5_000 {
-                let s = format!("stranger-{round}-{probe}");
-                let raw = mph.index_no_remap(&crate::hash::hash_key(&s));
-                if raw >= restored.m() && (raw - restored.m()) as u64 >= restored.overflow_cap {
-                    assert_eq!(restored.id(&s), None);
-                    assert_eq!(restored.ids_of(&[&s]), vec![None]);
-                    engaged += 1;
-                }
-            }
-            if engaged >= 20 {
-                break;
-            }
-        }
-        assert!(
-            engaged > 0,
-            "no trailing free zone in 300 builds - raise rounds"
-        );
+    fn the_same_keys_always_produce_the_same_blob() {
+        let words: Vec<String> = (0..50_000).map(|i| format!("word-{i:05}")).collect();
+        let first = PerfectHashIndex::build(&words).unwrap().to_bytes().unwrap();
+        let again = PerfectHashIndex::build(&words).unwrap().to_bytes().unwrap();
+        assert_eq!(first, again);
     }
 
     #[test]
