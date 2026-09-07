@@ -22,11 +22,11 @@ jobs:
     name: AddressSanitizer (nightly)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # `--target` is required: without it the sanitizer flags also instrument build scripts and
       # proc-macros, which then run under an uninstrumented host and fail to link.
       # `--lib --tests` skips doctests: rustdoc does not link the sanitizer runtime into the
@@ -40,12 +40,12 @@ jobs:
     name: Miri (fst only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: nightly
           components: miri
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Deliberately narrow: the interpreter is orders of magnitude slower than the machine, so it
       # goes where lexindex does its own byte-range and pointer work — `blob` (the shared,
       # range-limited views every index borrows from) and `subsequence` (the automaton's index
@@ -71,6 +71,66 @@ jobs:
         run: |
           cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay::
 
+  # Dependabot is deliberately *not* configured for this repository: any merged bot PR puts
+  # `dependabot[bot]` into the contributor list, and that list is kept to people. What the bot would
+  # have noticed is checked here instead, weekly, and reported as a failing job; the pins then move
+  # in a human's own commit. Never a gate on a PR. A pin is stale when it is not the commit behind
+  # the action's latest release. `dtolnay/rust-toolchain` is the exception: its refs *are* its
+  # inputs (`@stable`, `@nightly`), its one release tag `v1` is years behind `master`, and this repo
+  # pins `master` on purpose -- so for it the check is the pinned commit's age, 180 days. A crate is
+  # behind when `cargo update --dry-run` would move it, or knows a newer version that the MSRV does
+  # *not* rule out -- one that the MSRV does rule out is a decision already taken, not a nudge.
+  freshness:
+    name: pins and dependencies are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+      - name: action pins against their latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > stale.txt
+          grep -rhoE 'uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' .github/workflows \
+            | sed 's/^uses: //' | sort -u > pins.txt
+          while IFS=@ read -r repo sha; do
+            if [ "$repo" != dtolnay/rust-toolchain ] \
+               && tag=$(gh api "repos/$repo/releases/latest" --jq .tag_name 2>/dev/null); then
+              latest=$(gh api "repos/$repo/commits/$tag" --jq .sha)
+              if [ "$latest" != "$sha" ]; then
+                echo "$repo: pinned ${sha:0:7}, latest release $tag is ${latest:0:7}" >> stale.txt
+              fi
+            else
+              when=$(gh api "repos/$repo/commits/$sha" --jq .commit.committer.date)
+              age=$(( ( $(date +%s) - $(date -d "$when" +%s) ) / 86400 ))
+              if [ "$age" -gt 180 ]; then
+                echo "$repo: tracked by commit; pinned one is $age days old" >> stale.txt
+              fi
+            fi
+          done < pins.txt
+          if [ -s stale.txt ]; then
+            sed 's/^/::warning::/' stale.txt
+            exit 1
+          fi
+          echo "all $(wc -l < pins.txt) pins are current"
+      - name: crates against their latest compatible and latest available versions
+        run: |
+          set -euo pipefail
+          behind=0
+          for m in Cargo.toml fuzz/Cargo.toml; do
+            out=$(cargo update --dry-run --verbose --manifest-path "$m" 2>&1)
+            # `Updating` = a compatible bump the lockfile has not taken; `Unchanged ... (available:` =
+            # a newer major, unless the MSRV is what rules it out.
+            if echo "$out" | grep -E '^\s*Updating [A-Za-z0-9_-]+ v|^\s*Unchanged .*\(available:' \
+                 | grep -v 'requires Rust' | sed "s|^|::warning::$m: |" | grep .; then
+              behind=1
+            fi
+          done
+          exit $behind
+
   fuzz:
     name: libFuzzer (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -79,11 +139,11 @@ jobs:
       matrix:
         target: [parse_compact, parse_perfect, parse_overlay, parse_mphf]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target\nfuzz -> fuzz/target"
       - name: install cargo-fuzz
@@ -107,7 +167,7 @@ jobs:
             -- -max_total_time=600 -print_final_stats=1
       - name: upload the crashing input
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-artifacts-${{ matrix.target }}
           path: fuzz/artifacts/
