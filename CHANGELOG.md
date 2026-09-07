@@ -38,6 +38,17 @@ All notable changes to this project are documented here. The format follows
   this version still reads — nothing about it was undecodable, so refusing it would have cost a
   rebuild for nothing.
 
+- **Both key hashes read eight bytes at a time.** The byte-at-a-time FNV-1a chain that shipped
+  through 0.12 cost one multiply per *byte*; the replacement costs one multiply-rotate per 8-byte
+  word plus a splitmix64 finalizer with the key's length folded in. A-B-A-B in one process against
+  the old implementation, with a control that touches the same keys: **1.5×** on a 9.3-byte
+  dictionary word, **1.7×** on a 10.9-byte bigram, **6.2–6.6×** on an 80-byte URI-like key. Every
+  hash value therefore changed, which is the second reason no pre-1.0 blob can be read. Held to the
+  same statistics as the hash it replaces before shipping: strict-avalanche worst |z| 4.50 against
+  4.75, low-bit chi-square over 480 k real words and 1 M bigrams within ±1, slot-against-fingerprint
+  independence within ±1, and the false-positive rate re-measured at 2 M probes — 7 732 accepted
+  against 7 812 expected at 8 fingerprint bits, z = −0.91.
+
 - **New blob formats: `BMP5` and `BCH6`.** `BCH6` drops the `overflow_cap` field — it existed to
   bound `ptr_hash`'s unchecked remap, and the new one covers its whole slot range — so its header
   is 40 bytes rather than 48.
@@ -49,6 +60,13 @@ All notable changes to this project are documented here. The format follows
   signature widens rather than breaks it. What makes 1.0 major is the on-disk format, which no API
   tool can inspect — so the policy in `docs/design.md` states that a blob format is part of the
   contract, and the CHANGELOG section above is the half of compatibility a human writes.
+
+- **The 1.0 blobs are pinned by their bytes, not by invariants.** `golden-1.0.0-compact.bch` and
+  `golden-1.0.0-perfect.bmp` are now asserted byte-identical to a fresh build from the same key
+  list. No earlier release could do this: pre-1.0 ids were not reproducible across builds, so every
+  golden test could only check the properties a correct load must satisfy. These two files are also
+  what seeds the `parse_compact` and `parse_perfect` fuzz targets, and a seed that still parses but
+  no longer resembles what the writer emits is the exact failure this release already hit once.
 
 - **`SECURITY.md`, as a threat model rather than a form letter.** What the loaders guarantee
   (soundness, not correctness — a crafted blob answers wrong ids, never out-of-range ones), why

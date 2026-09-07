@@ -117,8 +117,9 @@ this is the release where that debt is paid rather than carried.
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
 gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/mphf.rs`), keyed on
-a **version-stable** 64-bit hash of each string (FNV-1a + a splitmix64 finalizer — not `std`'s `DefaultHasher`, which is not guaranteed stable
-and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
+a **version-stable** 64-bit hash of each string (eight bytes at a time: one
+multiply-rotate round per word, then a splitmix64 finalizer with the length folded in — not
+`std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
 deterministic and unseeded (that is what makes the serialised MPH reloadable), so a retry could never

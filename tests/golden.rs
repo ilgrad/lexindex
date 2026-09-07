@@ -155,6 +155,53 @@ mod mph {
         );
     }
 
+    /// The 1.0 formats pinned by their **bytes**, which nothing could do before this release: ids
+    /// from the pre-1.0 minimal perfect hash were not reproducible across builds, so every earlier
+    /// golden test could only assert invariants. Construction is deterministic now (1.0-03) and the
+    /// key hash is fixed (1.0-04), so the whole blob is a constant and this test is the strongest
+    /// statement available: a changed header field, a changed section order, a changed checksum
+    /// function or a changed hash fails *here*, at the line that names the format, rather than in
+    /// whatever loads a stale blob a year from now.
+    ///
+    /// These two files are also what seeds `parse_compact`/`parse_perfect`. A seed that still
+    /// parses but no longer resembles what the writer emits is the failure mode 1.0 already hit
+    /// once, and byte-identity is what rules it out.
+    ///
+    /// Regenerating them, if a format or the hash is deliberately changed: write `compact` and
+    /// `perfect` below to their paths.
+    #[test]
+    fn the_1_0_hash_blobs_are_byte_identical_to_a_fresh_build() {
+        let keys = keys();
+        let compact = lexindex::CompactHashIndex::build(&keys, 1)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let perfect = lexindex::PerfectHashIndex::build(&keys)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+
+        for (name, magic, fresh) in [
+            ("golden-1.0.0-compact.bch", &b"BCH6"[..], compact),
+            ("golden-1.0.0-perfect.bmp", &b"BMP5"[..], perfect),
+        ] {
+            let path = data(name);
+            let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(&fresh[..4], magic, "{name}");
+            assert_eq!(
+                stored.len(),
+                fresh.len(),
+                "{name} changed size; regenerate {}",
+                path.display()
+            );
+            assert!(
+                stored == fresh,
+                "{name} changed; regenerate {}",
+                path.display()
+            );
+        }
+    }
+
     /// The zero-copy path against a real file on disk, not a buffer this process just wrote.
     #[cfg(feature = "mmap")]
     #[test]

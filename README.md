@@ -207,8 +207,9 @@ assert_eq!(raw, id);
   built over one representative per distinct hash value and the colliding leftovers are served — still
   exactly — from a tiny side table consulted only after the stored-key comparison has missed, so the
   hot path pays nothing. The expected number of colliding pairs is `n(n-1)/2^65` ≈ 2.7×10⁻⁸ at 1 M
-  keys, 2.7×10⁻⁴ at 100 M — the table is almost always empty. The hash is **version-stable** (FNV-1a
-  + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH reloads and queries
+  keys, 2.7×10⁻⁴ at 100 M — the table is almost always empty. The hash is **version-stable** (eight bytes at a
+  time — one multiply-rotate round per word, then a splitmix64 finalizer — not `std`'s
+  `DefaultHasher`), so a `save`d MPH reloads and queries
   identically on any build — the precondition for persistence. `CompactHashIndex` shares the
   same version-stable slot hash plus a second, uncorrelated one for the fingerprint, and resolves hash
   collisions the same way — its side table keeps the second hash at its **full 64 bits** whatever
@@ -395,7 +396,9 @@ else, so the second pass now has to come from a separate session.</sub>
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
 Measured on the 0.9.0 code in one session (min of 12 runs, idle machine, four seconds between runs
-so clocks settle). Absolute numbers are machine-dependent — this session runs ~19% faster than the
+so clocks settle) and **not yet re-run on 1.0**, which replaced both the perfect hash and the key
+hash — the bare key hash alone measured 1.5× on a 9.3-byte word and 6.2× on an 80-byte key, so every
+lexindex row here is a floor rather than a current figure. Absolute numbers are machine-dependent — this session runs ~19% faster than the
 one that produced the 0.8.0 table, `std::HashMap` control included — so compare the **ratios**, and
 only within a column.
 
