@@ -346,29 +346,29 @@ So, in decision order:
 `local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
 forms rotated inside each round so none keeps the position that pays to warm the probe list,
 minimum over 11 rounds. Ratios are **quotients of the minima against `dict` on the same probe
-set**, which is the quantity that reproduces: two independent runs agree to 7.3 % at worst and
-1.0 % at the median (`grid`: 2.1 % / 0.8 %).
+set**. A column is published only once two full 11-round passes agree on the absolute minima:
+7.3 % at worst and 1.0 % at the median (`grid`, re-measured 2026-09-07: 4.3 % / 0.5 %).
 
 | probe set | structure | 479 823 words | 1 M random pairs | 1 M grid pairs |
 |---|---|---:|---:|---:|
-| members | `marisa-trie` | 1.85× | 4.20× | 2.50× |
-| | `StringIndex.id` | 1.38× | 2.61× | 1.41× |
+| members | `marisa-trie` | 1.85× | 4.20× | 3.08× |
+| | `StringIndex.id` | 1.38× | 2.61× | 1.73× |
 | | `PerfectHashIndex.id` | 1.05× | 1.32× | 1.33× |
-| | **`CompactHashIndex.id`** | **0.61×** | **0.71×** | **0.61×** |
-| | `PerfectHashIndex.ids_of` | 0.47× | 0.49× | 0.54× |
-| | **`CompactHashIndex.ids_of`** | **0.31×** | **0.38×** | **0.38×** |
-| absent | `marisa-trie` | 2.34× | 4.29× | 2.16× |
-| | `StringIndex.id` | 1.47× | 2.37× | 1.06× |
-| | `PerfectHashIndex.id` | 0.83× | 0.95× | 0.96× |
-| | **`CompactHashIndex.id`** | **0.36×** | **0.33×** | **0.32×** |
-| | **`CompactHashIndex.ids_of`** | **0.29×** | **0.21×** | **0.20×** |
+| | **`CompactHashIndex.id`** | **0.61×** | **0.71×** | **0.71×** |
+| | `PerfectHashIndex.ids_of` | 0.47× | 0.49× | 0.62× |
+| | **`CompactHashIndex.ids_of`** | **0.31×** | **0.38×** | **0.45×** |
+| absent | `marisa-trie` | 2.34× | 4.29× | 2.75× |
+| | `StringIndex.id` | 1.47× | 2.37× | 1.37× |
+| | `PerfectHashIndex.id` | 0.83× | 0.95× | 0.89× |
+| | **`CompactHashIndex.id`** | **0.36×** | **0.33×** | **0.41×** |
+| | **`CompactHashIndex.ids_of`** | **0.29×** | **0.21×** | **0.26×** |
 
-Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in about
-two-thirds the time of a `dict` and a **missing** one in about a third, batched `ids_of` in a
-quarter to a third — while occupying 1.27 bytes per key on disk against the `dict`'s 71–95 bytes
-per key in RAM. `PerfectHashIndex` trades level with `dict` on members and wins on misses;
-`marisa-trie` costs 1.9–4.3× and `StringIndex` 1.1–2.6×, and both swing with the corpus exactly as
-their sizes do. Absolute figures for the word corpus, for scale: `dict` 327.9 ns, `CompactHashIndex`
+Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in 0.6–0.7×
+the time of a `dict` and a **missing** one in a third to two-fifths, batched `ids_of` in a fifth to
+under a half — while occupying 1.27 bytes per key on disk against the `dict`'s 71–95 bytes per key
+in RAM. `PerfectHashIndex` trades level with `dict` on members and wins on misses; `marisa-trie`
+costs 1.9–4.3× and `StringIndex` 1.4–2.6×, and both swing with the corpus exactly as their sizes
+do. Absolute figures for the word corpus, for scale: `dict` 327.9 ns, `CompactHashIndex`
 200.8, its `ids_of` 102.0, `marisa` 605.8.
 
 <sub>Read the ratios, not the absolutes. This machine drifts 3–11 % within a single run and 13.7 %
@@ -380,7 +380,17 @@ the same `str` skips rehashing where lexindex hashes the bytes every call (~23 n
 1 M); and every column pays the same per-call binding overhead, which flatters the slower ones. The
 first run of a corpus, taken minutes after a build, disagreed with the two settled runs by up to
 24 % on two cells and is excluded — the machine needs to settle, and cross-run agreement is what
-says when it has.</sub>
+says when it has. The `grid` column was **re-measured a day after it was first published, and did
+not reproduce**: it is restated here from two fresh 11-round passes. Five runs on the new day — at
+three round counts, idle and under load, and on the released 0.11.0 wheel as well as the current
+build — agree with each other and disagree with the first day's column by up to 30 %. Ruled out as
+the cause: the extension (the released wheel measures the same as the working tree), the
+interpreter (the same virtualenv throughout), the corpus generator (unchanged), and background
+load (raising it did not restore the old figures). What moved is the `dict` denominator itself —
+251 ns then, 194–196 ns now, on identical keys — while `words` and `random` reproduce to within
+1 %. The mechanism is not identified. The lesson is in the protocol: the two passes that validated
+the old column ran minutes apart inside one session, which bounds within-session noise and nothing
+else, so the second pass now has to come from a separate session.</sub>
 
 ### Point-lookup latency vs the standard library
 

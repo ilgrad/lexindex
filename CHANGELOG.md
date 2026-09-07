@@ -37,9 +37,14 @@ All notable changes to this project are documented here. The format follows
   Returned as `bytes` rather than as a buffer-protocol `#[pyclass]`. Both work under `abi3-py311`
   (`Py_bf_getbuffer` has been in the limited API since 3.11), so the choice is surface, not
   portability: `bytes` adds no public class and no exported-buffer lifetime to get wrong, and it is
-  immutable, which is what an answer should be. What it costs is one `memcpy` of 4 bytes per key,
-  a small fraction of what a Python `int` per key costs. The ns/key figures are owed: the machine
-  was not quiet enough to publish them and they are queued with the rest of the measurement batch.
+  immutable, which is what an answer should be. What it costs is one `memcpy` of 4 bytes per key.
+
+  Measured on 200 000 real-word keys, minimum of nine rounds, machine drift 3.0 % on a calibration
+  loop with no memory traffic: `ids_of` **117.5 ns/key**, `ids_of_bytes` **87.9 ns/key** — a
+  **1.34×** ratio, saving **29.6 ns/key**. That saving is the Python `int` construction and nothing
+  else, which the decomposition shows rather than assumes: `arr.tolist()`, which builds the same
+  `int`s from an array with no lookup at all, costs **31.6 ns/key** — an upper bound, since it also
+  walks the array. The plan predicted 15–25 ns/key and understated it.
 
 - **`Overlay<I>`** — edits on top of any of the three indexes without rebuilding them. All three are
   immutable by construction: an FST and a minimal perfect hash are both built once from the whole key
@@ -60,6 +65,11 @@ All notable changes to this project are documented here. The format follows
   The base may be shared: `OverlayBase` is implemented for `Arc<I>`, so an overlay can wrap an index
   the caller still holds and several overlays can sit on one base.
 
+  A lookup costs the base plus one bitset probe, and that is what it measures: at 10 M keys, with the
+  tombstone bitset fully allocated (1.25 MB), `Overlay<PerfectHashIndex>::id` is **363.0 ns** against
+  the bare index's **354.9 ns** on the same deserialised structure — **1.023×**, +8.0 ns, minimum of
+  nine A-B-A-B rounds with a machine drift of 1.5 %.
+
   `to_bytes`/`save` serialise the base blob, the additions and the tombstones together; `from_bytes_with`/
   `load_with` take the base's own loader as a closure. That is deliberate: `StringIndex::from_bytes`
   is safe while the perfect-hash loaders are `unsafe fn`, and a single generic loader would have had
@@ -74,6 +84,26 @@ All notable changes to this project are documented here. The format follows
   on a `CompactHashIndex` base where Rust refuses to compile. `Overlay.load(path, base)` and
   `Overlay.from_bytes(data, base)` take the base *class*, since each index loads itself; the base
   tag turns the wrong class into an error instead of an unchecked read.
+
+### Fixed
+
+- **The `grid` column of the Python lookup table did not reproduce, and is restated.** Re-measured
+  one day after 0.11.0 published it, from two fresh 11-round passes agreeing to 4.3 % at worst and
+  0.5 % at the median. The corrected figures: `marisa-trie` 3.08×/2.75× (was 2.50×/2.16×),
+  `StringIndex.id` 1.73×/1.37× (was 1.41×/1.06×), `CompactHashIndex.id` 0.71×/0.41× (was
+  0.61×/0.32×), its `ids_of` 0.45×/0.26× (was 0.38×/0.20×). `PerfectHashIndex.id` reproduced.
+  The published ranges move with it: a missing key costs `CompactHashIndex` 0.33–0.41× a `dict`
+  (was 0.32–0.36×), batched `ids_of` on members 0.31–0.45× (was 0.31–0.38×), and `StringIndex`
+  1.37–2.61× (was 1.06–2.61×). The `words` and `random` columns reproduce to within 1 % and stand.
+
+  Five runs on the new day — three round counts, idle and under load, on the released 0.11.0 wheel
+  as well as the working tree — agree with each other and disagree with the old column by up to
+  30 %. That rules out the extension, the interpreter, the corpus generator and background load.
+  What moved is the `dict` denominator, 251 ns then against 194–196 ns now on identical keys; the
+  mechanism is not identified and the README says so rather than guessing. The protocol defect is
+  identified: the two passes that validated the old column ran minutes apart inside one session,
+  which bounds within-session noise and nothing else, so the second pass now has to come from a
+  separate session.
 
 ## [0.11.0] — 2026-09-06
 
