@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: tag == Cargo.toml == pyproject.toml == CITATION.cff == CHANGELOG
         run: |
           set -euo pipefail
@@ -69,9 +69,11 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # `--target` keeps the sanitizer flags off build scripts/proc-macros (they run on an
       # uninstrumented host); `--lib --tests` skips doctests, which do not link the ASan runtime.
       - name: cargo test under ASan
@@ -102,12 +104,12 @@ jobs:
           - { runner: macos-14, target: aarch64, smoke: true }
           - { runner: windows-latest, target: x64, smoke: true }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.x"
       - name: Build wheels
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
@@ -136,7 +138,7 @@ jobs:
           assert lexindex.PerfectHashIndex.load_mmap("smoke.bmp").key(p.id("y")) == "y"
           print("smoke ok:", lexindex.__version__)
           EOF
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
           path: dist
@@ -147,13 +149,13 @@ jobs:
     needs: [preflight]
     if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build sdist
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wheels-sdist
           path: dist
@@ -166,13 +168,24 @@ jobs:
     environment: pypi
     permissions:
       id-token: write # OIDC token for PyPI Trusted Publishing
+      attestations: write # Sigstore provenance for the wheels, verifiable with `gh attestation verify`
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Two attestations, deliberately: this one goes to GitHub's store and covers the sdist too, so
+      # `gh attestation verify --repo <this repo> <file>` works on a wheel obtained from anywhere;
+      # the publish action below mints PyPI's own PEP 740 attestation, which only travels with the
+      # PyPI copy. The subject here is the artefact as it came back out of the artifact store rather
+      # than as the matrix job wrote it -- attesting in all seven build jobs would close that gap,
+      # and it is not worth seven copies of this step while the transfer is GitHub's own.
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
 
   crates-io:
     name: publish to crates.io
@@ -183,11 +196,13 @@ jobs:
       id-token: write # OIDC token for crates.io Trusted Publishing
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
       # Tokenless Trusted Publishing (OIDC), like the PyPI job above. Configure a trusted publisher for
       # this repo once at https://crates.io/crates/lexindex/settings before the next `v*` tag.
-      - uses: rust-lang/crates-io-auth-action@v1
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1
         id: auth
       - run: cargo publish
         env:
@@ -203,7 +218,7 @@ jobs:
     permissions:
       contents: write # create the GitHub Release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Extract this version's CHANGELOG section
         run: |
           ver="${GITHUB_REF_NAME#v}"
@@ -213,7 +228,7 @@ jobs:
             f { print }
           ' CHANGELOG.md > release-notes.md
           echo "----- release notes -----"; cat release-notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: lexindex ${{ github.ref_name }}
           body_path: release-notes.md
