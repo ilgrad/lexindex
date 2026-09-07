@@ -234,6 +234,37 @@ could not check them at any price. Upstream agreed: `epserde` 0.13 made `deseria
 `unsafe fn`, and PtrHash declined a checked `try_index()` for the same reason. The fix was not more
 checking but a different MPH.
 
+## Blob compatibility
+
+Every blob starts with a four-byte magic whose last character is the format version. A format change
+bumps it, and the loader decides one of three things about the old one: read it, refuse it by name,
+or — never — read it wrong.
+
+| Magic | Written by | Structure | Older formats |
+|---|---|---|---|
+| `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
+| `BMP5` | 1.0 | `PerfectHashIndex` | `BMP1`–`BMP4` **refused by name** |
+| `BCH6` | 1.0 | `CompactHashIndex` | `BCH1`–`BCH5` **refused by name** |
+| `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
+| `MPH1` | 1.0 | the minimal perfect hash, inside `BMP5` and `BCH6` | first version |
+
+**The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
+magic" sends someone hunting for disk corruption when the file is intact and merely old, so both
+hash-index loaders carry the list of magics they used to write and answer with a sentence naming
+`lexindex < 1.0` and the fix. That is worth more than a conversion path would have been, because for
+these two formats there is no conversion path to offer: every pre-1.0 blob embeds a `ptr_hash` image
+this crate no longer links, `PerfectHashIndex`'s arena survives but its ids came from that image, and
+`CompactHashIndex` stores no keys at all. **Rebuilding from the key list is the migration.**
+
+`OVL1` is the exception that proves the rule: it is decodable — the same three sections with the
+tombstone count in a different place — so it is read rather than refused. Compatibility is broken
+where it cannot be kept, not where keeping it is merely inconvenient.
+
+What a blob does *not* promise is that it will load into the same **ids** across a format change.
+Since 1.0 construction is deterministic, so the same keys rebuilt on the same version give the same
+blob byte for byte; across versions that changed the key hash or the MPH, they do not. An id written
+down outside the index belongs with the blob that produced it.
+
 ## Cargo features
 
 - `mph` (default) — `PerfectHashIndex`, `CompactHashIndex` and the in-crate MPH behind them. No
