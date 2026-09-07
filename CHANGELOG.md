@@ -41,6 +41,22 @@ All notable changes to this project are documented here. The format follows
   bound `ptr_hash`'s unchecked remap, and the new one covers its whole slot range — so its header
   is 40 bytes rather than 48.
 
+### Added
+
+- **A libFuzzer target over the MPH's own blob (`parse_mphf`), and a seed for it.** The two index
+  targets reach that format only behind their own header, where a mutation has to keep two
+  checksums and a length identity intact first — so in practice they fuzz the framing and never the
+  body. The new target starts inside it, and asserts more than "does not crash": every id it gets
+  back must land in `[0, n)`, which is the property that makes `from_bytes` a safe fn.
+
+### Fixed
+
+- **The fuzz seed corpus had gone stale, and nothing said so.** 1.0's blob formats made every
+  committed seed a blob refused on its magic, so all three fuzz targets would have explored one
+  branch and reported a clean run. The test that exists to catch exactly this is behind the
+  `fuzzing` feature, which no CI job built — it does now, along with a clippy pass over the same
+  feature, and the seeds are current.
+
 ### Removed
 
 - **`ptr_hash` and `epserde`, and 129 crates with them.** The `mph` feature now has no dependency

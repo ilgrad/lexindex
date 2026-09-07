@@ -104,6 +104,40 @@ pub mod fuzzing {
         crate::PerfectHashIndex::fuzz_parse_frame(bytes, verify)
     }
 
+    /// Load a standalone `MPH1` blob and query the table it produced.
+    ///
+    /// The other targets reach this format only through a `BMP5`/`BCH6` header, which means a
+    /// mutation has to keep two checksums and a length identity intact before the MPH region is
+    /// read at all — so in practice they fuzz the framing and never the body. This one starts
+    /// inside it.
+    ///
+    /// Loading is only half of what is asserted. `from_bytes` is a safe fn because every read the
+    /// table makes is bounded by a length derived from its own header, and the claim that follows
+    /// is that a crafted blob answers *wrong* ids rather than out-of-range ones. So the queries
+    /// below are the actual property under test: an answer outside `[0, n)` fails here as a wrong
+    /// number, which is a far easier signal to act on than the crash it would eventually become.
+    pub fn parse_mphf(bytes: &[u8]) -> bool {
+        let Ok(mph) = crate::mphf::Mphf::from_bytes(bytes) else {
+            return false;
+        };
+        let n = mph.n();
+        if n == 0 {
+            return true;
+        }
+        for h in [
+            0,
+            1,
+            u64::MAX,
+            0x9e37_79b9_7f4a_7c15,
+            0xdead_beef_dead_beef,
+            0x0123_4567_89ab_cdef,
+        ] {
+            assert!(mph.index(h) < n, "id {} is outside [0, {n})", mph.index(h));
+        }
+        assert!(mph.index_all(&[0, 1, u64::MAX]).iter().all(|&i| i < n));
+        true
+    }
+
     /// Parse the framing of an `Overlay` blob: the magic, the header checksum, the base tag, the
     /// four header lengths, the payload checksum, the length-prefixed additions with their UTF-8
     /// and duplicate checks, and the tombstone words. Both formats reach this — `OVL2`, and the
