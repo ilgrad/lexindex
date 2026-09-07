@@ -197,6 +197,24 @@ jobs:
       - name: check (mph, wasm32)
         run: cargo check --no-default-features --features mph --target wasm32-unknown-unknown
 
+  # Catches an *API* break that the version number does not admit to. It cannot catch the kind of
+  # break 1.0 actually is -- refusing every pre-1.0 blob is a change in what the bytes mean, and the
+  # public signatures did not shrink at all, so this job passed clean across that release. Necessary,
+  # not sufficient: the CHANGELOG's "Changed - breaking" section is the other half, and it is the
+  # half a human writes.
+  semver:
+    name: semver-checks (public API against the published version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - name: cargo semver-checks
+        run: cargo semver-checks check-release
+
   msrv:
     name: msrv (rust-version from Cargo.toml)
     runs-on: ubuntu-latest

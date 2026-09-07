@@ -44,6 +44,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`cargo semver-checks` as a CI job, and a versioning policy that says what it cannot see.** It
+  passed clean across this release: nothing in the public API shrank, and removing `unsafe` from a
+  signature widens rather than breaks it. What makes 1.0 major is the on-disk format, which no API
+  tool can inspect — so the policy in `docs/design.md` states that a blob format is part of the
+  contract, and the CHANGELOG section above is the half of compatibility a human writes.
+
 - **`SECURITY.md`, as a threat model rather than a form letter.** What the loaders guarantee
   (soundness, not correctness — a crafted blob answers wrong ids, never out-of-range ones), why
   `load_mmap` is the one `unsafe fn` and what its obligation is about, why the checksums are

@@ -234,6 +234,19 @@ could not check them at any price. Upstream agreed: `epserde` 0.13 made `deseria
 `unsafe fn`, and PtrHash declined a checked `try_index()` for the same reason. The fix was not more
 checking but a different MPH.
 
+## Versioning
+
+Semantic versioning, with one qualification that matters more here than the API does: **a blob format
+is part of the contract**. A version that refuses a format an earlier one wrote is a major release,
+even when every public signature is unchanged — which is exactly what 1.0 is. `cargo semver-checks`
+runs in CI and passed clean across that release, because nothing in the API shrank; it catches the
+half of compatibility that lives in signatures, and the CHANGELOG's "Changed — breaking" section
+catches the half that lives in bytes.
+
+The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
+and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
+release, not a patch.
+
 ## Security
 
 What is validated on load and what is merely trusted is spelled out per format above; the threat
