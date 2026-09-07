@@ -333,14 +333,13 @@ mod mph {
         }
 
         // The never-panics property on arbitrary bytes lives with the *safe* framing parser in each
-        // index's own tests (`parse_frame_never_panics`): the unsafe loaders' contract excludes
-        // arbitrary input, so calling them on it would test the wrong thing.
+        // index's own tests (`parse_frame_never_panics`), where the framing parser is reachable
+        // without building an index first.
 
         // Any single flipped byte — header field, MPH region or fingerprint table — must be
-        // *rejected* by an owned load: the header carries a checksum because `overflow_cap` bounds
-        // an otherwise unchecked read inside the MPH, and since 0.8 the whole payload carries one
-        // too, so even a flipped fingerprint bit (which would only have perturbed the probabilistic
-        // membership answer) fails cleanly instead of loading corrupt.
+        // *rejected* by an owned load: the header carries a checksum and, since 0.8, so does the
+        // whole payload, so even a flipped fingerprint bit (which would only have perturbed the
+        // probabilistic membership answer) fails cleanly instead of loading corrupt.
         #[test]
         fn compact_hash_corrupt_blob_is_rejected(
             keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
@@ -350,12 +349,11 @@ mod mph {
         ) {
             let idx = CompactHashIndex::build(&keys, fp).unwrap();
             let mut blob = idx.to_bytes().unwrap();
-            assert_eq!(&blob[0..4], b"BCH5");
+            assert_eq!(&blob[0..4], b"BCH6");
             let pos = 4 + at.index(blob.len() - 4);
             blob[pos] ^= xor;
-            // SAFETY: a one-byte flip is caught by the payload checksum before the MPH is read.
             prop_assert!(
-                unsafe { CompactHashIndex::from_bytes(&blob) }.is_err(),
+                CompactHashIndex::from_bytes(&blob).is_err(),
                 "single-byte flip at {pos} (xor {xor}) was accepted by an owned load",
             );
         }

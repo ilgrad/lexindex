@@ -118,41 +118,41 @@ mod mph {
         }
     }
 
+    /// Same as the perfect-hash refusal, and a shade stronger: this index stores no keys, so its
+    /// pre-1.0 blobs cannot even be converted, and the message has to say so.
+    #[test]
+    fn compact_hash_blobs_from_every_published_version_are_refused_by_name() {
+        for version in VERSIONS {
+            let path = data(&format!("golden-{version}-compact.bch"));
+            let err = match lexindex::CompactHashIndex::load(&path) {
+                Err(e) => e.to_string(),
+                Ok(_) => panic!("{version}: a pre-1.0 blob was accepted"),
+            };
+            assert!(err.contains("lexindex < 1.0"), "{version}: {err}");
+            assert!(err.contains("rebuild"), "{version}: {err}");
+        }
+    }
+
     /// `CompactHashIndex` membership is probabilistic, so the assertions split: every member must
     /// be found (a false negative is impossible by construction), while non-members are held to the
     /// 8-bit table's false-positive rate with room to spare — 1 000 probes at 2^-8 expect ~4.
     #[test]
-    fn compact_hash_blobs_from_every_accepted_version_load() {
+    fn a_1_0_compact_hash_blob_round_trips_exactly() {
         let keys = keys();
-        for version in VERSIONS {
-            let path = data(&format!("golden-{version}-compact.bch"));
-            // SAFETY: as above — a committed blob this repo wrote.
-            let loaded = unsafe { lexindex::CompactHashIndex::load(&path) };
-            if version == "0.5.1" {
-                // `BCH1` is refused on purpose (0.7 rewrote the layout); the message must say so
-                // rather than the load half-succeeding.
-                assert!(loaded.is_err(), "a 0.5.1 BCH1 blob must be refused");
-                continue;
-            }
-            let idx = loaded.unwrap_or_else(|e| panic!("{version}: {e}"));
-            assert_eq!(idx.len(), keys.len(), "{version}");
-
-            let mut seen = vec![false; keys.len()];
-            for key in &keys {
-                assert!(idx.contains(key), "{version}: false negative on {key:?}");
-                let id = idx.id(key).expect("a member has an id") as usize;
-                assert!(
-                    id < keys.len() && !seen[id],
-                    "{version}: id {id} is not a bijection"
-                );
-                seen[id] = true;
-            }
-            let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
-            assert!(
-                false_positives <= 20,
-                "{version}: {false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
-            );
+        let idx = lexindex::CompactHashIndex::build(&keys, 1).unwrap();
+        let blob = idx.to_bytes().unwrap();
+        assert_eq!(&blob[0..4], b"BCH6");
+        let back = lexindex::CompactHashIndex::from_bytes(&blob).expect("its own blob loads");
+        assert_eq!(back.len(), keys.len());
+        for key in &keys {
+            assert!(back.contains(key), "false negative on {key:?}");
+            assert_eq!(back.id(key), idx.id(key));
         }
+        let false_positives = non_members().iter().filter(|k| back.contains(k)).count();
+        assert!(
+            false_positives <= 20,
+            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
+        );
     }
 
     /// The zero-copy path against a real file on disk, not a buffer this process just wrote.
@@ -160,16 +160,11 @@ mod mph {
     #[test]
     fn the_newest_blobs_also_load_zero_copy() {
         let keys = keys();
-        // SAFETY: committed blobs, and nothing in this process writes to them while mapped.
-        let compact =
-            unsafe { lexindex::CompactHashIndex::load_mmap(data("golden-0.9.1-compact.bch")) }
-                .expect("mmap load");
+        // SAFETY: a committed blob, and nothing in this process writes to it while mapped.
         let string = unsafe { lexindex::StringIndex::load_mmap(data("golden-0.9.1-string.bix")) }
             .expect("mmap load");
-        assert_eq!(compact.len(), keys.len());
         assert_eq!(string.len(), keys.len());
         for key in keys.iter().take(50) {
-            assert!(compact.contains(key));
             assert!(string.id(key).is_some());
         }
     }

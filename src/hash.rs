@@ -137,29 +137,6 @@ pub(crate) fn hash_block(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
-use epserde::prelude::*;
-use ptr_hash::{DefaultPtrHash, PtrHash, PtrHashParams};
-
-/// Build the MPH with `default_compact` parameters (λ=3.9): measured 2.17 bits/key on real words
-/// vs 2.41 for the λ=3.5 default, with identical query time at 480k and 5M keys. Compact
-/// construction can occasionally fail (pilot eviction chains grow too long), so fall back to the
-/// default parameters; both produce the same `DefaultPtrHash` type, so blobs stay compatible
-/// either way.
-pub(crate) fn build_mph(hashes: &[u64]) -> Result<DefaultPtrHash, crate::IndexError> {
-    PtrHash::try_new(hashes, PtrHashParams::default_compact())
-        .or_else(|| PtrHash::try_new(hashes, PtrHashParams::default()))
-        .ok_or(crate::IndexError::Build(
-            "minimal-perfect-hash construction failed after exhausting its retry seeds",
-        ))
-}
-
-/// Byte length of `mph`'s `epserde` image without materialising it: `serialize` reports how many
-/// bytes it wrote, so a sink that discards them is enough.
-pub(crate) fn mph_serialized_len(mph: &DefaultPtrHash) -> Result<usize, crate::IndexError> {
-    mph.serialize(&mut std::io::sink())
-        .map_err(|e| crate::IndexError::Serde(e.to_string()))
-}
-
 /// Partition `hashes` (parallel to some key order) into the MPH's key set and the collided
 /// leftovers. One representative per distinct hash value — the smallest original index — goes to
 /// the MPH; every other member of a colliding group is returned as `(hash, original_index)` in
@@ -182,61 +159,6 @@ pub(crate) fn split_collisions(hashes: &[u64]) -> (Vec<u64>, Vec<(u64, u32)>) {
     }
     extras.sort_unstable_by_key(|&(_, i)| i);
     (mph_hashes, extras)
-}
-
-/// The exact length of the MPH's internal remap vector: the largest member `raw_slot - n`, plus
-/// one. ptr_hash's `index()` reads that remap *unchecked* (cacheline-ef `index_unchecked`), and the
-/// remap only covers raw slots up to the last member-occupied one — so a non-member whose raw slot
-/// lands in the trailing free zone indexes out of bounds: a debug assertion at best, undefined
-/// behaviour in release. Queries bound the remap access with this cap and answer `None` outright
-/// past it — a provably free slot cannot hold a member.
-pub(crate) fn overflow_cap(mph: &DefaultPtrHash, hashes: &[u64], n: usize) -> u64 {
-    let mut cap: u64 = 0;
-    mph.index_stream::<32, false, _>(hashes.iter())
-        .for_each(|raw| {
-            if raw >= n {
-                cap = cap.max((raw - n + 1) as u64);
-            }
-        });
-    cap
-}
-
-/// Slot for a key hash, or `None` when the raw slot is past the MPH's remap — a trailing free slot
-/// no member occupies, which ptr_hash's own `index()` would read out of bounds (unchecked).
-/// This is the ONLY place `mph.index()` may be called on a possibly-non-member hash.
-#[inline]
-pub(crate) fn slot_for(mph: &DefaultPtrHash, n: usize, overflow_cap: u64, h: u64) -> Option<usize> {
-    let raw = mph.index_no_remap(&h);
-    if raw < n {
-        Some(raw)
-    } else if (raw - n) as u64 >= overflow_cap {
-        None
-    } else {
-        Some(mph.index(&h)) // remapped; in bounds because the cap is the remap's exact length
-    }
-}
-
-/// Batch [`slot_for`]: streams raw (non-remapped) slots with software prefetch, then triages the
-/// rare `raw ≥ n` cases — `usize::MAX` marks a definite non-member past the remap.
-pub(crate) fn triage_slots(
-    mph: &DefaultPtrHash,
-    n: usize,
-    overflow_cap: u64,
-    hashes: &[u64],
-) -> Vec<usize> {
-    let mut slots = Vec::with_capacity(hashes.len());
-    mph.index_stream::<32, false, _>(hashes.iter())
-        .for_each(|s| slots.push(s));
-    for (i, slot) in slots.iter_mut().enumerate() {
-        if *slot >= n {
-            *slot = if (*slot - n) as u64 >= overflow_cap {
-                usize::MAX
-            } else {
-                mph.index(&hashes[i])
-            };
-        }
-    }
-    slots
 }
 
 /// Two distinct strings with equal [`hash_key`], found offline by a Pollard-rho birthday search

@@ -12,8 +12,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-# `fuzzing` exposes the framing parsers that arbitrary bytes actually reach; the unsafe loaders are
-# deliberately not fuzzed, since their contract excludes untrusted input in the first place.
+# `fuzzing` exposes the framing parsers, which is where the interesting branches are: since 1.0 the
+# loaders themselves are safe, so a target could call them directly, but it would then spend most of
+# its budget re-deriving the same framing rejections through an extra allocation per case.
 #
 # `StringIndex::from_bytes` was a third target and is deliberately gone. It found a real defect in
 # ten minutes — 44 bytes carrying a matching FST checksum panic in `fst`'s node decoder — but the

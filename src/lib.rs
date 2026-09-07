@@ -9,7 +9,7 @@
 //!   (automaton-driven; no separate key list to scan). Use it for autocomplete / fuzzy search /
 //!   ordered scans.
 //! - [`CompactHashIndex`] — the **smallest** `string → dense id` map: a minimal perfect hash
-//!   ([`ptr_hash`], the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
+//!   (in-crate, the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
 //!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
 //!   no reverse lookup. Use it when footprint is paramount.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
@@ -27,7 +27,7 @@
 //! assert_eq!(idx.prefix("ap").len(), 2);
 //! ```
 
-// The crate docs above link `PerfectHashIndex` / `CompactHashIndex` / `ptr_hash`, which exist only under
+// The crate docs above link `PerfectHashIndex` / `CompactHashIndex`, which exist only under
 // the default `mph` feature. docs.rs builds with default features, where the links resolve; on an
 // `fst`-only build they can't, so silence the broken-link lint just there rather than downgrade the
 // links to plain code spans.
@@ -36,16 +36,18 @@
 // own justification in an `unsafe {}` block rather than ride on the signature.
 #![deny(unsafe_op_in_unsafe_fn)]
 
-// `ptr_hash` 1.1 depends on `sucds` unconditionally (for an Elias-Fano packing this crate never
-// selects), and `sucds` refuses any target whose pointer width is not 64. Without this the failure
-// surfaces as half a dozen errors inside a transitive dependency, which says nothing about what to
-// do; say it once, here, in terms of a feature the caller controls.
+// The 64-bit requirement outlived the dependency that imposed it: `ptr_hash`'s `sucds` refused any
+// other width, and dropping it for the in-crate MPH removed that. What has *not* been done is the
+// audit that would let this gate go — the MPH's slot arithmetic is `u64` throughout and narrows to
+// `usize` in a handful of places, each of which is a truncation on a 32-bit target rather than an
+// error. Until every one of those is checked and cross-built, say so here rather than ship a
+// silently wrong index on wasm32.
 #[cfg(all(feature = "mph", not(target_pointer_width = "64")))]
 compile_error!(
     "lexindex's `mph` feature (PerfectHashIndex, CompactHashIndex) requires a 64-bit target: its \
-     minimal perfect hash comes from `ptr_hash`, whose `sucds` dependency refuses any other \
-     pointer width. Build with `--no-default-features` for the `fst`-only `StringIndex`, which \
-     supports 32-bit targets including `wasm32-unknown-unknown`."
+     minimal perfect hash indexes slots as `u64` and narrows them to `usize`, which has not been \
+     audited for a narrower width. Build with `--no-default-features` for the `fst`-only \
+     `StringIndex`, which supports 32-bit targets including `wasm32-unknown-unknown`."
 );
 
 mod blob;
@@ -61,9 +63,9 @@ pub use string_index::StringIndex;
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash
 // and arena live behind the `mph` feature; `StringIndex` reconstructs `id → key` from the FST itself
 // and needs none of them.
-// The width is part of the gate because the modules below name `ptr_hash` and `epserde` types, and
-// those dependencies exist only on 64-bit targets (see the `compile_error!` above). Without it a
-// 32-bit build would report eight missing-crate errors on top of the one that explains itself.
+// The width is part of the gate so that a 32-bit build reports the `compile_error!` above and
+// nothing else: without it, the modules would also fail on their own narrowing conversions, and the
+// one message that explains what to do would be buried.
 #[cfg(all(feature = "mph", target_pointer_width = "64"))]
 mod arena;
 #[cfg(all(feature = "mph", target_pointer_width = "64"))]
@@ -83,11 +85,10 @@ mod python;
 /// Entry points for the fuzz targets in `fuzz/`, and **not public API**: the `fuzzing` feature is
 /// off by default and this module may change or vanish in any release.
 ///
-/// What it exposes is the *safe* half of the blob loaders — the framing parsers that validate magic,
-/// lengths, checksums, the side table and the fingerprint range before anything unsafe happens.
-/// Those are the functions arbitrary bytes actually reach, and they are `pub(crate)`; a libFuzzer
-/// target lives in its own crate and cannot see them. Fuzzing the unsafe loaders instead would test
-/// what their contract explicitly excludes.
+/// What it exposes is the framing half of the blob loaders — the parsers that validate magic,
+/// lengths, checksums, the side table and the fingerprint range before the MPH region is read.
+/// Those carry the branches arbitrary bytes actually reach, and they are `pub(crate)`; a libFuzzer
+/// target lives in its own crate and cannot see them.
 #[cfg(all(feature = "fuzzing", feature = "mph", target_pointer_width = "64"))]
 #[doc(hidden)]
 pub mod fuzzing {

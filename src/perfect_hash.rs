@@ -818,9 +818,9 @@ impl PerfectHashIndex {
     ///
     /// The file is a blob that answers exactly as [`build`](Self::build) + [`save`](Self::save)
     /// would have for the same key set — every key a member, every `key(id)` round trip intact —
-    /// but **not the same bytes**, and the ids are not the same ids: `ptr_hash` construction is not
-    /// deterministic, so even two in-memory builds of one key set serialise differently. Anything
-    /// that needs stable ids has to build once and distribute the blob.
+    /// but **not necessarily the same bytes**: the arena's offset width is chosen from the key
+    /// lengths this pass sees, and a streamed build knows them before it has the keys. The MPH
+    /// itself is deterministic, so the ids agree.
     ///
     /// `source` is a *factory*, not an iterator, and it is called **twice**. That is the shape the
     /// problem has, not an inconvenience: the arena stores keys in slot order, slot order is only
@@ -1130,11 +1130,9 @@ mod stream_build_tests {
         let n = PerfectHashIndex::build_to_file(&path, || keys.iter()).unwrap();
         assert_eq!(n, keys.len());
 
-        // Not compared byte for byte against `build` + `save`, because that is not a property
-        // either of them has: `ptr_hash` construction is not deterministic, and two in-memory
-        // builds of the same key set already differ in their serialised pilots. What must hold is
-        // that the file is a valid blob answering exactly like the index built in memory.
-        // SAFETY: written by this crate a line above.
+        // Not compared byte for byte against `build` + `save`: the streamed build picks the
+        // arena's offset width from the lengths it saw in pass one, which need not match. What
+        // must hold is that the file is a valid blob answering exactly like the in-memory index.
         let idx = PerfectHashIndex::load(&path).unwrap();
         assert_eq!(idx.len(), keys.len());
         let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
@@ -1495,7 +1493,7 @@ mod tests {
     }
 
     /// Every truncation of a real blob is rejected by the framing alone, with or without the
-    /// payload checksum — so the epserde region is never reached on a short read.
+    /// payload checksum — so the MPH region is never reached on a short read.
     #[test]
     fn parse_frame_rejects_every_truncation() {
         let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
