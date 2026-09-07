@@ -21,34 +21,35 @@
 //!
 //! # Space
 //!
-//! One byte per bucket plus the remap. At `λ` keys per bucket that is `8/λ` bits per key, so the
-//! bucket size is the whole size story and `α` (the table's fill) trades against how hard the search
-//! is. The remap is a `u32` per slot above `n`, which is `32·(1−α)/α` bits per key — the part with
-//! the most room left in it, and the first thing to compress if the rest holds up.
+//! One byte per bucket plus the remap: `8/λ + 16.125·(1−α)/α` bits per key. Both terms matter and
+//! they pull against each other — a larger `λ` is fewer pilots but harder buckets, and a smaller `α`
+//! is an easier search but more slots to remap. The measured trade is tabulated on [`LAMBDA`].
 
 use crate::IndexError;
 
 /// Keys per bucket, and the table's fill. Together they set both the size — `8/λ` bits per key plus
-/// the remap — and the whole cost of construction, and the two do not trade the way an independent
-/// pilot per bucket would suggest. A window pilot is not 256 independent tries but four runs of 64
-/// correlated shifts, which makes a large bucket much dearer than the Poisson model predicts.
-/// Measured at 10 M real-word bigram hashes, single-threaded, `u32` remap:
+/// `16.125·(1−α)/α` for the remap — and the whole cost of construction, and the two do not trade the
+/// way an independent pilot per bucket would suggest. A window pilot is not 256 independent tries but
+/// four runs of 64 correlated shifts, which makes a large bucket much dearer than a Poisson model
+/// predicts. Measured at 10 M real-word bigram hashes, single-threaded, against `ptr_hash` at ~1.9 s:
 ///
-/// | λ, α | bits/key | build | with an Elias-Fano remap |
+/// | λ, α | bits/key | build | vs `ptr_hash` |
 /// |---|---|---|---|
-/// | 3.9, 0.99 | 2.383 | 11.9 s | 2.309 |
-/// | 3.9, 0.98 | 2.712 | 3.6 s | 2.207 |
-/// | 3.6, 0.98 | 2.883 | 2.0 s | **2.378** |
-/// | 4.2, 0.97 | 2.903 | 41.8 s | 2.122 |
+/// | 3.6, 0.98 | 2.555 | 2.0 s | 1.05× |
+/// | **3.9, 0.98** | **2.384** | **3.1 s** | **1.63×** |
+/// | 4.0, 0.98 | 2.333 | 5.5 s | 2.9× |
+/// | 3.9, 0.99 | 2.218 | 11.8 s | 6.2× |
+/// | 4.0, 0.985 | 2.250 | 25.5 s | 13.4× |
+/// | 4.2, 0.97 | 2.324 | 41.8 s | 22× |
 ///
-/// So (3.6, 0.98) builds 6× faster than (3.9, 0.99) at the same size — but only once the remap is
-/// Elias-Fano rather than a `u32` per overflowing slot. Until then the only setting that meets the
-/// 2.4 bits/key gate is the first row, and that is what ships here.
+/// The λ axis is steep and not monotone with size: 4.0 costs 1.8× the build of 3.9 for 0.05 bits,
+/// and 4.2 costs 13× more than that. This row is the one that meets both gates; the ones below it
+/// buy size the build cannot afford, and 3.6 buys build the size gate will not allow.
 const LAMBDA: f64 = 3.9;
 
 /// Table fill. Below 1 there are spare slots for the last buckets to land on; the leftovers above
 /// `n` are what the remap pays for.
-const ALPHA: f64 = 0.99;
+const ALPHA: f64 = 0.98;
 
 /// How many global seeds to try before giving up. A restart costs a full construction, so this is a
 /// safety net against pathological input rather than an expected path.
@@ -92,8 +93,13 @@ pub struct Mphf {
     part_seed: Vec<u64>,
     /// One pilot per bucket. A byte: the top two bits pick one of [`MUL`], the low six a shift.
     pilots: Vec<u8>,
-    /// For each slot in `[n, slots)`, the free slot below `n` it stands for.
-    remap: Vec<u32>,
+    /// The remap, one entry per slot in `[n, slots)`, as a block base plus an offset into it: the
+    /// free slot below `n` that slot stands for is `remap_base[i / REMAP_BLOCK] + remap_off[i]`.
+    /// See [`REMAP_BLOCK`] for why the offsets fit in 16 bits.
+    remap_base: Vec<u32>,
+    /// Offset from its block's base, one per entry. Two bytes, not four — the remap is the whole
+    /// difference between a table that meets the size gate at α = 0.98 and one that does not.
+    remap_off: Vec<u16>,
     /// Mixed into every hash, so a failed construction can be retried on a different table.
     seed: u64,
 }
@@ -134,6 +140,20 @@ const MUL: [u64; 4] = [
 
 /// Slots past a part's last window base, so `base + shift` never reaches the next part.
 const GUARD: u64 = 64;
+
+/// Remap entries per block base.
+///
+/// The remap is a *non-decreasing* sequence: the holes below `n` are handed out in increasing order,
+/// and a slot at or above `n` that no key reached repeats its predecessor rather than breaking the
+/// run. So a block needs only its first value in full, and the rest as offsets from it — which fit
+/// in 16 bits with room to spare, because a block spans `REMAP_BLOCK · n / m` slots on average and
+/// `u16::MAX` is 26 standard deviations above that at α = 0.99, more at every lower fill. A block
+/// that overflowed anyway fails the seed rather than truncating, which is the safe direction.
+///
+/// 16.125 bits an entry against 32 for a `u32` each. Elias-Fano with a sampled select would reach
+/// ~8.5, and is what to reach for if λ ever has to drop to 3.6 — but it puts a select on the lookup
+/// path, and `id` is the gate with the least room in it.
+const REMAP_BLOCK: usize = 256;
 
 /// 64 consecutive occupancy bits starting at `bit`. The map carries one spare word at its end, so
 /// the read past the last real word is in bounds.
@@ -199,7 +219,8 @@ impl Mphf {
         if s < self.n {
             s
         } else {
-            u64::from(self.remap[(s - self.n) as usize])
+            let i = (s - self.n) as usize;
+            u64::from(self.remap_base[i / REMAP_BLOCK]) + u64::from(self.remap_off[i])
         }
     }
 
@@ -213,7 +234,8 @@ impl Mphf {
         if self.n == 0 {
             return 0.0;
         }
-        ((self.pilots.len() + self.remap.len() * 4) * 8) as f64 / self.n as f64
+        ((self.pilots.len() + self.remap_base.len() * 4 + self.remap_off.len() * 2) * 8) as f64
+            / self.n as f64
     }
 
     /// Build over `hashes`, which must already be distinct.
@@ -245,7 +267,8 @@ impl Mphf {
                 dense_buckets: 0,
                 part_seed: Vec::new(),
                 pilots: Vec::new(),
-                remap: Vec::new(),
+                remap_base: Vec::new(),
+                remap_off: Vec::new(),
                 seed,
             });
         }
@@ -508,13 +531,22 @@ impl Mphf {
         // Minimal at last: every occupied slot at or above `n` is redirected to a hole below it.
         // There are exactly as many of each, because the table holds `n` keys in `slots` slots.
         let mut holes = (0..n).filter(|&s| taken[(s / 64) as usize] >> (s % 64) & 1 == 0);
-        let mut remap = vec![0u32; (slots - n) as usize];
-        for (i, entry) in remap.iter_mut().enumerate() {
+        let entries = (slots - n) as usize;
+        let mut remap_base = vec![0u32; entries.div_ceil(REMAP_BLOCK)];
+        let mut remap_off = vec![0u16; entries];
+        let mut hole = 0u32;
+        for i in 0..entries {
             let s = n + i as u64;
             if taken[(s / 64) as usize] >> (s % 64) & 1 == 1 {
                 // A hole must exist: occupancy below `n` plus occupancy above it is exactly `n`.
-                *entry = holes.next().expect("a hole for every overflowing slot") as u32;
+                hole = holes.next().expect("a hole for every overflowing slot") as u32;
             }
+            // A slot no key reached keeps the previous hole. Nothing ever reads that entry; what it
+            // buys is that the sequence never decreases, which is what makes the offsets small.
+            if i % REMAP_BLOCK == 0 {
+                remap_base[i / REMAP_BLOCK] = hole;
+            }
+            remap_off[i] = u16::try_from(hole - remap_base[i / REMAP_BLOCK]).ok()?;
         }
 
         Some(Self {
@@ -527,7 +559,8 @@ impl Mphf {
             dense_buckets,
             part_seed,
             pilots,
-            remap,
+            remap_base,
+            remap_off,
             seed,
         })
     }
@@ -666,7 +699,7 @@ mod spike {
                 "n {n:>9}  bits/key {:>6.3}  (target <= 2.400)  pilots {:>9}  remap {:>8}  build {ms:>7.0} ms (loaded machine, not a timing claim)",
                 m.bits_per_key(),
                 m.pilots.len(),
-                m.remap.len(),
+                m.remap_off.len(),
             );
         }
     }
