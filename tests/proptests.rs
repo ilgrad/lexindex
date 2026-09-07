@@ -207,6 +207,58 @@ proptest! {
         let _ = StringIndex::from_bytes(&data);
     }
 
+    // Random bytes never spell `OVL1`, so the overlay's framing is fuzzed outward from a real blob:
+    // one byte flipped, or the blob cut short, or one of its three claimed counts replaced by a
+    // hostile value. Only `Ok`/`Err` — never a panic, and in particular never an allocation sized
+    // by a number the blob merely claims (`1 << 61` tombstone words used to be an overflow panic in
+    // debug and a wrapped length check in release).
+    //
+    // The base blob is deliberately not re-parsed: the loader closure returns the same fixed base
+    // the blob was written over. That is `StringIndex::from_bytes`'s own property, pinned two tests
+    // above, and parsing mutated FST bytes here would only rediscover the `fst` node-decoder panic
+    // that `fuzz/Cargo.toml` records as out of this crate's scope.
+    #[test]
+    fn overlay_framing_survives_seeded_mutations(
+        additions in prop::collection::vec("[cd]{0,4}", 0..6),
+        removals in prop::collection::vec(prop::sample::select(vec!["a", "b", "c", "d"]), 0..4),
+        at in any::<prop::sample::Index>(),
+        xor in 1u8..=255,
+        kind in 0u8..5,
+        hostile in prop::sample::select(vec![0u64, 1, 7, u32::MAX as u64, u64::MAX, 1 << 61, 1 << 62]),
+    ) {
+        let base = || StringIndex::build(["a", "b"]);
+        let mut ov = Overlay::new(base().unwrap());
+        for a in &additions {
+            ov.add(a);
+        }
+        for r in &removals {
+            ov.remove(r);
+        }
+        let mut blob = ov.to_bytes().unwrap();
+        prop_assert!(Overlay::from_bytes_with(&blob, |_| base()).is_ok(), "the unmutated blob must load");
+
+        match kind {
+            0 => {
+                let pos = at.index(blob.len());
+                blob[pos] ^= xor;
+            }
+            1 => {
+                let pos = at.index(blob.len());
+                blob.truncate(pos);
+            }
+            // The base blob's claimed length, the addition count, and the tombstone word count:
+            // the three numbers the parser must never trust into an index or an allocation.
+            2 => blob[5..13].copy_from_slice(&hostile.to_le_bytes()),
+            3 => blob[13..21].copy_from_slice(&hostile.to_le_bytes()),
+            _ => {
+                let tail = blob.len() - 8;
+                blob[tail..].copy_from_slice(&hostile.to_le_bytes());
+            }
+        }
+        // The verdict is not the point; surviving the parse is.
+        let _ = Overlay::from_bytes_with(&blob, |_| base());
+    }
+
     // A single flipped byte in a real blob must be *rejected* by an owned load, not merely survive
     // it. Owned `from_bytes` runs the FST's CRC-32 checksum, which detects every single-byte error
     // (a ≤8-bit burst) with certainty; a flip in the magic or the framing fails even earlier. So the

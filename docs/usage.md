@@ -195,7 +195,14 @@ folded = back.compact()                              # rebuild the base; this re
 An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning until
 `compact()` — which is explicit for exactly that reason. `load` and `from_bytes` take the base class
 because each index loads itself; the blob records which base wrote it, so passing the wrong class is
-an error rather than an unchecked read of bytes meant for something else.
+an error rather than an unchecked read of bytes meant for something else. `save` is atomic, like the
+indexes' own: a crash or a full disk leaves the previous file whole rather than a truncated one.
+
+**`Overlay.load` and `Overlay.from_bytes` inherit the base class's trust contract.** The overlay's
+own framing — the header lengths, the additions, the tombstones — is validated for every base, and
+malformed bytes raise `ValueError`. What follows goes to the base class's loader, which is checked
+for `StringIndex` and *unchecked* for `PerfectHashIndex` and `CompactHashIndex`, exactly as their
+own `from_bytes` is. Over those two, load only blobs you wrote.
 
 `key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is

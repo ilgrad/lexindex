@@ -669,6 +669,59 @@ def test_overlay_blob_refuses_the_wrong_base():
         lexindex.Overlay.from_bytes(blob, dict)
 
 
+def test_overlay_loaders_state_whose_trust_contract_they_inherit():
+    """The overlay's loaders are as safe as the base class's, and nothing in the signature says so.
+
+    ``Overlay.from_bytes(data, PerfectHashIndex)`` reaches an unchecked deserialiser through a name
+    that reads like a parser, and Python has no ``unsafe`` block to mark the boundary. Until the
+    names carry it, the docstrings must — so this pins them: a refactor that drops the sentence
+    fails here rather than silently shipping a loader whose contract has gone undocumented.
+    """
+    for doc in (lexindex.Overlay.from_bytes.__doc__, lexindex.Overlay.load.__doc__):
+        assert doc is not None
+        assert "trust contract" in doc
+
+
+def test_overlay_rejects_an_addition_that_duplicates_an_exact_base_key():
+    """No ``to_bytes`` writes this: ``add`` revives a base key's own id instead of issuing a second.
+
+    Loading one would count the key twice in ``len`` while ``id`` could only ever answer the base's,
+    so the parser refuses it — but only over a base whose membership is exact, since a
+    ``CompactHashIndex`` would false-positive and reject sound blobs.
+    """
+    ov = lexindex.Overlay(lexindex.StringIndex(["apple", "banana"]))
+    blob = bytearray(ov.to_bytes())
+    base_len = int.from_bytes(blob[5:13], "little")
+    # Splice in one addition, "apple", which the base already holds.
+    addition = b"apple"
+    header, base_blob = blob[:21], blob[21 : 21 + base_len]
+    header[13:21] = (1).to_bytes(8, "little")
+    crafted = (
+        bytes(header)
+        + bytes(base_blob)
+        + len(addition).to_bytes(4, "little")
+        + addition
+        + (0).to_bytes(8, "little")
+    )
+    with pytest.raises(ValueError, match="duplicates a base key"):
+        lexindex.Overlay.from_bytes(crafted, lexindex.StringIndex)
+
+
+def test_overlay_save_replaces_an_existing_file_whole(tmp_path):
+    """``save`` goes through the crate's atomic writer, like the three indexes."""
+    path = tmp_path / "overlay.bin"
+    big = lexindex.Overlay(lexindex.StringIndex(["apple", "banana", "cherry"]))
+    big.add("date")
+    big.save(path)
+    assert path.stat().st_size > 0
+
+    # A shorter overlay over the same path: a non-atomic rewrite could leave the longer one's tail.
+    small = lexindex.Overlay(lexindex.StringIndex(["apple"]))
+    small.save(path)
+    assert lexindex.Overlay.load(path, lexindex.StringIndex).keys() == ["apple"]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_overlay_over_a_compact_hash_has_membership_and_nothing_else():
     ov = lexindex.Overlay(lexindex.CompactHashIndex(["alpha", "beta"], 4))
     assert ov.add("gamma") == 2

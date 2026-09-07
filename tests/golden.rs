@@ -193,3 +193,47 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
 }
+
+/// The overlay format `0.12.0` published. Its base is a `StringIndex`, whose ids are a key's rank in
+/// sorted order, so unlike the MPH blobs this one can be asserted exactly rather than by invariant.
+///
+/// It is also the seed the `parse_overlay` fuzz target needs: reaching `OVL1` and a base blob whose
+/// length agrees with the file by chance is hopeless, so without this file the fuzzer would only
+/// ever exercise the magic check.
+#[test]
+fn the_overlay_blob_from_0_12_0_still_loads() {
+    let keys = keys();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    sorted.dedup();
+
+    let path = data("golden-0.12.0-overlay.ovl");
+    let blob = std::fs::read(&path).expect("golden overlay blob");
+    let ov = lexindex::Overlay::from_bytes_with(&blob, lexindex::StringIndex::from_bytes)
+        .expect("0.12.0 overlay blob loads");
+
+    // Three added, three removed: the count is unchanged, the membership is not.
+    assert_eq!(ov.len(), sorted.len());
+    assert_eq!(ov.id_space(), sorted.len() as u64 + 3);
+
+    for removed in &sorted[..3] {
+        assert_eq!(
+            ov.id(removed),
+            None,
+            "removed key {removed:?} is still live"
+        );
+    }
+    for (rank, key) in sorted.iter().enumerate().skip(3) {
+        let id = rank as u64;
+        assert_eq!(ov.id(key), Some(id), "id({key:?})");
+        assert_eq!(ov.key(id).as_deref(), Some(key.as_str()), "key({id})");
+    }
+    for (i, added) in ["absent-0000", "absent-0001", "absent-0002"]
+        .iter()
+        .enumerate()
+    {
+        let id = sorted.len() as u64 + i as u64;
+        assert_eq!(ov.id(added), Some(id), "id({added:?})");
+        assert_eq!(ov.key(id).as_deref(), Some(*added), "key({id})");
+    }
+}

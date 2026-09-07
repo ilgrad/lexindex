@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [parse_compact, parse_perfect]
+        target: [parse_compact, parse_perfect, parse_overlay]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

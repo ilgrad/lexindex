@@ -281,11 +281,12 @@ lexindex doesn't claim that particular cell (see below for why).
 
 ### Against other Rust string indexes
 
-`marisa-trie` is C++. Among ordered string indexes you can `cargo add`, **none is smaller than
+`marisa-trie` is C++. Of the ordered Rust string indexes benchmarked here, **none is smaller than
 `StringIndex`** — the double-array tries trade space for lookup speed, and no succinct LOUDS trie
 (marisa / XCDAT / CoCo-trie-style) exists in Rust to depend on. So `StringIndex` at 5.95 B/key is the
-**smallest ordered `string → id` index available in pure Rust** — second only to a C++ library, and the
-only one of them that does fuzzy and range. Same real words:
+**smallest of the pure-Rust ordered indexes measured below** — second only to a C++ library, and the
+only one of them that does fuzzy and range. The comparison is against the four crates in the table,
+not against all of crates.io, which no benchmark can settle. Same real words:
 
 | Rust structure | bytes/key | vs marisa |
 |---|---:|---:|

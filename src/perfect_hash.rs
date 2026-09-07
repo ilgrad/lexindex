@@ -116,6 +116,36 @@ impl ArenaLayout<'_> {
     }
 }
 
+/// What both replay passes say when pass two disagrees with pass one.
+#[cfg(feature = "mmap")]
+const REPLAY_MISMATCH: &str =
+    "perfect-hash: the source did not replay the same keys in the same order";
+
+/// Where pass two may write the key at `slot`, once it has shown itself to be the key pass one put
+/// there.
+///
+/// The hash answers "same key" only probabilistically — two strings can share a 64-bit hash — so
+/// the slot's own length is checked as well. It is free: pass one sized the slot from that key's
+/// length. Without it an equal-hash key of a different length reaches `copy_from_slice` with
+/// mismatched lengths, which panics, or writes a short record into the spill, whose framing is read
+/// back by the arena's lengths and would silently desynchronise from there on.
+#[cfg(feature = "mmap")]
+fn replay_span(
+    layout: &ArenaLayout<'_>,
+    expected_hash: u64,
+    slot: u32,
+    key: &str,
+) -> Result<std::ops::Range<usize>, IndexError> {
+    if hash_key(key) != expected_hash {
+        return Err(IndexError::Build(REPLAY_MISMATCH));
+    }
+    let span = layout.span(slot as usize);
+    if key.len() != span.len() {
+        return Err(IndexError::Build(REPLAY_MISMATCH));
+    }
+    Ok(span)
+}
+
 /// A sibling temporary holding pass two's records until each window can be scattered.
 ///
 /// Opened `O_CREAT|O_EXCL` under a pid-and-counter name for the same reason the output temporary
@@ -225,12 +255,11 @@ where
     let mut i = 0usize;
     for item in source() {
         let key = item.as_ref();
-        if i >= n || hash_key(key) != hashes[i] {
-            return Err(IndexError::Build(
-                "perfect-hash: the source did not replay the same keys in the same order",
-            ));
+        if i >= n {
+            return Err(IndexError::Build(REPLAY_MISMATCH));
         }
         let slot = slot_of[i];
+        replay_span(layout, hashes[i], slot, key)?;
         let w = layout.window_of(slot as usize, windows);
         let out = &mut buf[w];
         out.extend_from_slice(&slot.to_le_bytes());
@@ -1087,12 +1116,11 @@ impl PerfectHashIndex {
                 let mut i = 0usize;
                 for item in source() {
                     let key = item.as_ref();
-                    if i >= n || hash_key(key) != hashes[i] {
-                        return Err(IndexError::Build(
-                            "perfect-hash: the source did not replay the same keys in the same order",
-                        ));
+                    if i >= n {
+                        return Err(IndexError::Build(REPLAY_MISMATCH));
                     }
-                    map[layout.span(slot_of[i] as usize)].copy_from_slice(key.as_bytes());
+                    let span = replay_span(&layout, hashes[i], slot_of[i], key)?;
+                    map[span].copy_from_slice(key.as_bytes());
                     i += 1;
                 }
                 i
@@ -1233,6 +1261,39 @@ mod stream_build_tests {
         assert_eq!(windows, 2);
         assert_eq!(layout.window_of(2, windows), windows - 1);
         assert!(layout.span(2).is_empty());
+    }
+
+    /// A 64-bit hash collision cannot be found in a test, so the collision is supplied instead:
+    /// `replay_span` is handed the hash of the key it is about to see, which is exactly what a
+    /// colliding second pass would produce, over a slot pass one sized for a longer key. Both fill
+    /// paths go through this function, so this pins the invariant for both. Without the length
+    /// check the direct path would panic inside `copy_from_slice` and the windowed path would write
+    /// a short record and desynchronise the spill.
+    #[test]
+    fn a_replayed_key_of_the_wrong_length_is_refused_even_when_the_hash_matches() {
+        let (prefix, data_len, width) = StringArena::prefix_for_lengths(&[3]);
+        let layout = ArenaLayout {
+            prefix: &prefix,
+            width,
+            data_start: 0,
+            data_len,
+            window: 64,
+        };
+        assert_eq!(layout.span(0).len(), 3);
+
+        // The hash matches by construction; only the length differs.
+        let short = "b";
+        match replay_span(&layout, hash_key(short), 0, short) {
+            Err(IndexError::Build(msg)) => assert_eq!(msg, REPLAY_MISMATCH),
+            other => panic!("expected a replay mismatch, got {other:?}"),
+        }
+        // The same length, the same hash: this is the ordinary path and it yields the slot.
+        assert_eq!(
+            replay_span(&layout, hash_key("abc"), 0, "abc").unwrap(),
+            0..3
+        );
+        // A key whose hash does not match is refused before the length is ever consulted.
+        assert!(replay_span(&layout, hash_key("zzz"), 0, "abc").is_err());
     }
 
     /// Nothing in a unit test can build a 32 MB arena, so the window is shrunk instead and the

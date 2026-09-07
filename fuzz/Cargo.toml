@@ -39,6 +39,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "parse_overlay"
+path = "fuzz_targets/parse_overlay.rs"
+test = false
+doc = false
+bench = false
+
 # Keeps cargo from trying to fold this package into the crate above it.
 [workspace]
 

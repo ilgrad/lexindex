@@ -260,7 +260,10 @@ class Overlay:
         """The index underneath, unchanged and shared with this overlay."""
 
     def to_bytes(self) -> bytes: ...
-    def save(self, path: str | os.PathLike[str]) -> None: ...
+    def save(self, path: str | os.PathLike[str]) -> None:
+        """Write :meth:`to_bytes` to ``path``, atomically: a crash or a full disk leaves the
+        previous file intact rather than a truncated one under the real name."""
+
     @staticmethod
     def from_bytes(
         data: bytes, base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex]
@@ -268,8 +271,13 @@ class Overlay:
         """Read a blob, rebuilding the base with ``base``'s own loader — pass the class itself.
 
         The blob records which base wrote it and a mismatch is refused, so the wrong class is an
-        error rather than an unchecked read of bytes meant for something else. As with the index
-        loaders, a blob from an untrusted source is not something this can make safe.
+        error rather than an unchecked read of bytes meant for something else.
+
+        **The trust contract is the base class's own, and this method inherits it.** The overlay's
+        own framing is fully validated for every base and raises ``ValueError`` when malformed;
+        what follows the header goes to the base class's loader, which is checked for
+        :class:`StringIndex` and unchecked for :class:`PerfectHashIndex` and
+        :class:`CompactHashIndex`. Over those two, load only blobs you wrote.
         """
 
     @staticmethod
@@ -277,4 +285,4 @@ class Overlay:
         path: str | os.PathLike[str],
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
-        """:meth:`from_bytes` from a file."""
+        """:meth:`from_bytes` from a file, inheriting the same trust contract from ``base``."""

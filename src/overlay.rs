@@ -42,6 +42,18 @@ pub trait OverlayBase {
     /// than an unchecked deserialisation of the wrong bytes. Tags `0..=15` are reserved for this
     /// crate; an outside implementation should pick above that.
     const BASE_TAG: u8;
+
+    /// Whether [`base_id`](Self::base_id) never answers `Some` for a key the base does not hold.
+    ///
+    /// True for the two exact indexes, false for `CompactHashIndex`, whose fingerprints admit false
+    /// positives. [`Overlay::from_bytes_with`] uses it to reject a crafted blob whose additions
+    /// duplicate a base key — a blob that no [`to_bytes`](Overlay::to_bytes) writes, and that would
+    /// otherwise load with a [`len`](Overlay::len) counting a key twice while
+    /// [`id`](Overlay::id) can only ever answer the base's. Over a probabilistic base the same
+    /// check would reject sound blobs, so it is not applied there.
+    ///
+    /// Defaults to `false`, the conservative answer: an outside implementation opts in.
+    const EXACT_MEMBERSHIP: bool = false;
 }
 
 /// A base that stores its keys, and so can answer `id → key` and be rebuilt from its own contents.
@@ -250,6 +262,7 @@ impl<I: OverlayKeys> Overlay<I> {
 /// object the caller still holds, and cloning a `PerfectHashIndex` is not on offer.
 impl<T: OverlayBase> OverlayBase for std::sync::Arc<T> {
     const BASE_TAG: u8 = T::BASE_TAG;
+    const EXACT_MEMBERSHIP: bool = T::EXACT_MEMBERSHIP;
 
     fn base_len(&self) -> usize {
         (**self).base_len()
@@ -276,6 +289,7 @@ impl<T: OverlayKeys> OverlayKeys for std::sync::Arc<T> {
 
 impl OverlayBase for crate::StringIndex {
     const BASE_TAG: u8 = 1;
+    const EXACT_MEMBERSHIP: bool = true;
 
     fn base_len(&self) -> usize {
         self.len()
@@ -303,6 +317,7 @@ impl OverlayKeys for crate::StringIndex {
 #[cfg(all(feature = "mph", target_pointer_width = "64"))]
 impl OverlayBase for crate::PerfectHashIndex {
     const BASE_TAG: u8 = 2;
+    const EXACT_MEMBERSHIP: bool = true;
 
     fn base_len(&self) -> usize {
         self.len()
@@ -385,9 +400,17 @@ impl<I: OverlayBase> Overlay<I> {
         Ok(out)
     }
 
-    /// Write [`to_bytes`](Self::to_bytes) to `path`.
+    /// Write [`to_bytes`](Self::to_bytes) to `path`, atomically: a crash, a full disk or a kill
+    /// mid-write leaves the previous file intact rather than a truncated one under the real name.
+    /// The overlay is the crate's *mutable* layer, so it is the structure most likely to be
+    /// rewritten in place, and it gets the same guarantee the three indexes already have.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
-        std::fs::write(path, self.to_bytes()?).map_err(IndexError::Io)
+        let bytes = self.to_bytes()?;
+        crate::blob::write_atomically_with(path.as_ref(), |w| {
+            use std::io::Write;
+            w.write_all(&bytes)?;
+            Ok(())
+        })
     }
 
     /// Reconstruct from [`to_bytes`](Self::to_bytes) output, with `load_base` reconstructing the
@@ -417,9 +440,18 @@ impl<I: OverlayBase> Overlay<I> {
     /// closure body is what needs the block, so the surrounding call stays honest about which part
     /// carries the obligation.
     ///
-    /// Additions are checked for duplicates, tombstones for bits outside the id space, and every
-    /// added key for UTF-8. They are *not* checked against the base: a `CompactHashIndex` base
-    /// answers membership probabilistically, so a false positive would reject a sound blob.
+    /// Additions are checked for duplicates and, over a base whose membership is exact
+    /// ([`EXACT_MEMBERSHIP`](OverlayBase::EXACT_MEMBERSHIP)), against the base itself; tombstones
+    /// are checked for bits outside the id space, and every added key for UTF-8. Over a
+    /// `CompactHashIndex` base the check against the base is skipped, because a false positive
+    /// would reject a sound blob.
+    ///
+    /// **This function is safe; `load_base` is where the caller's trust decision lives.** Every
+    /// count in the overlay's own framing is validated against the bytes that are actually present,
+    /// so no header field can steer an index or an allocation. The base region is then handed to
+    /// `load_base` unexamined — with `StringIndex::from_bytes` that is a checked parse, while the
+    /// two hash indexes' loaders are `unsafe` and validate nothing, so an overlay over them is only
+    /// as trustworthy as the blob it came from.
     pub fn from_bytes_with(
         bytes: &[u8],
         load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
@@ -433,8 +465,12 @@ impl<I: OverlayBase> Overlay<I> {
                 "overlay blob was written over a different base index",
             ));
         }
-        let base_len = read_u64(bytes, 5) as usize;
-        let added_count = read_u64(bytes, 13) as usize;
+        // Every count below comes from the blob, so it is narrowed rather than cast: on a 32-bit
+        // target `as usize` would truncate a fabricated length into a plausible one.
+        let base_len = usize::try_from(read_u64(bytes, 5))
+            .map_err(|_| IndexError::Format("overlay base blob length out of range"))?;
+        let added_count = usize::try_from(read_u64(bytes, 13))
+            .map_err(|_| IndexError::Format("overlay addition count out of range"))?;
         let base_end = header
             .checked_add(base_len)
             .filter(|end| *end <= bytes.len())
@@ -445,11 +481,12 @@ impl<I: OverlayBase> Overlay<I> {
         let mut added_keys = Vec::with_capacity(added_count.min(1 << 16));
         let mut added = std::collections::HashMap::with_capacity(added_count.min(1 << 16));
         for i in 0..added_count {
-            if at + 4 > bytes.len() {
-                return Err(IndexError::Format("overlay additions truncated"));
-            }
+            let len_end = at
+                .checked_add(4)
+                .filter(|end| *end <= bytes.len())
+                .ok_or(IndexError::Format("overlay additions truncated"))?;
             let len = read_u32(bytes, at) as usize;
-            at += 4;
+            at = len_end;
             let end = at
                 .checked_add(len)
                 .filter(|end| *end <= bytes.len())
@@ -457,6 +494,12 @@ impl<I: OverlayBase> Overlay<I> {
             let key = std::str::from_utf8(&bytes[at..end])
                 .map_err(|_| IndexError::Format("overlay addition is not UTF-8"))?;
             at = end;
+            // `add` consults the base first and revives its id rather than issuing a second one, so
+            // no blob this crate writes holds an addition the base already has. Over a
+            // probabilistic base the same check would reject sound blobs, hence the constant.
+            if I::EXACT_MEMBERSHIP && base.base_id(key).is_some() {
+                return Err(IndexError::Format("overlay addition duplicates a base key"));
+            }
             if added
                 .insert(key.to_string(), base.base_len() as u64 + i as u64)
                 .is_some()
@@ -466,17 +509,25 @@ impl<I: OverlayBase> Overlay<I> {
             added_keys.push(key.to_string());
         }
 
-        if at + 8 > bytes.len() {
-            return Err(IndexError::Format("overlay tombstones truncated"));
-        }
-        let words = read_u64(bytes, at) as usize;
-        at += 8;
-        if bytes.len() - at != words * 8 {
+        let count_end = at
+            .checked_add(8)
+            .filter(|end| *end <= bytes.len())
+            .ok_or(IndexError::Format("overlay tombstones truncated"))?;
+        let words = usize::try_from(read_u64(bytes, at))
+            .map_err(|_| IndexError::Format("overlay tombstone count out of range"))?;
+        at = count_end;
+        let tombstone_bytes = words
+            .checked_mul(8)
+            .ok_or(IndexError::Format("overlay tombstone count out of range"))?;
+        if bytes.len() - at != tombstone_bytes {
             return Err(IndexError::Format("overlay tombstone length mismatch"));
         }
-        let dead: Vec<u64> = (0..words)
-            .map(|w| read_u64(bytes, at + w * 8))
-            .collect::<Vec<_>>();
+        // Read from the slice rather than from the count: a fabricated count can no longer size an
+        // allocation, because the bytes it claims have already been shown to be there.
+        let dead: Vec<u64> = bytes[at..]
+            .chunks_exact(8)
+            .map(|w| u64::from_le_bytes(w.try_into().expect("8 bytes")))
+            .collect();
 
         let id_space = base.base_len() as u64 + added_keys.len() as u64;
         let last = (id_space / 64) as usize;
@@ -592,6 +643,37 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// `save` goes through the crate's atomic writer, like the three indexes: rewriting an overlay
+    /// in place replaces it whole or not at all, and leaves no temporary behind. The overlay is the
+    /// mutable layer, so it is the file most often written over a live one.
+    #[test]
+    fn save_replaces_an_existing_file_whole_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("lexindex-ovl-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("overlay.bin");
+
+        let mut first = Overlay::new(StringIndex::build(["a", "b"]).unwrap());
+        first.add("c");
+        first.save(&path).unwrap();
+        let first_len = std::fs::metadata(&path).unwrap().len();
+
+        // A shorter overlay over the same path: a non-atomic rewrite could leave the tail of the
+        // longer one behind, which would still parse as a valid blob.
+        let second = Overlay::new(StringIndex::build(["a"]).unwrap());
+        second.save(&path).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() < first_len);
+        let back = Overlay::load_with(&path, StringIndex::from_bytes).unwrap();
+        assert_eq!(back.keys(), second.keys());
+
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "atomic write left a temporary behind");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_malformed_blob_is_rejected_rather_than_half_loaded() {
         let base = StringIndex::build(["a", "b"]).unwrap();
@@ -652,6 +734,28 @@ mod tests {
                 b.truncate(b.len() - 8 - 4 - 1 + 2);
                 b
             }),
+            // A tombstone count large enough that `count * 8` wraps: in debug this used to be an
+            // arithmetic-overflow panic and in release a wrapped product of zero, which let the
+            // length identity pass and drove a `2^61`-element allocation. Both are `Format` now.
+            ("overlay tombstone count out of range", {
+                let mut b = craft(&base, &[b"c"], &[]);
+                let at = b.len() - 8;
+                b[at..].copy_from_slice(&(1u64 << 61).to_le_bytes());
+                b
+            }),
+            ("overlay tombstone count out of range", {
+                let mut b = craft(&base, &[b"c"], &[]);
+                let at = b.len() - 8;
+                b[at..].copy_from_slice(&u64::MAX.to_le_bytes());
+                b
+            }),
+            // `add` revives a base key's own id rather than issuing a second one, so `to_bytes`
+            // never writes this; loading it would count "a" twice in `len` while `id` could only
+            // ever answer the base's.
+            (
+                "overlay addition duplicates a base key",
+                craft(&base, &[b"a"], &[]),
+            ),
         ];
         for (expected, bytes) in cases {
             match Overlay::from_bytes_with(&bytes, StringIndex::from_bytes) {
@@ -837,6 +941,54 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>(),
             ["three".to_string(), "two".into()].into_iter().collect()
         );
+    }
+
+    /// The duplicate-addition check is keyed on `EXACT_MEMBERSHIP`, so it must not fire over a
+    /// probabilistic base: `CompactHashIndex::id` answers `Some` for keys it never held, and
+    /// rejecting on that would refuse blobs that are perfectly sound.
+    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[test]
+    fn a_duplicate_addition_is_refused_only_over_an_exact_base() {
+        use crate::{CompactHashIndex, PerfectHashIndex};
+        // Compile-time: which bases are exact is a property of the types, not of this run.
+        const {
+            assert!(<StringIndex as OverlayBase>::EXACT_MEMBERSHIP);
+            assert!(<PerfectHashIndex as OverlayBase>::EXACT_MEMBERSHIP);
+            assert!(!<CompactHashIndex as OverlayBase>::EXACT_MEMBERSHIP);
+        }
+
+        /// The same hand-assembly as `craft`, over whichever base is given.
+        fn craft_over<B: OverlayBase>(base_blob: &[u8], addition: &[u8]) -> Vec<u8> {
+            let mut out = b"OVL1".to_vec();
+            out.push(B::BASE_TAG);
+            out.extend_from_slice(&(base_blob.len() as u64).to_le_bytes());
+            out.extend_from_slice(&1u64.to_le_bytes());
+            out.extend_from_slice(base_blob);
+            out.extend_from_slice(&(addition.len() as u32).to_le_bytes());
+            out.extend_from_slice(addition);
+            out.extend_from_slice(&0u64.to_le_bytes());
+            out
+        }
+
+        let perfect = PerfectHashIndex::build(["one", "two"]).unwrap();
+        let blob = craft_over::<PerfectHashIndex>(&perfect.to_bytes().unwrap(), b"one");
+        // SAFETY: the base blob was produced by `to_bytes` in this process and has not left it.
+        match Overlay::from_bytes_with(&blob, |b| unsafe { PerfectHashIndex::from_bytes(b) }) {
+            Err(IndexError::Format(msg)) => {
+                assert_eq!(msg, "overlay addition duplicates a base key")
+            }
+            other => panic!(
+                "expected a duplicate error, got {:?}",
+                other.map(|o| o.len())
+            ),
+        }
+
+        let compact = CompactHashIndex::build(["one", "two"], 4).unwrap();
+        let blob = craft_over::<CompactHashIndex>(&compact.to_bytes().unwrap(), b"one");
+        // SAFETY: as above.
+        let back = Overlay::from_bytes_with(&blob, |b| unsafe { CompactHashIndex::from_bytes(b) })
+            .expect("a probabilistic base must not have its additions checked against it");
+        assert_eq!(back.len(), 3);
     }
 
     /// `CompactHashIndex` stores no keys, so an overlay over it has membership and nothing else —

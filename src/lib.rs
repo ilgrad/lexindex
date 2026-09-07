@@ -100,6 +100,28 @@ pub mod fuzzing {
     pub fn parse_perfect_frame(bytes: &[u8], verify: bool) -> bool {
         crate::PerfectHashIndex::fuzz_parse_frame(bytes, verify)
     }
+
+    /// Parse the framing of an `Overlay` blob: the magic, the base tag, the two header lengths, the
+    /// length-prefixed additions with their UTF-8 and duplicate checks, and the tombstone words.
+    ///
+    /// **The embedded base blob is deliberately not parsed.** The loader closure ignores it and
+    /// returns a fixed two-key index, so this target exercises the overlay's own framing and does
+    /// not re-fuzz `StringIndex::from_bytes` — which was a target of its own, and was removed
+    /// because it re-finds a panic in `fst`'s node decoder that this crate cannot fix (see
+    /// `fuzz/Cargo.toml`). Everything the overlay validates about the base region — that its length
+    /// is in range, and that the tag matches before the loader is called at all — still runs.
+    pub fn parse_overlay_frame(bytes: &[u8]) -> bool {
+        static BASE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+        let blob = BASE.get_or_init(|| {
+            crate::StringIndex::build(["a", "b"])
+                .expect("a two-key index builds")
+                .to_bytes()
+        });
+        crate::Overlay::<crate::StringIndex>::from_bytes_with(bytes, |_| {
+            crate::StringIndex::from_bytes(blob)
+        })
+        .is_ok()
+    }
 }
 
 // Compiles and runs the README's Rust snippets as doctests without pulling its prose into the API

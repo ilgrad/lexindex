@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc e5562c75fd541be0836933df0efc3497b6d6999ee5e1ea1da6d83c52d0e8317d # shrinks to (initial, ops) = (["ba"], [Remove("ba")])
 cc 4dbe9d18bcbc89e270b6c49437cdf1bb434b6a6fc1e66d10c339960b2c9244c7 # shrinks to (initial, ops) = ([], [Add("a"), Remove("a"), Add("a")])
+cc 23f4d233a08c610bbd08036bbf7e84e23c6da16cc0b1db288e88c0a1478e691b # shrinks to additions = [], removals = [], at = Index(0), xor = 1, kind = 4, hostile = 18446744073709551615

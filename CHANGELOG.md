@@ -4,6 +4,70 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A crafted overlay blob could panic a safe loader.** `Overlay::from_bytes_with` read the
+  tombstone word count out of the blob and computed `count * 8` on it unchecked. A 40-byte blob
+  claiming `1 << 61` words panicked with an arithmetic overflow in a debug build; in release the
+  product wrapped to zero, the length identity `bytes.len() - at == count * 8` then *passed*, and
+  the parser went on to collect `2^61` elements — a capacity-overflow panic where a clean
+  `IndexError::Format` was owed. Reproduced in both profiles before the fix, and both regression
+  tests fail against the old parser.
+
+  Every count the blob carries is now narrowed with `usize::try_from` and combined with
+  `checked_mul` / `checked_add`, and the tombstones are read from the byte slice itself
+  (`chunks_exact(8)`) after its length has been checked — so a number the blob merely claims can no
+  longer size an allocation. The same `as usize` casts truncated `base_len` and the addition count
+  on a 32-bit target, where `Overlay<StringIndex>` is available; `StringArena` already used
+  `try_from` here and the overlay now matches it.
+
+- **`Overlay::save` was not atomic.** It was `std::fs::write`, so a crash, a full disk or a kill
+  mid-write left a truncated blob under the real name. It now goes through the same writer the three
+  indexes use — temporary + `O_EXCL` + fsync + rename + directory fsync — which matters most here:
+  the overlay is the crate's mutable layer, and so the file most often rewritten over a live one.
+
+- **A crafted blob could make `len()` disagree with the keys.** Additions were checked against each
+  other but never against the base, so a hand-made blob could add a key the base already held:
+  `len()` counted it twice while `id()` could only ever answer the base's, leaving the addition's id
+  unreachable. `add` consults the base first and revives its id rather than issuing a second one, so
+  no blob this crate writes looks like that. The parser now rejects it over a base whose membership
+  is exact — a new `OverlayBase::EXACT_MEMBERSHIP`, `true` for `StringIndex` and
+  `PerfectHashIndex`. `CompactHashIndex` keeps the old behaviour, since its false positives would
+  otherwise reject sound blobs, and the constant defaults to `false` so an outside implementation of
+  the trait still compiles.
+
+- **`PerfectHashIndex::build_to_file` verified pass two by hash alone.** The docs promised "a second
+  pass that yields different keys is refused", which a 64-bit hash cannot deliver on its own: an
+  equal-hash key of a different length reached `copy_from_slice` with mismatched lengths — a panic —
+  on the direct path, and wrote a short record that desynchronised the spill's framing on the
+  windowed one. Both paths now share one `replay_span`, which checks the slot's length as well. The
+  length is free (pass one sized the slot from it); a second hash would have cost 8 B/key of build
+  memory for an adversarial case, and was not worth it.
+
+### Added
+
+- **A libFuzzer target and a property test for the overlay's framing.** `parse_overlay` joins
+  `parse_compact` and `parse_perfect`, and a seeded-mutation property test works outward from a real
+  blob — one byte flipped, the blob cut short, or one of its three claimed counts replaced by a
+  hostile value — since random bytes never spell `OVL1`. Both deliberately stub out the base loader
+  rather than re-parse the embedded blob: that is `StringIndex::from_bytes`'s own property, and
+  fuzzing it here would only rediscover the `fst` node-decoder panic that `fuzz/Cargo.toml` already
+  records as out of this crate's scope.
+
+### Changed
+
+- **`Overlay`'s Python loaders document whose trust contract they inherit.** `Overlay.from_bytes`
+  and `Overlay.load` validate the overlay's own framing for every base, then hand the rest to the
+  base class's loader — checked for `StringIndex`, trust-your-own-blob for the two hash indexes. The
+  signature cannot say that and Python has no `unsafe` marker, so the docstrings and the stubs do,
+  and a test asserts the sentence is still there.
+
+- **The README's size claim is qualified to what was measured.** "The smallest ordered `string → id`
+  index available in pure Rust" was a universal claim over crates.io that a benchmark of four crates
+  cannot establish; it now reads "the smallest of the pure-Rust ordered indexes measured below".
+
 ## [0.12.0] — 2026-09-07
 
 ### Added
