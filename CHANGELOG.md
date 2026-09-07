@@ -118,8 +118,28 @@ All notable changes to this project are documented here. The format follows
   recompute `overflow_cap` on each load and was O(n) on the blob's size.
 - `CompactHashIndex` costs 1.30 B/key at the 8-bit default and 0.80 at 4 bits, against 1.27 and
   0.77 on the old backend: the in-crate MPH is 2.390 bits/key where `ptr_hash` was 2.169. Measured
-  on `/usr/share/dict/words` (479 823 keys). Build and lookup timings across the README have **not**
-  yet been re-measured on the new backend and say so where they appear.
+  on `/usr/share/dict/words` (479 823 keys).
+
+- **Every timed table in the README was re-measured on 1.0**, in one idle session after the last
+  code change. Three findings, and one non-finding stated as such:
+
+  - `PerfectHashIndex::id_unchecked` went from 0.451× to **0.287×** of `std::HashMap` — 111 → 75 ns
+    at 1 M bigrams, on a control that got 6.7% *slower*. Against a `HashMap` with FxHash it is now
+    ~2× faster (75 against 156 ns), where through 0.12 this README said the latency advantage
+    against a fast-hashed map was gone. That claim is retracted; the perfect hash and the 8-byte
+    key hash are what changed, not the conditions.
+  - **Builds cost more.** `CompactHashIndex` at 1 M went 114 → 175 ms and `PerfectHashIndex`
+    291 → 378 ms: the in-crate backend builds 1.5–1.8× slower than `ptr_hash` did, which was
+    accepted as the price of a header a loader can check. At 10 M the picture reverses in the
+    scale table, because that build is eight-threaded and the older session was core-contended.
+  - From Python, `PerfectHashIndex` moved 1.04× where `marisa-trie`, `StringIndex` and
+    `CompactHashIndex` all moved 1.18–1.20× on the same corpus — a ~14% gain relative to
+    everything else in the room.
+  - The **`dict` denominator moved again** and the Python table is therefore not comparable cell by
+    cell with the one it replaces: 327.9 ns then, 258.5 now, on identical keys and untouched code.
+    Its absolute values are now printed in the table so the next session can see the denominator
+    rather than guess at it. The mechanism remains unidentified after having been chased once
+    already.
 
 ## [0.12.1] — 2026-09-07
 

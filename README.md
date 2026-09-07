@@ -339,104 +339,105 @@ So, in decision order:
 ### Lookup speed from Python, against `dict` and `marisa-trie`
 
 `local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
-forms rotated inside each round so none keeps the position that pays to warm the probe list,
-minimum over 11 rounds. **Measured on 0.12's `ptr_hash` backend and not yet re-run on 1.0's
-in-crate one**, whose bare lookup measured 0.91× the old one — so the two hash-index rows should
-move slightly in lexindex's favour, and are published unchanged until that is measured rather than
-scaled. Ratios are **quotients of the minima against `dict` on the same probe
-set**. A column is published only once two full 11-round passes agree on the absolute minima:
-7.3 % at worst and 1.0 % at the median (`grid`, re-measured 2026-09-07: 4.3 % / 0.5 %).
+forms rotated inside each round so none keeps the position that pays to warm the probe list.
+**Measured on 1.0**, from the minimum over two full 11-round passes per corpus. Ratios are
+**quotients of the minima against `dict` on the same probe set**. A column is published only once
+the two passes agree on the absolute minima: worst 6.9 % / median 1.7 % (`words`), 4.1 % / 0.5 %
+(`random`), 5.9 % / 0.8 % (`grid`), against a bar of 7.3 % worst.
+
+**The `dict` denominator is not stable between sessions and this table is not comparable to the one
+it replaces.** On `words` it read 327.9 ns when the 0.12 column was published and 258.5 ns here, on
+identical keys and untouched code, so every ratio in that column moves up by about a fifth for a
+reason that has nothing to do with lexindex. The absolutes are printed below the table for exactly
+that purpose. What *is* comparable is the shape: `marisa-trie`, `StringIndex` and
+`CompactHashIndex` all moved by 1.18–1.20× on `words`, which is what a change in the reference alone
+looks like — while `PerfectHashIndex` moved only 1.04×, i.e. it is genuinely ~14 % faster relative to
+everything else in the room, which is 1.0's own perfect hash and its 8-byte-at-a-time key hash.
 
 | probe set | structure | 479 823 words | 1 M random pairs | 1 M grid pairs |
 |---|---|---:|---:|---:|
-| members | `marisa-trie` | 1.85× | 4.20× | 3.08× |
-| | `StringIndex.id` | 1.38× | 2.61× | 1.73× |
-| | `PerfectHashIndex.id` | 1.05× | 1.32× | 1.33× |
-| | **`CompactHashIndex.id`** | **0.61×** | **0.71×** | **0.71×** |
-| | `PerfectHashIndex.ids_of` | 0.47× | 0.49× | 0.62× |
-| | **`CompactHashIndex.ids_of`** | **0.31×** | **0.38×** | **0.45×** |
-| absent | `marisa-trie` | 2.34× | 4.29× | 2.75× |
-| | `StringIndex.id` | 1.47× | 2.37× | 1.37× |
-| | `PerfectHashIndex.id` | 0.83× | 0.95× | 0.89× |
-| | **`CompactHashIndex.id`** | **0.36×** | **0.33×** | **0.41×** |
-| | **`CompactHashIndex.ids_of`** | **0.29×** | **0.21×** | **0.26×** |
+| members | `dict` absolute, for scale | 258.5 ns | 260.8 ns | 216.1 ns |
+| | `marisa-trie` | 2.21× | 4.35× | 2.73× |
+| | `StringIndex.id` | 1.63× | 2.56× | 1.60× |
+| | `PerfectHashIndex.id` | 1.09× | 1.32× | 1.29× |
+| | **`CompactHashIndex.id`** | **0.73×** | **0.75×** | **0.62×** |
+| | `PerfectHashIndex.ids_of` | 0.53× | 0.53× | 0.58× |
+| | **`CompactHashIndex.ids_of`** | **0.34×** | **0.39×** | **0.39×** |
+| absent | `dict` absolute, for scale | 173.5 ns | 236.0 ns | 235.9 ns |
+| | `marisa-trie` | 2.81× | 4.47× | 2.42× |
+| | `StringIndex.id` | 1.76× | 2.28× | 1.25× |
+| | `PerfectHashIndex.id` | 0.75× | 0.89× | 0.84× |
+| | **`CompactHashIndex.id`** | **0.40×** | **0.32×** | **0.31×** |
+| | **`CompactHashIndex.ids_of`** | **0.32×** | **0.19×** | **0.18×** |
 
-Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in 0.6–0.7×
-the time of a `dict` and a **missing** one in a third to two-fifths, batched `ids_of` in a fifth to
-under a half — while occupying 1.30 bytes per key on disk against the `dict`'s 71–95 bytes per key
-in RAM. `PerfectHashIndex` trades level with `dict` on members and wins on misses; `marisa-trie`
-costs 1.9–4.3× and `StringIndex` 1.4–2.6×, and both swing with the corpus exactly as their sizes
-do. Absolute figures for the word corpus, for scale: `dict` 327.9 ns, `CompactHashIndex`
-200.8, its `ids_of` 102.0, `marisa` 605.8.
+Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in 0.62–0.75×
+the time of a `dict` and a **missing** one in under half, batched `ids_of` in a fifth to two-fifths —
+while occupying 1.30 bytes per key on disk against the `dict`'s 71–95 bytes per key in RAM.
+`PerfectHashIndex` trades level with `dict` on members and wins on misses; `marisa-trie` costs
+2.2–4.5× and `StringIndex` 1.3–2.6×, and both swing with the corpus exactly as their sizes do.
 
-<sub>Read the ratios, not the absolutes. This machine drifts 3–11 % within a single run and 13.7 %
-over twelve rounds **while idle** — measured with a cache-resident integer loop that touches no
-memory, whose time climbs monotonically as the CPU heats — so absolute nanoseconds here are a
-statement about one laptop's thermal envelope. The ratios divide that out. Two caveats in `dict`'s
-favour, both deliberate: CPython caches a string's hash inside the object, so a repeated probe over
-the same `str` skips rehashing where lexindex hashes the bytes every call (~23 ns of the gap at
-1 M); and every column pays the same per-call binding overhead, which flatters the slower ones. The
-first run of a corpus, taken minutes after a build, disagreed with the two settled runs by up to
-24 % on two cells and is excluded — the machine needs to settle, and cross-run agreement is what
-says when it has. The `grid` column was **re-measured a day after it was first published, and did
-not reproduce**: it is restated here from two fresh 11-round passes. Five runs on the new day — at
-three round counts, idle and under load, and on the released 0.11.0 wheel as well as the current
-build — agree with each other and disagree with the first day's column by up to 30 %. Ruled out as
-the cause: the extension (the released wheel measures the same as the working tree), the
-interpreter (the same virtualenv throughout), the corpus generator (unchanged), and background
-load (raising it did not restore the old figures). What moved is the `dict` denominator itself —
-251 ns then, 194–196 ns now, on identical keys — while `words` and `random` reproduce to within
-1 %. The mechanism is not identified. The lesson is in the protocol: the two passes that validated
-the old column ran minutes apart inside one session, which bounds within-session noise and nothing
-else, so the second pass now has to come from a separate session.</sub>
+<sub>Read the ratios, not the absolutes. This machine drifts 7–11 % over eleven rounds **while
+idle** — measured with a cache-resident integer loop that touches no memory, whose time climbs
+monotonically as the CPU heats — so absolute nanoseconds here are a statement about one laptop's
+thermal envelope. The ratios divide that out *within* a session. Two caveats in `dict`'s favour,
+both deliberate: CPython caches a string's hash inside the object, so a repeated probe over the same
+`str` skips rehashing where lexindex hashes the bytes every call (~23 ns of the gap at 1 M); and
+every column pays the same per-call binding overhead, which flatters the slower ones. **The
+denominator's instability across sessions is a standing, unexplained property of this machine**, and
+it has now been seen three times: `grid`'s `dict` read 251 ns, then 194–196 the next day, and 216
+here; `words`' read 327.9, then 258.5. Ruled out on the day it was first chased: the extension (the
+released wheel measured the same as the working tree), the interpreter (one virtualenv throughout),
+the corpus generator (unchanged) and background load (raising it did not restore the old figures).
+The mechanism is still not identified. What follows for the protocol is that a *cross-session* delta
+in this table means nothing on its own — only the shape across columns within one session does, which
+is why the paragraph above compares how far each structure moved rather than whether it
+moved.</sub>
 
 ### Point-lookup latency vs the standard library
 
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
-Measured on the 0.9.0 code in one session (min of 12 runs, idle machine, four seconds between runs
-so clocks settle) and **not yet re-run on 1.0**, which replaced both the perfect hash and the key
-hash — the bare key hash alone measured 1.5× on a 9.3-byte word and 6.2× on an 80-byte key, so every
-lexindex row here is a floor rather than a current figure. Absolute numbers are machine-dependent — this session runs ~19% faster than the
-one that produced the 0.8.0 table, `std::HashMap` control included — so compare the **ratios**, and
-only within a column.
+Measured on the 1.0 code in one session (min of 12 runs, idle machine, four seconds between runs so
+clocks settle). Absolute numbers are machine-dependent — the `std::HashMap` control reads 6.7%
+slower here than in the 0.9.0 session that produced the previous table — so compare the **ratios**,
+and only within a column.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `CompactHashIndex::id` (fp=1) | **~114 ms** | ~151 ns | fingerprint-verified, `2^-8` false-positive rate |
-| lexindex `PerfectHashIndex::id_unchecked` | ~291 ms | **~111 ns** | closed vocabulary, no membership check |
-| `std::HashMap<String, u32>` | ~187 ms | ~246 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~294 ms | ~273 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~253 ms | ~337 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~201 ms | ~770 ns | in-RAM |
+| lexindex `CompactHashIndex::id` (fp=1) | **~175 ms** | ~157 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~373 ms | **~75 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~190 ms | ~263 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~378 ms | ~290 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~263 ms | ~387 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~217 ms | ~857 ns | in-RAM |
 
-<sub>Run-to-run lookup spread over the 12 runs: 1.9% for the `HashMap` control, 2.3% for
-`id_unchecked`, 5.4% `BTreeMap`, 7.1% `CompactHashIndex::id`, 8.0% `PerfectHashIndex::id`, 11.0%
-`StringIndex` — the control's tightness is what says the session was quiet. The ratio to `HashMap`
-is itself session-dependent: `id_unchecked` measured 2.2× here and 1.7× in the 0.8.0 session on the
-same machine, so read it as "roughly twice", not as a constant. 0.9's fused two-hash pass was
-verified separately by an interleaved A/B against the 0.8.1 binary in one session:
-`CompactHashIndex::id` 165 → 158 ns (−4.3%), build 117 → 116 ms, with `HashMap`, `BTreeMap` and both
-`PerfectHashIndex` rows flat. `CompactHashIndex`'s build halved back in 0.8: it sorts 16-byte
-`(hash, second hash)` pairs instead of strings, keeping it below `HashMap`'s build. Real keys move
-lookups in lexindex's favour versus synthetic ones (byte-wise FNV vs `HashMap`'s SipHash), while
-every `build` reads higher because real input is not pre-sorted and sorting is part of the
-build.</sub>
+<sub>**One of the twelve runs was perturbed and every column shows it** — run 2 reads `HashMap`
+330 ns against ~265 in the other eleven, `id_unchecked` 119 against ~78. Over all twelve the control's
+spread is therefore 25.7%; over the eleven it is 2.7%, against the 1.9% the 0.9.0 session recorded.
+The minimum is the estimator precisely because it is the least-perturbed run, and it is unaffected
+either way. **What the table can and cannot resolve**: `StringIndex`'s code has not changed since
+0.5.1, and its ratio to `HashMap` still moved 1.370× → 1.473× between the two sessions, so treat
+differences under ~8% here as session noise. Two things are outside that. `id_unchecked` went 0.451×
+→ **0.287×** of `HashMap` — 111 → 75 ns absolute, on a control that got *slower* — which is 1.0's
+own perfect hash and its 8-byte-at-a-time key hash together. And `CompactHashIndex`'s build went
+114 → 175 ms and `PerfectHashIndex`'s 291 → 378: the new backend builds 1.5–1.8× slower than
+`ptr_hash` did, which is the price of a header that a loader can actually check, and it was accepted
+as such. Real keys move lookups in lexindex's favour versus synthetic ones, while every `build` reads
+higher because real input is not pre-sorted and sorting is part of the build.</sub>
 
 **`HashMap` here is the `std` one, which hashes with SipHash** — hardened against hash-flooding and
 correspondingly slow on short keys. That is the map most Rust code actually uses, so it is the right
 default comparison, but it is not the fastest map available: the same `HashMap` with a
 non-cryptographic hasher is much quicker, and `cargo run --release --example bench` prints that row
-too (FxHash, written out in the example rather than added as a dependency). Measured on the 0.10
-code in two independent 12-run sessions on a **shared** machine — so only the within-session ratio
-means anything, and the control's run-to-run spread was 9–10% against the 1.9% of the table above —
-`HashMap` + FxHash came out at **196 / 200 ns**, `PerfectHashIndex::id_unchecked` at **216 / 216**
-and the SipHash `HashMap` at **341 / 347**. Against a fast-hashed map, in other words, lexindex's
-latency advantage is gone; what it still offers is the footprint and the serialisable,
-memory-mappable blob. (The table above still stands: 0.10 changed how the indexes are
-*built* and 0.11 added new build paths and a faster batched `ids_of`, but neither touched a byte of
-the blob or an instruction of the single-key lookups measured here.)
+too (FxHash, written out in the example rather than added as a dependency). In the same 1.0 session
+as the table above, `HashMap` + FxHash reads **~156 ns** and `PerfectHashIndex::id_unchecked`
+**~75 ns** — so on a closed vocabulary the perfect hash is now about **2× faster than a
+fast-hashed map**, not merely level with it. That reverses what this README said through 0.12, where
+two 12-run sessions on a *shared* machine put FxHash at 196/200 ns against `id_unchecked`'s 216/216
+and concluded the latency advantage was gone. What changed is not the measurement conditions but the
+code: 1.0's own perfect hash and its 8-byte-at-a-time key hash. `CompactHashIndex::id` (~157 ns) is
+level with the FxHash map and still carries the membership check and the 1.30 B/key blob.
 
 **Two things the table above cannot show, both measured on 0.11 with an independent harness
 (`local/latency/`, one process, all forms alternated per round, min of 12):**
@@ -478,26 +479,28 @@ rather than the corpus's:
 
 | n | structure | keys | build | bytes/key | peak RSS | lookup |
 |---|---|---|---:|---:|---:|---:|
-| 1 M | `StringIndex` | list | 0.52 s | 0.68\* | 154 MB | 206 ns |
-| 1 M | `StringIndex` | generator | 0.60 s | 0.68\* | 147 MB | 209 ns |
-| 1 M | `CompactHashIndex` | list | 0.21 s | 1.30 | 157 MB | 257 ns |
-| 1 M | `CompactHashIndex` | **generator** | 0.32 s | 1.30 | **83 MB** | 176 ns |
-| 10 M | `StringIndex` | list | 6.8 s | 2.00\* | 1108 MB | 851 ns |
-| 10 M | `StringIndex` | generator | 7.8 s | 2.00\* | 1032 MB | 923 ns |
-| 10 M | `CompactHashIndex` | list | 2.4 s | 1.30 | 988 MB | 330 ns |
-| 10 M | `CompactHashIndex` | **generator** | 3.5 s | 1.30 | **304 MB** | 302 ns |
+| 1 M | `StringIndex` | list | 0.38 s | 0.68\* | 154 MB | 210 ns |
+| 1 M | `StringIndex` | generator | 0.53 s | 0.68\* | 147 MB | 211 ns |
+| 1 M | `CompactHashIndex` | list | 0.26 s | 1.30 | 152 MB | 223 ns |
+| 1 M | `CompactHashIndex` | **generator** | 0.38 s | 1.30 | **84 MB** | 164 ns |
+| 10 M | `StringIndex` | list | 5.6 s | 2.00\* | 1108 MB | 734 ns |
+| 10 M | `StringIndex` | generator | 6.5 s | 2.00\* | 1032 MB | 728 ns |
+| 10 M | `CompactHashIndex` | list | 1.8 s | 1.30 | 986 MB | 253 ns |
+| 10 M | `CompactHashIndex` | **generator** | 3.1 s | 1.30 | **297 MB** | 246 ns |
 
-<sub>**Build and lookup times below predate 1.0's in-crate perfect hash and have not been
-re-measured on it** — the `bytes/key` and `peak RSS` columns are current. The MPH's own build is
-1.78× the old one at 10 M and its lookup 0.91×, both measured directly; what that does to a whole
-`CompactHashIndex` build is not something to infer from those, so it is left to a measurement
-session rather than scaled here.
+<sub>Measured on the 1.0 code, one idle session, one process per cell. **It is not comparable cell
+by cell with the 0.10 table it replaces**, which ran on a *shared* machine: `StringIndex`, whose code
+has not changed since 0.5.1 and so is the control here, reads 1.2–1.4× faster now. Nor is that
+control usable to normalise `CompactHashIndex`, and the reason is worth stating — the FST build is
+single-threaded and the perfect hash's is eight-threaded, so core contention penalised them by very
+different amounts. What the numbers say directly: at 1 M the `CompactHashIndex` build went 0.21 →
+0.26 s against a session that got *faster*, which is the price of 1.0's own perfect hash; at 10 M it
+went 2.4 → 1.8 s, because that build parallelises and the old session had a core taken away from it.
+Lookups improved 1.2–1.3×, but so did `StringIndex`'s, so nothing lexindex-specific is resolvable
+there.
 \* bigram keys share far more prefixes than single words — at 1 M the generator draws on only
 1 000 distinct words, which is why `StringIndex` compresses to an unrepresentative 0.68 B/key there;
-the honest single-word figure is in the size table above. One session on the 0.10 code, one process
-per cell. **The machine was shared** (another job held a core throughout), so the times are slower
-across the board than an idle session would give — `StringIndex`'s build is the control here, since
-its code has not changed since 0.5.1 and it reads 1.6× slower than it did on an idle box. Read the
+the honest single-word figure is in the size table above. Read the
 `peak RSS` and `bytes/key` columns, which are not clock-dependent, and read the times only against
 each other. Peak RSS in the *list* rows is dominated by the Python key list; the *generator* rows are
 the index's own cost, which is why `CompactHashIndex` falls 3.3× there and `StringIndex` barely
