@@ -99,9 +99,9 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 
 ```toml
 [dependencies]
-lexindex = "0.11"
+lexindex = "0.12"
 # fst-only (drop the ptr_hash dependency):
-# lexindex = { version = "0.11", default-features = false }
+# lexindex = { version = "0.12", default-features = false }
 ```
 
 ## Usage
