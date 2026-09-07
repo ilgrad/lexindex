@@ -317,9 +317,9 @@ free in the target directory until the build finishes. Filling the arena in one 
 what made the build rewrite its own file dozens of times over.
 
 Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
-`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra dependencies)
-and the only one that compiles for 32-bit targets, including `wasm32-unknown-unknown` — `mph` needs a
-64-bit pointer width and refuses anything else at compile time.
+`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra
+dependencies). All of them compile for 32-bit targets, `wasm32-unknown-unknown` included — leave
+`mmap` off there, since there is nothing to memory-map.
 
 ### Editing without a rebuild — `Overlay`
 

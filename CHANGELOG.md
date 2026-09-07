@@ -44,6 +44,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The whole library builds on 32-bit targets, `wasm32` included — `mph` too.** Two things had kept
+  the hash indexes off them: `ptr_hash` pulled in `sucds`, which refuses any other pointer width,
+  and the MPH's own `u64 → usize` narrowings had never been audited. The dependency left with the
+  backend in this release, and the audit found one narrowing that mattered — the remap's entry count
+  in `Mphf::from_bytes`, where a fabricated `slots` would have truncated into a plausible length
+  instead of failing. Everything else on a load path was already `try_from`. The `compile_error!`
+  that explained the restriction is gone, and CI cross-checks `i686` and `wasm32`. Leave `mmap` off
+  on `wasm32`: there is nothing there to memory-map.
+
 - **A libFuzzer target over the MPH's own blob (`parse_mphf`), and a seed for it.** The two index
   targets reach that format only behind their own header, where a mutation has to keep two
   checksums and a length identity intact first — so in practice they fuzz the framing and never the

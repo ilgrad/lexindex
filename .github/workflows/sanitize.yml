@@ -43,12 +43,11 @@ jobs:
         with:
           components: miri
       - uses: Swatinem/rust-cache@v2
-      # Deliberately narrow. The `mph` path pulls in ptr_hash's prefetch and SIMD intrinsics, which
-      # Miri does not support, and the interpreter is far too slow to build a perfect hash — ASan
-      # above covers that half. What is left for Miri is where lexindex does its own byte-range and
-      # pointer work: `blob` (the shared, range-limited views every index borrows from) and
-      # `subsequence` (the automaton's index arithmetic). Interpreting the whole fst suite would
-      # take hours and add nothing.
+      # Deliberately narrow: the interpreter is orders of magnitude slower than the machine, so it
+      # goes where lexindex does its own byte-range and pointer work — `blob` (the shared,
+      # range-limited views every index borrows from) and `subsequence` (the automaton's index
+      # arithmetic). ASan above covers the rest. Interpreting the whole fst suite would take hours
+      # and add nothing.
       # Isolation off because these tests write real files; under Miri's default isolation those
       # calls are refused rather than checked.
       - name: cargo miri test (blob + subsequence)
@@ -57,6 +56,16 @@ jobs:
         run: |
           cargo +nightly miri test --no-default-features --lib blob::
           cargo +nightly miri test --no-default-features --lib subsequence::
+      # The only place 32-bit code actually *runs*. `cargo check --target i686` is its own CI job,
+      # but a compilation check cannot see a `u64 -> usize` truncation, and there is no 32-bit
+      # runner to test on — Miri needs neither, since it interprets. It earned this on its first
+      # run, catching a test that pinned an error message which is a property of the pointer width.
+      # `overlay::` builds a perfect hash under the interpreter and costs minutes: weekly, not per
+      # push.
+      - name: cargo miri test on a 32-bit target (the parsers)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay::
 
   fuzz:
     name: libFuzzer (${{ matrix.target }})

@@ -153,10 +153,12 @@ promise that a rebuild will agree. `StringIndex` ids are the sorted rank and sur
 key set trivially.
 
 **Blob portability.** Every field of every blob is written little-endian and read byte-wise, so a
-blob moves between machines of any endianness or pointer width — with the one caveat that the `mph`
-feature itself still requires a 64-bit target, because the MPH's slot arithmetic narrows `u64` to
-`usize` in places nobody has audited for a smaller one. `StringIndex`'s blob is the `fst`, whose
-encoding is little-endian by specification.
+blob moves between machines of any endianness or pointer width — and since 1.0 that includes 32-bit
+ones, `wasm32` among them. What made `mph` 64-bit-only was first `ptr_hash`'s `sucds`, which refuses
+any other width, and then the MPH's own `u64 → usize` narrowings: the dependency left with the
+backend, and every length a blob supplies is now converted with `try_from`, so a fabricated one fails
+identically at either width instead of truncating at one of them. `StringIndex`'s blob is the `fst`,
+whose encoding is little-endian by specification.
 
 ## `Overlay`
 
@@ -235,10 +237,11 @@ checking but a different MPH.
 ## Cargo features
 
 - `mph` (default) — `PerfectHashIndex`, `CompactHashIndex` and the in-crate MPH behind them. No
-  dependency; 64-bit targets only.
-- `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`).
+  dependency, any pointer width.
+- `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`). The one feature with a target
+  it cannot serve: there is nothing to map on `wasm32`.
 - `python` — the PyO3 abi3 extension module.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and
-  owned `save`/`load`, depending on nothing but `fst`, and the only build that runs on a 32-bit
-  target. The full default build depends on `fst` and `memmap2` and nothing else, and `cargo audit`
-  reports nothing on either.
+  owned `save`/`load`, depending on nothing but `fst`. The full default build depends on `fst` and
+  `memmap2` and nothing else, and `cargo audit` reports nothing on either. CI cross-checks `i686`
+  and `wasm32` on both.

@@ -36,22 +36,8 @@
 // own justification in an `unsafe {}` block rather than ride on the signature.
 #![deny(unsafe_op_in_unsafe_fn)]
 
-// The 64-bit requirement outlived the dependency that imposed it: `ptr_hash`'s `sucds` refused any
-// other width, and dropping it for the in-crate MPH removed that. What has *not* been done is the
-// audit that would let this gate go — the MPH's slot arithmetic is `u64` throughout and narrows to
-// `usize` in a handful of places, each of which is a truncation on a 32-bit target rather than an
-// error. Until every one of those is checked and cross-built, say so here rather than ship a
-// silently wrong index on wasm32.
-#[cfg(all(feature = "mph", not(target_pointer_width = "64")))]
-compile_error!(
-    "lexindex's `mph` feature (PerfectHashIndex, CompactHashIndex) requires a 64-bit target: its \
-     minimal perfect hash indexes slots as `u64` and narrows them to `usize`, which has not been \
-     audited for a narrower width. Build with `--no-default-features` for the `fst`-only \
-     `StringIndex`, which supports 32-bit targets including `wasm32-unknown-unknown`."
-);
-
 mod blob;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 mod mphf;
 mod overlay;
 mod string_index;
@@ -63,23 +49,26 @@ pub use string_index::StringIndex;
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash
 // and arena live behind the `mph` feature; `StringIndex` reconstructs `id → key` from the FST itself
 // and needs none of them.
-// The width is part of the gate so that a 32-bit build reports the `compile_error!` above and
-// nothing else: without it, the modules would also fail on their own narrowing conversions, and the
-// one message that explains what to do would be buried.
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+//
+// They were 64-bit-only until 1.0, for two reasons that both went away: `ptr_hash` pulled in `sucds`,
+// which refuses any other width, and the MPH's own `u64 → usize` narrowings had not been audited.
+// The dependency left with the backend, and the audit is done — every length a blob supplies is
+// converted with `try_from` and every build-path narrowing is bounded by the address space it would
+// have to exhaust first. `cargo check` on `i686` and `wasm32` is a CI job, so it stays that way.
+#[cfg(feature = "mph")]
 mod arena;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 mod compact_hash;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 mod hash;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 mod perfect_hash;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 pub use compact_hash::CompactHashIndex;
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 pub use perfect_hash::PerfectHashIndex;
 
-#[cfg(all(feature = "python", target_pointer_width = "64"))]
+#[cfg(feature = "python")]
 mod python;
 
 /// Entry points for the fuzz targets in `fuzz/`, and **not public API**: the `fuzzing` feature is
@@ -89,7 +78,7 @@ mod python;
 /// lengths, checksums, the side table and the fingerprint range before the MPH region is read.
 /// Those carry the branches arbitrary bytes actually reach, and they are `pub(crate)`; a libFuzzer
 /// target lives in its own crate and cannot see them.
-#[cfg(all(feature = "fuzzing", feature = "mph", target_pointer_width = "64"))]
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
 #[doc(hidden)]
 pub mod fuzzing {
     /// Parse the framing of a `CompactHashIndex` blob; `true` if it was accepted. The verdict is

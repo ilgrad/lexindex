@@ -445,7 +445,10 @@ impl Mphf {
             ));
         }
 
-        let entries = (slots - n) as usize;
+        // Narrowed rather than cast: on a 32-bit target `as usize` would truncate a fabricated
+        // `slots` into a plausible remap length, and the length identity below would then agree
+        // with a table that cannot cover its own slot range.
+        let entries = usize::try_from(slots - n).map_err(|_| SIZE)?;
         let bucket_count = usize::try_from(
             parts
                 .checked_mul(buckets_per_part)
@@ -528,6 +531,14 @@ impl Mphf {
     /// takes. Exposed so that a test can prove it rather than assert it, and so a caller inside its
     /// own pool can decline to open another one.
     pub fn build_with_threads(hashes: &[u64], threads: usize) -> Result<Self, IndexError> {
+        // The CSR offsets and the slot-owner marker are `u32`, so the table cannot describe more
+        // keys than that. Both callers refuse such an index first, for their own reason — their ids
+        // are `u32` — but the limit belongs where it is assumed, not two modules away.
+        if hashes.len() > u32::MAX as usize {
+            return Err(IndexError::Build(
+                "minimal perfect hash: more than u32::MAX keys",
+            ));
+        }
         for attempt in 0..SEED_TRIES {
             let seed = mix(0xA5A5_5A5A_DEAD_BEEF ^ u64::from(attempt));
             if let Some(built) = Self::try_build(hashes, seed, threads.max(1)) {

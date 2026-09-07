@@ -125,6 +125,10 @@ impl StringArena {
     /// This is what lets a builder place the keys without ever holding them: the offset table is
     /// derivable from the lengths alone, so the bytes can be written afterwards, out of order,
     /// straight into a mapped file. Read one back with [`offset_at`](Self::offset_at).
+    ///
+    /// Only `build_to_file` writes an arena this way, so this and its reader are behind `mmap` with
+    /// it — otherwise an `mph`-without-`mmap` build carries two functions nothing can call.
+    #[cfg(feature = "mmap")]
     pub(crate) fn prefix_for_lengths(lens: &[u32]) -> (Vec<u8>, usize, usize) {
         let data_len: usize = lens.iter().map(|&l| l as usize).sum();
         let width = if data_len <= u32::MAX as usize {
@@ -146,6 +150,7 @@ impl StringArena {
     }
 
     /// Offset `i` out of a prefix built by [`prefix_for_lengths`](Self::prefix_for_lengths).
+    #[cfg(feature = "mmap")]
     pub(crate) fn offset_at(prefix: &[u8], width: usize, i: usize) -> u64 {
         read_offset(prefix, HEADER + i * width, width).unwrap_or(0)
     }

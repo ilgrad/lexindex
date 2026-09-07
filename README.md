@@ -40,10 +40,9 @@ All three assign dense ids in `[0, n)` and **serialise to a flat blob** (`save` 
 `load_mmap`) — build once, persist, then reload and query many times. All are immutable after
 building; **`Overlay`** sits on top of any of them to add and remove keys without a rebuild, keeping
 every id stable, and folds the edits back into a fresh base with `compact()`.
-The `mph` feature (on by default) provides the two hash indexes; `--no-default-features` is `fst`-only
-and the only configuration that builds for **32-bit targets**, `wasm32-unknown-unknown` included —
-the minimal perfect hash's dependency chain requires a 64-bit pointer width, and a 32-bit build with
-`mph` says so at compile time.
+The `mph` feature (on by default) provides the two hash indexes. Every configuration builds for
+**32-bit targets**, `wasm32-unknown-unknown` included; `mmap` is the one to leave off there, since
+there is nothing to memory-map.
 
 ## Python
 

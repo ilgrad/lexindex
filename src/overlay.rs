@@ -314,7 +314,7 @@ impl OverlayKeys for crate::StringIndex {
     }
 }
 
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 impl OverlayBase for crate::PerfectHashIndex {
     const BASE_TAG: u8 = 2;
     const EXACT_MEMBERSHIP: bool = true;
@@ -332,7 +332,7 @@ impl OverlayBase for crate::PerfectHashIndex {
     }
 }
 
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 impl OverlayKeys for crate::PerfectHashIndex {
     fn base_key(&self, id: u64) -> Option<String> {
         self.key(u32::try_from(id).ok()?).map(str::to_owned)
@@ -343,7 +343,7 @@ impl OverlayKeys for crate::PerfectHashIndex {
     }
 }
 
-#[cfg(all(feature = "mph", target_pointer_width = "64"))]
+#[cfg(feature = "mph")]
 impl OverlayBase for crate::CompactHashIndex {
     const BASE_TAG: u8 = 3;
 
@@ -859,7 +859,19 @@ mod tests {
                 seal(&mut b);
                 b
             }),
+            // `u32::MAX`, not `u64::MAX`: a length that fits `usize` at *either* width takes the
+            // range check at both, where `u64::MAX` is refused one step earlier on a 32-bit target
+            // and this assertion would name the wrong message there. The narrowing itself is the
+            // case below.
             ("overlay base blob out of range", {
+                let mut b = good.clone();
+                b[5..13].copy_from_slice(&u64::from(u32::MAX).to_le_bytes());
+                seal(&mut b);
+                b
+            }),
+            // Refused for its width on a 32-bit target and for its range on a 64-bit one; both are
+            // a clean `Format`, and which one runs is the platform's business, not this test's.
+            ("", {
                 let mut b = good.clone();
                 b[5..13].copy_from_slice(&u64::MAX.to_le_bytes());
                 seal(&mut b);
@@ -932,6 +944,11 @@ mod tests {
         ];
         for (expected, bytes) in cases {
             match Overlay::from_bytes_with(&bytes, StringIndex::from_bytes) {
+                // An empty `expected` asks only for a clean refusal, for the one case whose
+                // message is a property of the target's pointer width.
+                Err(IndexError::Format(msg)) if expected.is_empty() => {
+                    assert!(msg.starts_with("overlay base blob"), "{msg}")
+                }
                 Err(IndexError::Format(msg)) => assert_eq!(msg, expected),
                 other => panic!("expected {expected:?}, got {:?}", other.map(|o| o.len())),
             }
@@ -1050,7 +1067,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn a_blob_refuses_the_wrong_base_before_the_loader_runs() {
         use crate::PerfectHashIndex;
@@ -1098,7 +1115,7 @@ mod tests {
         assert_eq!(back.keys(), ov.keys());
         assert_eq!(back.compact().unwrap().len(), 2);
     }
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn a_perfect_hash_overlay_round_trips_through_its_own_loader() {
         use crate::PerfectHashIndex;
@@ -1115,7 +1132,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn a_compact_hash_overlay_round_trips_its_membership() {
         use crate::CompactHashIndex;
@@ -1198,7 +1215,7 @@ mod tests {
         assert!(!ov.is_empty());
     }
 
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn overlay_over_a_perfect_hash_round_trips() {
         use crate::PerfectHashIndex;
@@ -1228,7 +1245,7 @@ mod tests {
     /// The duplicate-addition check is keyed on `EXACT_MEMBERSHIP`, so it must not fire over a
     /// probabilistic base: `CompactHashIndex::id` answers `Some` for keys it never held, and
     /// rejecting on that would refuse blobs that are perfectly sound.
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn a_duplicate_addition_is_refused_only_over_an_exact_base() {
         use crate::{CompactHashIndex, PerfectHashIndex};
@@ -1278,7 +1295,7 @@ mod tests {
     /// `CompactHashIndex` stores no keys, so an overlay over it has membership and nothing else —
     /// `key` and `compact` are not merely unimplemented but absent, since `OverlayKeys` is what
     /// provides them and it cannot be implemented without the keys.
-    #[cfg(all(feature = "mph", target_pointer_width = "64"))]
+    #[cfg(feature = "mph")]
     #[test]
     fn overlay_over_a_compact_hash_tracks_membership() {
         use crate::CompactHashIndex;
