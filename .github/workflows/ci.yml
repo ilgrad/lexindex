@@ -40,15 +40,23 @@ jobs:
       # measurements, which are `#[ignore]`d and so never run here -- but they still have to compile.
       - name: clippy (bench-mphf = the MPH measurements)
         run: cargo clippy --features bench-mphf --all-targets -- -D warnings
+      - name: clippy (fuzzing = the shims the fuzz targets call)
+        run: cargo clippy --features fuzzing --all-targets -- -D warnings
       - name: test (default)
         run: cargo test
       - name: test (no-default-features)
         run: cargo test --no-default-features
-      # Debug and release are different programs here: `debug_assert!`s inside ptr_hash and
-      # cacheline-ef fire only in debug, and the optimiser is free to reorder the bounds reasoning
-      # they document. The regression tests for the remap bound are only meaningful in both.
+      # Debug and release are different programs here: the MPH's `debug_assert!`s fire only in
+      # debug, while the optimiser is free to reorder the bounds reasoning they document. The
+      # regression tests for the remap bound are only meaningful in both.
       - name: test (release)
         run: cargo test --release
+      # The `fuzzing` feature is off by default and `sanitize.yml` only runs weekly, so the test
+      # that keeps the fuzz seed corpus current has no other job that builds it. It went stale for
+      # exactly that reason once already: 1.0 changed the blob formats and every seed became a
+      # blob refused on its magic, which the fuzzers would have reported as a clean run.
+      - name: test (fuzzing = the fuzz seed corpus is still a corpus)
+        run: cargo test --features fuzzing --test golden
       - name: cargo audit
         run: cargo audit
       - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap)

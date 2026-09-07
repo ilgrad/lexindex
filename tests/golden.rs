@@ -173,11 +173,16 @@ mod mph {
 /// The fuzz targets in `fuzz/` are seeded from these same files, and a target that rejected every
 /// seed on its first branch would explore nothing while still reporting "no crashes". This asserts
 /// the shims they call actually accept a real blob, so the seed corpus is worth something.
+///
+/// **The `0.9.1` blobs stopped being seeds when 1.0 changed the backend.** They are refused on the
+/// magic now, one branch in, which is exactly the failure this test exists to catch — and it did not
+/// catch it, because nothing in CI built the `fuzzing` feature. Both are fixed here: the seeds are
+/// current, and `ci.yml` runs this test.
 #[cfg(all(feature = "fuzzing", feature = "mph"))]
 #[test]
 fn the_fuzz_shims_accept_a_real_blob() {
-    let compact = std::fs::read(data("golden-0.9.1-compact.bch")).unwrap();
-    let perfect = std::fs::read(data("golden-0.9.1-perfect.bmp")).unwrap();
+    let compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
+    let perfect = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
     for verify in [false, true] {
         assert!(
             lexindex::fuzzing::parse_compact_frame(&compact, verify),
@@ -190,6 +195,21 @@ fn the_fuzz_shims_accept_a_real_blob() {
     }
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
+
+    // A pre-1.0 blob is refused at the magic, so it is worth nothing as a seed. Pinned so that the
+    // seeds cannot silently go stale again the next time a format changes.
+    let old = std::fs::read(data("golden-0.9.1-compact.bch")).unwrap();
+    assert!(!lexindex::fuzzing::parse_compact_frame(&old, false));
+
+    // The standalone MPH seed. `parse_mphf` starts inside the format the other two only reach
+    // behind their own header, so without this file its target would have nothing to mutate: an
+    // `MPH1` header is eight scalars, a checksum and a length identity, and no blob written for
+    // another format gets past the magic.
+    let mphf = std::fs::read(data("golden-1.0.0-mphf.bin")).unwrap();
+    assert_eq!(&mphf[..4], b"MPH1");
+    assert!(lexindex::fuzzing::parse_mphf(&mphf), "MPH seed rejected");
+    assert!(!lexindex::fuzzing::parse_mphf(&compact));
+    assert!(!lexindex::fuzzing::parse_mphf(&perfect));
 }
 
 /// The overlay format `0.12.0` published, and the one `1.0` writes. Their base is a `StringIndex`,
