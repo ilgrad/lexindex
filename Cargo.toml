@@ -33,6 +33,9 @@ mph = []
 mmap = ["dep:memmap2"]
 # Python bindings (PyO3 abi3 extension module); pulls in `mph` + `mmap` for the full API surface.
 python = ["dep:pyo3", "mph", "mmap"]
+# The MPH's own size/speed measurements (`mphf::spike`). Off by default because they run for
+# minutes and are `#[ignore]`d, and an ignored test's body still counts against the coverage floor.
+bench-mphf = ["mph"]
 # Exposes `lexindex::fuzzing`, the safe framing parsers, to the libFuzzer targets in `fuzz/`.
 # Not public API and never enabled by a dependent — see the module's own documentation.
 fuzzing = ["mph"]

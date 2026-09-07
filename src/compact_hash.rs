@@ -1095,6 +1095,9 @@ mod tests {
         assert!(matches!(from_bytes(&blob), Err(IndexError::Format(_))));
     }
 
+    /// `[0, 0)` has no inhabitant, so the MPH has no table and `Mphf::index` would panic on one.
+    /// Every query path has to notice that before it asks — including the batch, which is the one
+    /// that allocates an answer per key.
     #[test]
     fn empty_round_trips() {
         let empty = CompactHashIndex::build_bits(Vec::<String>::new(), 4).unwrap();
@@ -1102,8 +1105,10 @@ mod tests {
         assert!(empty.is_empty() && empty.id("x").is_none());
         let empty = CompactHashIndex::build(Vec::<String>::new(), 1).unwrap();
         assert!(empty.is_empty() && empty.id("x").is_none() && empty.id_unchecked("x") == 0);
+        assert_eq!(empty.ids_of(&["x", "y"]), vec![None, None]);
         let restored = from_bytes(&empty.to_bytes().unwrap()).unwrap();
         assert!(restored.is_empty());
+        assert_eq!(restored.ids_of(&["x"]), vec![None]);
     }
 
     #[test]

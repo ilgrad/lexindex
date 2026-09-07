@@ -141,7 +141,8 @@ dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zer
 
 ### Choosing the fingerprint width
 
-Size is the minimal perfect hash (~0.27 B/key) plus exactly `fingerprint_bits/8` bytes per key, and
+Size is the minimal perfect hash (0.30 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
+per key, and
 the membership false-positive rate is about `2^-fingerprint_bits` — a design rate for
 well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes;
 not a defence against an adversary who chooses the queries, since both hashes are deterministic and
@@ -150,12 +151,12 @@ same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 
 | `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
 |---:|---:|---:|---:|
-| 4 | **0.77** | 6.25% | 62 500 |
-| 6 | 1.02 | 1.56% | 15 625 |
-| 8 (= `fingerprint_bytes=1`, default) | 1.27 | 0.39% | 3 906 |
-| 12 | 1.77 | 0.024% | 244 |
-| 16 (= `fingerprint_bytes=2`) | 2.27 | 0.0015% | 15 |
-| 32 (= `fingerprint_bytes=4`) | 4.27 | 2.3×10⁻⁸% | ~0 |
+| 4 | **0.80** | 6.25% | 62 500 |
+| 6 | 1.05 | 1.56% | 15 625 |
+| 8 (= `fingerprint_bytes=1`, default) | 1.30 | 0.39% | 3 906 |
+| 12 | 1.80 | 0.024% | 244 |
+| 16 (= `fingerprint_bytes=2`) | 2.30 | 0.0015% | 15 |
+| 32 (= `fingerprint_bytes=4`) | 4.30 | 2.3×10⁻⁸% | ~0 |
 
 Pick by the probe mix, not the key count: the rate is per *non-member* lookup, so a workload that
 only ever queries members never sees a false positive at any width, while a filter in front of a
@@ -164,7 +165,7 @@ index costs 2.98 B/key on this corpus — `CompactHashIndex` is below it at *eve
 21 bits (rate 2⁻²¹ ≈ 5×10⁻⁵%).
 
 ```python
-tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.77 B/key, 1-in-16 false positives
+tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.80 B/key, 1-in-16 false positives
 tiny.fingerprint_bits                               # -> 4
 ```
 
@@ -198,11 +199,12 @@ because each index loads itself; the blob records which base wrote it, so passin
 an error rather than an unchecked read of bytes meant for something else. `save` is atomic, like the
 indexes' own: a crash or a full disk leaves the previous file whole rather than a truncated one.
 
-**`Overlay.load` and `Overlay.from_bytes` inherit the base class's trust contract.** The overlay's
-own framing — the header lengths, the additions, the tombstones — is validated for every base, and
-malformed bytes raise `ValueError`. What follows goes to the base class's loader, which is checked
-for `StringIndex` and *unchecked* for `PerfectHashIndex` and `CompactHashIndex`, exactly as their
-own `from_bytes` is. Over those two, load only blobs you wrote.
+**`Overlay.load` and `Overlay.from_bytes` validate everything they read, but carry no integrity
+check of their own.** The overlay's framing — the header lengths, the additions, the tombstones — is
+validated for every base, and malformed bytes raise `ValueError`; what follows goes to the base
+class's loader, which validates its own region. What the format does not have is a checksum over the
+additions and tombstones, which every base blob has for itself: a flipped bit in an addition that
+stays valid UTF-8 loads as a different key, and one in a tombstone word revives a removed id.
 
 `key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
@@ -350,11 +352,9 @@ The base may be shared: `OverlayBase` is implemented for `Arc<I>`, so `Overlay<A
 leaves the index usable and lets several overlays sit on one base. That is what the Python bindings
 use.
 
-`from_bytes_with` takes the base's loader rather than picking one, because the bases do not agree on
-safety: `StringIndex::from_bytes` is safe, while the perfect-hash loaders are `unsafe fn`. A
-`PerfectHashIndex` base is loaded as `Overlay::from_bytes_with(&blob, |b| unsafe {
-PerfectHashIndex::from_bytes(b) })`, and the `unsafe` sits on the part that actually carries the
-obligation.
+`from_bytes_with` takes the base's loader rather than picking one, because `Overlay<I>` is generic
+over the base and each base parses its own blob: `Overlay::from_bytes_with(&blob,
+PerfectHashIndex::from_bytes)`. All three base loaders are safe fns.
 
 `key`, `keys` and `compact` need the base to store its keys, which `CompactHashIndex` does not — an
 overlay over it answers membership and nothing else, and the absence is a compile error rather than a

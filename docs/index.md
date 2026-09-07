@@ -1,9 +1,8 @@
 # lexindex
 
 **Compact, immutable string↔id indexes for huge catalogs** — a Rust core built on
-[`fst`](https://crates.io/crates/fst) (finite-state transducer) and
-[`ptr_hash`](https://crates.io/crates/ptr_hash) (minimal perfect hash), with typed Python bindings
-and no Python runtime dependencies.
+[`fst`](https://crates.io/crates/fst) (finite-state transducer) and an in-crate minimal perfect hash,
+with typed Python bindings and no Python runtime dependencies.
 
 Build once over a set of strings (entity names, cluster labels, vocabulary terms, document keys),
 then query many times: exact `string ↔ id` both ways, plus **prefix**, **range**, **fuzzy**
@@ -35,8 +34,9 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers ordered and
   typo-tolerant queries. Use it for autocomplete, fuzzy search, ordered browse.
-- **`CompactHashIndex`** — the **smallest** `string → dense id` map (`ptr_hash` + a fingerprint per
-  key, no keys stored). ~1.3 bytes/key, at the cost of probabilistic membership and no reverse lookup.
+- **`CompactHashIndex`** — the **smallest** `string → dense id` map (a minimal perfect hash plus a
+  fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no
+  reverse lookup.
   Use it when a fixed vocabulary's footprint is paramount.
 - **`PerfectHashIndex`** — a **minimal-perfect-hash** dictionary with verified membership and reverse
   lookup; the fastest exact `string → dense id`. Use it as a fixed-vocabulary token↔id map on a hot

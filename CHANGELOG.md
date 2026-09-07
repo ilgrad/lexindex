@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — breaking
+
+- **The minimal perfect hash is now this crate's own, and every pre-1.0 blob is refused.**
+  `PerfectHashIndex` and `CompactHashIndex` were built on `ptr_hash`, whose pilot table is read
+  unchecked and whose bounding fields are private, so a blob holding one could not be validated
+  from outside the crate that owned it. The new backend writes every array length into its own
+  header (`MPH1`) and derives them again on load, which is what a loader needs to bound every read
+  it makes. `BMP2`/`BMP3`/`BMP4` and `BCH1`–`BCH5` therefore cannot be read at all: each embeds an
+  image the crate no longer links. They are refused with a message naming the version that wrote
+  them; the migration is to rebuild from the key list.
+
+- **`from_bytes` and `load` are safe fns on both hash indexes** — in Rust and in Python, where
+  there was never an `unsafe` marker to warn anyone. A crafted blob is now a wrong answer rather
+  than undefined behaviour. `load_mmap` stays `unsafe`, for the one obligation that is actually
+  about mapping: do not modify the file under the map.
+
+- **Ids are reproducible.** Construction is deterministic and independent of thread count, so the
+  same key set produces the same blob byte for byte. `PerfectHashIndex::build`'s docstring
+  previously promised the opposite.
+
+- **New blob formats: `BMP5` and `BCH6`.** `BCH6` drops the `overflow_cap` field — it existed to
+  bound `ptr_hash`'s unchecked remap, and the new one covers its whole slot range — so its header
+  is 40 bytes rather than 48.
+
+### Removed
+
+- **`ptr_hash` and `epserde`, and 129 crates with them.** The `mph` feature now has no dependency
+  at all; the crate's whole tree is `fst` plus `memmap2`. `cargo audit` goes from three allowed
+  warnings to none — every one came from that tree.
+
+### Changed
+
+- Loading a `PerfectHashIndex` no longer hashes every key in the arena. That pass existed to
+  recompute `overflow_cap` on each load and was O(n) on the blob's size.
+- `CompactHashIndex` costs 1.30 B/key at the 8-bit default and 0.80 at 4 bits, against 1.27 and
+  0.77 on the old backend: the in-crate MPH is 2.390 bits/key where `ptr_hash` was 2.169. Measured
+  on `/usr/share/dict/words` (479 823 keys). Build and lookup timings across the README have **not**
+  yet been re-measured on the new backend and say so where they appear.
+
 ## [0.12.1] — 2026-09-07
 
 ### Fixed

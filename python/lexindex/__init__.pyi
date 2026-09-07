@@ -130,24 +130,23 @@ class PerfectHashIndex:
     def serialized_len(self) -> int: ...
     @staticmethod
     def from_bytes(data: bytes) -> PerfectHashIndex:
-        """Reconstruct from a ``to_bytes`` blob **written by this library**.
+        """Reconstruct from a ``to_bytes`` blob.
 
-        The framing is validated and checksummed, so accidental corruption fails cleanly, but the
-        embedded perfect hash cannot be validated: a deliberately crafted blob is undefined
-        behaviour (the Rust loader is ``unsafe fn``). Never pass bytes from an untrusted source.
+        Every length the index will read is checked against the bytes present, so arbitrary input
+        raises ``ValueError`` rather than misbehaving. A blob written before 1.0 is refused: its
+        perfect hash came from a crate this version no longer links, so rebuild from the keys.
         """
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
     def load(path: str | os.PathLike[str]) -> PerfectHashIndex:
-        """Load a file **written by this library's** ``save`` — see ``from_bytes`` for why a crafted
-        file cannot be rejected.
-        """
+        """Load a file written by ``save``. Validated like ``from_bytes``."""
     @staticmethod
     def load_mmap(path: str | os.PathLike[str]) -> PerfectHashIndex:
-        """Memory-map a file **written by this library's** ``save`` and borrow it zero-copy.
+        """Memory-map a file written by ``save`` and borrow it zero-copy.
 
-        Two obligations: the file must be trusted (see ``from_bytes``), and it must not be modified
-        or truncated by any process while the index is alive (see ``StringIndex.load_mmap``).
+        One obligation, and it is about the mapping rather than the bytes: the file must not be
+        modified or truncated by any process while the index is alive (see
+        ``StringIndex.load_mmap``). The bytes themselves are validated as in ``from_bytes``.
         """
 
 @final
@@ -193,24 +192,23 @@ class CompactHashIndex:
     def serialized_len(self) -> int: ...
     @staticmethod
     def from_bytes(data: bytes) -> CompactHashIndex:
-        """Reconstruct from a ``to_bytes`` blob **written by this library**.
+        """Reconstruct from a ``to_bytes`` blob.
 
-        The framing is validated and checksummed, so accidental corruption fails cleanly, but the
-        embedded perfect hash cannot be validated: a deliberately crafted blob is undefined
-        behaviour (the Rust loader is ``unsafe fn``). Never pass bytes from an untrusted source.
+        Every length the index will read is checked against the bytes present, so arbitrary input
+        raises ``ValueError`` rather than misbehaving. A blob written before 1.0 is refused: its
+        perfect hash came from a crate this version no longer links, so rebuild from the keys.
         """
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
     def load(path: str | os.PathLike[str]) -> CompactHashIndex:
-        """Load a file **written by this library's** ``save`` — see ``from_bytes`` for why a crafted
-        file cannot be rejected.
-        """
+        """Load a file written by ``save``. Validated like ``from_bytes``."""
     @staticmethod
     def load_mmap(path: str | os.PathLike[str]) -> CompactHashIndex:
-        """Memory-map a file **written by this library's** ``save`` and borrow it zero-copy.
+        """Memory-map a file written by ``save`` and borrow it zero-copy.
 
-        Two obligations: the file must be trusted (see ``from_bytes``), and it must not be modified
-        or truncated by any process while the index is alive (see ``StringIndex.load_mmap``).
+        One obligation, and it is about the mapping rather than the bytes: the file must not be
+        modified or truncated by any process while the index is alive (see
+        ``StringIndex.load_mmap``). The bytes themselves are validated as in ``from_bytes``.
         """
 
 @final
@@ -273,11 +271,11 @@ class Overlay:
         The blob records which base wrote it and a mismatch is refused, so the wrong class is an
         error rather than an unchecked read of bytes meant for something else.
 
-        **The trust contract is the base class's own, and this method inherits it.** The overlay's
-        own framing is fully validated for every base and raises ``ValueError`` when malformed;
-        what follows the header goes to the base class's loader, which is checked for
-        :class:`StringIndex` and unchecked for :class:`PerfectHashIndex` and
-        :class:`CompactHashIndex`. Over those two, load only blobs you wrote.
+        **Validated throughout, but with no integrity check of its own.** The overlay's framing is
+        checked for every base and raises ``ValueError`` when malformed, and so is the base region,
+        by that class's own loader. What this format does not carry is a checksum over the additions
+        and tombstones, which the base blob has for itself — so a flipped bit in an addition that
+        stays valid UTF-8 loads as a different key, silently.
         """
 
     @staticmethod
@@ -285,4 +283,6 @@ class Overlay:
         path: str | os.PathLike[str],
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
-        """:meth:`from_bytes` from a file, inheriting the same trust contract from ``base``."""
+        """:meth:`from_bytes` from a file: validated the same way, with the same gap — the
+        additions and tombstones carry no integrity check of their own.
+        """

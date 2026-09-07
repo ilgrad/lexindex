@@ -669,17 +669,18 @@ def test_overlay_blob_refuses_the_wrong_base():
         lexindex.Overlay.from_bytes(blob, dict)
 
 
-def test_overlay_loaders_state_whose_trust_contract_they_inherit():
-    """The overlay's loaders are as safe as the base class's, and nothing in the signature says so.
+def test_overlay_loaders_state_the_gap_they_still_have():
+    """Every loader validates its bytes now, but the overlay carries no checksum of its own.
 
-    ``Overlay.from_bytes(data, PerfectHashIndex)`` reaches an unchecked deserialiser through a name
-    that reads like a parser, and Python has no ``unsafe`` block to mark the boundary. Until the
-    names carry it, the docstrings must — so this pins them: a refactor that drops the sentence
-    fails here rather than silently shipping a loader whose contract has gone undocumented.
+    A flipped bit in an addition that stays valid UTF-8 loads as a different key, and one in a
+    tombstone word revives a removed id — silently, where every other blob in this library catches
+    it. That is a property of the format, not a bug in the parser, and the docstrings are the only
+    place a Python caller learns it. This pins them: a refactor that drops the sentence fails here
+    rather than quietly leaving the gap undocumented.
     """
     for doc in (lexindex.Overlay.from_bytes.__doc__, lexindex.Overlay.load.__doc__):
         assert doc is not None
-        assert "trust contract" in doc
+        assert "integrity check" in doc
 
 
 def test_overlay_rejects_an_addition_that_duplicates_an_exact_base_key():

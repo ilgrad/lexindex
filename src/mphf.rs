@@ -305,7 +305,7 @@ impl Mphf {
     /// Bits per key: what the table costs, and the number its design is judged on. Only the
     /// measurements read it — a caller sizing a blob wants `PerfectHashIndex::serialized_len`,
     /// which counts the arena too.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "bench-mphf"))]
     pub fn bits_per_key(&self) -> f64 {
         if self.n == 0 {
             return 0.0;
@@ -1094,7 +1094,7 @@ mod tests {
     fn an_empty_set_builds_and_answers_nothing() {
         let mphf = Mphf::build(&[]).unwrap();
         assert_eq!(mphf.n(), 0);
-        assert_eq!(mphf.bits_per_key(), 0.0);
+        assert_eq!(mphf.byte_len(), HEADER);
     }
 
     /// Sizes either side of a power of two, and of the 64-bit words the occupancy bitset uses.
@@ -1199,12 +1199,19 @@ mod tests {
         // correctness.
         assert!(slots_per_part <= stride - 63);
         assert!(Mphf::from_bytes(&with_scalar(blob, 4, stride - 63)).is_ok());
-        // A header that checksums but was written by a different version of this file.
-        let mut wrong_version = blob.clone();
-        wrong_version[4..6].copy_from_slice(&(FORMAT + 1).to_le_bytes());
-        let check = crate::hash::hash_bytes(&wrong_version[..CHECKED]) as u32;
-        wrong_version[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
-        assert!(Mphf::from_bytes(&wrong_version).is_err(), "accepted v2");
+        // A header that checksums but was written by a different version of this file, and one
+        // whose reserved field carries a flag this version does not know about. Both have to be
+        // re-checksummed to reach the check under test at all.
+        for (at, word) in [(4usize, FORMAT + 1), (6, 1)] {
+            let mut bad = blob.clone();
+            bad[at..at + 2].copy_from_slice(&word.to_le_bytes());
+            let check = crate::hash::hash_bytes(&bad[..CHECKED]) as u32;
+            bad[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
+            assert!(
+                Mphf::from_bytes(&bad).is_err(),
+                "accepted a header word at {at}"
+            );
+        }
         assert!(parts > 1, "the reference table should have several parts");
     }
 
@@ -1316,11 +1323,13 @@ mod tests {
     }
 }
 
-/// Measurements for the 1.0-01 spike. Not part of the test suite — they take minutes and answer
-/// "how big and how fast", which is a question about this machine, not about correctness.
+/// Measurements, behind their own feature. They take minutes and answer "how big and how fast",
+/// which is a question about this machine rather than about correctness — and an `#[ignore]`d test
+/// still counts as uncovered code, so leaving them in the default build would spend a percent of
+/// the coverage floor on scaffolding that never runs.
 ///
-/// `cargo test --features own-mphf,mph --release --lib mphf::spike -- --ignored --nocapture`
-#[cfg(all(test, feature = "mph"))]
+/// `cargo test --features bench-mphf --release --lib mphf::spike -- --ignored --nocapture`
+#[cfg(all(test, feature = "bench-mphf"))]
 mod spike {
     use super::*;
 

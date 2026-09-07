@@ -36,6 +36,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: clippy (no-default-features = fst only)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
+      # A feature no job builds is a feature that breaks quietly; `bench-mphf` holds the MPH's
+      # measurements, which are `#[ignore]`d and so never run here -- but they still have to compile.
+      - name: clippy (bench-mphf = the MPH measurements)
+        run: cargo clippy --features bench-mphf --all-targets -- -D warnings
       - name: test (default)
         run: cargo test
       - name: test (no-default-features)

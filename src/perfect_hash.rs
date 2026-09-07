@@ -1557,12 +1557,22 @@ mod tests {
         assert_eq!(ids, (0..500).collect::<Vec<u32>>()); // exactly 0..n, no gaps or repeats
     }
 
+    /// `[0, 0)` has no inhabitant, so the MPH has no table and `Mphf::index` would panic on one.
+    /// Every query path has to notice that before it asks — including the batch, which is the one
+    /// that allocates an answer per key.
     #[test]
     fn empty_dictionary() {
         let idx = PerfectHashIndex::build(Vec::<String>::new()).unwrap();
         assert!(idx.is_empty());
         assert_eq!(idx.id("x"), None);
         assert_eq!(idx.key(0), None);
+        assert_eq!(idx.id_unchecked("x"), 0);
+        assert!(!idx.contains("x"));
+        assert_eq!(idx.ids_of(&["x", "y"]), vec![None, None]);
+        assert_eq!(
+            from_bytes(&idx.to_bytes().unwrap()).unwrap().ids_of(&["x"]),
+            vec![None]
+        );
     }
 
     #[test]

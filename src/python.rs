@@ -1125,21 +1125,20 @@ impl PyOverlay {
     /// The blob records which base wrote it and a mismatch is refused, so the wrong class is an
     /// error rather than an unchecked read of bytes meant for something else.
     ///
-    /// **The trust contract is the base class's own, and this method inherits it.** The overlay's
-    /// own framing — the header lengths, the additions and their UTF-8, the tombstones against the
-    /// id space — is fully validated for every base, and malformed bytes there raise `ValueError`.
-    /// What follows the header is handed to the base class's loader: with `StringIndex` that
-    /// loader is checked, while `PerfectHashIndex` and `CompactHashIndex` deserialise their tables
-    /// without validating them, exactly as their own `from_bytes` does. So over those two an
-    /// overlay blob is trust-your-own-blob data, and a crafted one is undefined behaviour rather
-    /// than an exception. Load only blobs this process, or something you trust, wrote.
+    /// **Validated throughout, but with no integrity check of its own.** The overlay's framing —
+    /// the header lengths, the additions and their UTF-8, the tombstones against the id space — is
+    /// checked for every base, and so is the base region, by that class's own loader; malformed
+    /// bytes raise `ValueError` rather than misbehaving. What this format does *not* carry is a
+    /// checksum over the additions and tombstones, which the base blob has for itself: a flipped
+    /// bit in an addition that stays valid UTF-8 loads as a different key, and one in a tombstone
+    /// word revives a removed id. Accidental corruption of that region is therefore silent.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
         Self::load_blob(py, data, base)
     }
 
-    /// [`from_bytes`](Self::from_bytes) from a file, and it inherits the same trust contract from
-    /// the base class: checked for `StringIndex`, trust-your-own-blob for the two hash indexes.
+    /// [`from_bytes`](Self::from_bytes) from a file: validated the same way, and with the same
+    /// gap — the additions and tombstones carry no integrity check of their own.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
         let data = py

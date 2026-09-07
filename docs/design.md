@@ -32,7 +32,7 @@ serialised blob is now simply `[magic "BIX4"][fst bytes]`.
 The smallest `string → dense id` map, and smaller than any installable trie. It pairs a minimal
 perfect hash with **one small fingerprint per key and no stored keys at all**:
 
-- **`key → id`.** The MPH ([`ptr_hash`](https://crates.io/crates/ptr_hash)) maps the key's
+- **`key → id`.** The MPH (in-crate, `src/mphf.rs`) maps the key's
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
 - **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
@@ -50,14 +50,14 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (~0.27 B/key — PtrHash is ≈2.2
-bits/key with its compact λ=3.9 parameters; the build falls back to the default λ=3.5 ≈2.4 on the
-rare compact-construction failure, and both serialise identically) plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.77 B/key at 4 bits
-(6.25% false positives), 1.27 at the 8-bit default (0.39%), 2.27 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH5"][n][fp_bits][overflow_cap][mph length][side_len]
-[payload][check][mph epserde bytes][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
+Because the keys themselves are never stored, size is just the MPH (0.30 B/key — 2.390 bits/key,
+measured, and flat in `n`: `8/λ` bits of pilot plus a block remap over the `1−α` of slots above `n`)
+plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.80 B/key at 4 bits
+(6.25% false positives), 1.30 at the 8-bit default (0.39%), 2.30 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+`id → key`. The serialised blob is `[magic "BCH6"][n][fp_bits][mph length][side_len]
+[payload][check][MPH1 blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
-32-bit check over the lexindex header — `overflow_cap` bounds an otherwise unchecked read, so it is
+32-bit check over the lexindex header — it frames every section, so it is
 not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
 payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, second hash)` pair
 — 16 bytes — per key and never the strings, so build memory does not grow with key length. The pairs
@@ -74,54 +74,50 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
 one silent case left is a pair colliding in *both* 64-bit hashes at once (`≈ 2^-128` per pair), which
-is indistinguishable from a duplicate key by construction and collapses into one entry. 0.7 blobs
-(`BCH3`) still load, as does a collision-free 0.8.0 `BCH4` (bit-identical to v5); a `BCH4` *with* a
-side table stored truncated side fingerprints and is refused with a rebuild message. 0.5/0.6 blobs
-(`BCH1`/`BCH2`) are refused; see below. On load, side-table ids are structurally required to be
-exactly the tail range `[m, n)` — the checksums vouch for transport, not construction.
+is indistinguishable from a duplicate key by construction and collapses into one entry. Every blob
+written before 1.0 (`BCH1`–`BCH5`) is refused; see below. On load, side-table ids are structurally
+required to be exactly the tail range `[m, n)` — the checksums vouch for transport, not
+construction.
 
-**ptr_hash construction is not deterministic, so a blob is not a reproducible artefact.** Two
-`PerfectHashIndex::build` calls over the same key set, in one process, serialise to *different*
-bytes — the pilots differ. The index is equally correct either way and every key answers, but the
-ids a key gets are not stable across builds, so a blob cannot be checksummed against a rebuild and
-two nodes building the same corpus will not agree on ids. Anything that needs stable ids must build
-once and distribute the blob. This is why `PerfectHashIndex::build_to_file` is tested against the
-in-memory index by behaviour — every key present, ids a permutation of `[0, n)`, non-members
-rejected — and not byte for byte: byte-identity is not a property `build` itself has.
+**Construction is deterministic, so a blob *is* a reproducible artefact.** Two `build` calls over
+the same key set produce the same bytes, on any thread count and any machine: the seed sequence is
+fixed and every part is placed independently of the others. Two nodes building the same corpus agree
+on ids, and a blob can be checksummed against a rebuild. `build_to_file` is still tested against the
+in-memory index by behaviour rather than byte for byte — it chooses the arena's offset width from
+the key lengths its first pass saw, which need not match — but the MPH region is identical.
 
-**ptr_hash's load factor is not exposed, and that is a measurement, not an omission.** `alpha` sets
-the slot count to `n / alpha`; the natural expectation is that lowering it trades size for an easier
-build. It does at 1 M — 0.90 gives a 16 % cheaper build for a 12 % larger index — and the trade
-*inverts* by 10 M, where every setting below the default is both bigger and slower (0.93: 1.37 B/key
-in 10.6 s against 0.99's 1.27 in 6.8 s) and 0.90 does not construct at all, aborting on a 197-key
-bucket against a λ of 3.9. `default_compact()` ships alpha, λ and the cubic-eps bucket function as
-one tuned triple, so alpha is not independently movable; a knob whose only reachable settings are
-worse is not worth the API surface. Measured on word bigrams at 1 M and 10 M for both MPH indexes.
-`fingerprint_bits` is the knob that *does* have a monotone trade, and it is public.
+**The MPH's load factor is not exposed, and that is a measurement, not an omission.** `α` sets the
+slot count to `n / α`; the natural expectation is that lowering it trades size for an easier build.
+The measured surface is not that shape. A window pilot is not 256 independent tries but four runs of
+64 correlated shifts, so a large bucket is far dearer than a Poisson model predicts, and λ dominates:
+at 10 M real-word bigram hashes, (3.6, 0.98) costs 2.555 bits/key and builds in 2.0 s while
+(4.0, 0.98) costs 2.333 and takes 5.5 s, and (3.9, 0.99) — a *smaller* index at 2.218 — takes 11.8 s.
+The shipped (3.9, 0.98) sits at the knee. A knob whose settings are all worse in one direction or the
+other is not worth the API surface; `fingerprint_bits` is the knob that *does* have a monotone trade,
+and it is public.
 
-**The `overflow_cap` field guards ptr_hash's unchecked remap.** ptr_hash's minimal `index()` remaps
-raw slots ≥ n through an internal Elias-Fano vector that only covers slots up to the last
-member-occupied one, and reads it *unchecked* (`cacheline-ef`'s `index_unchecked`). A non-member
-whose raw slot lands in the trailing free zone therefore indexes out of bounds — a debug assertion
-at best, undefined behaviour in release. The cap recorded at build time is the remap's exact length
-(the largest member `raw − n`, plus one, measured by streaming every member through
-`index_no_remap`), and queries answer `None` outright for raw slots past it: those slots are
-provably free, so no member can live there. Every query path is bounded by it, `id_unchecked`
-included: that method skips the membership *comparison*, not the bounds.
+**Every read the MPH makes is bounded by a length in its own header.** That is the whole reason it is
+in-crate. `index` touches four arrays — the part seeds, the pilots, and the remap's block bases and
+offsets — and each of those lengths is *derived* on load from the eight scalars in the `MPH1` header
+rather than read beside them, so a loader that recomputes them cannot be handed a length that
+disagrees with the table it describes. The remap is the one table whose *contents* can leave the
+image, so it is the one checked by value: every entry must land below `n`. What that buys is a
+`from_bytes` that is a safe fn on arbitrary bytes — a crafted blob answers wrong ids, never
+out-of-range ones.
 
-Blobs written before the cap existed cannot be loaded as they are, since that would reinstate the
-defect. `PerfectHashIndex` does not trust *any* stored cap — its arena holds every key, so the cap is
-recomputed exactly on every load (O(m) hashes, paid once; the v4 format does not even carry the
-field). `CompactHashIndex` stores no keys and has nothing to recompute from, so its checked header
-cap is trusted and a `BCH1`/`BCH2` blob (which predates the field) is refused with a message naming
-the fix. Soundness outranks compatibility with a two-day-old format.
+**Pre-1.0 blobs are refused, by name.** Every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash`
+image, and the crate that could decode it is no longer linked — so the refusal names the version that
+wrote the file and says to rebuild, rather than reporting a bad magic on an intact one. There is no
+conversion path for either index: `PerfectHashIndex`'s arena is readable but its ids came from the
+old MPH, and `CompactHashIndex` stores no keys at all. Rebuilding from the key list is the migration,
+and it is the only one a keyless index could ever have had. Soundness outranks compatibility, and
+this is the release where that debt is paid rather than carried.
 
 ## `PerfectHashIndex`
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
-gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH with
-[`ptr_hash`](https://crates.io/crates/ptr_hash), keyed on a **version-stable** 64-bit hash of each
-string (FNV-1a + a splitmix64 finalizer — not `std`'s `DefaultHasher`, which is not guaranteed stable
+gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/mphf.rs`), keyed on
+a **version-stable** 64-bit hash of each string (FNV-1a + a splitmix64 finalizer — not `std`'s `DefaultHasher`, which is not guaranteed stable
 and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
@@ -138,29 +134,29 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP4"][n][mph length]
-[side_len][payload][check][mph epserde bytes][arena bytes][side]` — the payload hash covers
-everything after the header and is verified on owned loads; `overflow_cap` is not stored at all,
-because every load recomputes it from the arena (`BMP2`/`BMP3` blobs from 0.5–0.7 load the same way).
-The arena is `[n+1][offset width][offsets][data]`. Offsets are
-4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the index
-(8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut the
-whole structure to 13.60 B/key.
+where membership is already guaranteed. The serialised blob is `[magic "BMP5"][n][mph length]
+[side_len][payload][check][MPH1 blob][arena bytes][side]` — the payload hash covers everything after
+the header and is verified on owned loads. The arena is `[n+1][offset width][offsets][data]`. Offsets
+are 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the
+index (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut
+the whole structure to 13.62 B/key.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
 between them is purely a size-vs-exactness trade, not a different lookup path.
 
-**Ids are not reproducible across builds.** The key *hash* is version-stable, but `ptr_hash`'s
-construction is randomised, so building the same key set twice assigns different slots — measured on
-50 000 keys, ~53 % kept their id. `save`/`load` of one built index is exact (the blob carries the
-MPH itself), so an id written down anywhere outside the index must be paired with the blob that
-produced it, never with the key list. `StringIndex` has no such caveat: its ids are the sorted rank.
+**Ids are reproducible across builds.** The key hash is version-stable and construction is
+deterministic, so the same key set gives the same ids and the same bytes. They remain *arbitrary* —
+nothing about a key predicts its id, and any change to the key set reshuffles all of them — so an id
+written down outside the index must still be paired with the blob that produced it, not with a
+promise that a rebuild will agree. `StringIndex` ids are the sorted rank and survive an unchanged
+key set trivially.
 
-**Blob portability.** The MPH region is `epserde`, which stores an in-memory layout: a blob moves
-between machines of the same endianness and pointer width (every published wheel and CI target is
-64-bit little-endian), not to a big-endian target. `StringIndex`'s blob is the `fst`, whose encoding
-is little-endian by specification and byte-portable.
+**Blob portability.** Every field of every blob is written little-endian and read byte-wise, so a
+blob moves between machines of any endianness or pointer width — with the one caveat that the `mph`
+feature itself still requires a 64-bit target, because the MPH's slot arithmetic narrows `u64` to
+`usize` in places nobody has audited for a smaller one. `StringIndex`'s blob is the `fst`, whose
+encoding is little-endian by specification.
 
 ## Zero-copy `load_mmap`
 
@@ -174,7 +170,7 @@ the key arena, so `from_bytes` (owned) and `load_mmap` (mapped) share one code p
 self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every field is read byte-wise
 (`u64::from_le_bytes`, varints), so there is no alignment requirement — for `PerfectHashIndex` and
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
-and reads only the small MPH structure into memory, sidestepping the deserialiser's alignment concern entirely.
+and reads only the small MPH structure into memory.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
 it. That obligation is the caller's, so `load_mmap` is an **`unsafe fn`** on all three indexes —
@@ -187,39 +183,37 @@ truncated download, a flipped byte, a lost header field — every owned `load`/`
 cleanly: `StringIndex` verifies the FST's stored checksum and spot-checks that its values are the
 sorted ranks (first value 0, rank-walk to `n - 1`), and the perfect-hash indexes verify a
 streaming hash of their whole payload plus a check over the header's framing fields, so a corrupted
-blob of any of the three is rejected rather than read. Against a **deliberately crafted** blob the
-perfect-hash indexes remain *trust-your-own-blob*: every checksum involved is public and
-deterministic (an attacker can recompute them), and the embedded minimal-perfect-hash is an `epserde`
-region that `ptr_hash` reads **unchecked**, so a crafted payload can steer an out-of-bounds read no
-checksum can catch. What narrows that: `overflow_cap` — the bound on the one otherwise-unchecked
-remap read — is **recomputed from the arena on every `PerfectHashIndex` load**, never trusted from
-any header, and side-table ids are structurally required to be exactly the tail range `[m, n)` on
-every load, so no blob can hand `id()` a value at or past `len()`. `CompactHashIndex` stores no keys
-to recompute from, so its cap is trusted from the checked header. `StringIndex` sits differently: the
-FST checksum catches accidental corruption, and `fst` documents that even invalid input cannot
-violate memory safety — a crafted, re-checksummed FST can at worst panic or answer wrongly, never
-read out of bounds. That is measured, not assumed: a libFuzzer target over `from_bytes` produced 44
-such bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. The
-`from_bytes` docstring used to promise the checksum ruled that out; it no longer does.
-`load_mmap` skips every checksum scan by design, trusting the mapped file
-outright to keep mapping time independent of blob size.
+blob of any of the three is rejected rather than read. Against a **deliberately crafted** blob every
+checksum involved is public and deterministic, so an attacker can recompute them — and since 1.0 that
+no longer matters for soundness. The perfect-hash indexes validate structure, not just transport:
+every array length is derived from the header and checked against the bytes present, side-table ids
+are structurally required to be exactly the tail range `[m, n)`, and the MPH's own remap is checked
+by value so it cannot point outside `[0, n)`. A crafted blob therefore answers *wrong*, never out of
+bounds. `StringIndex` sits differently and worse: the FST checksum catches accidental corruption, and
+`fst` documents that even invalid input cannot violate memory safety — but a crafted, re-checksummed
+FST can panic. That is measured, not assumed: a libFuzzer target over `from_bytes` produced 44 such
+bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. The
+`from_bytes` docstring used to promise the checksum ruled that out; it no longer does. `load_mmap`
+skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
+independent of blob size — the structural checks still run.
 
-That asymmetry is what decides the signatures. A function must be an `unsafe fn` when some input
-makes it unsound, and `from_bytes(&[u8])` accepts every byte string there is — so on the two
-perfect-hash indexes `from_bytes` and `load` are **`unsafe fn`** alongside `load_mmap`. This is not a
-gap waiting to be closed by more validation: `ptr_hash` reads its pilot table unchecked, and the
-fields that would bound that read (`parts`, `buckets`, the fast-modulo constants) are private, so a
-downstream crate cannot check them at any price. Upstream reached the same conclusion independently —
-`epserde` 0.13 made `deserialize_full` an `unsafe fn`, and PtrHash declined a checked `try_index()`
-for exactly this reason. `StringIndex` keeps safe `from_bytes`/`load`: `fst` validates its own
-structure and documents that invalid input cannot violate memory safety.
+That is what decides the signatures. `from_bytes` and `load` are **safe fns on all three indexes**,
+because none of them is unsound on any input. `load_mmap` stays an `unsafe fn` everywhere, for the
+mapping obligation alone: the index borrows the pages, so a concurrent write to the file is undefined
+behaviour and nothing in the library can check for it. Until 1.0 the two perfect-hash loaders were
+`unsafe` as well, and that was not a gap waiting for more validation — `ptr_hash` read its pilot
+table unchecked and the fields that would have bounded that read were private, so a downstream crate
+could not check them at any price. Upstream agreed: `epserde` 0.13 made `deserialize_full` an
+`unsafe fn`, and PtrHash declined a checked `try_index()` for the same reason. The fix was not more
+checking but a different MPH.
 
 ## Cargo features
 
-- `mph` (default) — `PerfectHashIndex` and `CompactHashIndex` (pulls `ptr_hash` + `epserde`).
+- `mph` (default) — `PerfectHashIndex`, `CompactHashIndex` and the in-crate MPH behind them. No
+  dependency; 64-bit targets only.
 - `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`).
 - `python` — the PyO3 abi3 extension module.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and
-  owned `save`/`load`, depending on nothing but `fst`. It is also free of the informational RustSec
-  advisories (unmaintained / unsound) that `ptr_hash`'s transitive dependency tree currently carries —
-  `cargo audit` reports those as warnings, not vulnerabilities.
+  owned `save`/`load`, depending on nothing but `fst`, and the only build that runs on a 32-bit
+  target. The full default build depends on `fst` and `memmap2` and nothing else, and `cargo audit`
+  reports nothing on either.

@@ -25,9 +25,9 @@ Three complementary, build-once / query-many structures — pick by what you nee
   answers **ordered and typo-tolerant** queries. Use it for autocomplete, fuzzy search, browse, and
   ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
-  ([`ptr_hash`](https://crates.io/crates/ptr_hash)) plus a small fingerprint per key, storing *no keys
-  at all*. **1.27 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`**, down to
-  **0.77 bytes/key** at a 4-bit fingerprint (`fingerprint_bits=4`, 6.25% false-positive rate) — below
+  (in-crate, no dependency) plus a small fingerprint per key, storing *no keys
+  at all*. **1.30 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`**, down to
+  **0.80 bytes/key** at a 4-bit fingerprint (`fingerprint_bits=4`, 6.25% false-positive rate) — below
   every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
   (a tunable `2^-bits` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
   footprint is paramount and rare false positives are acceptable.
@@ -100,7 +100,7 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 ```toml
 [dependencies]
 lexindex = "0.12"
-# fst-only (drop the ptr_hash dependency):
+# fst-only (drop the memory-mapping and perfect-hash code):
 # lexindex = { version = "0.12", default-features = false }
 ```
 
@@ -144,9 +144,7 @@ assert_eq!(dict.id("PATCH"), None);            // membership is verified, not ju
 
 // persist the MPH and reload it (the dense ids are preserved across save/load)
 dict.save("verbs.bmp")?;
-// `load` is unsafe: the embedded perfect hash cannot be validated, so only blobs this library
-// wrote are in contract. See "Design notes" below.
-let dict = unsafe { PerfectHashIndex::load("verbs.bmp") }?;
+let dict = PerfectHashIndex::load("verbs.bmp")?;
 assert_eq!(dict.id("POST"), Some(id));
 # std::fs::remove_file("verbs.bmp").ok();
 # Ok::<(), lexindex::IndexError>(())
@@ -183,11 +181,11 @@ assert_eq!(raw, id);
   `e\u{301}` are two different keys, an emoji ZWJ sequence is several characters to `fuzzy` and
   `subsequence`, and ordering is byte order, not any locale's. Normalise (NFC/NFKC, casefold) before
   building *and* before querying if the application needs it.
-- **Perfect-hash ids are not reproducible across builds.** `ptr_hash`'s construction is randomised,
-  so building the *same* key set twice assigns different slots — measured on 50 k keys, only ~53 % of
-  them keep their id. Ids are stable across `save`/`load` of one built index, so persist the **blob**,
-  not the key list, whenever an id is written down anywhere else. `StringIndex` ids are the sorted
-  rank and are reproducible by construction.
+- **Every index builds deterministically.** The same key set produces the same blob, byte for byte,
+  on any machine and any thread count — the perfect hash's construction is a fixed sequence of seeds,
+  not a randomised search. Ids are still *arbitrary* (nothing about a key predicts its id) and they
+  change whenever the key set does, so persist the **blob** rather than re-deriving it whenever an id
+  is written down elsewhere. `StringIndex` ids are the sorted rank, reproducible by construction.
 - **`CompactHashIndex` stores no keys — only a minimal perfect hash and one small fingerprint per
   slot.** `id(key)` hashes the key to a slot (the MPH), then compares the key's `b`-bit fingerprint —
   from a *second* hash with a different basis and multiplier — against the stored one; a match is a
@@ -197,14 +195,12 @@ assert_eq!(raw, id);
   tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH5"][n][fp_bits][overflow_cap][mph_len][side_len][payload][check][mph][bit-packed
+  is `[magic "BCH6"][n][fp_bits][mph_len][side_len][payload][check][MPH1 blob][bit-packed
   fingerprints][side]` — the payload hash is verified on owned loads, so a corrupted blob fails
   cleanly. Its build **streams**: only a 16-byte `(hash, second hash)` pair is kept per key, never
-  the strings. 0.7 blobs (`BCH3`) still load, as does a collision-free 0.8.0 `BCH4` (bit-identical);
-  a `BCH4` holding a side table is refused — its side fingerprints were truncated — with a message
-  naming the rebuild. 0.5/0.6 blobs (`BCH1`/`BCH2`) are **refused**: they predate the recorded remap
-  bound and store no keys to recompute it from, so loading one would reinstate an out-of-bounds
-  read — rebuild instead.
+  the strings. Blobs written before 1.0 (`BCH1`–`BCH5`) are **refused**: each embeds a `ptr_hash`
+  image the crate no longer links, and with no keys stored there is nothing to convert — rebuild
+  from the key list, which a caller of a keyless index necessarily has.
 - **`PerfectHashIndex`** keys the MPH on a deterministic 64-bit hash of each string (so queries take
   `&str` without allocating), then verifies the hit against the stored key — an MPH returns a slot for
   *any* input, so verification is what turns it into a real membership test, and the stored keys give
@@ -213,9 +209,8 @@ assert_eq!(raw, id);
   exactly — from a tiny side table consulted only after the stored-key comparison has missed, so the
   hot path pays nothing. The expected number of colliding pairs is `n(n-1)/2^65` ≈ 2.7×10⁻⁸ at 1 M
   keys, 2.7×10⁻⁴ at 100 M — the table is almost always empty. The hash is **version-stable** (FNV-1a
-  + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH (the `ptr_hash` structure
-  serialised via [`epserde`](https://crates.io/crates/epserde), alongside the arena) reloads and
-  queries identically on any build — the precondition for persistence. `CompactHashIndex` shares the
+  + a splitmix64 finalizer, not `std`'s `DefaultHasher`), so a `save`d MPH reloads and queries
+  identically on any build — the precondition for persistence. `CompactHashIndex` shares the
   same version-stable slot hash plus a second, uncorrelated one for the fingerprint, and resolves hash
   collisions the same way — its side table keeps the second hash at its **full 64 bits** whatever
   `fingerprint_bits` is set to, so only a pair colliding in **both** 64-bit hashes at once
@@ -229,20 +224,19 @@ assert_eq!(raw, id);
   to the file from *any* process while the index is alive is undefined behaviour and nothing in the
   library can check for it. lexindex blobs are written once and never updated in place, so publishing
   new versions under new paths discharges the obligation; the Python binding, which has no way to
-  express it in the type system, states the same contract in its docstring.
-- **Loading a perfect-hash index is `unsafe` too — `from_bytes` and `load`, not just `load_mmap`.**
-  The blob framing is validated and checksummed, so accidental corruption is rejected cleanly, but the
-  embedded MPH is an `epserde` region whose pilot table `ptr_hash` reads unchecked, and the fields that
-  would bound that read are private to `ptr_hash` — no amount of checking downstream can make a crafted
-  blob safe. A function that is unsound for *some* input belongs behind `unsafe fn`, so both
-  perfect-hash indexes say so in their signatures rather than in a doc paragraph. Upstream agrees:
-  `epserde` 0.13 made `deserialize_full` an `unsafe fn`, and PtrHash declined a checked `try_index()`
-  on the same grounds. `StringIndex` keeps safe `from_bytes`/`load` — `fst` validates its own structure
-  and guarantees invalid input cannot violate memory safety.
+  express it in the type system, states the same contract in its docstring. That is the *whole* of
+  what `load_mmap` asks for: the bytes themselves are validated exactly as `from_bytes` validates
+  them.
+- **`from_bytes` and `load` are safe on every index, and that is why the perfect hash is in-crate.**
+  Until 1.0 they were `unsafe fn` on both hash indexes: the embedded MPH was an `epserde` region
+  whose pilot table `ptr_hash` read unchecked, and the fields that would have bounded that read were
+  private to `ptr_hash`, so no amount of checking downstream could make a crafted blob safe. 1.0
+  replaced that MPH with one whose every array length is written and checked by this crate, which
+  turns a crafted blob from undefined behaviour into a wrong answer. The cost is that pre-1.0 blobs
+  cannot be read at all — they are refused with a message naming the version that wrote them.
 - `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst` (and keeps
-  `StringIndex`). Enabling `mph` pulls `ptr_hash` and its dependency tree, which currently carries a few
-  informational RustSec advisories (unmaintained / unsound) on transitive crates — `cargo audit`
-  reports them as warnings, not vulnerabilities. The `fst`-only build is free of them.
+  `StringIndex`). Enabling `mph` pulls **no dependency at all** — the perfect hash is in-crate — so
+  the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either build.
 
 ## Benchmarks
 
@@ -255,19 +249,19 @@ better; the capability columns are why you would still pick a larger one.
 
 | library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.77** |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.27** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.27** |
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.80** |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.30** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.30** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.60 |
+| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.62 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
 is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.3×
-below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
+below `marisa-trie` at the default 8-bit fingerprint, 3.7× at 4 bits** — when you can accept a bounded
 false-positive rate (about `2^-fingerprint_bits` by design — the fingerprint comes from a second hash,
 uncorrelated with the slot hash for well-distributed keys — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
 z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 16) and don't need
@@ -314,14 +308,14 @@ The same structures over three corpora built from the same word list, one proces
 
 | bytes/key | 479 823 single words | 1 M `word.word` pairs, drawn at random | 1 M `word.word`, 1 000 × 1 000 grid |
 |---|---:|---:|---:|
-| bare `ptr_hash` MPHF (no keys, no membership, no reverse) | 0.27 | 0.27 | 0.27 |
-| **lexindex `CompactHashIndex`** (fp = 1 byte) | **1.27** | **1.27** | **1.27** |
+| the bare MPHF (no keys, no membership, no reverse) | 0.30 | 0.30 | 0.30 |
+| **lexindex `CompactHashIndex`** (fp = 1 byte) | **1.30** | **1.30** | **1.30** |
 | `marisa-trie` | 2.98 | 6.21 | 2.12 |
 | **lexindex `StringIndex`** | 5.95 | 15.19 | 0.68 |
-| lexindex `PerfectHashIndex` | 13.60 | 23.92 | 15.21 |
+| lexindex `PerfectHashIndex` | 13.62 | 23.95 | 15.24 |
 
 At 10 M the trie numbers move again — `marisa` 4.14 on random pairs against 2.36 on the grid,
-`StringIndex` 12.44 against 2.00 — while `CompactHashIndex` stays at 1.27 and the bare MPHF at 0.27,
+`StringIndex` 12.44 against 2.00 — while `CompactHashIndex` stays at 1.30 and the bare MPHF at 0.30,
 because their size is a function of `n` and the fingerprint width alone. The grid is a full cross
 product and is the *most* favourable set a trie can be handed; it is what the scale table below uses,
 and on it `StringIndex` at 0.68 B/key undercuts even a keyless perfect hash. Treat that as the
@@ -346,7 +340,10 @@ So, in decision order:
 
 `local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
 forms rotated inside each round so none keeps the position that pays to warm the probe list,
-minimum over 11 rounds. Ratios are **quotients of the minima against `dict` on the same probe
+minimum over 11 rounds. **Measured on 0.12's `ptr_hash` backend and not yet re-run on 1.0's
+in-crate one**, whose bare lookup measured 0.91× the old one — so the two hash-index rows should
+move slightly in lexindex's favour, and are published unchanged until that is measured rather than
+scaled. Ratios are **quotients of the minima against `dict` on the same probe
 set**. A column is published only once two full 11-round passes agree on the absolute minima:
 7.3 % at worst and 1.0 % at the median (`grid`, re-measured 2026-09-07: 4.3 % / 0.5 %).
 
@@ -366,7 +363,7 @@ set**. A column is published only once two full 11-round passes agree on the abs
 
 Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in 0.6–0.7×
 the time of a `dict` and a **missing** one in a third to two-fifths, batched `ids_of` in a fifth to
-under a half — while occupying 1.27 bytes per key on disk against the `dict`'s 71–95 bytes per key
+under a half — while occupying 1.30 bytes per key on disk against the `dict`'s 71–95 bytes per key
 in RAM. `PerfectHashIndex` trades level with `dict` on members and wins on misses; `marisa-trie`
 costs 1.9–4.3× and `StringIndex` 1.4–2.6×, and both swing with the corpus exactly as their sizes
 do. Absolute figures for the word corpus, for scale: `dict` 327.9 ns, `CompactHashIndex`
@@ -471,7 +468,7 @@ with nothing persisted.
 ### Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow
-linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.27 bytes/key holds constant** as
+linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.30 bytes/key holds constant** as
 `n` grows. Each row is measured twice: handing the constructor a **list** of keys, and handing it a
 **generator**. The second is what `CompactHashIndex`'s streaming build exists for — it keeps a
 16-byte pair per key and drops the string — and it is the only way to see the index's own footprint
@@ -481,14 +478,19 @@ rather than the corpus's:
 |---|---|---|---:|---:|---:|---:|
 | 1 M | `StringIndex` | list | 0.52 s | 0.68\* | 154 MB | 206 ns |
 | 1 M | `StringIndex` | generator | 0.60 s | 0.68\* | 147 MB | 209 ns |
-| 1 M | `CompactHashIndex` | list | 0.21 s | 1.27 | 157 MB | 257 ns |
-| 1 M | `CompactHashIndex` | **generator** | 0.32 s | 1.27 | **83 MB** | 176 ns |
+| 1 M | `CompactHashIndex` | list | 0.21 s | 1.30 | 157 MB | 257 ns |
+| 1 M | `CompactHashIndex` | **generator** | 0.32 s | 1.30 | **83 MB** | 176 ns |
 | 10 M | `StringIndex` | list | 6.8 s | 2.00\* | 1108 MB | 851 ns |
 | 10 M | `StringIndex` | generator | 7.8 s | 2.00\* | 1032 MB | 923 ns |
-| 10 M | `CompactHashIndex` | list | 2.4 s | 1.27 | 988 MB | 330 ns |
-| 10 M | `CompactHashIndex` | **generator** | 3.5 s | 1.27 | **304 MB** | 302 ns |
+| 10 M | `CompactHashIndex` | list | 2.4 s | 1.30 | 988 MB | 330 ns |
+| 10 M | `CompactHashIndex` | **generator** | 3.5 s | 1.30 | **304 MB** | 302 ns |
 
-<sub>\* bigram keys share far more prefixes than single words — at 1 M the generator draws on only
+<sub>**Build and lookup times below predate 1.0's in-crate perfect hash and have not been
+re-measured on it** — the `bytes/key` and `peak RSS` columns are current. The MPH's own build is
+1.78× the old one at 10 M and its lookup 0.91×, both measured directly; what that does to a whole
+`CompactHashIndex` build is not something to infer from those, so it is left to a measurement
+session rather than scaled here.
+\* bigram keys share far more prefixes than single words — at 1 M the generator draws on only
 1 000 distinct words, which is why `StringIndex` compresses to an unrepresentative 0.68 B/key there;
 the honest single-word figure is in the size table above. One session on the 0.10 code, one process
 per cell. **The machine was shared** (another job held a core throughout), so the times are slower
@@ -499,7 +501,7 @@ each other. Peak RSS in the *list* rows is dominated by the Python key list; the
 the index's own cost, which is why `CompactHashIndex` falls 3.3× there and `StringIndex` barely
 moves — it has to keep the keys. The extrapolation this table used to end on — ~35 s and ~3 GB for a
 streamed `CompactHashIndex` at 100 M — has since been measured instead of left standing: **35.9 /
-36.1 s at a 2 452 MB peak**, the same **1.27 B/key**, and a point lookup that does not move with `n`
+36.1 s at a 2 452 MB peak**, the same **1.30 B/key**, and a point lookup that does not move with `n`
 (298–344 ns against 302–330 at 10 M). That is a separate and quieter session on 0.11 code, which is
 why it is stated here rather than added as a row above. Hash collisions do not change the picture at any n: since 0.8 both perfect-hash
 indexes absorb them into a side table instead of failing the build, and the fst build has no
