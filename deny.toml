@@ -1,0 +1,31 @@
+# `cargo audit` already covers advisories, and it is the RustSec tool for exactly that; this file is
+# for the three things it cannot see. Hence `cargo deny check licenses bans sources` in CI rather
+# than a bare `cargo deny check`, which would report every advisory twice under two exit codes.
+
+[graph]
+# Everything the crate can be built as, plus the dev tree: a GPL test-only dependency is still a
+# GPL dependency of the repository.
+all-features = true
+
+[licenses]
+# The whole tree is permissive today. This list is the assertion that it stays that way -- a new
+# dependency under a copyleft or an unknown licence fails CI instead of arriving unnoticed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+[bans]
+# The tree is four crates deep without the dev-dependencies, and two versions of one crate in it
+# would mean something moved that was not intended. Cheap to hold to `deny` while that is true.
+multiple-versions = "deny"
+# A `*` version requirement lets any future release in, which is the same class of mistake as an
+# unpinned action.
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

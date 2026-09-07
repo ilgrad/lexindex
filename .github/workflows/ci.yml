@@ -30,7 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
         with:
-          tool: cargo-audit,cargo-llvm-cov
+          tool: cargo-audit,cargo-deny,cargo-llvm-cov
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy (default = with mph)
@@ -64,6 +64,12 @@ jobs:
         run: cargo test --features fuzzing --test golden
       - name: cargo audit
         run: cargo audit
+      # Advisories are `cargo audit`'s job and it is the RustSec tool for them; this is the rest of
+      # what the dependency tree can say -- a copyleft or unrecognised licence, two versions of one
+      # crate, a `*` requirement, a source that is not crates.io. Named subcommands, so the two
+      # tools do not both report the same advisory under different exit codes.
+      - name: cargo deny (licences, bans, sources)
+        run: cargo deny check licenses bans sources
       - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap)
         run: cargo llvm-cov --summary-only --fail-under-lines 95
 
