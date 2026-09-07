@@ -353,7 +353,7 @@ impl CompactHashIndex {
             side_buf.extend_from_slice(&fp.to_le_bytes());
             side_buf.extend_from_slice(&id.to_le_bytes());
         }
-        let mut payload = crate::hash::BlockHasher::new();
+        let mut payload = crate::blob::BlockHasher::new();
         payload.update(&mph_buf);
         payload.update(self.fps.as_ref());
         payload.update(&side_buf);
@@ -364,7 +364,7 @@ impl CompactHashIndex {
         header[16..24].copy_from_slice(&(mph_buf.len() as u64).to_le_bytes());
         header[24..28].copy_from_slice(&(self.side.len() as u32).to_le_bytes());
         header[28..36].copy_from_slice(&payload.finish().to_le_bytes());
-        let check = crate::hash::hash_bytes(&header[..CHECKED_V6]) as u32;
+        let check = crate::blob::hash_bytes(&header[..CHECKED_V6]) as u32;
         header[CHECKED_V6..].copy_from_slice(&check.to_le_bytes());
         Ok((header, mph_buf, side_buf))
     }
@@ -436,7 +436,7 @@ impl CompactHashIndex {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V6..HEADER_V6].try_into().unwrap());
-        if check != crate::hash::hash_bytes(&bytes[..CHECKED_V6]) as u32 {
+        if check != crate::blob::hash_bytes(&bytes[..CHECKED_V6]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
         }
         // Owned loads verify the whole payload — one streaming pass over everything after the
@@ -444,7 +444,7 @@ impl CompactHashIndex {
         // rejected here rather than perturbing answers later.
         if verify {
             let stored = u64::from_le_bytes(bytes[28..36].try_into().unwrap());
-            if stored != crate::hash::hash_block(&bytes[HEADER_V6..]) {
+            if stored != crate::blob::hash_block(&bytes[HEADER_V6..]) {
                 return Err(IndexError::Format("payload checksum mismatch"));
             }
         }
@@ -943,9 +943,9 @@ mod tests {
             let mut bad = good.clone();
             let at = bad.len() - 4;
             bad[at..].copy_from_slice(&bad_id.to_le_bytes());
-            let payload = crate::hash::hash_block(&bad[HEADER_V6..]);
+            let payload = crate::blob::hash_block(&bad[HEADER_V6..]);
             bad[28..36].copy_from_slice(&payload.to_le_bytes());
-            let check = crate::hash::hash_bytes(&bad[..CHECKED_V6]) as u32;
+            let check = crate::blob::hash_bytes(&bad[..CHECKED_V6]) as u32;
             bad[CHECKED_V6..HEADER_V6].copy_from_slice(&check.to_le_bytes());
             let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),

@@ -350,7 +350,7 @@ impl Mphf {
         {
             header[8 + i * 8..16 + i * 8].copy_from_slice(&v.to_le_bytes());
         }
-        let check = crate::hash::hash_bytes(&header[..CHECKED]) as u32;
+        let check = crate::blob::hash_bytes(&header[..CHECKED]) as u32;
         header[CHECKED..].copy_from_slice(&check.to_le_bytes());
         out.extend_from_slice(&header);
 
@@ -381,7 +381,7 @@ impl Mphf {
             return Err(IndexError::Format("mphf: bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED..HEADER].try_into().expect("4 bytes"));
-        if check != crate::hash::hash_bytes(&bytes[..CHECKED]) as u32 {
+        if check != crate::blob::hash_bytes(&bytes[..CHECKED]) as u32 {
             return Err(IndexError::Format("mphf: header checksum mismatch"));
         }
         if u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")) != FORMAT {
@@ -1123,7 +1123,7 @@ mod tests {
     fn with_scalar(blob: &[u8], field: usize, value: u64) -> Vec<u8> {
         let mut out = blob.to_vec();
         out[8 + field * 8..16 + field * 8].copy_from_slice(&value.to_le_bytes());
-        let check = crate::hash::hash_bytes(&out[..CHECKED]) as u32;
+        let check = crate::blob::hash_bytes(&out[..CHECKED]) as u32;
         out[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         out
     }
@@ -1205,7 +1205,7 @@ mod tests {
         for (at, word) in [(4usize, FORMAT + 1), (6, 1)] {
             let mut bad = blob.clone();
             bad[at..at + 2].copy_from_slice(&word.to_le_bytes());
-            let check = crate::hash::hash_bytes(&bad[..CHECKED]) as u32;
+            let check = crate::blob::hash_bytes(&bad[..CHECKED]) as u32;
             bad[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
             assert!(
                 Mphf::from_bytes(&bad).is_err(),

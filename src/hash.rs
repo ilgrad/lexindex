@@ -5,25 +5,11 @@
 //! persistence.
 
 /// FNV-1a over the bytes, then a splitmix64 finalizer for avalanche (so structured keys like
-/// `"key_0001"` still spread evenly across the MPH's buckets). This drives the perfect-hash **slot**.
+/// `"key_0001"` still spread evenly across the MPH's buckets). This drives the perfect-hash
+/// **slot**; it is [`crate::blob::hash_bytes`], which the blob headers also use as their check.
 #[inline]
 pub(crate) fn hash_key(s: &str) -> u64 {
-    hash_bytes(s.as_bytes())
-}
-
-/// [`hash_key`] over raw bytes. Also used as a 32-bit integrity check (its low half) of the
-/// lexindex-owned blob header, so an accidentally corrupted `n` / width / `overflow_cap` fails
-/// cleanly at load instead of steering queries with a bogus bound.
-#[inline]
-pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a prime
-    }
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9); // splitmix64 finalizer
-    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    h ^ (h >> 31)
+    crate::blob::hash_bytes(s.as_bytes())
 }
 
 /// The **fingerprint** hash: a *separate* hash of the key (a different basis/multiplier than
@@ -64,79 +50,6 @@ pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
     (slot ^ (slot >> 31), fp ^ (fp >> 29))
 }
 
-/// Streaming hash over a byte stream fed in arbitrary chunks — the whole-payload integrity check
-/// of the v4 blob formats. Consumes 8-byte words (one multiply per word, ~8× the byte-serial
-/// [`hash_bytes`] on large payloads), buffers across chunk boundaries so section splits never
-/// change the result, and folds the total length into the finalizer so a trailing zero-pad cannot
-/// alias a shorter stream. Version-stable like [`hash_key`]: written blobs pin it forever. Like the
-/// header check, it guards **accidental** corruption, not a crafted blob — it is public and
-/// deterministic, so an attacker can recompute it.
-pub(crate) struct BlockHasher {
-    h: u64,
-    buf: [u8; 8],
-    buf_len: usize,
-    total: u64,
-}
-
-impl BlockHasher {
-    pub(crate) fn new() -> Self {
-        Self {
-            h: 0x9e37_79b9_7f4a_7c15, // golden-ratio basis, distinct from hash_bytes'
-            buf: [0; 8],
-            buf_len: 0,
-            total: 0,
-        }
-    }
-
-    #[inline]
-    fn word(&mut self, w: u64) {
-        self.h = (self.h ^ w).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        self.h ^= self.h >> 29;
-    }
-
-    pub(crate) fn update(&mut self, mut bytes: &[u8]) {
-        self.total += bytes.len() as u64;
-        if self.buf_len > 0 {
-            let take = bytes.len().min(8 - self.buf_len);
-            self.buf[self.buf_len..self.buf_len + take].copy_from_slice(&bytes[..take]);
-            self.buf_len += take;
-            if self.buf_len < 8 {
-                return; // `bytes` exhausted without completing the pending word
-            }
-            bytes = &bytes[take..];
-            self.word(u64::from_le_bytes(self.buf));
-        }
-        let mut words = bytes.chunks_exact(8);
-        for w in &mut words {
-            self.word(u64::from_le_bytes(w.try_into().unwrap()));
-        }
-        let tail = words.remainder();
-        self.buf[..tail.len()].copy_from_slice(tail);
-        self.buf_len = tail.len();
-    }
-
-    pub(crate) fn finish(mut self) -> u64 {
-        if self.buf_len > 0 {
-            self.buf[self.buf_len..].fill(0);
-            let w = u64::from_le_bytes(self.buf);
-            self.word(w);
-        }
-        // splitmix64 finalizer over (state ^ length): a zero-padded tail differs from genuine
-        // zeros because the lengths differ.
-        let mut h = self.h ^ self.total;
-        h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        h ^ (h >> 31)
-    }
-}
-
-/// [`BlockHasher`] over one contiguous slice.
-pub(crate) fn hash_block(bytes: &[u8]) -> u64 {
-    let mut h = BlockHasher::new();
-    h.update(bytes);
-    h.finish()
-}
-
 /// Partition `hashes` (parallel to some key order) into the MPH's key set and the collided
 /// leftovers. One representative per distinct hash value — the smallest original index — goes to
 /// the MPH; every other member of a colliding group is returned as `(hash, original_index)` in
@@ -170,7 +83,7 @@ pub(crate) const COLLIDING_PAIR: (&str, &str) = ("x5iojurfgtipm", "7gvob4sxctomf
 
 #[cfg(test)]
 mod golden {
-    use super::{BlockHasher, fingerprint_full, hash_block, hash_key};
+    use super::{fingerprint_full, hash_key};
 
     #[test]
     fn the_pinned_collision_pair_still_collides() {
@@ -180,38 +93,6 @@ mod golden {
         assert_eq!(hash_key(a), 0x156a_c9d1_f216_0cbf);
         // The pair collides in the slot hash only — the independent fingerprint tells them apart.
         assert_ne!(fingerprint_full(a), fingerprint_full(b));
-    }
-
-    /// The v4 payload check is part of the blob format: pinned like the key hashes below.
-    #[test]
-    fn block_hash_is_stable() {
-        assert_eq!(hash_block(b""), 0xe220_a839_7b1d_cdaf);
-        assert_eq!(hash_block(b"a"), 0x8b92_4b9e_e3ce_42da);
-        assert_eq!(hash_block(b"12345678"), 0xd56d_dc08_eb9e_e133);
-        assert_eq!(hash_block(b"123456789"), 0xaa5d_e941_889d_7528);
-        let long: Vec<u8> = (0..1000u32).flat_map(|i| i.to_le_bytes()).collect();
-        assert_eq!(hash_block(&long), 0x3ade_b0bd_009e_9a90);
-    }
-
-    /// Chunk boundaries must never change the digest (sections are streamed in arbitrary splits),
-    /// and a zero-padded tail must not alias genuine zeros.
-    #[test]
-    fn block_hash_is_split_invariant() {
-        let data: Vec<u8> = (0..255u8).cycle().take(4097).collect();
-        let whole = hash_block(&data);
-        for split in [0usize, 1, 7, 8, 9, 63, 4096, 4097] {
-            let mut h = BlockHasher::new();
-            h.update(&data[..split]);
-            h.update(&data[split..]);
-            assert_eq!(h.finish(), whole, "split at {split}");
-        }
-        let mut three = BlockHasher::new();
-        for chunk in data.chunks(11) {
-            three.update(chunk);
-        }
-        assert_eq!(three.finish(), whole);
-        assert_ne!(hash_block(b"ab"), hash_block(b"ab\0"));
-        assert_ne!(hash_block(b""), hash_block(b"\0"));
     }
 
     /// Every serialised MPH blob is keyed on these hashes, so a hash that silently changed — a

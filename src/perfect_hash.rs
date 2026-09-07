@@ -44,7 +44,7 @@ fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8;
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
     header[24..32].copy_from_slice(&payload.to_le_bytes());
-    let check = crate::hash::hash_bytes(&header[..CHECKED_V5]) as u32;
+    let check = crate::blob::hash_bytes(&header[..CHECKED_V5]) as u32;
     header[CHECKED_V5..].copy_from_slice(&check.to_le_bytes());
     header
 }
@@ -617,7 +617,7 @@ impl PerfectHashIndex {
             side_buf.extend_from_slice(&h.to_le_bytes());
             side_buf.extend_from_slice(&id.to_le_bytes());
         }
-        let mut payload = crate::hash::BlockHasher::new();
+        let mut payload = crate::blob::BlockHasher::new();
         payload.update(&mph_buf);
         payload.update(self.arena.as_bytes());
         payload.update(&side_buf);
@@ -691,7 +691,7 @@ impl PerfectHashIndex {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
-        if check != crate::hash::hash_bytes(&bytes[..CHECKED_V5]) as u32 {
+        if check != crate::blob::hash_bytes(&bytes[..CHECKED_V5]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
         }
         let side_len = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
@@ -700,7 +700,7 @@ impl PerfectHashIndex {
         // here rather than surfacing as a wrong answer later.
         if verify {
             let stored = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
-            if stored != crate::hash::hash_block(&bytes[HEADER_V5..]) {
+            if stored != crate::blob::hash_block(&bytes[HEADER_V5..]) {
                 return Err(IndexError::Format("payload checksum mismatch"));
             }
         }
@@ -1069,7 +1069,7 @@ impl PerfectHashIndex {
 
             check()?;
 
-            let mut payload = crate::hash::BlockHasher::new();
+            let mut payload = crate::blob::BlockHasher::new();
             payload.update(&map[HEADER_V5..]);
             let header = header_bytes(n, mph_buf.len(), side.len(), payload.finish());
             map[..HEADER_V5].copy_from_slice(&header);
@@ -1771,9 +1771,9 @@ mod tests {
             let mut bad = good.clone();
             let at = bad.len() - 4;
             bad[at..].copy_from_slice(&bad_id.to_le_bytes());
-            let payload = crate::hash::hash_block(&bad[HEADER_V5..]);
+            let payload = crate::blob::hash_block(&bad[HEADER_V5..]);
             bad[24..32].copy_from_slice(&payload.to_le_bytes());
-            let check = crate::hash::hash_bytes(&bad[..CHECKED_V5]) as u32;
+            let check = crate::blob::hash_bytes(&bad[..CHECKED_V5]) as u32;
             bad[CHECKED_V5..HEADER_V5].copy_from_slice(&check.to_le_bytes());
             let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),
