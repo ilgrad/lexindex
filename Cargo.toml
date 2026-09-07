@@ -48,6 +48,9 @@ mph = ["dep:ptr_hash", "dep:epserde"]
 mmap = ["dep:memmap2"]
 # Python bindings (PyO3 abi3 extension module); pulls in `mph` + `mmap` for the full API surface.
 python = ["dep:pyo3", "mph", "mmap"]
+# Spike (1.0-01): an in-crate minimal perfect hash, so a loader can bound every read. Not shipped,
+# not public, and not wired into either hash index until its numbers beat the `ptr_hash` alias.
+own-mphf = []
 # Exposes `lexindex::fuzzing`, the safe framing parsers, to the libFuzzer targets in `fuzz/`.
 # Not public API and never enabled by a dependent — see the module's own documentation.
 fuzzing = ["mph"]
