@@ -168,6 +168,24 @@ fn window(taken: &[u64], bit: u64) -> u64 {
     }
 }
 
+/// The shape of a table, shared by every part of it.
+struct Layout {
+    seed: u64,
+    buckets_per_part: u64,
+    dense_buckets: u64,
+    slots_per_part: u64,
+    stride: u64,
+}
+
+/// One part's share of the four tables construction writes. Disjoint by construction: `chunks_mut`
+/// hands each part its own, which is what lets parts be placed independently of each other.
+struct PartTables<'a> {
+    owner: &'a mut [u32],
+    taken: &'a mut [u64],
+    pilots: &'a mut [u8],
+    placed: &'a mut [bool],
+}
+
 impl Mphf {
     /// Which bucket of its own part a hash belongs to, from the mixed hash the part came from.
     ///
@@ -243,9 +261,20 @@ impl Mphf {
     /// Fails only if no global seed works, which needs input the bucket assignment cannot spread —
     /// duplicate hashes will do it, and the caller has already ruled those out.
     pub fn build(hashes: &[u64]) -> Result<Self, IndexError> {
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        Self::build_with_threads(hashes, threads)
+    }
+
+    /// [`build`](Self::build) on a fixed number of threads.
+    ///
+    /// The result does not depend on `threads` — a part is placed from its own index, its own keys
+    /// and its own slice of the tables, so the only thing the thread count changes is how long it
+    /// takes. Exposed so that a test can prove it rather than assert it, and so a caller inside its
+    /// own pool can decline to open another one.
+    pub fn build_with_threads(hashes: &[u64], threads: usize) -> Result<Self, IndexError> {
         for attempt in 0..SEED_TRIES {
             let seed = mix(0xA5A5_5A5A_DEAD_BEEF ^ u64::from(attempt));
-            if let Some(built) = Self::try_build(hashes, seed) {
+            if let Some(built) = Self::try_build(hashes, seed, threads.max(1)) {
                 return Ok(built);
             }
         }
@@ -254,7 +283,248 @@ impl Mphf {
         ))
     }
 
-    fn try_build(hashes: &[u64], seed: u64) -> Option<Self> {
+    /// Sort one part's keys into its buckets, CSR-style: one counting pass, then one placing pass.
+    /// `starts` is the part's slice of the global offset array and `off` where its keys begin, so
+    /// the result is indexed exactly as one counting sort over the whole table would have left it.
+    fn group_part(
+        lay: &Layout,
+        keys: &mut [u64],
+        starts: &mut [u32],
+        off: u32,
+        scratch: &mut Vec<u64>,
+        cursor: &mut Vec<u32>,
+    ) {
+        let local = |h: u64| {
+            Self::bucket_in_part(spread(h, lay.seed), lay.buckets_per_part, lay.dense_buckets)
+                as usize
+        };
+        cursor.clear();
+        cursor.resize(starts.len(), 0);
+        scratch.clear();
+        scratch.extend_from_slice(keys);
+        for &h in scratch.iter() {
+            cursor[local(h)] += 1;
+        }
+        let mut acc = off;
+        for (b, s) in starts.iter_mut().enumerate() {
+            *s = acc;
+            acc += cursor[b];
+            cursor[b] = *s;
+        }
+        for &h in scratch.iter() {
+            let b = local(h);
+            keys[(cursor[b] - off) as usize] = h;
+            cursor[b] += 1;
+        }
+    }
+
+    /// Place one part: a pilot for each of its buckets such that no two of its keys take one slot.
+    /// Returns the slot seed that worked, or `None` if none of [`PART_TRIES`] did.
+    ///
+    /// Everything it touches is the part's own. `start` and `by_bucket` are read-only and shared,
+    /// the four tables are disjoint slices, and every slot a key can reach lies inside the part —
+    /// so parts can be placed in any order, on any thread, and the table comes out the same. That
+    /// is what makes the build deterministic under a thread count rather than merely usually equal.
+    fn place_part(
+        lay: &Layout,
+        part: u64,
+        start: &[u32],
+        by_bucket: &[u64],
+        t: PartTables<'_>,
+    ) -> Option<u64> {
+        // Buckets are numbered within the part; `start` and `by_bucket` are global, so these two
+        // closures are the only place the two numberings meet.
+        let first = (part * lay.buckets_per_part) as usize;
+        let size_of = |b: u32| start[first + b as usize + 1] - start[first + b as usize];
+        let keys_of = |b: u32| {
+            let g = first + b as usize;
+            &by_bucket[start[g] as usize..start[g + 1] as usize]
+        };
+        const FREE: u32 = u32::MAX;
+        let mut bases: [Vec<u64>; 4] = std::array::from_fn(|_| Vec::with_capacity(64));
+        let mut victims: Vec<u32> = Vec::with_capacity(16);
+        let mut best_victims: Vec<u32> = Vec::with_capacity(16);
+        let mut order: Vec<u32> = Vec::with_capacity(lay.buckets_per_part as usize);
+        let mut queue: std::collections::VecDeque<u32> =
+            std::collections::VecDeque::with_capacity(lay.buckets_per_part as usize);
+
+        // Largest bucket first: the hard ones are cheap only while the part is still empty.
+        // The order is a property of the bucket sizes, which no retry changes.
+        order.clear();
+        order.extend(0..lay.buckets_per_part as u32);
+        order.sort_unstable_by_key(|&b| std::cmp::Reverse(size_of(b)));
+        for retry in 0..PART_TRIES {
+            let pseed = mix(lay.seed ^ part.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(retry));
+            for s in 0..lay.stride {
+                t.owner[s as usize] = FREE;
+                t.taken[(s / 64) as usize] &= !(1 << (s % 64));
+            }
+            for b in 0..lay.buckets_per_part {
+                t.placed[b as usize] = false;
+            }
+            queue.clear();
+            queue.extend(order.iter().copied());
+
+            // Displacement is bounded so a part that livelocks is retried instead of looping.
+            // The bound is tight on purpose, because the two cases separate cleanly: measured at
+            // 10 M keys, every part that finished did so in 1.2–1.9 pops per bucket, while the
+            // four that circulated burned 64 each before the old loose bound gave up — and every
+            // one of them placed on the next seed. Four times the bucket count is twice the worst
+            // healthy part and a thirtieth of a stuck one.
+            let mut budget = 4 * lay.buckets_per_part + 4096;
+            // A cuckoo table cycles when two buckets keep taking each other's slots. The standard
+            // guard is to refuse to evict anything displaced in the last few steps; 16 is what
+            // PtrHash uses, but the ring may not cover a sizeable share of a small part, or it
+            // would forbid every eviction there is and fail on a bucket it could have placed.
+            let recent_len = (lay.buckets_per_part as usize / 4).clamp(1, 16);
+            let mut recent = [u32::MAX; 16];
+            let mut recent_at = 0usize;
+            let mut failed = false;
+
+            while let Some(b) = queue.pop_front() {
+                let keys = keys_of(b);
+                // Empty buckets need no pilot; already-placed ones are stale queue entries left by
+                // an eviction that was itself undone, and re-placing them only churns the part.
+                if keys.is_empty() || t.placed[b as usize] {
+                    continue;
+                }
+                if budget == 0 {
+                    failed = true;
+                    break;
+                }
+                budget -= 1;
+
+                // The window base of every key under every base function, once per bucket. A
+                // base function under which two keys of this bucket share a base is out: their
+                // slots would coincide under every shift, and no eviction changes that.
+                let mut usable = [true; 4];
+                for (j, bj) in bases.iter_mut().enumerate() {
+                    bj.clear();
+                    for &h in keys {
+                        let base = Self::base(h, pseed, j, lay.slots_per_part);
+                        if bj.contains(&base) {
+                            usable[j] = false;
+                            break;
+                        }
+                        bj.push(base);
+                    }
+                }
+
+                // Prefer a pilot that collides with nothing: under each base function, AND the
+                // keys' windows and take the first zero. Failing that, the second pass below
+                // prices what each pilot would displace and takes the cheapest.
+                let mut chosen: Option<(u8, u32, bool)> = None;
+                for j in 0..4 {
+                    if !usable[j] {
+                        continue;
+                    }
+                    let mut free = !0u64;
+                    for &base in &bases[j] {
+                        free &= !window(t.taken, base);
+                        if free == 0 {
+                            break;
+                        }
+                    }
+                    if free != 0 {
+                        chosen = Some((((j as u8) << 6) | free.trailing_zeros() as u8, 0, true));
+                        break;
+                    }
+                }
+                if chosen.is_none() {
+                    for j in 0..4 {
+                        if !usable[j] {
+                            continue;
+                        }
+                        for d in 0..GUARD {
+                            victims.clear();
+                            let mut cost = 0u32;
+                            for &base in &bases[j] {
+                                let o = t.owner[(base + d) as usize];
+                                if o != FREE && o != b && !victims.contains(&o) {
+                                    victims.push(o);
+                                    // Squared, so displacing one big bucket loses to displacing
+                                    // two small ones: the big one is the expensive one to re-place.
+                                    cost += size_of(o) * size_of(o);
+                                }
+                            }
+                            // The first pass would have taken a free pilot.
+                            debug_assert!(cost != 0);
+                            if victims.iter().any(|&v| recent[..recent_len].contains(&v)) {
+                                continue;
+                            }
+                            // Displacing a bucket bigger than this one is what stalls a part:
+                            // the big ones are placed first, into an empty part, and once evicted
+                            // they need a run of free slots that no longer exists. Prefer the
+                            // pilots that push work downhill, and reach for the rest only when
+                            // there is no such pilot at all.
+                            let downhill = victims.iter().all(|&v| size_of(v) <= size_of(b));
+                            let better = match chosen {
+                                None => true,
+                                Some((_, best, was_downhill)) => match (downhill, was_downhill) {
+                                    (true, false) => true,
+                                    (false, true) => false,
+                                    _ => cost < best,
+                                },
+                            };
+                            if better {
+                                chosen = Some((((j as u8) << 6) | d as u8, cost, downhill));
+                                best_victims.clear();
+                                best_victims.extend_from_slice(&victims);
+                            }
+                        }
+                    }
+                }
+
+                // No pilot at all placed this bucket's keys on distinct slots, or every one that
+                // did would evict a bucket displaced moments ago: a different seed is the way out.
+                let Some((pilot, _, _)) = chosen else {
+                    failed = true;
+                    break;
+                };
+
+                // Clear each victim's slots and hand it back before claiming its own. A displaced
+                // bucket goes to the *front*, so its chain is followed to the end before the next
+                // fresh bucket is touched. That is not a nicety: appending them instead diffuses
+                // displaced buckets among the pending ones, and the part settles into an
+                // equilibrium where eviction hands back as many keys as placement takes — measured
+                // over one un-partitioned table of 10 000 keys, ~85 buckets stayed unplaced across
+                // 1.3 M displacements with no trend. Depth-first, the same table builds at once.
+                for &v in &best_victims {
+                    let vk = keys_of(v);
+                    let pv = t.pilots[v as usize];
+                    for &h in vk {
+                        let s = Self::base(h, pseed, usize::from(pv >> 6), lay.slots_per_part)
+                            + u64::from(pv & 63);
+                        if t.owner[s as usize] == v {
+                            t.owner[s as usize] = FREE;
+                            t.taken[(s / 64) as usize] &= !(1 << (s % 64));
+                        }
+                    }
+                    t.placed[v as usize] = false;
+                    recent[recent_at] = v;
+                    recent_at = (recent_at + 1) % recent_len;
+                    queue.push_front(v);
+                }
+                best_victims.clear();
+
+                let (j, d) = (usize::from(pilot >> 6), u64::from(pilot & 63));
+                for &base in &bases[j] {
+                    let s = base + d;
+                    t.owner[s as usize] = b;
+                    t.taken[(s / 64) as usize] |= 1 << (s % 64);
+                }
+                t.pilots[b as usize] = pilot;
+                t.placed[b as usize] = true;
+            }
+
+            if !failed {
+                return Some(pseed);
+            }
+        }
+        None
+    }
+
+    fn try_build(hashes: &[u64], seed: u64, threads: usize) -> Option<Self> {
         let n = hashes.len() as u64;
         if n == 0 {
             return Some(Self {
@@ -276,7 +546,9 @@ impl Mphf {
         let per_part = n.div_ceil(parts);
         let buckets_per_part = ((per_part as f64 / LAMBDA).ceil() as u64).max(1);
         let slots_per_part = ((per_part as f64 / ALPHA).ceil() as u64).max(1);
-        let stride = slots_per_part + GUARD;
+        // Rounded up to whole bitmap words: a part owns its slots outright, and the occupancy
+        // map is split between parts by `chunks_mut`, which cannot split a word between two.
+        let stride = (slots_per_part + GUARD).next_multiple_of(64);
         // A degenerate part (one or two buckets) would leave one side of the split empty; folding
         // that case into a zero here keeps the test out of `index`.
         let dense_buckets = {
@@ -292,240 +564,137 @@ impl Mphf {
         // `per_part * parts >= n` and `slots_per_part >= per_part`, so the table holds every key.
         debug_assert!(slots >= n);
 
-        // Group the keys by bucket, CSR-style: one counting pass, then one placing pass. A
-        // `Vec<Vec<u64>>` would allocate once per bucket, which at λ ≈ 4 is a quarter of `n`.
-        // Global bucket numbers are `part * buckets_per_part + local`, so a part's buckets — and
-        // with them its keys — come out contiguous, which is what the per-part loop below needs.
-        let bucket_of = |h: u64| {
-            let hb = spread(h, seed);
-            scale(hb, parts) * buckets_per_part
-                + Self::bucket_in_part(hb, buckets_per_part, dense_buckets)
-        };
-        let mut start = vec![0u32; buckets as usize + 1];
+        let t0 = std::time::Instant::now();
+        // By part first. A histogram over every bucket is 10 MB at 10 M keys and every increment is
+        // a cache miss; a histogram over the parts is a few dozen counters that never leave L1. Once
+        // the keys are grouped by part, each part sorts its own into its own buckets — in parallel,
+        // and inside a slice that fits in cache. Measured at 10 M: 631 ms of a 1 094 ms build was
+        // this grouping, all of it serial.
+        let part_of = |h: u64| scale(spread(h, seed), parts) as usize;
+        let mut part_start = vec![0u32; parts as usize + 1];
         for &h in hashes {
-            start[bucket_of(h) as usize + 1] += 1;
+            part_start[part_of(h) + 1] += 1;
         }
-        for i in 0..buckets as usize {
-            start[i + 1] += start[i];
+        for p in 0..parts as usize {
+            part_start[p + 1] += part_start[p];
         }
-        let mut cursor = start.clone();
         let mut by_bucket = vec![0u64; hashes.len()];
-        for &h in hashes {
-            let b = bucket_of(h) as usize;
-            by_bucket[cursor[b] as usize] = h;
-            cursor[b] += 1;
+        {
+            let mut cursor = part_start.clone();
+            for &h in hashes {
+                let p = part_of(h);
+                by_bucket[cursor[p] as usize] = h;
+                cursor[p] += 1;
+            }
         }
 
+        let lay = Layout {
+            seed,
+            buckets_per_part,
+            dense_buckets,
+            slots_per_part,
+            stride,
+        };
+
+        // Each part sorts its own keys into its own buckets. `start` is written in absolute
+        // offsets into `by_bucket`, so what the placement pass reads is exactly what it read when
+        // this was one serial counting sort.
+        let mut start = vec![0u32; buckets as usize + 1];
+        let bpp = buckets_per_part as usize;
+        let group = (parts as usize).div_ceil(threads.clamp(1, parts as usize));
+        {
+            let mut slices: Vec<&mut [u64]> = Vec::with_capacity(parts as usize);
+            let mut rest: &mut [u64] = &mut by_bucket;
+            for p in 0..parts as usize {
+                let (head, tail) = rest.split_at_mut((part_start[p + 1] - part_start[p]) as usize);
+                slices.push(head);
+                rest = tail;
+            }
+            let mut work: Vec<(&mut [u64], &mut [u32], u32)> = slices
+                .into_iter()
+                .zip(start.chunks_mut(bpp))
+                .zip(part_start.iter().copied())
+                .map(|((k, st), off)| (k, st, off))
+                .collect();
+            std::thread::scope(|scope| {
+                for chunk in work.chunks_mut(group) {
+                    let lay = &lay;
+                    scope.spawn(move || {
+                        let mut scratch: Vec<u64> = Vec::new();
+                        let mut cursor: Vec<u32> = Vec::new();
+                        for (keys, starts, off) in chunk.iter_mut() {
+                            Self::group_part(lay, keys, starts, *off, &mut scratch, &mut cursor);
+                        }
+                    });
+                }
+            });
+        }
+        start[buckets as usize] = n as u32;
+
+        let t1 = std::time::Instant::now();
         // Who owns each slot, so a colliding bucket can be evicted rather than the pilot grown.
-        // `FREE` is the empty marker; there are fewer than `u32::MAX` buckets by construction.
-        const FREE: u32 = u32::MAX;
-        let mut owner = vec![FREE; slots as usize];
-        // The same occupancy as one bit per slot, plus a spare word for `window`. Whether a pilot
-        // is usable at all is a question about free slots and nothing else, and a part's bits are
-        // 33 KiB against `owner`'s 1 MiB — the search runs out of L1 instead of L2.
-        let mut taken = vec![0u64; (slots as usize).div_ceil(64) + 1];
+        // `u32::MAX` is the empty marker; a part has fewer buckets than that by construction.
+        let mut owner = vec![u32::MAX; slots as usize];
+        // The same occupancy as one bit per slot. Whether a pilot is usable at all is a question
+        // about free slots and nothing else, and a part's bits are 33 KiB against `owner`'s 1 MiB —
+        // the search runs out of L1 rather than L2. A key's window never crosses out of its part, so
+        // `window`'s read of the word after the one it starts in stays inside the part's own words.
+        let words_per_part = (stride / 64) as usize;
+        let mut taken = vec![0u64; words_per_part * parts as usize];
         let mut pilots = vec![0u8; buckets as usize];
         let mut placed = vec![false; buckets as usize];
-        let mut bases: [Vec<u64>; 4] = std::array::from_fn(|_| Vec::with_capacity(64));
-        let mut victims: Vec<u32> = Vec::with_capacity(16);
-        let mut best_victims: Vec<u32> = Vec::with_capacity(16);
-        let mut part_seed: Vec<u64> = Vec::with_capacity(parts as usize);
-        let mut order: Vec<u32> = Vec::with_capacity(buckets_per_part as usize);
-        let mut queue: std::collections::VecDeque<u32> =
-            std::collections::VecDeque::with_capacity(buckets_per_part as usize);
-        let size_of = |b: u32| start[b as usize + 1] - start[b as usize];
+        let mut part_seed = vec![0u64; parts as usize];
 
-        // A part at a time. Every slot a part can reach lies in its own window, so the displacement
-        // search — which reads occupancy at random and is the whole cost of construction — works
-        // inside one cache-resident slice instead of striding a table the size of the output.
-        for part in 0..parts {
-            let first = part * buckets_per_part;
-            let slot_base = part * stride;
-
-            // Largest bucket first: the hard ones are cheap only while the part is still empty.
-            // The order is a property of the bucket sizes, which no retry changes.
-            order.clear();
-            order.extend(first as u32..(first + buckets_per_part) as u32);
-            order.sort_unstable_by_key(|&b| std::cmp::Reverse(size_of(b)));
-            let mut placed_part = false;
-            for retry in 0..PART_TRIES {
-                let pseed = mix(seed ^ part.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(retry));
-                for s in slot_base..slot_base + stride {
-                    owner[s as usize] = FREE;
-                    taken[(s / 64) as usize] &= !(1 << (s % 64));
-                }
-                for b in first..first + buckets_per_part {
-                    placed[b as usize] = false;
-                }
-                queue.clear();
-                queue.extend(order.iter().copied());
-
-                // Displacement is bounded so a part that livelocks is retried instead of looping.
-                // The bound is tight on purpose, because the two cases separate cleanly: measured at
-                // 10 M keys, every part that finished did so in 1.2–1.9 pops per bucket, while the
-                // four that circulated burned 64 each before the old loose bound gave up — and every
-                // one of them placed on the next seed. Four times the bucket count is twice the worst
-                // healthy part and a thirtieth of a stuck one.
-                let mut budget = 4 * buckets_per_part + 4096;
-                // A cuckoo table cycles when two buckets keep taking each other's slots. The standard
-                // guard is to refuse to evict anything displaced in the last few steps; 16 is what
-                // PtrHash uses, but the ring may not cover a sizeable share of a small part, or it
-                // would forbid every eviction there is and fail on a bucket it could have placed.
-                let recent_len = (buckets_per_part as usize / 4).clamp(1, 16);
-                let mut recent = [u32::MAX; 16];
-                let mut recent_at = 0usize;
-                let mut failed = false;
-
-                while let Some(b) = queue.pop_front() {
-                    let keys =
-                        &by_bucket[start[b as usize] as usize..start[b as usize + 1] as usize];
-                    // Empty buckets need no pilot; already-placed ones are stale queue entries left by
-                    // an eviction that was itself undone, and re-placing them only churns the part.
-                    if keys.is_empty() || placed[b as usize] {
-                        continue;
-                    }
-                    if budget == 0 {
-                        failed = true;
-                        break;
-                    }
-                    budget -= 1;
-
-                    // The window base of every key under every base function, once per bucket. A
-                    // base function under which two keys of this bucket share a base is out: their
-                    // slots would coincide under every shift, and no eviction changes that.
-                    let mut usable = [true; 4];
-                    for (j, bj) in bases.iter_mut().enumerate() {
-                        bj.clear();
-                        for &h in keys {
-                            let base = Self::base(h, pseed, j, slots_per_part);
-                            if bj.contains(&base) {
-                                usable[j] = false;
-                                break;
-                            }
-                            bj.push(base);
-                        }
-                    }
-
-                    // Prefer a pilot that collides with nothing: under each base function, AND the
-                    // keys' windows and take the first zero. Failing that, the second pass below
-                    // prices what each pilot would displace and takes the cheapest.
-                    let mut chosen: Option<(u8, u32, bool)> = None;
-                    for j in 0..4 {
-                        if !usable[j] {
-                            continue;
-                        }
-                        let mut free = !0u64;
-                        for &base in &bases[j] {
-                            free &= !window(&taken, slot_base + base);
-                            if free == 0 {
-                                break;
-                            }
-                        }
-                        if free != 0 {
-                            chosen =
-                                Some((((j as u8) << 6) | free.trailing_zeros() as u8, 0, true));
-                            break;
-                        }
-                    }
-                    if chosen.is_none() {
-                        for j in 0..4 {
-                            if !usable[j] {
-                                continue;
-                            }
-                            for d in 0..GUARD {
-                                victims.clear();
-                                let mut cost = 0u32;
-                                for &base in &bases[j] {
-                                    let o = owner[(slot_base + base + d) as usize];
-                                    if o != FREE && o != b && !victims.contains(&o) {
-                                        victims.push(o);
-                                        // Squared, so displacing one big bucket loses to displacing
-                                        // two small ones: the big one is the expensive one to re-place.
-                                        cost += size_of(o) * size_of(o);
-                                    }
-                                }
-                                // The first pass would have taken a free pilot.
-                                debug_assert!(cost != 0);
-                                if victims.iter().any(|&v| recent[..recent_len].contains(&v)) {
-                                    continue;
-                                }
-                                // Displacing a bucket bigger than this one is what stalls a part:
-                                // the big ones are placed first, into an empty part, and once evicted
-                                // they need a run of free slots that no longer exists. Prefer the
-                                // pilots that push work downhill, and reach for the rest only when
-                                // there is no such pilot at all.
-                                let downhill = victims.iter().all(|&v| size_of(v) <= size_of(b));
-                                let better = match chosen {
-                                    None => true,
-                                    Some((_, best, was_downhill)) => match (downhill, was_downhill)
-                                    {
-                                        (true, false) => true,
-                                        (false, true) => false,
-                                        _ => cost < best,
-                                    },
-                                };
-                                if better {
-                                    chosen = Some((((j as u8) << 6) | d as u8, cost, downhill));
-                                    best_victims.clear();
-                                    best_victims.extend_from_slice(&victims);
-                                }
+        let t2 = std::time::Instant::now();
+        // One thread per group of parts, and the groups are contiguous so every table splits with
+        // `chunks_mut`. A group that cannot place one of its parts sets the flag and stops; there is
+        // nothing to unwind, because the next seed rebuilds everything anyway.
+        let stalled = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            for (g, ((((o, tk), pi), pl), ps)) in owner
+                .chunks_mut(stride as usize * group)
+                .zip(taken.chunks_mut(words_per_part * group))
+                .zip(pilots.chunks_mut(bpp * group))
+                .zip(placed.chunks_mut(bpp * group))
+                .zip(part_seed.chunks_mut(group))
+                .enumerate()
+            {
+                let (lay, start, by_bucket, stalled) = (&lay, &start, &by_bucket, &stalled);
+                scope.spawn(move || {
+                    for (k, ((((o, tk), pi), pl), ps)) in o
+                        .chunks_mut(stride as usize)
+                        .zip(tk.chunks_mut(words_per_part))
+                        .zip(pi.chunks_mut(bpp))
+                        .zip(pl.chunks_mut(bpp))
+                        .zip(ps.iter_mut())
+                        .enumerate()
+                    {
+                        let tables = PartTables {
+                            owner: o,
+                            taken: tk,
+                            pilots: pi,
+                            placed: pl,
+                        };
+                        match Self::place_part(
+                            lay,
+                            (g * group + k) as u64,
+                            start,
+                            by_bucket,
+                            tables,
+                        ) {
+                            Some(pseed) => *ps = pseed,
+                            None => {
+                                stalled.store(true, std::sync::atomic::Ordering::Relaxed);
+                                return;
                             }
                         }
                     }
-
-                    // No pilot at all placed this bucket's keys on distinct slots, or every one that
-                    // did would evict a bucket displaced moments ago: a different seed is the way out.
-                    let Some((pilot, _, _)) = chosen else {
-                        failed = true;
-                        break;
-                    };
-
-                    // Clear each victim's slots and hand it back before claiming its own. A displaced
-                    // bucket goes to the *front*, so its chain is followed to the end before the next
-                    // fresh bucket is touched. That is not a nicety: appending them instead diffuses
-                    // displaced buckets among the pending ones, and the part settles into an
-                    // equilibrium where eviction hands back as many keys as placement takes — measured
-                    // over one un-partitioned table of 10 000 keys, ~85 buckets stayed unplaced across
-                    // 1.3 M displacements with no trend. Depth-first, the same table builds at once.
-                    for &v in &best_victims {
-                        let vk =
-                            &by_bucket[start[v as usize] as usize..start[v as usize + 1] as usize];
-                        let pv = pilots[v as usize];
-                        for &h in vk {
-                            let s = slot_base
-                                + Self::base(h, pseed, usize::from(pv >> 6), slots_per_part)
-                                + u64::from(pv & 63);
-                            if owner[s as usize] == v {
-                                owner[s as usize] = FREE;
-                                taken[(s / 64) as usize] &= !(1 << (s % 64));
-                            }
-                        }
-                        placed[v as usize] = false;
-                        recent[recent_at] = v;
-                        recent_at = (recent_at + 1) % recent_len;
-                        queue.push_front(v);
-                    }
-                    best_victims.clear();
-
-                    let (j, d) = (usize::from(pilot >> 6), u64::from(pilot & 63));
-                    for &base in &bases[j] {
-                        let s = slot_base + base + d;
-                        owner[s as usize] = b;
-                        taken[(s / 64) as usize] |= 1 << (s % 64);
-                    }
-                    pilots[b as usize] = pilot;
-                    placed[b as usize] = true;
-                }
-
-                if !failed {
-                    part_seed.push(pseed);
-                    placed_part = true;
-                    break;
-                }
+                });
             }
-            if !placed_part {
-                return None;
-            }
+        });
+        let t3 = std::time::Instant::now();
+        if stalled.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
         }
 
         // Minimal at last: every occupied slot at or above `n` is redirected to a hole below it.
@@ -549,6 +718,13 @@ impl Mphf {
             remap_off[i] = u16::try_from(hole - remap_base[i / REMAP_BLOCK]).ok()?;
         }
 
+        eprintln!(
+            "PHASE csr {:>6.0} alloc {:>6.0} place {:>6.0} remap {:>6.0} ms (threads {threads}, parts {parts})",
+            (t1 - t0).as_secs_f64() * 1e3,
+            (t2 - t1).as_secs_f64() * 1e3,
+            (t3 - t2).as_secs_f64() * 1e3,
+            t3.elapsed().as_secs_f64() * 1e3,
+        );
         Some(Self {
             n,
             slots,
@@ -608,6 +784,18 @@ mod tests {
     fn it_is_a_bijection_onto_the_dense_range() {
         for n in [1usize, 2, 3, 7, 64, 1_000, 10_000] {
             assert_bijection(&hashes(n));
+        }
+    }
+
+    /// The gate's determinism criterion, as a test rather than a claim: a part is placed from its
+    /// own index, its own keys and its own slice, so the thread count cannot reach the result.
+    #[test]
+    fn the_table_is_the_same_on_one_thread_and_on_eight() {
+        for n in [1000usize, 300_000] {
+            let hs = hashes(n);
+            let one = Mphf::build_with_threads(&hs, 1).expect("one thread");
+            let eight = Mphf::build_with_threads(&hs, 8).expect("eight threads");
+            assert_eq!(one, eight, "n = {n}: the thread count changed the table");
         }
     }
 
