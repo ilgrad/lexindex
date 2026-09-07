@@ -44,6 +44,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`SECURITY.md`, as a threat model rather than a form letter.** What the loaders guarantee
+  (soundness, not correctness — a crafted blob answers wrong ids, never out-of-range ones), why
+  `load_mmap` is the one `unsafe fn` and what its obligation is about, why the checksums are
+  integrity and not authentication, and that the unseeded hashes make this no defence against an
+  adversary who picks the keys. The README and `docs/design.md` link it rather than restate it.
+
+- **A blob compatibility policy** (`docs/design.md`): the magic table, and the rule that a refusal
+  must name the version that wrote the file. `OVL1` is read where `BMP*`/`BCH*` are refused because
+  it is decodable and they are not — compatibility is broken where it cannot be kept, not where
+  keeping it is inconvenient.
+
 - **The whole library builds on 32-bit targets, `wasm32` included — `mph` too.** Two things had kept
   the hash indexes off them: `ptr_hash` pulled in `sucds`, which refuses any other pointer width,
   and the MPH's own `u64 → usize` narrowings had never been audited. The dependency left with the

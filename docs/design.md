@@ -234,6 +234,12 @@ could not check them at any price. Upstream agreed: `epserde` 0.13 made `deseria
 `unsafe fn`, and PtrHash declined a checked `try_index()` for the same reason. The fix was not more
 checking but a different MPH.
 
+## Security
+
+What is validated on load and what is merely trusted is spelled out per format above; the threat
+model that ties it together — soundness versus correctness, why the checksums are integrity and not
+authentication, and where the crate's `unsafe` lives — is [`SECURITY.md`](../SECURITY.md).
+
 ## Blob compatibility
 
 Every blob starts with a four-byte magic whose last character is the format version. A format change

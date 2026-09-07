@@ -506,6 +506,14 @@ why it is stated here rather than added as a row above. Hash collisions do not c
 indexes absorb them into a side table instead of failing the build, and the fst build has no
 collision failure mode at all.</sub>
 
+## Security
+
+Every loader is a safe fn on arbitrary bytes since 1.0, and `load_mmap` is the one that is not — its
+obligation is about the file, not the bytes. What the blob formats do and do not defend against is
+[`SECURITY.md`](SECURITY.md): a crafted blob answers wrong ids, never out-of-range ones; the
+checksums are integrity and not authentication; and the hashes are unseeded, so this is not a HashDoS
+defence.
+
 ## License
 
 MIT © Ilia Gradina
