@@ -199,12 +199,13 @@ because each index loads itself; the blob records which base wrote it, so passin
 an error rather than an unchecked read of bytes meant for something else. `save` is atomic, like the
 indexes' own: a crash or a full disk leaves the previous file whole rather than a truncated one.
 
-**`Overlay.load` and `Overlay.from_bytes` validate everything they read, but carry no integrity
-check of their own.** The overlay's framing — the header lengths, the additions, the tombstones — is
-validated for every base, and malformed bytes raise `ValueError`; what follows goes to the base
-class's loader, which validates its own region. What the format does not have is a checksum over the
-additions and tombstones, which every base blob has for itself: a flipped bit in an addition that
-stays valid UTF-8 loads as a different key, and one in a tombstone word revives a removed id.
+**`Overlay.load` and `Overlay.from_bytes` are checksummed and validated throughout.** The header
+carries a check of its own and a hash of everything after it, both verified before any of it is
+read, so a flipped bit anywhere raises `ValueError` rather than loading as a different key or a
+revived id. The framing is checked past the checksums too — the lengths, the additions and their
+UTF-8, the tombstones against the id space — and the base region goes to the base class's loader,
+which validates its own. A blob written by `0.12` still loads, without the two checksums that format
+does not carry; saving it again writes the current one and it gains them.
 
 `key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
@@ -354,7 +355,10 @@ use.
 
 `from_bytes_with` takes the base's loader rather than picking one, because `Overlay<I>` is generic
 over the base and each base parses its own blob: `Overlay::from_bytes_with(&blob,
-PerfectHashIndex::from_bytes)`. All three base loaders are safe fns.
+PerfectHashIndex::from_bytes)`. All three base loaders are safe fns, so the closure could now be a
+trait method — it stays a closure because that is also how a base loaded some other way, or a stub
+that skips the base entirely, gets in: the fuzz target and the framing property tests both need it,
+and the wrong loader is already refused by the base tag rather than by the type.
 
 `key`, `keys` and `compact` need the base to store its keys, which `CompactHashIndex` does not — an
 overlay over it answers membership and nothing else, and the absence is a compile error rather than a

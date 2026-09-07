@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed — breaking
 
-- **The minimal perfect hash is now this crate's own, and every pre-1.0 blob is refused.**
+- **The minimal perfect hash is now this crate's own, and every pre-1.0 hash-index blob is
+  refused.**
   `PerfectHashIndex` and `CompactHashIndex` were built on `ptr_hash`, whose pilot table is read
   unchecked and whose bounding fields are private, so a blob holding one could not be validated
   from outside the crate that owned it. The new backend writes every array length into its own
@@ -26,6 +27,16 @@ All notable changes to this project are documented here. The format follows
   same key set produces the same blob byte for byte. `PerfectHashIndex::build`'s docstring
   previously promised the opposite.
 
+- **The overlay is checksummed: new format `OVL2`.** `OVL1` was the one blob in this library with
+  no integrity check of its own — the base carried one for its own region and the additions and
+  tombstones carried none — so a flipped bit in an addition that stayed valid UTF-8 loaded as a
+  different key, and one in a tombstone word revived a removed id, silently. `OVL2` puts every
+  section length in the header, adds a header check and a hash over everything after it, and
+  verifies both before reading any of it. `OVL1` blobs still load, without the checks that format
+  does not carry; saving one again writes `OVL2` and it gains them. It is the only pre-1.0 format
+  this version still reads — nothing about it was undecodable, so refusing it would have cost a
+  rebuild for nothing.
+
 - **New blob formats: `BMP5` and `BCH6`.** `BCH6` drops the `overflow_cap` field — it existed to
   bound `ptr_hash`'s unchecked remap, and the new one covers its whole slot range — so its header
   is 40 bytes rather than 48.
@@ -37,6 +48,10 @@ All notable changes to this project are documented here. The format follows
   warnings to none — every one came from that tree.
 
 ### Changed
+
+- The blob-integrity primitives — the header hash and the streaming payload hash — moved from the
+  `mph`-gated `hash` module to `blob`, which every format shares. `StringIndex`-only builds could
+  not reach them before, which is why the overlay had none.
 
 - Loading a `PerfectHashIndex` no longer hashes every key in the arena. That pass existed to
   recompute `overflow_cap` on each load and was O(n) on the blob's size.

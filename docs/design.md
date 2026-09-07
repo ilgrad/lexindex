@@ -158,6 +158,31 @@ feature itself still requires a 64-bit target, because the MPH's slot arithmetic
 `usize` in places nobody has audited for a smaller one. `StringIndex`'s blob is the `fst`, whose
 encoding is little-endian by specification.
 
+## `Overlay`
+
+The three indexes are build-once summaries: a finite-state transducer and a minimal perfect hash both
+have to be rebuilt to admit one new key. An overlay keeps the base as it is, holds the keys added
+after it in a map, and marks the ids retired from it in a bitset — so a catalog that mostly grows at
+the edges is not rebuilt on every change. Removal is **by id, not by key**, which is what makes it
+well defined over a probabilistic base: a tombstone is tested only after the base has already said
+yes, so a `CompactHashIndex` false positive that lands on a tombstoned id reads as absent, which is
+the contract that index already has.
+
+The serialised blob is `[magic "OVL2"][base tag][base blob len][addition count][addition bytes]
+[tombstone words][payload][check][base blob][additions][tombstone words]`. Every section length is in
+the header, which is what lets the loader bound each region before reading a byte of it — and what
+makes the payload hash checkable *before* any of the contents are trusted. Neither the live count nor
+the live/dead split is stored; both are derived, so a blob cannot disagree with itself about how many
+keys it holds. The base is embedded verbatim and validated by its own loader, so the overlay inherits
+exactly its base's guarantees over that region and adds its own over the rest.
+
+`OVL1`, which `0.12` wrote, is the one pre-1.0 format this version still reads. Nothing about it was
+undecodable — it is the same three sections with the tombstone count in the body instead of the
+header — so refusing it would have cost users a rebuild for nothing. What it cannot have is either
+checksum: a flipped bit in an addition that stayed valid UTF-8 loaded as a different key, and one in
+a tombstone word revived a removed id, silently. Saving a loaded `OVL1` writes `OVL2` and it gains
+them; that is the whole migration.
+
 ## Zero-copy `load_mmap`
 
 All three indexes load two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
