@@ -25,7 +25,8 @@ All notable changes to this project are documented here. The format follows
 
 - **Ids are reproducible.** Construction is deterministic and independent of thread count, so the
   same key set produces the same blob byte for byte. `PerfectHashIndex::build`'s docstring
-  previously promised the opposite.
+  previously promised the opposite, and `CompactHashIndex::build_bits`' still did — both say what
+  is true now, and a property test over arbitrary key sets holds all three indexes to it.
 
 - **The overlay is checksummed: new format `OVL2`.** `OVL1` was the one blob in this library with
   no integrity check of its own — the base carried one for its own region and the additions and

@@ -74,9 +74,9 @@ impl CompactHashIndex {
     /// bits, ≈ 0.4% at 8, ≈ 0.0015% at 16; measured 6.2530% at 4 bits over 2 M non-member probes).
     /// That rate describes *random* non-members — both hashes are deterministic and unseeded, so it
     /// is not a defence against an adversary who chooses the queries. Duplicates are removed; ids
-    /// are arbitrary dense slots in `[0, n)` (no defined order) and, like
-    /// [`PerfectHashIndex`](crate::PerfectHashIndex)'s, are not reproducible across builds — persist
-    /// the blob, not the key list.
+    /// are arbitrary dense slots in `[0, n)` with no defined order, but they are **reproducible**:
+    /// the same key set always produces the same blob, byte for byte, whatever the machine's thread
+    /// count — so a blob is a comparable artefact and rebuilding one is not a renumbering.
     ///
     /// The build **streams**: only a `(hash, second hash)` pair — 16 bytes — is kept per key, never
     /// the strings, so building from a lazy iterator costs the same whatever the keys weigh. Those
@@ -1063,6 +1063,26 @@ mod tests {
                 },
             )
             .unwrap();
+    }
+
+    /// The same promise `PerfectHashIndex` makes, at a scale a property test cannot afford: the
+    /// same keys give the same blob byte for byte, so a rebuild is not a renumbering and two blobs
+    /// can be compared to tell whether a corpus changed. The fingerprint width is part of the
+    /// input, so it is varied rather than left at the default.
+    #[test]
+    fn the_same_keys_always_produce_the_same_blob() {
+        let words: Vec<String> = (0..50_000).map(|i| format!("word-{i:05}")).collect();
+        for bits in [1u32, 8, 17] {
+            let first = CompactHashIndex::build_bits(&words, bits)
+                .unwrap()
+                .to_bytes()
+                .unwrap();
+            let again = CompactHashIndex::build_bits(&words, bits)
+                .unwrap()
+                .to_bytes()
+                .unwrap();
+            assert_eq!(first, again, "{bits} fingerprint bits");
+        }
     }
 
     /// At 4 bits the advertised false-positive rate is 2^-4 = 6.25%; check it statistically

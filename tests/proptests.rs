@@ -359,5 +359,30 @@ mod mph {
                 "single-byte flip at {pos} (xor {xor}) was accepted by an owned load",
             );
         }
+
+        /// A blob is a reproducible artefact since 1.0, which is a property of *every* key set and not
+        /// of the two that happen to be in a unit test. Building twice must give the same bytes for all
+        /// three indexes — the two hash ones because their MPH is deterministic, `StringIndex` because
+        /// an FST over sorted keys is canonical.
+        ///
+        /// The thread count is the other half of the claim and is tested where threads actually enter,
+        /// in `mphf`: here every build takes the default, so what this covers is the key set.
+        #[test]
+        fn building_twice_gives_the_same_bytes(keys in multibyte_keys(), fp in 1u32..=16) {
+            let perfect = PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap();
+            prop_assert_eq!(
+                &perfect,
+                &PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap()
+            );
+
+            let compact = CompactHashIndex::build_bits(&keys, fp).unwrap().to_bytes().unwrap();
+            prop_assert_eq!(
+                &compact,
+                &CompactHashIndex::build_bits(&keys, fp).unwrap().to_bytes().unwrap()
+            );
+
+            let string = lexindex::StringIndex::build(&keys).unwrap().to_bytes();
+            prop_assert_eq!(&string, &lexindex::StringIndex::build(&keys).unwrap().to_bytes());
+        }
     }
 }

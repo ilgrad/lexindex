@@ -1652,9 +1652,6 @@ mod tests {
         assert!(batch[keys.len()..].iter().all(Option::is_none));
     }
 
-    /// A 0.7 "BMP3" blob (header keeps a now-ignored `overflow_cap` field) still loads: the bound
-    /// is recomputed from the arena, and every lookup matches the source index.
-    ///
     /// Every pre-1.0 blob embedded a `ptr_hash` image this crate can no longer read. The refusal
     /// has to *name* that — a bare "bad magic" would send someone hunting for a corrupt file when
     /// the file is intact and merely old.
