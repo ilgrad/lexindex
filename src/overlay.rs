@@ -362,30 +362,66 @@ impl OverlayBase for crate::CompactHashIndex {
 
 /// Magic for the [`Overlay::to_bytes`] blob. The trailing digit is the format version, as
 /// everywhere else in this crate; a change to the layout below bumps it.
-const OVERLAY_MAGIC: &[u8; 4] = b"OVL1";
+const OVERLAY_MAGIC: &[u8; 4] = b"OVL2";
 
-/// `[magic 4][base tag 1][base blob len 8][additions 8]`.
-const OVERLAY_HEADER: usize = 4 + 1 + 8 + 8;
+/// The format `0.12` wrote: the same three sections, but with the tombstone word count buried
+/// between the additions and the words, and no checksum anywhere. Still read — the parser is the
+/// same one, and an overlay over a `StringIndex` is the one pre-1.0 blob in this crate that 1.0
+/// can still open — but never written: saving one again produces `OVL2`.
+const OVERLAY_MAGIC_V1: &[u8; 4] = b"OVL1";
+
+/// `[magic 4][base tag 1][base blob len 8][addition count 8][addition bytes 8][tombstone words 8]
+/// [payload 8][check 4]`.
+const OVERLAY_HEADER: usize = 4 + 1 + 8 + 8 + 8 + 8 + 8 + 4;
+
+/// Header bytes the trailing check covers.
+const OVERLAY_CHECKED: usize = OVERLAY_HEADER - 4;
+
+/// `[magic 4][base tag 1][base blob len 8][addition count 8]`.
+const OVERLAY_HEADER_V1: usize = 4 + 1 + 8 + 8;
+
+/// Fill in the two checksums of an otherwise complete `OVL2` blob: the payload hash over every
+/// section, then the header hash over the header including it. Both are recomputed from the bytes
+/// that are there, so sealing a blob a test has tampered with is the same operation as writing one
+/// — which is what lets those tests show that the semantic checks stand on their own.
+fn seal(out: &mut [u8]) {
+    let payload = crate::blob::hash_block(&out[OVERLAY_HEADER..]);
+    out[37..45].copy_from_slice(&payload.to_le_bytes());
+    let check = crate::blob::hash_bytes(&out[..OVERLAY_CHECKED]) as u32;
+    out[OVERLAY_CHECKED..OVERLAY_HEADER].copy_from_slice(&check.to_le_bytes());
+}
+
+/// The three sections of an overlay blob, already bounded by whichever header framed them.
+struct Sections<'a> {
+    base: &'a [u8],
+    added_count: usize,
+    additions: &'a [u8],
+    tombstones: &'a [u8],
+}
 
 impl<I: OverlayBase> Overlay<I> {
-    /// Serialise to `[magic 4][base tag u8][base blob len u64][additions u64][base blob][additions][tombstones]`.
+    /// Serialise to `[header][base blob][additions][tombstones]`, where the header is
+    /// `[magic "OVL2"][base tag u8][base blob len u64][addition count u64][addition bytes u64]
+    /// [tombstone words u64][payload u64][check u32]`.
     ///
-    /// Additions are length-prefixed (`u32` length, then the bytes) in id order; tombstones are a
-    /// `u64` word count followed by the words, little-endian throughout. Neither `len` nor the
-    /// live/dead split is stored: both are derived on load, so a blob cannot disagree with itself
-    /// about how many keys it holds.
+    /// Additions are length-prefixed (`u32` length, then the bytes) in id order; tombstones are
+    /// bare `u64` words; little-endian throughout. `check` is a hash of the header bytes before it,
+    /// and `payload` a hash of everything after it — so a flipped bit in an addition that stays
+    /// valid UTF-8, or in a tombstone word, is caught on load instead of loading as a different key
+    /// or a revived id.
+    ///
+    /// **Every section length is in the header.** That is what lets the loader bound each region
+    /// before reading a byte of it, and what makes the payload hash checkable *before* any of the
+    /// contents are trusted. Neither `len` nor the live/dead split is stored: both are derived on
+    /// load, so a blob cannot disagree with itself about how many keys it holds.
     ///
     /// The base is serialised with its own `to_bytes`, so the blob inherits exactly the
     /// trust model of the base's format — see [`from_bytes_with`](Self::from_bytes_with).
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let base = self.base.base_to_bytes()?;
         let added: usize = self.added_keys.iter().map(|k| 4 + k.len()).sum();
-        let mut out =
-            Vec::with_capacity(OVERLAY_HEADER + base.len() + added + 8 + self.dead.len() * 8);
-        out.extend_from_slice(OVERLAY_MAGIC);
-        out.push(I::BASE_TAG);
-        out.extend_from_slice(&(base.len() as u64).to_le_bytes());
-        out.extend_from_slice(&(self.added_keys.len() as u64).to_le_bytes());
+        let mut out = Vec::with_capacity(OVERLAY_HEADER + base.len() + added + self.dead.len() * 8);
+        out.resize(OVERLAY_HEADER, 0);
         out.extend_from_slice(&base);
         for key in &self.added_keys {
             let len = u32::try_from(key.len())
@@ -393,10 +429,18 @@ impl<I: OverlayBase> Overlay<I> {
             out.extend_from_slice(&len.to_le_bytes());
             out.extend_from_slice(key.as_bytes());
         }
-        out.extend_from_slice(&(self.dead.len() as u64).to_le_bytes());
         for word in &self.dead {
             out.extend_from_slice(&word.to_le_bytes());
         }
+        // Written last, over the sections already in place: the payload hash covers exactly the
+        // bytes the loader will hash back, and nothing the header says about them.
+        out[0..4].copy_from_slice(OVERLAY_MAGIC);
+        out[4] = I::BASE_TAG;
+        out[5..13].copy_from_slice(&(base.len() as u64).to_le_bytes());
+        out[13..21].copy_from_slice(&(self.added_keys.len() as u64).to_le_bytes());
+        out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
+        out[29..37].copy_from_slice(&(self.dead.len() as u64).to_le_bytes());
+        seal(&mut out);
         Ok(out)
     }
 
@@ -432,25 +476,43 @@ impl<I: OverlayBase> Overlay<I> {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     ///
-    /// Additions are checked for duplicates and, over a base whose membership is exact
-    /// ([`EXACT_MEMBERSHIP`](OverlayBase::EXACT_MEMBERSHIP)), against the base itself; tombstones
-    /// are checked for bits outside the id space, and every added key for UTF-8. Over a
+    /// **Safe on arbitrary bytes, and so is every base loader since 1.0.** The order is: the header
+    /// checksum, then the section lengths against the bytes actually present, then the payload
+    /// checksum, and only then the contents. So no header field can steer an index or an
+    /// allocation, and nothing is parsed out of a region that has not already been shown intact.
+    /// The base region is handed to `load_base`, which validates it in turn.
+    ///
+    /// Past the checksums the checks are semantic, because a hash vouches for transport and not for
+    /// what was written: additions are checked for duplicates and, over a base whose membership is
+    /// exact ([`EXACT_MEMBERSHIP`](OverlayBase::EXACT_MEMBERSHIP)), against the base itself;
+    /// tombstones are checked for bits outside the id space; every added key for UTF-8. Over a
     /// `CompactHashIndex` base the check against the base is skipped, because a false positive
     /// would reject a sound blob.
     ///
-    /// **Safe on arbitrary bytes, and so is every base loader since 1.0.** Every count in the
-    /// overlay's own framing is validated against the bytes that are actually present, so no header
-    /// field can steer an index or an allocation; the base region is then handed to `load_base`,
-    /// which validates it in turn. What the overlay still does *not* have is an integrity check of
-    /// its own over the additions and tombstones — the base blob carries one, this layer does not
-    /// yet.
+    /// A `0.12` blob (magic `OVL1`) still loads, and gets every check above except the two
+    /// checksums, which that format does not carry. Re-saving it writes `OVL2` and it gains them.
     pub fn from_bytes_with(
         bytes: &[u8],
         load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
     ) -> Result<Self, IndexError> {
-        let header = OVERLAY_HEADER;
-        if bytes.len() < header || &bytes[..4] != OVERLAY_MAGIC {
+        let legacy = bytes.len() >= 4 && &bytes[..4] == OVERLAY_MAGIC_V1;
+        let header = if legacy {
+            OVERLAY_HEADER_V1
+        } else {
+            OVERLAY_HEADER
+        };
+        if bytes.len() < header || (!legacy && &bytes[..4] != OVERLAY_MAGIC) {
             return Err(IndexError::Format("bad overlay magic or truncated header"));
+        }
+        if !legacy {
+            let check = u32::from_le_bytes(
+                bytes[OVERLAY_CHECKED..OVERLAY_HEADER]
+                    .try_into()
+                    .expect("4 bytes"),
+            );
+            if check != crate::blob::hash_bytes(&bytes[..OVERLAY_CHECKED]) as u32 {
+                return Err(IndexError::Format("overlay header checksum mismatch"));
+            }
         }
         if bytes[4] != I::BASE_TAG {
             return Err(IndexError::Format(
@@ -467,25 +529,40 @@ impl<I: OverlayBase> Overlay<I> {
             .checked_add(base_len)
             .filter(|end| *end <= bytes.len())
             .ok_or(IndexError::Format("overlay base blob out of range"))?;
-        let base = load_base(&bytes[header..base_end])?;
 
-        let mut at = base_end;
+        let sections = if legacy {
+            v1_sections(bytes, base_end, added_count)?
+        } else {
+            v2_sections(bytes, base_end, added_count)?
+        };
+        let base = load_base(sections.base)?;
+        Self::assemble(base, sections)
+    }
+
+    /// Read a file written by [`save`](Self::save); see
+    /// [`from_bytes_with`](Self::from_bytes_with) for why the base loader is the caller's.
+    pub fn load_with(
+        path: impl AsRef<std::path::Path>,
+        load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
+    ) -> Result<Self, IndexError> {
+        let bytes = std::fs::read(path).map_err(IndexError::Io)?;
+        Self::from_bytes_with(&bytes, load_base)
+    }
+
+    /// The contents of an already-bounded blob, checked against each other and against the base.
+    fn assemble(base: I, sections: Sections<'_>) -> Result<Self, IndexError> {
+        let Sections {
+            added_count,
+            additions,
+            tombstones,
+            ..
+        } = sections;
+        let mut at = 0;
         let mut added_keys = Vec::with_capacity(added_count.min(1 << 16));
         let mut added = std::collections::HashMap::with_capacity(added_count.min(1 << 16));
         for i in 0..added_count {
-            let len_end = at
-                .checked_add(4)
-                .filter(|end| *end <= bytes.len())
-                .ok_or(IndexError::Format("overlay additions truncated"))?;
-            let len = read_u32(bytes, at) as usize;
-            at = len_end;
-            let end = at
-                .checked_add(len)
-                .filter(|end| *end <= bytes.len())
-                .ok_or(IndexError::Format("overlay addition out of range"))?;
-            let key = std::str::from_utf8(&bytes[at..end])
-                .map_err(|_| IndexError::Format("overlay addition is not UTF-8"))?;
-            at = end;
+            let (key, next) = read_addition(additions, at)?;
+            at = next;
             // `add` consults the base first and revives its id rather than issuing a second one, so
             // no blob this crate writes holds an addition the base already has. Over a
             // probabilistic base the same check would reject sound blobs, hence the constant.
@@ -500,23 +577,17 @@ impl<I: OverlayBase> Overlay<I> {
             }
             added_keys.push(key.to_string());
         }
-
-        let count_end = at
-            .checked_add(8)
-            .filter(|end| *end <= bytes.len())
-            .ok_or(IndexError::Format("overlay tombstones truncated"))?;
-        let words = usize::try_from(read_u64(bytes, at))
-            .map_err(|_| IndexError::Format("overlay tombstone count out of range"))?;
-        at = count_end;
-        let tombstone_bytes = words
-            .checked_mul(8)
-            .ok_or(IndexError::Format("overlay tombstone count out of range"))?;
-        if bytes.len() - at != tombstone_bytes {
-            return Err(IndexError::Format("overlay tombstone length mismatch"));
+        // Only reachable under `OVL2`, whose header states the region's length independently of the
+        // additions in it: `OVL1` has no such field, so its region is whatever the walk consumed.
+        if at != additions.len() {
+            return Err(IndexError::Format(
+                "overlay addition region is longer than its additions",
+            ));
         }
-        // Read from the slice rather than from the count: a fabricated count can no longer size an
+
+        // Read from the slice rather than from any count: a fabricated count can no longer size an
         // allocation, because the bytes it claims have already been shown to be there.
-        let dead: Vec<u64> = bytes[at..]
+        let dead: Vec<u64> = tombstones
             .chunks_exact(8)
             .map(|w| u64::from_le_bytes(w.try_into().expect("8 bytes")))
             .collect();
@@ -543,16 +614,89 @@ impl<I: OverlayBase> Overlay<I> {
             live,
         })
     }
+}
 
-    /// Read a file written by [`save`](Self::save); see
-    /// [`from_bytes_with`](Self::from_bytes_with) for why the base loader is the caller's.
-    pub fn load_with(
-        path: impl AsRef<std::path::Path>,
-        load_base: impl FnOnce(&[u8]) -> Result<I, IndexError>,
-    ) -> Result<Self, IndexError> {
-        let bytes = std::fs::read(path).map_err(IndexError::Io)?;
-        Self::from_bytes_with(&bytes, load_base)
+/// Bound the two sections after the base from the `OVL2` header, and verify the payload checksum
+/// over all three — before a single addition or tombstone is read.
+fn v2_sections(
+    bytes: &[u8],
+    base_end: usize,
+    added_count: usize,
+) -> Result<Sections<'_>, IndexError> {
+    let added_bytes = usize::try_from(read_u64(bytes, 21))
+        .map_err(|_| IndexError::Format("overlay addition region out of range"))?;
+    let words = usize::try_from(read_u64(bytes, 29))
+        .map_err(|_| IndexError::Format("overlay tombstone count out of range"))?;
+    let added_end = base_end
+        .checked_add(added_bytes)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(IndexError::Format("overlay addition region out of range"))?;
+    let tombstone_bytes = words
+        .checked_mul(8)
+        .ok_or(IndexError::Format("overlay tombstone count out of range"))?;
+    if bytes.len() - added_end != tombstone_bytes {
+        return Err(IndexError::Format("overlay tombstone length mismatch"));
     }
+    let stored = read_u64(bytes, 37);
+    if stored != crate::blob::hash_block(&bytes[OVERLAY_HEADER..]) {
+        return Err(IndexError::Format("overlay payload checksum mismatch"));
+    }
+    Ok(Sections {
+        base: &bytes[OVERLAY_HEADER..base_end],
+        added_count,
+        additions: &bytes[base_end..added_end],
+        tombstones: &bytes[added_end..],
+    })
+}
+
+/// The same three sections out of an `OVL1` blob, whose addition region has no stated length: it
+/// is whatever a length-only walk of `added_count` additions consumes, and the tombstone word count
+/// sits after it rather than in the header.
+fn v1_sections(
+    bytes: &[u8],
+    base_end: usize,
+    added_count: usize,
+) -> Result<Sections<'_>, IndexError> {
+    let mut at = base_end;
+    for _ in 0..added_count {
+        at = read_addition(bytes, at)?.1;
+    }
+    let added_end = at;
+    let count_end = at
+        .checked_add(8)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(IndexError::Format("overlay tombstones truncated"))?;
+    let words = usize::try_from(read_u64(bytes, at))
+        .map_err(|_| IndexError::Format("overlay tombstone count out of range"))?;
+    let tombstone_bytes = words
+        .checked_mul(8)
+        .ok_or(IndexError::Format("overlay tombstone count out of range"))?;
+    if bytes.len() - count_end != tombstone_bytes {
+        return Err(IndexError::Format("overlay tombstone length mismatch"));
+    }
+    Ok(Sections {
+        base: &bytes[OVERLAY_HEADER_V1..base_end],
+        added_count,
+        additions: &bytes[base_end..added_end],
+        tombstones: &bytes[count_end..],
+    })
+}
+
+/// One length-prefixed addition at `at`, and where the next one starts. Every bound is checked
+/// against `bytes`, so a fabricated length is an error rather than a slice past the end.
+fn read_addition(bytes: &[u8], at: usize) -> Result<(&str, usize), IndexError> {
+    let len_end = at
+        .checked_add(4)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(IndexError::Format("overlay additions truncated"))?;
+    let len = read_u32(bytes, at) as usize;
+    let end = len_end
+        .checked_add(len)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(IndexError::Format("overlay addition out of range"))?;
+    let key = std::str::from_utf8(&bytes[len_end..end])
+        .map_err(|_| IndexError::Format("overlay addition is not UTF-8"))?;
+    Ok((key, end))
 }
 
 fn read_u64(bytes: &[u8], at: usize) -> u64 {
@@ -573,10 +717,34 @@ mod tests {
     use super::*;
     use crate::StringIndex;
 
-    /// Assemble a blob by hand, so a test can put in what `to_bytes` never would.
+    /// Assemble a blob by hand, so a test can put in what `to_bytes` never would. Sealed like a
+    /// real one: what these tests exercise is the checks *past* the checksums.
     fn craft(base: &StringIndex, additions: &[&[u8]], dead: &[u64]) -> Vec<u8> {
         let base = base.to_bytes();
-        let mut out = b"OVL1".to_vec();
+        let added: usize = additions.iter().map(|k| 4 + k.len()).sum();
+        let mut out = vec![0u8; OVERLAY_HEADER];
+        out[0..4].copy_from_slice(OVERLAY_MAGIC);
+        out[4] = <StringIndex as OverlayBase>::BASE_TAG;
+        out[5..13].copy_from_slice(&(base.len() as u64).to_le_bytes());
+        out[13..21].copy_from_slice(&(additions.len() as u64).to_le_bytes());
+        out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
+        out[29..37].copy_from_slice(&(dead.len() as u64).to_le_bytes());
+        out.extend_from_slice(&base);
+        for key in additions {
+            out.extend_from_slice(&(key.len() as u32).to_le_bytes());
+            out.extend_from_slice(key);
+        }
+        for word in dead {
+            out.extend_from_slice(&word.to_le_bytes());
+        }
+        seal(&mut out);
+        out
+    }
+
+    /// The `OVL1` layout `0.12` wrote: no checksums, and the tombstone word count in the body.
+    fn craft_v1(base: &StringIndex, additions: &[&[u8]], dead: &[u64]) -> Vec<u8> {
+        let base = base.to_bytes();
+        let mut out = OVERLAY_MAGIC_V1.to_vec();
         out.push(<StringIndex as OverlayBase>::BASE_TAG);
         out.extend_from_slice(&(base.len() as u64).to_le_bytes());
         out.extend_from_slice(&(additions.len() as u64).to_le_bytes());
@@ -672,6 +840,10 @@ mod tests {
         let good = craft(&base, &[b"c"], &[0b100]);
         assert!(Overlay::from_bytes_with(&good, StringIndex::from_bytes).is_ok());
 
+        // Where the payload starts in a blob crafted over this base: `craft` writes the header,
+        // then the base blob, so the first addition's length prefix begins here.
+        let additions_at = OVERLAY_HEADER + base.to_bytes().len();
+
         let cases: Vec<(&str, Vec<u8>)> = vec![
             ("bad overlay magic or truncated header", {
                 let mut b = good.clone();
@@ -679,20 +851,39 @@ mod tests {
                 b
             }),
             ("bad overlay magic or truncated header", good[..12].to_vec()),
+            // Every case below is re-sealed after the tamper, so what it reaches is the check it
+            // names and not the checksum: the semantic checks have to stand on their own.
             ("overlay blob was written over a different base index", {
                 let mut b = good.clone();
                 b[4] = 99;
+                seal(&mut b);
                 b
             }),
             ("overlay base blob out of range", {
                 let mut b = good.clone();
                 b[5..13].copy_from_slice(&u64::MAX.to_le_bytes());
+                seal(&mut b);
                 b
             }),
             ("overlay addition out of range", {
                 let mut b = craft(&base, &[b"c"], &[]);
-                let at = b.len() - 8 - 4 - 1;
-                b[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+                b[additions_at..additions_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+                seal(&mut b);
+                b
+            }),
+            // The addition region's stated length is longer than the additions in it — a gap the
+            // walk would otherwise skip past silently, since it stops at `added_count`.
+            ("overlay addition region is longer than its additions", {
+                let mut b = craft(&base, &[b"c"], &[]);
+                b[21..29].copy_from_slice(&9u64.to_le_bytes());
+                b.extend_from_slice(&[0; 4]);
+                seal(&mut b);
+                b
+            }),
+            ("overlay addition region out of range", {
+                let mut b = craft(&base, &[b"c"], &[]);
+                b[21..29].copy_from_slice(&u64::MAX.to_le_bytes());
+                seal(&mut b);
                 b
             }),
             (
@@ -716,29 +907,19 @@ mod tests {
                 b.truncate(b.len() - 1);
                 b
             }),
-            ("overlay tombstones truncated", {
-                let mut b = craft(&base, &[b"c"], &[]);
-                b.truncate(b.len() - 4);
-                b
-            }),
-            ("overlay additions truncated", {
-                let mut b = craft(&base, &[b"c"], &[]);
-                b.truncate(b.len() - 8 - 4 - 1 + 2);
-                b
-            }),
             // A tombstone count large enough that `count * 8` wraps: in debug this used to be an
             // arithmetic-overflow panic and in release a wrapped product of zero, which let the
             // length identity pass and drove a `2^61`-element allocation. Both are `Format` now.
             ("overlay tombstone count out of range", {
                 let mut b = craft(&base, &[b"c"], &[]);
-                let at = b.len() - 8;
-                b[at..].copy_from_slice(&(1u64 << 61).to_le_bytes());
+                b[29..37].copy_from_slice(&(1u64 << 61).to_le_bytes());
+                seal(&mut b);
                 b
             }),
             ("overlay tombstone count out of range", {
                 let mut b = craft(&base, &[b"c"], &[]);
-                let at = b.len() - 8;
-                b[at..].copy_from_slice(&u64::MAX.to_le_bytes());
+                b[29..37].copy_from_slice(&u64::MAX.to_le_bytes());
+                seal(&mut b);
                 b
             }),
             // `add` revives a base key's own id rather than issuing a second one, so `to_bytes`
@@ -747,6 +928,118 @@ mod tests {
             (
                 "overlay addition duplicates a base key",
                 craft(&base, &[b"a"], &[]),
+            ),
+        ];
+        for (expected, bytes) in cases {
+            match Overlay::from_bytes_with(&bytes, StringIndex::from_bytes) {
+                Err(IndexError::Format(msg)) => assert_eq!(msg, expected),
+                other => panic!("expected {expected:?}, got {:?}", other.map(|o| o.len())),
+            }
+        }
+    }
+
+    /// The checksums are what `OVL2` exists for: a flipped bit anywhere past the magic is an error
+    /// rather than a different key, a revived id, or a section boundary read from a wrong number.
+    /// Every byte is tried, so this covers the header, the embedded base blob, the additions and
+    /// the tombstone words alike — the base's own checksum catches its region, ours catches the
+    /// rest, and neither region has a gap between them.
+    #[test]
+    fn a_flipped_bit_anywhere_is_caught() {
+        let mut ov = Overlay::new(StringIndex::build(["a", "b", "c"]).unwrap());
+        ov.add("dd");
+        assert!(ov.remove("b"));
+        let good = ov.to_bytes().unwrap();
+        assert_eq!(&good[..4], OVERLAY_MAGIC);
+
+        for pos in 0..good.len() {
+            for bit in [0x01u8, 0x80] {
+                let mut bad = good.clone();
+                bad[pos] ^= bit;
+                assert!(
+                    Overlay::from_bytes_with(&bad, StringIndex::from_bytes).is_err(),
+                    "byte {pos} bit {bit:#04x} was accepted",
+                );
+            }
+        }
+    }
+
+    /// The two checksums cover disjoint regions, so each has to be shown to work on its own: a
+    /// header-only tamper that is *not* re-sealed must fail on the header check specifically, and a
+    /// payload-only tamper under a valid header must fail on the payload check.
+    #[test]
+    fn each_checksum_catches_its_own_region() {
+        let base = StringIndex::build(["a", "b"]).unwrap();
+        let good = craft(&base, &[b"c"], &[0b10]);
+
+        let mut header_only = good.clone();
+        header_only[13..21].copy_from_slice(&7u64.to_le_bytes());
+        assert!(matches!(
+            Overlay::from_bytes_with(&header_only, StringIndex::from_bytes),
+            Err(IndexError::Format("overlay header checksum mismatch"))
+        ));
+
+        let mut payload_only = good.clone();
+        let last = payload_only.len() - 1;
+        payload_only[last] ^= 0b1;
+        assert!(matches!(
+            Overlay::from_bytes_with(&payload_only, StringIndex::from_bytes),
+            Err(IndexError::Format("overlay payload checksum mismatch"))
+        ));
+    }
+
+    /// `0.12`'s `OVL1` blobs still load — over a `StringIndex`, the one base whose own format 1.0
+    /// can still read — and saving one again upgrades it to `OVL2`, checksums and all. That is the
+    /// only migration this format needs: the parser never went away.
+    #[test]
+    fn a_legacy_blob_loads_and_is_rewritten_as_the_new_format() {
+        let base = StringIndex::build(["a", "b", "c"]).unwrap();
+        let old = craft_v1(&base, &[b"d"], &[0b010]);
+        assert_eq!(&old[..4], OVERLAY_MAGIC_V1);
+
+        let ov = Overlay::from_bytes_with(&old, StringIndex::from_bytes).expect("0.12 blob loads");
+        assert_eq!(ov.len(), 3);
+        assert_eq!(ov.id("b"), None);
+        assert_eq!(ov.id("d"), Some(3));
+
+        let new = ov.to_bytes().unwrap();
+        assert_eq!(&new[..4], OVERLAY_MAGIC);
+        let back = Overlay::from_bytes_with(&new, StringIndex::from_bytes).unwrap();
+        assert_eq!(back.len(), ov.len());
+        for key in ["a", "b", "c", "d"] {
+            assert_eq!(back.id(key), ov.id(key), "id({key:?})");
+        }
+    }
+
+    /// The legacy path frames its own sections, so it has framing errors the new one cannot reach:
+    /// its addition region ends wherever the walk ends, and the tombstone count sits after it.
+    #[test]
+    fn the_legacy_framing_is_validated_too() {
+        let base = StringIndex::build(["a", "b"]).unwrap();
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("overlay tombstones truncated", {
+                let mut b = craft_v1(&base, &[b"c"], &[]);
+                b.truncate(b.len() - 4);
+                b
+            }),
+            ("overlay additions truncated", {
+                let mut b = craft_v1(&base, &[b"c"], &[]);
+                b.truncate(b.len() - 8 - 4 - 1 + 2);
+                b
+            }),
+            ("overlay tombstone length mismatch", {
+                let mut b = craft_v1(&base, &[b"c"], &[0]);
+                b.truncate(b.len() - 1);
+                b
+            }),
+            ("overlay tombstone count out of range", {
+                let mut b = craft_v1(&base, &[b"c"], &[]);
+                let at = b.len() - 8;
+                b[at..].copy_from_slice(&(1u64 << 61).to_le_bytes());
+                b
+            }),
+            (
+                "overlay tombstone outside the id space",
+                craft_v1(&base, &[b"c"], &[0b1000]),
             ),
         ];
         for (expected, bytes) in cases {
@@ -948,14 +1241,16 @@ mod tests {
 
         /// The same hand-assembly as `craft`, over whichever base is given.
         fn craft_over<B: OverlayBase>(base_blob: &[u8], addition: &[u8]) -> Vec<u8> {
-            let mut out = b"OVL1".to_vec();
-            out.push(B::BASE_TAG);
-            out.extend_from_slice(&(base_blob.len() as u64).to_le_bytes());
-            out.extend_from_slice(&1u64.to_le_bytes());
+            let mut out = vec![0u8; OVERLAY_HEADER];
+            out[0..4].copy_from_slice(OVERLAY_MAGIC);
+            out[4] = B::BASE_TAG;
+            out[5..13].copy_from_slice(&(base_blob.len() as u64).to_le_bytes());
+            out[13..21].copy_from_slice(&1u64.to_le_bytes());
+            out[21..29].copy_from_slice(&(4 + addition.len() as u64).to_le_bytes());
             out.extend_from_slice(base_blob);
             out.extend_from_slice(&(addition.len() as u32).to_le_bytes());
             out.extend_from_slice(addition);
-            out.extend_from_slice(&0u64.to_le_bytes());
+            seal(&mut out);
             out
         }
 

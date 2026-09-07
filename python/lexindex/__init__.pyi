@@ -271,11 +271,14 @@ class Overlay:
         The blob records which base wrote it and a mismatch is refused, so the wrong class is an
         error rather than an unchecked read of bytes meant for something else.
 
-        **Validated throughout, but with no integrity check of its own.** The overlay's framing is
-        checked for every base and raises ``ValueError`` when malformed, and so is the base region,
-        by that class's own loader. What this format does not carry is a checksum over the additions
-        and tombstones, which the base blob has for itself — so a flipped bit in an addition that
-        stays valid UTF-8 loads as a different key, silently.
+        **Validated and checksummed throughout.** The header carries a check of its own and a hash
+        of everything after it, verified before any of it is read, so a flipped bit anywhere raises
+        ``ValueError`` rather than loading as a different key or a revived id. The framing is
+        checked past the checksums too — the lengths, the additions and their UTF-8, the tombstones
+        against the id space — and so is the base region, by that class's own loader.
+
+        A blob written by ``0.12`` still loads, without the two checksums it does not carry; saving
+        it again writes the current format and it gains them.
         """
 
     @staticmethod
@@ -283,6 +286,4 @@ class Overlay:
         path: str | os.PathLike[str],
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
-        """:meth:`from_bytes` from a file: validated the same way, with the same gap — the
-        additions and tombstones carry no integrity check of their own.
-        """
+        """:meth:`from_bytes` from a file: checksummed and validated the same way."""

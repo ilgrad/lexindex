@@ -104,8 +104,10 @@ pub mod fuzzing {
         crate::PerfectHashIndex::fuzz_parse_frame(bytes, verify)
     }
 
-    /// Parse the framing of an `Overlay` blob: the magic, the base tag, the two header lengths, the
-    /// length-prefixed additions with their UTF-8 and duplicate checks, and the tombstone words.
+    /// Parse the framing of an `Overlay` blob: the magic, the header checksum, the base tag, the
+    /// four header lengths, the payload checksum, the length-prefixed additions with their UTF-8
+    /// and duplicate checks, and the tombstone words. Both formats reach this — `OVL2`, and the
+    /// `OVL1` a `0.12` file carries, whose framing is the one without the checksums.
     ///
     /// **The embedded base blob is deliberately not parsed.** The loader closure ignores it and
     /// returns a fixed two-key index, so this target exercises the overlay's own framing and does

@@ -1125,20 +1125,23 @@ impl PyOverlay {
     /// The blob records which base wrote it and a mismatch is refused, so the wrong class is an
     /// error rather than an unchecked read of bytes meant for something else.
     ///
-    /// **Validated throughout, but with no integrity check of its own.** The overlay's framing —
-    /// the header lengths, the additions and their UTF-8, the tombstones against the id space — is
-    /// checked for every base, and so is the base region, by that class's own loader; malformed
-    /// bytes raise `ValueError` rather than misbehaving. What this format does *not* carry is a
-    /// checksum over the additions and tombstones, which the base blob has for itself: a flipped
-    /// bit in an addition that stays valid UTF-8 loads as a different key, and one in a tombstone
-    /// word revives a removed id. Accidental corruption of that region is therefore silent.
+    /// **Validated and checksummed throughout.** The header carries a check of its own and a hash
+    /// of everything after it, verified before any of it is read, so a flipped bit anywhere — in an
+    /// addition that stays valid UTF-8, in a tombstone word that would revive a removed id — raises
+    /// `ValueError` instead of loading as something else. Past the checksums the framing is checked
+    /// too, because a hash vouches for transport and not for what was written: the lengths, the
+    /// additions and their UTF-8, the tombstones against the id space, and the base region by that
+    /// class's own loader.
+    ///
+    /// A blob written by `0.12` still loads, and gets every check above except the two checksums,
+    /// which that format does not carry. Saving it again writes the current format and it gains
+    /// them.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
         Self::load_blob(py, data, base)
     }
 
-    /// [`from_bytes`](Self::from_bytes) from a file: validated the same way, and with the same
-    /// gap — the additions and tombstones carry no integrity check of their own.
+    /// [`from_bytes`](Self::from_bytes) from a file: checksummed and validated the same way.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
         let data = py

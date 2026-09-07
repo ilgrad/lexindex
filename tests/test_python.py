@@ -669,43 +669,26 @@ def test_overlay_blob_refuses_the_wrong_base():
         lexindex.Overlay.from_bytes(blob, dict)
 
 
-def test_overlay_loaders_state_the_gap_they_still_have():
-    """Every loader validates its bytes now, but the overlay carries no checksum of its own.
+def test_overlay_loaders_are_checksummed():
+    """The overlay blob carries a header check and a payload hash, like every other blob here.
 
-    A flipped bit in an addition that stays valid UTF-8 loads as a different key, and one in a
-    tombstone word revives a removed id — silently, where every other blob in this library catches
-    it. That is a property of the format, not a bug in the parser, and the docstrings are the only
-    place a Python caller learns it. This pins them: a refactor that drops the sentence fails here
-    rather than quietly leaving the gap undocumented.
+    A flipped bit in an addition that stays valid UTF-8 used to load as a different key, and one in
+    a tombstone word used to revive a removed id — silently. Both are refused now, and this asserts
+    it from the Python side, where there is no way to reach the Rust unit tests. Every byte is
+    tried, so the header, the embedded base blob, the additions and the tombstones are all covered.
     """
-    for doc in (lexindex.Overlay.from_bytes.__doc__, lexindex.Overlay.load.__doc__):
-        assert doc is not None
-        assert "integrity check" in doc
+    ov = lexindex.Overlay(lexindex.StringIndex(["apple", "banana", "cherry"]))
+    ov.add("date")
+    ov.remove("banana")
+    blob = ov.to_bytes()
+    assert blob[:4] == b"OVL2"
+    assert len(lexindex.Overlay.from_bytes(blob, lexindex.StringIndex)) == 3
 
-
-def test_overlay_rejects_an_addition_that_duplicates_an_exact_base_key():
-    """No ``to_bytes`` writes this: ``add`` revives a base key's own id instead of issuing a second.
-
-    Loading one would count the key twice in ``len`` while ``id`` could only ever answer the base's,
-    so the parser refuses it — but only over a base whose membership is exact, since a
-    ``CompactHashIndex`` would false-positive and reject sound blobs.
-    """
-    ov = lexindex.Overlay(lexindex.StringIndex(["apple", "banana"]))
-    blob = bytearray(ov.to_bytes())
-    base_len = int.from_bytes(blob[5:13], "little")
-    # Splice in one addition, "apple", which the base already holds.
-    addition = b"apple"
-    header, base_blob = blob[:21], blob[21 : 21 + base_len]
-    header[13:21] = (1).to_bytes(8, "little")
-    crafted = (
-        bytes(header)
-        + bytes(base_blob)
-        + len(addition).to_bytes(4, "little")
-        + addition
-        + (0).to_bytes(8, "little")
-    )
-    with pytest.raises(ValueError, match="duplicates a base key"):
-        lexindex.Overlay.from_bytes(crafted, lexindex.StringIndex)
+    for pos in range(len(blob)):
+        bad = bytearray(blob)
+        bad[pos] ^= 0x01
+        with pytest.raises(ValueError):
+            lexindex.Overlay.from_bytes(bytes(bad), lexindex.StringIndex)
 
 
 def test_overlay_save_replaces_an_existing_file_whole(tmp_path):

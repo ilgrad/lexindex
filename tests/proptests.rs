@@ -207,11 +207,14 @@ proptest! {
         let _ = StringIndex::from_bytes(&data);
     }
 
-    // Random bytes never spell `OVL1`, so the overlay's framing is fuzzed outward from a real blob:
-    // one byte flipped, or the blob cut short, or one of its three claimed counts replaced by a
+    // Random bytes never spell `OVL2`, so the overlay's framing is fuzzed outward from a real blob:
+    // one byte flipped, or the blob cut short, or one of its four claimed lengths replaced by a
     // hostile value. Only `Ok`/`Err` — never a panic, and in particular never an allocation sized
     // by a number the blob merely claims (`1 << 61` tombstone words used to be an overflow panic in
-    // debug and a wrapped length check in release).
+    // debug and a wrapped length check in release). The hostile lengths are written *without*
+    // re-sealing the header, so most of them are caught by the checksum — the point here is that
+    // the parser survives them, and the messages they would otherwise reach are pinned by name in
+    // the unit tests.
     //
     // The base blob is deliberately not re-parsed: the loader closure returns the same fixed base
     // the blob was written over. That is `StringIndex::from_bytes`'s own property, pinned two tests
@@ -223,7 +226,7 @@ proptest! {
         removals in prop::collection::vec(prop::sample::select(vec!["a", "b", "c", "d"]), 0..4),
         at in any::<prop::sample::Index>(),
         xor in 1u8..=255,
-        kind in 0u8..5,
+        kind in 0u8..6,
         hostile in prop::sample::select(vec![0u64, 1, 7, u32::MAX as u64, u64::MAX, 1 << 61, 1 << 62]),
     ) {
         let base = || StringIndex::build(["a", "b"]);
@@ -246,14 +249,13 @@ proptest! {
                 let pos = at.index(blob.len());
                 blob.truncate(pos);
             }
-            // The base blob's claimed length, the addition count, and the tombstone word count:
-            // the three numbers the parser must never trust into an index or an allocation.
+            // The base blob's length, the addition count, the addition region's length and the
+            // tombstone word count: the four numbers the parser must never trust into an index or
+            // an allocation.
             2 => blob[5..13].copy_from_slice(&hostile.to_le_bytes()),
             3 => blob[13..21].copy_from_slice(&hostile.to_le_bytes()),
-            _ => {
-                let tail = blob.len() - 8;
-                blob[tail..].copy_from_slice(&hostile.to_le_bytes());
-            }
+            4 => blob[21..29].copy_from_slice(&hostile.to_le_bytes()),
+            _ => blob[29..37].copy_from_slice(&hostile.to_le_bytes()),
         }
         // The verdict is not the point; surviving the parse is.
         let _ = Overlay::from_bytes_with(&blob, |_| base());

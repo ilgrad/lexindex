@@ -192,12 +192,18 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
 }
 
-/// The overlay format `0.12.0` published. Its base is a `StringIndex`, whose ids are a key's rank in
-/// sorted order, so unlike the MPH blobs this one can be asserted exactly rather than by invariant.
+/// The overlay format `0.12.0` published, and the one `1.0` writes. Their base is a `StringIndex`,
+/// whose ids are a key's rank in sorted order, so unlike the MPH blobs these can be asserted exactly
+/// rather than by invariant.
 ///
-/// It is also the seed the `parse_overlay` fuzz target needs: reaching `OVL1` and a base blob whose
-/// length agrees with the file by chance is hopeless, so without this file the fuzzer would only
-/// ever exercise the magic check.
+/// The overlay is also the one pre-1.0 blob this version still reads: `OVL1`'s parser never went
+/// away, and a `StringIndex` base is a format 1.0 can still open. What `OVL1` cannot have is either
+/// checksum, so the two files below are checked for different things — this one for loading at all,
+/// the `1.0` one for its exact bytes.
+///
+/// Both are seeds the `parse_overlay` fuzz target needs: reaching a magic, a base blob whose length
+/// agrees with the file, and (for `OVL2`) two checksums by chance is hopeless, so without them the
+/// fuzzer would only ever exercise the rejection paths.
 #[test]
 fn the_overlay_blob_from_0_12_0_still_loads() {
     let keys = keys();
@@ -207,6 +213,7 @@ fn the_overlay_blob_from_0_12_0_still_loads() {
 
     let path = data("golden-0.12.0-overlay.ovl");
     let blob = std::fs::read(&path).expect("golden overlay blob");
+    assert_eq!(&blob[..4], b"OVL1", "the legacy fixture must stay legacy");
     let ov = lexindex::Overlay::from_bytes_with(&blob, lexindex::StringIndex::from_bytes)
         .expect("0.12.0 overlay blob loads");
 
@@ -233,5 +240,57 @@ fn the_overlay_blob_from_0_12_0_still_loads() {
         let id = sorted.len() as u64 + i as u64;
         assert_eq!(ov.id(added), Some(id), "id({added:?})");
         assert_eq!(ov.key(id).as_deref(), Some(*added), "key({id})");
+    }
+}
+
+/// The `1.0` overlay format, pinned by its bytes rather than by what a load produces.
+///
+/// `StringIndex` construction is deterministic and so is `Overlay::to_bytes`, so a fresh build over
+/// the same keys and edits must reproduce this file exactly. That makes it a check on the format
+/// itself: a changed section order, a changed header field, or a changed checksum function fails
+/// here rather than in whatever loads a stale blob a year from now. Nothing in the file depends on
+/// the MPH key hash — the base is an FST and the two checksums live in `blob` — so the hash upgrade
+/// still to come in this release does not touch it.
+///
+/// Regenerating it, if the format is deliberately changed: write `fresh` to the path below.
+#[test]
+fn the_1_0_overlay_blob_is_byte_identical_to_a_fresh_build() {
+    let mut sorted = keys();
+    sorted.sort();
+    sorted.dedup();
+
+    let mut ov = lexindex::Overlay::new(lexindex::StringIndex::build(&sorted).unwrap());
+    for added in ["absent-0000", "absent-0001", "absent-0002"] {
+        ov.add(added);
+    }
+    for removed in &sorted[..3] {
+        assert!(ov.remove(removed));
+    }
+    let fresh = ov.to_bytes().unwrap();
+
+    let path = data("golden-1.0.0-overlay.ovl");
+    let stored = std::fs::read(&path).expect("golden overlay blob");
+    assert_eq!(&stored[..4], b"OVL2");
+    assert_eq!(
+        stored.len(),
+        fresh.len(),
+        "the 1.0 overlay format changed size; regenerate {}",
+        path.display()
+    );
+    assert!(
+        stored == fresh,
+        "the 1.0 overlay format changed; regenerate {}",
+        path.display()
+    );
+
+    let back = lexindex::Overlay::from_bytes_with(&stored, lexindex::StringIndex::from_bytes)
+        .expect("the committed blob loads");
+    assert_eq!(back.len(), sorted.len());
+    assert_eq!(back.id_space(), sorted.len() as u64 + 3);
+    for removed in &sorted[..3] {
+        assert_eq!(back.id(removed), None, "{removed:?} is still live");
+    }
+    for (rank, key) in sorted.iter().enumerate().skip(3) {
+        assert_eq!(back.id(key), Some(rank as u64), "id({key:?})");
     }
 }
