@@ -107,7 +107,10 @@ out-of-range ones.
 
 **Pre-1.0 blobs are refused, by name.** Every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash`
 image, and the crate that could decode it is no longer linked — so the refusal names the version that
-wrote the file and says to rebuild, rather than reporting a bad magic on an intact one. There is no
+wrote the file and says to rebuild, rather than reporting a bad magic on an intact one. There is a
+second, independent reason, which is why no amount of decoding work would have bought a conversion:
+1.0 also replaced the key hash, so every slot in an old blob is keyed on a value this version does
+not compute. There is no
 conversion path for either index: `PerfectHashIndex`'s arena is readable but its ids came from the
 old MPH, and `CompactHashIndex` stores no keys at all. Rebuilding from the key list is the migration,
 and it is the only one a keyless index could ever have had. Soundness outranks compatibility, and
