@@ -2,9 +2,11 @@
 
 import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from typing import ClassVar, final
+from typing import ClassVar, TypeVar, final
 
 __all__ = ["CompactHashIndex", "Overlay", "PerfectHashIndex", "StringIndex", "__version__"]
+
+_T = TypeVar("_T")
 
 __version__: str
 
@@ -40,6 +42,14 @@ class StringIndex:
     def is_empty(self) -> bool: ...
     def id(self, key: str) -> int | None: ...
     def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Dense id of ``key``, or ``default`` (``None`` unless given)."""
+
     def key(self, id: int) -> str | None: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
@@ -112,6 +122,14 @@ class PerfectHashIndex:
     def id(self, key: str) -> int | None: ...
     def id_unchecked(self, key: str) -> int: ...
     def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Dense id of ``key``, or ``default`` (``None`` unless given)."""
+
     def key(self, id: int) -> str | None: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
@@ -176,6 +194,14 @@ class CompactHashIndex:
     def id(self, key: str) -> int | None: ...
     def id_unchecked(self, key: str) -> int: ...
     def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Dense id of ``key``, or ``default`` (``None`` unless given)."""
+
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
@@ -237,6 +263,14 @@ class Overlay:
 
     def id(self, key: str) -> int | None: ...
     def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Dense id of ``key``, or ``default`` (``None`` unless given)."""
+
     def add(self, key: str) -> int:
         """Add ``key`` and return its id, reviving the id a removed key used to have."""
 

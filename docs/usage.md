@@ -23,6 +23,10 @@ idx.id("missing")        # None
 "cherry" in idx          # True
 idx.key(2)               # "banana"  (id → string)
 
+# the dict spelling of the same lookup, on all four classes: KeyError on a miss, or a default
+idx["apple"]             # 0
+idx.get("missing", -1)   # -1
+
 # ordered iteration — automaton-driven: prefix/range seek directly; a broad fuzzy or
 # subsequence pattern may still walk most of the FST
 idx.prefix("ap")         # [("apple", 0), ("apricot", 1)]

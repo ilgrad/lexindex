@@ -80,6 +80,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Dict-style lookup in Python**: `idx["apple"]` raises `KeyError` on a miss, `idx.get("apple")`
+  returns `None` or whatever default is passed, on all four classes. Nothing further — no
+  `__setitem__`, no `keys` / `values` / `items`, no `Mapping` registration — because these indexes
+  are immutable `str -> int` lookups and registering as mappings would promise iteration semantics
+  three of the four do not have. One consequence is pinned by a test rather than left to be
+  discovered: defining `__getitem__` revives the legacy sequence protocol, so `list(index)` on the
+  two hash indexes raises `TypeError` from the key type instead of iterating.
+
 - **Every Python class pickles.** `__reduce__` on `StringIndex`, `PerfectHashIndex`,
   `CompactHashIndex` and `Overlay` names the class's own `from_bytes` and hands it the blob — and,
   for an overlay, the class of the base underneath, since `OVL2` records which base wrote it and its

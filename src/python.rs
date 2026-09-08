@@ -36,7 +36,7 @@
 //! released with the GIL held.
 
 use crate::{IndexError, Overlay, StringIndex};
-use pyo3::exceptions::{PyIOError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
@@ -215,6 +215,33 @@ impl PyStringIndex {
     /// Whether `key` is present.
     fn contains(&self, key: &str) -> bool {
         self.inner.contains(key)
+    }
+
+    /// Dense id of `key`, raising `KeyError` if it is absent — the dict spelling of
+    /// [`id`](Self::id), for a caller who wants a miss to be an error rather than a `None` to
+    /// check.
+    ///
+    /// There is no `__setitem__`, no `keys` / `values` / `items` and no `Mapping` registration:
+    /// this is an immutable `str -> int` lookup, and pretending to be a mapping would promise
+    /// iteration semantics it does not have.
+    fn __getitem__(&self, key: &str) -> PyResult<u64> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Dense id of `key`, or `default` (`None` unless given) — `idx.get("apple", -1)`.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
     }
 
     /// Key for `id`, or `None` if out of range.
@@ -631,6 +658,33 @@ impl PyPerfectHashIndex {
         self.inner.contains(key)
     }
 
+    /// Dense id of `key`, raising `KeyError` if it is absent — the dict spelling of
+    /// [`id`](Self::id), for a caller who wants a miss to be an error rather than a `None` to
+    /// check.
+    ///
+    /// There is no `__setitem__`, no `keys` / `values` / `items` and no `Mapping` registration:
+    /// this is an immutable `str -> int` lookup, and pretending to be a mapping would promise
+    /// iteration semantics it does not have.
+    fn __getitem__(&self, key: &str) -> PyResult<u32> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Dense id of `key`, or `default` (`None` unless given) — `idx.get("apple", -1)`.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
+    }
+
     /// Key for `id`, or `None` if out of range.
     fn key<'py>(&self, py: Python<'py>, id: u32) -> Option<Bound<'py, PyString>> {
         self.inner.key(id).map(|k| PyString::new(py, k))
@@ -851,6 +905,33 @@ impl PyCompactHashIndex {
     /// an arbitrary valid slot. Fastest lookup for a fixed vocabulary.
     fn id_unchecked(&self, key: &str) -> u32 {
         self.inner.id_unchecked(key)
+    }
+
+    /// Dense id of `key`, raising `KeyError` if it is absent — the dict spelling of
+    /// [`id`](Self::id), for a caller who wants a miss to be an error rather than a `None` to
+    /// check.
+    ///
+    /// There is no `__setitem__`, no `keys` / `values` / `items` and no `Mapping` registration:
+    /// this is an immutable `str -> int` lookup, and pretending to be a mapping would promise
+    /// iteration semantics it does not have.
+    fn __getitem__(&self, key: &str) -> PyResult<u32> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Dense id of `key`, or `default` (`None` unless given) — `idx.get("apple", -1)`.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
     }
 
     /// Whether `key` is present (subject to the false-positive rate).
@@ -1096,6 +1177,32 @@ impl PyOverlay {
     /// Whether `key` is live.
     fn contains(&self, py: Python<'_>, key: &str) -> bool {
         on_base!(self.lock(py), |ov| ov.contains(key))
+    }
+
+    /// Dense id of `key`, raising `KeyError` if it is absent — the dict spelling of
+    /// [`id`](Self::id), for a caller who wants a miss to be an error rather than a `None` to
+    /// check.
+    ///
+    /// There is no `__setitem__`, no `keys` / `values` / `items` and no `Mapping` registration:
+    /// this is an immutable `str -> int` lookup, and pretending to be a mapping would promise
+    /// iteration semantics it does not have.
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<u64> {
+        self.id(py, key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Dense id of `key`, or `default` (`None` unless given) — `idx.get("apple", -1)`.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.id(py, key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
     }
 
     fn __contains__(&self, py: Python<'_>, key: &str) -> bool {

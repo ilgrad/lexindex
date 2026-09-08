@@ -887,3 +887,34 @@ def test_pickle_survives_a_spawned_worker():
     with ctx.Pool(1) as pool:
         got = pool.apply_async(_ids_in_child, (indexes, words)).get(timeout=120)
     assert got == [[idx.id(k) for k in words] for idx in indexes]
+
+
+def test_dict_style_access_on_every_class():
+    words = ["apple", "apricot", "banana"]
+    si = lexindex.StringIndex(words)
+    ov = lexindex.Overlay(si)
+    ov.add("durian")
+    # 4-byte fingerprint on the compact index: a miss below is then a miss, not a 1-in-256
+    # false positive that would make this test flaky.
+    for idx in (si, lexindex.PerfectHashIndex(words), lexindex.CompactHashIndex(words, 4), ov):
+        assert idx["apple"] == idx.id("apple")
+        assert idx.get("apple") == idx.id("apple")
+        assert idx.get("nope") is None
+        assert idx.get("nope", -1) == -1
+        assert idx.get("nope", "absent") == "absent"
+        with pytest.raises(KeyError, match="nope"):
+            idx["nope"]
+    assert ov["durian"] == ov.id("durian")
+
+
+def test_the_indexes_are_not_mappings():
+    """`__getitem__` is a lookup, not a promise of iteration: nothing here walks by index."""
+    ph = lexindex.PerfectHashIndex(["apple", "banana"])
+    for absent in ("items", "keys", "values", "__setitem__"):
+        assert not hasattr(ph, absent), absent
+    # Defining `__getitem__` alone revives the legacy sequence protocol, so `list()` reaches for
+    # `ph[0]` and gets a TypeError from the key type rather than iterating anything.
+    with pytest.raises(TypeError):
+        list(ph)
+    # StringIndex does iterate, and through `__iter__` -- ordered pairs, not integer indexing.
+    assert list(lexindex.StringIndex(["apple", "banana"]))[0] == ("apple", 0)
