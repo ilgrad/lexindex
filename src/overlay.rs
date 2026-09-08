@@ -890,8 +890,13 @@ mod tests {
     /// caller can act on. Nothing about the frame can make that choice for them.
     #[test]
     fn an_overlay_is_only_as_trustworthy_as_the_base_loader_it_is_given() {
-        const SPECIMEN: &[u8] = include_bytes!("../tests/data/panicking-1.0.0-string.bix");
-        let blob = craft_raw(SPECIMEN, &[b"added"], &[]);
+        let blob = hostile_overlay();
+        assert_eq!(
+            blob,
+            include_bytes!("../tests/data/panicking-1.0.0-overlay.ovl"),
+            "the committed fixture no longer matches what this test crafts; regenerate it with \
+             `cargo test --lib write_the_hostile_overlay_fixture -- --ignored`"
+        );
 
         let hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
@@ -909,6 +914,30 @@ mod tests {
             Overlay::<StringIndex>::from_bytes_with(&blob, StringIndex::from_untrusted_bytes),
             Err(IndexError::Format(_))
         ));
+    }
+
+    /// The 111-byte panic specimen sealed into an `OVL2` frame: a blob whose overlay framing is
+    /// perfect and whose base region is hostile.
+    fn hostile_overlay() -> Vec<u8> {
+        craft_raw(
+            include_bytes!("../tests/data/panicking-1.0.0-string.bix"),
+            &[b"added"],
+            &[],
+        )
+    }
+
+    /// Writes the fixture above to `tests/data/`, because the Python test needs it and cannot build
+    /// it: both checksums are this crate's, so a blob spliced together from outside is refused by a
+    /// hash long before its base region is read, and would prove nothing about the base loader.
+    /// Pinned by the test above, so a format change fails there rather than leaving a stale file.
+    #[test]
+    #[ignore = "regenerates a committed fixture"]
+    fn write_the_hostile_overlay_fixture() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/panicking-1.0.0-overlay.ovl"
+        );
+        std::fs::write(path, hostile_overlay()).expect("write the fixture");
     }
 
     /// The `OVL1` layout `0.12` wrote: no checksums, and the tombstone word count in the body.

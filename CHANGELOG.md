@@ -80,6 +80,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`from_untrusted_bytes` in Python**, on `StringIndex` and on `Overlay`. The gap it closes is
+  sharper there than in Rust: `pyo3_runtime.PanicException` derives from `BaseException`, so the
+  panic a crafted `BIX4` blob raises slips straight past `except ValueError`. Both bindings are
+  tested against the committed specimens — the 111-byte one for the index, and the same bytes
+  sealed into a real `OVL2` frame for the overlay, which the Rust side writes and pins because both
+  checksums are the crate's and a blob spliced together from Python would be refused by a hash long
+  before its base region was read. The overlay test asserts that the ordinary loader *panics* on
+  that fixture, so a binding wired to the wrong loader fails rather than passing quietly.
+  `docs/usage.md` no longer says the binding does not exist.
+
 - **An overlay is only as trustworthy as the base loader it is handed**, and the loader's docstring
   now says so instead of claiming that "every base loader since 1.0" is safe on arbitrary bytes.
   It is not: `StringIndex::from_bytes` may panic on a crafted transducer, and an `OVL2` frame

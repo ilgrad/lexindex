@@ -918,3 +918,63 @@ def test_the_indexes_are_not_mappings():
         list(ph)
     # StringIndex does iterate, and through `__iter__` -- ordered pairs, not integer indexing.
     assert next(iter(lexindex.StringIndex(["apple", "banana"]))) == ("apple", 0)
+
+
+def _specimen() -> bytes:
+    """The 111-byte `StringIndex` blob that panics the ordinary loader (see tests/golden.rs)."""
+    path = os.path.join(os.path.dirname(__file__), "data", "panicking-1.0.0-string.bix")
+    with open(path, "rb") as f:
+        blob = f.read()
+    assert len(blob) == 111
+    return blob
+
+
+def test_untrusted_loader_refuses_the_specimen_with_a_value_error():
+    """The blob `from_bytes` panics on is a `ValueError` here -- the whole point of the binding."""
+    blob = _specimen()
+    with pytest.raises(ValueError):
+        lexindex.StringIndex.from_untrusted_bytes(blob)
+
+    # And the exception is not the panic: PanicException derives from BaseException, so a bare
+    # `except ValueError` would miss it and a caller would see the process's panic path instead.
+    try:
+        lexindex.StringIndex.from_untrusted_bytes(blob)
+    except BaseException as e:  # the type is exactly what is under test
+        assert type(e).__name__ == "ValueError", type(e).__name__
+
+
+def test_untrusted_loader_accepts_a_real_blob():
+    words = ["apple", "apricot", "banana"]
+    blob = lexindex.StringIndex(words).to_bytes()
+    idx = lexindex.StringIndex.from_untrusted_bytes(blob)
+    assert [idx.key(i) for i in range(len(idx))] == words
+    assert idx.id("banana") == 2
+
+
+def test_overlay_untrusted_loader_refuses_a_hostile_base():
+    """An overlay frame can be perfect and its base still hostile: the loader is the whole defence.
+
+    The fixture is the 111-byte specimen sealed into a real `OVL2` frame (written by the Rust test
+    that pins it, since both checksums are the crate's). Every check the overlay makes for itself
+    passes, which is what the first assertion proves: the ordinary loader gets far enough to panic.
+    """
+    path = os.path.join(os.path.dirname(__file__), "data", "panicking-1.0.0-overlay.ovl")
+    with open(path, "rb") as f:
+        hostile = f.read()
+
+    with pytest.raises(BaseException) as panicked:  # PanicException is not an Exception
+        lexindex.Overlay.from_bytes(hostile, lexindex.StringIndex)
+    assert type(panicked.value).__name__ == "PanicException", (
+        "the frame no longer reaches the base loader, so this test proves nothing about it"
+    )
+
+    with pytest.raises(ValueError):
+        lexindex.Overlay.from_untrusted_bytes(hostile, lexindex.StringIndex)
+
+
+def test_overlay_untrusted_loader_accepts_a_real_blob():
+    ov = lexindex.Overlay(lexindex.StringIndex(["apple", "banana"]))
+    ov.add("cherry")
+    back = lexindex.Overlay.from_untrusted_bytes(ov.to_bytes(), lexindex.StringIndex)
+    assert len(back) == 3
+    assert back.id("cherry") == ov.id("cherry")

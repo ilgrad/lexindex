@@ -85,6 +85,21 @@ class StringIndex:
     def serialized_len(self) -> int: ...
     @staticmethod
     def from_bytes(data: bytes) -> StringIndex: ...
+    @staticmethod
+    def from_untrusted_bytes(data: bytes) -> StringIndex:
+        """Read a blob **someone else wrote**, validating it before any query reaches it.
+
+        ``from_bytes`` documents the one exception to "arbitrary bytes raise ``ValueError``": the
+        blob is an ``fst`` transducer whose node decoder is safe but not *total*, so bytes crafted
+        to carry a matching checksum raise ``pyo3_runtime.PanicException`` instead. This loader
+        walks every reachable node, streams every key to check its rank, and catches the panic, so
+        a crafted blob raises ``ValueError`` like any other bad input.
+
+        42x the cost of ``from_bytes`` (50.8 ms against 1.2 on 479 823 words): worth paying once for
+        a stranger's blob, not for one of your own. The contained panic still prints through the
+        process-wide hook before the ``ValueError`` is raised.
+        """
+
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
     def load(path: str | os.PathLike[str]) -> StringIndex: ...
@@ -317,6 +332,19 @@ class Overlay:
 
         A blob written by ``0.12`` still loads, without the two checksums it does not carry; saving
         it again writes the current format and it gains them.
+        """
+
+    @staticmethod
+    def from_untrusted_bytes(
+        data: bytes, base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex]
+    ) -> Overlay:
+        """:meth:`from_bytes` for a blob **someone else wrote**.
+
+        The overlay's own framing is checked identically either way. What changes is the loader the
+        *embedded base* is handed to, and it matters for exactly one base: a ``StringIndex`` region
+        can panic ``from_bytes`` (see :meth:`StringIndex.from_untrusted_bytes`), and an overlay
+        frame passes every check it makes for itself before that region is reached. Over the two
+        hash bases this is the same work as :meth:`from_bytes`, whose loaders are already total.
         """
 
     @staticmethod

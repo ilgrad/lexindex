@@ -441,6 +441,35 @@ impl PyStringIndex {
         })
     }
 
+    /// Reconstruct from a blob **someone else wrote**, validating the transducer before any query
+    /// can reach it — slower than `from_bytes`, and total where that one is not.
+    ///
+    /// `from_bytes` documents the one exception to "arbitrary bytes raise `ValueError`": the blob
+    /// is an `fst` transducer whose node decoder is safe but not *total*, and the checksum in
+    /// front of it is public, so bytes crafted to carry a matching one **panic** —
+    /// `pyo3_runtime.PanicException`, not `ValueError`. This loader walks every reachable node,
+    /// requires every transition to point below the node holding it, streams every key and
+    /// requires its value to be its rank, and catches the panic at the load boundary, so a
+    /// crafted blob raises `ValueError` like any other bad input.
+    ///
+    /// It costs one decode of every node and one pass over the keys: 50.8 ms against 1.2 ms for
+    /// `from_bytes` on the 479 823-word `/usr/share/dict/words`, 42×. Worth paying once for a blob
+    /// from a stranger, not worth paying for one of your own.
+    ///
+    /// Two things it cannot promise. The panic runs the process-wide hook on its way out, so the
+    /// rejection normally prints a panic message to stderr before `ValueError` is raised — nothing
+    /// suppresses it, because the hook is global. And a build with `panic = "abort"` has no
+    /// unwinding to catch, which the published wheels do not use.
+    #[staticmethod]
+    fn from_untrusted_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| StringIndex::from_untrusted_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
     /// Write the index to `path`.
     fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
         py.detach(|| self.inner.save(&path)).map_err(to_py)
@@ -1318,7 +1347,7 @@ impl PyOverlay {
     /// them.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
-        Self::load_blob(py, data, base)
+        Self::load_blob(py, data, base, BaseTrust::Own)
     }
 
     /// Pickle support: the blob, the loader, and the class of the base underneath it.
@@ -1339,22 +1368,60 @@ impl PyOverlay {
         Ok((from_bytes, (self.to_bytes(py)?, base)))
     }
 
+    /// [`from_bytes`](Self::from_bytes) for a blob **someone else wrote**.
+    ///
+    /// The overlay's own framing is checked identically either way — magic, both checksums, the
+    /// section lengths, the additions and their UTF-8, the tombstones. What changes is the loader
+    /// the *embedded base* is handed to, and it matters for exactly one base: a `StringIndex`
+    /// region can panic `from_bytes` (`PanicException`, see `StringIndex.from_untrusted_bytes`),
+    /// and an overlay frame passes every check it makes for itself before that region is reached.
+    /// Over a `PerfectHashIndex` or `CompactHashIndex` base this is the same work as `from_bytes`,
+    /// because those loaders are already total.
+    #[staticmethod]
+    fn from_untrusted_bytes(
+        py: Python<'_>,
+        data: &[u8],
+        base: &Bound<'_, PyType>,
+    ) -> PyResult<Self> {
+        Self::load_blob(py, data, base, BaseTrust::Stranger)
+    }
+
     /// [`from_bytes`](Self::from_bytes) from a file: checksummed and validated the same way.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
         let data = py
             .detach(|| std::fs::read(&path))
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
-        Self::load_blob(py, &data, base)
+        Self::load_blob(py, &data, base, BaseTrust::Own)
     }
 }
 
+/// How far an overlay's *embedded base* is to be trusted. The overlay's own framing is checked the
+/// same way either way; this only chooses the loader the base region is handed to, and it matters
+/// for exactly one base — `StringIndex`, whose ordinary loader may panic on a crafted transducer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BaseTrust {
+    Own,
+    Stranger,
+}
+
 impl PyOverlay {
-    fn load_blob(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
+    fn load_blob(
+        py: Python<'_>,
+        data: &[u8],
+        base: &Bound<'_, PyType>,
+        trust: BaseTrust,
+    ) -> PyResult<Self> {
         let inner = if base.is(py.get_type::<PyStringIndex>()) {
             OverlayInner::String(
-                Overlay::from_bytes_with(data, |b| StringIndex::from_bytes(b).map(Arc::new))
-                    .map_err(to_py)?,
+                Overlay::from_bytes_with(data, |b| {
+                    match trust {
+                        BaseTrust::Own => StringIndex::from_bytes(b),
+                        BaseTrust::Stranger => StringIndex::from_untrusted_bytes(b),
+                    }
+                    .map(Arc::new)
+                })
+                .map_err(to_py)?,
             )
         } else if base.is(py.get_type::<PyPerfectHashIndex>()) {
             OverlayInner::Perfect(

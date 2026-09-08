@@ -127,10 +127,26 @@ behaviour. `StringIndex` has one documented exception, and it is the reason `SEC
 threat model rather than a promise: its blob is an `fst` transducer whose node decoder is safe Rust
 but not *total*, and the checksum in front of that decoder is public, so bytes crafted to carry a
 matching one can **panic** instead of returning. In Python that surfaces as
-`pyo3_runtime.PanicException`, not `ValueError`. The Rust API answers this with
-`StringIndex::from_untrusted_bytes`, which walks the whole transducer and catches the panic at the
-load boundary; there is no Python binding for it yet. Until there is, treat a `StringIndex` blob
-from a stranger the way `SECURITY.md` says to treat any of them -- as code, not as data.
+`pyo3_runtime.PanicException`, which derives from `BaseException` and so slips past
+`except ValueError`.
+
+```python
+idx = lexindex.StringIndex.from_untrusted_bytes(data)          # a blob someone else wrote
+ov = lexindex.Overlay.from_untrusted_bytes(data, lexindex.StringIndex)   # …or one wrapping it
+```
+
+That loader walks every reachable node, requires every transition to point below the node holding
+it, streams every key to check its rank, and catches the panic at the load boundary, so a crafted
+blob raises `ValueError` like any other bad input. It costs 42× `from_bytes` (50.8 ms against
+1.2 ms on 479 823 words), which is the trade: pay it once for a stranger's blob, never for your
+own. The overlay form exists for the same reason — an overlay's own framing is checksummed and
+validated either way, but the base region inside it is handed to a base loader, and over a
+`StringIndex` base that is exactly the choice above. The two hash indexes need no such call: their
+loaders are total, so `Overlay.from_untrusted_bytes` over a hash base does the same work as
+`from_bytes`.
+
+One thing neither loader can promise: the contained panic still runs the process-wide hook on its
+way out, so a rejection normally prints a panic message to stderr before the `ValueError` arrives.
 
 ## `PerfectHashIndex` — exact lookup with `id → key`
 
