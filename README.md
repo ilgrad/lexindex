@@ -256,7 +256,12 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.94 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
-| `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
+| `datrie` | ✅ | — | — | — | ✅ | — | 30.91 |
+
+<sub>Raw numbers and the machine that produced them:
+[`bench/results/compare-2026-09-09-arz-2d23792.json`](bench/results/compare-2026-09-09-arz-2d23792.json)
+— every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
+load average at both ends of the run.</sub>
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
@@ -479,25 +484,27 @@ rather than the corpus's:
 
 | n | structure | keys | build | bytes/key | peak RSS | lookup |
 |---|---|---|---:|---:|---:|---:|
-| 1 M | `StringIndex` | list | 0.38 s | 0.68\* | 154 MB | 210 ns |
-| 1 M | `StringIndex` | generator | 0.53 s | 0.68\* | 147 MB | 211 ns |
-| 1 M | `CompactHashIndex` | list | 0.26 s | 1.30 | 152 MB | 223 ns |
-| 1 M | `CompactHashIndex` | **generator** | 0.38 s | 1.30 | **84 MB** | 164 ns |
-| 10 M | `StringIndex` | list | 5.6 s | 2.00\* | 1108 MB | 734 ns |
-| 10 M | `StringIndex` | generator | 6.5 s | 2.00\* | 1032 MB | 728 ns |
-| 10 M | `CompactHashIndex` | list | 1.8 s | 1.30 | 986 MB | 253 ns |
-| 10 M | `CompactHashIndex` | **generator** | 3.1 s | 1.30 | **297 MB** | 246 ns |
+| 1 M | `StringIndex` | list | 0.39 s | 0.68\* | 154 MB | 205 ns |
+| 1 M | `StringIndex` | generator | 0.55 s | 0.68\* | 147 MB | 214 ns |
+| 1 M | `CompactHashIndex` | list | 0.22 s | 1.30 | 151 MB | 162 ns |
+| 1 M | `CompactHashIndex` | **generator** | 0.34 s | 1.30 | **84 MB** | 151 ns |
+| 10 M | `StringIndex` | list | 5.6 s | 2.00\* | 1108 MB | 746 ns |
+| 10 M | `StringIndex` | generator | 7.7 s | 2.00\* | 1031 MB | 838 ns |
+| 10 M | `CompactHashIndex` | list | 1.9 s | 1.30 | 985 MB | 256 ns |
+| 10 M | `CompactHashIndex` | **generator** | 3.3 s | 1.30 | **297 MB** | 272 ns |
 
-<sub>Measured on the 1.0 code, one idle session, one process per cell. **It is not comparable cell
-by cell with the 0.10 table it replaces**, which ran on a *shared* machine: `StringIndex`, whose code
-has not changed since 0.5.1 and so is the control here, reads 1.2–1.4× faster now. Nor is that
-control usable to normalise `CompactHashIndex`, and the reason is worth stating — the FST build is
-single-threaded and the perfect hash's is eight-threaded, so core contention penalised them by very
-different amounts. What the numbers say directly: at 1 M the `CompactHashIndex` build went 0.21 →
-0.26 s against a session that got *faster*, which is the price of 1.0's own perfect hash; at 10 M it
-went 2.4 → 1.8 s, because that build parallelises and the old session had a core taken away from it.
-Lookups improved 1.2–1.3×, but so did `StringIndex`'s, so nothing lexindex-specific is resolvable
-there.
+<sub>Measured on the 1.1 code
+([`bench/results/scale-2026-09-09-arz-cca2d20.json`](bench/results/scale-2026-09-09-arz-cca2d20.json)),
+one process per cell and the **minimum of five** per cell, on a machine idle at the start
+(load 1.05). Unlike the 1.0 → 0.10 pair, this table *is* comparable cell by cell with the 1.0 one it
+replaces: `StringIndex`, whose build and lookup code has not changed since 0.5.1 and is therefore
+the control, holds within 2 % on both `list` rows. So the cells that moved are readable. At 1 M
+`CompactHashIndex` reads 0.26 → 0.22 s and 223 → 162 ns on code 1.1 did not touch — the 1.0 table's
+cells were single samples and these are minima of five, so that is old noise leaving, not a
+speed-up. One cell moved the other way and is left standing rather than smoothed: 10 M
+`StringIndex` from a **generator** went 6.5 → 7.7 s and 728 → 838 ns while the `list` row beside it
+held, its five samples are tight (7.7–8.0 s), and the diff on that path between the two tags is
+additive. It is unexplained.
 \* bigram keys share far more prefixes than single words — at 1 M the generator draws on only
 1 000 distinct words, which is why `StringIndex` compresses to an unrepresentative 0.68 B/key there;
 the honest single-word figure is in the size table above. Read the

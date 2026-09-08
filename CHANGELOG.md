@@ -41,6 +41,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The scale table is re-measured on 1.1**, as the minimum of five runs per cell rather than the
+  single run behind the 1.0 table, and the file it came from is committed. It is comparable cell by
+  cell with the table it replaces, which the 1.0 one could not claim: `StringIndex`, whose build and
+  lookup code has not changed since 0.5.1, holds within 2 % on both `list` rows and is therefore a
+  usable control. Two cells moved on code 1.1 never touched — `CompactHashIndex` at 1 M reads
+  0.26 → 0.22 s and 223 → 162 ns, which is the old single sample's noise leaving — and one moved the
+  wrong way and is published rather than smoothed: 10 M `StringIndex` from a generator went
+  6.5 → 7.7 s with five tight samples and an additive diff on that path. `datrie`'s size in the
+  comparison table is 30.91 B/key, not the 30.69 measured for 1.0.
+
 - **`PerfectHashIndex` addresses its keys in blocks: 13.62 → 10.94 bytes per key**, and writes
   `BMP6`. The arena's `n + 1` four-byte offsets are gone; sixteen slots now share a `u32` base and
   carry one-byte *cumulative* offsets after it, 21 bytes per block, so a key is
