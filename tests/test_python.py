@@ -1,7 +1,9 @@
 """End-to-end tests of the lexindex Python bindings."""
 
 import itertools
+import multiprocessing
 import os
+import pickle
 import random
 import sys
 import threading
@@ -826,3 +828,62 @@ def test_a_shared_overlay_serialises_its_edits():
     assert len(ids) == len(set(ids)), "two threads were handed the same id"
     assert len(ov) == 1 + 8 * 50
     assert ov.id_space() == 1 + 8 * 50
+
+
+def _ids_in_child(indexes, keys):
+    """Run in a spawned worker: every index arrives by pickle, nothing is inherited."""
+    return [[idx.id(k) for k in keys] for idx in indexes]
+
+
+def test_pickle_round_trips_every_class():
+    words = ["apple", "apricot", "banana", "cherry"]
+    si = lexindex.StringIndex(words)
+    ph = lexindex.PerfectHashIndex(words)
+    ch = lexindex.CompactHashIndex(words, 1)
+    ov = lexindex.Overlay(si)
+    ov.add("durian")
+    ov.remove("apple")
+
+    # Protocol 2 as well as the default: `__reduce__` names a static method by qualname, which is
+    # the part of the protocol that differs between them.
+    for protocol in (2, pickle.HIGHEST_PROTOCOL):
+        for original in (si, ph, ch, ov):
+            back = pickle.loads(pickle.dumps(original, protocol=protocol))
+            assert type(back) is type(original)
+            assert len(back) == len(original)
+            for key in [*words, "durian", "absent"]:
+                assert back.id(key) == original.id(key), (type(original), key, protocol)
+
+    # The reverse map survives too, where there is one.
+    back = pickle.loads(pickle.dumps(ph))
+    assert [back.key(i) for i in range(len(ph))] == [ph.key(i) for i in range(len(ph))]
+
+
+def test_pickle_copies_a_memory_mapped_index_by_value(tmp_path):
+    """A mapped index pickles its bytes, so the copy outlives the file it was borrowing."""
+    path = tmp_path / "words.bix"
+    lexindex.StringIndex(["apple", "banana"]).save(path)
+    mapped = lexindex.StringIndex.load_mmap(path)
+    blob = pickle.dumps(mapped)
+    del mapped
+    path.unlink()
+
+    back = pickle.loads(blob)
+    assert back.id("banana") == 1
+    assert back.key(0) == "apple"
+
+
+def test_pickle_survives_a_spawned_worker():
+    """`spawn` shares nothing, so the worker gets each index only if `__reduce__` is right."""
+    words = ["apple", "apricot", "banana", "cherry"]
+    si = lexindex.StringIndex(words)
+    indexes = [
+        si,
+        lexindex.PerfectHashIndex(words),
+        lexindex.CompactHashIndex(words, 1),
+        lexindex.Overlay(si),
+    ]
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(1) as pool:
+        got = pool.apply_async(_ids_in_child, (indexes, words)).get(timeout=120)
+    assert got == [[idx.id(k) for k in words] for idx in indexes]

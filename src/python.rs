@@ -390,6 +390,21 @@ impl PyStringIndex {
         self.inner.serialized_len()
     }
 
+    /// Pickle support: the blob, and the loader that reads it back.
+    ///
+    /// An index pickles by **copying its bytes**, including one opened with `load_mmap`, whose
+    /// pages are borrowed from a file the unpickling process may not have — a path would not
+    /// survive a `spawn`ed worker on another machine, and a borrowed mapping would not survive
+    /// the file changing. Pickling a large index therefore costs its serialised size in the
+    /// pickle; `save` + `load_mmap` is what to use when both ends can see the same file.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py),)))
+    }
+
     /// Reconstruct from a [`PyStringIndex::to_bytes`] blob.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
@@ -690,6 +705,21 @@ impl PyPerfectHashIndex {
         self.inner.serialized_len().map_err(to_py)
     }
 
+    /// Pickle support: the blob, and the loader that reads it back.
+    ///
+    /// An index pickles by **copying its bytes**, including one opened with `load_mmap`, whose
+    /// pages are borrowed from a file the unpickling process may not have — a path would not
+    /// survive a `spawn`ed worker on another machine, and a borrowed mapping would not survive
+    /// the file changing. Pickling a large index therefore costs its serialised size in the
+    /// pickle; `save` + `load_mmap` is what to use when both ends can see the same file.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py)?,)))
+    }
+
     /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
     ///
     /// Every length the index will read is validated against the bytes present, so arbitrary input
@@ -884,6 +914,21 @@ impl PyCompactHashIndex {
         self.inner.serialized_len().map_err(to_py)
     }
 
+    /// Pickle support: the blob, and the loader that reads it back.
+    ///
+    /// An index pickles by **copying its bytes**, including one opened with `load_mmap`, whose
+    /// pages are borrowed from a file the unpickling process may not have — a path would not
+    /// survive a `spawn`ed worker on another machine, and a borrowed mapping would not survive
+    /// the file changing. Pickling a large index therefore costs its serialised size in the
+    /// pickle; `save` + `load_mmap` is what to use when both ends can see the same file.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py)?,)))
+    }
+
     /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.
     ///
     /// Every length the index will read is validated against the bytes present, so arbitrary input
@@ -982,6 +1027,9 @@ fn no_keys() -> PyErr {
 /// free-threaded interpreter PyO3's borrow flag turns two threads calling `add` on one overlay into
 /// `RuntimeError: Already borrowed` — measured, 7 of 8 threads. Concurrent edits to one overlay are
 /// a reasonable thing for a Python caller to do, so they are serialised instead.
+/// What [`PyOverlay::__reduce__`] hands pickle: the loader, the blob and the base's class.
+type OverlayReduce<'py> = (Bound<'py, PyAny>, (Bound<'py, PyBytes>, Bound<'py, PyType>));
+
 #[pyclass(frozen, name = "Overlay", module = "lexindex")]
 pub struct PyOverlay {
     inner: std::sync::Mutex<OverlayInner>,
@@ -1164,6 +1212,24 @@ impl PyOverlay {
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8], base: &Bound<'_, PyType>) -> PyResult<Self> {
         Self::load_blob(py, data, base)
+    }
+
+    /// Pickle support: the blob, the loader, and the class of the base underneath it.
+    ///
+    /// The overlay's own loader takes that class — an `OVL2` blob records which base wrote it and
+    /// refuses a mismatch — so it has to travel with the bytes. Everything else is as the indexes:
+    /// the base is copied into the pickle, not referenced by path.
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<OverlayReduce<'py>> {
+        // Scoped: `to_bytes` takes the same lock, and it is not reentrant.
+        let base = {
+            match &*self.lock(py) {
+                OverlayInner::String(_) => py.get_type::<PyStringIndex>(),
+                OverlayInner::Perfect(_) => py.get_type::<PyPerfectHashIndex>(),
+                OverlayInner::Compact(_) => py.get_type::<PyCompactHashIndex>(),
+            }
+        };
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py)?, base)))
     }
 
     /// [`from_bytes`](Self::from_bytes) from a file: checksummed and validated the same way.

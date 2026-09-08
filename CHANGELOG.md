@@ -80,6 +80,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Every Python class pickles.** `__reduce__` on `StringIndex`, `PerfectHashIndex`,
+  `CompactHashIndex` and `Overlay` names the class's own `from_bytes` and hands it the blob — and,
+  for an overlay, the class of the base underneath, since `OVL2` records which base wrote it and its
+  loader takes that class. An index therefore travels to a `multiprocessing` worker under `spawn`,
+  which shares nothing, and the tests check exactly that rather than a same-process round trip.
+  Pickling copies the bytes, a memory-mapped index included: a path would not survive a worker that
+  cannot see the same filesystem, and a borrowed mapping would not survive the file changing. When
+  both ends *can* see the file, `save` plus `load_mmap` still shares the pages instead of copying
+  them, and `docs/usage.md` says so.
+
 - **`StringIndex::from_untrusted_bytes`**, the loader for a blob someone else wrote. It walks the
   whole transducer instead of spot-checking it -- every reachable node decoded once, every
   transition required to point strictly below the node holding it, which is how `fst` lays nodes

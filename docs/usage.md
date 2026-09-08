@@ -102,7 +102,17 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix") # …or memory-map it: no re
 
 data = idx.to_bytes()                              # or go through bytes directly
 idx = lexindex.StringIndex.from_bytes(data)
+
+import pickle                                      # every class pickles, including Overlay
+idx = pickle.loads(pickle.dumps(idx))              # …so one can be sent to a spawned worker
 ```
+
+**Pickling copies the blob.** An index goes onto the wire as its `to_bytes()` and comes back through
+`from_bytes`, which is what makes it work across a `multiprocessing` `spawn` — a path would not
+survive a worker that cannot see the same filesystem, and a memory-mapped index would not survive
+the file changing. So a mapped index pickles by value like any other, and a large one costs its
+serialised size in the pickle: when both ends can see the same file, `save` plus `load_mmap` shares
+the pages instead of copying them.
 
 `load_mmap` maps the file and borrows the index from the mapped pages, so load time is independent of
 the index size and the pages are shared across processes. The mapped file must stay immutable while an
