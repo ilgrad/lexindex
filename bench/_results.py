@@ -63,12 +63,19 @@ def _run(*argv: str) -> str | None:
 
 def _commit() -> str:
     """`<short sha>` for a clean tree, `<short sha>-dirty` otherwise. The suffix is the point: a
-    result measured on uncommitted code is not attributable to the commit it names."""
+    result measured on uncommitted code is not attributable to the commit it names.
+
+    Sampled once at import, like the load average, and for the same reason: the state that matters
+    is the code the run started on. Reading it again at write time would tag a clean measurement
+    `-dirty` for an edit made to an unrelated file while the benchmark was running."""
     sha = _run("git", "-C", str(Path(__file__).parent.parent), "rev-parse", "--short", "HEAD")
     if sha is None:
         return "nogit"
     dirty = _run("git", "-C", str(Path(__file__).parent.parent), "status", "--porcelain")
     return f"{sha}-dirty" if dirty else sha
+
+
+_COMMIT_AT_IMPORT = _commit()
 
 
 def environment() -> dict[str, Any]:
@@ -77,7 +84,7 @@ def environment() -> dict[str, Any]:
     return {
         "date": date.today().isoformat(),
         "host": socket.gethostname(),
-        "commit": _commit(),
+        "commit": _COMMIT_AT_IMPORT,
         "cpu": _cpu_model(),
         "cpus": os.cpu_count(),
         "kernel": f"{platform.system()} {platform.release()}",

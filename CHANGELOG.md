@@ -80,6 +80,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Benchmark results are files**, not terminal output pasted into a table. `bench/compare.py` and
+  `bench/scale.py` write `bench/results/<table>-<date>-<host>-<commit>.json` carrying the CPU model,
+  kernel, rustc, Python, lexindex version, the load average at both ends of the run, and the commit
+  — suffixed `-dirty` when the tree was not clean, because a result measured on uncommitted code is
+  not attributable to the commit it names. Per cell the file keeps the minimum of the repeats with
+  the median and every raw sample beside it, so a run taken on a busy machine is visible in the file
+  instead of averaged into it. The README tables cite the file that filled them.
+
 - **`from_untrusted_bytes` in Python**, on `StringIndex` and on `Overlay`. The gap it closes is
   sharper there than in Rust: `pyo3_runtime.PanicException` derives from `BaseException`, so the
   panic a crafted `BIX4` blob raises slips straight past `except ValueError`. Both bindings are
