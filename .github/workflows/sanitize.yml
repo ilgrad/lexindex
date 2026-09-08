@@ -152,7 +152,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [parse_compact, parse_perfect, parse_overlay, parse_mphf, parse_string]
+        target:
+          - parse_compact
+          - parse_perfect
+          - parse_overlay
+          - parse_overlay_untrusted
+          - parse_mphf
+          - parse_string
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -172,6 +178,18 @@ jobs:
       # drops the coverage instrumentation, leaving libFuzzer blind to everything outside the target
       # crate. The manifest says so too, but a `config.toml` outranks a manifest profile and only an
       # env override outranks both.
+      # The seeds first, with no mutation at all. A target that dies on its own corpus is a bug in
+      # the target, and it reads identically to a real finding in the ten-minute run below --
+      # `parse_string` shipped that way once, aborting on a committed blob because libfuzzer-sys's
+      # panic hook fires before the `catch_unwind` the loader is built around. This step names it.
+      - name: ${{ matrix.target }} accepts its own seed corpus
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            fuzz/corpus/${{ matrix.target }} tests/data -- -runs=0
+
       - name: fuzz ${{ matrix.target }} for 10 minutes
         env:
           CARGO_PROFILE_RELEASE_LTO: "false"

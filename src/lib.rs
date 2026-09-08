@@ -158,6 +158,26 @@ pub mod fuzzing {
         .is_ok()
     }
 
+    /// [`parse_overlay_frame`] with the embedded base parsed too, by the loader a caller who does
+    /// not trust the blob has to use.
+    ///
+    /// The seam is the one neither other target reaches: the overlay derives the base region's
+    /// bounds from its own header and hands that slice to a closure, so a blob can be framed
+    /// perfectly and still deliver a *mis-sized* or hostile base. `OVL1` is what makes this
+    /// fuzzable at all — it carries no checksums, so a mutation reaches the framing instead of
+    /// dying at a hash it cannot recompute.
+    ///
+    /// Same claim as [`parse_string`]: **no input may panic out of this function**. The
+    /// contained panic `from_untrusted_bytes` catches is why this target, like that one, has to
+    /// replace libfuzzer-sys's aborting hook.
+    pub fn parse_overlay_untrusted(bytes: &[u8]) -> bool {
+        crate::Overlay::<crate::StringIndex>::from_bytes_with(
+            bytes,
+            crate::StringIndex::from_untrusted_bytes,
+        )
+        .is_ok()
+    }
+
     /// Load an ordered blob the way a caller who does not trust it would, and query what comes
     /// back.
     ///

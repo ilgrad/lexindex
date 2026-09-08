@@ -598,11 +598,18 @@ impl<I: OverlayBase> Overlay<I> {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     ///
-    /// **Safe on arbitrary bytes, and so is every base loader since 1.0.** The order is: the header
-    /// checksum, then the section lengths against the bytes actually present, then the payload
-    /// checksum, and only then the contents. So no header field can steer an index or an
-    /// allocation, and nothing is parsed out of a region that has not already been shown intact.
-    /// The base region is handed to `load_base`, which validates it in turn.
+    /// **Safe on arbitrary bytes — as far as `load_base` is.** The order is: the header checksum,
+    /// then the section lengths against the bytes actually present, then the payload checksum, and
+    /// only then the contents. So no header field can steer an index or an allocation, and nothing
+    /// is parsed out of a region that has not already been shown intact.
+    ///
+    /// The base region is then handed to `load_base`, and **that closure is where the caller
+    /// decides how far to trust it**. Both hash indexes' loaders are total, so for those the
+    /// question does not arise. `StringIndex::from_bytes` is the exception `SECURITY.md`
+    /// documents — a crafted transducer can make it *panic* — so a blob a stranger wrote must be
+    /// loaded with [`StringIndex::from_untrusted_bytes`](crate::StringIndex::from_untrusted_bytes)
+    /// instead. Everything the overlay checks is total either way; it cannot vouch for a region it
+    /// hands to someone else.
     ///
     /// Past the checksums the checks are semantic, because a hash vouches for transport and not for
     /// what was written: additions are checked for duplicates and, over a base whose membership is
@@ -847,7 +854,11 @@ mod tests {
     /// Assemble a blob by hand, so a test can put in what `to_bytes` never would. Sealed like a
     /// real one: what these tests exercise is the checks *past* the checksums.
     fn craft(base: &StringIndex, additions: &[&[u8]], dead: &[u64]) -> Vec<u8> {
-        let base = base.to_bytes();
+        craft_raw(&base.to_bytes(), additions, dead)
+    }
+
+    /// [`craft`] over a base region that is not an index this crate built.
+    fn craft_raw(base: &[u8], additions: &[&[u8]], dead: &[u64]) -> Vec<u8> {
         let added: usize = additions.iter().map(|k| 4 + k.len()).sum();
         let mut out = vec![0u8; OVERLAY_HEADER];
         out[0..4].copy_from_slice(OVERLAY_MAGIC);
@@ -856,7 +867,7 @@ mod tests {
         out[13..21].copy_from_slice(&(additions.len() as u64).to_le_bytes());
         out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
         out[29..37].copy_from_slice(&(dead.len() as u64).to_le_bytes());
-        out.extend_from_slice(&base);
+        out.extend_from_slice(base);
         for key in additions {
             out.extend_from_slice(&(key.len() as u32).to_le_bytes());
             out.extend_from_slice(key);
@@ -866,6 +877,38 @@ mod tests {
         }
         seal(&mut out);
         out
+    }
+
+    /// An overlay is exactly as trustworthy as the loader it is handed.
+    ///
+    /// The specimen is the 111-byte `StringIndex` blob `tests/golden.rs` keeps: bytes crafted so
+    /// that `fst`'s node decoder panics inside `from_bytes`. Sealed into an `OVL2` frame it is
+    /// still those bytes, and every check the overlay makes for itself — magic, header checksum,
+    /// the four lengths, the base tag, the payload checksum — passes before the base region is
+    /// handed over. So this pins both halves of what the loader's docstring now says: the ordinary
+    /// loader panics *through* an overlay, and `from_untrusted_bytes` turns that into the `Err` a
+    /// caller can act on. Nothing about the frame can make that choice for them.
+    #[test]
+    fn an_overlay_is_only_as_trustworthy_as_the_base_loader_it_is_given() {
+        const SPECIMEN: &[u8] = include_bytes!("../tests/data/panicking-1.0.0-string.bix");
+        let blob = craft_raw(SPECIMEN, &[b"added"], &[]);
+
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let trusting = std::panic::catch_unwind(|| {
+            Overlay::<StringIndex>::from_bytes_with(&blob, StringIndex::from_bytes)
+        });
+        std::panic::set_hook(hook);
+        assert!(
+            trusting.is_err(),
+            "from_bytes no longer panics on the specimen -- if fst's decoder became total, this \
+             test and the loader docstring both need their exception removed"
+        );
+
+        assert!(matches!(
+            Overlay::<StringIndex>::from_bytes_with(&blob, StringIndex::from_untrusted_bytes),
+            Err(IndexError::Format(_))
+        ));
     }
 
     /// The `OVL1` layout `0.12` wrote: no checksums, and the tombstone word count in the body.

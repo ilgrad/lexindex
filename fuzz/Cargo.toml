@@ -48,6 +48,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "parse_overlay_untrusted"
+path = "fuzz_targets/parse_overlay_untrusted.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "parse_string"
 path = "fuzz_targets/parse_string.rs"
 test = false

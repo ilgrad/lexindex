@@ -80,6 +80,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **An overlay is only as trustworthy as the base loader it is handed**, and the loader's docstring
+  now says so instead of claiming that "every base loader since 1.0" is safe on arbitrary bytes.
+  It is not: `StringIndex::from_bytes` may panic on a crafted transducer, and an `OVL2` frame
+  passes every check it makes for itself before handing the base region over — so the 111-byte
+  specimen sealed into an overlay panics through it, which a test now pins alongside the `Err` that
+  `from_untrusted_bytes` returns for the same bytes. No new entry point: `from_bytes_with` already
+  takes the loader as a closure, so the fix was to name the right one rather than to add a second
+  door.
+
+- **A sixth fuzz target, `parse_overlay_untrusted`**, parsing the embedded base as well as the
+  frame — the seam neither existing target reaches, since the overlay derives the base region's
+  bounds from its own header. `OVL1` is what makes it fuzzable: no checksum for a mutation to
+  break. 8.5 M executions in three minutes locally, 674 edges, no crashes. Every fuzz job now runs
+  its seed corpus with `-runs=0` *before* the timed run, because a target that dies on its own
+  corpus reads exactly like a real finding — `parse_string` shipped that way once — and
+  `fuzz/Cargo.toml` carries the rule that a target surviving a contained panic must replace
+  libfuzzer-sys's aborting hook.
+
 - **The byte formats are proved on a big-endian target**, in the weekly sanitizer workflow: Miri
   interprets `s390x-unknown-linux-gnu`, so no runner is needed, and `blob::`, `arena::` and a new
   `MPH1` fixture test run there in twelve seconds. Every scalar in every blob is little-endian by

@@ -290,6 +290,21 @@ fn the_fuzz_shims_accept_a_real_blob() {
     let flat = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
     assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
 
+    // The overlay seeds, through both of their targets: the frame-only one and the one that also
+    // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
+    // checksums, so it is the one a mutation can still reach the framing through.
+    for name in ["golden-1.0.0-overlay.ovl", "golden-0.12.0-overlay.ovl"] {
+        let blob = std::fs::read(data(name)).unwrap();
+        assert!(
+            lexindex::fuzzing::parse_overlay_frame(&blob),
+            "{name}: overlay frame rejected"
+        );
+        assert!(
+            lexindex::fuzzing::parse_overlay_untrusted(&blob),
+            "{name}: overlay with an untrusted base rejected"
+        );
+    }
+
     // A pre-1.0 blob is refused at the magic, so it is worth nothing as a seed. Pinned so that the
     // seeds cannot silently go stale again the next time a format changes.
     let old = std::fs::read(data("golden-0.9.1-compact.bch")).unwrap();
