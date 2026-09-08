@@ -207,6 +207,53 @@ proptest! {
         let _ = StringIndex::from_bytes(&data);
     }
 
+    // The strict loader has to hold to the same on arbitrary bytes, and to more: it is the one
+    // that promises an `Err` where `from_bytes` is allowed to panic.
+    #[test]
+    fn string_index_from_untrusted_bytes_never_panics(data in prop::collection::vec(any::<u8>(), 0..256)) {
+        let _ = StringIndex::from_untrusted_bytes(&data);
+    }
+
+    // Random bytes almost never reach `fst`'s node decoder — they fail the magic, and past that the
+    // checksum. Mutating a *real* blob is what gets there: flip one byte inside the FST body and
+    // re-seal nothing, and the CRC usually catches it, but the surviving cases are exactly the
+    // class that produced the 44-byte panic `fuzz/Cargo.toml` records. Whatever the mutation, the
+    // strict loader must return, and whatever it returns must be self-consistent: an index that
+    // loads has to answer its own keys.
+    #[test]
+    fn string_index_untrusted_survives_seeded_mutations(
+        keys in prop::collection::vec("[ab]{0,5}", 1..12),
+        at in any::<prop::sample::Index>(),
+        xor in 1u8..=255,
+    ) {
+        let keys = distinct_sorted(keys);
+        let mut blob = StringIndex::build(keys.iter()).unwrap().to_bytes();
+        let i = at.index(blob.len());
+        blob[i] ^= xor;
+        if let Ok(idx) = StringIndex::from_untrusted_bytes(&blob) {
+            let mut seen = 0u64;
+            for (rank, key) in idx.iter().enumerate() {
+                prop_assert_eq!(key.1, rank as u64);
+                seen += 1;
+            }
+            prop_assert_eq!(seen, idx.len() as u64);
+        }
+    }
+
+    // No false rejections at scale: whatever `to_bytes` writes, the strict loader takes, and the
+    // index it hands back answers exactly what the original did.
+    #[test]
+    fn string_index_untrusted_round_trip(keys in multibyte_keys()) {
+        let keys = distinct_sorted(keys);
+        let idx = StringIndex::build(keys.iter()).unwrap();
+        let back = StringIndex::from_untrusted_bytes(&idx.to_bytes())
+            .map_err(|e| TestCaseError::fail(format!("refused its own blob: {e}")))?;
+        prop_assert_eq!(back.len(), keys.len());
+        for (rank, key) in keys.iter().enumerate() {
+            prop_assert_eq!(back.id(key), Some(rank as u64));
+        }
+    }
+
     // Random bytes never spell `OVL2`, so the overlay's framing is fuzzed outward from a real blob:
     // one byte flipped, or the blob cut short, or one of its four claimed lengths replaced by a
     // hostile value. Only `Ok`/`Err` — never a panic, and in particular never an allocation sized

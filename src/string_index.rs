@@ -383,6 +383,115 @@ impl StringIndex {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
 
+    /// Reconstruct from bytes **someone else wrote**, validating the transducer before any query
+    /// can reach it. Slower than [`from_bytes`](Self::from_bytes) and total where that one is not.
+    ///
+    /// [`from_bytes`](Self::from_bytes) documents what it does not defend against: `fst`'s node
+    /// decoder is safe Rust but not total, the checksum in front of it is public and recomputable,
+    /// and a blob crafted to carry a matching one can panic instead of returning. This method
+    /// closes that gap in the only two ways available from outside `fst`.
+    ///
+    /// It **walks the whole transducer** rather than spot-checking it. Every node reachable from
+    /// the root is decoded once and every transition is read, so a node that would panic a query
+    /// panics here instead, where it is caught; every transition must point strictly *below* the
+    /// node holding it, which is how `fst` lays nodes out and what makes the walk terminate on
+    /// bytes that were not laid out that way at all. Then every key is streamed in order and its
+    /// value must be its rank — the check [`from_bytes`](Self::from_bytes) only samples at both
+    /// ends, so a blob whose values are a *permutation* of the ranks is refused here and accepted
+    /// there.
+    ///
+    /// And it **catches the panic**, at the load boundary, turning it into
+    /// [`IndexError::Format`]. Two consequences worth knowing before relying on it: under
+    /// `panic = "abort"` there is no unwinding to catch, so a crafted blob aborts the process
+    /// instead — still not undefined behaviour, but not an `Err` either; and the panic runs the
+    /// process-wide hook on its way out, so the rejection normally prints a panic message to
+    /// stderr. Nothing is suppressed, because the hook is global and another thread's panic is not
+    /// this loader's to silence.
+    ///
+    /// What it costs is one full pass over the keys — around 80 ns each, 40 ms on a 480 k-word
+    /// dictionary, against 0.7 ms for the owned load. Use it for a blob from a stranger, and
+    /// [`from_bytes`](Self::from_bytes) for one of your own.
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let blob = StringIndex::build(["apple", "banana"])?.to_bytes();
+    /// assert_eq!(StringIndex::from_untrusted_bytes(&blob)?.id("banana"), Some(1));
+    /// assert!(StringIndex::from_untrusted_bytes(b"BIX4 and nonsense").is_err());
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn from_untrusted_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        let blob = SharedBytes::from_owned(bytes.to_vec());
+        // `AssertUnwindSafe` because nothing crosses the boundary on the panic path: the half-built
+        // index is dropped inside, and the caller gets an `Err` that borrows nothing from it.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            // Structure before content, so a malformed transducer is *diagnosed* rather than
+            // survived: `from_shared`'s own rank spot-check walks the very nodes that can panic, so
+            // running it first would leave `catch_unwind` as the only thing standing between a
+            // crafted blob and an abort. The checksum runs after the walk for the same reason --
+            // it reads the whole blob, and is worth doing only once the layout is known good.
+            let idx = Self::from_shared(blob, false)?;
+            idx.validate_nodes()?;
+            idx.map.as_fst().verify()?;
+            idx.validate_ranks()?;
+            Ok(idx)
+        }))
+        .map_err(|_| IndexError::Format("fst node decoder panicked on this blob"))?
+    }
+
+    /// Decode every node reachable from the root, once each, and check that the transducer is laid
+    /// out the way `fst` lays one out: a transition points strictly below the node that holds it.
+    ///
+    /// `fst` writes nodes in reverse — a node's targets are already on disk when it is written, so
+    /// their addresses are smaller. Enforcing that is worth two things at once. It rejects a blob
+    /// whose transitions form a cycle, which is what would otherwise make this walk run forever;
+    /// and, with each address visited at most once, it bounds the walk at one decode per byte of
+    /// the blob rather than one per path through it.
+    fn validate_nodes(&self) -> Result<(), IndexError> {
+        let fst = self.map.as_fst();
+        let len = fst.as_bytes().len();
+        let mut seen = vec![0u64; len / 64 + 1];
+        let mut stack = vec![fst.root().addr()];
+        while let Some(addr) = stack.pop() {
+            if addr >= len {
+                return Err(IndexError::Format("fst node address is outside the blob"));
+            }
+            let (w, b) = (addr / 64, addr % 64);
+            if seen[w] >> b & 1 == 1 {
+                continue;
+            }
+            seen[w] |= 1 << b;
+            for t in fst.node(addr).transitions() {
+                if t.addr >= addr && addr != 0 {
+                    return Err(IndexError::Format(
+                        "fst transition does not point below its own node",
+                    ));
+                }
+                stack.push(t.addr);
+            }
+        }
+        Ok(())
+    }
+
+    /// Stream every key in order and require its value to be its rank. This is
+    /// [`verify_ranks`](Self::verify_ranks) without the sampling: it costs a full pass, and it is
+    /// the only form that rules out a permutation of the ranks.
+    fn validate_ranks(&self) -> Result<(), IndexError> {
+        let mut expect = 0u64;
+        let mut stream = self.map.stream();
+        while let Some((_, v)) = stream.next() {
+            if v != expect {
+                return Err(IndexError::Format("fst value is not the key's rank"));
+            }
+            expect += 1;
+        }
+        if expect != self.map.len() as u64 {
+            return Err(IndexError::Format(
+                "fst holds a different number of keys than its header says",
+            ));
+        }
+        Ok(())
+    }
+
     /// Reconstruct from a shared byte source, borrowing the FST from it without copying. Backs both the
     /// owned [`from_bytes`](StringIndex::from_bytes) and the zero-copy
     /// [`load_mmap`](StringIndex::load_mmap). `verify` runs the FST's `O(blob)` checksum pass — on
@@ -743,6 +852,81 @@ mod tests {
         }
         assert_eq!(mapped.prefix("entity-001").len(), 10); // 0010..0019
         std::fs::remove_file(&path).ok();
+    }
+
+    /// The whole point of the untrusted loader: it refuses a blob the owned one accepts.
+    ///
+    /// A *permutation* of the ranks passes both ends of the spot check — the first key's value is
+    /// 0 and some path accumulates `n - 1` — so `from_bytes` loads it and then answers wrong ids.
+    /// Only the full stream catches it, and the full stream is what this loader pays for.
+    #[test]
+    fn the_untrusted_loader_refuses_a_permutation_the_owned_one_takes() {
+        fn blob_with_values(values: &[u64]) -> Vec<u8> {
+            let mut b = fst::MapBuilder::memory();
+            for (i, &v) in values.iter().enumerate() {
+                b.insert(format!("key-{i:03}"), v).unwrap();
+            }
+            let mut out = b"BIX4".to_vec();
+            out.extend_from_slice(&b.into_inner().unwrap());
+            out
+        }
+        let permuted = blob_with_values(&[0, 2, 1, 3]);
+        let loose = StringIndex::from_bytes(&permuted).expect("the spot check passes");
+        assert_eq!(loose.id("key-001"), Some(2), "and it answers a wrong id");
+        assert!(StringIndex::from_untrusted_bytes(&permuted).is_err());
+
+        // The same shape with the real ranks passes both, so what is refused is the values.
+        let good = blob_with_values(&[0, 1, 2, 3]);
+        assert!(StringIndex::from_bytes(&good).is_ok());
+        assert_eq!(
+            StringIndex::from_untrusted_bytes(&good)
+                .unwrap()
+                .id("key-001"),
+            Some(1)
+        );
+    }
+
+    /// No false rejections: whatever `to_bytes` writes, the strict loader takes — including the
+    /// empty index and a single key, which are the two shapes with special node addresses.
+    #[test]
+    fn the_untrusted_loader_accepts_every_blob_this_crate_writes() {
+        for keys in [
+            vec![],
+            vec!["only"],
+            vec!["a", "b"],
+            vec!["", "a", "ab", "abc"],
+            vec!["é中🎉", "über", "zebra"],
+        ] {
+            let idx = StringIndex::build(keys.iter()).unwrap();
+            let blob = idx.to_bytes();
+            let back = StringIndex::from_untrusted_bytes(&blob)
+                .unwrap_or_else(|e| panic!("refused its own blob for {keys:?}: {e}"));
+            assert_eq!(back.len(), keys.len());
+            // By byte order, which is not the order they are written above: `zebra` starts 0x7a and
+            // every non-ASCII key starts 0xc3.
+            let mut sorted = keys.clone();
+            sorted.sort_unstable();
+            for (i, k) in sorted.iter().enumerate() {
+                assert_eq!(back.id(k), Some(i as u64), "{k:?} in {sorted:?}");
+            }
+        }
+    }
+
+    /// Bytes that are not an FST at all stop at the magic or the checksum, before the walk.
+    #[test]
+    fn the_untrusted_loader_refuses_bytes_that_are_not_an_fst() {
+        for bytes in [
+            &b""[..],
+            &b"BIX"[..],
+            &b"NOPE0123456789"[..],
+            &b"BIX4 and nonsense past the magic"[..],
+            &[0xffu8; 64][..],
+        ] {
+            assert!(
+                StringIndex::from_untrusted_bytes(bytes).is_err(),
+                "accepted {bytes:?}"
+            );
+        }
     }
 
     /// A blob whose FST is structurally valid — and CRC-correct, because it was built by `fst`

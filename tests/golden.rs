@@ -361,3 +361,37 @@ fn the_1_0_overlay_blob_is_byte_identical_to_a_fresh_build() {
         assert_eq!(back.id(key), Some(rank as u64), "id({key:?})");
     }
 }
+
+/// A blob that `from_bytes` panics on and `from_untrusted_bytes` refuses.
+///
+/// `SECURITY.md` states the one exception to "arbitrary bytes get an `Err`": the ordered loader
+/// can panic instead, because `fst`'s node decoder is safe Rust but not total and the checksum in
+/// front of it is public, so bytes crafted to carry a matching one reach an invalid body. That
+/// sentence was written from a fuzz run; this is the specimen, kept so the claim stays a measured
+/// fact rather than a recollection. libFuzzer found it against `StringIndex::from_bytes` and could
+/// not minimise it below 111 bytes.
+///
+/// The pair of assertions is the point. The first pins the gap the security policy documents, and
+/// fails the day `fst` gains a total decoder — which is a fix, and should be noticed as one. The
+/// second is the contract [`StringIndex::from_untrusted_bytes`] exists to provide, checked on a
+/// real crafted blob rather than on bytes invented to be rejected.
+#[test]
+fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
+    let bytes = std::fs::read(data("panicking-1.0.0-string.bix")).expect("the panic specimen");
+    assert_eq!(bytes.len(), 111);
+
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let owned = std::panic::catch_unwind(|| lexindex::StringIndex::from_bytes(&bytes));
+    std::panic::set_hook(hook);
+    assert!(
+        owned.is_err(),
+        "from_bytes no longer panics on this blob -- if fst's decoder became total, \
+         SECURITY.md and the from_bytes docstring both need their exception removed"
+    );
+
+    assert!(matches!(
+        lexindex::StringIndex::from_untrusted_bytes(&bytes),
+        Err(lexindex::IndexError::Format(_))
+    ));
+}

@@ -16,12 +16,12 @@ libfuzzer-sys = "0.4"
 # loaders themselves are safe, so a target could call them directly, but it would then spend most of
 # its budget re-deriving the same framing rejections through an extra allocation per case.
 #
-# `StringIndex::from_bytes` was a third target and is deliberately gone. It found a real defect in
-# ten minutes — 44 bytes carrying a matching FST checksum panic in `fst`'s node decoder — but the
-# defect is in a claim, not in code this crate can fix: the checksum guards accidental corruption,
-# and `docs/design.md` already said a crafted, re-checksummed FST "can at worst panic or answer
-# wrongly". The docstring that promised otherwise is corrected; keeping a target that re-finds an
-# accepted, unfixable-downstream panic every week would only teach us to ignore a red job.
+# `StringIndex::from_bytes` had a target once and lost it: it found a real defect in ten minutes —
+# 44 bytes carrying a matching FST checksum panic in `fst`'s node decoder — but that defect was in a
+# claim rather than in code this crate could fix, so the target only re-found an accepted panic
+# every week and taught us to ignore a red job. `parse_string` is its replacement and fuzzes
+# `from_untrusted_bytes` instead, which walks every node inside `catch_unwind` and so *can* promise
+# the rejection the old one kept disproving.
 [dependencies.lexindex]
 path = ".."
 features = ["fuzzing"]
@@ -43,6 +43,13 @@ bench = false
 [[bin]]
 name = "parse_overlay"
 path = "fuzz_targets/parse_overlay.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_string"
+path = "fuzz_targets/parse_string.rs"
 test = false
 doc = false
 bench = false

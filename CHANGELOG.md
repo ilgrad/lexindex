@@ -43,6 +43,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`StringIndex::from_untrusted_bytes`**, the loader for a blob someone else wrote. It walks the
+  whole transducer instead of spot-checking it -- every reachable node decoded once, every
+  transition required to point strictly below the node holding it, which is how `fst` lays nodes
+  out and what makes the walk terminate on bytes that were not -- then streams every key and
+  requires its value to be its rank, so a blob whose values are a *permutation* of the ranks is
+  refused here and accepted by `from_bytes`. Decoding a malformed node still panics inside `fst`,
+  because that decoder is the only one there is; the panic is caught at the load boundary and
+  returned as `IndexError::Format`. Two caveats it documents: under `panic = "abort"` a crafted
+  blob aborts rather than returning, and the rejection prints through the process-wide panic hook.
+  `tests/data/panicking-1.0.0-string.bix` is a real 111-byte specimen, found by libFuzzer against
+  `from_bytes` and kept so the security policy's exception stays a measured fact. There is no
+  Python binding yet; `docs/usage.md` now says so instead of promising a clean `ValueError`.
+
+- **A `parse_string` fuzz target**, replacing the one removed before 1.0 for re-finding a panic the
+  crate could not then fix. It loads through `from_untrusted_bytes` and asserts the loaded index
+  agrees with itself -- every key's id equals its rank, every point lookup agrees with the scan --
+  so the target now fails on a wrong answer, not only on a crash. It is in the weekly matrix.
+
 - **Feature badges on docs.rs**: the "Available on crate feature `mph`/`mmap` only" markers that say
   which parts of the API a `--no-default-features` build does not have.
 

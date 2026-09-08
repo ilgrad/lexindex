@@ -99,7 +99,17 @@ idx = lexindex.StringIndex.from_bytes(data)
 
 `load_mmap` maps the file and borrows the index from the mapped pages, so load time is independent of
 the index size and the pages are shared across processes. The mapped file must stay immutable while an
-index borrows it. Loading an untrusted / truncated blob fails cleanly (`ValueError`), never corrupts.
+index borrows it.
+
+A truncated or corrupt blob is refused with `ValueError`, and no load can produce undefined
+behaviour. `StringIndex` has one documented exception, and it is the reason `SECURITY.md` states a
+threat model rather than a promise: its blob is an `fst` transducer whose node decoder is safe Rust
+but not *total*, and the checksum in front of that decoder is public, so bytes crafted to carry a
+matching one can **panic** instead of returning. In Python that surfaces as
+`pyo3_runtime.PanicException`, not `ValueError`. The Rust API answers this with
+`StringIndex::from_untrusted_bytes`, which walks the whole transducer and catches the panic at the
+load boundary; there is no Python binding for it yet. Until there is, treat a `StringIndex` blob
+from a stranger the way `SECURITY.md` says to treat any of them -- as code, not as data.
 
 ## `PerfectHashIndex` — exact lookup with `id → key`
 

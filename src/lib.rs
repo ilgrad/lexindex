@@ -157,6 +157,34 @@ pub mod fuzzing {
         })
         .is_ok()
     }
+
+    /// Load an ordered blob the way a caller who does not trust it would, and query what comes
+    /// back.
+    ///
+    /// This is the target `fuzz/Cargo.toml` used to say could not exist. It could not while the
+    /// only loader was `StringIndex::from_bytes`, which is allowed to panic on a crafted FST — a
+    /// target over it re-found that every week and taught us to ignore a red job.
+    /// `from_untrusted_bytes` makes the panic an `Err`, and that is a claim worth a fuzzer:
+    /// **no input may panic out of this function**, and any index that does load must answer its
+    /// own keys with their own ranks, because the loader walked every node and streamed every
+    /// value to say so.
+    pub fn parse_string(bytes: &[u8]) -> bool {
+        let Ok(idx) = crate::StringIndex::from_untrusted_bytes(bytes) else {
+            return false;
+        };
+        let mut n = 0u64;
+        for (rank, (key, id)) in idx.iter().enumerate() {
+            assert_eq!(id, rank as u64, "loaded index answers {key:?} with {id}");
+            assert_eq!(
+                idx.id(&key),
+                Some(id),
+                "point lookup disagrees with the scan"
+            );
+            n += 1;
+        }
+        assert_eq!(n, idx.len() as u64, "the scan and the length disagree");
+        true
+    }
 }
 
 // Compiles and runs the README's Rust snippets as doctests without pulling its prose into the API
