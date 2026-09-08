@@ -71,7 +71,10 @@ def _commit() -> str:
     sha = _run("git", "-C", str(Path(__file__).parent.parent), "rev-parse", "--short", "HEAD")
     if sha is None:
         return "nogit"
-    dirty = _run("git", "-C", str(Path(__file__).parent.parent), "status", "--porcelain")
+    # `--untracked-files=no`: the run's own results file is untracked, and a plain `--porcelain`
+    # therefore reported the *next* run dirty for the output of the previous one.
+    root = str(Path(__file__).parent.parent)
+    dirty = _run("git", "-C", root, "status", "--porcelain", "--untracked-files=no")
     return f"{sha}-dirty" if dirty else sha
 
 
