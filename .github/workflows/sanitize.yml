@@ -59,6 +59,21 @@ jobs:
         run: |
           cargo +nightly miri test --no-default-features --lib blob::
           cargo +nightly miri test --no-default-features --lib subsequence::
+      # Every scalar in every blob this crate writes is little-endian, and every reader says so
+      # with `from_le_bytes` -- but `to_ne_bytes` compiles, passes on x86 and silently writes a
+      # different file on a big-endian machine. There is no big-endian runner and there does not
+      # need to be one: the interpreter has the target. Measured negative control -- flipping the
+      # arena's count field to `to_ne_bytes` passes `cargo test` and fails eight tests here.
+      #
+      # `mphf::` is deliberately absent. Its blob tests go through a 263 000-key build, which is
+      # hours under an interpreter; `the_golden_blob_parses_and_writes_back_identically` reads the
+      # committed `MPH1` fixture instead and pins the same header, in 12 seconds for the whole job.
+      - name: cargo miri test on a big-endian target (the byte formats)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: |
+          cargo +nightly miri test --target s390x-unknown-linux-gnu --lib -- \
+            blob:: arena:: mphf::tests::the_golden_blob_parses_and_writes_back_identically
       # The only place 32-bit code actually *runs*. `cargo check --target i686` is its own CI job,
       # but a compilation check cannot see a `u64 -> usize` truncation, and there is no 32-bit
       # runner to test on — Miri needs neither, since it interprets. It earned this on its first

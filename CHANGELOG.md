@@ -80,6 +80,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The byte formats are proved on a big-endian target**, in the weekly sanitizer workflow: Miri
+  interprets `s390x-unknown-linux-gnu`, so no runner is needed, and `blob::`, `arena::` and a new
+  `MPH1` fixture test run there in twelve seconds. Every scalar in every blob is little-endian by
+  construction, but `to_ne_bytes` compiles, passes on x86 and would silently write a different file
+  elsewhere — flipping the arena's count field to it passes `cargo test` and fails eight tests
+  under the interpreter, which is how the job was checked rather than assumed. `mphf::` as a whole
+  is out of reach there (its blob tests build a 263 000-key table, hours under interpretation), so
+  the new test reads the committed fixture and writes it back byte for byte instead.
+
 - **Dict-style lookup in Python**: `idx["apple"]` raises `KeyError` on a miss, `idx.get("apple")`
   returns `None` or whatever default is passed, on all four classes. Nothing further — no
   `__setitem__`, no `keys` / `values` / `items`, no `Mapping` registration — because these indexes

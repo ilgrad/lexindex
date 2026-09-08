@@ -1155,6 +1155,20 @@ mod tests {
         }
     }
 
+    /// The committed `MPH1` fixture, parsed and written straight back — byte for byte.
+    ///
+    /// Every scalar in that header is little-endian on purpose and a `to_ne_bytes` slip is
+    /// invisible on x86, so this is the assertion the weekly big-endian Miri job runs. It reads a
+    /// blob rather than building one, which is what makes it affordable there: the other blob tests
+    /// go through `reference()`, whose 263 000-key build is hours under an interpreter.
+    #[test]
+    fn the_golden_blob_parses_and_writes_back_identically() {
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-1.0.0-mphf.bin");
+        let mphf = Mphf::from_bytes(GOLDEN).expect("the committed MPH1 fixture parses");
+        assert_eq!(mphf.to_bytes(), GOLDEN);
+        assert_eq!(mphf.byte_len(), GOLDEN.len());
+    }
+
     /// A cut blob has a header that still checksums; only the derived total length catches it.
     #[test]
     fn a_truncated_blob_is_refused() {
