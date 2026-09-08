@@ -408,9 +408,11 @@ impl StringIndex {
     /// stderr. Nothing is suppressed, because the hook is global and another thread's panic is not
     /// this loader's to silence.
     ///
-    /// What it costs is one full pass over the keys — around 80 ns each, 40 ms on a 480 k-word
-    /// dictionary, against 0.7 ms for the owned load. Use it for a blob from a stranger, and
-    /// [`from_bytes`](Self::from_bytes) for one of your own.
+    /// What it costs is one decode of every node plus one full pass over the keys: 50.8 ms against
+    /// 1.2 ms for the owned load, on the 479 823-word `/usr/share/dict/words`, or 106 ns per key
+    /// and 42× the load it replaces. That ratio is the whole design — it is a price worth paying
+    /// once for a blob from a stranger and not worth paying at all for one of your own, so use
+    /// [`from_bytes`](Self::from_bytes) for the latter.
     ///
     /// ```
     /// use lexindex::StringIndex;

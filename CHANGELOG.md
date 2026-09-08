@@ -53,8 +53,10 @@ All notable changes to this project are documented here. The format follows
   returned as `IndexError::Format`. Two caveats it documents: under `panic = "abort"` a crafted
   blob aborts rather than returning, and the rejection prints through the process-wide panic hook.
   `tests/data/panicking-1.0.0-string.bix` is a real 111-byte specimen, found by libFuzzer against
-  `from_bytes` and kept so the security policy's exception stays a measured fact. There is no
-  Python binding yet; `docs/usage.md` now says so instead of promising a clean `ValueError`.
+  `from_bytes` and kept so the security policy's exception stays a measured fact. The validation
+  costs 50.8 ms against 1.2 ms for the owned load on the 479 823-word `/usr/share/dict/words`, or
+  106 ns per key. There is no Python binding yet; `docs/usage.md` now says so instead of promising
+  a clean `ValueError`.
 
 - **A `parse_string` fuzz target**, replacing the one removed before 1.0 for re-finding a panic the
   crate could not then fix. It loads through `from_untrusted_bytes` and asserts the loaded index
