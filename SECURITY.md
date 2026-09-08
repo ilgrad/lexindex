@@ -23,10 +23,21 @@ within a week; this is a single-maintainer project, so that is a realistic figur
 ## Threat model
 
 **A blob is data you own.** Every loader takes bytes it did not write, and since 1.0 all of them are
-safe fns: `from_bytes` and `load` on all three indexes, and `Overlay`'s. Arbitrary bytes produce an
-`Err`, never undefined behaviour, an out-of-range id, or a read outside the blob. That is what the
-in-crate minimal perfect hash bought — every array length is derived on load from the header's own
-scalars, so a loader cannot be handed a length that disagrees with the table it describes.
+safe fns: `from_bytes` and `load` on all three indexes, and `Overlay`'s. No input produces undefined
+behaviour, an out-of-range id, or a read outside the blob. That is what the in-crate minimal perfect
+hash bought — every array length is derived on load from the header's own scalars, so a loader cannot
+be handed a length that disagrees with the table it describes.
+
+**Refusal is an `Err` on the perfect-hash side, and can be a panic on the ordered one.** Arbitrary
+bytes handed to `CompactHashIndex`, `PerfectHashIndex` or `Overlay` come back as an `IndexError`,
+whatever they contain. `StringIndex` is backed by [`fst`](https://docs.rs/fst), whose node decoder is
+safe Rust but not total, and the checksum in front of it is public and recomputable — so a blob
+crafted to carry a matching one reaches that decoder with an invalid body and can **panic** instead
+of returning. That is measured rather than feared: a libFuzzer target over `from_bytes` produced 44
+such bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. A panic is
+neither undefined behaviour nor an out-of-bounds read — it unwinds, or aborts the process under
+`panic = "abort"` — but it is a denial of service for anything that loads ordered blobs supplied by
+a stranger. Load `StringIndex` blobs you produced yourself.
 
 The guarantee is **soundness, not correctness**. A blob crafted by someone else can answer *wrong*
 ids for keys it does not hold. It cannot answer ids outside `[0, n)`, allocate from a number it
@@ -58,12 +69,17 @@ is a resource you are protecting, put a keyed hash in front.
 writable one `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
-target, and libFuzzer over all four blob parsers.
+target, and libFuzzer over the four parsers a target can hold to a return value: `BCH6`, `BMP5`,
+`OVL2`, and the standalone `MPH1` from inside. `BIX4` has none, because the panic above is the
+accepted answer there and a target that re-finds it every week would only teach us to ignore a red
+job.
 
 ## Not vulnerabilities
 
 - **A crafted blob that answers wrong ids.** Stated above; it is the documented contract.
-- **A crafted blob that fails to load.** Every rejection path returns `Err`.
+- **A crafted blob that fails to load.** The perfect-hash and overlay loaders refuse with an `Err`
+  on any input. A crafted `StringIndex` blob may panic instead: documented above, bounded to a panic
+  by `fst` being safe Rust, and avoided by not loading ordered blobs from strangers.
 - **`CompactHashIndex` reporting a key it never held.** Its membership is probabilistic by
   construction, at the false-positive rate `fingerprint_bits` buys.
 - **`Overlay::remove` retiring an id over a probabilistic base.** Removal is by id, and a false

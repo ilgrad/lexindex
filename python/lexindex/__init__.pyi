@@ -85,7 +85,7 @@ class StringIndex:
 
 @final
 class PerfectHashIndex:
-    """Minimal-perfect-hash dictionary: fastest exact string->dense id, with persistence."""
+    """Minimal-perfect-hash dictionary: exact string->dense id, with reverse lookup."""
 
     def __new__(cls, items: Iterable[str]) -> PerfectHashIndex: ...
     @staticmethod

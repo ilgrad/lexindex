@@ -493,7 +493,7 @@ impl StringIndexIterator {
     }
 }
 
-/// Minimal-perfect-hash dictionary: fastest exact `string → dense id`, with persistence.
+/// Minimal-perfect-hash dictionary: exact `string → dense id` with reverse lookup and persistence.
 #[cfg(feature = "mph")]
 #[pyclass(name = "PerfectHashIndex", module = "lexindex._core", frozen)]
 pub struct PyPerfectHashIndex {

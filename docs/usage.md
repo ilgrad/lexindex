@@ -101,7 +101,7 @@ idx = lexindex.StringIndex.from_bytes(data)
 the index size and the pages are shared across processes. The mapped file must stay immutable while an
 index borrows it. Loading an untrusted / truncated blob fails cleanly (`ValueError`), never corrupts.
 
-## `PerfectHashIndex` — fastest exact lookup
+## `PerfectHashIndex` — exact lookup with `id → key`
 
 ```python
 from lexindex import PerfectHashIndex

@@ -13,8 +13,9 @@
 //!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
 //!   no reverse lookup. Use it when footprint is paramount.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
-//!   reverse lookup (keys stored). Fastest exact `string → dense id`; no ordering. Use it as a
-//!   fixed-vocabulary token↔id map on a hot path.
+//!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
+//!   at 13.6 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
+//!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //!
 //! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
@@ -35,6 +36,10 @@
 // Edition 2024 already warns; deny so an `unsafe` operation inside an `unsafe fn` must name its
 // own justification in an `unsafe {}` block rather than ride on the signature.
 #![deny(unsafe_op_in_unsafe_fn)]
+// Feature badges on docs.rs. `doc_cfg` is nightly-only and docs.rs builds on nightly with the
+// `--cfg docsrs` its metadata in `Cargo.toml` asks for; no other build ever sees the cfg, so the
+// attribute costs a stable compiler nothing.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod blob;
 #[cfg(feature = "mph")]
@@ -64,8 +69,10 @@ mod hash;
 #[cfg(feature = "mph")]
 mod perfect_hash;
 #[cfg(feature = "mph")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use compact_hash::CompactHashIndex;
 #[cfg(feature = "mph")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use perfect_hash::PerfectHashIndex;
 
 #[cfg(feature = "python")]

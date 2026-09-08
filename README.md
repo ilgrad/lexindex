@@ -137,7 +137,7 @@ let idx = unsafe { StringIndex::load_mmap("catalog.bix") }?; // no read into RAM
 use lexindex::PerfectHashIndex;            // requires the default `mph` feature
 
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT", "DELETE"])?;
-let id = dict.id("POST").unwrap();             // fastest exact lookup, dense id in [0, n)
+let id = dict.id("POST").unwrap();             // exact lookup, dense id in [0, n)
 assert_eq!(dict.key(id), Some("POST"));
 assert_eq!(dict.id("PATCH"), None);            // membership is verified, not just hashed
 

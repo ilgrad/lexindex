@@ -306,7 +306,7 @@ struct Frame {
     side: Vec<(u64, u32)>,
 }
 
-/// An immutable minimal-perfect-hash dictionary: fastest exact `string → dense id` with reverse lookup.
+/// An immutable minimal-perfect-hash dictionary: exact `string → dense id` with reverse lookup.
 pub struct PerfectHashIndex {
     mph: Option<Mphf>,  // over one hash per distinct hash value; None iff empty
     arena: StringArena, // id → key (also verifies membership); ids [m, n) are the side keys
@@ -853,6 +853,7 @@ impl PerfectHashIndex {
     /// removed on every exit path, and on a machine with memory to spare it never reaches the disk
     /// at all.
     #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
     pub fn build_to_file<F, I, S>(
         path: impl AsRef<std::path::Path>,
         source: F,
@@ -1097,6 +1098,7 @@ impl PerfectHashIndex {
     /// [`from_bytes`](Self::from_bytes) performs runs on the mapping — it is merely wrong. See
     /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
     #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
         // SAFETY: forwarded from this function's own contract.

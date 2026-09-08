@@ -375,9 +375,10 @@ impl StringIndex {
     /// node decoder with an invalid body: a 44-byte input found by the fuzz target that used to
     /// live in `fuzz/` panics inside this crate's own rank spot-check, before the caller ever runs
     /// a query. `fst` is safe Rust throughout, so the worst case stays a panic or a wrong answer,
-    /// never an out-of-bounds read — which is why this stays a safe `fn` while the perfect-hash
-    /// loaders are `unsafe`. Blobs from an untrusted source need a check this crate cannot make
-    /// for you.
+    /// never an out-of-bounds read — which is why this is a safe `fn`, as every loader in the crate
+    /// has been since 1.0. What it is not is *total*: the perfect-hash loaders answer a crafted blob
+    /// with an `Err`, and this one may panic instead. Blobs from an untrusted source need a check
+    /// this crate does not make for you.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
@@ -455,6 +456,7 @@ impl StringIndex {
     /// `save` → `load_mmap` workflow satisfies this; publishing new versions under new paths, or
     /// [`load`](Self::load), keeps it safe without the obligation.
     #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
         // SAFETY: forwarded to this function's own contract — the caller guarantees the file is

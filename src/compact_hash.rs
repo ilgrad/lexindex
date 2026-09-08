@@ -584,6 +584,7 @@ impl CompactHashIndex {
     /// [`from_bytes`](Self::from_bytes) performs runs on the mapping — it is merely wrong. See
     /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
     #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
     pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
         let file = std::fs::File::open(path)?;
         // SAFETY: forwarded from this function's own contract.

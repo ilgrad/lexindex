@@ -11,6 +11,14 @@ readme = "README.md"
 keywords = ["index", "fst", "perfect-hash", "prefix", "catalog"]
 categories = ["data-structures", "text-processing"]
 
+# docs.rs builds the Rust-facing API — `mph` + `mmap`, the defaults. Not `python`: that surface is
+# PyO3 classes whose documentation lives in the type stubs, and its build script wants an interpreter.
+# Not `fuzzing` / `bench-mphf` either; both say in their own docs that they are not public API.
+# `--cfg docsrs` is what turns on the "Available on crate feature ..." badges below.
+[package.metadata.docs.rs]
+features = ["mph", "mmap"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 name = "lexindex"
 # `cdylib` for the Python extension module (maturin/PyO3); `rlib` for use as a normal Rust crate.

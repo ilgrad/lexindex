@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`SECURITY.md` said every loader answers arbitrary bytes with an `Err`; `StringIndex` can panic
+  instead.** The claim was true of the perfect-hash and overlay loaders and had never been true of
+  the ordered one: `fst`'s node decoder is safe Rust but not total, and the checksum in front of it
+  is public, so a blob crafted to carry a matching one reaches that decoder with an invalid body.
+  A libFuzzer target measured it — 44 bytes in ten minutes, panicking inside the rank spot-check
+  the load itself runs — and `docs/design.md` and the `from_bytes` docstring had said so since
+  0.12.1 while the security policy still promised otherwise. The policy now states the exception,
+  and names the four parsers a fuzz target actually covers rather than implying all five.
+
+- **`PerfectHashIndex` was documented as the "fastest exact `string → dense id`" in seven places.**
+  Its own benchmark says otherwise: `id` costs about what a `std::HashMap` lookup does, and the
+  claim belongs to `id_unchecked`, which skips the membership comparison for a closed vocabulary.
+
+### Changed
+
+- The PyPI classifier is `Development Status :: 5 - Production/Stable`; 1.0 shipped as `4 - Beta`.
+
+### Added
+
+- **Feature badges on docs.rs**: the "Available on crate feature `mph`/`mmap` only" markers that say
+  which parts of the API a `--no-default-features` build does not have.
+
 ## [1.0.0] — 2026-09-08
 
 ### Changed — breaking
