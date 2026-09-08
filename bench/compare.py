@@ -15,6 +15,9 @@ imported at the top of this file; the others import inside their build callable)
 is deliberately *not* measured here — at the Python level it is dominated by the call boundary;
 `cargo run --release --example bench` measures it in Rust.
 
+Every number printed here is also written to `bench/results/compare-<date>-<host>-<commit>.json`
+with the machine that produced it; the README table cites that file.
+
 Run:
   uv run --with matplotlib --with marisa-trie --with datrie --with dawg2 \\
          --with <lexindex wheel> python bench/compare.py [WORDS_FILE]
@@ -30,6 +33,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import _results
 import lexindex
 import matplotlib.pyplot as plt
 
@@ -37,7 +41,7 @@ OUT = Path(__file__).parent / "plots"
 OUT.mkdir(exist_ok=True)
 
 
-def _load_words() -> list[str]:
+def _load_words() -> tuple[list[str], str]:
     """Real, high-entropy keys. Prefer an explicit path / env, else the system word list."""
     candidates = [
         sys.argv[1] if len(sys.argv) > 1 else None,
@@ -53,14 +57,14 @@ def _load_words() -> list[str]:
             random.Random(0).shuffle(words)
             if words:
                 print(f"keys: {len(words):,} real words from {path}")
-                return words
+                return words, path
     sys.exit(
         "no word list found. Pass a path as argv[1], set LEXINDEX_BENCH_WORDS, or install a "
         "system dictionary (e.g. `words` / `words-en`). Synthetic keys are deliberately refused."
     )
 
 
-KEYS = _load_words()
+KEYS, WORDS_FILE = _load_words()
 N = len(KEYS)
 RAW = sum(len(k.encode()) for k in KEYS) / N
 
@@ -68,18 +72,19 @@ RAW = sum(len(k.encode()) for k in KEYS) / N
 REPS = 5
 
 
-def _time(fn) -> tuple[object, float]:
-    """Median of `REPS` builds after a discarded warm-up. The warm-up matters for fairness: every
-    competitor imports its module inside its build callable, and charging that one-time import (and
-    the allocator's first growth) to the library would flatter lexindex, which is imported at the
-    top of this file. The median, not the mean, so one scheduling hiccup cannot move the bar."""
+def _time(fn) -> tuple[object, list[float]]:
+    """`REPS` builds after a discarded warm-up, all of them returned. The warm-up matters for
+    fairness: every competitor imports its module inside its build callable, and charging that
+    one-time import (and the allocator's first growth) to the library would flatter lexindex, which
+    is imported at the top of this file. The printed figure is the median, so one scheduling hiccup
+    cannot move the bar; the results file keeps the minimum and every sample beside it."""
     fn()
     times = []
     for _ in range(REPS):
         t = time.perf_counter()
         out = fn()
         times.append((time.perf_counter() - t) * 1e3)
-    return out, statistics.median(times)
+    return out, times
 
 
 def _serialised_size(obj) -> int | None:
@@ -189,29 +194,51 @@ CANDIDATES = [
 
 
 def main() -> None:
-    rows = []
+    rows, cells = [], []
     for name, build, caps in CANDIDATES:
         try:
-            obj, build_ms = _time(build)
+            obj, samples = _time(build)
         except Exception as e:  # missing dep or an API drift → skip, note it
             print(f"skip {name.replace(chr(10), ' ')}: {type(e).__name__}: {e}")
+            cells.append({"library": name.replace(chr(10), " "), "skipped": f"{type(e).__name__}"})
             continue
+        build_ms = statistics.median(samples)
         size = _serialised_size(obj)
         bpk = size / N if size else None
         rows.append((name, build_ms, bpk, caps))
+        cells.append(
+            {
+                "library": name.replace(chr(10), " "),
+                "build_ms": _results.summary(samples),
+                "serialised_bytes": size,
+                "bytes_per_key": bpk,
+                "capabilities": caps,
+            }
+        )
         print(
             f"{name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms (median of {REPS})   "
             f"size {bpk if bpk is None else round(bpk, 2)} bytes/key"
         )
 
-    _measure_false_positive_rate()
+    false_positives = _measure_false_positive_rate()
     _plot_size(rows)
     _plot_build(rows)
     _capability_table(rows)
+    path = _results.write(
+        "compare",
+        cells,
+        keys={
+            "source": WORDS_FILE,
+            "n": N,
+            "raw_bytes_per_key": RAW,
+        },
+        false_positive_rate=false_positives,
+    )
     print(f"\nplots → {OUT}/  (raw keys = {RAW:.1f} bytes/key, n = {N:,})")
+    print(f"results → {path}")
 
 
-def _measure_false_positive_rate() -> None:
+def _measure_false_positive_rate() -> list[dict]:
     """The one honest cost of CompactHashIndex: a bounded chance a non-member reads as present."""
     member = set(KEYS)
     rng = random.Random(1234)
@@ -221,13 +248,24 @@ def _measure_false_positive_rate() -> None:
         if s not in member:
             probes.append(s)
     print("\nCompactHashIndex membership false-positive rate (100k non-member probes):")
+    measured = []
     for fp in (1, 2):
         ch = lexindex.CompactHashIndex(KEYS, fp)
         fps = sum(ch.contains(s) for s in probes)
+        measured.append(
+            {
+                "fingerprint_bits": fp * 8,
+                "probes": len(probes),
+                "false_positives": fps,
+                "rate": fps / len(probes),
+                "theory": 256.0**-fp,
+            }
+        )
         print(
             f"  fp={fp}: {fps}/{len(probes)} = {fps / len(probes) * 100:.3f}%  "
             f"(theory {100 / 256**fp:.3f}%)"
         )
+    return measured
 
 
 def _plot_size(rows) -> None:

@@ -11,6 +11,10 @@ includes the key list in the peak, which is what a caller who already holds the 
 *generator* is what `CompactHashIndex`'s streaming build is for, and is the only way to see its own
 footprint rather than the corpus's.
 
+Every cell is also written to `bench/results/scale-<date>-<host>-<commit>.json` with the machine
+that produced it; the README table cites that file. `LEXINDEX_BENCH_REPS` repeats each cell and
+records the minimum -- it defaults to 1 because a single 10 M cell already costs minutes.
+
 Run: ``uv run --with <lexindex wheel> python bench/scale.py [N ...]``  (default: 1000000 10000000)
 Pass e.g. `100000000` explicitly — that needs ~8 GB free for the key list alone.
 """
@@ -26,13 +30,21 @@ import time
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+import _results
 
-def load_vocab() -> list[str]:
+REPS = int(os.environ.get("LEXINDEX_BENCH_REPS", "1"))
+
+
+def vocab_path() -> str:
     for p in (os.environ.get("LEXINDEX_BENCH_WORDS"), "/usr/share/dict/words"):
         if p and Path(p).exists():
-            with open(p, encoding="utf-8", errors="ignore") as f:
-                return sorted({line.strip() for line in f if line.strip()})
+            return p
     sys.exit("no word list; set LEXINDEX_BENCH_WORDS or install a system dictionary.")
+
+
+def load_vocab() -> list[str]:
+    with open(vocab_path(), encoding="utf-8", errors="ignore") as f:
+        return sorted({line.strip() for line in f if line.strip()})
 
 
 def iter_keys(n: int, vocab: list[str]) -> Iterator[str]:
@@ -92,21 +104,47 @@ def main() -> None:
         f"{'peak RSS':>10} {'lookup':>9}"
     )
     print("-" * 82)
+    cells = []
     for n in ns:
         for kind in ("StringIndex", "CompactHashIndex"):
             for source in ("list", "generator"):
-                q: mp.Queue = mp.Queue()
-                p = mp.Process(target=_bench_one, args=(n, kind, source, q))
-                p.start()
-                p.join()
-                if q.empty():
+                runs = []
+                for _ in range(REPS):
+                    q: mp.Queue = mp.Queue()
+                    p = mp.Process(target=_bench_one, args=(n, kind, source, q))
+                    p.start()
+                    p.join()
+                    if q.empty():
+                        break
+                    runs.append(q.get())
+                if not runs:
                     print(f"{n:>13,}  {kind:16} {source:9}  (failed — likely OOM at this n)")
+                    cells.append(
+                        {"n": n, "structure": kind, "keys": source, "failed": "no result (OOM?)"}
+                    )
                     continue
-                n_act, k, src, build_ms, bpk, peak_mb, lookup_ns = q.get()
-                print(
-                    f"{n_act:>13,}  {k:16} {src:9} {build_ms:>7.0f}ms {bpk:>6.2f} "
-                    f"{peak_mb:>8.0f}MB {lookup_ns:>7.0f}ns"
+                n_act, k, src, _, bpk, _, _ = runs[0]
+                build = _results.summary([r[3] for r in runs])
+                peak = _results.summary([r[5] for r in runs])
+                lookup = _results.summary([r[6] for r in runs])
+                cells.append(
+                    {
+                        "n": n_act,
+                        "structure": k,
+                        "keys": src,
+                        "build_ms": build,
+                        "bytes_per_key": bpk,
+                        "peak_rss_mb": peak,
+                        "lookup_ns": lookup,
+                    }
                 )
+                print(
+                    f"{n_act:>13,}  {k:16} {src:9} {build['min']:>7.0f}ms {bpk:>6.2f} "
+                    f"{peak['min']:>8.0f}MB {lookup['min']:>7.0f}ns"
+                )
+    keys = {"source": vocab_path(), "form": "word.word bigrams", "reps": REPS}
+    path = _results.write("scale", cells, keys=keys)
+    print(f"results → {path}")
 
 
 if __name__ == "__main__":
