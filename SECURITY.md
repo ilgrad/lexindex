@@ -33,11 +33,17 @@ bytes handed to `CompactHashIndex`, `PerfectHashIndex` or `Overlay` come back as
 whatever they contain. `StringIndex` is backed by [`fst`](https://docs.rs/fst), whose node decoder is
 safe Rust but not total, and the checksum in front of it is public and recomputable — so a blob
 crafted to carry a matching one reaches that decoder with an invalid body and can **panic** instead
-of returning. That is measured rather than feared: a libFuzzer target over `from_bytes` produced 44
-such bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. A panic is
-neither undefined behaviour nor an out-of-bounds read — it unwinds, or aborts the process under
+of returning. That is measured rather than feared: a libFuzzer target over `from_bytes` produced
+such bytes in minutes, and the 111-byte specimen it could not shrink further is committed as
+`tests/data/panicking-1.0.0-string.bix`, with a test that it still panics. A panic is neither
+undefined behaviour nor an out-of-bounds read — it unwinds, or aborts the process under
 `panic = "abort"` — but it is a denial of service for anything that loads ordered blobs supplied by
-a stranger. Load `StringIndex` blobs you produced yourself.
+a stranger. For those, use `StringIndex::from_untrusted_bytes`: it walks every reachable node and
+every key before answering, and catches the decoder's panic at the load boundary, returning it as
+an `IndexError`. It cannot *prevent* the panic — checking a node means decoding it, and `fst`'s
+decoder is the only one there is — so under `panic = "abort"` a crafted blob still aborts, and the
+rejection runs the process-wide panic hook on its way out. `from_bytes` stays the loader for blobs
+you produced yourself.
 
 The guarantee is **soundness, not correctness**. A blob crafted by someone else can answer *wrong*
 ids for keys it does not hold. It cannot answer ids outside `[0, n)`, allocate from a number it
@@ -70,16 +76,16 @@ writable one `build_to_file` uses on a temporary file it created itself, and a c
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
 target, and libFuzzer over the four parsers a target can hold to a return value: `BCH6`, `BMP5`,
-`OVL2`, and the standalone `MPH1` from inside. `BIX4` has none, because the panic above is the
-accepted answer there and a target that re-finds it every week would only teach us to ignore a red
-job.
+`OVL2`, and the standalone `MPH1` from inside. `BIX4` is fuzzed through `from_untrusted_bytes`,
+which holds it to a return value too; a target over `from_bytes` would only re-find the panic above
+every week and teach us to ignore a red job.
 
 ## Not vulnerabilities
 
 - **A crafted blob that answers wrong ids.** Stated above; it is the documented contract.
 - **A crafted blob that fails to load.** The perfect-hash and overlay loaders refuse with an `Err`
-  on any input. A crafted `StringIndex` blob may panic instead: documented above, bounded to a panic
-  by `fst` being safe Rust, and avoided by not loading ordered blobs from strangers.
+  on any input. A crafted `StringIndex` blob may panic `from_bytes` instead: documented above,
+  bounded to a panic by `fst` being safe Rust, and answered by `from_untrusted_bytes`.
 - **`CompactHashIndex` reporting a key it never held.** Its membership is probabilistic by
   construction, at the false-positive rate `fingerprint_bits` buys.
 - **`Overlay::remove` retiring an id over a probabilistic base.** Removal is by id, and a false

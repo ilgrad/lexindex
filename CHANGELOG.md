@@ -19,14 +19,16 @@ All notable changes to this project are documented here. The format follows
 
 - **An `Overlay` stored every added key twice.** `add` owned each string once in a `Vec<String>`,
   so `key(id)` could index, and again as the key of a `HashMap<String, u64>`, so `id(key)` could
-  hash. The additions now live once in a byte arena, indexed by a map from the key's hash to its
-  position — which is what the perfect-hash indexes have always done, down to the side list for the
-  64-bit collision that essentially never happens — pinned by a test over a real colliding pair,
-  since a branch guarding a 2.7e-8 event is otherwise never executed. Measured over a million
-  ten-byte additions: peak RSS falls from 172 to 69 bytes per added key, the resident cost of
-  holding them from 147 to 55, and `add` runs about three times faster. The trade is paid by `id`
-  on a *short* addition, which goes from 71-76 ns to 106-113 ns at ten bytes, draws level at
-  twenty, and wins by about 1.8x at forty; base keys are untouched, since the base answers first.
+  hash. The additions now live once, as the length-prefixed records the blob format already uses,
+  indexed by a map from the key's hash to the record's position — the layout the perfect-hash
+  indexes have always had, down to the side list for the 64-bit collision that essentially never
+  happens, pinned by a test over a real colliding pair since a branch guarding a 2.7e-8 event is
+  otherwise never executed. Measured over a million ten-byte additions on a 100 000-word base with
+  shuffled probes: the resident cost of holding an addition falls from 147 to 54 bytes, `add` runs
+  about three times faster, and `id` on an addition is 278 ns against 295 before. Base keys are
+  untouched, since the base answers first. The length sits inside the record rather than in a
+  side table on purpose: a lookup is then the map and the bytes, two dependent accesses, and the
+  version with a side table measured 40 % slower on shuffled probes.
 
 - **`Overlay::key` could answer someone else's key on a 32-bit target.** An id above `usize::MAX`
   was narrowed with `as` before the bounds check, so it wrapped onto a real addition instead of

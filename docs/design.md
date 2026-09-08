@@ -222,9 +222,17 @@ are structurally required to be exactly the tail range `[m, n)`, and the MPH's o
 by value so it cannot point outside `[0, n)`. A crafted blob therefore answers *wrong*, never out of
 bounds. `StringIndex` sits differently and worse: the FST checksum catches accidental corruption, and
 `fst` documents that even invalid input cannot violate memory safety — but a crafted, re-checksummed
-FST can panic. That is measured, not assumed: a libFuzzer target over `from_bytes` produced 44 such
-bytes in ten minutes, and they panic inside the rank spot-check the load itself runs. The
-`from_bytes` docstring used to promise the checksum ruled that out; it no longer does. `load_mmap`
+FST can panic. That is measured, not assumed: a libFuzzer target over `from_bytes` produced such
+bytes in minutes, and the 111-byte specimen it could not shrink further is committed under
+`tests/data/` with a test that it still panics. The `from_bytes` docstring used to promise the
+checksum ruled that out; it no longer does. `from_untrusted_bytes` is the answer for a blob from a
+stranger: it walks every reachable node — each transition must point strictly below the node that
+holds it, which is how `fst` lays nodes out and what makes the walk terminate on bytes that were
+not laid out that way — then streams every key and requires its value to be its rank, all inside a
+`catch_unwind` that turns the decoder's panic into an `IndexError`. The catch is load-bearing, not
+a backstop: a node cannot be checked without decoding it, and the specimen above is rejected by
+the catch, not by the address check. It costs 42× the owned load (50.8 ms against 1.2 ms on
+479 823 words), which is the right price once and the wrong price every time. `load_mmap`
 skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
 independent of blob size — the structural checks still run.
 

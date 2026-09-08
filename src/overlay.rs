@@ -125,30 +125,34 @@ impl std::hash::BuildHasher for PreHashed {
 #[derive(Debug, Clone)]
 pub struct Overlay<I> {
     base: I,
-    /// Every added key's bytes, once, concatenated in id order.
+    /// Every added key, once, in id order, as the records the blob format uses: `[len: u32 LE]`
+    /// then the bytes. The in-memory arena *is* the blob's addition region.
     ///
     /// The additions are the only strings an overlay owns, and until 1.0.1 it owned each of them
     /// twice: once in a `Vec<String>`, so `key(id)` could index, and again as the owned key of a
-    /// `HashMap<String, u64>`, so `id(key)` could hash. One arena serves both.
-    added_data: String,
-    /// Where each addition ends in [`added_data`](Self::added_data); its length is how many
-    /// additions there are, and the `i`-th runs from `added_ends[i - 1]` (or 0) to `added_ends[i]`.
-    added_ends: Vec<usize>,
-    /// Hash of an added key → the index of the first addition carrying that hash. The stored key is
-    /// compared before the index is believed, so the map never holds a string of its own.
+    /// `HashMap<String, u64>`, so `id(key)` could hash. One arena serves both. The length travels
+    /// *inside* the record rather than in a side table so that a lookup that has the record's
+    /// start has everything: the map, then the bytes, and nothing in between to wait for.
+    added_data: Vec<u8>,
+    /// Where the `i`-th addition's record starts in [`added_data`](Self::added_data); its length
+    /// is how many additions there are. Read by `key(id)`, never by `id(key)`.
+    added_starts: Vec<u32>,
+    /// Hash of an added key → `(index, record start)` of the first addition carrying that hash.
+    /// The stored bytes are compared before the index is believed, so the map never holds a
+    /// string of its own; and the start rides in the value so the compare needs no second table.
     ///
     /// Which hash is an in-memory choice and not a format one: nothing here is serialised, and a
     /// blob's additions are a plain length-prefixed list. It is `blob::hash_block` because that one
     /// exists in every feature configuration — `hash::hash_key` lives behind `mph` and an overlay
     /// does not — and because it consumes eight bytes per multiply, so a long added key does not
     /// pay per byte the way the byte-serial `hash_bytes` would.
-    added_lookup: std::collections::HashMap<u64, usize, PreHashed>,
-    /// `(hash, index)` for an addition whose hash a previous one already had. Two *distinct* keys
+    added_lookup: std::collections::HashMap<u64, (u32, u32), PreHashed>,
+    /// `(hash, index, start)` for an addition whose hash a previous one already had. Two *distinct* keys
     /// need a full 64-bit collision to land here — `n(n-1)/2^65`, which is 2.7e-8 at a million
     /// additions — so this is empty in every run that will ever happen. It exists because
     /// "essentially never" is not a contract, and the lookup above would otherwise answer `None`
     /// for a key it holds.
-    added_collisions: Vec<(u64, usize)>,
+    added_collisions: Vec<(u64, u32, u32)>,
     /// One bit per id ever issued: base ids below `base.base_len()`, additions above it.
     dead: Vec<u64>,
     live: usize,
@@ -161,8 +165,8 @@ impl<I: OverlayBase> Overlay<I> {
         let live = base.base_len();
         Self {
             base,
-            added_data: String::new(),
-            added_ends: Vec::new(),
+            added_data: Vec::new(),
+            added_starts: Vec::new(),
             added_lookup: std::collections::HashMap::default(),
             added_collisions: Vec::new(),
             dead: Vec::new(),
@@ -188,40 +192,58 @@ impl<I: OverlayBase> Overlay<I> {
     /// How many ids have ever been issued. `key(id)` is `None` for every `id` at or above this,
     /// and ids below it may be live or retired.
     pub fn id_space(&self) -> u64 {
-        self.base.base_len() as u64 + self.added_ends.len() as u64
+        self.base.base_len() as u64 + self.added_starts.len() as u64
     }
 
-    /// The `i`-th addition's bytes, borrowed from the arena.
+    /// The bytes of the addition whose record starts at `start`.
+    fn record_at(&self, start: u32) -> &[u8] {
+        let at = start as usize;
+        let len = read_u32(&self.added_data, at) as usize;
+        &self.added_data[at + 4..at + 4 + len]
+    }
+
+    /// The `i`-th addition, borrowed from the arena.
     fn added_key(&self, i: usize) -> &str {
-        let start = if i == 0 { 0 } else { self.added_ends[i - 1] };
-        &self.added_data[start..self.added_ends[i]]
+        std::str::from_utf8(self.record_at(self.added_starts[i]))
+            .expect("every overlay addition was UTF-8 when it was pushed")
     }
 
     /// The index of the addition equal to `key`, or `None` if there is none.
     fn added_index(&self, key: &str) -> Option<usize> {
         let h = crate::blob::hash_block(key.as_bytes());
-        let first = *self.added_lookup.get(&h)?;
-        if self.added_key(first) == key {
-            return Some(first);
+        let &(first, start) = self.added_lookup.get(&h)?;
+        if self.record_at(start) == key.as_bytes() {
+            return Some(first as usize);
         }
         // Reached only when two distinct added keys share a 64-bit hash; see `added_collisions`.
-        self.added_collisions
-            .iter()
-            .find_map(|&(hh, i)| (hh == h && self.added_key(i) == key).then_some(i))
+        self.added_collisions.iter().find_map(|&(hh, i, at)| {
+            (hh == h && self.record_at(at) == key.as_bytes()).then_some(i as usize)
+        })
     }
 
     /// Append `key` to the arena and index it. The caller has already established that no addition
     /// equals it, which is what lets an occupied slot go straight to the collision list.
+    ///
+    /// The three narrowings panic rather than wrap, the way `Vec` panics on capacity overflow: an
+    /// overlay is a staging structure, and one holding four billion additions or four gibibytes of
+    /// them has missed every reasonable point to [`compact`](Self::compact).
     fn push_added(&mut self, key: &str) -> usize {
-        let i = self.added_ends.len();
-        self.added_data.push_str(key);
-        self.added_ends.push(self.added_data.len());
+        let i = self.added_starts.len();
+        let index = u32::try_from(i).expect("an Overlay holds at most u32::MAX additions");
+        let start = u32::try_from(self.added_data.len())
+            .expect("an Overlay holds at most 4 GiB of added keys");
+        let len = u32::try_from(key.len()).expect("an added key is at most 4 GiB long");
+        self.added_starts.push(start);
+        self.added_data.extend_from_slice(&len.to_le_bytes());
+        self.added_data.extend_from_slice(key.as_bytes());
         let h = crate::blob::hash_block(key.as_bytes());
         match self.added_lookup.entry(h) {
             std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(i);
+                slot.insert((index, start));
             }
-            std::collections::hash_map::Entry::Occupied(_) => self.added_collisions.push((h, i)),
+            std::collections::hash_map::Entry::Occupied(_) => {
+                self.added_collisions.push((h, index, start));
+            }
         }
         i
     }
@@ -252,13 +274,14 @@ impl<I: OverlayBase> Overlay<I> {
     /// by anything below. A key added later costs a hash lookup and an arena read on top, which is
     /// the price of an overlay and the reason [`compact`](Self::compact) exists.
     ///
-    /// That second path is tuned for space, not latency. Holding the additions in an arena rather
-    /// than as owned `String`s cut the resident cost of a ten-byte addition from 147 to 55 bytes
-    /// and made [`add`](Self::add) about three times faster, at the cost of roughly 35 ns on short
-    /// added keys: measured over a million additions, `id` on an addition went from 71-76 ns to
-    /// 106-113 ns at ten bytes, drew level at twenty, and became about 1.8x faster at forty, where
-    /// the arena's one copy replaces chasing a heap pointer per key. Short keys are the case that
-    /// regressed; base keys and long added keys did not.
+    /// That second path is two dependent memory accesses: the map, whose value carries the
+    /// record's position, and then the record itself, whose length is its first four bytes. The
+    /// arena layout was chosen for exactly that count. Its first version kept the lengths in a
+    /// side table, which put a third access between the two and cost 40 % on an added key once
+    /// probes were shuffled -- in insertion order the loss hid behind a stride prefetcher.
+    /// Measured on a million ten-byte additions over a 100 000-word base, shuffled probes, `id`
+    /// on an addition is 278 ns against 295 ns for the `Vec<String>` + `HashMap<String, u64>`
+    /// layout it replaced, at 54 bytes held per addition against 147.
     pub fn id(&self, key: &str) -> Option<u64> {
         if let Some(id) = self.base.base_id(key) {
             // Only reached once the base has already answered, so the base path pays for this bit
@@ -338,7 +361,7 @@ impl<I: OverlayKeys> Overlay<I> {
             // otherwise truncate onto a real addition and answer someone else's key.
             Some(off) => usize::try_from(off)
                 .ok()
-                .filter(|&i| i < self.added_ends.len())
+                .filter(|&i| i < self.added_starts.len())
                 .map(|i| self.added_key(i).to_owned()),
         }
     }
@@ -522,17 +545,12 @@ impl<I: OverlayBase> Overlay<I> {
     /// trust model of the base's format — see [`from_bytes_with`](Self::from_bytes_with).
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let base = self.base.base_to_bytes()?;
-        let added: usize = self.added_data.len() + 4 * self.added_ends.len();
+        let added = self.added_data.len();
         let mut out = Vec::with_capacity(OVERLAY_HEADER + base.len() + added + self.dead.len() * 8);
         out.resize(OVERLAY_HEADER, 0);
         out.extend_from_slice(&base);
-        for i in 0..self.added_ends.len() {
-            let key = self.added_key(i);
-            let len = u32::try_from(key.len())
-                .map_err(|_| IndexError::Format("added key longer than 4 GiB"))?;
-            out.extend_from_slice(&len.to_le_bytes());
-            out.extend_from_slice(key.as_bytes());
-        }
+        // The arena already holds the additions in the blob's own record form.
+        out.extend_from_slice(&self.added_data);
         for word in &self.dead {
             out.extend_from_slice(&word.to_le_bytes());
         }
@@ -541,7 +559,7 @@ impl<I: OverlayBase> Overlay<I> {
         out[0..4].copy_from_slice(OVERLAY_MAGIC);
         out[4] = I::BASE_TAG;
         out[5..13].copy_from_slice(&(base.len() as u64).to_le_bytes());
-        out[13..21].copy_from_slice(&(self.added_ends.len() as u64).to_le_bytes());
+        out[13..21].copy_from_slice(&(self.added_starts.len() as u64).to_le_bytes());
         out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
         out[29..37].copy_from_slice(&(self.dead.len() as u64).to_le_bytes());
         seal(&mut out);
@@ -666,8 +684,8 @@ impl<I: OverlayBase> Overlay<I> {
         // shown to be present — so this reserve is sized by the blob rather than by a claim in it.
         let mut this = Self {
             base,
-            added_data: String::with_capacity(additions.len()),
-            added_ends: Vec::with_capacity(added_count.min(1 << 16)),
+            added_data: Vec::with_capacity(additions.len()),
+            added_starts: Vec::with_capacity(added_count.min(1 << 16)),
             added_lookup: std::collections::HashMap::with_capacity_and_hasher(
                 added_count.min(1 << 16),
                 PreHashed::default(),
