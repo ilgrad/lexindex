@@ -34,6 +34,13 @@ idx.subsequence("ae")    # [("apple", 0)]  — "a…e" in order, not necessarily
 # "character" above means a Unicode scalar value: no normalisation, case folding or grapheme
 # segmentation is applied — normalise before building and querying if you need it
 
+# order statistics — answers about the id space without decoding any key, so the cost does not
+# grow with the number of matches
+idx.lower_bound("ba")            # 2  — how many keys sort below "ba"; an insertion point in 0..=len
+idx.prefix_id_range("ap")        # (0, 2)  — a prefix is a contiguous *slice* of the id space
+idx.prefix_count("ap")           # 2
+idx.range_count("apricot", "cherry")  # 2  — what range() would return, uncounted
+
 # lazy iteration in sorted (= id) order — streams the transducer a chunk at a time, so it never
 # builds a giant list and never decodes a key twice
 list(idx)                # [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]

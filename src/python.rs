@@ -298,6 +298,31 @@ impl PyStringIndex {
         })
     }
 
+    /// How many keys sort below `query` -- equivalently the id of the first key `>= query`, and
+    /// the position `query` would be inserted at. Defined for any string, present or not, and
+    /// never larger than `len`.
+    fn lower_bound(&self, query: &str) -> u64 {
+        self.inner.lower_bound(query)
+    }
+
+    /// How many keys satisfy `lo <= key < hi`, without decoding any of them.
+    fn range_count(&self, lo: &str, hi: &str) -> u64 {
+        self.inner.range_count(lo, hi)
+    }
+
+    /// How many keys start with `prefix`.
+    fn prefix_count(&self, prefix: &str) -> u64 {
+        self.inner.prefix_count(prefix)
+    }
+
+    /// The contiguous `(start, end)` id range of the keys starting with `prefix`, half-open. Ids
+    /// follow lexicographic order, so a prefix is a slice of the id space rather than a set of ids
+    /// to test one at a time -- usable directly as a `range()` or a bitset window.
+    fn prefix_id_range(&self, prefix: &str) -> (u64, u64) {
+        let r = self.inner.prefix_id_range(prefix);
+        (r.start, r.end)
+    }
+
     /// The smallest `(key, id)` with `key >= query`, or `None` if every key is smaller.
     fn successor(&self, query: &str) -> Option<(String, u64)> {
         self.inner.successor(query)

@@ -433,3 +433,46 @@ mod mph {
         }
     }
 }
+
+proptest! {
+    /// The four order statistics against the obvious model: a sorted `Vec` searched by hand.
+    ///
+    /// The oracle is deliberately naive -- `partition_point`, a linear prefix filter -- because the
+    /// implementation's whole claim is that it reaches the same answers without touching the keys.
+    /// Multibyte keys are in the alphabet on purpose: the ids are assigned in *byte* order, and a
+    /// prefix range's exclusive end is built by incrementing a byte, so a `char`-shaped assumption
+    /// anywhere in either would show up here as a disagreement on `é`, `中` or `🎉`.
+    #[test]
+    fn order_statistics_agree_with_a_sorted_vec(
+        keys in multibyte_keys(),
+        probes in prop::collection::vec(
+            prop::collection::vec(
+                prop::sample::select(vec!['a', 'b', 'z', 'à', 'é', 'Ω', '中', '🎉']), 0..4)
+                .prop_map(|cs| cs.into_iter().collect::<String>()),
+            1..12),
+    ) {
+        let idx = StringIndex::build(&keys).unwrap();
+        let sorted = distinct_sorted(keys.clone());
+
+        for q in &probes {
+            let expected = sorted.partition_point(|k| k.as_str() < q.as_str()) as u64;
+            prop_assert_eq!(idx.lower_bound(q), expected, "lower_bound({:?})", q);
+
+            let matching: Vec<&String> = sorted.iter().filter(|k| k.starts_with(q.as_str())).collect();
+            let range = idx.prefix_id_range(q);
+            prop_assert_eq!(idx.prefix_count(q), matching.len() as u64, "prefix_count({:?})", q);
+            prop_assert_eq!(range.end - range.start, matching.len() as u64);
+            // The range is the ids of the matches, not merely as many of them.
+            for (offset, key) in matching.iter().enumerate() {
+                prop_assert_eq!(idx.id(key), Some(range.start + offset as u64));
+            }
+        }
+
+        for pair in probes.windows(2) {
+            let (lo, hi) = (&pair[0], &pair[1]);
+            let expected = sorted.iter().filter(|k| k.as_str() >= lo.as_str() && k.as_str() < hi.as_str()).count();
+            prop_assert_eq!(idx.range_count(lo, hi), expected as u64, "range_count({:?}, {:?})", lo, hi);
+            prop_assert_eq!(idx.range_count(lo, hi), idx.range(lo, hi).len() as u64);
+        }
+    }
+}

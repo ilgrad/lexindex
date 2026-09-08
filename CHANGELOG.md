@@ -58,6 +58,17 @@ All notable changes to this project are documented here. The format follows
   106 ns per key. There is no Python binding yet; `docs/usage.md` now says so instead of promising
   a clean `ValueError`.
 
+- **Order statistics on `StringIndex`**: `lower_bound`, `range_count`, `prefix_count` and
+  `prefix_id_range`, in Rust and Python. Ids are lexicographic ranks, so keys sharing a prefix
+  occupy a *contiguous* id range -- `prefix_id_range` hands back that interval, which turns a
+  prefix into an array slice or a bitset window instead of a set of ids to test one at a time.
+  None of them decodes a key, so counting three million matches costs what counting three does:
+  420 ns for `prefix_id_range` on a three-byte prefix against 238 ns for `id` on a whole word,
+  and 479 ns for `lower_bound`, on the 479 823-word `/usr/share/dict/words`. A property test
+  checks all four against a sorted `Vec` searched by hand, on an alphabet with two-, three- and
+  four-byte characters, since the ids follow byte order and a prefix bound is built by
+  incrementing one.
+
 - **A `parse_string` fuzz target**, replacing the one removed before 1.0 for re-finding a panic the
   crate could not then fix. It loads through `from_untrusted_bytes` and asserts the loaded index
   agrees with itself -- every key's id equals its rank, every point lookup agrees with the scan --

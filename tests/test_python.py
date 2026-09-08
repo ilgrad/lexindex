@@ -266,6 +266,38 @@ def test_string_index_neighbours():
     assert si.predecessor("a") is None  # before all
 
 
+def test_string_index_order_statistics():
+    si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
+    # lower_bound answers for any string, present or not, and never exceeds len
+    assert si.lower_bound("apple") == 0
+    assert si.lower_bound("ba") == 2
+    assert si.lower_bound("zzz") == len(si) == 4
+    # a prefix is a contiguous slice of the id space, not a set of ids
+    assert si.prefix_id_range("ap") == (0, 2)
+    assert si.prefix_count("ap") == 2
+    assert [si.id(k) for k, _ in si.prefix("ap")] == list(range(*si.prefix_id_range("ap")))
+    # a prefix nothing carries is empty rather than absent
+    assert si.prefix_id_range("z") == (4, 4)
+    assert si.prefix_count("z") == 0
+    # an empty prefix is the whole id space
+    assert si.prefix_id_range("") == (0, 4)
+    # counting a range agrees with listing it, without decoding the keys
+    assert si.range_count("apricot", "cherry") == len(si.range("apricot", "cherry")) == 2
+    assert si.range_count("cherry", "apricot") == 0
+
+
+def test_string_index_order_statistics_are_byte_ordered():
+    # Ids follow UTF-8 byte order, so a multibyte key sorts after every ASCII one -- and the
+    # exclusive end of a prefix range is built by incrementing a byte, which is where a
+    # char-shaped assumption would break.
+    si = lexindex.StringIndex(["zebra", "\u00e9clair", "\u00e9t\u00e9", "\u4e2d\u6587"])
+    assert [k for k, _ in si] == ["zebra", "\u00e9clair", "\u00e9t\u00e9", "\u4e2d\u6587"]
+    assert si.prefix_id_range("\u00e9") == (1, 3)
+    assert si.prefix_count("\u00e9") == 2
+    assert si.lower_bound("\u00e9") == 1
+    assert si.prefix_id_range("\u4e2d") == (3, 4)
+
+
 def test_string_index_iter():
     si = lexindex.StringIndex(["banana", "apple", "apricot", "cherry"])
     # __iter__ yields every (key, id) in sorted (= id) order, lazily
