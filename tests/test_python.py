@@ -917,4 +917,4 @@ def test_the_indexes_are_not_mappings():
     with pytest.raises(TypeError):
         list(ph)
     # StringIndex does iterate, and through `__iter__` -- ordered pairs, not integer indexing.
-    assert list(lexindex.StringIndex(["apple", "banana"]))[0] == ("apple", 0)
+    assert next(iter(lexindex.StringIndex(["apple", "banana"]))) == ("apple", 0)
