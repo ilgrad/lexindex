@@ -98,15 +98,13 @@ mod mph {
     }
 
     /// A blob this version writes reloads exactly — and, because construction is deterministic
-    /// since 1.0, reloads to the *same ids* a fresh build assigns. The pinned golden file for the
-    /// 1.0 format lands with the rest of the format bundle; until then the round trip is what
-    /// guards the new loader.
+    /// since 1.0, reloads to the *same ids* a fresh build assigns.
     #[test]
-    fn a_1_0_perfect_hash_blob_round_trips_exactly() {
+    fn a_perfect_hash_blob_round_trips_exactly() {
         let keys = keys();
         let idx = lexindex::PerfectHashIndex::build(&keys).unwrap();
         let blob = idx.to_bytes().unwrap();
-        assert_eq!(&blob[0..4], b"BMP5");
+        assert_eq!(&blob[0..4], b"BMP6");
         let back = lexindex::PerfectHashIndex::from_bytes(&blob).expect("its own blob loads");
         for key in &keys {
             let id = idx.id(key).expect("member");
@@ -167,10 +165,15 @@ mod mph {
     /// parses but no longer resembles what the writer emits is the failure mode 1.0 already hit
     /// once, and byte-identity is what rules it out.
     ///
-    /// Regenerating them, if a format or the hash is deliberately changed: write `compact` and
-    /// `perfect` below to their paths.
+    /// Each is named by the release whose writer first produced it, and only the current pair is
+    /// pinned this way: 1.1 re-encoded the key arena in blocks, so `golden-1.0.0-perfect.bmp` is
+    /// now held to what a *reader* must promise it — see
+    /// [`the_1_0_perfect_hash_blob_still_loads`] — and `golden-1.1.0-perfect.bmp` took over here.
+    ///
+    /// Regenerating them, if a format or the hash is deliberately changed:
+    /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
     #[test]
-    fn the_1_0_hash_blobs_are_byte_identical_to_a_fresh_build() {
+    fn the_current_hash_blobs_are_byte_identical_to_a_fresh_build() {
         let keys = keys();
         let compact = lexindex::CompactHashIndex::build(&keys, 1)
             .unwrap()
@@ -183,7 +186,7 @@ mod mph {
 
         for (name, magic, fresh) in [
             ("golden-1.0.0-compact.bch", &b"BCH6"[..], compact),
-            ("golden-1.0.0-perfect.bmp", &b"BMP5"[..], perfect),
+            ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], perfect),
         ] {
             let path = data(name);
             let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -202,6 +205,34 @@ mod mph {
         }
     }
 
+    /// What a `BMP5` blob is promised now that it is no longer the format this version writes:
+    /// it loads, it answers every key with the id a fresh build assigns, it refuses every
+    /// non-member, and it maps zero-copy. The bytes are free to differ — 1.1's arena is 2.7 bytes
+    /// per key smaller — but nothing a caller can observe through the API may.
+    ///
+    /// This is the whole reason `BMP6` exists as a separate magic rather than a silent change to
+    /// the arena: the format has two readable versions now, and this test is the statement that
+    /// the older one is genuinely readable and not merely parsed.
+    #[test]
+    fn the_1_0_perfect_hash_blob_still_loads() {
+        let keys = keys();
+        let path = data("golden-1.0.0-perfect.bmp");
+        let stored = std::fs::read(&path).unwrap();
+        assert_eq!(&stored[..4], b"BMP5", "the 1.0 fixture must stay 1.0");
+
+        let old = lexindex::PerfectHashIndex::load(&path).expect("a 1.0 blob still loads");
+        let fresh = lexindex::PerfectHashIndex::build(&keys).unwrap();
+        assert_eq!(old.len(), keys.len());
+        for key in &keys {
+            let id = fresh.id(key).expect("member");
+            assert_eq!(old.id(key), Some(id), "id({key:?})");
+            assert_eq!(old.key(id), Some(key.as_str()), "key({id})");
+        }
+        for absent in non_members() {
+            assert_eq!(old.id(&absent), None, "{absent:?} is not a member");
+        }
+    }
+
     /// The zero-copy path against a real file on disk, not a buffer this process just wrote.
     #[cfg(feature = "mmap")]
     #[test]
@@ -213,6 +244,17 @@ mod mph {
         assert_eq!(string.len(), keys.len());
         for key in keys.iter().take(50) {
             assert!(string.id(key).is_some());
+        }
+
+        for name in ["golden-1.0.0-perfect.bmp", "golden-1.1.0-perfect.bmp"] {
+            // SAFETY: as above.
+            let perfect = unsafe { lexindex::PerfectHashIndex::load_mmap(data(name)) }
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(perfect.len(), keys.len(), "{name}");
+            for key in keys.iter().take(50) {
+                let id = perfect.id(key).unwrap_or_else(|| panic!("{name}: {key:?}"));
+                assert_eq!(perfect.key(id), Some(key.as_str()), "{name}");
+            }
         }
     }
 }
@@ -229,7 +271,7 @@ mod mph {
 #[test]
 fn the_fuzz_shims_accept_a_real_blob() {
     let compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
-    let perfect = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
+    let perfect = std::fs::read(data("golden-1.1.0-perfect.bmp")).unwrap();
     for verify in [false, true] {
         assert!(
             lexindex::fuzzing::parse_compact_frame(&compact, verify),
@@ -242,6 +284,11 @@ fn the_fuzz_shims_accept_a_real_blob() {
     }
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
+
+    // Both arena encodings are seeds: the flat table is still parsed, and a target that only ever
+    // saw blocked offsets would leave that half of the reader unexplored.
+    let flat = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
+    assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
 
     // A pre-1.0 blob is refused at the magic, so it is worth nothing as a seed. Pinned so that the
     // seeds cannot silently go stale again the next time a format changes.

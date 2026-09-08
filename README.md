@@ -254,7 +254,7 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.30** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 13.62 |
+| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.94 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.69 |
 
@@ -312,7 +312,7 @@ The same structures over three corpora built from the same word list, one proces
 | **lexindex `CompactHashIndex`** (fp = 1 byte) | **1.30** | **1.30** | **1.30** |
 | `marisa-trie` | 2.98 | 6.21 | 2.12 |
 | **lexindex `StringIndex`** | 5.95 | 15.19 | 0.68 |
-| lexindex `PerfectHashIndex` | 13.62 | 23.95 | 15.24 |
+| lexindex `PerfectHashIndex` | 10.94 | 21.97 | 12.55 |
 
 At 10 M the trie numbers move again — `marisa` 4.14 on random pairs against 2.36 on the grid,
 `StringIndex` 12.44 against 2.00 — while `CompactHashIndex` stays at 1.30 and the bare MPHF at 0.30,

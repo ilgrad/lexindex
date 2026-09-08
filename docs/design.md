@@ -82,9 +82,9 @@ construction.
 **Construction is deterministic, so a blob *is* a reproducible artefact.** Two `build` calls over
 the same key set produce the same bytes, on any thread count and any machine: the seed sequence is
 fixed and every part is placed independently of the others. Two nodes building the same corpus agree
-on ids, and a blob can be checksummed against a rebuild. `build_to_file` is still tested against the
-in-memory index by behaviour rather than byte for byte — it chooses the arena's offset width from
-the key lengths its first pass saw, which need not match — but the MPH region is identical.
+on ids, and a blob can be checksummed against a rebuild. `build_to_file` writes the same bytes as `build` + `save`
+for the same key set, and is tested that way: both derive the arena's encoding from the same key
+lengths in the same slot order.
 
 **The MPH's load factor is not exposed, and that is a measurement, not an omission.** `α` sets the
 slot count to `n / α`; the natural expectation is that lowering it trades size for an easier build.
@@ -138,12 +138,20 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP5"][n][mph length]
+where membership is already guaranteed. The serialised blob is `[magic "BMP6"][n][mph length]
 [side_len][payload][check][MPH1 blob][arena bytes][side]` — the payload hash covers everything after
-the header and is verified on owned loads. The arena is `[n+1][offset width][offsets][data]`. Offsets
-are 4 bytes unless the arena exceeds 4 GiB — at 8 bytes they were the single largest part of the
-index (8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena), so narrowing them cut
-the whole structure to 13.62 B/key.
+the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
+names one of four encodings.
+
+Addressing the keys was for a long time the largest part of this index. Before 0.5.0 every offset was
+a `u64`: 8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena. Choosing 4 or 8
+bytes per arena took the whole structure to 13.62. Since 1.1 the offsets are **blocked**: 16 slots
+share a `u32` base and carry one-byte *cumulative* offsets after it (tag `0x11`, 21 bytes per block),
+so a key is `data[base + off[k] .. base + off[k + 1]]` — 1.31 bytes per key instead of 4, and the
+whole index is **10.94 B/key**. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot
+blocks with two-byte offsets (`0x12`, 2.02 B/key), and one that fits neither, or exceeds 4 GiB, keeps
+the flat table. The encoding is chosen once at build time and recorded in the tag, so reading it is a
+branch that never changes for the life of the index.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -274,10 +282,10 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP5` | 1.0 | `PerfectHashIndex` | `BMP1`–`BMP4` **refused by name** |
+| `BMP6` | 1.1 | `PerfectHashIndex` | `BMP5` **read**; `BMP1`–`BMP4` **refused by name** |
 | `BCH6` | 1.0 | `CompactHashIndex` | `BCH1`–`BCH5` **refused by name** |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH1` | 1.0 | the minimal perfect hash, inside `BMP5` and `BCH6` | first version |
+| `MPH1` | 1.0 | the minimal perfect hash, inside `BMP6` and `BCH6` | first version |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so both

@@ -1,35 +1,64 @@
-//! Compact `slot → &str` storage: a contiguous byte buffer plus `n + 1` offsets, so a key is the
-//! slice `data[offsets[i]..offsets[i + 1]]`. Backs [`PerfectHashIndex`](crate::PerfectHashIndex),
-//! whose `id()` hot path needs the stored key (zero-copy `&str`) to verify membership exactly.
-//! (`StringIndex` stores no keys — it reconstructs them from the FST by a rank-walk — and
-//! `CompactHashIndex` stores only fingerprints.) It views a [`SharedBytes`], so a memory-mapped load
-//! borrows it without copying.
+//! Compact `slot → &str` storage: a contiguous data region plus an offset structure, so a key is a
+//! slice of that region. Backs [`PerfectHashIndex`](crate::PerfectHashIndex), whose `id()` hot path
+//! needs the stored key (zero-copy `&str`) to verify membership exactly. (`StringIndex` stores no
+//! keys — it reconstructs them from the FST by a rank-walk — and `CompactHashIndex` stores only
+//! fingerprints.) It views a [`SharedBytes`], so a memory-mapped load borrows it without copying.
 //!
-//! # Offset width
+//! # Offset encoding
 //!
-//! Offsets are **4 bytes** unless the arena needs more than 4 GiB, in which case they are 8. An
-//! 8-byte offset was the whole table's width before 0.5.0 and dominated the index: on the 479 823
-//! word dictionary it cost 8.0 of `PerfectHashIndex`'s 17.6 bytes per key, to address a 4.9 MB
-//! arena. Choosing the width per arena rather than capping it keeps corpora above 4 GiB working;
-//! the cost is one branch in [`get`](StringArena::get), on a field that never changes for the life
-//! of the index and so predicts perfectly.
+//! Four encodings, chosen per arena at build time and named by the tag byte in the header. The two
+//! flat ones are a table of `n + 1` absolute offsets. The two blocked ones cut the slots into
+//! fixed-size runs and give each run a base plus a row of *cumulative* one- or two-byte offsets, so
+//! a key is `data[base + off[k] .. base + off[k + 1]]` — two adjacent reads out of a header that is
+//! one cache line wide.
+//!
+//! | tag | block header | slots/block | bytes/key |
+//! |---|---|---|---|
+//! | `0x11` | `[base u32][off u8 × 17]` | 16 | 1.31 |
+//! | `0x12` | `[base u32][off u16 × 257]` | 256 | 2.02 |
+//! | `4` | — | — | 4 |
+//! | `8` | — | — | 8 |
+//!
+//! The build is optimistic: it lays out `0x11` and widens only when a block overflows its offset
+//! width, or when the arena passes 4 GiB and a `u32` base can no longer reach the data.
+//!
+//! This is the second narrowing of the same table, and both were worth what they cost. Before
+//! 0.5.0 every offset was 8 bytes: on the 479 823-word dictionary that was 8.0 of
+//! `PerfectHashIndex`'s 17.6 bytes per key, to address a 4.9 MB arena. Choosing 4 or 8 per arena
+//! took the whole index to 13.62 bytes per key; the blocked layouts take it to **10.94**.
+//!
+//! Reading did not get slower for it. Alternated against the flat arena with
+//! `CompactHashIndex::id_unchecked` — same key hash, no arena — as the control, `id` measured
+//! **182 ns against 216** and `key` **38 against 52**, because 1.3 MB less index stays resident.
+//! Only the batched `ids_of` had to be paid for, and only through the prefetch: see
+//! [`prefetch_offsets`](StringArena::prefetch_offsets). Probes are shuffled in every measurement
+//! here — a strided probe is learned by the L2 prefetcher and reverses layout rankings, which is
+//! how the first version of `local/arenalayout` chose the wrong candidate.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
 
-/// Byte width of an offset in an arena small enough for 32-bit offsets, and in one that is not.
+/// Byte width of a flat offset in an arena small enough for 32-bit offsets, and in one that is not.
+/// Both double as their own tag byte, which is what they were before the blocked layouts existed.
 const NARROW: usize = 4;
 const WIDE: usize = 8;
-/// `[n_off: u64][width: u8]`.
+/// Blocked layouts: 16 slots with one-byte cumulative offsets, 256 with two-byte ones.
+const BLOCK_U8: u8 = 0x11;
+const BLOCK_U16: u8 = 0x12;
+const B_U8: usize = 16;
+const B_U16: usize = 256;
+const BLOCK_U8_BYTES: usize = 4 + (B_U8 + 1);
+const BLOCK_U16_BYTES: usize = 4 + (B_U16 + 1) * 2;
+/// `[n_off: u64][tag: u8]`.
 const HEADER: usize = 9;
 
 /// A contiguous arena of UTF-8 strings addressable by index, viewing a shared byte source.
 #[derive(Clone, Debug)]
 pub(crate) struct StringArena {
-    blob: SharedBytes, // [n_off: u64][width: u8][offsets: n_off × width][data]
+    blob: SharedBytes, // [n_off: u64][tag: u8][offset structure][data]
     n: usize,          // number of strings == n_off - 1
-    data_start: usize, // HEADER + n_off * width
-    width: usize,      // NARROW or WIDE
+    data_start: usize, // HEADER + the offset structure's length
+    tag: u8,           // NARROW, WIDE, BLOCK_U8 or BLOCK_U16
 }
 
 impl StringArena {
@@ -37,10 +66,16 @@ impl StringArena {
     /// total byte length from a first pass over the iterator — hence the `Clone` bound.
     ///
     /// Knowing both totals up front is what lets the arena be assembled in one exactly-sized buffer
-    /// with the offsets written in place. Collecting the data and the offsets separately and
+    /// with the data written straight into it. Collecting the data and the offsets separately and
     /// concatenating them afterwards, as this did before 0.10, held two copies of the whole corpus
     /// alive across the concatenation — on a 2 M-key
     /// [`PerfectHashIndex`](crate::PerfectHashIndex) build that was 36 MB of the peak.
+    ///
+    /// A blocked layout cannot write its header as the data lands — a block's offsets are only
+    /// final once the block is — so the lengths are held in a transient `Vec<u32>` and the header
+    /// is filled from it at the end. That is 4 bytes per key alive during the build, and the
+    /// build's peak did not rise with it: 55.1 MB against 56.3 for the flat arena on the
+    /// dictionary, three runs each.
     ///
     /// A caller that already knows the totals should use [`build_exact`](Self::build_exact): the
     /// first pass looks cheap (it reads string *lengths*, never their bytes) but it follows the
@@ -78,26 +113,35 @@ impl StringArena {
         }
     }
 
-    /// Write the whole arena into one buffer sized for `n` strings holding `data_len` bytes, with
-    /// each offset written as soon as its string lands. `None` if the iterator disagrees with
-    /// either total — the caller decides what to do about it.
+    /// Write the whole arena into one buffer sized for `n` strings holding `data_len` bytes.
+    /// `None` if the iterator disagrees with either total — the caller decides what to do about it.
     fn assemble<I, S>(items: I, n: usize, data_len: usize) -> Option<Self>
     where
         I: Iterator<Item = S>,
         S: AsRef<str>,
     {
-        let width = if data_len <= u32::MAX as usize {
-            NARROW
+        let blob = if data_len > u32::MAX as usize {
+            Self::lay_out_wide(items, n, data_len)?
         } else {
-            WIDE
+            Self::lay_out_blocked(items, n, data_len)?
         };
-        let n_off = n + 1;
-        let data_start = HEADER + n_off * width;
+        Some(
+            Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
+        )
+    }
+
+    /// The 8-byte flat table, written as the data lands: the encoding for an arena past 4 GiB,
+    /// which no blocked base can reach. Every arena below that goes through
+    /// [`lay_out_blocked`](Self::lay_out_blocked), which picks between the three narrower ones.
+    fn lay_out_wide<I, S>(items: I, n: usize, data_len: usize) -> Option<Vec<u8>>
+    where
+        I: Iterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let data_start = prefix_len(WIDE as u8, n)?;
         let mut blob = Vec::with_capacity(data_start + data_len);
-        blob.extend_from_slice(&(n_off as u64).to_le_bytes());
-        blob.push(width as u8);
         blob.resize(data_start, 0); // offset table, filled in as the data lands after it
-        write_offset(&mut blob, HEADER, width, 0);
+        write_offset(&mut blob, HEADER, WIDE, 0);
         let mut count = 0usize;
         for s in items {
             blob.extend_from_slice(s.as_ref().as_bytes());
@@ -106,53 +150,90 @@ impl StringArena {
                 return None; // more strings than the table was sized for
             }
             let end = (blob.len() - data_start) as u64;
-            write_offset(&mut blob, HEADER + count * width, width, end);
+            write_offset(&mut blob, HEADER + count * WIDE, WIDE, end);
         }
-        // A narrow table that turned out to need wide offsets has silently truncated them, so the
-        // width is re-derived from what was actually written rather than from the promise.
-        if count != n || (width == NARROW && blob.len() - data_start > u32::MAX as usize) {
+        // An overstated `data_len` would otherwise wrap a wide table around data a blocked layout
+        // addresses — a different arena from the one `build` derives for the same strings.
+        if count != n || blob.len() - data_start <= u32::MAX as usize {
             return None;
         }
-        Some(
-            Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
-        )
+        write_head(&mut blob, n, WIDE as u8);
+        Some(blob)
     }
 
-    /// The arena's fixed prefix — `[n_off u64][width u8][offsets]` — for strings whose lengths are
-    /// known in index order but whose bytes are not yet available. Returns the prefix, the data
-    /// length the offsets describe, and the offset width.
+    /// Stream the data behind a header sized for `0x11`, then choose the encoding the lengths
+    /// actually need and fill the header in place.
     ///
-    /// This is what lets a builder place the keys without ever holding them: the offset table is
+    /// A widening moves the data once, by one `copy_within`, and never re-walks the iterator: the
+    /// source may be a permutation the caller cannot cheaply replay, and for `PerfectHashIndex` it
+    /// is exactly that.
+    fn lay_out_blocked<I, S>(items: I, n: usize, data_len: usize) -> Option<Vec<u8>>
+    where
+        I: Iterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let optimistic = prefix_len(BLOCK_U8, n)?;
+        let mut blob = Vec::with_capacity(optimistic + data_len);
+        blob.resize(optimistic, 0);
+        let mut lens: Vec<u32> = Vec::with_capacity(n);
+        for s in items {
+            if lens.len() == n {
+                return None; // more strings than the header was sized for
+            }
+            let bytes = s.as_ref().as_bytes();
+            blob.extend_from_slice(bytes);
+            // Truncating only if the caller's `data_len` was an underestimate, which the check
+            // below catches before any of these lengths is read.
+            lens.push(bytes.len() as u32);
+        }
+        let written = blob.len() - optimistic;
+        if lens.len() != n || written > u32::MAX as usize {
+            return None;
+        }
+        let tag = tag_for(&lens, written);
+        if tag != BLOCK_U8 {
+            let widened = prefix_len(tag, n)?;
+            move_data(&mut blob, optimistic, written, widened);
+        }
+        write_head(&mut blob, n, tag);
+        write_offsets(&mut blob, tag, &lens);
+        Some(blob)
+    }
+
+    /// The arena's fixed prefix — header plus offset structure — for strings whose lengths are
+    /// known in index order but whose bytes are not yet available. Returns the prefix, the data
+    /// length the offsets describe, and the tag that encodes them.
+    ///
+    /// This is what lets a builder place the keys without ever holding them: the offsets are
     /// derivable from the lengths alone, so the bytes can be written afterwards, out of order,
-    /// straight into a mapped file. Read one back with [`offset_at`](Self::offset_at).
+    /// straight into a mapped file. Read one back with [`span_at`](Self::span_at).
     ///
     /// Only `build_to_file` writes an arena this way, so this and its reader are behind `mmap` with
     /// it — otherwise an `mph`-without-`mmap` build carries two functions nothing can call.
     #[cfg(feature = "mmap")]
-    pub(crate) fn prefix_for_lengths(lens: &[u32]) -> (Vec<u8>, usize, usize) {
+    pub(crate) fn prefix_for_lengths(lens: &[u32]) -> (Vec<u8>, usize, u8) {
         let data_len: usize = lens.iter().map(|&l| l as usize).sum();
-        let width = if data_len <= u32::MAX as usize {
-            NARROW
-        } else {
-            WIDE
-        };
-        let n_off = lens.len() + 1;
-        let mut blob = vec![0u8; HEADER + n_off * width];
-        blob[..8].copy_from_slice(&(n_off as u64).to_le_bytes());
-        blob[8] = width as u8;
-        let mut at = 0u64;
-        write_offset(&mut blob, HEADER, width, 0);
-        for (i, &l) in lens.iter().enumerate() {
-            at += l as u64;
-            write_offset(&mut blob, HEADER + (i + 1) * width, width, at);
-        }
-        (blob, data_len, width)
+        let tag = tag_for(lens, data_len);
+        let mut blob =
+            vec![0u8; prefix_len(tag, lens.len()).expect("lengths came from a real corpus")];
+        write_head(&mut blob, lens.len(), tag);
+        write_offsets(&mut blob, tag, lens);
+        (blob, data_len, tag)
     }
 
-    /// Offset `i` out of a prefix built by [`prefix_for_lengths`](Self::prefix_for_lengths).
+    /// The `(start, end)` of slot `i` within the data region of a prefix built by
+    /// [`prefix_for_lengths`](Self::prefix_for_lengths).
     #[cfg(feature = "mmap")]
-    pub(crate) fn offset_at(prefix: &[u8], width: usize, i: usize) -> u64 {
-        read_offset(prefix, HEADER + i * width, width).unwrap_or(0)
+    pub(crate) fn span_at(prefix: &[u8], tag: u8, i: usize) -> (u64, u64) {
+        let (lo, hi) = offsets_of(prefix, tag, i).unwrap_or((0, 0));
+        (lo as u64, hi as u64)
+    }
+
+    /// Which of the four encodings this arena uses — for tests that must show they built the
+    /// layout they say they are testing.
+    #[cfg(test)]
+    pub(crate) fn tag(&self) -> u8 {
+        self.tag
     }
 
     /// Number of stored strings.
@@ -162,23 +243,27 @@ impl StringArena {
 
     /// The string at index `i`, or `None` if out of range. Borrows the shared source — zero-copy.
     pub(crate) fn get(&self, i: usize) -> Option<&str> {
-        if i >= self.n {
-            return None;
-        }
-        let bytes = self.blob.as_ref();
-        let at = HEADER + i * self.width;
-        let lo = usize::try_from(read_offset(bytes, at, self.width).ok()?).ok()?;
-        let hi = usize::try_from(read_offset(bytes, at + self.width, self.width).ok()?).ok()?;
-        let start = self.data_start.checked_add(lo)?;
-        let end = self.data_start.checked_add(hi)?;
-        std::str::from_utf8(bytes.get(start..end)?).ok()
+        self.str_at(self.span(i)?)
     }
 
-    /// Prefetch the cache line holding slot `i`'s offset pair (pipelined batch lookups).
+    /// Prefetch the lines slot `i`'s offsets are read from (pipelined batch lookups).
+    ///
+    /// Two of them under a blocked layout: a block header is 21 or 518 bytes, so its base and the
+    /// offset pair 4 + k bytes in are regularly on different cache lines, and pulling in only the
+    /// first leaves `ids_of` stalling on the second. Measured on the dictionary, prefetching the
+    /// base alone cost `ids_of` 9 % against the flat table it replaced; with both it is level.
     #[inline(always)]
     pub(crate) fn prefetch_offsets(&self, i: usize) {
-        if i < self.n {
-            crate::blob::prefetch_byte(self.blob.as_ref(), HEADER + i * self.width);
+        if i >= self.n {
+            return;
+        }
+        let bytes = self.blob.as_ref();
+        let at = offsets_start(self.tag, i);
+        crate::blob::prefetch_byte(bytes, at);
+        match self.tag {
+            BLOCK_U8 => crate::blob::prefetch_byte(bytes, at + 4 + i % B_U8),
+            BLOCK_U16 => crate::blob::prefetch_byte(bytes, at + 4 + (i % B_U16) * 2),
+            _ => {}
         }
     }
 
@@ -190,10 +275,7 @@ impl StringArena {
         if i >= self.n {
             return None;
         }
-        let bytes = self.blob.as_ref();
-        let at = HEADER + i * self.width;
-        let lo = usize::try_from(read_offset(bytes, at, self.width).ok()?).ok()?;
-        let hi = usize::try_from(read_offset(bytes, at + self.width, self.width).ok()?).ok()?;
+        let (lo, hi) = offsets_of(self.blob.as_ref(), self.tag, i)?;
         Some((
             self.data_start.checked_add(lo)?,
             self.data_start.checked_add(hi)?,
@@ -230,8 +312,8 @@ impl StringArena {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
     }
 
-    /// View a shared blob without copying, validating the header (untrusted input): the width must
-    /// be one this format defines, the offset table must fit, and its ends must span the data.
+    /// View a shared blob without copying, validating the header (untrusted input): the tag must be
+    /// one this format defines, the offset structure must fit, and its ends must span the data.
     /// Individual offsets are bounds-checked lazily in [`get`](StringArena::get), so a
     /// memory-mapped load stays instant (no `O(n)` scan).
     pub(crate) fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
@@ -243,36 +325,170 @@ impl StringArena {
         if n_off == 0 {
             return Err(IndexError::Format("arena: zero offsets (need at least 1)"));
         }
-        let width = match bytes.get(8) {
-            Some(&w) if w as usize == NARROW => NARROW,
-            Some(&w) if w as usize == WIDE => WIDE,
-            _ => return Err(IndexError::Format("arena: unknown offset width")),
+        let n = n_off - 1;
+        let tag = match bytes.get(8) {
+            Some(&t) if t as usize == NARROW || t as usize == WIDE => t,
+            Some(&t) if t == BLOCK_U8 || t == BLOCK_U16 => t,
+            _ => return Err(IndexError::Format("arena: unknown offset encoding")),
         };
-        let data_start = n_off
-            .checked_mul(width)
-            .and_then(|t| t.checked_add(HEADER))
-            .ok_or(IndexError::Format("arena: offset table too large"))?;
+        let data_start =
+            prefix_len(tag, n).ok_or(IndexError::Format("arena: offset table too large"))?;
         if bytes.len() < data_start {
             return Err(IndexError::Format("arena: truncated offset table"));
         }
         let data_len = bytes.len() - data_start;
-        let last = HEADER + (n_off - 1) * width;
-        if read_offset(bytes, HEADER, width)? != 0
-            || read_offset(bytes, last, width)? != data_len as u64
-        {
+        // The two ends: the first key starts the data (so a blocked layout's first base is 0) and
+        // the last one finishes it. Everything between is checked at the access that reads it.
+        let ends = match n {
+            0 => (0, 0),
+            _ => {
+                let first = offsets_of(bytes, tag, 0)
+                    .ok_or(IndexError::Format("arena: unreadable first offset"))?;
+                let last = offsets_of(bytes, tag, n - 1)
+                    .ok_or(IndexError::Format("arena: unreadable last offset"))?;
+                (first.0, last.1)
+            }
+        };
+        if ends != (0, data_len) {
             return Err(IndexError::Format("arena: offsets do not span the data"));
         }
         Ok(Self {
             blob,
-            n: n_off - 1,
+            n,
             data_start,
-            width,
+            tag,
         })
     }
 }
 
-/// Write one offset of the arena's own width. Only [`StringArena::build`] calls this, into the
-/// table it has already reserved, so an out-of-range `at` is a bug in this file.
+/// Bytes from the start of the arena to the start of its data, or `None` if a header-supplied `n`
+/// makes that overflow.
+fn prefix_len(tag: u8, n: usize) -> Option<usize> {
+    let table = match tag {
+        BLOCK_U8 => n.div_ceil(B_U8).checked_mul(BLOCK_U8_BYTES)?,
+        BLOCK_U16 => n.div_ceil(B_U16).checked_mul(BLOCK_U16_BYTES)?,
+        w => n.checked_add(1)?.checked_mul(w as usize)?,
+    };
+    table.checked_add(HEADER)
+}
+
+/// Where slot `i`'s offsets live: its block header, or its pair of flat entries.
+#[inline(always)]
+fn offsets_start(tag: u8, i: usize) -> usize {
+    match tag {
+        BLOCK_U8 => HEADER + (i / B_U8) * BLOCK_U8_BYTES,
+        BLOCK_U16 => HEADER + (i / B_U16) * BLOCK_U16_BYTES,
+        w => HEADER + i * w as usize,
+    }
+}
+
+/// Slot `i`'s `(start, end)` relative to the data region. `None` if the structure is too short for
+/// it or the pair runs backwards — a corrupt blob answers "no such key", never a wild slice.
+#[inline(always)]
+fn offsets_of(bytes: &[u8], tag: u8, i: usize) -> Option<(usize, usize)> {
+    let at = offsets_start(tag, i);
+    match tag {
+        BLOCK_U8 => {
+            let block = bytes.get(at..at.checked_add(BLOCK_U8_BYTES)?)?;
+            let base = u32::from_le_bytes(block[..4].try_into().unwrap()) as usize;
+            let k = 4 + i % B_U8;
+            span_from(base, block[k] as usize, block[k + 1] as usize)
+        }
+        BLOCK_U16 => {
+            let block = bytes.get(at..at.checked_add(BLOCK_U16_BYTES)?)?;
+            let base = u32::from_le_bytes(block[..4].try_into().unwrap()) as usize;
+            let k = 4 + (i % B_U16) * 2;
+            let lo = u16::from_le_bytes(block[k..k + 2].try_into().unwrap()) as usize;
+            let hi = u16::from_le_bytes(block[k + 2..k + 4].try_into().unwrap()) as usize;
+            span_from(base, lo, hi)
+        }
+        w => {
+            let width = w as usize;
+            let lo = usize::try_from(read_offset(bytes, at, width).ok()?).ok()?;
+            let hi = usize::try_from(read_offset(bytes, at + width, width).ok()?).ok()?;
+            span_from(0, lo, hi)
+        }
+    }
+}
+
+#[inline(always)]
+fn span_from(base: usize, lo: usize, hi: usize) -> Option<(usize, usize)> {
+    if hi < lo {
+        return None;
+    }
+    Some((base.checked_add(lo)?, base.checked_add(hi)?))
+}
+
+/// The narrowest encoding that holds these lengths: one byte per offset if no run of 16 keys spans
+/// more than 255 bytes, two if no run of 256 spans more than 65 535, otherwise the flat table.
+fn tag_for(lens: &[u32], data_len: usize) -> u8 {
+    let fits = |b: usize, limit: u64| {
+        lens.chunks(b)
+            .all(|c| c.iter().map(|&l| l as u64).sum::<u64>() <= limit)
+    };
+    if data_len <= u32::MAX as usize && fits(B_U8, u8::MAX as u64) {
+        BLOCK_U8
+    } else if data_len <= u32::MAX as usize && fits(B_U16, u16::MAX as u64) {
+        BLOCK_U16
+    } else if data_len <= u32::MAX as usize {
+        NARROW as u8
+    } else {
+        WIDE as u8
+    }
+}
+
+fn write_head(blob: &mut [u8], n: usize, tag: u8) {
+    blob[..8].copy_from_slice(&((n as u64) + 1).to_le_bytes());
+    blob[8] = tag;
+}
+
+/// Move the data region from `from` to `to`, growing or shrinking the buffer to match. The bytes
+/// vacated are the offset structure's, and every one of them is written before the arena is read.
+fn move_data(blob: &mut Vec<u8>, from: usize, data_len: usize, to: usize) {
+    if to > from {
+        blob.resize(to + data_len, 0);
+    }
+    blob.copy_within(from..from + data_len, to);
+    blob.truncate(to + data_len);
+}
+
+/// Fill an already-sized offset structure from the lengths it was sized for. Slots past `n` in the
+/// last block repeat that block's total, so a read past the end sees an empty span rather than an
+/// inverted one.
+fn write_offsets(blob: &mut [u8], tag: u8, lens: &[u32]) {
+    let (b, width) = match tag {
+        BLOCK_U8 => (B_U8, 1usize),
+        BLOCK_U16 => (B_U16, 2usize),
+        w => {
+            let width = w as usize;
+            let mut at = 0u64;
+            write_offset(blob, HEADER, width, 0);
+            for (i, &l) in lens.iter().enumerate() {
+                at += l as u64;
+                write_offset(blob, HEADER + (i + 1) * width, width, at);
+            }
+            return;
+        }
+    };
+    let mut base = 0u32;
+    for (j, chunk) in lens.chunks(b).enumerate() {
+        let at = HEADER + j * (4 + (b + 1) * width);
+        blob[at..at + 4].copy_from_slice(&base.to_le_bytes());
+        let mut off = 0u32;
+        for k in 0..=b {
+            let p = at + 4 + k * width;
+            match width {
+                1 => blob[p] = off as u8,
+                _ => blob[p..p + 2].copy_from_slice(&(off as u16).to_le_bytes()),
+            }
+            off += chunk.get(k).copied().unwrap_or(0);
+        }
+        base += off;
+    }
+}
+
+/// Write one offset of a flat table's width, into the table the caller has already reserved, so an
+/// out-of-range `at` is a bug in this file.
 fn write_offset(bytes: &mut [u8], at: usize, width: usize, off: u64) {
     match width {
         NARROW => bytes[at..at + NARROW].copy_from_slice(&(off as u32).to_le_bytes()),
@@ -301,6 +517,25 @@ fn read_u64(bytes: &[u8], at: usize) -> Result<u64, IndexError> {
 mod tests {
     use super::*;
 
+    /// The block header a corpus of two short keys produces, byte for byte. The serialised layout
+    /// is a format, not an implementation detail: every blob any released version wrote is parsed
+    /// by [`from_shared`](StringArena::from_shared), so a build that quietly changed a byte would
+    /// break `load` on existing files.
+    #[test]
+    fn small_arenas_use_one_byte_cumulative_offsets() {
+        let arena = StringArena::build(["apple", "banana"]);
+        assert_eq!(arena.tag(), BLOCK_U8);
+        let mut want = Vec::new();
+        want.extend_from_slice(&3u64.to_le_bytes()); // n_off = 2 keys + 1
+        want.push(BLOCK_U8);
+        want.extend_from_slice(&0u32.to_le_bytes()); // the one block's base
+        want.extend_from_slice(&[0, 5, 11]); // and its cumulative offsets,
+        want.extend_from_slice(&[11; 14]); // padded past the end with the block total
+        want.extend_from_slice(b"applebanana");
+        assert_eq!(arena.to_bytes(), want);
+        assert_eq!(want.len(), HEADER + BLOCK_U8_BYTES + 11);
+    }
+
     #[test]
     fn build_get_and_roundtrip() {
         let arena = StringArena::build(["apple", "banana", "", "cherry"]);
@@ -319,33 +554,61 @@ mod tests {
         let arena = StringArena::build(Vec::<&str>::new());
         assert_eq!(arena.len(), 0);
         assert_eq!(arena.get(0), None);
+        assert_eq!(arena.to_bytes().len(), HEADER); // no blocks at all
         assert_eq!(StringArena::from_bytes(&arena.to_bytes()).unwrap().len(), 0);
     }
 
-    /// The serialised layout is a format, not an implementation detail: every blob any released
-    /// version wrote is parsed by [`from_shared`](StringArena::from_shared) above, so a build that
-    /// quietly changed a byte would break `load` on existing files. Pinned in full rather than by
-    /// length — the 0.10 rewrite that assembles the arena in one buffer, offsets written in place,
-    /// had to prove it produced exactly what the two-buffer version did.
+    /// Every key in a blocked layout is addressed off its own block's base, so the arithmetic is
+    /// only exercised by a corpus that crosses one. 16 keys fill a block exactly, 17 start a
+    /// second, and the block-relative offset of key 16 is 0 while its absolute one is not.
     #[test]
-    fn small_arenas_use_narrow_offsets() {
-        let arena = StringArena::build(["apple", "banana"]);
-        assert_eq!(arena.width, NARROW);
-        let mut want = Vec::new();
-        want.extend_from_slice(&3u64.to_le_bytes()); // n_off = 2 keys + 1
-        want.push(NARROW as u8);
-        for o in [0u32, 5, 11] {
-            want.extend_from_slice(&o.to_le_bytes());
+    fn keys_are_read_across_block_boundaries() {
+        for n in [15usize, 16, 17, 33] {
+            let keys: Vec<String> = (0..n).map(|i| format!("k{i}")).collect();
+            let arena = StringArena::build(&keys);
+            assert_eq!(arena.tag(), BLOCK_U8, "n={n}");
+            assert_eq!(
+                arena.to_bytes().len(),
+                HEADER
+                    + n.div_ceil(B_U8) * BLOCK_U8_BYTES
+                    + keys.iter().map(String::len).sum::<usize>(),
+                "n={n}"
+            );
+            for (i, key) in keys.iter().enumerate() {
+                assert_eq!(arena.get(i), Some(key.as_str()), "n={n}, key {i}");
+            }
+            assert_eq!(arena.get(n), None, "n={n}");
         }
-        want.extend_from_slice(b"applebanana");
-        assert_eq!(arena.to_bytes(), want);
-        assert_eq!(want.len(), HEADER + 3 * NARROW + 11);
+    }
+
+    /// An empty entry between two others, at each end, and on both sides of a block boundary: a
+    /// zero-length key is the case where two consecutive offsets are equal, which is where an
+    /// off-by-one in the fill loop shows up.
+    #[test]
+    fn empty_keys_keep_their_slots() {
+        let arena = StringArena::build(["", "a", "", "bc", ""]);
+        assert_eq!(arena.len(), 5);
+        let got: Vec<Option<&str>> = (0..6).map(|i| arena.get(i)).collect();
+        assert_eq!(
+            got,
+            [Some(""), Some("a"), Some(""), Some("bc"), Some(""), None]
+        );
+
+        let mut keys: Vec<String> = (0..20).map(|i| format!("k{i}")).collect();
+        keys[15] = String::new(); // last slot of block 0
+        keys[16] = String::new(); // first slot of block 1
+        let arena = StringArena::build(&keys);
+        for (i, key) in keys.iter().enumerate() {
+            assert_eq!(arena.get(i), Some(key.as_str()), "key {i}");
+        }
     }
 
     /// The totals a caller passes to `build_exact` are a shortcut, not a promise: whatever they
     /// say, the arena must come out exactly as `build` would have derived it. A count that is too
     /// small is caught mid-fill, one that is too large at the end, and a byte total that is merely
-    /// wrong only mis-sizes the initial allocation.
+    /// wrong only mis-sizes the initial allocation. A hint above 4 GiB is *not* exercised here: it
+    /// selects the wide encoding, whose buffer is reserved from the hint, and a test that asks for
+    /// 4 GiB of address space is a test that fails on the first machine without overcommit.
     #[test]
     fn a_wrong_hint_never_changes_the_arena() {
         let items = ["apple", "banana", "", "cherry"]; // 17 bytes over 4 strings
@@ -357,34 +620,82 @@ mod tests {
         }
     }
 
-    /// An empty entry between two others, and one at each end: the offset written for key `i` is
-    /// the *end* of its bytes, so a zero-length key is the case where two consecutive offsets are
-    /// equal and an off-by-one in the fill loop would not otherwise show.
+    /// Sixteen 20-byte keys span 320 bytes in one block of 16, so the one-byte offsets cannot
+    /// describe them and the build re-lays to `0x12` — the case the optimistic first pass exists
+    /// to make cheap, and the one that must not corrupt the data it has already written.
     #[test]
-    fn empty_keys_keep_their_slots() {
-        let arena = StringArena::build(["", "a", "", "bc", ""]);
-        assert_eq!(arena.len(), 5);
-        let got: Vec<Option<&str>> = (0..6).map(|i| arena.get(i)).collect();
+    fn a_block_that_overflows_one_byte_widens_to_two() {
+        let keys: Vec<String> = (0..40).map(|i| format!("{i:020}")).collect();
+        let arena = StringArena::build(&keys);
+        assert_eq!(arena.tag(), BLOCK_U16);
         assert_eq!(
-            got,
-            [Some(""), Some("a"), Some(""), Some("bc"), Some(""), None]
+            arena.to_bytes().len(),
+            HEADER + BLOCK_U16_BYTES + 800 // one block of 256 slots, 40 of them used
         );
+        for (i, key) in keys.iter().enumerate() {
+            assert_eq!(arena.get(i), Some(key.as_str()), "key {i}");
+        }
+        let restored = StringArena::from_bytes(&arena.to_bytes()).unwrap();
+        assert_eq!(restored.get(39).unwrap(), keys[39]);
+        assert_eq!(restored.get(40), None);
+    }
+
+    /// A key longer than 65 535 bytes overflows a block of 256 as well, and the flat table is what
+    /// is left. The same corpus through `build_exact` with a true hint and a false one, because the
+    /// widening happens after the hint has already sized the buffer.
+    #[test]
+    fn a_key_too_long_for_any_block_falls_back_to_the_flat_table() {
+        let long = "x".repeat(70_000);
+        let items = [long.as_str(), "tail"];
+        let arena = StringArena::build(items);
+        assert_eq!(arena.tag(), NARROW as u8);
+        assert_eq!(arena.to_bytes().len(), HEADER + 3 * NARROW + 70_004);
+        assert_eq!(arena.get(0), Some(long.as_str()));
+        assert_eq!(arena.get(1), Some("tail"));
+        for (n, data_len) in [(2, 70_004), (2, 0), (9, 70_004)] {
+            assert_eq!(
+                StringArena::build_exact(items, n, data_len).to_bytes(),
+                arena.to_bytes(),
+                "hint n={n}, data_len={data_len}"
+            );
+        }
     }
 
     /// The wide path cannot be reached by building a >4 GiB arena in a test, so drive it through
-    /// the parser: a hand-written wide blob must load and read back identically.
+    /// the parser: a hand-written wide blob must load and read back identically. The narrow flat
+    /// blob beside it is what every arena written before 1.1 looks like.
     #[test]
-    fn wide_offsets_round_trip() {
-        let data = b"applebanana";
+    fn flat_offsets_round_trip() {
+        for width in [NARROW, WIDE] {
+            let mut blob = Vec::new();
+            blob.extend_from_slice(&3u64.to_le_bytes());
+            blob.push(width as u8);
+            for o in [0u64, 5, 11] {
+                blob.extend_from_slice(&o.to_le_bytes()[..width]);
+            }
+            blob.extend_from_slice(b"applebanana");
+            let arena = StringArena::from_bytes(&blob).unwrap();
+            assert_eq!(arena.tag(), width as u8);
+            assert_eq!(arena.get(0), Some("apple"));
+            assert_eq!(arena.get(1), Some("banana"));
+            assert_eq!(arena.get(2), None);
+        }
+    }
+
+    /// A hand-written `0x12` blob, so the reader is pinned independently of the writer that
+    /// normally produces one.
+    #[test]
+    fn two_byte_blocks_round_trip() {
         let mut blob = Vec::new();
         blob.extend_from_slice(&3u64.to_le_bytes());
-        blob.push(WIDE as u8);
-        for o in [0u64, 5, 11] {
-            blob.extend_from_slice(&o.to_le_bytes());
+        blob.push(BLOCK_U16);
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        for off in [0u16, 5, 11] {
+            blob.extend_from_slice(&off.to_le_bytes());
         }
-        blob.extend_from_slice(data);
+        blob.resize(HEADER + BLOCK_U16_BYTES, 11); // padded with the block total, as the writer does
+        blob.extend_from_slice(b"applebanana");
         let arena = StringArena::from_bytes(&blob).unwrap();
-        assert_eq!(arena.width, WIDE);
         assert_eq!(arena.get(0), Some("apple"));
         assert_eq!(arena.get(1), Some("banana"));
         assert_eq!(arena.get(2), None);
@@ -394,11 +705,34 @@ mod tests {
     fn rejects_corrupt_headers() {
         assert!(StringArena::from_bytes(b"short").is_err()); // < 8-byte header
         let mut good = StringArena::build(["a", "b"]).to_bytes();
-        good[0] = 0xff; // absurd offset count → truncated table
+        good[0] = 0xff; // absurd offset count → truncated block region
         assert!(StringArena::from_bytes(&good).is_err());
 
-        let mut bad_width = StringArena::build(["a", "b"]).to_bytes();
-        bad_width[8] = 3; // neither 4 nor 8
-        assert!(StringArena::from_bytes(&bad_width).is_err());
+        let mut bad_tag = StringArena::build(["a", "b"]).to_bytes();
+        bad_tag[8] = 3; // no such encoding
+        assert!(StringArena::from_bytes(&bad_tag).is_err());
+
+        let full = StringArena::build(["a", "b"]).to_bytes();
+        assert!(StringArena::from_bytes(&full[..HEADER + 4]).is_err()); // block header cut short
+
+        let mut short_last = full.clone();
+        short_last[HEADER + 4 + 2] = 1; // last offset no longer reaches the end of the data
+        assert!(StringArena::from_bytes(&short_last).is_err());
+
+        let mut moved_base = full.clone();
+        moved_base[HEADER] = 1; // the first key no longer starts the data
+        assert!(StringArena::from_bytes(&moved_base).is_err());
+    }
+
+    /// An offset pair that runs backwards is in range and passes the two end checks, so it is
+    /// caught where it is read: that slot has no key, and no slice is taken from it.
+    #[test]
+    fn a_backwards_offset_pair_yields_no_key() {
+        let mut blob = StringArena::build(["apple", "banana", "cherry"]).to_bytes();
+        blob[HEADER + 4 + 2] = 3; // off[2]: 11 → 3, below off[1] = 5
+        let arena = StringArena::from_bytes(&blob).unwrap();
+        assert_eq!(arena.get(0), Some("apple"));
+        assert_eq!(arena.get(1), None);
+        assert_eq!(arena.span(1), None);
     }
 }

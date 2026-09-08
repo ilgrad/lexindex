@@ -14,7 +14,7 @@
 //!   no reverse lookup. Use it when footprint is paramount.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
-//!   at 13.6 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
+//!   at 10.9 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
 //!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //!
 //! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable

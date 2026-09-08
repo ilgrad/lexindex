@@ -41,6 +41,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`PerfectHashIndex` addresses its keys in blocks: 13.62 → 10.94 bytes per key**, and writes
+  `BMP6`. The arena's `n + 1` four-byte offsets are gone; sixteen slots now share a `u32` base and
+  carry one-byte *cumulative* offsets after it, 21 bytes per block, so a key is
+  `data[base + off[k] .. base + off[k + 1]]` — two adjacent reads out of one header, 1.31 bytes per
+  key instead of 4. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot blocks with
+  two-byte offsets (2.02 B/key; the 1 M random-bigram corpus is one, 23.95 → 21.97), and one that
+  fits neither, or exceeds 4 GiB, keeps the flat table — which is also what removes the old 4 GiB
+  cliff, since a `u32` base cannot reach past it. The encoding is chosen in the same pass that
+  writes the data, from the lengths it saw, and recorded in the arena's tag byte.
+
+  Reading did not get slower; it got faster, because the whole index is 1.3 MB smaller on the
+  479 823-word dictionary and stays resident. Alternated A-B-A-B against the flat arena with
+  `CompactHashIndex::id_unchecked` — same key hash, no arena — as the control: `id` **216 → 182 ns**
+  and `key` **52 → 38**, with the control moving under 5 %. Batched `ids_of` was the one path that
+  had to be paid for and the one that had to be fixed: a block header is 21 bytes, so its base and
+  the offset pair regularly land in different cache lines, and prefetching only the base cost 9 %.
+  Prefetching both puts it level. Build peak did not rise either — 55.1 MB against 56.3 — although
+  the build now holds one transient `u32` per key, since a block's offsets are only final once the
+  block is.
+
+  Six layouts were measured before this one was written (`local/arenalayout`), and the obvious
+  candidate lost: a length prefix in the data with a periodic sample costs +17 to +37 ns, because
+  its "sequential" length reads are hops through the data region rather than through an array.
+  Cumulative offsets are what removes the summing loop altogether.
+
+- **`BMP5` blobs still load**, and are held to it by a test: `golden-1.0.0-perfect.bmp` now has to
+  answer every key with the id a fresh build assigns, refuse every non-member and map zero-copy,
+  while `golden-1.1.0-perfect.bmp` takes over the byte-identity assertion. The new magic exists so
+  that a 1.0 reader refuses a 1.1 blob by name instead of failing inside the arena with "unknown
+  offset encoding".
+
+- **`build_to_file` now writes bytes identical to `build` + `save`**, and is tested that way rather
+  than by behaviour: both derive the arena's encoding from the same key lengths in the same slot
+  order, so the only way the two writers can disagree is a bug in one of them.
+
 - The PyPI classifier is `Development Status :: 5 - Production/Stable`; 1.0 shipped as `4 - Beta`.
 
 ### Added

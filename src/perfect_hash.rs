@@ -27,6 +27,11 @@ use crate::mphf::Mphf;
 /// rather than half-supported.
 const LEGACY_MAGICS: [&[u8; 4]; 3] = [b"BMP2", b"BMP3", b"BMP4"];
 const MAGIC_V5: &[u8; 4] = b"BMP5"; // [magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]
+/// 1.1's key arena encodes its offsets in blocks, which a 1.0 reader would reject from inside the
+/// arena with "unknown offset encoding". The framing is byte for byte `BMP5`'s, so the magic exists
+/// only to make that refusal legible — and, read the other way, `BMP5` blobs are still ordinary
+/// input here: the arena says which encoding it uses, so both load through the same parser.
+const MAGIC_V6: &[u8; 4] = b"BMP6";
 const HEADER_V5: usize = 36;
 const CHECKED_V5: usize = 32;
 const SIDE_ENTRY: usize = 12; // hash u64 + id u32
@@ -39,7 +44,7 @@ const NO_KEY: u32 = u32::MAX;
 /// without ever holding the index — one writer of this layout, so the two cannot drift.
 fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V5] {
     let mut header = [0u8; HEADER_V5];
-    header[0..4].copy_from_slice(MAGIC_V5);
+    header[0..4].copy_from_slice(MAGIC_V6);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
@@ -88,7 +93,7 @@ static SPILL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 #[cfg(feature = "mmap")]
 struct ArenaLayout<'a> {
     prefix: &'a [u8],
-    width: usize,
+    tag: u8,
     data_start: usize,
     data_len: usize,
     /// [`SPILL_WINDOW`] in every build; a handful of bytes in the tests, so the windowed fill is
@@ -100,16 +105,14 @@ struct ArenaLayout<'a> {
 impl ArenaLayout<'_> {
     /// The byte range slot `slot` occupies in the file.
     fn span(&self, slot: usize) -> std::ops::Range<usize> {
-        let lo = self.data_start + StringArena::offset_at(self.prefix, self.width, slot) as usize;
-        let hi =
-            self.data_start + StringArena::offset_at(self.prefix, self.width, slot + 1) as usize;
-        lo..hi
+        let (lo, hi) = StringArena::span_at(self.prefix, self.tag, slot);
+        self.data_start + lo as usize..self.data_start + hi as usize
     }
 
     /// Which window slot `slot` is filled in. Clamped because a zero-length key at the very end of
     /// the arena starts exactly at `data_len`, one past the last window.
     fn window_of(&self, slot: usize, windows: usize) -> usize {
-        let off = StringArena::offset_at(self.prefix, self.width, slot) as usize;
+        let off = StringArena::span_at(self.prefix, self.tag, slot).0 as usize;
         (off / self.window).min(windows - 1)
     }
 }
@@ -343,7 +346,7 @@ impl PerfectHashIndex {
         if n == 0 {
             return Ok(Self {
                 mph: None,
-                arena: StringArena::build(Vec::<&str>::new()), // offsets = [0]: a valid empty arena
+                arena: StringArena::build(Vec::<&str>::new()), // a valid arena of no keys
                 n: 0,
                 side: Vec::new(),
             });
@@ -687,7 +690,8 @@ impl PerfectHashIndex {
                  from a crate this version no longer links; rebuild the index from its keys",
             ));
         }
-        if &bytes[0..4] != MAGIC_V5 || bytes.len() < HEADER_V5 {
+        let magic = &bytes[0..4];
+        if (magic != MAGIC_V5 && magic != MAGIC_V6) || bytes.len() < HEADER_V5 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
@@ -818,7 +822,7 @@ impl PerfectHashIndex {
     ///
     /// The file is a blob that answers exactly as [`build`](Self::build) + [`save`](Self::save)
     /// would have for the same key set — every key a member, every `key(id)` round trip intact —
-    /// but **not necessarily the same bytes**: the arena's offset width is chosen from the key
+    /// but **not necessarily the same bytes**: the arena's offset encoding is chosen from the key
     /// lengths this pass sees, and a streamed build knows them before it has the keys. The MPH
     /// itself is deterministic, so the ids agree.
     ///
@@ -986,7 +990,7 @@ impl PerfectHashIndex {
             len_by_slot[slot as usize] = lens[i];
         }
         drop(lens);
-        let (arena_prefix, data_len, width) = StringArena::prefix_for_lengths(&len_by_slot);
+        let (arena_prefix, data_len, tag) = StringArena::prefix_for_lengths(&len_by_slot);
         drop(len_by_slot);
 
         let mut side: Vec<(u64, u32)> = extras
@@ -1018,7 +1022,7 @@ impl PerfectHashIndex {
 
             let layout = ArenaLayout {
                 prefix: &arena_prefix,
-                width,
+                tag,
                 data_start,
                 data_len,
                 window,
@@ -1132,9 +1136,12 @@ mod stream_build_tests {
         let n = PerfectHashIndex::build_to_file(&path, || keys.iter()).unwrap();
         assert_eq!(n, keys.len());
 
-        // Not compared byte for byte against `build` + `save`: the streamed build picks the
-        // arena's offset width from the lengths it saw in pass one, which need not match. What
-        // must hold is that the file is a valid blob answering exactly like the in-memory index.
+        // Byte for byte against `build` + `save`, which is stronger than "answers the same": both
+        // derive the arena's encoding from the same key lengths in the same slot order, and the MPH
+        // is deterministic, so the only way the files can differ is a bug in one of the two writers.
+        let in_memory = PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), in_memory, "streamed blob");
+
         let idx = PerfectHashIndex::load(&path).unwrap();
         assert_eq!(idx.len(), keys.len());
         let mut ids: Vec<u32> = Vec::with_capacity(keys.len());
@@ -1158,11 +1165,11 @@ mod stream_build_tests {
     /// lands in is the perfect hash's choice — so the invariant is pinned directly.
     #[test]
     fn window_of_clamps_a_zero_length_key_at_the_end_of_the_arena() {
-        let (prefix, data_len, width) = StringArena::prefix_for_lengths(&[4, 4, 0]);
+        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[4, 4, 0]);
         assert_eq!(data_len, 8);
         let layout = ArenaLayout {
             prefix: &prefix,
-            width,
+            tag,
             data_start: 0,
             data_len,
             window: 4,
@@ -1181,10 +1188,10 @@ mod stream_build_tests {
     /// a short record and desynchronise the spill.
     #[test]
     fn a_replayed_key_of_the_wrong_length_is_refused_even_when_the_hash_matches() {
-        let (prefix, data_len, width) = StringArena::prefix_for_lengths(&[3]);
+        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[3]);
         let layout = ArenaLayout {
             prefix: &prefix,
-            width,
+            tag,
             data_start: 0,
             data_len,
             window: 64,
@@ -1242,6 +1249,34 @@ mod stream_build_tests {
         assert_eq!(b.id("not-a-key"), None);
         std::fs::remove_dir_all(wide.parent().unwrap()).ok();
         std::fs::remove_dir_all(narrow.parent().unwrap()).ok();
+    }
+
+    /// Keys long enough that a 16-slot block cannot be described by one-byte offsets, so the arena
+    /// is laid out with 256-slot blocks and two-byte ones. The streamed build reads its spans out
+    /// of a prefix rather than a finished arena, so that second encoding has its own arithmetic in
+    /// `span_at`, and this is the corpus that runs it — through the windowed path, where a wrong
+    /// span would scatter a record into the wrong window rather than merely read the wrong bytes.
+    #[test]
+    fn build_to_file_lays_out_two_byte_blocks_for_long_keys() {
+        let keys: Vec<String> = (0..300).map(|i| format!("{i:040}")).collect();
+        let path = tmp("wide_blocks.bmp");
+        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 512).unwrap();
+
+        let in_memory = PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), in_memory, "streamed blob");
+
+        let idx = PerfectHashIndex::load(&path).unwrap();
+        assert_eq!(
+            idx.arena.tag(),
+            0x12,
+            "these keys must not fit one-byte offsets"
+        );
+        for k in &keys {
+            let id = idx.id(k).expect("every key is a member");
+            assert_eq!(idx.key(id), Some(k.as_str()));
+        }
+        assert_eq!(idx.id("not-a-key"), None);
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
     /// An empty key at the end of the arena starts exactly at `data_len`, one past the last
