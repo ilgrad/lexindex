@@ -69,6 +69,42 @@ pub trait OverlayKeys: OverlayBase + Sized {
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError>;
 }
 
+/// The `BuildHasher` of [`Overlay`]'s addition lookup, whose keys are already hashes: it hands back
+/// the `u64` it was given.
+///
+/// That map is keyed on `blob::hash_block` output, which a splitmix64 finalizer has already
+/// avalanched. Running the default SipHash over those eight bytes again would add its cost to every
+/// `id` on an addition and buy nothing — the bucket index would be no better distributed. Only
+/// `write_u64` is implemented; the map's key type is `u64`, so nothing else can be reached.
+///
+/// This is not a HashDoS position, and does not change one: `SECURITY.md` already says the hashes
+/// are unseeded and deterministic, so someone who chooses the keys can search for collisions
+/// offline whatever this map hashes with.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PreHashed(u64);
+
+impl std::hash::Hasher for PreHashed {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, _: &[u8]) {
+        unreachable!("the addition lookup is keyed by u64, which hashes through write_u64")
+    }
+
+    fn write_u64(&mut self, h: u64) {
+        self.0 = h;
+    }
+}
+
+impl std::hash::BuildHasher for PreHashed {
+    type Hasher = Self;
+
+    fn build_hasher(&self) -> Self {
+        Self(0)
+    }
+}
+
 /// An immutable index plus the keys added after it and the ids retired from it.
 ///
 /// Ids are stable: an id issued once is never issued again, and removing a key does not renumber
@@ -89,11 +125,30 @@ pub trait OverlayKeys: OverlayBase + Sized {
 #[derive(Debug, Clone)]
 pub struct Overlay<I> {
     base: I,
-    /// Key → id for everything added after the base, kept even once tombstoned so that re-adding
-    /// revives the original id instead of issuing a second one for the same string.
-    added: std::collections::HashMap<String, u64>,
-    /// Additions in id order, so `key(id)` is an index rather than a scan.
-    added_keys: Vec<String>,
+    /// Every added key's bytes, once, concatenated in id order.
+    ///
+    /// The additions are the only strings an overlay owns, and until 1.0.1 it owned each of them
+    /// twice: once in a `Vec<String>`, so `key(id)` could index, and again as the owned key of a
+    /// `HashMap<String, u64>`, so `id(key)` could hash. One arena serves both.
+    added_data: String,
+    /// Where each addition ends in [`added_data`](Self::added_data); its length is how many
+    /// additions there are, and the `i`-th runs from `added_ends[i - 1]` (or 0) to `added_ends[i]`.
+    added_ends: Vec<usize>,
+    /// Hash of an added key → the index of the first addition carrying that hash. The stored key is
+    /// compared before the index is believed, so the map never holds a string of its own.
+    ///
+    /// Which hash is an in-memory choice and not a format one: nothing here is serialised, and a
+    /// blob's additions are a plain length-prefixed list. It is `blob::hash_block` because that one
+    /// exists in every feature configuration — `hash::hash_key` lives behind `mph` and an overlay
+    /// does not — and because it consumes eight bytes per multiply, so a long added key does not
+    /// pay per byte the way the byte-serial `hash_bytes` would.
+    added_lookup: std::collections::HashMap<u64, usize, PreHashed>,
+    /// `(hash, index)` for an addition whose hash a previous one already had. Two *distinct* keys
+    /// need a full 64-bit collision to land here — `n(n-1)/2^65`, which is 2.7e-8 at a million
+    /// additions — so this is empty in every run that will ever happen. It exists because
+    /// "essentially never" is not a contract, and the lookup above would otherwise answer `None`
+    /// for a key it holds.
+    added_collisions: Vec<(u64, usize)>,
     /// One bit per id ever issued: base ids below `base.base_len()`, additions above it.
     dead: Vec<u64>,
     live: usize,
@@ -106,8 +161,10 @@ impl<I: OverlayBase> Overlay<I> {
         let live = base.base_len();
         Self {
             base,
-            added: std::collections::HashMap::new(),
-            added_keys: Vec::new(),
+            added_data: String::new(),
+            added_ends: Vec::new(),
+            added_lookup: std::collections::HashMap::default(),
+            added_collisions: Vec::new(),
             dead: Vec::new(),
             live,
         }
@@ -131,7 +188,42 @@ impl<I: OverlayBase> Overlay<I> {
     /// How many ids have ever been issued. `key(id)` is `None` for every `id` at or above this,
     /// and ids below it may be live or retired.
     pub fn id_space(&self) -> u64 {
-        self.base.base_len() as u64 + self.added_keys.len() as u64
+        self.base.base_len() as u64 + self.added_ends.len() as u64
+    }
+
+    /// The `i`-th addition's bytes, borrowed from the arena.
+    fn added_key(&self, i: usize) -> &str {
+        let start = if i == 0 { 0 } else { self.added_ends[i - 1] };
+        &self.added_data[start..self.added_ends[i]]
+    }
+
+    /// The index of the addition equal to `key`, or `None` if there is none.
+    fn added_index(&self, key: &str) -> Option<usize> {
+        let h = crate::blob::hash_block(key.as_bytes());
+        let first = *self.added_lookup.get(&h)?;
+        if self.added_key(first) == key {
+            return Some(first);
+        }
+        // Reached only when two distinct added keys share a 64-bit hash; see `added_collisions`.
+        self.added_collisions
+            .iter()
+            .find_map(|&(hh, i)| (hh == h && self.added_key(i) == key).then_some(i))
+    }
+
+    /// Append `key` to the arena and index it. The caller has already established that no addition
+    /// equals it, which is what lets an occupied slot go straight to the collision list.
+    fn push_added(&mut self, key: &str) -> usize {
+        let i = self.added_ends.len();
+        self.added_data.push_str(key);
+        self.added_ends.push(self.added_data.len());
+        let h = crate::blob::hash_block(key.as_bytes());
+        match self.added_lookup.entry(h) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(i);
+            }
+            std::collections::hash_map::Entry::Occupied(_) => self.added_collisions.push((h, i)),
+        }
+        i
     }
 
     fn is_dead(&self, id: u64) -> bool {
@@ -156,19 +248,25 @@ impl<I: OverlayBase> Overlay<I> {
 
     /// The id of `key`, or `None` if it is absent or has been removed.
     ///
-    /// A key the base holds costs the base's own lookup plus one bitset probe. A key added later
-    /// costs a hash-map lookup on top, which is the price of an overlay and the reason
-    /// [`compact`](Self::compact) exists.
+    /// A key the base holds costs the base's own lookup plus one bitset probe, and is unaffected
+    /// by anything below. A key added later costs a hash lookup and an arena read on top, which is
+    /// the price of an overlay and the reason [`compact`](Self::compact) exists.
+    ///
+    /// That second path is tuned for space, not latency. Holding the additions in an arena rather
+    /// than as owned `String`s cut the resident cost of a ten-byte addition from 147 to 55 bytes
+    /// and made [`add`](Self::add) about three times faster, at the cost of roughly 35 ns on short
+    /// added keys: measured over a million additions, `id` on an addition went from 71-76 ns to
+    /// 106-113 ns at ten bytes, drew level at twenty, and became about 1.8x faster at forty, where
+    /// the arena's one copy replaces chasing a heap pointer per key. Short keys are the case that
+    /// regressed; base keys and long added keys did not.
     pub fn id(&self, key: &str) -> Option<u64> {
         if let Some(id) = self.base.base_id(key) {
             // Only reached once the base has already answered, so the base path pays for this bit
             // and nothing more. A base key cannot also be an addition: `add` revives instead.
             return (!self.is_dead(id)).then_some(id);
         }
-        match self.added.get(key) {
-            Some(&id) if !self.is_dead(id) => Some(id),
-            _ => None,
-        }
+        let id = self.base.base_len() as u64 + self.added_index(key)? as u64;
+        (!self.is_dead(id)).then_some(id)
     }
 
     /// Whether `key` is live, with the base's membership contract — exact for
@@ -191,7 +289,8 @@ impl<I: OverlayBase> Overlay<I> {
             }
             return id;
         }
-        if let Some(&id) = self.added.get(key) {
+        if let Some(i) = self.added_index(key) {
+            let id = self.base.base_len() as u64 + i as u64;
             if self.is_dead(id) {
                 self.set_dead(id, false);
                 self.live += 1;
@@ -199,8 +298,7 @@ impl<I: OverlayBase> Overlay<I> {
             return id;
         }
         let id = self.id_space();
-        self.added_keys.push(key.to_owned());
-        self.added.insert(key.to_owned(), id);
+        self.push_added(key);
         self.live += 1;
         id
     }
@@ -236,7 +334,12 @@ impl<I: OverlayKeys> Overlay<I> {
         let base_n = self.base.base_len() as u64;
         match id.checked_sub(base_n) {
             None => self.base.base_key(id),
-            Some(off) => self.added_keys.get(off as usize).cloned(),
+            // `try_from` rather than `as`: on a 32-bit target an id above `usize::MAX` would
+            // otherwise truncate onto a real addition and answer someone else's key.
+            Some(off) => usize::try_from(off)
+                .ok()
+                .filter(|&i| i < self.added_ends.len())
+                .map(|i| self.added_key(i).to_owned()),
         }
     }
 
@@ -419,11 +522,12 @@ impl<I: OverlayBase> Overlay<I> {
     /// trust model of the base's format — see [`from_bytes_with`](Self::from_bytes_with).
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let base = self.base.base_to_bytes()?;
-        let added: usize = self.added_keys.iter().map(|k| 4 + k.len()).sum();
+        let added: usize = self.added_data.len() + 4 * self.added_ends.len();
         let mut out = Vec::with_capacity(OVERLAY_HEADER + base.len() + added + self.dead.len() * 8);
         out.resize(OVERLAY_HEADER, 0);
         out.extend_from_slice(&base);
-        for key in &self.added_keys {
+        for i in 0..self.added_ends.len() {
+            let key = self.added_key(i);
             let len = u32::try_from(key.len())
                 .map_err(|_| IndexError::Format("added key longer than 4 GiB"))?;
             out.extend_from_slice(&len.to_le_bytes());
@@ -437,7 +541,7 @@ impl<I: OverlayBase> Overlay<I> {
         out[0..4].copy_from_slice(OVERLAY_MAGIC);
         out[4] = I::BASE_TAG;
         out[5..13].copy_from_slice(&(base.len() as u64).to_le_bytes());
-        out[13..21].copy_from_slice(&(self.added_keys.len() as u64).to_le_bytes());
+        out[13..21].copy_from_slice(&(self.added_ends.len() as u64).to_le_bytes());
         out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
         out[29..37].copy_from_slice(&(self.dead.len() as u64).to_le_bytes());
         seal(&mut out);
@@ -558,24 +662,33 @@ impl<I: OverlayBase> Overlay<I> {
             ..
         } = sections;
         let mut at = 0;
-        let mut added_keys = Vec::with_capacity(added_count.min(1 << 16));
-        let mut added = std::collections::HashMap::with_capacity(added_count.min(1 << 16));
-        for i in 0..added_count {
+        // The region's length is an upper bound on the arena, and those bytes have already been
+        // shown to be present — so this reserve is sized by the blob rather than by a claim in it.
+        let mut this = Self {
+            base,
+            added_data: String::with_capacity(additions.len()),
+            added_ends: Vec::with_capacity(added_count.min(1 << 16)),
+            added_lookup: std::collections::HashMap::with_capacity_and_hasher(
+                added_count.min(1 << 16),
+                PreHashed::default(),
+            ),
+            added_collisions: Vec::new(),
+            dead: Vec::new(),
+            live: 0,
+        };
+        for _ in 0..added_count {
             let (key, next) = read_addition(additions, at)?;
             at = next;
             // `add` consults the base first and revives its id rather than issuing a second one, so
             // no blob this crate writes holds an addition the base already has. Over a
             // probabilistic base the same check would reject sound blobs, hence the constant.
-            if I::EXACT_MEMBERSHIP && base.base_id(key).is_some() {
+            if I::EXACT_MEMBERSHIP && this.base.base_id(key).is_some() {
                 return Err(IndexError::Format("overlay addition duplicates a base key"));
             }
-            if added
-                .insert(key.to_string(), base.base_len() as u64 + i as u64)
-                .is_some()
-            {
+            if this.added_index(key).is_some() {
                 return Err(IndexError::Format("duplicate key among overlay additions"));
             }
-            added_keys.push(key.to_string());
+            this.push_added(key);
         }
         // Only reachable under `OVL2`, whose header states the region's length independently of the
         // additions in it: `OVL1` has no such field, so its region is whatever the walk consumed.
@@ -592,7 +705,7 @@ impl<I: OverlayBase> Overlay<I> {
             .map(|w| u64::from_le_bytes(w.try_into().expect("8 bytes")))
             .collect();
 
-        let id_space = base.base_len() as u64 + added_keys.len() as u64;
+        let id_space = this.id_space();
         let last = (id_space / 64) as usize;
         let stray = dead.iter().enumerate().any(|(w, word)| match w.cmp(&last) {
             std::cmp::Ordering::Less => false,
@@ -606,13 +719,9 @@ impl<I: OverlayBase> Overlay<I> {
         let retired: u64 = dead.iter().map(|w| u64::from(w.count_ones())).sum();
         let live = (id_space - retired) as usize;
 
-        Ok(Self {
-            base,
-            added,
-            added_keys,
-            dead,
-            live,
-        })
+        this.dead = dead;
+        this.live = live;
+        Ok(this)
     }
 }
 
@@ -1312,5 +1421,51 @@ mod tests {
         for k in ["alpha", "gamma", "delta"] {
             assert!(ov.contains(k), "{k}");
         }
+    }
+
+    /// Two distinct additions whose 64-bit hashes are equal.
+    ///
+    /// The pair was found by Pollard rho over `blob::hash_block` (`local/blobcollide`), because no
+    /// key set anyone builds will produce one: `n(n-1)/2^65` is 2.7e-8 at a million additions. The
+    /// lookup's collision list exists for exactly this case, and without a pinned pair nothing
+    /// would ever execute it — an untested branch guarding an event that cannot be reproduced is
+    /// how a wrong answer waits years to be found.
+    #[test]
+    fn additions_sharing_a_hash_keep_their_own_ids() {
+        const A: &str = "mqko3xbnxy2gd";
+        const B: &str = "eye7iouhhweao";
+        assert_ne!(A, B);
+        assert_eq!(
+            crate::blob::hash_block(A.as_bytes()),
+            crate::blob::hash_block(B.as_bytes()),
+            "the pinned pair no longer collides: `hash_block` changed, so find another with \
+             `local/blobcollide` rather than deleting this test"
+        );
+
+        let base = StringIndex::build(["apple", "banana"]).unwrap();
+        let mut ov = Overlay::new(base);
+        let a = ov.add(A);
+        let b = ov.add(B);
+        assert_ne!(a, b, "a shared hash must not merge two keys onto one id");
+        assert_eq!((ov.id(A), ov.id(B)), (Some(a), Some(b)));
+        assert_eq!(
+            (ov.key(a).as_deref(), ov.key(b).as_deref()),
+            (Some(A), Some(B))
+        );
+        assert_eq!(
+            ov.add(A),
+            a,
+            "re-adding revives rather than issuing a second id"
+        );
+        assert_eq!(ov.len(), 4);
+
+        // Through a blob as well: `assemble` rebuilds the lookup from the bytes, so it has to
+        // reach the same branch — including the duplicate check that runs before each push.
+        let blob = ov.to_bytes().unwrap();
+        let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes).unwrap();
+        assert_eq!((back.id(A), back.id(B)), (Some(a), Some(b)));
+
+        assert!(ov.remove(A));
+        assert_eq!((ov.id(A), ov.id(B)), (None, Some(b)));
     }
 }

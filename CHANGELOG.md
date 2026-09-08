@@ -17,6 +17,22 @@ All notable changes to this project are documented here. The format follows
   0.12.1 while the security policy still promised otherwise. The policy now states the exception,
   and names the four parsers a fuzz target actually covers rather than implying all five.
 
+- **An `Overlay` stored every added key twice.** `add` owned each string once in a `Vec<String>`,
+  so `key(id)` could index, and again as the key of a `HashMap<String, u64>`, so `id(key)` could
+  hash. The additions now live once in a byte arena, indexed by a map from the key's hash to its
+  position — which is what the perfect-hash indexes have always done, down to the side list for the
+  64-bit collision that essentially never happens — pinned by a test over a real colliding pair,
+  since a branch guarding a 2.7e-8 event is otherwise never executed. Measured over a million
+  ten-byte additions: peak RSS falls from 172 to 69 bytes per added key, the resident cost of
+  holding them from 147 to 55, and `add` runs about three times faster. The trade is paid by `id`
+  on a *short* addition, which goes from 71-76 ns to 106-113 ns at ten bytes, draws level at
+  twenty, and wins by about 1.8x at forty; base keys are untouched, since the base answers first.
+
+- **`Overlay::key` could answer someone else's key on a 32-bit target.** An id above `usize::MAX`
+  was narrowed with `as` before the bounds check, so it wrapped onto a real addition instead of
+  returning `None`. Reachable only where `usize` is 32 bits and only for an id no `add` ever
+  issued, which is why no test had caught it; the conversion is now `try_from`.
+
 - **`PerfectHashIndex` was documented as the "fastest exact `string → dense id`" in seven places.**
   Its own benchmark says otherwise: `id` costs about what a `std::HashMap` lookup does, and the
   claim belongs to `id_unchecked`, which skips the membership comparison for a closed vocabulary.
