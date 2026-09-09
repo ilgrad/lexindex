@@ -158,8 +158,10 @@ bytes per arena took the whole structure to 13.62. Since 1.1 the offsets are **b
 share a `u32` base and carry one-byte *cumulative* offsets after it (tag `0x11`, 21 bytes per block),
 so a key is `data[base + off[k] .. base + off[k + 1]]` — 1.31 bytes per key instead of 4, and the
 whole index is **10.94 B/key**. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot
-blocks with two-byte offsets (`0x12`, 2.02 B/key), and one that fits neither, or exceeds 4 GiB, keeps
-the flat table. The encoding is chosen once at build time and recorded in the tag, so reading it is a
+blocks with two-byte offsets (`0x12`, 2.02 B/key); past 4 GiB of data the blocks keep their offsets
+and widen their bases to `u64` (`0x31` / `0x32`, 1.56 / 2.04 B/key — the flat `u64` table that size
+took before 1.2 cost 8), and only a 256-key run past 64 KiB, which no block width holds, keeps the
+flat table. The encoding is chosen once at build time and recorded in the tag, so reading it is a
 branch that never changes for the life of the index.
 
 `build_with_fingerprints` sets bit `0x80` of the tag and stores one byte per slot behind the offsets —

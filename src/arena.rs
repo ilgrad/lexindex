@@ -16,6 +16,8 @@
 //! |---|---|---|---|
 //! | `0x11` | `[base u32][off u8 × 17]` | 16 | 1.31 |
 //! | `0x12` | `[base u32][off u16 × 257]` | 256 | 2.02 |
+//! | `0x31` | `[base u64][off u8 × 17]` | 16 | 1.56 |
+//! | `0x32` | `[base u64][off u16 × 257]` | 256 | 2.04 |
 //! | `4` | — | — | 4 |
 //! | `8` | — | — | 8 |
 //!
@@ -30,7 +32,10 @@
 //! four, and cost a member probe 6 ns against 3 for this layout.
 //!
 //! The build is optimistic: it lays out `0x11` and widens only when a block overflows its offset
-//! width, or when the arena passes 4 GiB and a `u32` base can no longer reach the data.
+//! width. Past 4 GiB of data the bases widen to `u64` instead — bit `0x20` of the tag — and the
+//! offsets stay blocked: 1.56 bytes per key where the flat `u64` table, the only encoding for that
+//! size before 1.2, cost 8. The flat tables remain for a 256-key run past 64 KiB, which no block
+//! width holds.
 //!
 //! This is the second narrowing of the same table, and both were worth what they cost. Before
 //! 0.5.0 every offset was 8 bytes: on the 479 823-word dictionary that was 8.0 of
@@ -57,6 +62,11 @@ const BLOCK_U8: u8 = 0x11;
 const BLOCK_U16: u8 = 0x12;
 const B_U8: usize = 16;
 const B_U16: usize = 256;
+/// Set on a blocked tag whose bases are `u64`: `0x31` is `0x11` past 4 GiB of data. Never on a
+/// flat tag — the flat `u64` table is its own encoding, `8`.
+const WIDE_BASE: u8 = 0x20;
+/// The data length past which a `u32` base can no longer reach every block.
+const NARROW_LIMIT: usize = u32::MAX as usize;
 /// Set on a tag that stores a fingerprint byte per slot behind the offsets: `0x91` is the `0x11`
 /// layout with fingerprints. The offsets keep their geometry; a block, or the flat table, grows
 /// by one byte per slot at its end.
@@ -70,7 +80,7 @@ pub(crate) struct StringArena {
     blob: SharedBytes, // [n_off: u64][tag: u8][offset structure][data]
     n: usize,          // number of strings == n_off - 1
     data_start: usize, // HEADER + the offset structure's length
-    tag: u8,           // NARROW, WIDE, BLOCK_U8 or BLOCK_U16, any of them `| FP`
+    tag: u8, // NARROW, WIDE, BLOCK_U8 or BLOCK_U16 (those two also `| WIDE_BASE`), any `| FP`
 }
 
 impl StringArena {
@@ -101,7 +111,8 @@ impl StringArena {
     {
         let items = items.into_iter();
         let (n, data_len) = Self::totals(items.clone());
-        Self::assemble(items, n, data_len, None).expect("totals came from the iterator itself")
+        Self::assemble(items, n, data_len, None, NARROW_LIMIT)
+            .expect("totals came from the iterator itself")
     }
 
     fn totals<I, S>(items: I) -> (usize, usize)
@@ -130,21 +141,46 @@ impl StringArena {
         I::IntoIter: Clone,
         S: AsRef<str>,
     {
+        Self::build_exact_limited(items, n, data_len, fps, NARROW_LIMIT)
+    }
+
+    /// [`build_exact`](Self::build_exact) with the data length past which bases are `u64`
+    /// injected, so a test reaches the layouts a 4 GiB arena takes with a 40-byte one.
+    pub(crate) fn build_exact_limited<I, S>(
+        items: I,
+        n: usize,
+        data_len: usize,
+        fps: Option<&[u8]>,
+        limit: usize,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        I::IntoIter: Clone,
+        S: AsRef<str>,
+    {
         let items = items.into_iter();
-        match Self::assemble(items.clone(), n, data_len, fps) {
+        match Self::assemble(items.clone(), n, data_len, fps, limit) {
             Some(arena) => arena,
             None => {
                 let (n, data_len) = Self::totals(items.clone());
-                Self::assemble(items, n, data_len, fps)
-                    .expect("totals came from the iterator itself, one fingerprint per string")
+                Self::assemble(items, n, data_len, fps, limit).expect(
+                    "totals came from the iterator itself, one fingerprint per string, no key \
+                     past u32::MAX bytes",
+                )
             }
         }
     }
 
     /// Write the whole arena into one buffer sized for `n` strings holding `data_len` bytes.
-    /// `None` if the iterator disagrees with either total, or `fps` is not one per string — the
-    /// caller decides what to do about it.
-    fn assemble<I, S>(items: I, n: usize, data_len: usize, fps: Option<&[u8]>) -> Option<Self>
+    /// `None` if the iterator disagrees with either total, `fps` is not one per string, or a key
+    /// is longer than `u32::MAX` bytes — the caller decides what to do about it.
+    fn assemble<I, S>(
+        items: I,
+        n: usize,
+        data_len: usize,
+        fps: Option<&[u8]>,
+        limit: usize,
+    ) -> Option<Self>
     where
         I: Iterator<Item = S>,
         S: AsRef<str>,
@@ -152,58 +188,15 @@ impl StringArena {
         if fps.is_some_and(|f| f.len() != n) {
             return None;
         }
-        let blob = if data_len > u32::MAX as usize {
-            Self::lay_out_wide(items, n, data_len, fps)?
-        } else {
-            Self::lay_out_blocked(items, n, data_len, fps)?
-        };
+        let blob = Self::lay_out_blocked(items, n, data_len, fps, limit)?;
         Some(
             Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
         )
     }
 
-    /// The 8-byte flat table, written as the data lands: the encoding for an arena past 4 GiB,
-    /// which no blocked base can reach. Every arena below that goes through
-    /// [`lay_out_blocked`](Self::lay_out_blocked), which picks between the three narrower ones.
-    fn lay_out_wide<I, S>(
-        items: I,
-        n: usize,
-        data_len: usize,
-        fps: Option<&[u8]>,
-    ) -> Option<Vec<u8>>
-    where
-        I: Iterator<Item = S>,
-        S: AsRef<str>,
-    {
-        let tag = tag_with(WIDE as u8, fps.is_some());
-        let data_start = prefix_len(tag, n)?;
-        let mut blob = Vec::with_capacity(data_start + data_len);
-        blob.resize(data_start, 0); // offset table, filled in as the data lands after it
-        write_offset(&mut blob, HEADER, WIDE, 0);
-        let mut count = 0usize;
-        for s in items {
-            if count == n {
-                return None; // more strings than the table was sized for
-            }
-            blob.extend_from_slice(s.as_ref().as_bytes());
-            if let Some(fps) = fps {
-                blob[HEADER + (n + 1) * WIDE + count] = fps[count];
-            }
-            count += 1;
-            let end = (blob.len() - data_start) as u64;
-            write_offset(&mut blob, HEADER + count * WIDE, WIDE, end);
-        }
-        // An overstated `data_len` would otherwise wrap a wide table around data a blocked layout
-        // addresses — a different arena from the one `build` derives for the same strings.
-        if count != n || blob.len() - data_start <= u32::MAX as usize {
-            return None;
-        }
-        write_head(&mut blob, n, tag);
-        Some(blob)
-    }
-
-    /// Stream the data behind a header sized for `0x11`, then choose the encoding the lengths
-    /// actually need and fill the header in place.
+    /// Stream the data behind a header sized for `0x11` — or for `0x31` when the caller's total
+    /// already says the data passes `limit`, so the common wide case moves nothing — then choose
+    /// the encoding the lengths actually need and fill the header in place.
     ///
     /// A widening moves the data once, by one `copy_within`, and never re-walks the iterator: the
     /// source may be a permutation the caller cannot cheaply replay, and for `PerfectHashIndex` it
@@ -213,12 +206,14 @@ impl StringArena {
         n: usize,
         data_len: usize,
         fps: Option<&[u8]>,
+        limit: usize,
     ) -> Option<Vec<u8>>
     where
         I: Iterator<Item = S>,
         S: AsRef<str>,
     {
-        let optimistic_tag = tag_with(BLOCK_U8, fps.is_some());
+        let wide = if data_len > limit { WIDE_BASE } else { 0 };
+        let optimistic_tag = tag_with(BLOCK_U8 | wide, fps.is_some());
         let optimistic = prefix_len(optimistic_tag, n)?;
         let mut blob = Vec::with_capacity(optimistic + data_len);
         blob.resize(optimistic, 0);
@@ -229,15 +224,13 @@ impl StringArena {
             }
             let bytes = s.as_ref().as_bytes();
             blob.extend_from_slice(bytes);
-            // Truncating only if the caller's `data_len` was an underestimate, which the check
-            // below catches before any of these lengths is read.
-            lens.push(bytes.len() as u32);
+            lens.push(u32::try_from(bytes.len()).ok()?); // no encoding holds a longer key
         }
         let written = blob.len() - optimistic;
-        if lens.len() != n || written > u32::MAX as usize {
+        if lens.len() != n {
             return None;
         }
-        let tag = tag_for(&lens, written, fps.is_some());
+        let tag = tag_for(&lens, written, fps.is_some(), limit);
         if tag != optimistic_tag {
             let widened = prefix_len(tag, n)?;
             move_data(&mut blob, optimistic, written, widened);
@@ -259,8 +252,19 @@ impl StringArena {
     /// it — otherwise an `mph`-without-`mmap` build carries two functions nothing can call.
     #[cfg(feature = "mmap")]
     pub(crate) fn prefix_for_lengths(lens: &[u32], fps: Option<&[u8]>) -> (Vec<u8>, usize, u8) {
+        Self::prefix_for_lengths_limited(lens, fps, NARROW_LIMIT)
+    }
+
+    /// [`prefix_for_lengths`](Self::prefix_for_lengths) with the `u64`-base limit injected, as
+    /// [`build_exact_limited`](Self::build_exact_limited).
+    #[cfg(feature = "mmap")]
+    pub(crate) fn prefix_for_lengths_limited(
+        lens: &[u32],
+        fps: Option<&[u8]>,
+        limit: usize,
+    ) -> (Vec<u8>, usize, u8) {
         let data_len: usize = lens.iter().map(|&l| l as usize).sum();
-        let tag = tag_for(lens, data_len, fps.is_some());
+        let tag = tag_for(lens, data_len, fps.is_some(), limit);
         let mut blob =
             vec![0u8; prefix_len(tag, lens.len()).expect("lengths came from a real corpus")];
         write_head(&mut blob, lens.len(), tag);
@@ -323,20 +327,20 @@ impl StringArena {
         let bytes = self.blob.as_ref();
         let at = offsets_start(self.tag, i);
         crate::blob::prefetch_byte(bytes, at);
-        let (kind, fp) = split(self.tag);
-        let (slots, width) = match kind {
+        let g = split(self.tag);
+        let (slots, width) = match g.layout {
             BLOCK_U8 => (B_U8, 1),
             BLOCK_U16 => (B_U16, 2),
             w => {
-                if fp == 1 {
+                if g.fp == 1 {
                     crate::blob::prefetch_byte(bytes, HEADER + (self.n + 1) * w as usize + i);
                 }
                 return;
             }
         };
-        crate::blob::prefetch_byte(bytes, at + 4 + (i % slots) * width);
-        if fp == 1 {
-            crate::blob::prefetch_byte(bytes, at + 4 + (slots + 1) * width + i % slots);
+        crate::blob::prefetch_byte(bytes, at + g.base + (i % slots) * width);
+        if g.fp == 1 {
+            crate::blob::prefetch_byte(bytes, at + g.base + (slots + 1) * width + i % slots);
         }
     }
 
@@ -417,9 +421,10 @@ impl StringArena {
             return Err(IndexError::Format("arena: zero offsets (need at least 1)"));
         }
         let n = n_off - 1;
-        // `4 | 8`: `NARROW` and `WIDE` as tag bytes.
+        // `4 | 8`: `NARROW` and `WIDE` as tag bytes; a flat table never carries `WIDE_BASE`.
         let tag = match bytes.get(8) {
-            Some(&t) if matches!(split(t).0, BLOCK_U8 | BLOCK_U16 | 4 | 8) => t,
+            Some(&t) if matches!(split(t).layout, BLOCK_U8 | BLOCK_U16) => t,
+            Some(&t) if matches!(t & !FP, 4 | 8) => t,
             _ => return Err(IndexError::Format("arena: unknown offset encoding")),
         };
         let data_start =
@@ -452,32 +457,49 @@ impl StringArena {
     }
 }
 
-/// The tag's layout and whether its entries carry fingerprints — as `0` or `1`, so the stride
-/// arithmetic can add it.
+/// What a tag says, split into the three things the arithmetic needs: which of the four encodings,
+/// how wide a block's base is, and whether a fingerprint byte follows each slot — the last as `0`
+/// or `1`, so the stride arithmetic can add it.
+#[derive(Clone, Copy)]
+struct Geometry {
+    layout: u8,
+    base: usize,
+    fp: usize,
+}
+
 #[inline(always)]
-fn split(tag: u8) -> (u8, usize) {
-    (tag & !FP, usize::from(tag & FP != 0))
+fn split(tag: u8) -> Geometry {
+    Geometry {
+        layout: tag & !(FP | WIDE_BASE),
+        base: if tag & WIDE_BASE != 0 { WIDE } else { NARROW },
+        fp: usize::from(tag & FP != 0),
+    }
 }
 
 fn tag_with(kind: u8, fingerprints: bool) -> u8 {
     if fingerprints { kind | FP } else { kind }
 }
 
-/// One block header: the base, `slots + 1` offsets of `width` bytes and, with fingerprints, one
-/// byte more per slot — interleaved, so an entry is `[off][fp]` and the fencepost offset is last.
+/// One block header: a base of `base` bytes, `slots + 1` offsets of `width` bytes and, with
+/// fingerprints, one byte more per slot — behind the offsets, so the fencepost offset stays where
+/// it is.
 #[inline(always)]
-const fn block_bytes(slots: usize, width: usize, fp: usize) -> usize {
-    4 + (slots + 1) * width + slots * fp
+const fn block_bytes(slots: usize, width: usize, base: usize, fp: usize) -> usize {
+    base + (slots + 1) * width + slots * fp
 }
 
 /// Bytes from the start of the arena to the start of its data, or `None` if a header-supplied `n`
 /// makes that overflow.
 fn prefix_len(tag: u8, n: usize) -> Option<usize> {
-    let (kind, fp) = split(tag);
-    let table = match kind {
-        BLOCK_U8 => n.div_ceil(B_U8).checked_mul(block_bytes(B_U8, 1, fp))?,
-        BLOCK_U16 => n.div_ceil(B_U16).checked_mul(block_bytes(B_U16, 2, fp))?,
-        w => n.checked_mul(w as usize + fp)?.checked_add(w as usize)?,
+    let g = split(tag);
+    let table = match g.layout {
+        BLOCK_U8 => n
+            .div_ceil(B_U8)
+            .checked_mul(block_bytes(B_U8, 1, g.base, g.fp))?,
+        BLOCK_U16 => n
+            .div_ceil(B_U16)
+            .checked_mul(block_bytes(B_U16, 2, g.base, g.fp))?,
+        w => n.checked_mul(w as usize + g.fp)?.checked_add(w as usize)?,
     };
     table.checked_add(HEADER)
 }
@@ -485,15 +507,15 @@ fn prefix_len(tag: u8, n: usize) -> Option<usize> {
 /// Where slot `i`'s offsets live: its block header, or its pair of flat entries.
 #[inline(always)]
 fn offsets_start(tag: u8, i: usize) -> usize {
-    let (kind, fp) = split(tag);
-    offsets_start_in(kind, fp, i)
+    let g = split(tag);
+    offsets_start_in(g.layout, g.base, g.fp, i)
 }
 
 #[inline(always)]
-fn offsets_start_in(kind: u8, fp: usize, i: usize) -> usize {
-    match kind {
-        BLOCK_U8 => HEADER + (i / B_U8) * block_bytes(B_U8, 1, fp),
-        BLOCK_U16 => HEADER + (i / B_U16) * block_bytes(B_U16, 2, fp),
+fn offsets_start_in(layout: u8, base: usize, fp: usize, i: usize) -> usize {
+    match layout {
+        BLOCK_U8 => HEADER + (i / B_U8) * block_bytes(B_U8, 1, base, fp),
+        BLOCK_U16 => HEADER + (i / B_U16) * block_bytes(B_U16, 2, base, fp),
         w => HEADER + i * w as usize,
     }
 }
@@ -503,42 +525,43 @@ fn offsets_start_in(kind: u8, fp: usize, i: usize) -> usize {
 /// backwards — a corrupt blob answers "no such key", never a wild slice. `n` locates a flat
 /// table's fingerprint row, which follows its `n + 1` offsets.
 ///
-/// The fingerprint bit is decided once, into a copy specialised on it, so the layouts without
-/// fingerprints keep the constant strides they had before the bit existed.
+/// The fingerprint and base-width bits are decided once, into a copy specialised on them, so the
+/// layout without either keeps the constant strides it had before the bits existed.
 #[inline(always)]
 fn entry_of(bytes: &[u8], tag: u8, n: usize, i: usize) -> Option<((usize, usize), u8)> {
-    let (kind, fp) = split(tag);
-    if fp == 1 {
-        entry_in::<1>(bytes, kind, n, i)
-    } else {
-        entry_in::<0>(bytes, kind, n, i)
+    let g = split(tag);
+    match (g.fp, g.base) {
+        (0, NARROW) => entry_in::<0, NARROW>(bytes, g.layout, n, i),
+        (0, _) => entry_in::<0, WIDE>(bytes, g.layout, n, i),
+        (_, NARROW) => entry_in::<1, NARROW>(bytes, g.layout, n, i),
+        _ => entry_in::<1, WIDE>(bytes, g.layout, n, i),
     }
 }
 
 #[inline(always)]
-fn entry_in<const F: usize>(
+fn entry_in<const F: usize, const B: usize>(
     bytes: &[u8],
-    kind: u8,
+    layout: u8,
     n: usize,
     i: usize,
 ) -> Option<((usize, usize), u8)> {
-    let at = offsets_start_in(kind, F, i);
-    match kind {
+    let at = offsets_start_in(layout, B, F, i);
+    match layout {
         BLOCK_U8 => {
-            let block = bytes.get(at..at.checked_add(block_bytes(B_U8, 1, F))?)?;
-            let base = u32::from_le_bytes(block[..4].try_into().unwrap()) as usize;
-            let k = 4 + i % B_U8;
+            let block = bytes.get(at..at.checked_add(block_bytes(B_U8, 1, B, F))?)?;
+            let base = read_base::<B>(block)?;
+            let k = B + i % B_U8;
             let span = span_from(base, block[k] as usize, block[k + 1] as usize)?;
             Some((span, if F == 1 { block[k + B_U8 + 1] } else { 0 }))
         }
         BLOCK_U16 => {
-            let block = bytes.get(at..at.checked_add(block_bytes(B_U16, 2, F))?)?;
-            let base = u32::from_le_bytes(block[..4].try_into().unwrap()) as usize;
-            let k = 4 + (i % B_U16) * 2;
+            let block = bytes.get(at..at.checked_add(block_bytes(B_U16, 2, B, F))?)?;
+            let base = read_base::<B>(block)?;
+            let k = B + (i % B_U16) * 2;
             let lo = u16::from_le_bytes(block[k..k + 2].try_into().unwrap()) as usize;
             let hi = u16::from_le_bytes(block[k + 2..k + 4].try_into().unwrap()) as usize;
             let fp = if F == 1 {
-                block[4 + (B_U16 + 1) * 2 + i % B_U16]
+                block[B + (B_U16 + 1) * 2 + i % B_U16]
             } else {
                 0
             };
@@ -558,6 +581,18 @@ fn entry_in<const F: usize>(
     }
 }
 
+/// A block's base, `u32` or `u64` by the tag; `None` where a `u64` one does not fit this
+/// platform's `usize` — a blob past 4 GiB answers "no such key" on a 32-bit target, never a
+/// truncated address.
+#[inline(always)]
+fn read_base<const B: usize>(block: &[u8]) -> Option<usize> {
+    if B == WIDE {
+        usize::try_from(u64::from_le_bytes(block[..8].try_into().unwrap())).ok()
+    } else {
+        Some(u32::from_le_bytes(block[..4].try_into().unwrap()) as usize)
+    }
+}
+
 #[inline(always)]
 fn span_from(base: usize, lo: usize, hi: usize) -> Option<(usize, usize)> {
     if hi < lo {
@@ -567,20 +602,22 @@ fn span_from(base: usize, lo: usize, hi: usize) -> Option<(usize, usize)> {
 }
 
 /// The narrowest encoding that holds these lengths: one byte per offset if no run of 16 keys spans
-/// more than 255 bytes, two if no run of 256 spans more than 65 535, otherwise the flat table.
-fn tag_for(lens: &[u32], data_len: usize, fingerprints: bool) -> u8 {
-    let fits = |b: usize, limit: u64| {
+/// more than 255 bytes, two if no run of 256 spans more than 65 535, otherwise the flat table —
+/// off `u64` bases, or the `u64` table, once the data passes `limit` (4 GiB outside the tests).
+fn tag_for(lens: &[u32], data_len: usize, fingerprints: bool, limit: usize) -> u8 {
+    let fits = |b: usize, most: u64| {
         lens.chunks(b)
-            .all(|c| c.iter().map(|&l| l as u64).sum::<u64>() <= limit)
+            .all(|c| c.iter().map(|&l| l as u64).sum::<u64>() <= most)
     };
-    let kind = if data_len <= u32::MAX as usize && fits(B_U8, u8::MAX as u64) {
-        BLOCK_U8
-    } else if data_len <= u32::MAX as usize && fits(B_U16, u16::MAX as u64) {
-        BLOCK_U16
-    } else if data_len <= u32::MAX as usize {
-        NARROW as u8
-    } else {
+    let wide = data_len > limit;
+    let kind = if fits(B_U8, u8::MAX as u64) {
+        BLOCK_U8 | if wide { WIDE_BASE } else { 0 }
+    } else if fits(B_U16, u16::MAX as u64) {
+        BLOCK_U16 | if wide { WIDE_BASE } else { 0 }
+    } else if wide {
         WIDE as u8
+    } else {
+        NARROW as u8
     };
     tag_with(kind, fingerprints)
 }
@@ -606,9 +643,9 @@ fn move_data(blob: &mut Vec<u8>, from: usize, data_len: usize, to: usize) {
 /// fingerprint: every header byte is written, because a widening leaves stale data bytes where the
 /// wider header now is.
 fn write_offsets(blob: &mut [u8], tag: u8, lens: &[u32], fps: Option<&[u8]>) {
-    let (kind, fp) = split(tag);
-    debug_assert_eq!(fps.is_some(), fp == 1);
-    let (b, width) = match kind {
+    let g = split(tag);
+    debug_assert_eq!(fps.is_some(), g.fp == 1);
+    let (b, width) = match g.layout {
         BLOCK_U8 => (B_U8, 1usize),
         BLOCK_U16 => (B_U16, 2usize),
         w => {
@@ -626,13 +663,13 @@ fn write_offsets(blob: &mut [u8], tag: u8, lens: &[u32], fps: Option<&[u8]>) {
             return;
         }
     };
-    let mut base = 0u32;
+    let mut base = 0u64;
     for (j, chunk) in lens.chunks(b).enumerate() {
-        let at = HEADER + j * block_bytes(b, width, fp);
-        blob[at..at + 4].copy_from_slice(&base.to_le_bytes());
+        let at = HEADER + j * block_bytes(b, width, g.base, g.fp);
+        blob[at..at + g.base].copy_from_slice(&base.to_le_bytes()[..g.base]);
         let mut off = 0u32;
         for k in 0..=b {
-            let p = at + 4 + k * width;
+            let p = at + g.base + k * width;
             match width {
                 1 => blob[p] = off as u8,
                 _ => blob[p..p + 2].copy_from_slice(&(off as u16).to_le_bytes()),
@@ -640,12 +677,12 @@ fn write_offsets(blob: &mut [u8], tag: u8, lens: &[u32], fps: Option<&[u8]>) {
             off += chunk.get(k).copied().unwrap_or(0);
         }
         if let Some(fps) = fps {
-            let row = at + 4 + (b + 1) * width;
+            let row = at + g.base + (b + 1) * width;
             for k in 0..b {
                 blob[row + k] = fps.get(j * b + k).copied().unwrap_or(0);
             }
         }
-        base += off;
+        base += u64::from(off);
     }
 }
 
@@ -695,7 +732,7 @@ mod tests {
         want.extend_from_slice(&[11; 14]); // padded past the end with the block total
         want.extend_from_slice(b"applebanana");
         assert_eq!(arena.to_bytes(), want);
-        assert_eq!(want.len(), HEADER + block_bytes(B_U8, 1, 0) + 11);
+        assert_eq!(want.len(), HEADER + block_bytes(B_U8, 1, NARROW, 0) + 11);
     }
 
     #[test]
@@ -732,7 +769,7 @@ mod tests {
             assert_eq!(
                 arena.to_bytes().len(),
                 HEADER
-                    + n.div_ceil(B_U8) * block_bytes(B_U8, 1, 0)
+                    + n.div_ceil(B_U8) * block_bytes(B_U8, 1, NARROW, 0)
                     + keys.iter().map(String::len).sum::<usize>(),
                 "n={n}"
             );
@@ -768,9 +805,10 @@ mod tests {
     /// The totals a caller passes to `build_exact` are a shortcut, not a promise: whatever they
     /// say, the arena must come out exactly as `build` would have derived it. A count that is too
     /// small is caught mid-fill, one that is too large at the end, and a byte total that is merely
-    /// wrong only mis-sizes the initial allocation. A hint above 4 GiB is *not* exercised here: it
-    /// selects the wide encoding, whose buffer is reserved from the hint, and a test that asks for
-    /// 4 GiB of address space is a test that fails on the first machine without overcommit.
+    /// wrong only mis-sizes the initial allocation. A hint above 4 GiB is *not* exercised here:
+    /// the buffer is reserved from the hint, and a test that asks for 4 GiB of address space fails
+    /// on the first machine without overcommit; the layouts it selects are reached by injecting
+    /// the limit instead.
     #[test]
     fn a_wrong_hint_never_changes_the_arena() {
         let items = ["apple", "banana", "", "cherry"]; // 17 bytes over 4 strings
@@ -792,7 +830,7 @@ mod tests {
         assert_eq!(arena.tag(), BLOCK_U16);
         assert_eq!(
             arena.to_bytes().len(),
-            HEADER + block_bytes(B_U16, 2, 0) + 800 // one block of 256 slots, 40 of them used
+            HEADER + block_bytes(B_U16, 2, NARROW, 0) + 800 // one block of 256 slots, 40 of them used
         );
         for (i, key) in keys.iter().enumerate() {
             assert_eq!(arena.get(i), Some(key.as_str()), "key {i}");
@@ -855,7 +893,7 @@ mod tests {
         for off in [0u16, 5, 11] {
             blob.extend_from_slice(&off.to_le_bytes());
         }
-        blob.resize(HEADER + block_bytes(B_U16, 2, 0), 11); // padded with the block total, as the writer does
+        blob.resize(HEADER + block_bytes(B_U16, 2, NARROW, 0), 11); // padded with the block total, as the writer does
         blob.extend_from_slice(b"applebanana");
         let arena = StringArena::from_bytes(&blob).unwrap();
         assert_eq!(arena.get(0), Some("apple"));
@@ -916,7 +954,7 @@ mod tests {
         want.extend_from_slice(&[0; 14]);
         want.extend_from_slice(b"applebanana");
         assert_eq!(arena.to_bytes(), want);
-        assert_eq!(want.len(), HEADER + block_bytes(B_U8, 1, 1) + 11);
+        assert_eq!(want.len(), HEADER + block_bytes(B_U8, 1, NARROW, 1) + 11);
         assert_eq!(arena.get(0), Some("apple")); // `get` never filters
         assert_eq!(arena.get_matching(0, 0xA5), Some("apple"));
         assert_eq!(arena.get_matching(0, 0xA4), None);
@@ -1009,5 +1047,94 @@ mod tests {
         assert!(StringArena::from_bytes(&blob).is_ok());
         blob.truncate(HEADER + 10);
         assert!(StringArena::from_bytes(&blob).is_err());
+    }
+
+    /// Past the `u32` limit a block's base is a `u64` and the offsets stay blocked — 1.56 or 2.04
+    /// bytes per key where the flat `u64` table cost 8. The limit is injected, so a 40-byte arena
+    /// takes the layout a 4 GiB one would; a 256-run past 64 KiB still gets the flat `u64` table.
+    #[test]
+    fn past_the_narrow_limit_the_bases_widen_and_the_offsets_stay_blocked() {
+        let corpora: [(Vec<String>, u8, usize, usize); 2] = [
+            (
+                (0..40).map(|i| format!("k{i}")).collect(),
+                BLOCK_U8,
+                B_U8,
+                1,
+            ),
+            (
+                (0..40).map(|i| format!("{i:020}")).collect(),
+                BLOCK_U16,
+                B_U16,
+                2,
+            ),
+        ];
+        for (keys, layout, slots, width) in corpora {
+            let n = keys.len();
+            let data_len: usize = keys.iter().map(String::len).sum();
+            let fps: Vec<u8> = (0..n).map(|i| i as u8 ^ 0x5A).collect();
+            for fp in [None, Some(&fps[..])] {
+                let arena = StringArena::build_exact_limited(&keys, n, data_len, fp, 16);
+                let want_tag = tag_with(layout | WIDE_BASE, fp.is_some());
+                assert_eq!(arena.tag(), want_tag);
+                let blocks = n.div_ceil(slots);
+                assert_eq!(
+                    arena.to_bytes().len(),
+                    HEADER
+                        + blocks * block_bytes(slots, width, WIDE, fp.map_or(0, |_| 1))
+                        + data_len
+                );
+                // The same corpus below the limit: `u32` bases, each block 4 bytes shorter.
+                let narrow = StringArena::build_exact_limited(&keys, n, data_len, fp, data_len);
+                assert_eq!(narrow.tag(), tag_with(layout, fp.is_some()));
+                assert_eq!(arena.to_bytes().len(), narrow.to_bytes().len() + 4 * blocks);
+                for (i, key) in keys.iter().enumerate() {
+                    assert_eq!(arena.get(i), Some(key.as_str()), "{want_tag:#x} key {i}");
+                    if let Some(fps) = fp {
+                        assert_eq!(arena.get_matching(i, fps[i]), Some(key.as_str()));
+                        assert_eq!(arena.get_matching(i, fps[i] ^ 1), None);
+                    }
+                }
+                assert_eq!(arena.get(n), None);
+                let restored = StringArena::from_bytes(&arena.to_bytes()).unwrap();
+                assert_eq!(restored.tag(), want_tag);
+                assert_eq!(restored.get(n - 1), Some(keys[n - 1].as_str()));
+                #[cfg(feature = "mmap")]
+                {
+                    let lens: Vec<u32> = keys.iter().map(|k| k.len() as u32).collect();
+                    let (prefix, len, tag) = StringArena::prefix_for_lengths_limited(&lens, fp, 16);
+                    assert_eq!((len, tag), (data_len, want_tag));
+                    assert_eq!(prefix[..], arena.to_bytes()[..prefix.len()]);
+                    for (i, key) in keys.iter().enumerate() {
+                        let (lo, hi) = StringArena::span_at(&prefix, tag, i);
+                        assert_eq!((hi - lo) as usize, key.len(), "{want_tag:#x} key {i}");
+                    }
+                }
+            }
+        }
+        let long = "x".repeat(70_000);
+        let items = [long.as_str(), "tail"];
+        let arena = StringArena::build_exact_limited(items, 2, 70_004, None, 16);
+        assert_eq!(arena.tag(), WIDE as u8);
+        assert_eq!(arena.to_bytes().len(), HEADER + 3 * WIDE + 70_004);
+        assert_eq!(arena.get(0), Some(long.as_str()));
+        assert_eq!(arena.get(1), Some("tail"));
+    }
+
+    /// The wide-base bit means nothing on a flat table, and on a blocked one it changes the
+    /// block's size — so a tag that claims it over bytes laid out without it is refused, not read
+    /// off by one base width.
+    #[test]
+    fn a_wide_base_bit_is_refused_where_it_does_not_belong() {
+        let mut flat = Vec::new();
+        flat.extend_from_slice(&3u64.to_le_bytes());
+        flat.push(NARROW as u8 | WIDE_BASE);
+        for o in [0u32, 5, 11] {
+            flat.extend_from_slice(&o.to_le_bytes());
+        }
+        flat.extend_from_slice(b"applebanana");
+        assert!(StringArena::from_bytes(&flat).is_err());
+        let mut blocked = StringArena::build(["apple", "banana"]).to_bytes();
+        blocked[8] = BLOCK_U8 | WIDE_BASE;
+        assert!(StringArena::from_bytes(&blocked).is_err());
     }
 }

@@ -100,6 +100,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **An arena past 4 GiB keeps its blocked offsets.** The `u32` block base that could not reach
+  the data past 4 GiB widens to `u64` (arena tags `0x31` / `0x32`, bit `0x20`) instead of the
+  layout falling back to the flat `u64` table: 1.56 bytes per key of offsets instead of 8 -- 0.78 GB
+  instead of 4 for 500 M ten-byte keys. The flat table remains only for a 256-key run past 64 KiB.
+  Below 4 GiB nothing changes, byte for byte; the blob stays `BMP6`, and a reader from before 1.2
+  refuses the wide-base tags as an unknown encoding, the same way it refuses the fingerprinted
+  ones. The threshold is injectable in the tests, so both layouts are exercised on a 40-byte
+  arena. `PerfectHashIndex::build` now refuses a key longer than `u32::MAX` bytes with the error
+  `build_to_file` already gave, instead of laying out a truncated length.
 - **The perfect hash looks up 20 % faster.** `MPH2` has had one seed family since 1.1.0, but every
   lookup still decoded the seed byte into a family and a shift and took the key's offset from a
   family-dependent run of its hash bits -- a variable shift on the hot path. The value is now

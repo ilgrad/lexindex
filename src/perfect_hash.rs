@@ -389,6 +389,11 @@ impl PerfectHashIndex {
                 "perfect-hash: more than u32::MAX keys; ids are u32",
             ));
         }
+        if keys.iter().any(|k| k.as_ref().len() > u32::MAX as usize) {
+            return Err(IndexError::Format(
+                "perfect-hash: a key is longer than u32::MAX bytes",
+            ));
+        }
         if n == 0 {
             return Ok(Self {
                 mph: None,
@@ -2080,6 +2085,42 @@ mod tests {
             };
             assert!(err.contains("side-table ids"), "{err}");
         }
+    }
+
+    /// An arena whose blocks carry `u64` bases — the layout past 4 GiB — reads through the index
+    /// like any other: the same blob with its arena re-laid under an injected limit, checksums
+    /// recomputed, answers every key with the same id and every id with the same key.
+    #[test]
+    fn a_wide_base_arena_reads_like_a_narrow_one() {
+        let keys: Vec<String> = (0..300).map(|i| format!("key-{i}")).collect();
+        let idx = PerfectHashIndex::build(&keys).unwrap();
+        assert!(idx.side.is_empty());
+        let n = idx.len();
+        let data_len: usize = keys.iter().map(String::len).sum();
+        let wide = StringArena::build_exact_limited(
+            (0..n).map(|i| idx.key(i as u32).unwrap()),
+            n,
+            data_len,
+            None,
+            16,
+        );
+        assert_eq!(wide.tag(), 0x31); // one-byte blocks off `u64` bases
+        let mut blob = idx.to_bytes().unwrap();
+        let mph_len = u64::from_le_bytes(blob[12..20].try_into().unwrap()) as usize;
+        blob.truncate(HEADER_V5 + mph_len);
+        blob.extend_from_slice(wide.as_bytes());
+        let payload = crate::blob::hash_block(&blob[HEADER_V5..]);
+        blob[24..32].copy_from_slice(&payload.to_le_bytes());
+        let check = crate::blob::hash_bytes(&blob[..CHECKED_V5]) as u32;
+        blob[CHECKED_V5..HEADER_V5].copy_from_slice(&check.to_le_bytes());
+        let restored = from_bytes(&blob).unwrap();
+        assert_eq!(restored.serialized_len().unwrap(), blob.len());
+        for key in &keys {
+            let id = idx.id(key).unwrap();
+            assert_eq!(restored.id(key), Some(id));
+            assert_eq!(restored.key(id), Some(key.as_str()));
+        }
+        assert_eq!(restored.id("key-300"), None);
     }
 
     /// `save` streams sections instead of assembling one buffer; the file must still be
