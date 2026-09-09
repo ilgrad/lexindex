@@ -90,27 +90,18 @@ const WINDOW: u32 = 512;
 /// the lag heuristic it replaced, at no build-time cost. See [`ell`].
 const WEIGHTS: [i64; 7] = [-50137, 65904, 111782, 139890, 159029, 175922, 186995];
 
-/// Seed families: a seed byte is a family and a shift within it, and a key's offset in its slice
-/// is a different run of its hash bits under each family. One family makes a key's 255
-/// candidate values one arc of its slice, and a key whose arc lies where the map is already full
-/// holds its whole bucket back under every seed; several families give every key several arcs.
-const FAMILIES: u64 = 1;
-
-/// Most families a sweep may ask for; bounds the interval list of a bucket.
-const MAX_FAMILIES: usize = 8;
-
 /// Per-bucket working memory of a placement pass, kept across buckets so that a bucket's search
 /// allocates and zeroes nothing.
 struct Scratch {
     /// The smallest value each key can take on this map.
     starts: [u64; MAX_BUCKET],
-    /// Each key's offset in its slice, per family.
-    offs: [[u64; MAX_BUCKET]; MAX_FAMILIES],
-    /// Each key's wrap shift, per family, sorted; `cuts[f][..nc[f]]`.
-    cuts: [[u64; MAX_BUCKET]; MAX_FAMILIES],
-    nc: [usize; MAX_FAMILIES],
-    /// Each key's wrap shift, per family, in key order.
-    cut: [[u64; MAX_BUCKET]; MAX_FAMILIES],
+    /// Each key's offset in its slice.
+    offs: [u64; MAX_BUCKET],
+    /// The keys' wrap shifts, sorted; `cuts[..nc]`.
+    cuts: [u64; MAX_BUCKET],
+    nc: usize,
+    /// Each key's wrap shift, in key order.
+    cut: [u64; MAX_BUCKET],
     /// Where each key's shifts are on the map: the plane's word offset and the bit of shift 0.
     plane: [usize; MAX_BUCKET],
     bit: [u64; MAX_BUCKET],
@@ -125,10 +116,10 @@ impl Scratch {
     fn new() -> Self {
         Self {
             starts: [0; MAX_BUCKET],
-            offs: [[0; MAX_BUCKET]; MAX_FAMILIES],
-            cuts: [[0; MAX_BUCKET]; MAX_FAMILIES],
-            nc: [0; MAX_FAMILIES],
-            cut: [[0; MAX_BUCKET]; MAX_FAMILIES],
+            offs: [0; MAX_BUCKET],
+            cuts: [0; MAX_BUCKET],
+            nc: 0,
+            cut: [0; MAX_BUCKET],
             plane: [0; MAX_BUCKET],
             bit: [0; MAX_BUCKET],
             vals: [0; MAX_BUCKET],
@@ -542,13 +533,6 @@ fn weights() -> [i64; 7] {
     WEIGHTS
 }
 
-/// Log2 of the shifts per seed family: 256 shifts over [`FAMILIES`] families.
-fn per_log() -> u32 {
-    let families = tun(15, FAMILIES as f64) as u64;
-    debug_assert!(families.is_power_of_two() && families <= MAX_FAMILIES as u64);
-    8 - families.trailing_zeros()
-}
-
 /// The stride of a level with `slice`: [`STRIDE`], or less on a slice too short for 255 shifts
 /// at that stride to be distinct positions.
 fn stride_for(slice: u64) -> u64 {
@@ -601,8 +585,6 @@ struct Level {
     /// Values between two consecutive shifts of a key; [`stride_for`] the slice, kept because it
     /// is on every lookup.
     stride: u64,
-    /// Log2 of the shifts per seed family; 8 when there is one family. See [`FAMILIES`].
-    per_log: u32,
     /// One per bucket; 0 is bumped.
     seeds: Vec<u8>,
 }
@@ -645,7 +627,6 @@ impl Level {
             buckets: ceil_div_ratio(n, ratio(0, LAMBDA)).max(1),
             slice,
             stride: stride_for(slice),
-            per_log: per_log(),
             seeds: Vec::new(),
         }
     }
@@ -656,10 +637,7 @@ impl Level {
     #[inline(always)]
     fn value(&self, h: u64, seed: u8) -> u64 {
         let mask = self.slice - 1;
-        let s = u64::from(seed) - 1;
-        let (family, t) = (s >> self.per_log, (s & ((1 << self.per_log) - 1)) + 1);
-        let offset = (h >> (u64::from(self.slice.trailing_zeros()) * family)) & mask;
-        let v = scale(h, self.n) + ((offset + self.stride * t) & mask);
+        let v = scale(h, self.n) + (((h & mask) + self.stride * u64::from(seed)) & mask);
         if v >= self.n { v - self.n } else { v }
     }
 }
@@ -1563,7 +1541,6 @@ impl V2 {
                 buckets,
                 slice,
                 stride: stride_for(slice),
-                per_log: per_log(),
                 seeds: Vec::new(),
             });
         }
@@ -1794,12 +1771,9 @@ fn seed_bucket(
     let margin = *margin;
     count!(BUCKETS, 1);
     let (slice, mask) = (level.slice, level.slice - 1);
-    let bits = u64::from(slice.trailing_zeros());
     let delta = level.stride;
     let (shift, dm) = (delta.trailing_zeros(), delta - 1);
     let period = slice >> shift;
-    let per = 1u64 << level.per_log;
-    let families = (256 / per) as usize;
     let ks_delta = k as u64 * delta;
     // Values past the range's end wrap to its beginning; `limit` is where that is on this map,
     // which a chunk's private map never reaches. A key whose slice crosses it is read bit by bit.
@@ -1810,151 +1784,119 @@ fn seed_bucket(
         starts[i] = scale(ks[i], level.n) - origin;
         slow |= u64::from(starts[i] + slice > limit) << i;
     }
-    // A family's shifts are `1..end`; the last family loses the shift seed 256 would be.
-    let end_of = |family: usize| per.min(255 - per * family as u64) + 1;
-    // Per family: the keys' offsets, the shifts at which they wrap (sorted), and the least sum
-    // any of its intervals starts at. Inside an interval the sum grows by `k` strides per shift
-    // and at each cut a key drops by a slice, so the intervals' floors follow from the first.
-    let mut order = [(0u64, 0usize); MAX_FAMILIES];
-    for family in 0..families {
-        let end = end_of(family);
-        let (offs, cuts, cut) = (&mut offs[family], &mut cuts[family], &mut cut[family]);
-        let mut n = 0;
-        let mut floor = 0u64;
-        for i in 0..k {
-            let o = (ks[i] >> (bits * family as u64)) & mask;
-            offs[i] = o;
-            floor += o;
-            let c = (slice - o + dm) >> shift;
-            cut[i] = c;
-            if c < end {
-                let mut at = n;
-                while at > 0 && cuts[at - 1] > c {
-                    cuts[at] = cuts[at - 1];
-                    at -= 1;
-                }
-                cuts[at] = c;
-                n += 1;
+    // The shifts are `1..end`, seed 256 having no byte. The keys' offsets, and the shifts at
+    // which they wrap, sorted: inside an interval between two the sum grows by `k` strides per
+    // shift, and at each cut a key drops by a slice.
+    let end = 256u64;
+    let mut n = 0;
+    for i in 0..k {
+        let o = ks[i] & mask;
+        offs[i] = o;
+        let c = (slice - o + dm) >> shift;
+        cut[i] = c;
+        if c < end {
+            let mut at = n;
+            while at > 0 && cuts[at - 1] > c {
+                cuts[at] = cuts[at - 1];
+                at -= 1;
             }
+            cuts[at] = c;
+            n += 1;
         }
-        nc[family] = n;
-        let mut least = floor;
-        let mut from = 0;
-        for &c in &cuts[..n] {
-            floor = floor + ks_delta * (c - from) - slice;
-            from = c;
-            least = least.min(floor);
-        }
-        order[family] = (least, family);
     }
-    if families > 1 {
-        order[..families].sort_unstable();
-    }
-    // Families from the lowest floor; one whose floor cannot beat the best seed found is skipped.
+    *nc = n;
     let mut best: Option<(u64, u64)> = None;
-    for &(least, family) in &order[..families] {
-        if best.is_some_and(|(sum, _)| least + margin >= sum) {
-            break;
-        }
-        let end = end_of(family);
-        let (offs, cuts, nc, cut) = (&offs[family], &cuts[family], nc[family], &cut[family]);
-        for i in 0..k {
-            vals[i] = fold(starts[i] + offs[i]);
-            let (p, b) = taken.at(vals[i]);
-            plane[i] = p;
-            bit[i] = b;
-        }
-        // Two keys on one value under shift 0 stay together under every shift.
-        let collides = if k <= 16 {
-            (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
-        } else {
-            let mut sorted = vals[..k].to_vec();
-            sorted.sort_unstable();
-            sorted.windows(2).any(|w| w[0] == w[1])
-        };
-        if collides {
-            continue;
-        }
-        // The value of key `i` under shift `t`.
-        let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
-        // First feasible shift in `[from, to)`, an interval no key wraps inside, so each key's
-        // occupancy under 64 consecutive shifts is one window of its plane: from the bit of
-        // shift 0, or `period` bits before it once the key has wrapped. A shift where two keys
-        // fold onto one value is skipped.
-        let first_feasible = |taken: &Map, from: u64, to: u64, vals: &mut [u64]| -> Option<u64> {
-            let mut t0 = from;
-            while t0 < to {
-                let mut u = u64::from(t0 == 0);
-                if to - t0 < 64 {
-                    u |= u64::MAX << (to - t0);
-                }
-                for i in 0..k {
-                    count!(WINDOWS, 1);
-                    u |= if slow >> i & 1 == 1 {
-                        (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j))
-                    } else {
-                        let back = if cut[i] <= t0 { period } else { 0 };
-                        taken.window(plane[i], bit[i] + t0 - back)
-                    };
-                    if u == u64::MAX {
-                        break;
-                    }
-                }
-                while u != u64::MAX {
-                    count!(CANDIDATES, 1);
-                    let j = u64::from((!u).trailing_zeros());
-                    for (i, v) in vals[..k].iter_mut().enumerate() {
-                        *v = value(i, t0 + j);
-                    }
-                    if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
-                        return Some(t0 + j);
-                    }
-                    u |= 1 << j;
-                }
-                t0 += 64;
+    for i in 0..k {
+        vals[i] = fold(starts[i] + offs[i]);
+        let (p, b) = taken.at(vals[i]);
+        plane[i] = p;
+        bit[i] = b;
+    }
+    // Two keys on one value under shift 0 stay together under every shift.
+    let collides = if k <= 16 {
+        (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
+    } else {
+        let mut sorted = vals[..k].to_vec();
+        sorted.sort_unstable();
+        sorted.windows(2).any(|w| w[0] == w[1])
+    };
+    if collides {
+        return 0;
+    }
+    // The value of key `i` under shift `t`.
+    let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
+    // First feasible shift in `[from, to)`, an interval no key wraps inside, so each key's
+    // occupancy under 64 consecutive shifts is one window of its plane: from the bit of
+    // shift 0, or `period` bits before it once the key has wrapped. A shift where two keys
+    // fold onto one value is skipped.
+    let first_feasible = |taken: &Map, from: u64, to: u64, vals: &mut [u64]| -> Option<u64> {
+        let mut t0 = from;
+        while t0 < to {
+            let mut u = u64::from(t0 == 0);
+            if to - t0 < 64 {
+                u |= u64::MAX << (to - t0);
             }
-            None
-        };
-        // Intervals from the last, whose values are lowest: one is worth scanning only while it
-        // can still beat the best, and at each cut going back one key un-wraps.
-        let mut from = if nc == 0 { 0 } else { cuts[nc - 1] };
-        let mut floor: u64 = (0..k).map(|i| (offs[i] + (from << shift)) & mask).sum();
-        let mut to = end;
-        for j in (0..=nc).rev() {
-            if from < to {
-                let stop = match best {
-                    Some((sum, _)) if floor + margin >= sum => None,
-                    Some((sum, _)) => Some(to.min(from + (sum - floor).div_ceil(ks_delta))),
-                    None => Some(to),
+            for i in 0..k {
+                count!(WINDOWS, 1);
+                u |= if slow >> i & 1 == 1 {
+                    (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j))
+                } else {
+                    let back = if cut[i] <= t0 { period } else { 0 };
+                    taken.window(plane[i], bit[i] + t0 - back)
                 };
-                if let Some(stop) = stop {
-                    count!(INTERVALS, 1);
-                    if let Some(t) = first_feasible(taken, from, stop, vals) {
-                        let sum = floor + ks_delta * (t - from);
-                        let seed = per * family as u64 + t;
-                        if best.is_none_or(|(s, sd)| sum < s || (sum == s && seed < sd)) {
-                            best = Some((sum, seed));
-                        }
+                if u == u64::MAX {
+                    break;
+                }
+            }
+            while u != u64::MAX {
+                count!(CANDIDATES, 1);
+                let j = u64::from((!u).trailing_zeros());
+                for (i, v) in vals[..k].iter_mut().enumerate() {
+                    *v = value(i, t0 + j);
+                }
+                if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
+                    return Some(t0 + j);
+                }
+                u |= 1 << j;
+            }
+            t0 += 64;
+        }
+        None
+    };
+    // Intervals from the last, whose values are lowest: one is worth scanning only while it
+    // can still beat the best, and at each cut going back one key un-wraps.
+    let mut from = if n == 0 { 0 } else { cuts[n - 1] };
+    let mut floor: u64 = (0..k).map(|i| (offs[i] + (from << shift)) & mask).sum();
+    let mut to = end;
+    for j in (0..=n).rev() {
+        if from < to {
+            let stop = match best {
+                Some((sum, _)) if floor + margin >= sum => None,
+                Some((sum, _)) => Some(to.min(from + (sum - floor).div_ceil(ks_delta))),
+                None => Some(to),
+            };
+            if let Some(stop) = stop {
+                count!(INTERVALS, 1);
+                if let Some(t) = first_feasible(taken, from, stop, vals) {
+                    let sum = floor + ks_delta * (t - from);
+                    if best.is_none_or(|(s, sd)| sum < s || (sum == s && t < sd)) {
+                        best = Some((sum, t));
                     }
                 }
             }
-            if j > 0 {
-                let prev = if j == 1 { 0 } else { cuts[j - 2] };
-                floor = floor + slice - ks_delta * (from - prev);
-                to = from;
-                from = prev;
-            }
+        }
+        if j > 0 {
+            let prev = if j == 1 { 0 } else { cuts[j - 2] };
+            floor = floor + slice - ks_delta * (from - prev);
+            to = from;
+            from = prev;
         }
     }
     let Some((_, seed)) = best else {
         return 0;
     };
-    let (family, t) = (
-        ((seed - 1) >> level.per_log) as usize,
-        ((seed - 1) & (per - 1)) + 1,
-    );
     for i in 0..k {
-        taken.set(fold(starts[i] + ((offs[family][i] + (t << shift)) & mask)));
+        taken.set(value(i, seed));
     }
     seed as u8
 }
@@ -3018,7 +2960,7 @@ mod spike {
         let spec = std::env::var("LEXINDEX_MPHF_SWEEP").unwrap_or_default();
         let names = [
             "lambda", "slice", "unused2", "unused3", "tlambda", "talpha", "window", "delta", "w1",
-            "w2", "w3", "w4", "w5", "w6", "w7", "fam", "margin", "chunk", "phantom", "tail",
+            "w2", "w3", "w4", "w5", "w6", "w7", "unused15", "margin", "chunk", "phantom", "tail",
         ];
         let threads = env("LEXINDEX_MPHF_THREADS", 1);
         for cfg in spec.split(';').filter(|c| !c.trim().is_empty()) {

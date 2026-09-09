@@ -88,6 +88,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The perfect hash looks up 20 % faster.** `MPH2` has had one seed family since 1.1.0, but every
+  lookup still decoded the seed byte into a family and a shift and took the key's offset from a
+  family-dependent run of its hash bits -- a variable shift on the hot path. The value is now
+  `start + ((offset + stride × seed) mod slice)` and nothing else; the family machinery is gone from
+  the builder too. Blobs are unchanged and the golden 1.1.0 fixtures are byte-identical: the same
+  seeds, 2.089 bits/key. In the sweep harness, 10 M bigram hashes, A-B-A-B against 1.1.1's tree:
+  lookup 34.4 → 27.5 ns, build 50.6 → 46.1 ns/key single-threaded; in `bench/mphf_vs` against
+  PHast and PtrHash, lookup 33 → 28.8 ns and build 47.7 → 44.8 ns/key (8.1 → 7.6 on 8 threads).
 - **`Overlay::save` streams.** The base goes to the file through the new
   `OverlayBase::write_base` -- a default through `base_to_bytes`, overridden by the three indexes to
   write from the bytes they already hold -- then the additions and the tombstones, and the header
@@ -105,9 +113,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Documentation
 
-- `docs/benchmarks.md` gains the perfect hash's head-to-head with PtrHash and PHast: at 2.09 bits it
-  builds 1.7× faster than the PHast+ it follows and 3.9× faster than PtrHash's compact set, with
-  the fastest lookup of the three; regular PHast is smaller (1.92 bits) at 13.7× the build.
+- `docs/benchmarks.md` gains the perfect hash's head-to-head with PtrHash and PHast, re-measured
+  after the lookup change: at 2.09 bits it builds 1.8× faster than the PHast+ it follows and 4.2×
+  faster than PtrHash's compact set, with the fastest lookup of the three; regular PHast is smaller
+  (1.92 bits) at 14× the build.
 - `SECURITY.md` lists 1.1.x as the supported line and no longer says an `Overlay` answers arbitrary
   bytes with an `Err`: its own framing does, but an overlay over a `StringIndex` hands the base
   region to the base's loader and inherits that loader's exception unless loaded through
