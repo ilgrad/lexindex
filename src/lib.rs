@@ -20,8 +20,9 @@
 //! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
-//! The minimal perfect hash under the two hash indexes implements [PTHash]'s construction, and the
-//! crate depended on [`ptr_hash`] for it until 1.0; the README says why that changed.
+//! The minimal perfect hash under the two hash indexes implements [PHast]'s map-or-bump
+//! construction, the successor of [PTHash]; the crate depended on [`ptr_hash`] for the latter until
+//! 1.0, and the README says why that changed.
 //!
 //! ```
 //! use lexindex::StringIndex;
@@ -32,6 +33,7 @@
 //! ```
 //!
 //! [PTHash]: https://arxiv.org/abs/2104.10402
+//! [PHast]: https://arxiv.org/abs/2504.17918
 //! [`ptr_hash`]: https://arxiv.org/abs/2502.15539
 
 // The crate docs above link `PerfectHashIndex` / `CompactHashIndex`, which exist only under
@@ -192,8 +194,8 @@ pub mod fuzzing {
     /// target over it re-found that every week and taught us to ignore a red job.
     /// `from_untrusted_bytes` makes the panic an `Err`, and that is a claim worth a fuzzer:
     /// **no input may panic out of this function**, and any index that does load must answer its
-    /// own keys with their own ranks, because the loader walked every node and streamed every
-    /// value to say so.
+    /// own keys with their own ranks and decode each of them back, because the loader checked
+    /// every node's outputs and bytes to say so.
     pub fn parse_string(bytes: &[u8]) -> bool {
         let Ok(idx) = crate::StringIndex::from_untrusted_bytes(bytes) else {
             return false;
@@ -205,6 +207,11 @@ pub mod fuzzing {
                 idx.id(&key),
                 Some(id),
                 "point lookup disagrees with the scan"
+            );
+            assert_eq!(
+                idx.key(id).as_deref(),
+                Some(key.as_str()),
+                "reverse lookup disagrees with the scan"
             );
             n += 1;
         }
@@ -239,7 +246,14 @@ pub enum IndexError {
     /// query and edit distance would be too large).
     Automaton(String),
     /// (De)serialisation of a [`PerfectHashIndex`] blob failed (corrupt or incompatible MPH bytes).
+    ///
+    /// Never constructed since 1.0, when the crate's own perfect hash replaced the `epserde`
+    /// loader; a malformed blob is [`Format`](Self::Format). Removed in 2.0.
     #[cfg(feature = "mph")]
+    #[deprecated(
+        since = "1.1.1",
+        note = "never constructed since 1.0; a malformed blob is `IndexError::Format`"
+    )]
     Serde(String),
     /// Constructing the minimal perfect hash failed after exhausting its retry seeds — extremely
     /// rare; rebuilding with a different key set is the only recourse.
@@ -255,6 +269,7 @@ impl fmt::Display for IndexError {
             IndexError::Format(m) => write!(f, "format error: {m}"),
             IndexError::Automaton(m) => write!(f, "automaton error: {m}"),
             #[cfg(feature = "mph")]
+            #[allow(deprecated)]
             IndexError::Serde(m) => write!(f, "serde error: {m}"),
             #[cfg(feature = "mph")]
             IndexError::Build(m) => write!(f, "build error: {m}"),
@@ -269,6 +284,7 @@ impl std::error::Error for IndexError {
             IndexError::Io(e) => Some(e),
             IndexError::Format(_) | IndexError::Automaton(_) => None,
             #[cfg(feature = "mph")]
+            #[allow(deprecated)]
             IndexError::Serde(_) => None,
             #[cfg(feature = "mph")]
             IndexError::Build(_) => None,
@@ -319,6 +335,7 @@ mod tests {
     #[cfg(feature = "mph")]
     #[test]
     fn serde_error_display_has_no_source() {
+        #[allow(deprecated)]
         let e = IndexError::Serde("corrupt mph".into());
         assert!(e.to_string().contains("serde error") && e.to_string().contains("corrupt mph"));
         assert!(e.source().is_none());

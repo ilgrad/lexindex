@@ -207,8 +207,9 @@ pub(crate) fn write_atomically_with(
 
 /// FNV-1a over the bytes, then a splitmix64 finalizer for avalanche. Used as the 32-bit integrity
 /// check (its low half) of every lexindex-owned blob header, so an accidentally corrupted length or
-/// count fails cleanly at load instead of steering a query with a bogus bound — and, over a key's
-/// bytes, as the minimal perfect hash's slot hash. Version-stable: written blobs pin it forever.
+/// count fails cleanly at load instead of steering a query with a bogus bound. Keys are hashed by
+/// `hash::hash_key` and `hash::fingerprint_full`, not by this. Version-stable: written blobs pin
+/// it forever.
 #[inline]
 pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis

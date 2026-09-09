@@ -263,8 +263,8 @@ impl PyStringIndex {
     /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
     /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
-    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
-    /// it, not for the wire.
+    /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
+    /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
     fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
         let packed = py.detach(|| {
             let mut out = Vec::with_capacity(keys.len() * 8);
@@ -447,14 +447,15 @@ impl PyStringIndex {
     /// `from_bytes` documents the one exception to "arbitrary bytes raise `ValueError`": the blob
     /// is an `fst` transducer whose node decoder is safe but not *total*, and the checksum in
     /// front of it is public, so bytes crafted to carry a matching one **panic** —
-    /// `pyo3_runtime.PanicException`, not `ValueError`. This loader walks every reachable node,
-    /// requires every transition to point below the node holding it, streams every key and
-    /// requires its value to be its rank, and catches the panic at the load boundary, so a
-    /// crafted blob raises `ValueError` like any other bad input.
+    /// `pyo3_runtime.PanicException`, not `ValueError`. This loader checks the transducer as a
+    /// graph — every reachable node once, in time proportional to nodes and transitions rather
+    /// than to the keys they spell — so that its values are ranks and its keys are UTF-8, and
+    /// catches the panic at the load boundary, so a crafted blob raises `ValueError` like any
+    /// other bad input.
     ///
-    /// It costs one decode of every node and one pass over the keys: 50.8 ms against 1.2 ms for
-    /// `from_bytes` on the 479 823-word `/usr/share/dict/words`, 42×. Worth paying once for a blob
-    /// from a stranger, not worth paying for one of your own.
+    /// It costs two decodes of every node and the checksum: 22.9 ms against
+    /// 0.7 ms for `from_bytes` on the 479 823-word `/usr/share/dict/words`, 32×.
+    /// Worth paying once for a blob from a stranger, not worth paying for one of your own.
     ///
     /// Two things it cannot promise. The panic runs the process-wide hook on its way out, so the
     /// rejection normally prints a panic message to stderr before `ValueError` is raised — nothing
@@ -731,8 +732,8 @@ impl PyPerfectHashIndex {
     /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
     /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
-    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
-    /// it, not for the wire.
+    /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
+    /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
     fn ids_of_bytes<'py>(
         &self,
         py: Python<'py>,
@@ -980,8 +981,8 @@ impl PyCompactHashIndex {
     /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
     /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
-    /// Native endianness, like the index blobs: the buffer is meant for the machine that produced
-    /// it, not for the wire.
+    /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
+    /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
     fn ids_of_bytes<'py>(
         &self,
         py: Python<'py>,

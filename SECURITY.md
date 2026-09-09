@@ -8,7 +8,8 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 1.0.x | yes |
+| 1.1.x | yes |
+| 1.0.x | no — 1.1 reads every blob 1.0 wrote, so the fix is to upgrade |
 | 0.x | no — its blob formats are refused by 1.0 anyway, and the fix is to rebuild |
 
 ## Reporting a vulnerability
@@ -29,17 +30,22 @@ hash bought — every array length is derived on load from the header's own scal
 be handed a length that disagrees with the table it describes.
 
 **Refusal is an `Err` on the perfect-hash side, and can be a panic on the ordered one.** Arbitrary
-bytes handed to `CompactHashIndex`, `PerfectHashIndex` or `Overlay` come back as an `IndexError`,
-whatever they contain. `StringIndex` is backed by [`fst`](https://docs.rs/fst), whose node decoder is
-safe Rust but not total, and the checksum in front of it is public and recomputable — so a blob
-crafted to carry a matching one reaches that decoder with an invalid body and can **panic** instead
-of returning. That is measured rather than feared: a libFuzzer target over `from_bytes` produced
-such bytes in minutes, and the 111-byte specimen it could not shrink further is committed as
-`tests/data/panicking-1.0.0-string.bix`, with a test that it still panics. A panic is neither
-undefined behaviour nor an out-of-bounds read — it unwinds, or aborts the process under
-`panic = "abort"` — but it is a denial of service for anything that loads ordered blobs supplied by
-a stranger. For those, use `StringIndex::from_untrusted_bytes`: it walks every reachable node and
-every key before answering, and catches the decoder's panic at the load boundary, returning it as
+bytes handed to `CompactHashIndex` or `PerfectHashIndex` come back as an `IndexError`, whatever they
+contain, and so does an `Overlay`'s own framing — but an overlay hands its embedded base region to
+the base's loader, so an overlay over a `StringIndex` inherits the exception below unless it is
+loaded through `from_untrusted_bytes` (in Python) or `from_bytes_with(..,
+StringIndex::from_untrusted_bytes)` (in Rust). `StringIndex` is backed by
+[`fst`](https://docs.rs/fst), whose node decoder is safe Rust but not total, and the checksum in
+front of it is public and recomputable — so a blob crafted to carry a matching one reaches that
+decoder with an invalid body and can **panic** instead of returning. That is measured rather than
+feared: a libFuzzer target over `from_bytes` produced such bytes in minutes, and the 111-byte
+specimen it could not shrink further is committed as `tests/data/panicking-1.0.0-string.bix`, with a
+test that it still panics. A panic is neither undefined behaviour nor an out-of-bounds read — it
+unwinds, or aborts the process under `panic = "abort"` — but it is a denial of service for anything
+that loads ordered blobs supplied by a stranger. For those, use `StringIndex::from_untrusted_bytes`:
+it checks the transducer as a graph before answering — every reachable node once, in time
+proportional to nodes and transitions rather than to the keys they spell, so that its values are
+ranks and its keys are UTF-8 — and catches the decoder's panic at the load boundary, returning it as
 an `IndexError`. It cannot *prevent* the panic — checking a node means decoding it, and `fst`'s
 decoder is the only one there is — so under `panic = "abort"` a crafted blob still aborts, and the
 rejection runs the process-wide panic hook on its way out. `from_bytes` stays the loader for blobs

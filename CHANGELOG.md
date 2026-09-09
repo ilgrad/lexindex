@@ -4,6 +4,64 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`StringIndex::from_untrusted_bytes` costs the graph, not the language, and refuses a key that
+  is not UTF-8.** The 1.1.0 validator streamed every key to check its rank, so a blob packing an
+  astronomical language into a few hundred bytes -- `fst` documents a billion strings in 896 -- was
+  a denial of service against the one loader meant for a stranger's bytes; and it never looked at
+  the bytes it streamed, so a transducer over non-UTF-8 keys, which `fst` permits and this crate's
+  builder never writes, loaded and then answered `None` from `key(id)` for a live id. The validator
+  now checks the transducer as a graph, in time proportional to its nodes and transitions: every
+  reachable node once, transitions pointing strictly below their node and in increasing byte
+  order, every accepted path valid UTF-8 -- the set of decoder states each node is reachable in is
+  propagated parents-first, so a node shared between a character boundary and the inside of a
+  character is caught -- and outputs that are ranks by construction: a final node carries none,
+  each transition carries the count of keys its node spells before it, and the root's count must
+  be the footer's length. On the 479 823-word dictionary it costs 22.9 ms against
+  0.7 ms for the owned load, down from 48.1 ms; on a 65 536-key transducer of a few dozen
+  nodes it costs microseconds. The `parse_string` fuzz target now also asserts that `key(rank)`
+  decodes back to the scanned key, and a property test builds raw `fst` maps over arbitrary bytes
+  and requires the loader to accept exactly the UTF-8 ones.
+
+- **`PerfectHashIndex::build_to_file` could publish a file whose keys were not the source's.** Pass
+  two checked each replayed key by its slot hash and length only, so a source that replayed two
+  keys sharing a 64-bit hash at equal length -- `hash::COLLIDING_PAIR` is such a pair -- in the
+  other order, or one in place of the other, was accepted, and the file answered each with the
+  other's id. Both passes now fold a second, independent 64-bit hash of every key into an ordered
+  digest that is compared before the rename; a replay that differs in any key or any position is
+  refused with `IndexError::Build` and the target is left untouched.
+
+### Changed
+
+- The sizes the perfect hash derives from its load factors -- buckets per level, the tail's buckets
+  and range, the held share at a run's start -- are integer arithmetic over ratios (`9/2`, `13/2`,
+  `24/25`, a fixed-point `0.966`) rather than `f64`. The output is byte-identical, and the golden
+  blobs say so; what changes is that the determinism promise no longer rests on every target
+  rounding a division the same way, which IEEE 754 guarantees but no test could show.
+- `IndexError::Serde` is deprecated. Nothing has constructed it since 1.0 replaced the `epserde`
+  loader; a malformed perfect-hash blob is `IndexError::Format`. It goes in 2.0.
+- `bench/compare.py` records the competitors' installed versions (`marisa-trie`, `dawg2`,
+  `datrie`) in its results file, next to lexindex's own.
+
+### Documentation
+
+- `SECURITY.md` lists 1.1.x as the supported line and no longer says an `Overlay` answers arbitrary
+  bytes with an `Err`: its own framing does, but an overlay over a `StringIndex` hands the base
+  region to the base's loader and inherits that loader's exception unless loaded through
+  `from_untrusted_bytes`.
+- Contradictions removed: `StringIndex::from_bytes` pointed at no check for a stranger's blob
+  while `from_untrusted_bytes` is that check; `build_to_file` said its file need not match
+  `build` + `save` byte for byte while a test holds it to exactly that, short of a hash collision;
+  `ids_of_bytes` said its buffer is native-endian "like the blobs", which are little-endian
+  everywhere; `blob::hash_bytes` said it is the perfect hash's slot hash, which is
+  `hash::hash_key`; the crate doc said the perfect hash implements PTHash's construction, which
+  1.1.0 replaced with PHast's; the README's determinism note now says "within one lexindex
+  version", as `docs/design.md` already did; the 1.1.0 entry below said `from_untrusted_bytes`
+  had no Python binding, and it shipped one.
+
 ## [1.1.0] — 2026-09-09
 
 ### Fixed
@@ -204,8 +262,8 @@ All notable changes to this project are documented here. The format follows
   `tests/data/panicking-1.0.0-string.bix` is a real 111-byte specimen, found by libFuzzer against
   `from_bytes` and kept so the security policy's exception stays a measured fact. The validation
   costs 50.8 ms against 1.2 ms for the owned load on the 479 823-word `/usr/share/dict/words`, or
-  106 ns per key. There is no Python binding yet; `docs/usage.md` now says so instead of promising
-  a clean `ValueError`.
+  106 ns per key. In Python it is `StringIndex.from_untrusted_bytes`, and
+  `Overlay.from_untrusted_bytes(data, StringIndex)` for an overlay wrapping one.
 
 - **Order statistics on `StringIndex`**: `lower_bound`, `range_count`, `prefix_count` and
   `prefix_id_range`, in Rust and Python. Ids are lexicographic ranks, so keys sharing a prefix

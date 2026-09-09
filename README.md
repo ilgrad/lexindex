@@ -173,8 +173,9 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
   bytes; normalise (NFC/NFKC, casefold) before building *and* before querying if the application
   needs it.
 - **Every index builds deterministically.** The same keys give the same blob, byte for byte, on any
-  machine and any thread count. Ids are still arbitrary and change whenever the key set does, so
-  persist the blob rather than re-deriving it.
+  machine and any thread count — within one lexindex version; a release may change a hash or the
+  perfect hash, and `docs/design.md` says which did. Ids are still arbitrary and change whenever
+  the key set does, so persist the blob rather than re-deriving it.
 - **`CompactHashIndex` stores no keys**: a minimal perfect hash plus one `fingerprint_bits`-wide
   fingerprint per slot, from a second hash uncorrelated with the first, so a non-member survives
   with probability about `2^-bits` — a design rate, not a defence against chosen queries — and
