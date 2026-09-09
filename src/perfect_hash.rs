@@ -824,15 +824,18 @@ impl PerfectHashIndex {
     /// section by section, so saving peaks at the index's own memory plus the small MPH buffer
     /// rather than a full serialised copy.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
+        crate::blob::write_atomically_with(path.as_ref(), |w| self.write_to(w))
+    }
+
+    /// The [`to_bytes`](Self::to_bytes) blob streamed into `w`: the header, the hash and the side
+    /// table from their serialised parts, the arena from where it is.
+    pub(crate) fn write_to(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
         let (header, mph_buf, side_buf) = self.serialised_parts()?;
-        crate::blob::write_atomically_with(path.as_ref(), |w| {
-            use std::io::Write;
-            w.write_all(&header)?;
-            w.write_all(&mph_buf)?;
-            w.write_all(self.arena.as_bytes())?;
-            w.write_all(&side_buf)?;
-            Ok(())
-        })
+        w.write_all(&header)?;
+        w.write_all(&mph_buf)?;
+        w.write_all(self.arena.as_bytes())?;
+        w.write_all(&side_buf)?;
+        Ok(())
     }
 
     /// Build straight to `path` **without ever holding the keys**, for a corpus that does not fit

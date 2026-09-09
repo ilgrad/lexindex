@@ -258,7 +258,8 @@ An id is never reissued and removal never renumbers, so an id held elsewhere kee
 `compact()` — which is explicit for exactly that reason. `load` and `from_bytes` take the base class
 because each index loads itself; the blob records which base wrote it, so passing the wrong class is
 an error rather than an unchecked read of bytes meant for something else. `save` is atomic, like the
-indexes' own: a crash or a full disk leaves the previous file whole rather than a truncated one.
+indexes' own — a crash or a full disk leaves the previous file whole rather than a truncated one —
+and streams: an overlay over a mapped base of a gigabyte saves without a copy of the base.
 
 **`Overlay.load` and `Overlay.from_bytes` are checksummed and validated throughout.** The header
 carries a check of its own and a hash of everything after it, both verified before any of it is

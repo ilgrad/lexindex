@@ -59,6 +59,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`Overlay::save` streams.** The base goes to the file through the new
+  `OverlayBase::write_base` -- a default through `base_to_bytes`, overridden by the three indexes to
+  write from the bytes they already hold -- then the additions and the tombstones, and the header
+  last over its place once the lengths and the payload hash are known. Saving an overlay over a
+  mapped base of a gigabyte no longer makes two copies of it. `to_bytes` assembles the same
+  sections into one `Vec`, sized by the new `OverlayBase::base_serialized_len`; both produce the
+  bytes 1.1 wrote.
 - The sizes the perfect hash derives from its load factors -- buckets per level, the tail's buckets
   and range, the held share at a run's start -- are integer arithmetic over ratios (`9/2`, `13/2`,
   `24/25`, a fixed-point `0.966`) rather than `f64`. The output is byte-identical, and the golden

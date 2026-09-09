@@ -35,6 +35,22 @@ pub trait OverlayBase {
     /// The base's own serialised form, embedded verbatim in [`Overlay::to_bytes`].
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError>;
 
+    /// [`base_to_bytes`](Self::base_to_bytes) streamed into `w`: the same bytes, without the
+    /// `Vec`. [`Overlay::save`] writes the base through this, so an overlay over a mapped base of
+    /// a gigabyte saves without a gigabyte of copy. The default goes through `base_to_bytes`; the
+    /// three indexes write their sections from where they already hold them.
+    fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+        w.write_all(&self.base_to_bytes()?)?;
+        Ok(())
+    }
+
+    /// Length of [`base_to_bytes`](Self::base_to_bytes) without producing it; it sizes the buffer
+    /// [`Overlay::to_bytes`] assembles. The default produces the bytes to count them, so an
+    /// implementation that can count should.
+    fn base_serialized_len(&self) -> Result<usize, IndexError> {
+        Ok(self.base_to_bytes()?.len())
+    }
+
     /// Which base produced a blob, recorded in its header.
     ///
     /// [`Overlay::from_bytes_with`] checks this against the base being loaded *before* calling the
@@ -401,6 +417,14 @@ impl<T: OverlayBase> OverlayBase for std::sync::Arc<T> {
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         (**self).base_to_bytes()
     }
+
+    fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+        (**self).write_base(w)
+    }
+
+    fn base_serialized_len(&self) -> Result<usize, IndexError> {
+        (**self).base_serialized_len()
+    }
 }
 
 impl<T: OverlayKeys> OverlayKeys for std::sync::Arc<T> {
@@ -427,6 +451,14 @@ impl OverlayBase for crate::StringIndex {
 
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         Ok(self.to_bytes())
+    }
+
+    fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+        Ok(self.write_to(w)?)
+    }
+
+    fn base_serialized_len(&self) -> Result<usize, IndexError> {
+        Ok(self.serialized_len())
     }
 }
 
@@ -456,6 +488,14 @@ impl OverlayBase for crate::PerfectHashIndex {
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         self.to_bytes()
     }
+
+    fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+        self.write_to(w)
+    }
+
+    fn base_serialized_len(&self) -> Result<usize, IndexError> {
+        self.serialized_len()
+    }
 }
 
 #[cfg(feature = "mph")]
@@ -484,6 +524,14 @@ impl OverlayBase for crate::CompactHashIndex {
     fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         self.to_bytes()
     }
+
+    fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+        self.write_to(w)
+    }
+
+    fn base_serialized_len(&self) -> Result<usize, IndexError> {
+        self.serialized_len()
+    }
 }
 
 /// Magic for the [`Overlay::to_bytes`] blob. The trailing digit is the format version, as
@@ -510,6 +558,7 @@ const OVERLAY_HEADER_V1: usize = 4 + 1 + 8 + 8;
 /// section, then the header hash over the header including it. Both are recomputed from the bytes
 /// that are there, so sealing a blob a test has tampered with is the same operation as writing one
 /// — which is what lets those tests show that the semantic checks stand on their own.
+#[cfg(test)]
 fn seal(out: &mut [u8]) {
     let payload = crate::blob::hash_block(&out[OVERLAY_HEADER..]);
     out[37..45].copy_from_slice(&payload.to_le_bytes());
@@ -525,7 +574,78 @@ struct Sections<'a> {
     tombstones: &'a [u8],
 }
 
+/// A writer that hashes and counts what passes through it, so the header can state the sections'
+/// lengths and payload hash from the bytes as written rather than from anything claimed about them.
+struct Counting<'a> {
+    inner: &'a mut dyn std::io::Write,
+    hasher: crate::blob::BlockHasher,
+    written: u64,
+}
+
+impl std::io::Write for Counting<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.written += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 impl<I: OverlayBase> Overlay<I> {
+    /// The header that frames the sections: every length, the payload hash, and the check over
+    /// the fields before it.
+    fn header(
+        base_len: u64,
+        added_count: u64,
+        added_bytes: u64,
+        words: u64,
+        payload: u64,
+    ) -> [u8; OVERLAY_HEADER] {
+        let mut h = [0u8; OVERLAY_HEADER];
+        h[0..4].copy_from_slice(OVERLAY_MAGIC);
+        h[4] = I::BASE_TAG;
+        h[5..13].copy_from_slice(&base_len.to_le_bytes());
+        h[13..21].copy_from_slice(&added_count.to_le_bytes());
+        h[21..29].copy_from_slice(&added_bytes.to_le_bytes());
+        h[29..37].copy_from_slice(&words.to_le_bytes());
+        h[37..45].copy_from_slice(&payload.to_le_bytes());
+        let check = crate::blob::hash_bytes(&h[..OVERLAY_CHECKED]) as u32;
+        h[OVERLAY_CHECKED..].copy_from_slice(&check.to_le_bytes());
+        h
+    }
+
+    /// The three sections after the header, streamed into `w` in blob order — the base through
+    /// [`OverlayBase::write_base`], the additions as the arena already holds them, the tombstone
+    /// words — and the header that frames them, taken from the bytes as they went past.
+    fn write_sections(
+        &self,
+        w: &mut dyn std::io::Write,
+    ) -> Result<[u8; OVERLAY_HEADER], IndexError> {
+        use std::io::Write;
+        let mut w = Counting {
+            inner: w,
+            hasher: crate::blob::BlockHasher::new(),
+            written: 0,
+        };
+        self.base.write_base(&mut w)?;
+        let base_len = w.written;
+        w.write_all(&self.added_data)?;
+        for word in &self.dead {
+            w.write_all(&word.to_le_bytes())?;
+        }
+        Ok(Self::header(
+            base_len,
+            self.added_starts.len() as u64,
+            self.added_data.len() as u64,
+            self.dead.len() as u64,
+            w.hasher.finish(),
+        ))
+    }
+
     /// Serialise to `[header][base blob][additions][tombstones]`, where the header is
     /// `[magic "OVL2"][base tag u8][base blob len u64][addition count u64][addition bytes u64]
     /// [tombstone words u64][payload u64][check u32]`.
@@ -541,28 +661,19 @@ impl<I: OverlayBase> Overlay<I> {
     /// contents are trusted. Neither `len` nor the live/dead split is stored: both are derived on
     /// load, so a blob cannot disagree with itself about how many keys it holds.
     ///
-    /// The base is serialised with its own `to_bytes`, so the blob inherits exactly the
-    /// trust model of the base's format — see [`from_bytes_with`](Self::from_bytes_with).
+    /// The base is written by its own [`OverlayBase::write_base`] — the bytes of its `to_bytes` —
+    /// so the blob inherits exactly the trust model of the base's format; see
+    /// [`from_bytes_with`](Self::from_bytes_with).
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
-        let base = self.base.base_to_bytes()?;
-        let added = self.added_data.len();
-        let mut out = Vec::with_capacity(OVERLAY_HEADER + base.len() + added + self.dead.len() * 8);
+        let mut out = Vec::with_capacity(
+            OVERLAY_HEADER
+                + self.base.base_serialized_len()?
+                + self.added_data.len()
+                + self.dead.len() * 8,
+        );
         out.resize(OVERLAY_HEADER, 0);
-        out.extend_from_slice(&base);
-        // The arena already holds the additions in the blob's own record form.
-        out.extend_from_slice(&self.added_data);
-        for word in &self.dead {
-            out.extend_from_slice(&word.to_le_bytes());
-        }
-        // Written last, over the sections already in place: the payload hash covers exactly the
-        // bytes the loader will hash back, and nothing the header says about them.
-        out[0..4].copy_from_slice(OVERLAY_MAGIC);
-        out[4] = I::BASE_TAG;
-        out[5..13].copy_from_slice(&(base.len() as u64).to_le_bytes());
-        out[13..21].copy_from_slice(&(self.added_starts.len() as u64).to_le_bytes());
-        out[21..29].copy_from_slice(&(added as u64).to_le_bytes());
-        out[29..37].copy_from_slice(&(self.dead.len() as u64).to_le_bytes());
-        seal(&mut out);
+        let header = self.write_sections(&mut out)?;
+        out[..OVERLAY_HEADER].copy_from_slice(&header);
         Ok(out)
     }
 
@@ -570,11 +681,18 @@ impl<I: OverlayBase> Overlay<I> {
     /// mid-write leaves the previous file intact rather than a truncated one under the real name.
     /// The overlay is the crate's *mutable* layer, so it is the structure most likely to be
     /// rewritten in place, and it gets the same guarantee the three indexes already have.
+    ///
+    /// Streamed: the header's place first, then the sections straight through the file — the base
+    /// via [`OverlayBase::write_base`] from wherever it is held — and the header last over its
+    /// place, once the lengths and the payload hash are known. Saving an overlay over a mapped
+    /// base of a gigabyte peaks at the writer's buffer, not at two copies of the base.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), IndexError> {
-        let bytes = self.to_bytes()?;
         crate::blob::write_atomically_with(path.as_ref(), |w| {
-            use std::io::Write;
-            w.write_all(&bytes)?;
+            use std::io::{Seek, SeekFrom, Write};
+            w.write_all(&[0; OVERLAY_HEADER])?;
+            let header = self.write_sections(&mut *w)?;
+            w.seek(SeekFrom::Start(0))?;
+            w.write_all(&header)?;
             Ok(())
         })
     }
@@ -1031,6 +1149,89 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0, "atomic write left a temporary behind");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A base with nothing but the required methods, so the trait's defaults are what it runs on.
+    struct Stub;
+
+    impl OverlayBase for Stub {
+        const BASE_TAG: u8 = 200;
+
+        fn base_len(&self) -> usize {
+            3
+        }
+
+        fn base_id(&self, key: &str) -> Option<u64> {
+            ["p", "q", "r"]
+                .iter()
+                .position(|k| *k == key)
+                .map(|i| i as u64)
+        }
+
+        fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
+            Ok(b"stub-base-bytes".to_vec())
+        }
+    }
+
+    /// `save` streams the sections and writes the header over its place afterwards; `to_bytes`
+    /// assembles the same sections in memory. The same bytes, over every base, with additions and
+    /// a tombstone in the blob — and a base on the trait's defaults reaches them too.
+    #[test]
+    fn save_writes_exactly_the_bytes_to_bytes_produces() {
+        let dir = std::env::temp_dir().join(format!("lexindex-ovl-stream-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("overlay.bin");
+        fn check<I: OverlayBase>(mut ov: Overlay<I>, path: &std::path::Path) {
+            ov.add("added-one");
+            ov.add("added-two");
+            ov.remove("added-one");
+            ov.save(path).unwrap();
+            assert_eq!(std::fs::read(path).unwrap(), ov.to_bytes().unwrap());
+        }
+        check(Overlay::new(StringIndex::build(["a", "b"]).unwrap()), &path);
+        #[cfg(feature = "mph")]
+        {
+            check(
+                Overlay::new(crate::PerfectHashIndex::build(["a", "b"]).unwrap()),
+                &path,
+            );
+            check(
+                Overlay::new(crate::CompactHashIndex::build(["a", "b"], 2).unwrap()),
+                &path,
+            );
+        }
+        check(Overlay::new(Stub), &path);
+        check(Overlay::new(std::sync::Arc::new(Stub)), &path);
+        let back = Overlay::from_bytes_with(&std::fs::read(&path).unwrap(), |b| {
+            assert_eq!(b, b"stub-base-bytes");
+            Ok(Stub)
+        })
+        .unwrap();
+        assert_eq!(
+            (back.len(), back.id("added-two"), back.id("added-one")),
+            (4, Some(4), None)
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The length a base declares is the length it writes, on every base and on the defaults.
+    #[test]
+    fn base_serialized_len_is_the_length_of_base_to_bytes() {
+        fn check<I: OverlayBase>(base: &I) {
+            let bytes = base.base_to_bytes().unwrap();
+            assert_eq!(base.base_serialized_len().unwrap(), bytes.len());
+            let mut streamed = Vec::new();
+            base.write_base(&mut streamed).unwrap();
+            assert_eq!(streamed, bytes);
+        }
+        check(&StringIndex::build(["a", "b"]).unwrap());
+        #[cfg(feature = "mph")]
+        {
+            check(&crate::PerfectHashIndex::build(["a", "b"]).unwrap());
+            check(&crate::CompactHashIndex::build(["a", "b"], 2).unwrap());
+        }
+        check(&Stub);
+        check(&std::sync::Arc::new(Stub));
     }
 
     #[test]
