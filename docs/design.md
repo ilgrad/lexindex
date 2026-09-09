@@ -2,6 +2,14 @@
 
 lexindex is three build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
 
+## Keys are bytes
+
+**No Unicode normalisation, case folding, collation or grapheme segmentation.** Keys and queries
+are compared as UTF-8 byte strings, and "character" means a Unicode scalar value: `é` and
+`e\u{301}` are two different keys, an emoji ZWJ sequence is several characters to `fuzzy` and
+`subsequence`, and ordering is byte order, not any locale's. Normalise (NFC/NFKC, casefold) before
+building *and* before querying if the application needs it.
+
 ## `StringIndex`
 
 Keys are sorted and deduplicated on build, and each key's id is its **rank in sorted order**, so ids
@@ -299,6 +307,13 @@ this crate no longer links, `PerfectHashIndex`'s arena survives but its ids came
 `OVL1` is the exception that proves the rule: it is decodable — the same three sections with the
 tombstone count in a different place — so it is read rather than refused. Compatibility is broken
 where it cannot be kept, not where keeping it is merely inconvenient.
+
+**Blobs move forward, not backward — upgrade the reader first.** 1.1 reads every `BMP5` and
+every `BCH6` that 1.0 wrote, but what it writes is not readable by 1.0: `BMP6` is a magic 1.0 has
+never heard of, and a 1.1 `BCH6` carries the new `MPH2` perfect hash inside a container 1.0 does
+recognise, so 1.0 refuses both as malformed rather than as a version mismatch. `BIX4` and `OVL2`
+are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses the two versions
+in either direction.
 
 What a blob does *not* promise is that it will load into the same **ids** across a format change.
 Since 1.0 construction is deterministic, so the same keys rebuilt on the same version give the same

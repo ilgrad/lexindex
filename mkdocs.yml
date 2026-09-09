@@ -51,5 +51,6 @@ nav:
   - Home: index.md
   - Usage guide: usage.md
   - Design: design.md
+  - Benchmarks: benchmarks.md
   - API reference: api.md
   - Changelog: changelog.md
