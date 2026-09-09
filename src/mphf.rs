@@ -9,12 +9,12 @@
 //!
 //! # Construction
 //!
-//! PTHash's shape, which PHast and PtrHash both descend from. Keys are grouped into buckets by a
-//! first hash; each bucket gets a one-byte *pilot* chosen so that the bucket's keys land on slots
-//! nothing has taken yet. Buckets are placed largest first, while the table is still empty enough
-//! that a small pilot can be found. The table is slightly larger than `n`, so the last few keys have
-//! somewhere to go; the slots at or above `n` are then remapped down into the holes below it, which
-//! is what makes the result *minimal*.
+//! [PTHash]'s shape, which [PHast] and [PtrHash] both descend from. Keys are grouped into buckets
+//! by a first hash; each bucket gets a one-byte *pilot* chosen so that the bucket's keys land on
+//! slots nothing has taken yet. Buckets are placed largest first, while the table is still empty
+//! enough that a small pilot can be found. The table is slightly larger than `n`, so the last few
+//! keys have somewhere to go; the slots at or above `n` are then remapped down into the holes below
+//! it, which is what makes the result *minimal*.
 //!
 //! Bucket assignment is deliberately skewed — 60 % of the keys into 30 % of the buckets — because
 //! the cost is dominated by the hardest buckets, and skew makes them arrive first, when almost every
@@ -25,6 +25,10 @@
 //! One byte per bucket plus the remap: `8/λ + 16.125·(1−α)/α` bits per key. Both terms matter and
 //! they pull against each other — a larger `λ` is fewer pilots but harder buckets, and a smaller `α`
 //! is an easier search but more slots to remap. The measured trade is tabulated on [`LAMBDA`].
+//!
+//! [PTHash]: https://arxiv.org/abs/2104.10402
+//! [PHast]: https://arxiv.org/abs/2504.17918
+//! [PtrHash]: https://arxiv.org/abs/2502.15539
 
 use crate::IndexError;
 

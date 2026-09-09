@@ -20,6 +20,9 @@
 //! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
+//! The minimal perfect hash under the two hash indexes implements [PTHash]'s construction, and the
+//! crate depended on [`ptr_hash`] for it until 1.0; the README says why that changed.
+//!
 //! ```
 //! use lexindex::StringIndex;
 //! let idx = StringIndex::build(["apple", "apricot", "banana"]).unwrap();
@@ -27,6 +30,9 @@
 //! assert_eq!(idx.key(0).as_deref(), Some("apple"));
 //! assert_eq!(idx.prefix("ap").len(), 2);
 //! ```
+//!
+//! [PTHash]: https://arxiv.org/abs/2104.10402
+//! [`ptr_hash`]: https://arxiv.org/abs/2502.15539
 
 // The crate docs above link `PerfectHashIndex` / `CompactHashIndex`, which exist only under
 // the default `mph` feature. docs.rs builds with default features, where the links resolve; on an
