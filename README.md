@@ -323,8 +323,8 @@ of the trade. 1.0's own table was PtrHash-shaped and paid for the safety with a 
 times slower than `ptr_hash`'s; 1.1's is PHast-shaped, and over 10 M real word-bigram hashes it
 builds in **49 ns/key on one thread** (0.49 s; 9 ns/key on eight) at **2.09 bits/key**, against
 280 ns/key and 2.39 bits for 1.0, and its lookup costs 4.2 ns/key on in-order probes. Those are this crate's
-numbers on this machine from the spike in `src/mphf.rs`; nothing here is a claim about the
-libraries above.
+numbers on this machine from the spike in `src/mphf.rs`; the same-process comparison with
+`ptr_hash` and the PHast authors' `ph` crate is in [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## License
 

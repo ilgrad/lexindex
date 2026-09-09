@@ -247,6 +247,42 @@ and a rare false positive is fine; `PerfectHashIndex::id` for exact membership +
 `StringIndex` when order or fuzzy/prefix matters; `HashMap` when you just need a general in-RAM map
 with nothing persisted.
 
+## The perfect hash against PtrHash and PHast
+
+`bench/mphf_vs` is its own crate, outside the workspace, so that neither competitor becomes a
+dependency of lexindex: `cd bench/mphf_vs && cargo run --release -- 10000000 3 <threads>`. One
+process builds every function over the **same 10 M distinct splitmix64 keys** in turn, three rounds
+A-B-A-B (builds: the minimum), and looks every key up in **one shuffled probe order** (the minimum
+of three passes). `ph` 0.11.0 is the PHast authors' crate: `Function2` with `ShiftOnlyWrapped` is
+PHast+ with wrapping, the design this crate's `MPH2` follows; `Function` with `SeedOnly` is regular
+PHast. Both at 8-bit seeds and bucket size 4.5, as here. `ptr_hash` 2.1.1 is PtrHash's three
+parameter sets.
+
+| function | bits/key | build, 1 thread | build, 8 threads | lookup |
+|---|---:|---:|---:|---:|
+| **lexindex `MPH2`** | **2.088** | **47.7 ns/key** | **8.1 ns/key** | **33 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.148 | 82.5 | 18.3 | 69 |
+| `ph` PHast (`SeedOnly`) | 1.922 | 653.8 | 101.9 | 61–70 |
+| `ptr_hash` compact | 2.143 | 187.3 | 48.3 | 43 |
+| `ptr_hash` balanced | 2.378 | 119.8 | 29.5 | 46 |
+| `ptr_hash` fast | 2.990 | 174.4 | 158.3 | 26 |
+
+At the size this crate chose, about 2.1 bits, `MPH2` builds 1.7× faster than the PHast+ it is
+modelled on and 3.9× faster than PtrHash's compact set, and its lookup is the fastest of the three;
+regular PHast is the smallest function here, 1.92 bits, at 13.7× the build; PtrHash's fast set has
+the fastest lookup, 26 ns, at 3 bits. One asymmetry is in the numbers and should be read out of
+them: lexindex takes the keys as 64-bit hashes (its indexes hash the string once, before), while
+`ph` hashes each key with wyhash on build and on every lookup level and `ptr_hash` with one
+multiply — a few nanoseconds of the gap on the `ph` rows is that. PTHash and ConsensusRecSplit are
+C++ and are not in the harness.
+
+<sub>Measured 2026-09-09 on the tree that adds the harness
+([`bench/results/mphf-vs-2026-09-09-arz-1e24d81.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-09-arz-1e24d81.txt)),
+Ryzen 7 5800HS, load 3.7 with an editor and a browser open; lexindex's rows match its idle
+measurements from `src/mphf.rs`'s spike (49.7 / 34.8 ns), so the load did not reach them. The
+`SeedOnly` lookup read 61 ns in the single-thread run and 70 in the eight-thread one, the spread of
+a loaded machine, hence the range.</sub>
+
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow

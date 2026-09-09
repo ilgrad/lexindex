@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format follows
   retired id). Behind them, `OverlayKeys::rebuild_to_file`, with a default that materialises and
   rebuilds. Python: `Overlay.compact_to_file(path)` and `compact_with_remap()`, the table as
   native-endian `uint64` bytes.
+- **`bench/mphf_vs`**, a one-process harness that builds lexindex's perfect hash, `ph` 0.11's PHast
+  and PHast+, and `ptr_hash` 2.1's three parameter sets over the same keys and looks them up in the
+  same order. Its own crate outside the workspace, so the competitors are not dependencies of
+  lexindex; behind it, `Mphf` is exported -- hidden, and only under the `bench-mphf` feature.
 - **Python `ids_into(keys, out)`** on all three index types: `ids_of_bytes` written into a buffer
   the caller owns -- a `numpy` array, an `array.array`, a writable `memoryview` -- so a hot loop can
   reuse one allocation. A read-only, strided or wrongly typed buffer is a `BufferError`, one shorter
@@ -84,6 +88,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Documentation
 
+- `docs/benchmarks.md` gains the perfect hash's head-to-head with PtrHash and PHast: at 2.09 bits it
+  builds 1.7× faster than the PHast+ it follows and 3.9× faster than PtrHash's compact set, with
+  the fastest lookup of the three; regular PHast is smaller (1.92 bits) at 13.7× the build.
 - `SECURITY.md` lists 1.1.x as the supported line and no longer says an `Overlay` answers arbitrary
   bytes with an `Err`: its own framing does, but an overlay over a `StringIndex` hands the base
   region to the base's loader and inherits that loader's exception unless loaded through

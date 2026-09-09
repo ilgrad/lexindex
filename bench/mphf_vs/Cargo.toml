@@ -1,0 +1,19 @@
+# One-process comparison of lexindex's perfect hash with PtrHash and PHast over the same keys.
+# Its own crate, outside the workspace, so the two competitors never become dependencies of
+# lexindex: `cd bench/mphf_vs && cargo run --release -- [n] [rounds] [threads]`.
+[package]
+name = "mphf_vs"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+lexindex = { path = "../..", features = ["bench-mphf"] }
+ph = "0.11.0"
+ptr_hash = "2.1.1"
+rayon = "1"
+
+[profile.release]
+opt-level = 3

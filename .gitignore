@@ -21,3 +21,6 @@ __pycache__/
 /bench/plots/
 # dev-only lockfile from ad-hoc uv envs
 /uv.lock
+
+# The MPHF comparison harness is its own crate (bench/mphf_vs), outside the workspace.
+bench/mphf_vs/target/
