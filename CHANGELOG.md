@@ -14,8 +14,8 @@ All notable changes to this project are documented here. The format follows
   behind each block's offsets -- so a lookup of an **absent** key stops after one cache miss
   instead of two, the key itself never read, 255 times in 256. For a workload that is mostly
   misses: a stop list, a block list, a "seen before" check. Measured on the 480 k-word
-  dictionary, one index per process, five alternations, minimum: an absent probe 167 → 91 ns, a
-  member 168 → 171; batched `ids_of` over absent keys 70 → 44; the index 10.90 → 11.90 B/key. Ids
+  dictionary, one index per process, six alternations, minimum: an absent probe 166 → 74 ns, a
+  member 163 → 171; batched `ids_of` over absent keys 70 → 47; the index 10.90 → 11.90 B/key. Ids
   are unchanged -- it is the same perfect hash -- and an `Overlay` compaction keeps the
   fingerprints (`OverlayKeys::rebuild_like`, with a default). The blob stays `BMP6`: the arena tag
   carries the bit, and a reader from before 1.2 refuses it as an unknown arena encoding rather
@@ -109,6 +109,18 @@ All notable changes to this project are documented here. The format follows
   ones. The threshold is injectable in the tests, so both layouts are exercised on a 40-byte
   arena. `PerfectHashIndex::build` now refuses a key longer than `u32::MAX` bytes with the error
   `build_to_file` already gave, instead of laying out a truncated length.
+- **One long key no longer widens the whole arena.** A block whose 16 keys outgrew its one-byte
+  offsets used to move every block to two-byte offsets (0.7 bytes per key more), and a key past
+  64 KiB the whole arena to the flat table (2.7 more). Now such a block keeps its place and
+  stride, marks its first offset and puts its real offsets in an overflow table behind the data
+  (arena tag bit `0x40`): 76 bytes for one 10 kB key among a million short ones. An arena no
+  block of which overflows is unchanged byte for byte; a corpus of long keys still takes the
+  wider blocks, and the flat table remains for a handful of keys none of which any block holds --
+  once the one-byte blocks do not fit, the layout is the cheapest by the lengths. The file build
+  writes the table behind the data too, and a reader from before 1.2 refuses the tag. Alongside,
+  an absent probe under fingerprints is decided on the fingerprint byte before the slot's offsets
+  are read, which took it from 91 to 75 ns: that path is about as long as the reorder buffer is
+  wide, and its one cache miss overlaps the next probe's only while it stays that short.
 - **The perfect hash looks up 20 % faster.** `MPH2` has had one seed family since 1.1.0, but every
   lookup still decoded the seed byte into a family and a shift and took the key's offset from a
   family-dependent run of its hash bits -- a variable shift on the hot path. The value is now

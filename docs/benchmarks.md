@@ -290,29 +290,36 @@ lookup went from 33 to 29 ns: the change, not the machine.</sub>
 `build_with_fingerprints` — and a `CompactHashIndex` as the control, then probes the 480 k words as
 members and, with a digit appended (no dictionary word ends in one, so the length distribution is
 the members'), as absent keys, in a shuffled order. The headline rows are taken **one index per
-process**, so the two arenas never compete for the cache: five alternations of the five modes,
-ten passes each, the minimum. The in-process A-B-A-B (all three indexes resident, seven rounds)
-gives the batched rows and the 50/50 mix.
+process**, so the two arenas never compete for the cache: six alternations of the five modes in
+both orders, ten passes each, the minimum — after three warm-up pairs, because the part is a
+mobile one and runs a third faster for the first minute after an idle spell. The in-process
+A-B-A-B (all three indexes resident, seven rounds) gives the batched rows and the 50/50 mix.
 
 | probe | plain | with fingerprints | |
 |---|---:|---:|---|
-| `id`, member | 168 ns | 171 ns | one index per process |
-| `id`, absent | 167 ns | **91 ns** | one index per process |
-| `id`, 50 % absent | 168 ns | 136 ns | in-process |
-| `ids_of`, member | 71 ns | 76 ns | in-process |
-| `ids_of`, absent | 70 ns | **44 ns** | in-process |
-| `CompactHashIndex::id_unchecked` (control) | 42 ns | 42 ns | |
+| `id`, member | 163 ns | 171 ns | one index per process |
+| `id`, absent | 166 ns | **74 ns** | one index per process |
+| `id`, 50 % absent | 166 ns | 135 ns | in-process |
+| `ids_of`, member | 72 ns | 76 ns | in-process |
+| `ids_of`, absent | 70 ns | **47 ns** | in-process |
+| `CompactHashIndex::id_unchecked` (control) | 41 ns | 41 ns | |
 | bytes per key | 10.90 | 11.90 | exactly +1 |
 
 An absent probe stops at the block: the offset line says no key with that fingerprint is in the
 slot, and the key — the second cache miss — is never read. A member pays the second hash and one
-compare, three nanoseconds. The fingerprint bytes follow the block's offsets; interleaving them
+compare, a few nanoseconds. The fingerprint bytes follow the block's offsets; interleaving them
 with the offsets was measured first and cost a member 6 ns instead of 3, because the offset pair
-moved up to 36 bytes from the base and split cache lines more often.
+moved up to 36 bytes from the base and split cache lines more often. And the fingerprint is
+compared before the slot's offsets are read: an absent probe is then about 255 instructions long,
+the width of the reorder buffer, which is what lets its one cache miss overlap the next probe's.
+A three-instruction marker check added for the overflow blocks pushed the path past that and
+cost 11 ns with no change in cache or branch misses; moving the fingerprint first shortened it by
+the whole span computation and took the absent probe from 91 to 74.
 
-<sub>Measured 2026-09-10 on the tree that adds the layout
-([`bench/results/negfp-2026-09-10-arz-8f136d3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-8f136d3.txt)),
-Ryzen 7 5800HS, load 0.8–1.2 with an editor open.</sub>
+<sub>Measured 2026-09-10 on the tree that adds the overflow blocks and the fingerprint-first check
+([`bench/results/negfp-2026-09-10-arz-679a8c6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-679a8c6.txt)),
+Ryzen 7 5800HS, load 1.0–1.1 with an editor open; the fingerprint layout itself was chosen on
+[`negfp-2026-09-10-arz-8f136d3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-8f136d3.txt).</sub>
 
 ## Scaling to millions of keys
 

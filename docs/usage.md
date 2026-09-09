@@ -195,7 +195,7 @@ dict_ = PerfectHashIndex.load_mmap("verbs.bmp")   # arena mapped zero-copy; tiny
 n = PerfectHashIndex.build_to_file(lambda: (line.rstrip("\n") for line in open("keys.txt")), "keys.bmp")
 
 # a workload that is mostly misses (a stop list, a block list): one more byte per key, and an
-# absent key stops after one cache miss instead of two — 167 → 91 ns on the 480 k-word dictionary,
+# absent key stops after one cache miss instead of two — 166 → 74 ns on the 480 k-word dictionary,
 # a member +3 ns, the same ids. build_to_file takes the same keyword.
 stop = PerfectHashIndex(stop_words, fingerprints=True)
 stop.has_fingerprints()        # True

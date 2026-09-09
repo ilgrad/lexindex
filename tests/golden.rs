@@ -193,11 +193,22 @@ mod mph {
             .unwrap()
             .to_bytes()
             .unwrap();
+        let mut overflow_keys = keys.clone();
+        overflow_keys.push("x".repeat(300));
+        let perfect_overflow = lexindex::PerfectHashIndex::build(&overflow_keys)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
 
         for (name, magic, fresh) in [
             ("golden-1.1.0-compact.bch", &b"BCH6"[..], compact),
             ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], perfect),
             ("golden-1.2.0-perfect-fp.bmp", &b"BMP6"[..], perfect_fp),
+            (
+                "golden-1.2.0-perfect-overflow.bmp",
+                &b"BMP6"[..],
+                perfect_overflow,
+            ),
         ] {
             let path = data(name);
             let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -315,6 +326,26 @@ mod mph {
             }
         }
     }
+
+    /// The 1.2 arena with an overflow entry: the same 1000 keys plus one of 300 bytes, which puts
+    /// its block's offsets behind the data instead of widening every block. It maps zero-copy,
+    /// every key answers, and the long one reads back whole.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn the_overflow_blob_loads_zero_copy_and_reads_its_long_key() {
+        let keys = keys();
+        let long = "x".repeat(300);
+        let path = data("golden-1.2.0-perfect-overflow.bmp");
+        // SAFETY: a committed blob, and nothing in this process writes to it while mapped.
+        let perfect = unsafe { lexindex::PerfectHashIndex::load_mmap(path) }.unwrap();
+        assert_eq!(perfect.len(), keys.len() + 1);
+        assert!(!perfect.has_fingerprints());
+        for key in keys.iter().chain(std::iter::once(&long)) {
+            let id = perfect.id(key).unwrap_or_else(|| panic!("{key:?}"));
+            assert_eq!(perfect.key(id), Some(key.as_str()));
+            assert_eq!(perfect.id(&format!("{key}~")), None);
+        }
+    }
 }
 
 /// The fuzz targets in `fuzz/` are seeded from these same files, and a target that rejected every
@@ -350,9 +381,18 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
     let old_compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
     assert!(lexindex::fuzzing::parse_compact_frame(&old_compact, true));
-    // And the fingerprinted arena, the newest encoding the parser knows.
-    let fingerprinted = std::fs::read(data("golden-1.2.0-perfect-fp.bmp")).unwrap();
-    assert!(lexindex::fuzzing::parse_perfect_frame(&fingerprinted, true));
+    // And the two encodings 1.2 added: the fingerprinted arena, and the one with an overflow
+    // table behind its data.
+    for name in [
+        "golden-1.2.0-perfect-fp.bmp",
+        "golden-1.2.0-perfect-overflow.bmp",
+    ] {
+        let blob = std::fs::read(data(name)).unwrap();
+        assert!(
+            lexindex::fuzzing::parse_perfect_frame(&blob, true),
+            "{name}"
+        );
+    }
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -587,6 +627,23 @@ fn every_golden_blob_inspects_from_its_header() {
             plain.mph_bytes,
             Some(0),
             plain.arena_bytes.map(|b| b + 1008), // 63 blocks of 16 slots, one byte each
+        )
+    );
+    // The overflow arena of 1.2: one 300-byte key more, its block's offsets behind the data — the
+    // same 63 blocks, plus the key, a 68-byte entry and an 8-byte trailer.
+    let overflow = inspect_file(data("golden-1.2.0-perfect-overflow.bmp")).unwrap();
+    assert_eq!(
+        (
+            overflow.format.as_str(),
+            overflow.keys,
+            overflow.side_entries,
+            overflow.arena_bytes,
+        ),
+        (
+            "BMP6",
+            Some(1001),
+            Some(0),
+            plain.arena_bytes.map(|b| b + 300 + 68 + 8),
         )
     );
     // The hash blobs from 1.0 and 1.1: one perfect hash each, no side entries over these keys,

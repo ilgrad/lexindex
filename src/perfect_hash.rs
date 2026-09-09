@@ -93,6 +93,7 @@ static SPILL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 #[cfg(feature = "mmap")]
 struct ArenaLayout<'a> {
     prefix: &'a [u8],
+    tail: &'a [u8],
     tag: u8,
     data_start: usize,
     data_len: usize,
@@ -105,14 +106,14 @@ struct ArenaLayout<'a> {
 impl ArenaLayout<'_> {
     /// The byte range slot `slot` occupies in the file.
     fn span(&self, slot: usize) -> std::ops::Range<usize> {
-        let (lo, hi) = StringArena::span_at(self.prefix, self.tag, slot);
+        let (lo, hi) = StringArena::span_at(self.prefix, self.tail, self.tag, slot);
         self.data_start + lo as usize..self.data_start + hi as usize
     }
 
     /// Which window slot `slot` is filled in. Clamped because a zero-length key at the very end of
     /// the arena starts exactly at `data_len`, one past the last window.
     fn window_of(&self, slot: usize, windows: usize) -> usize {
-        let off = StringArena::span_at(self.prefix, self.tag, slot).0 as usize;
+        let off = StringArena::span_at(self.prefix, self.tail, self.tag, slot).0 as usize;
         (off / self.window).min(windows - 1)
     }
 }
@@ -363,7 +364,7 @@ impl PerfectHashIndex {
     /// encoding rather than misread it.
     ///
     /// Measured on the 480 k-word dictionary, each index alone in its process: an absent probe
-    /// 167 → 91 ns, a member 168 → 171, the index 10.90 → 11.90 bytes per key.
+    /// 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 bytes per key.
     pub fn build_with_fingerprints<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -1135,7 +1136,7 @@ impl PerfectHashIndex {
         }
         drop(lens);
         drop(fps);
-        let (arena_prefix, data_len, tag) =
+        let (arena_prefix, data_len, tag, arena_tail) =
             StringArena::prefix_for_lengths(&len_by_slot, fp_by_slot.as_deref());
         drop(len_by_slot);
         drop(fp_by_slot);
@@ -1156,7 +1157,8 @@ impl PerfectHashIndex {
 
         let arena_start = HEADER_V5 + mph_buf.len();
         let data_start = arena_start + arena_prefix.len();
-        let total = data_start + data_len + side_buf.len();
+        let arena_end = data_start + data_len + arena_tail.len();
+        let total = arena_end + side_buf.len();
         crate::blob::write_atomically_with(path.as_ref(), |w| {
             let file: &mut std::fs::File = w.get_mut();
             file.set_len(total as u64)?;
@@ -1165,10 +1167,12 @@ impl PerfectHashIndex {
             let mut map = unsafe { memmap2::MmapMut::map_mut(&*file)? };
             map[HEADER_V5..arena_start].copy_from_slice(&mph_buf);
             map[arena_start..data_start].copy_from_slice(&arena_prefix);
-            map[data_start + data_len..].copy_from_slice(&side_buf);
+            map[data_start + data_len..arena_end].copy_from_slice(&arena_tail);
+            map[arena_end..].copy_from_slice(&side_buf);
 
             let layout = ArenaLayout {
                 prefix: &arena_prefix,
+                tail: &arena_tail,
                 tag,
                 data_start,
                 data_len,
@@ -1318,6 +1322,40 @@ mod stream_build_tests {
         std::fs::remove_file(&spilled).ok();
     }
 
+    /// One long key among short ones keeps the arena on one-byte blocks with an overflow entry,
+    /// and the file build writes that entry behind the data — through the direct fill and through
+    /// the spill — byte for byte as the in-memory build does.
+    #[test]
+    fn build_to_file_writes_an_overflow_entry_behind_the_data() {
+        let mut keys: Vec<String> = (0..500).map(|i| format!("w{i}")).collect();
+        keys[250] = "x".repeat(5_000);
+        let mem = PerfectHashIndex::build(&keys).unwrap();
+        assert_eq!(
+            mem.arena.tag(),
+            0x51,
+            "one-byte blocks with an overflow table"
+        );
+        let want = mem.to_bytes().unwrap();
+        let direct = tmp("overflow-direct.bmp");
+        assert_eq!(
+            PerfectHashIndex::build_to_file(&direct, || keys.iter()).unwrap(),
+            keys.len()
+        );
+        assert_eq!(std::fs::read(&direct).unwrap(), want);
+        let spilled = tmp("overflow-spilled.bmp");
+        PerfectHashIndex::build_to_file_windowed(&spilled, || keys.iter(), || Ok(()), 64, false)
+            .unwrap();
+        assert_eq!(std::fs::read(&spilled).unwrap(), want);
+        // SAFETY: a file this test just wrote, and nothing else touches it.
+        let mapped = unsafe { PerfectHashIndex::load_mmap(&direct) }.unwrap();
+        let id = mapped.id(&keys[250]).unwrap();
+        assert_eq!(mapped.key(id), Some(keys[250].as_str()));
+        assert_eq!(mapped.id("w250"), None);
+        drop(mapped);
+        std::fs::remove_file(&direct).ok();
+        std::fs::remove_file(&spilled).ok();
+    }
+
     #[test]
     fn build_to_file_builds_an_index_indistinguishable_from_the_in_memory_one() {
         // Keys deliberately of different lengths and not in sorted order: the streaming build has
@@ -1358,10 +1396,11 @@ mod stream_build_tests {
     /// lands in is the perfect hash's choice — so the invariant is pinned directly.
     #[test]
     fn window_of_clamps_a_zero_length_key_at_the_end_of_the_arena() {
-        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[4, 4, 0], None);
+        let (prefix, data_len, tag, tail) = StringArena::prefix_for_lengths(&[4, 4, 0], None);
         assert_eq!(data_len, 8);
         let layout = ArenaLayout {
             prefix: &prefix,
+            tail: &tail,
             tag,
             data_start: 0,
             data_len,
@@ -1381,9 +1420,10 @@ mod stream_build_tests {
     /// a short record and desynchronise the spill.
     #[test]
     fn a_replayed_key_of_the_wrong_length_is_refused_even_when_the_hash_matches() {
-        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[3], None);
+        let (prefix, data_len, tag, tail) = StringArena::prefix_for_lengths(&[3], None);
         let layout = ArenaLayout {
             prefix: &prefix,
+            tail: &tail,
             tag,
             data_start: 0,
             data_len,

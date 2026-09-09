@@ -1,0 +1,38 @@
+local/negfp (a throwaway harness beside the crate; not shipped), 2026-09-10 02:21-02:24, lexindex 679a8c6 (+ the
+overflow blocks and the fingerprint-first check this commit adds), Ryzen 7 5800HS, Fedora 44, load average 1.0-1.1
+(editor open). Same corpus, probes and control as negfp-2026-09-10-arz-8f136d3.txt.
+
+A mobile part: after an idle spell the first processes run 30-40 % faster (absent-fp 57 ns, a member 119 ns) and
+settle within a minute -- so three warm-up pairs first, then `head` (679a8c6 as built) and `after` (this tree)
+alternated as processes in both orders, 6 rounds, one index per process; min/max per binary and the paired
+per-round delta (after - head). The control is CompactHashIndex::id_unchecked in the same binary.
+
+  absent-fp      head min  88.8 max  91.6 | after min  74.4 max  78.2 | paired delta median -13.9  all -13.9 -14.7 -13.6 -16.0 -15.6 -11.6
+  member-fp      head min 170.5 max 172.6 | after min 170.8 max 176.2 | paired delta median  +1.2  all +0.1 -0.5 +0.9 +4.7 +2.7 +1.2
+  absent-plain   head min 165.6 max 170.4 | after min 165.9 max 168.1 | paired delta median  -1.4  all -1.6 -1.4 -2.3 -1.5 +0.4 +2.0
+  member-plain   head min 164.5 max 168.3 | after min 163.4 max 166.0 | paired delta median  -0.6  all -1.2 -2.5 -0.6 +1.5 -1.5 +0.2
+  control        head min  41.4 max  42.6 | after min  41.0 max  41.8 | paired delta median  -0.4  all -0.4 -0.4 -0.4 -1.0 -0.3 -0.4
+
+Where the 14 ns came from. The overflow marker alone (a byte compare on the block line, three instructions, the
+cold call out of line) cost absent-fp 88 -> 99 ns with no change in cache or branch misses: an absent probe runs
+about 255 instructions, the width of the reorder buffer, and lives on its one miss overlapping the next probe's;
+the longer path broke the overlap. Checking the fingerprint before the offsets shortens the absent path by the
+whole span computation, and the overlap returns with room to spare. perf stat (absent-fp minus the `none` mode,
+per probe): head 254.6 instructions / 375 cycles; marker only 273.7 / 423; marker + cold call + closure-fed slice
+257.3 / 401; the final layout was not re-counted -- the wall clock above is the measurement.
+
+In-process A-B-A-B (all three indexes resident, 7 rounds, min per row; `negfp 7`), this tree only:
+n 479823  plain 10.899 B/key  fp 11.899 B/key  delta 1.000 B/key
+  member plain                164.5 ns  (max +2%)
+  member fp                   173.4 ns  (max +3%)
+  absent plain                164.6 ns  (max +3%)
+  absent fp                    75.5 ns  (max +5%)
+  mixed plain                 166.1 ns  (max +5%)
+  mixed fp                    135.3 ns  (max +3%)
+  ids_of absent plain          70.4 ns  (max +6%)
+  ids_of absent fp             47.2 ns  (max +18%)
+  ids_of member plain          72.2 ns  (max +6%)
+  ids_of member fp             75.6 ns  (max +6%)
+  control chi.id_unchecked     40.6 ns  (max +8%)
+The batched rows did not move: `ids_of` prefetches, so its misses already overlap and the shorter path buys
+nothing there.
