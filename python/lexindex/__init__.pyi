@@ -48,6 +48,17 @@ class StringIndex:
         build is abandoned with `path` untouched.
         """
 
+    @staticmethod
+    def build_to_file(items: Iterable[str], path: str | os.PathLike[str]) -> int:
+        """The constructor for a corpus that does not fit in memory, written straight to `path`.
+
+        The keys are taken in one pass, in any order: every 256 MiB of them is sorted in memory and
+        spilled as a run to a temporary directory beside `path`, and the runs are merged into the
+        transducer, so neither the corpus nor the index is ever held whole. The file is exactly what
+        the constructor followed by ``save`` would have written. Returns the number of distinct
+        keys. If the iterable raises, the build is abandoned with `path` untouched.
+        """
+
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...

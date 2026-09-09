@@ -131,6 +131,109 @@ impl StringIndex {
         Ok(n)
     }
 
+    /// [`build`](Self::build) for a corpus that does not fit in memory, written straight to
+    /// `path`. Returns the number of distinct keys written.
+    ///
+    /// The keys are taken in one pass, in any order, and never held together: every
+    /// [`RUN_BYTES`] of them is sorted and deduplicated in memory and spilled as one run to a
+    /// temporary directory beside `path`, and the runs are then merged — a `k`-way merge over one
+    /// buffered reader each, a duplicate across runs dropped like one within — into
+    /// [`build_sorted_to_file`](Self::build_sorted_to_file). The blob is exactly what `build`
+    /// followed by [`save`](Self::save) would have written, since `build` sorts, deduplicates and
+    /// inserts and this does the same in pieces; a corpus that fits in one run is sorted and fed
+    /// straight in without touching the disk. Peak memory is one run — the key bytes plus eight
+    /// per key, up to `RUN_BYTES` each — and a 1 MiB read buffer per run in the merge, whatever
+    /// the key count. Transient disk is the distinct keys once, next to the output, removed on
+    /// every exit path.
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let path = std::env::temp_dir().join("lexindex-doc-build_to_file.bix");
+    /// let n = StringIndex::build_to_file(["banana", "apple", "banana", "cherry"], &path)?;
+    /// let idx = StringIndex::load(&path)?;
+    /// assert_eq!((n, idx.id("banana")), (3, Some(1)));
+    /// # std::fs::remove_file(&path).ok();
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn build_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(items, path, || Ok(()))
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked once the
+    /// input has ended — before the merge, so a source that failed does not pay for one — and
+    /// again **inside** the atomic write, before the rename that publishes the file. It exists
+    /// for the reason [`build_sorted_to_file_checked`](Self::build_sorted_to_file_checked) does.
+    pub(crate) fn build_to_file_checked<I, S, C>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        Self::build_to_file_runs(items, path.as_ref(), check, RUN_BYTES)
+    }
+
+    /// [`build_to_file_checked`](Self::build_to_file_checked) with the run size exposed.
+    ///
+    /// Only the tests pass anything but [`RUN_BYTES`]: a corpus that needs more than one 256 MiB
+    /// run is far too large for a unit test, and a merge bug that only appears with several runs
+    /// is exactly the kind this has to catch.
+    fn build_to_file_runs<I, S, C>(
+        items: I,
+        path: &std::path::Path,
+        mut check: C,
+        run_bytes: usize,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        let mut run = Run::with_budget(run_bytes);
+        let mut runs = Runs::beside(path);
+        for key in items {
+            let key = key.as_ref();
+            if !run.fits(key) {
+                if run.is_empty() {
+                    return Err(IndexError::Format(
+                        "string-index: a key longer than the run budget",
+                    ));
+                }
+                runs.spill(run.sorted())?;
+                run.clear();
+            }
+            run.push(key);
+        }
+        check()?;
+        if runs.count == 0 {
+            return Self::build_sorted_to_file_checked(run.sorted(), path, check);
+        }
+        if !run.is_empty() {
+            runs.spill(run.sorted())?;
+        }
+        // A read error in the merge cannot travel through `Iterator::next`; it is parked here, the
+        // stream ends, and the check inside the atomic write reports it before anything is
+        // published.
+        let failed = std::cell::RefCell::new(None);
+        let merged = runs.merge(&failed)?;
+        Self::build_sorted_to_file_checked(merged, path, || {
+            if let Some(e) = failed.borrow_mut().take() {
+                return Err(IndexError::Io(e));
+            }
+            check()
+        })
+    }
+
     /// Feed an ascending key stream into `builder`, dropping adjacent duplicates and numbering what
     /// survives from 0. Returns how many keys were inserted.
     ///
@@ -847,6 +950,205 @@ fn utf8_step(state: u8, byte: u8) -> Option<u8> {
     })
 }
 
+/// Key bytes one run of [`StringIndex::build_to_file`] holds before it is sorted and spilled.
+pub const RUN_BYTES: usize = 256 << 20;
+
+/// Process-wide counter in the runs directory's name, so two builds in one process aimed at the
+/// same path do not share one.
+static RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// One run of [`StringIndex::build_to_file`]: an arena of key bytes and a span per key, so a run
+/// costs its bytes plus eight per key rather than a `String` and an allocation each. Both are
+/// reserved once, at the first key, to the budget — the pages are only touched as they fill.
+struct Run {
+    bytes: Vec<u8>,
+    spans: Vec<(u32, u32)>,
+    budget: usize,
+}
+
+impl Run {
+    fn with_budget(budget: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            spans: Vec::new(),
+            budget,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    /// Whether `key` still fits: its bytes in the arena and its span in the table.
+    fn fits(&self, key: &str) -> bool {
+        self.bytes.len() + key.len() <= self.budget && self.spans.len() < self.budget / 8
+    }
+
+    fn push(&mut self, key: &str) {
+        if self.bytes.capacity() == 0 {
+            self.bytes.reserve_exact(self.budget);
+            self.spans.reserve_exact(self.budget / 8);
+        }
+        // `fits` bounded the arena by `budget`, and the budget is a `usize` the caller chose;
+        // `u32` spans hold a run up to 4 GiB, which `RUN_BYTES` is far below.
+        self.spans.push((self.bytes.len() as u32, key.len() as u32));
+        self.bytes.extend_from_slice(key.as_bytes());
+    }
+
+    /// The keys ascending and distinct, in place.
+    fn sorted(&mut self) -> impl Iterator<Item = &str> {
+        let bytes = &self.bytes;
+        let key = |&(at, len): &(u32, u32)| &bytes[at as usize..(at + len) as usize];
+        self.spans.sort_unstable_by(|a, b| key(a).cmp(key(b)));
+        self.spans.dedup_by(|a, b| key(a) == key(b));
+        self.spans
+            .iter()
+            .map(move |s| std::str::from_utf8(key(s)).expect("appended from a str"))
+    }
+
+    fn clear(&mut self) {
+        self.bytes.clear();
+        self.spans.clear();
+    }
+}
+
+/// The spilled runs: a directory beside the output, one file per run — `[keys u64]`, then
+/// `[len u32][bytes]` per key, ascending and distinct — removed when this is dropped, whichever
+/// way the build ends. Nothing is created until the first spill, so a corpus that fits in one
+/// run leaves no trace.
+struct Runs {
+    beside: std::path::PathBuf,
+    dir: Option<std::path::PathBuf>,
+    count: usize,
+}
+
+impl Runs {
+    fn beside(target: &std::path::Path) -> Self {
+        Self {
+            beside: target.to_path_buf(),
+            dir: None,
+            count: 0,
+        }
+    }
+
+    fn dir(&mut self) -> Result<&std::path::Path, IndexError> {
+        if self.dir.is_none() {
+            let mut dir = self.beside.clone();
+            let seq = RUN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            dir.as_mut_os_string()
+                .push(format!(".{}.{seq}.runs", std::process::id()));
+            // `create_dir`, not `create_dir_all`: a directory already at this pid-and-counter
+            // name is someone else's, and an error rather than a place to write.
+            std::fs::create_dir(&dir)?;
+            self.dir = Some(dir);
+        }
+        Ok(self.dir.as_deref().expect("just created"))
+    }
+
+    fn spill<'a>(&mut self, keys: impl Iterator<Item = &'a str>) -> Result<(), IndexError> {
+        use std::io::Write;
+        let name = self.count.to_string();
+        let path = self.dir()?.join(name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
+        // The count goes first so the reader knows a run's end from a truncated key.
+        w.write_all(&[0u8; 8])?;
+        let mut n = 0u64;
+        for key in keys {
+            let len = u32::try_from(key.len())
+                .map_err(|_| IndexError::Format("string-index: a key longer than 4 GiB"))?;
+            w.write_all(&len.to_le_bytes())?;
+            w.write_all(key.as_bytes())?;
+            n += 1;
+        }
+        w.flush()?;
+        let mut file = w.into_inner().map_err(|e| e.into_error())?;
+        {
+            use std::io::{Seek, SeekFrom};
+            file.seek(SeekFrom::Start(0))?;
+            file.write_all(&n.to_le_bytes())?;
+        }
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Every run as one ascending stream; equal keys from different runs come out adjacent, for
+    /// the sorted builder to drop. A read error is parked in `failed` and ends the stream.
+    fn merge<'a>(
+        &self,
+        failed: &'a std::cell::RefCell<Option<std::io::Error>>,
+    ) -> Result<impl Iterator<Item = String> + 'a, IndexError> {
+        use std::cmp::Reverse;
+        let dir = self.dir.as_deref().expect("a run was spilled");
+        let mut readers = Vec::with_capacity(self.count);
+        let mut heap = std::collections::BinaryHeap::with_capacity(self.count);
+        for i in 0..self.count {
+            let mut reader = RunReader::open(&dir.join(i.to_string()))?;
+            if let Some(key) = reader.next()? {
+                heap.push(Reverse((key, i)));
+            }
+            readers.push(reader);
+        }
+        Ok(std::iter::from_fn(move || {
+            let Reverse((key, i)) = heap.pop()?;
+            match readers[i].next() {
+                Ok(Some(next)) => heap.push(Reverse((next, i))),
+                Ok(None) => {}
+                Err(e) => {
+                    *failed.borrow_mut() = Some(e);
+                    heap.clear();
+                }
+            }
+            Some(key)
+        }))
+    }
+}
+
+impl Drop for Runs {
+    fn drop(&mut self) {
+        if let Some(dir) = &self.dir {
+            std::fs::remove_dir_all(dir).ok();
+        }
+    }
+}
+
+struct RunReader {
+    reader: std::io::BufReader<std::fs::File>,
+    left: u64,
+}
+
+impl RunReader {
+    fn open(path: &std::path::Path) -> Result<Self, IndexError> {
+        use std::io::Read;
+        let mut reader = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?);
+        let mut count = [0u8; 8];
+        reader.read_exact(&mut count)?;
+        Ok(Self {
+            reader,
+            left: u64::from_le_bytes(count),
+        })
+    }
+
+    fn next(&mut self) -> std::io::Result<Option<String>> {
+        use std::io::Read;
+        if self.left == 0 {
+            return Ok(None);
+        }
+        self.left -= 1;
+        let mut len = [0u8; 4];
+        self.reader.read_exact(&mut len)?;
+        let mut key = vec![0u8; u32::from_le_bytes(len) as usize];
+        self.reader.read_exact(&mut key)?;
+        // Written from a `str` by this process moments ago: anything else is the disk lying.
+        String::from_utf8(key)
+            .map(Some)
+            .map_err(|_| std::io::Error::other("string-index: a run file is corrupt"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1448,6 +1750,117 @@ mod tests {
         let loaded = StringIndex::load(&path).unwrap();
         assert_eq!(loaded.id("cicada"), Some(2));
         std::fs::remove_file(&path).ok();
+    }
+
+    /// A directory of its own per test, so a leftover runs directory has nowhere to hide.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lexindex_{name}_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn entries(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn build_to_file_writes_the_blob_build_would_have_run_by_run() {
+        // 200 keys in a scrambled order, every one twice, the second copies after the first: a
+        // 64-byte run holds a handful, so the duplicates land in different runs.
+        let keys: Vec<String> = (0..200)
+            .map(|i| format!("k{:03}", (i * 7919) % 200))
+            .collect();
+        let twice: Vec<&str> = keys.iter().chain(keys.iter()).map(String::as_str).collect();
+        let want = StringIndex::build(&keys).unwrap().to_bytes();
+        let dir = scratch("runs");
+        let path = dir.join("idx.bix");
+        let n = StringIndex::build_to_file_runs(&twice, &path, || Ok(()), 64).unwrap();
+        assert_eq!(n, 200);
+        assert_eq!(std::fs::read(&path).unwrap(), want);
+        assert_eq!(entries(&dir), ["idx.bix"], "the runs directory is gone");
+        let loaded = StringIndex::load(&path).unwrap();
+        assert_eq!(loaded.id("k199"), Some(199));
+
+        // One run: sorted in memory, no directory at all.
+        assert_eq!(StringIndex::build_to_file(&twice, &path).unwrap(), 200);
+        assert_eq!(std::fs::read(&path).unwrap(), want);
+        assert_eq!(entries(&dir), ["idx.bix"]);
+
+        // Runs bounded by the span table rather than the arena: empty keys cost no bytes.
+        let empties = ["", "a", "", "b", "", "", "c"];
+        assert_eq!(
+            StringIndex::build_to_file_runs(empties, &path, || Ok(()), 16).unwrap(),
+            4
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            StringIndex::build(empties).unwrap().to_bytes()
+        );
+
+        assert_eq!(
+            StringIndex::build_to_file(Vec::<String>::new(), &path).unwrap(),
+            0
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            StringIndex::build(Vec::<String>::new()).unwrap().to_bytes()
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_to_file_check_aborts_before_the_file_is_published() {
+        let dir = scratch("runs_check");
+        let path = dir.join("idx.bix");
+        std::fs::write(&path, b"previous").unwrap();
+        let keys: Vec<String> = (0..100)
+            .map(|i| format!("k{:03}", (i * 37) % 100))
+            .collect();
+
+        // Refused once the input has ended: no merge, no file.
+        let err = StringIndex::build_to_file_runs(
+            &keys,
+            &path,
+            || Err(IndexError::Format("stopped")),
+            64,
+        )
+        .unwrap_err();
+        assert!(matches!(err, IndexError::Format("stopped")), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+
+        // Refused inside the atomic write, after the merge: the file is still the previous one.
+        let calls = std::cell::Cell::new(0);
+        let late = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                Err(IndexError::Format("late"))
+            } else {
+                Ok(())
+            }
+        };
+        let err = StringIndex::build_to_file_runs(&keys, &path, late, 64).unwrap_err();
+        assert!(matches!(err, IndexError::Format("late")), "{err}");
+        assert_eq!(
+            calls.get(),
+            2,
+            "once after the input, once inside the write"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        assert_eq!(entries(&dir), ["idx.bix"], "the runs directory is gone");
+
+        // A key no run can hold is an error, not an unbounded allocation.
+        let long = "x".repeat(65);
+        let err =
+            StringIndex::build_to_file_runs([long.as_str()], &path, || Ok(()), 64).unwrap_err();
+        assert!(err.to_string().contains("run budget"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

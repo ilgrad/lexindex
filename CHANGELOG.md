@@ -42,6 +42,15 @@ All notable changes to this project are documented here. The format follows
   microseconds; nothing is decoded or verified, and a blob from before 1.0 is an error naming the
   type to rebuild. `BlobInfo`, `BlobKind` and `OverlayInfo` are `#[non_exhaustive]`, so a field
   can be added later without a major.
+- **`StringIndex::build_to_file(items, path)`** (Python: `StringIndex.build_to_file`): `build` for
+  a corpus that does not fit in memory. The keys come in any order; every 256 MiB of them is sorted
+  and deduplicated in memory and spilled as one run beside the output, and the runs are merged --
+  one buffered reader each -- into `build_sorted_to_file`, so the blob is byte for byte what `build`
+  then `save` writes. Peak memory is one run plus a 1 MiB buffer per run, whatever the key count;
+  the transient disk is the distinct keys once, removed on every exit path. A run is an arena of
+  key bytes and a span per key, not a `String` each, so the budget is what it says. Measured at
+  100 M real-word pairs: 414 MB peak against 11 985 MB for `build` over the same generator, 150 s
+  against 211, blobs identical.
 
 ### Deprecated
 

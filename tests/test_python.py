@@ -1180,3 +1180,28 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
         lexindex.inspect(42)
     with pytest.raises(OSError):
         lexindex.inspect(tmp_path / "missing.blob")
+
+
+def test_build_to_file_writes_what_the_constructor_would_save(tmp_path):
+    keys = [f"k{(i * 7919) % 500:03}" for i in range(500)] * 2
+    path = tmp_path / "ext.bix"
+    assert lexindex.StringIndex.build_to_file(iter(keys), path) == 500
+    assert path.read_bytes() == lexindex.StringIndex(keys).to_bytes()
+    assert lexindex.StringIndex.load(path).id("k499") == 499
+    assert [p.name for p in tmp_path.iterdir()] == ["ext.bix"]
+
+
+def test_build_to_file_abandons_the_file_when_the_iterable_raises(tmp_path):
+    path = tmp_path / "ext.bix"
+    path.write_bytes(b"previous")
+
+    def keys():
+        yield "a"
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        lexindex.StringIndex.build_to_file(keys(), path)
+    assert path.read_bytes() == b"previous"
+    with pytest.raises(TypeError):
+        lexindex.StringIndex.build_to_file([1, 2], path)
+    assert [p.name for p in tmp_path.iterdir()] == ["ext.bix"]

@@ -1,0 +1,19 @@
+# StringIndex::build_to_file against StringIndex::build on the same lazy generator: peak RSS and wall time.
+# Script: local/ext_sort_rss.py (each variant in its own process, A-B-B-A; the two blobs compared byte for byte).
+# Keys: "w1.w2" pairs over /usr/share/dict/words with two coprime strides (no repeats, scrambled order).
+# Tree: deb8ba7 plus the uncommitted build_to_file change this file is committed with. Machine: arz
+# (Zen 3, 38 GB, output and runs on /home, ext4). Python 3.14, extension built with maturin --release.
+#
+# n = 100 000 000
+ctor	n=100000000	distinct=100000000	213.2 s	base 19.3 MB	peak 12004.3 MB	delta 11985.0 MB
+ext	n=100000000	distinct=100000000	150.1 s	base 19.2 MB	peak 432.9 MB	delta 413.7 MB
+ext	n=100000000	distinct=100000000	150.9 s	base 19.1 MB	peak 432.6 MB	delta 413.5 MB
+ctor	n=100000000	distinct=100000000	210.0 s	base 19.1 MB	peak 12003.5 MB	delta 11984.4 MB
+blobs identical: True	blob 1296.7 MB
+#
+# n = 10 000 000 (fits in one 256 MiB run: no run files)
+ctor	n=10000000	distinct=10000000	23.7 s	base 19.2 MB	peak 1224.5 MB	delta 1205.3 MB
+ext	n=10000000	distinct=10000000	19.3 s	base 18.9 MB	peak 315.2 MB	delta 296.3 MB
+ext	n=10000000	distinct=10000000	18.9 s	base 19.1 MB	peak 315.5 MB	delta 296.4 MB
+ctor	n=10000000	distinct=10000000	24.2 s	base 19.1 MB	peak 1224.8 MB	delta 1205.7 MB
+blobs identical: True	blob 123.3 MB

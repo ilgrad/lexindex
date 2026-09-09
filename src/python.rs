@@ -168,6 +168,33 @@ impl PyStringIndex {
         })
     }
 
+    /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
+    /// keys, in any order, are sorted in runs that spill beside the output and merged into the
+    /// transducer, so neither the corpus nor the index is ever held whole. Returns the number of
+    /// distinct keys written.
+    #[staticmethod]
+    fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf) -> PyResult<usize> {
+        let err = Rc::new(RefCell::new(None));
+        let seen = Rc::clone(&err);
+        let written = StringIndex::build_to_file_checked(
+            stream_strs(items.try_iter()?, Rc::clone(&err)),
+            &path,
+            move || {
+                if seen.borrow().is_some() {
+                    Err(crate::IndexError::Format(
+                        "string-index: the input iterable raised before it ended",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        written.map_err(to_py)
+    }
+
     /// [`from_sorted`] streamed straight to `path`, so neither the corpus nor the finished index
     /// has to fit in memory. Returns the number of keys written.
     #[staticmethod]

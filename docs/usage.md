@@ -15,6 +15,7 @@ idx = lexindex.StringIndex(["banana", "apple", "apricot", "cherry", "apple"])
 # keys, the streamed build peaks at 11.6 MB against the list build's 1053.4 -- 91x.
 keys = (line.rstrip("\n") for line in open("sorted-keys.txt"))   # any lazy iterable
 n = lexindex.StringIndex.build_sorted_to_file(keys, "keys.bix")  # -> number of keys written
+n = lexindex.StringIndex.build_to_file(unsorted, "keys.bix")     # any order: sorted in runs on disk
 idx2 = lexindex.StringIndex.from_sorted(["apple", "apricot", "banana"])  # or straight to memory
 
 len(idx)                 # 4  (duplicate "apple" deduped)
@@ -389,6 +390,8 @@ let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
 
 // `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
 StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
+// ...or takes them in any order through an external sort: runs spilled beside the output, merged.
+StringIndex::build_to_file(["c", "a", "b"], &bix)?;
 
 // `PerfectHashIndex` stores its keys in slot order, and slot order is only known once the perfect
 // hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
@@ -408,6 +411,17 @@ The perfect hash also needs **transient disk space**: an output whose key arena 
 filled window by window through a spill file next to it, so about 2.2× the output size has to be
 free in the target directory until the build finishes. Filling the arena in one pass instead is
 what made the build rewrite its own file dozens of times over.
+
+`StringIndex::build_to_file` is `build` for a corpus that does not fit: every 256 MiB of keys is
+sorted and deduplicated in memory and spilled as one run to a temporary directory beside the
+output, the runs are merged — one buffered reader each — into the transducer, and the file is byte
+for byte what `build` then `save` would have written. Peak memory is one run plus a 1 MiB buffer
+per run; the transient disk is the distinct keys once, removed on every exit path. A corpus that
+fits in one run never touches the disk before the output. Measured at 100 M real-word pairs
+(`w1.w2` over `/usr/share/dict/words`, a 1.30 GB blob), it peaks at 414 MB against 11 985 MB for
+the same generator handed to `build`, and finishes in 150 s against 211: a run is an arena of key
+bytes with a span per key, not a `String` each, so it also sorts faster. At 10 M pairs the corpus
+fits in one run — 296 MB against 1 205, 19 s against 24 — and the blobs are identical either way.
 
 Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
 `load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra
