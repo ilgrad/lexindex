@@ -108,8 +108,8 @@ pub(crate) fn fingerprint_full(s: &str) -> u64 {
 
 /// `(hash_key, fingerprint_full)` in one pass over the key's bytes — bit-for-bit the two functions
 /// above, with both states advanced inside a single loop, so each word is loaded once. Every
-/// `CompactHashIndex` path needs both hashes. `PerfectHashIndex` keeps using [`hash_key`] alone —
-/// it never needs the second.
+/// `CompactHashIndex` path needs both hashes; `PerfectHashIndex::build` keeps using [`hash_key`]
+/// alone, and `build_to_file` takes both, the second for its replay digest.
 #[inline]
 pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
     let b = s.as_bytes();

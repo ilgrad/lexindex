@@ -18,7 +18,7 @@
 use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
-use crate::hash::hash_key;
+use crate::hash::{hash_key, hash_pair};
 use crate::mphf::Mphf;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
@@ -122,6 +122,16 @@ impl ArenaLayout<'_> {
 const REPLAY_MISMATCH: &str =
     "perfect-hash: the source did not replay the same keys in the same order";
 
+/// One key's second hash folded into a pass's digest, in order. Both passes compute it and must
+/// agree before the rename: the per-key checks in [`replay_span`] cannot tell apart two keys that
+/// share the slot hash at equal length — `hash::COLLIDING_PAIR` is such a pair — and the digest
+/// can, because the second hash is independent of the first.
+#[cfg(feature = "mmap")]
+#[inline]
+fn fold_digest(digest: u64, fingerprint: u64) -> u64 {
+    (digest.rotate_left(5) ^ fingerprint).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
+
 /// Where pass two may write the key at `slot`, once it has shown itself to be the key pass one put
 /// there.
 ///
@@ -129,17 +139,22 @@ const REPLAY_MISMATCH: &str =
 /// the slot's own length is checked as well. It is free: pass one sized the slot from that key's
 /// length. Without it an equal-hash key of a different length reaches `copy_from_slice` with
 /// mismatched lengths, which panics, or writes a short record into the spill, whose framing is read
-/// back by the arena's lengths and would silently desynchronise from there on.
+/// back by the arena's lengths and would silently desynchronise from there on. An equal-hash key
+/// of the *same* length passes both, so the key's second hash goes into `digest` as well, and the
+/// caller compares the digests of the two passes before publishing.
 #[cfg(feature = "mmap")]
 fn replay_span(
     layout: &ArenaLayout<'_>,
     expected_hash: u64,
     slot: u32,
     key: &str,
+    digest: &mut u64,
 ) -> Result<std::ops::Range<usize>, IndexError> {
-    if hash_key(key) != expected_hash {
+    let (hash, fingerprint) = hash_pair(key);
+    if hash != expected_hash {
         return Err(IndexError::Build(REPLAY_MISMATCH));
     }
+    *digest = fold_digest(*digest, fingerprint);
     let span = layout.span(slot as usize);
     if key.len() != span.len() {
         return Err(IndexError::Build(REPLAY_MISMATCH));
@@ -226,6 +241,7 @@ fn fill_arena_windowed<F, I, S>(
     slot_of: &[u32],
     source: &mut F,
     target: &std::path::Path,
+    digest: &mut u64,
 ) -> Result<usize, IndexError>
 where
     F: FnMut() -> I,
@@ -260,7 +276,7 @@ where
             return Err(IndexError::Build(REPLAY_MISMATCH));
         }
         let slot = slot_of[i];
-        replay_span(layout, hashes[i], slot, key)?;
+        replay_span(layout, hashes[i], slot, key, digest)?;
         let w = layout.window_of(slot as usize, windows);
         let out = &mut buf[w];
         out.extend_from_slice(&slot.to_le_bytes());
@@ -822,9 +838,10 @@ impl PerfectHashIndex {
     ///
     /// The file is a blob that answers exactly as [`build`](Self::build) + [`save`](Self::save)
     /// would have for the same key set — every key a member, every `key(id)` round trip intact —
-    /// but **not necessarily the same bytes**: the arena's offset encoding is chosen from the key
-    /// lengths this pass sees, and a streamed build knows them before it has the keys. The MPH
-    /// itself is deterministic, so the ids agree.
+    /// and, short of two keys sharing a 64-bit hash, **the same bytes**, which a test holds it to:
+    /// the arena's offset encoding is chosen from the key lengths, which pass one records, and the
+    /// MPH is deterministic. With a collision the colliding keys' tail ids follow the source's
+    /// order instead of sorted order; every other id still agrees.
     ///
     /// `source` is a *factory*, not an iterator, and it is called **twice**. That is the shape the
     /// problem has, not an inconvenience: the arena stores keys in slot order, slot order is only
@@ -833,6 +850,13 @@ impl PerfectHashIndex {
     /// table follows from the lengths alone; pass two replays the corpus and places each key. A
     /// one-shot iterator cannot be passed by construction, which is the point — the signature
     /// states the requirement instead of documenting it.
+    ///
+    /// Pass two must replay **the same keys in the same order**, and is held to it: every key is
+    /// checked against the slot hash and length pass one recorded, and both passes fold a second,
+    /// independent 64-bit hash of every key into an ordered digest that must agree before the
+    /// file is published. A source that drops, adds, reorders or substitutes a key — two keys
+    /// sharing the slot hash at equal length included — is refused with [`IndexError::Build`]
+    /// and the target is left untouched.
     ///
     /// **Keys must be distinct.** [`build`](Self::build) sorts and deduplicates, which this cannot
     /// do: a repeated hash in pass one is either a duplicate key or a genuine 64-bit collision, and
@@ -915,12 +939,15 @@ impl PerfectHashIndex {
     {
         let mut hashes: Vec<u64> = Vec::new();
         let mut lens: Vec<u32> = Vec::new();
+        let mut digest = 0u64;
         for item in source() {
             let key = item.as_ref();
             lens.push(u32::try_from(key.len()).map_err(|_| {
                 IndexError::Format("perfect-hash: a key is longer than u32::MAX bytes")
             })?);
-            hashes.push(hash_key(key));
+            let (hash, fingerprint) = hash_pair(key);
+            hashes.push(hash);
+            digest = fold_digest(digest, fingerprint);
         }
         check()?;
         let n = hashes.len();
@@ -1031,6 +1058,7 @@ impl PerfectHashIndex {
             // through the mapping and no temporary is created; past that the fill goes through a
             // spill so the dirty set stays one window wide. See [`SPILL_WINDOW`] for the
             // measurements behind the threshold.
+            let mut replayed = 0u64;
             let i = if data_len <= window {
                 let mut i = 0usize;
                 for item in source() {
@@ -1038,7 +1066,7 @@ impl PerfectHashIndex {
                     if i >= n {
                         return Err(IndexError::Build(REPLAY_MISMATCH));
                     }
-                    let span = replay_span(&layout, hashes[i], slot_of[i], key)?;
+                    let span = replay_span(&layout, hashes[i], slot_of[i], key, &mut replayed)?;
                     map[span].copy_from_slice(key.as_bytes());
                     i += 1;
                 }
@@ -1051,12 +1079,11 @@ impl PerfectHashIndex {
                     &slot_of,
                     &mut source,
                     path.as_ref(),
+                    &mut replayed,
                 )?
             };
-            if i != n {
-                return Err(IndexError::Build(
-                    "perfect-hash: the source did not replay the same keys in the same order",
-                ));
+            if i != n || replayed != digest {
+                return Err(IndexError::Build(REPLAY_MISMATCH));
             }
             // Every extra shares a hash with its representative. Distinct keys make that a genuine
             // 64-bit collision, which the side table handles; equal keys mean the caller broke the
@@ -1200,17 +1227,17 @@ mod stream_build_tests {
 
         // The hash matches by construction; only the length differs.
         let short = "b";
-        match replay_span(&layout, hash_key(short), 0, short) {
+        match replay_span(&layout, hash_key(short), 0, short, &mut 0u64) {
             Err(IndexError::Build(msg)) => assert_eq!(msg, REPLAY_MISMATCH),
             other => panic!("expected a replay mismatch, got {other:?}"),
         }
         // The same length, the same hash: this is the ordinary path and it yields the slot.
         assert_eq!(
-            replay_span(&layout, hash_key("abc"), 0, "abc").unwrap(),
+            replay_span(&layout, hash_key("abc"), 0, "abc", &mut 0u64).unwrap(),
             0..3
         );
         // A key whose hash does not match is refused before the length is ever consulted.
-        assert!(replay_span(&layout, hash_key("zzz"), 0, "abc").is_err());
+        assert!(replay_span(&layout, hash_key("zzz"), 0, "abc", &mut 0u64).is_err());
     }
 
     /// Nothing in a unit test can build a 32 MB arena, so the window is shrunk instead and the
@@ -1741,6 +1768,44 @@ mod tests {
             assert_eq!(idx.id(s), None);
         }
         assert_eq!(idx.ids_of(&strangers), vec![None; strangers.len()]);
+    }
+
+    /// Pass two is held to pass one by more than the slot hash and the length: the pinned
+    /// colliding pair shares both, so a source that replays the two in the other order — or one
+    /// in place of the other — used to be accepted, and the file answered each key with the
+    /// other's id.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn build_to_file_refuses_a_replay_that_swaps_two_keys_sharing_a_hash() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        assert_eq!(a.len(), b.len());
+        let path = std::env::temp_dir().join(format!("lexindex_swap_{}.bmp", std::process::id()));
+        for (first, second) in [
+            (vec![a], vec![b]),
+            (vec![a, b], vec![b, a]),
+            (vec!["filler", a, b], vec!["filler", b, a]),
+        ] {
+            let calls = std::cell::Cell::new(0);
+            let err = PerfectHashIndex::build_to_file(&path, || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    first.clone()
+                } else {
+                    second.clone()
+                }
+            })
+            .unwrap_err();
+            assert!(
+                matches!(err, IndexError::Build(m) if m == REPLAY_MISMATCH),
+                "{first:?} then {second:?}: {err}"
+            );
+            assert!(!path.exists(), "a refused build must not publish");
+        }
+        assert_eq!(
+            PerfectHashIndex::build_to_file(&path, || [a, b]).unwrap(),
+            2
+        );
+        std::fs::remove_file(&path).ok();
     }
 
     /// A real 64-bit hash collision (the pinned pair from `crate::hash`) must build, keep ids a
