@@ -41,6 +41,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Both latency tables are re-measured on 1.1, and the Python one now says what it can support.**
+  The Rust table resolves the arena change cleanly: `PerfectHashIndex::id` went 1.103× → 1.010× of
+  `std::HashMap` (290 → 274 ns on a control that got 3.4 % *slower*) while four rows whose code did
+  not move shifted by at most 2 % — `StringIndex`, `BTreeMap`, the FxHash map, and `id_unchecked`,
+  which is flat at 0.285× → 0.288× precisely because it never reads the arena. Two independent
+  12-run sessions agree on every lookup minimum within 3.1 %.
+
+  The Python table cannot support a version claim at all, which took an A-B-B-A against the released
+  1.0.0 wheel to establish: in one session every cell landed within 1.01–1.04× on `random` and
+  0.98–1.09× on `words`, and the widest gaps belong to `dict` and `marisa-trie` — code identical in
+  both runs. That retires two readings the cross-session numbers had seemed to support, that
+  `PerfectHashIndex.id` gained 9 % and that `CompactHashIndex.ids_of` lost 37 % on absent pair-corpus
+  probes; today's 1.0.0 wheel measures the latter cell at 62.0 ns against the 44.8 the 1.0 table
+  published. The Rust-level win is real and simply does not survive ~180 ns of per-call binding
+  overhead. `local/latency_py.py`'s publish gate moved from the absolute minima to the ratios for
+  the same reason it exists: it had refused three tables whose ratios agreed to 1–8 %, with the
+  `dict` column — the drift the ratio divides out — the worst offender in every one.
+
 - **The scale table is re-measured on 1.1**, as the minimum of five runs per cell rather than the
   single run behind the 1.0 table, and the file it came from is committed. It is comparable cell by
   cell with the table it replaces, which the 1.0 one could not claim: `StringIndex`, whose build and
