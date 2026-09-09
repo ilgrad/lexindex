@@ -41,8 +41,6 @@ All notable changes to this project are documented here. The format follows
   `24/25`, a fixed-point `0.966`) rather than `f64`. The output is byte-identical, and the golden
   blobs say so; what changes is that the determinism promise no longer rests on every target
   rounding a division the same way, which IEEE 754 guarantees but no test could show.
-- `IndexError::Serde` is deprecated. Nothing has constructed it since 1.0 replaced the `epserde`
-  loader; a malformed perfect-hash blob is `IndexError::Format`. It goes in 2.0.
 - `bench/compare.py` records the competitors' installed versions (`marisa-trie`, `dawg2`,
   `datrie`) in its results file, next to lexindex's own.
 
@@ -61,6 +59,9 @@ All notable changes to this project are documented here. The format follows
   1.1.0 replaced with PHast's; the README's determinism note now says "within one lexindex
   version", as `docs/design.md` already did; the 1.1.0 entry below said `from_untrusted_bytes`
   had no Python binding, and it shipped one.
+- `IndexError::Serde` says that nothing has constructed it since 1.0 replaced the `epserde` loader
+  -- a malformed perfect-hash blob is `IndexError::Format` -- and that it is deprecated in 1.2 and
+  removed in 2.0. Marking it deprecated is a minor change under SemVer, so it waits for 1.2.
 
 ## [1.1.0] — 2026-09-09
 

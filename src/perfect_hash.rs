@@ -18,7 +18,9 @@
 use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
-use crate::hash::{hash_key, hash_pair};
+use crate::hash::hash_key;
+#[cfg(feature = "mmap")]
+use crate::hash::hash_pair;
 use crate::mphf::Mphf;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
