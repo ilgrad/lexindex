@@ -67,7 +67,9 @@ const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in m
 ///
 /// The lookup is over shuffled probes of all 10 M keys, so it is bound by memory; the bumped keys
 /// are what separates the rows.
-const LAMBDA: f64 = 4.5;
+///
+/// A ratio, `9 / 2`, so the bucket count is exact integer arithmetic: see [`ceil_div_ratio`].
+const LAMBDA: (u64, u64) = (9, 2);
 
 /// Slice length on a level big enough to afford it; smaller levels use a shorter one, see
 /// [`slice_for`]. A key's values under every seed stay inside its slice.
@@ -147,11 +149,13 @@ const MAX_BUCKET: usize = 64;
 /// is cheaper per key than the tail as long as it is long enough to bump few of them.
 const TAIL_KEYS: u64 = 256;
 
-/// Keys per bucket in the tail, whose seeds are two bytes and searched exhaustively.
-const TAIL_LAMBDA: f64 = 6.5;
+/// Keys per bucket in the tail, whose seeds are two bytes and searched exhaustively: `6.5`, as a
+/// ratio.
+const TAIL_LAMBDA: (u64, u64) = (13, 2);
 
-/// Fill of the tail's table; the slack above its keys is what lets the last buckets place.
-const TAIL_ALPHA: f64 = 0.96;
+/// Fill of the tail's table; the slack above its keys is what lets the last buckets place: `0.96`,
+/// as a ratio.
+const TAIL_ALPHA: (u64, u64) = (24, 25);
 
 /// Hash seeds the tail tries before construction fails. Only duplicate hashes get there.
 const TAIL_TRIES: u32 = 64;
@@ -206,8 +210,8 @@ fn chunk_starts(buckets: u64, deep: bool) -> Vec<u64> {
 }
 
 /// Share of the values at the start of a run held back for the gap before it, at the run's
-/// first value; the share falls linearly to nothing a slice on.
-const HELD: f64 = 0.966;
+/// first value; the share falls linearly to nothing a slice on. `0.966`, in fixed point over 2^52.
+const HELD: u64 = 4_350_477_240_039_899;
 
 /// The gap before bucket `b` is placed after the run from `b`, and reaches a slice past `b`'s
 /// first value. Mark taken in `map`, the run's, a share of those values held back for it: in
@@ -216,7 +220,7 @@ const HELD: f64 = 0.966;
 /// values is a draw fixed by the level and the value. Returns what was marked, to clear once
 /// the run is placed.
 fn reserve(level: &Level, b: u64, origin: u64, map: &mut Map) -> Vec<u64> {
-    let held = (tun(18, HELD) * (1u64 << 52) as f64) as u64;
+    let held = held_share();
     let slice = level.slice;
     let lo = ((b as u128 * level.n as u128) / level.buckets as u128) as u64;
     let mut marked = Vec::new();
@@ -603,6 +607,34 @@ struct Level {
     seeds: Vec<u8>,
 }
 
+/// `ceil(n / (num / den))`, exactly. Every size the format derives from a load factor — a level's
+/// buckets, the tail's buckets and range — goes through here, so the blob a key set builds to is
+/// integer arithmetic over the keys and never a question of how a target rounds a division.
+fn ceil_div_ratio(n: u64, (num, den): (u64, u64)) -> u64 {
+    (u128::from(n) * u128::from(den)).div_ceil(u128::from(num)) as u64
+}
+
+/// A ratio tunable: the shipped constant, or the sweep's `f64` read to a thousandth, so `4.5` is
+/// still `9 / 2` when a sweep sets it.
+fn ratio(i: usize, default: (u64, u64)) -> (u64, u64) {
+    let swept = tun(i, f64::NAN);
+    if swept.is_nan() {
+        default
+    } else {
+        ((swept * 1000.0).round() as u64, 1000)
+    }
+}
+
+/// [`HELD`], or the share a sweep sets, over 2^52.
+fn held_share() -> u64 {
+    let swept = tun(18, f64::NAN);
+    if swept.is_nan() {
+        HELD
+    } else {
+        (swept * (1u64 << 52) as f64) as u64
+    }
+}
+
 impl Level {
     /// The shape of a level over `n` keys, before its seeds are found. `n` must be at least the
     /// slice, which every level above [`TAIL_KEYS`] is.
@@ -610,7 +642,7 @@ impl Level {
         let slice = slice_for(n);
         Self {
             n,
-            buckets: ((n as f64 / tun(0, LAMBDA)).ceil() as u64).max(1),
+            buckets: ceil_div_ratio(n, ratio(0, LAMBDA)).max(1),
             slice,
             stride: stride_for(slice),
             per_log: per_log(),
@@ -1317,8 +1349,8 @@ impl V2 {
         if keys == 0 {
             return Some((Tail::EMPTY, Map::new(0, 0)));
         }
-        let buckets = ((keys as f64 / tun(4, TAIL_LAMBDA)).ceil() as u64).max(1);
-        let range = ((keys as f64 / tun(5, TAIL_ALPHA)).ceil() as u64).max(keys);
+        let buckets = ceil_div_ratio(keys, ratio(4, TAIL_LAMBDA)).max(1);
+        let range = ceil_div_ratio(keys, ratio(5, TAIL_ALPHA)).max(keys);
         let mut pairs: Vec<(u64, u64)> = Vec::with_capacity(hs.len());
         let mut order: Vec<(u32, u32)> = Vec::new();
         let mut pos: Vec<u64> = Vec::new();
@@ -2474,7 +2506,7 @@ mod tests {
     /// to one bumping level, and from one chunk to two chunks and a gap.
     #[test]
     fn it_holds_where_the_levels_and_chunks_divide() {
-        let per_chunk = (CHUNK as f64 * LAMBDA) as usize;
+        let per_chunk = (CHUNK * LAMBDA.0 / LAMBDA.1) as usize;
         for n in [
             TAIL_KEYS as usize,
             TAIL_KEYS as usize + 1,
