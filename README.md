@@ -265,7 +265,7 @@ better; the capability columns are why you would still pick a larger one.
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.91 |
 
 <sub>Raw numbers and the machine that produced them:
-[`bench/results/compare-2026-09-09-arz-2d23792.json`](bench/results/compare-2026-09-09-arz-2d23792.json)
+[`bench/results/compare-2026-09-09-arz-94c67e7.json`](bench/results/compare-2026-09-09-arz-94c67e7.json)
 — every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
 load average at both ends of the run.</sub>
 
