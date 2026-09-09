@@ -523,3 +523,108 @@ fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
         assert!(matches!(mapped, Err(lexindex::IndexError::Format(_))));
     }
 }
+
+/// `inspect` names every blob in `tests/data/` from its header alone, and refuses the pre-1.0
+/// hash blobs the way the loaders do: by the type to rebuild, not as corrupt.
+#[test]
+fn every_golden_blob_inspects_from_its_header() {
+    use lexindex::{BlobKind, inspect, inspect_file};
+    for v in VERSIONS {
+        let i = inspect_file(data(&format!("golden-{v}-string.bix"))).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.bytes),
+            (BlobKind::StringIndex, "BIX4", Some(1000), 1180),
+            "{v}"
+        );
+        let err = inspect_file(data(&format!("golden-{v}-perfect.bmp"))).unwrap_err();
+        let err = err.to_string();
+        assert!(
+            err.contains("< 1.0") && err.contains("PerfectHashIndex::build"),
+            "{v}: {err}"
+        );
+        let err = inspect_file(data(&format!("golden-{v}-compact.bch"))).unwrap_err();
+        let err = err.to_string();
+        assert!(
+            err.contains("< 1.0") && err.contains("CompactHashIndex::build"),
+            "{v}: {err}"
+        );
+    }
+    // The hash blobs from 1.0 and 1.1: one perfect hash each, no side entries over these keys,
+    // and the arena of a `CompactHashIndex` at its default width is one byte per key.
+    for (v, format, mphf, mph) in [
+        ("1.0.0", "BMP5", "MPH1", 521),
+        ("1.1.0", "BMP6", "MPH2", 429),
+    ] {
+        let i = inspect_file(data(&format!("golden-{v}-perfect.bmp"))).unwrap();
+        assert_eq!(
+            (
+                i.kind,
+                i.format.as_str(),
+                i.keys,
+                i.mph_bytes,
+                i.side_entries
+            ),
+            (
+                BlobKind::PerfectHashIndex,
+                format,
+                Some(1000),
+                Some(mph),
+                Some(0)
+            ),
+            "{v}"
+        );
+        assert_eq!(i.arena_bytes, Some(i.bytes - 36 - mph), "{v}");
+        let i = inspect_file(data(&format!("golden-{v}-compact.bch"))).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys),
+            (BlobKind::CompactHashIndex, "BCH6", Some(1000)),
+            "{v}"
+        );
+        assert_eq!(
+            (
+                i.fingerprint_bits,
+                i.mph_bytes,
+                i.arena_bytes,
+                i.side_entries
+            ),
+            (Some(8), Some(mph), Some(1000), Some(0)),
+            "{v}"
+        );
+        let i = inspect_file(data(&format!("golden-{v}-mphf.bin"))).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
+            (BlobKind::Mphf, mphf, Some(1000), Some(mph), mph),
+            "{v}"
+        );
+    }
+    // Both overlay formats: three keys added and three retired over the 1000-key ordered base.
+    for (name, format) in [
+        ("golden-0.12.0-overlay.ovl", "OVL1"),
+        ("golden-1.0.0-overlay.ovl", "OVL2"),
+    ] {
+        let i = inspect_file(data(name)).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys),
+            (BlobKind::Overlay, format, Some(1000)),
+            "{name}"
+        );
+        let o = i.overlay.unwrap();
+        assert_eq!((o.base_tag, o.additions, o.retired), (1, 3, 3), "{name}");
+        let base = o.base.unwrap();
+        assert_eq!(
+            (base.kind, base.format.as_str(), base.keys, base.bytes),
+            (BlobKind::StringIndex, "BIX4", Some(1000), 1180),
+            "{name}"
+        );
+    }
+    // The header is all it reads: the two specimens the owned loader panics on inspect without
+    // one, and the bytes say what the file says.
+    for name in ["panicking-1.0.0-string.bix", "panicking-1.0.0-overlay.ovl"] {
+        let bytes = std::fs::read(data(name)).unwrap();
+        assert_eq!(
+            inspect(&bytes).map_err(|e| e.to_string()),
+            inspect_file(data(name)).map_err(|e| e.to_string()),
+            "{name}"
+        );
+    }
+}

@@ -2,11 +2,20 @@
 
 import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from typing import ClassVar, TypeVar, final
+from typing import ClassVar, Literal, TypedDict, TypeVar, final
 
 from typing_extensions import Buffer
 
-__all__ = ["CompactHashIndex", "Overlay", "PerfectHashIndex", "StringIndex", "__version__"]
+__all__ = [
+    "BlobInfo",
+    "CompactHashIndex",
+    "Overlay",
+    "OverlayInfo",
+    "PerfectHashIndex",
+    "StringIndex",
+    "__version__",
+    "inspect",
+]
 
 _T = TypeVar("_T")
 
@@ -434,3 +443,49 @@ class Overlay:
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
         """:meth:`from_untrusted_bytes` from a file."""
+
+class BlobInfo(TypedDict):
+    """What :func:`inspect` reads out of a blob's header.
+
+    Every field comes from the framing and none is checked against the contents: a blob that
+    inspects cleanly may still fail to load, and the sizes are what the header claims. ``keys`` is
+    the key count -- for an overlay, the live keys -- and is ``None`` only for an overlay over a
+    base this library did not write. ``mph_bytes`` is the perfect hash's region where there is one
+    (``8 * mph_bytes / keys`` is its bits per key); ``arena_bytes`` is the key arena of a
+    ``PerfectHashIndex`` or the fingerprint table of a ``CompactHashIndex``; ``side_entries`` the
+    keys in a hash index's collision side table; ``fingerprint_bits`` the width a
+    ``CompactHashIndex`` was built with.
+    """
+
+    kind: Literal["StringIndex", "PerfectHashIndex", "CompactHashIndex", "Mphf", "Overlay"]
+    format: str
+    bytes: int
+    keys: int | None
+    fingerprint_bits: int | None
+    mph_bytes: int | None
+    arena_bytes: int | None
+    side_entries: int | None
+    overlay: OverlayInfo | None
+
+class OverlayInfo(TypedDict):
+    """An overlay's own sections, and its base inspected in turn.
+
+    ``base_tag`` is the base type's tag in the blob (1 ``StringIndex``, 2 ``PerfectHashIndex``,
+    3 ``CompactHashIndex``); ``base`` is that region inspected, ``None`` for a tag this library
+    does not know; ``additions`` the keys added on top of the base and ``retired`` the ids a
+    removal retired.
+    """
+
+    base_tag: int
+    base: BlobInfo | None
+    additions: int
+    retired: int
+
+def inspect(blob: str | os.PathLike[str] | bytes) -> BlobInfo:
+    """What a blob is, from its header alone: kind, format and sizes, without loading it.
+
+    Over a path only the header and the footer are read, so an index of gigabytes inspects in
+    microseconds. Nothing is decoded or verified. Bytes that are not a lexindex blob, or a header
+    whose lengths run past the end, raise ``ValueError``; so does a blob from before 1.0, with the
+    type to rebuild it in the message.
+    """

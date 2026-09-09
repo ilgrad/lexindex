@@ -41,7 +41,7 @@ use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValu
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyIterator, PyMemoryView, PyString, PyType};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyMemoryView, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -1712,6 +1712,63 @@ fn write_ids<T: pyo3::buffer::Element>(
 /// raises nothing; the two types that do hold mutable state — the `StringIndex` iterator and
 /// `Overlay` — are `frozen` with that state behind a lock, so sharing one of those serialises
 /// instead of raising `Already borrowed`.
+/// What a blob is, from its header alone: its kind, its format and the sizes a caller would
+/// otherwise have to load it to learn. `blob` is a path or `bytes`; over a path only the header
+/// and the footer are read, so an index of gigabytes inspects in microseconds. Nothing is decoded
+/// or verified -- a blob that inspects cleanly may still fail to load, and the sizes are what the
+/// header claims. A blob from before 1.0 is a `ValueError` naming the type to rebuild.
+#[pyfunction(name = "inspect")]
+fn py_inspect<'py>(py: Python<'py>, blob: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
+    let info = if let Ok(bytes) = blob.cast::<PyBytes>() {
+        crate::inspect(bytes.as_bytes()).map_err(to_py)?
+    } else {
+        let path: PathBuf = blob
+            .extract()
+            .map_err(|_| PyTypeError::new_err("inspect() takes a path or bytes"))?;
+        py.detach(|| crate::inspect_file(&path)).map_err(to_py)?
+    };
+    blob_info(py, &info)
+}
+
+fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py, PyDict>> {
+    use crate::BlobKind;
+    let d = PyDict::new(py);
+    d.set_item(
+        "kind",
+        match info.kind {
+            BlobKind::StringIndex => "StringIndex",
+            BlobKind::PerfectHashIndex => "PerfectHashIndex",
+            BlobKind::CompactHashIndex => "CompactHashIndex",
+            BlobKind::Mphf => "Mphf",
+            BlobKind::Overlay => "Overlay",
+        },
+    )?;
+    d.set_item("format", &info.format)?;
+    d.set_item("bytes", info.bytes)?;
+    d.set_item("keys", info.keys)?;
+    d.set_item("fingerprint_bits", info.fingerprint_bits)?;
+    d.set_item("mph_bytes", info.mph_bytes)?;
+    d.set_item("arena_bytes", info.arena_bytes)?;
+    d.set_item("side_entries", info.side_entries)?;
+    let overlay = match &info.overlay {
+        Some(o) => {
+            let od = PyDict::new(py);
+            od.set_item("base_tag", o.base_tag)?;
+            let base = match &o.base {
+                Some(b) => Some(blob_info(py, b)?),
+                None => None,
+            };
+            od.set_item("base", base)?;
+            od.set_item("additions", o.additions)?;
+            od.set_item("retired", o.retired)?;
+            Some(od)
+        }
+        None => None,
+    };
+    d.set_item("overlay", overlay)?;
+    Ok(d)
+}
+
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
@@ -1721,5 +1778,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "mph")]
     m.add_class::<PyCompactHashIndex>()?;
     m.add_class::<PyOverlay>()?;
+    m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     Ok(())
 }

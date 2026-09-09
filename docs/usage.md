@@ -162,6 +162,20 @@ loaders are total, so `Overlay.from_untrusted_bytes` over a hash base does the s
 One thing neither loader can promise: the contained panic still runs the process-wide hook on its
 way out, so a rejection normally prints a panic message to stderr before the `ValueError` arrives.
 
+Before loading a blob, or instead of it, `inspect` says what it is from its header alone:
+
+```python
+info = lexindex.inspect("catalog.bix")       # a path or bytes; only the header and footer are read
+info["kind"], info["format"], info["keys"]   # 'StringIndex', 'BIX4', 479823
+```
+
+The dict carries the kind, the format, the key count, and the sizes a caller would otherwise have
+to load the blob to learn: the perfect hash's region (`8 * mph_bytes / keys` is its bits per key),
+the key arena or the fingerprint table, the side table, and for an overlay its additions and
+retired ids with the base inspected in turn. Nothing is decoded or verified, so an index of
+gigabytes inspects in microseconds, and a blob that inspects cleanly may still fail to load. A
+blob from before 1.0 is a `ValueError` naming the type to rebuild.
+
 ## `PerfectHashIndex` — exact lookup with `id → key`
 
 ```python
@@ -345,6 +359,8 @@ assert_eq!(near, ["apple"]);
 // `save`, `load`, `load_mmap` and their `_untrusted` / `_verified` forms take any `AsRef<Path>`.
 let path = std::env::temp_dir().join("lexindex-usage-catalog.bix");
 idx.save(&path)?;
+let info = lexindex::inspect_file(&path)?; // what the file is, from its header alone
+assert_eq!((info.kind, info.keys), (lexindex::BlobKind::StringIndex, Some(3)));
 // SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
 let idx = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into RAM
 

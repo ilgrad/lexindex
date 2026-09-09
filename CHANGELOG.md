@@ -34,6 +34,14 @@ All notable changes to this project are documented here. The format follows
   the caller owns -- a `numpy` array, an `array.array`, a writable `memoryview` -- so a hot loop can
   reuse one allocation. A read-only, strided or wrongly typed buffer is a `BufferError`, one shorter
   than `keys` a `ValueError`.
+- **`inspect(bytes)` and `inspect_file(path)`** (Python: `inspect(path | bytes)`): what a blob
+  is, from its header alone -- the kind, the format, the key count, and the sizes a caller would
+  otherwise have to load it to learn: the perfect hash's region, the key arena or fingerprint
+  table, the side table, an overlay's additions and retired ids with its base inspected in turn.
+  Over a path only the header and the footer are read, so an index of gigabytes inspects in
+  microseconds; nothing is decoded or verified, and a blob from before 1.0 is an error naming the
+  type to rebuild. `BlobInfo`, `BlobKind` and `OverlayInfo` are `#[non_exhaustive]`, so a field
+  can be added later without a major.
 
 ### Deprecated
 

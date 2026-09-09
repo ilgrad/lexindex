@@ -57,10 +57,12 @@ mod mphf;
 #[cfg(feature = "bench-mphf")]
 #[doc(hidden)]
 pub use mphf::Mphf;
+mod inspect;
 mod overlay;
 mod string_index;
 mod subsequence;
 
+pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;
 

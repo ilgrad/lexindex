@@ -1137,3 +1137,46 @@ def test_load_mmap_verified_refuses_a_flipped_byte_the_plain_mapping_takes(tmp_p
         type(idx).load_mmap_verified(p)
     with pytest.raises(ValueError):
         type(idx).load(p)
+
+
+def test_inspect_reads_the_header_of_every_index(tmp_path):
+    keys = ["apple", "banana", "cherry"]
+    for idx, kind, fmt in [
+        (lexindex.StringIndex(keys), "StringIndex", "BIX4"),
+        (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP6"),
+        (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH6"),
+    ]:
+        blob = idx.to_bytes()
+        info = lexindex.inspect(blob)
+        assert (info["kind"], info["format"], info["keys"], info["bytes"]) == (
+            kind,
+            fmt,
+            3,
+            len(blob),
+        )
+        assert info["overlay"] is None
+        path = tmp_path / f"{fmt}.blob"
+        idx.save(path)
+        assert lexindex.inspect(path) == info
+        assert lexindex.inspect(str(path)) == info
+    compact = lexindex.inspect(lexindex.CompactHashIndex(keys, 2).to_bytes())
+    assert (compact["fingerprint_bits"], compact["arena_bytes"]) == (16, 6)
+    assert compact["bytes"] == 40 + compact["mph_bytes"] + 6 + 20 * compact["side_entries"]
+    info = lexindex.inspect(_edited_overlay(lexindex.StringIndex).to_bytes())
+    assert (info["kind"], info["format"], info["keys"]) == ("Overlay", "OVL2", 3)
+    overlay = info["overlay"]
+    assert (overlay["base_tag"], overlay["additions"], overlay["retired"]) == (1, 2, 2)
+    assert (overlay["base"]["kind"], overlay["base"]["keys"]) == ("StringIndex", 3)
+
+
+def test_inspect_refuses_what_is_not_a_blob(tmp_path):
+    with pytest.raises(ValueError, match="unknown magic"):
+        lexindex.inspect(b"nope")
+    with pytest.raises(ValueError, match="PerfectHashIndex"):
+        lexindex.inspect(b"BMP4 from before 1.0")
+    with pytest.raises(ValueError, match="truncated"):
+        lexindex.inspect(b"BCH6 cut short")
+    with pytest.raises(TypeError):
+        lexindex.inspect(42)
+    with pytest.raises(OSError):
+        lexindex.inspect(tmp_path / "missing.blob")
