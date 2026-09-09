@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Path forms of the strict loader, and checked forms of the mapping.** `StringIndex::load_untrusted`
+  is `from_untrusted_bytes` over a file (Python: `StringIndex.load_untrusted`, and
+  `Overlay.load_untrusted(path, base)`). `load_mmap_verified`, on all three indexes, is `load_mmap`
+  plus the payload checksum `load` makes -- one pass over the mapping at load, pages still shared,
+  nothing copied -- for a file you wrote but did not carry yourself. `load_mmap_untrusted`, on
+  `StringIndex`, runs the full validation over the mapping, for a stranger's file too large to copy.
+  All three mapped forms carry `load_mmap`'s obligation, and the two checked ones say why it weighs
+  more for them: the check trusts what it saw once, so map a copy you own. `docs/usage.md` has the
+  loader matrix. The stubs no longer say a mapped hash index is "validated as in `from_bytes`": its
+  header is, its payload checksum is skipped by design.
+
+### Deprecated
+
+- `IndexError::Serde`. Nothing has constructed it since 1.0 replaced the `epserde` loader; a
+  malformed perfect-hash blob is `IndexError::Format`. Removed in 2.0. (A deprecation is a minor
+  change under SemVer, which is one reason this release is 1.2.0.)
+
 ### Fixed
 
 - **`StringIndex::from_untrusted_bytes` costs the graph, not the language, and refuses a key that
@@ -59,9 +78,6 @@ All notable changes to this project are documented here. The format follows
   1.1.0 replaced with PHast's; the README's determinism note now says "within one lexindex
   version", as `docs/design.md` already did; the 1.1.0 entry below said `from_untrusted_bytes`
   had no Python binding, and it shipped one.
-- `IndexError::Serde` says that nothing has constructed it since 1.0 replaced the `epserde` loader
-  -- a malformed perfect-hash blob is `IndexError::Format` -- and that it is deprecated in 1.2 and
-  removed in 2.0. Marking it deprecated is a minor change under SemVer, so it waits for 1.2.
 
 ## [1.1.0] — 2026-09-09
 
