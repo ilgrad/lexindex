@@ -3110,6 +3110,36 @@ mod spike {
                     "    bumped by bucket size (share of its keys / share of all bumped): {}",
                     row.join(" ")
                 );
+                // Buckets no shift can place: two keys on one value under shift 1 stay
+                // together under nearly every shift, whatever the load, so their keys are the
+                // floor under the bumped share. `hs` is sorted and `scale` is monotone, so a
+                // bucket's keys are one run of `hs`.
+                let (mut stuck_keys, mut stuck_lost) = (0u64, 0u64);
+                let mut at = 0usize;
+                while at < hs.len() {
+                    let b = scale(hs[at], l.buckets);
+                    let mut end = at;
+                    while end < hs.len() && scale(hs[end], l.buckets) == b {
+                        end += 1;
+                    }
+                    let run = &hs[at..end];
+                    let stuck = (0..run.len()).any(|i| {
+                        run[i + 1..]
+                            .iter()
+                            .any(|&h| l.value(h, 1) == l.value(run[i], 1))
+                    });
+                    if stuck {
+                        stuck_keys += run.len() as u64;
+                        stuck_lost += u64::from(l.seeds[b as usize] == 0) * run.len() as u64;
+                    }
+                    at = end;
+                }
+                println!(
+                    "    stuck buckets (a same-value pair under shift 1): {:.2}% of keys, {:.1}% of all bumped, {:.1}% of their own keys bumped",
+                    100.0 * stuck_keys as f64 / n as f64,
+                    100.0 * stuck_lost as f64 / total.max(1) as f64,
+                    100.0 * stuck_lost as f64 / stuck_keys.max(1) as f64
+                );
                 // Where in its slice a placed key lands: the cumulative share of keys at or
                 // below each sixteenth of the slice.
                 if std::env::var_os("LEXINDEX_MPHF_OFFSETS").is_some() {
