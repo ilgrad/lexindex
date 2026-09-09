@@ -46,6 +46,8 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::IndexError;
 
@@ -59,9 +61,9 @@ const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in m
 ///
 /// | λ    | bits/key | bumped | build ns/key | lookup ns |
 /// |------|----------|--------|--------------|-----------|
-/// | 4.15 | 2.171    | 2.3 %  | 59           | 29.3      |
-/// | 4.5  | 2.118    | 3.4 %  | 61           | 30.5      |
-/// | 4.7  | 2.11     | 4 %    | 63           |           |
+/// | 4.15 | 2.154    | 2.1 %  | 48           | 32.6      |
+/// | 4.5  | 2.089    | 3.0 %  | 49           | 33.6      |
+/// | 4.7  | 2.070    | 3.8 %  | 51           | 34.5      |
 ///
 /// The lookup is over shuffled probes of all 10 M keys, so it is bound by memory; the bumped keys
 /// are what separates the rows.
@@ -81,10 +83,61 @@ const STRIDE: u64 = 2;
 /// while a large bucket needs a run of them; this bounds the wait.
 const WINDOW: u32 = 512;
 
-/// How long a single-key bucket waits, as a fraction of the buckets whose slices overlap one
-/// slice; and the unit larger buckets are pulled forward by. See [`ell`].
-const LAG1: f64 = 0.35;
-const LAG_UNIT: f64 = 0.18;
+/// Bucket-size term of the placement priority for sizes 1..=7, in units of 1024 (one bucket of
+/// index) for a slice of 1024 positions: the PHast delta=2 table. Measured 0.03 bits/key below
+/// the lag heuristic it replaced, at no build-time cost. See [`ell`].
+const WEIGHTS: [i64; 7] = [-50137, 65904, 111782, 139890, 159029, 175922, 186995];
+
+/// Seed families: a seed byte is a family and a shift within it, and a key's offset in its slice
+/// is a different run of its hash bits under each family. One family makes a key's 255
+/// candidate values one arc of its slice, and a key whose arc lies where the map is already full
+/// holds its whole bucket back under every seed; several families give every key several arcs.
+const FAMILIES: u64 = 1;
+
+/// Most families a sweep may ask for; bounds the interval list of a bucket.
+const MAX_FAMILIES: usize = 8;
+
+/// Per-bucket working memory of a placement pass, kept across buckets so that a bucket's search
+/// allocates and zeroes nothing.
+struct Scratch {
+    /// The smallest value each key can take on this map.
+    starts: [u64; MAX_BUCKET],
+    /// Each key's offset in its slice, per family.
+    offs: [[u64; MAX_BUCKET]; MAX_FAMILIES],
+    /// Each key's wrap shift, per family, sorted; `cuts[f][..nc[f]]`.
+    cuts: [[u64; MAX_BUCKET]; MAX_FAMILIES],
+    nc: [usize; MAX_FAMILIES],
+    /// Each key's wrap shift, per family, in key order.
+    cut: [[u64; MAX_BUCKET]; MAX_FAMILIES],
+    /// Where each key's shifts are on the map: the plane's word offset and the bit of shift 0.
+    plane: [usize; MAX_BUCKET],
+    bit: [u64; MAX_BUCKET],
+    /// The keys' values under a candidate shift.
+    vals: [u64; MAX_BUCKET],
+    /// How far past the best seed's sum an interval's floor may be and still be scanned; 0 is
+    /// the exact minimum, a sweep may trade some of it for time.
+    margin: u64,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        Self {
+            starts: [0; MAX_BUCKET],
+            offs: [[0; MAX_BUCKET]; MAX_FAMILIES],
+            cuts: [[0; MAX_BUCKET]; MAX_FAMILIES],
+            nc: [0; MAX_FAMILIES],
+            cut: [[0; MAX_BUCKET]; MAX_FAMILIES],
+            plane: [0; MAX_BUCKET],
+            bit: [0; MAX_BUCKET],
+            vals: [0; MAX_BUCKET],
+            margin: tun(16, 0.0) as u64,
+        }
+    }
+}
+
+/// Size classes of the placement order: a bucket of more keys than this is ordered as if it had
+/// this many. Its priority term is what [`ell`] gives that size.
+const CLASSES: usize = 16;
 
 /// Largest bucket a seed is searched for. Above this a bucket is bumped outright: it could only
 /// arise from structured input, and its keys spread out under the next level's hash.
@@ -107,10 +160,76 @@ const TAIL_TRIES: u32 = 64;
 /// three or four; the bound is for input a level cannot spread.
 const MAX_LEVELS: usize = 16;
 
-/// Buckets per chunk. Chunks are placed independently, in parallel, separated by gaps wide enough
-/// that their values cannot meet; the gaps are placed afterwards. Fixed rather than derived from
-/// the thread count, so that the count cannot reach the result.
+/// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary
+/// between two costs about two hundred keys bumped, so they are few and large.
 const CHUNK: u64 = 1 << 16;
+
+/// Fewest buckets per chunk on a level after the first: about the window, so that a chunk's
+/// placement order is the level's. A first level is cut no finer than a quarter chunk: a boundary
+/// costs about two hundred keys whatever the level, and a level that small builds in milliseconds.
+const MIN_CHUNK: u64 = 1 << 12;
+
+/// Chunks a level too small for whole chunks is cut into; and the pieces the last two chunks'
+/// worth of a first level is cut into, so that however many threads there are finish together.
+const PIECES: u64 = 8;
+
+/// Where each chunk of a level of `buckets` starts; the last runs to the end. A boundary between
+/// two chunks costs about two hundred keys bumped whatever the level's size, so the first level,
+/// which holds nearly every key, is cut into chunks of [`CHUNK`] only — and a level below two of
+/// them is one chunk — while a `deep` level, a few per cent of the keys, is cut into [`PIECES`]
+/// so that it too spreads over the threads. Derived from the level, never from the thread
+/// count, so that the count cannot reach the result.
+fn chunk_starts(buckets: u64, deep: bool) -> Vec<u64> {
+    let pieces = tun(17, PIECES as f64) as u64;
+    let tail = tun(19, PIECES as f64) as u64;
+    let mut starts = vec![0];
+    let mut at = 0;
+    if deep || buckets < 4 * CHUNK || tail == 0 {
+        let floor = if deep { MIN_CHUNK } else { CHUNK / 4 };
+        let size = (buckets / pieces).clamp(floor, CHUNK);
+        while buckets - at >= 2 * size {
+            at += size;
+            starts.push(at);
+        }
+    } else {
+        while buckets - at >= 3 * CHUNK {
+            at += CHUNK;
+            starts.push(at);
+        }
+        let small = 2 * CHUNK / tail;
+        while buckets - at >= 2 * small {
+            at += small;
+            starts.push(at);
+        }
+    }
+    starts
+}
+
+/// Share of the values at the start of a run held back for the gap before it, at the run's
+/// first value; the share falls linearly to nothing a slice on.
+const HELD: f64 = 0.966;
+
+/// The gap before bucket `b` is placed after the run from `b`, and reaches a slice past `b`'s
+/// first value. Mark taken in `map`, the run's, a share of those values held back for it: in
+/// the middle of a level the buckets before `b` take a share falling linearly from [`HELD`] at
+/// `b`'s first value to nothing a slice on, since a key lands evenly across its slice. Which
+/// values is a draw fixed by the level and the value. Returns what was marked, to clear once
+/// the run is placed.
+fn reserve(level: &Level, b: u64, origin: u64, map: &mut Map) -> Vec<u64> {
+    let held = (tun(18, HELD) * (1u64 << 52) as f64) as u64;
+    let slice = level.slice;
+    let lo = ((b as u128 * level.n as u128) / level.buckets as u128) as u64;
+    let mut marked = Vec::new();
+    for y in 0..slice.min(level.n - lo) {
+        let draw = mix(0x9E37_79B9_7F4A_7C15 ^ (b << 20) ^ y) >> 12;
+        if draw < held * (slice - y) / slice {
+            let v = lo + y - origin;
+            map.set(v);
+            marked.push(v);
+        }
+    }
+    marked
+}
 
 /// Remap entries per block base in the 1.0 format.
 const REMAP_BLOCK: usize = 256;
@@ -184,6 +303,11 @@ impl Map {
         self.words[p + (i / 64) as usize] |= 1 << (i % 64);
     }
 
+    fn clear(&mut self, v: u64) {
+        let (p, i) = self.at(v);
+        self.words[p + (i / 64) as usize] &= !(1 << (i % 64));
+    }
+
     /// 64 bits of the plane at word offset `p`, from bit `i`.
     #[inline(always)]
     fn window(&self, p: usize, i: u64) -> u64 {
@@ -192,24 +316,85 @@ impl Map {
         (pair[0] >> o) | (pair[1] << 1 << (63 - o))
     }
 
-    /// OR `other` into this map, plane by plane, from word `at` of each plane.
-    fn merge(&mut self, other: &Map, at: usize) {
+    /// The values below `n` no key landed on, in order: a word of every plane at a time, their
+    /// zero bits merged in bit order; a range of words per thread.
+    fn holes(&self, n: u64, threads: usize) -> Vec<u64> {
+        let planes = 1usize << self.shift;
+        let words = if n == 0 {
+            0
+        } else {
+            (((n - 1) >> self.shift) / 64 + 1) as usize
+        };
+        let part = words.div_ceil(threads.max(1)).max(1 << 14);
+        let of = |range: std::ops::Range<usize>| {
+            let mut holes = Vec::new();
+            for w in range {
+                let mut free = 0u64;
+                for p in 0..planes {
+                    free |= !self.words[p * self.plane + w];
+                }
+                while free != 0 {
+                    let j = free.trailing_zeros();
+                    free &= free - 1;
+                    let i = (w as u64 * 64 + u64::from(j)) << self.shift;
+                    for p in 0..planes {
+                        let v = i | p as u64;
+                        if v < n && self.words[p * self.plane + w] >> j & 1 == 0 {
+                            holes.push(v);
+                        }
+                    }
+                }
+            }
+            holes
+        };
+        if words <= part {
+            return of(0..words);
+        }
+        std::thread::scope(|scope| {
+            let parts: Vec<_> = (0..words)
+                .step_by(part)
+                .map(|w| scope.spawn(move || of(w..(w + part).min(words))))
+                .collect();
+            parts
+                .into_iter()
+                .flat_map(|p| p.join().expect("a hole scan panicked"))
+                .collect()
+        })
+    }
+
+    /// OR `other` into this map, plane by plane, `other`'s first word at word `at` of each plane
+    /// of this one — before its first when negative. Only the words both have are touched.
+    fn merge(&mut self, other: &Map, at: i64) {
+        self.combine(other, at, |d, s| *d |= s);
+    }
+
+    fn combine(&mut self, other: &Map, at: i64, f: impl Fn(&mut u64, u64)) {
+        let from = at.max(0) as usize;
+        let to = (at + other.plane as i64).clamp(from as i64, self.plane as i64) as usize;
         for p in 0..1usize << self.shift {
-            let dst = &mut self.words[p * self.plane + at..(p + 1) * self.plane];
-            let src = &other.words[p * other.plane..(p + 1) * other.plane];
-            for (d, s) in dst.iter_mut().zip(src) {
-                *d |= s;
+            let dst = &mut self.words[p * self.plane + from..p * self.plane + to];
+            let src = &other.words[p * other.plane + (from as i64 - at) as usize..][..to - from];
+            for (d, &s) in dst.iter_mut().zip(src) {
+                f(d, s);
             }
         }
     }
 }
 
-/// Slice length for a level of `n` keys: the full [`SLICE`], or the largest power of two that
-/// fits inside a smaller level. A level a few slices long is one where most keys share most of
-/// their slice, which places no worse; it is a level shorter than a slice that cannot exist.
+/// Slice length for a level of `n` keys: the full [`SLICE`] from 2^15 keys, 512 from 2^12, 256
+/// below. A shorter slice is fewer values a key can take, and a longer one is a level of fewer
+/// slices, whose end — the buckets whose slices wrap into its start — is a larger share of it;
+/// the thresholds are where the first level's bumped share crossed, measured over 4 k–100 k
+/// keys. Never longer than the level: 255 shifts at stride 1 need 256 values.
 fn slice_for(n: u64) -> u64 {
-    let below = 1u64 << (63 - n.max(1).leading_zeros());
-    below.min(tun(1, SLICE as f64) as u64)
+    let natural = if n >= 1 << 15 {
+        SLICE
+    } else if n >= 1 << 12 {
+        512
+    } else {
+        256
+    };
+    natural.min(tun(1, SLICE as f64) as u64)
 }
 
 /// Magic of a standalone minimal-perfect-hash blob.
@@ -235,7 +420,7 @@ fn header_len(levels: usize) -> usize {
 #[cfg(all(test, feature = "bench-mphf"))]
 mod tune {
     use std::sync::atomic::{AtomicU64, Ordering};
-    pub const N: usize = 8;
+    pub const N: usize = 20;
     pub static SET: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
     pub static VAL: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
     pub fn get(i: usize, default: f64) -> f64 {
@@ -256,10 +441,108 @@ fn tun(i: usize, default: f64) -> f64 {
     tune::get(i, default)
 }
 
+/// Wall time between consecutive marks of one build, printed when `LEXINDEX_MPHF_PHASES` is set;
+/// how a measurement tells a serial phase from a parallel one.
+#[cfg(all(test, feature = "bench-mphf"))]
+fn phase(label: &str) {
+    use std::cell::Cell;
+    use std::time::Instant;
+    thread_local!(static LAST: Cell<Option<Instant>> = const { Cell::new(None) });
+    if std::env::var_os("LEXINDEX_MPHF_PHASES").is_none() {
+        return;
+    }
+    LAST.with(|c| {
+        let now = Instant::now();
+        if let Some(prev) = c.get() {
+            eprintln!(
+                "phase {label:<20} {:>8.2} ms",
+                (now - prev).as_secs_f64() * 1e3
+            );
+        }
+        c.set(Some(now));
+    });
+}
+
+#[cfg(not(all(test, feature = "bench-mphf")))]
+#[inline(always)]
+fn phase(_: &str) {}
+
+/// Work counters of the seed search, for the sweep: buckets searched, intervals scanned, window
+/// reads, candidate shifts checked.
+#[cfg(all(test, feature = "bench-mphf"))]
+mod work {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    pub static BUCKETS: AtomicU64 = AtomicU64::new(0);
+    pub static INTERVALS: AtomicU64 = AtomicU64::new(0);
+    pub static WINDOWS: AtomicU64 = AtomicU64::new(0);
+    pub static CANDIDATES: AtomicU64 = AtomicU64::new(0);
+    pub static ON: AtomicU64 = AtomicU64::new(0);
+    #[inline(always)]
+    pub fn add(c: &AtomicU64, n: u64) {
+        if ON.load(Relaxed) == 1 {
+            c.fetch_add(n, Relaxed);
+        }
+    }
+    pub fn reset(on: bool) {
+        for c in [&BUCKETS, &INTERVALS, &WINDOWS, &CANDIDATES] {
+            c.store(0, Relaxed);
+        }
+        ON.store(u64::from(on), Relaxed);
+    }
+    pub fn report() -> String {
+        let b = BUCKETS.load(Relaxed).max(1) as f64;
+        format!(
+            "per bucket: intervals {:.2} windows {:.2} candidates {:.2}",
+            INTERVALS.load(Relaxed) as f64 / b,
+            WINDOWS.load(Relaxed) as f64 / b,
+            CANDIDATES.load(Relaxed) as f64 / b
+        )
+    }
+}
+
+#[cfg(all(test, feature = "bench-mphf"))]
+macro_rules! count {
+    ($c:ident, $n:expr) => {
+        work::add(&work::$c, $n)
+    };
+}
+
+#[cfg(not(all(test, feature = "bench-mphf")))]
+macro_rules! count {
+    ($c:ident, $n:expr) => {};
+}
+
 #[cfg(not(all(test, feature = "bench-mphf")))]
 #[inline(always)]
 fn tun(_: usize, default: f64) -> f64 {
     default
+}
+
+/// The priority table for bucket sizes 1..=7: [`WEIGHTS`], unless a sweep sets one.
+#[cfg(all(test, feature = "bench-mphf"))]
+fn weights() -> [i64; 7] {
+    if tune::SET[8].load(std::sync::atomic::Ordering::Relaxed) == 1 {
+        let mut w = [0i64; 7];
+        for (i, v) in w.iter_mut().enumerate() {
+            *v = tun(8 + i, 0.0) as i64;
+        }
+        w
+    } else {
+        WEIGHTS
+    }
+}
+
+#[cfg(not(all(test, feature = "bench-mphf")))]
+#[inline(always)]
+fn weights() -> [i64; 7] {
+    WEIGHTS
+}
+
+/// Log2 of the shifts per seed family: 256 shifts over [`FAMILIES`] families.
+fn per_log() -> u32 {
+    let families = tun(15, FAMILIES as f64) as u64;
+    debug_assert!(families.is_power_of_two() && families <= MAX_FAMILIES as u64);
+    8 - families.trailing_zeros()
 }
 
 /// The stride of a level with `slice`: [`STRIDE`], or less on a slice too short for 255 shifts
@@ -270,18 +553,18 @@ fn stride_for(slice: u64) -> u64 {
     (slice / 256).clamp(1, stride).next_power_of_two()
 }
 
-/// Bucket-size term of the placement priority, in units of 1024 (one bucket of index).
-/// Size 2 is the reference; size 1 is held back by `lag1` buckets; larger sizes are pulled
-/// forward by `unit` times a slowly saturating factor, linear past seven keys.
-fn ell(k: usize, lag1: i64, unit: i64) -> i64 {
-    const G: [i64; 5] = [800, 1170, 1500, 1800, 2000];
-    let g = match k {
-        0 | 1 => return -lag1 * 1024,
-        2 => 0,
-        3..=7 => G[k - 3],
-        _ => 2000 + 200 * (k as i64 - 7),
+/// Bucket-size term of the placement priority: [`WEIGHTS`] up to seven keys, linear past that,
+/// scaled with the slice. A term is a delay in buckets, and what transfers between slice sizes
+/// is the delay as a share of the buckets whose slices overlap one slice: measured at 10 k keys
+/// (slice 512), the table halved gives 2.20 bits/key against 2.27 unscaled.
+fn ell(k: usize, slice: u64) -> i64 {
+    let w = weights();
+    let term = match k {
+        0 => w[0],
+        1..=7 => w[k - 1],
+        _ => w[6] + (w[6] - w[5]) * (k as i64 - 7),
     };
-    unit * 1024 * g / 1000
+    term * slice as i64 / 1024
 }
 
 /// A minimal perfect hash over a set of 64-bit key hashes.
@@ -314,6 +597,8 @@ struct Level {
     /// Values between two consecutive shifts of a key; [`stride_for`] the slice, kept because it
     /// is on every lookup.
     stride: u64,
+    /// Log2 of the shifts per seed family; 8 when there is one family. See [`FAMILIES`].
+    per_log: u32,
     /// One per bucket; 0 is bumped.
     seeds: Vec<u8>,
 }
@@ -328,6 +613,7 @@ impl Level {
             buckets: ((n as f64 / tun(0, LAMBDA)).ceil() as u64).max(1),
             slice,
             stride: stride_for(slice),
+            per_log: per_log(),
             seeds: Vec::new(),
         }
     }
@@ -338,7 +624,10 @@ impl Level {
     #[inline(always)]
     fn value(&self, h: u64, seed: u8) -> u64 {
         let mask = self.slice - 1;
-        let v = scale(h, self.n) + (((h & mask) + self.stride * u64::from(seed)) & mask);
+        let s = u64::from(seed) - 1;
+        let (family, t) = (s >> self.per_log, (s & ((1 << self.per_log) - 1)) + 1);
+        let offset = (h >> (u64::from(self.slice.trailing_zeros()) * family)) & mask;
+        let v = scale(h, self.n) + ((offset + self.stride * t) & mask);
         if v >= self.n { v - self.n } else { v }
     }
 }
@@ -583,7 +872,8 @@ struct V2 {
 struct Run<'a> {
     level: &'a Level,
     keys: &'a [u64],
-    /// CSR offsets into `keys`, one per bucket plus the end.
+    /// CSR offsets into `keys`: `start[b]` is where the keys of the run's bucket `b` begin, and
+    /// the entry after the last bucket's is where they end.
     start: &'a [u32],
 }
 
@@ -596,6 +886,124 @@ impl Run<'_> {
     #[inline(always)]
     fn keys_of(&self, b: u32) -> &[u64] {
         &self.keys[self.start[b as usize] as usize..self.start[b as usize + 1] as usize]
+    }
+}
+
+/// The keys of a level after the first, grouped by bucket in bucket order — a counting sort of
+/// their level hashes — with the hashes they came from alongside, for the next level. The order
+/// inside a bucket does not reach its seed. Each thread scatters a range of buckets, so that
+/// its writes stay together.
+fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> (Vec<u64>, Vec<u64>) {
+    let his: Vec<u64> = hs.iter().map(|&h| level_hash(h, lv)).collect();
+    phase("his");
+    let mut at = vec![0u32; buckets as usize + 1];
+    for &hi in &his {
+        at[scale(hi, buckets) as usize + 1] += 1;
+    }
+    for b in 0..buckets as usize {
+        at[b + 1] += at[b];
+    }
+    phase("count");
+    let mut keys = vec![0u64; hs.len()];
+    let mut from = vec![0u64; hs.len()];
+    let per = (buckets as usize).div_ceil(threads.max(1)).max(1 << 12);
+    std::thread::scope(|scope| {
+        let (mut keys, mut from) = (&mut keys[..], &mut from[..]);
+        for b0 in (0..buckets as usize).step_by(per) {
+            let b1 = (b0 + per).min(buckets as usize);
+            let (k0, k1) = (at[b0] as usize, at[b1] as usize);
+            let (out_keys, rest) = std::mem::take(&mut keys).split_at_mut(k1 - k0);
+            let (out_from, rest_from) = std::mem::take(&mut from).split_at_mut(k1 - k0);
+            keys = rest;
+            from = rest_from;
+            let slots = &at[b0..=b1];
+            let his = &his;
+            scope.spawn(move || {
+                let mut next: Vec<u32> = slots.iter().map(|&s| s - k0 as u32).collect();
+                for (&hi, &h) in his.iter().zip(hs) {
+                    let b = scale(hi, buckets) as usize;
+                    if (b0..b1).contains(&b) {
+                        let slot = &mut next[b - b0];
+                        out_keys[*slot as usize] = hi;
+                        out_from[*slot as usize] = h;
+                        *slot += 1;
+                    }
+                }
+            });
+        }
+    });
+    (keys, from)
+}
+
+/// Whether `hashes` are sorted: in parts on `threads` when there are enough of them.
+fn is_sorted(hashes: &[u64], threads: usize) -> bool {
+    let part = hashes.len().div_ceil(threads.max(1));
+    if threads <= 1 || part < 1 << 20 {
+        return hashes.is_sorted();
+    }
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = hashes
+            .chunks(part)
+            .enumerate()
+            .map(|(i, c)| {
+                scope.spawn(move || (i == 0 || hashes[i * part - 1] <= c[0]) && c.is_sorted())
+            })
+            .collect();
+        parts
+            .into_iter()
+            .all(|p| p.join().expect("a sort check panicked"))
+    })
+}
+
+/// What placing a run of buckets produced.
+struct Piece {
+    /// Its first bucket.
+    first: u32,
+    seeds: Vec<u8>,
+    /// Occupancy of the values it placed, from value `origin`.
+    map: Map,
+    origin: u64,
+    /// CSR offsets of the gap's buckets after it, [`Run::start`]-style; empty for a gap's own.
+    tail: Vec<u32>,
+    /// The keys of the buckets it bumped.
+    bumped: Vec<u64>,
+}
+
+/// The keys of the buckets `from..to` of `run` that `seeds` bumped, appended to `out`.
+fn bumped_keys(run: &Run<'_>, seeds: &[u8], from: u32, to: u32, out: &mut Vec<u64>) {
+    for b in from..to {
+        if seeds[b as usize] == 0 {
+            out.extend_from_slice(run.keys_of(b));
+        }
+    }
+}
+
+/// Bucket boundaries of the keys `keys[from..]`, whose buckets are `first` on, into `ends`, one
+/// per bucket, CSR-style: `ends[i]` is the key index past the last key of bucket `first + i`.
+/// The keys are grouped by bucket in bucket order, so each key stores the index past itself, the
+/// last one wins, and a bucket with no key takes its predecessor's end.
+fn bucket_ends(keys: &[u64], from: usize, buckets: u64, first: u64, ends: &mut [u32]) {
+    // Eight buckets computed before any is stored: a store whose address is still unknown
+    // holds back the loads after it, and that is 5x here.
+    let mut i = from;
+    let mut eights = keys.chunks_exact(8);
+    for eight in &mut eights {
+        let mut bs = [0usize; 8];
+        for (b, &h) in bs.iter_mut().zip(eight) {
+            *b = (scale(h, buckets) - first) as usize;
+        }
+        for (j, &b) in bs.iter().enumerate() {
+            ends[b] = (i + j + 1) as u32;
+        }
+        i += 8;
+    }
+    for (j, &h) in eights.remainder().iter().enumerate() {
+        ends[(scale(h, buckets) - first) as usize] = (i + j + 1) as u32;
+    }
+    let mut last = from as u32;
+    for e in ends.iter_mut() {
+        last = last.max(*e);
+        *e = last;
     }
 }
 
@@ -648,25 +1056,22 @@ impl V2 {
         let mut levels: Vec<Level> = Vec::new();
         let mut maps: Vec<Map> = Vec::new();
         let mut remaining: Vec<u64>;
+        phase("start");
 
         // Both callers hand over sorted hashes, and a bucket is monotone in its hash, so sorted
         // input is already grouped by bucket; anything else is sorted first.
-        let sorted: std::borrow::Cow<[u64]> = if hashes.is_sorted() {
+        let sorted: std::borrow::Cow<[u64]> = if is_sorted(hashes, threads) {
             std::borrow::Cow::Borrowed(hashes)
         } else {
             let mut v = hashes.to_vec();
             v.sort_unstable();
             std::borrow::Cow::Owned(v)
         };
+        phase("sort");
 
         if n > TAIL_KEYS {
-            let (level, taken, bumped) = Self::build_level(&sorted, threads);
-            remaining = Vec::with_capacity(bumped as usize);
-            remaining.extend(
-                sorted
-                    .iter()
-                    .filter(|&&h| level.seeds[scale(h, level.buckets) as usize] == 0),
-            );
+            let (level, taken, bumped) = Self::build_level(&sorted, threads, false);
+            remaining = bumped;
             levels.push(level);
             maps.push(taken);
         } else {
@@ -675,19 +1080,19 @@ impl V2 {
 
         while remaining.len() as u64 > TAIL_KEYS && levels.len() < MAX_LEVELS {
             let lv = levels.len();
-            let mut pairs: Vec<(u64, u64)> =
-                remaining.iter().map(|&h| (level_hash(h, lv), h)).collect();
-            pairs.sort_unstable();
-            let keys: Vec<u64> = pairs.iter().map(|p| p.0).collect();
-            let (level, taken, bumped) = Self::build_level(&keys, threads);
+            let buckets = Level::shape(remaining.len() as u64).buckets;
+            let (keys, from) = group_by_bucket(&remaining, lv, buckets, threads);
+            phase("level pairs");
+            let (level, taken, bumped) = Self::build_level(&keys, threads, true);
             // A level that bumps everything has spread nothing; the tail takes the keys as they are.
-            if bumped as usize == pairs.len() {
+            if bumped.len() == keys.len() {
                 break;
             }
-            remaining = pairs
+            remaining = keys
                 .iter()
-                .filter(|(hi, _)| level.seeds[scale(*hi, level.buckets) as usize] == 0)
-                .map(|p| p.1)
+                .zip(&from)
+                .filter(|(hi, _)| level.seeds[scale(**hi, level.buckets) as usize] == 0)
+                .map(|(_, &h)| h)
                 .collect();
             levels.push(level);
             maps.push(taken);
@@ -696,6 +1101,7 @@ impl V2 {
         let (tail, tail_map) = Self::build_tail(&remaining).ok_or(IndexError::Build(
             "minimal perfect hash: no seed placed every bucket",
         ))?;
+        phase("tail");
 
         // Minimal at last: the values the levels below the first hand out, in order, take the
         // holes the first level left, in order. There are exactly as many of each.
@@ -725,14 +1131,17 @@ impl V2 {
             rank.push(seen);
             seen += words.iter().map(|w| w.count_ones()).sum::<u32>();
         }
+        phase("remap set");
         let holes = match maps.first() {
             Some(first) => {
-                let holes = (0..n).filter(|&v| !first.get(v));
-                Ef::encode(holes, placed, n)
+                let holes = first.holes(n, threads);
+                phase("holes scan");
+                Ef::encode(holes.into_iter(), placed, n)
             }
             None => Ef::default(),
         };
         debug_assert!(holes.len == placed || maps.is_empty());
+        phase("remap holes");
 
         let mut levels = levels.into_iter();
         Ok(Self {
@@ -744,106 +1153,158 @@ impl V2 {
         })
     }
 
-    /// One bumping level over `keys`, which are sorted and distinct. Returns the level, its
-    /// occupancy map, and how many keys it bumped.
-    fn build_level(keys: &[u64], threads: usize) -> (Level, Map, u64) {
+    /// One bumping level over `keys`, which are grouped by bucket in bucket order. Returns the
+    /// level, its occupancy map, and the keys it bumped.
+    fn build_level(keys: &[u64], threads: usize, deep: bool) -> (Level, Map, Vec<u64>) {
         let n = keys.len() as u64;
         let mut level = Level::shape(n);
         let buckets = level.buckets;
-        let chunks = buckets.div_ceil(CHUNK) as usize;
-        let group = chunks.div_ceil(threads.clamp(1, chunks));
-        // Two chunks are independent when the values their buckets can reach do not meet. Slices
-        // of consecutive buckets start within `n / buckets` of each other and a key stays inside
-        // its slice, so this many buckets between two chunks keeps them apart; the same many at
-        // the end keep the last chunk from wrapping into the first.
-        let gap = if chunks > 1 {
-            ((level.slice + 2) * buckets).div_ceil(n) + 1
-        } else {
-            0
-        };
-        debug_assert!(gap < CHUNK);
+        let slice = level.slice;
+        let starts = chunk_starts(buckets, deep);
+        let chunks = starts.len();
+        // Buckets whose slices reach past a bucket, from before it: consecutive buckets' slices
+        // start within `n / buckets` of each other. So many before each chunk boundary, and
+        // before the level's end, are its gap: placed once the runs on both sides are done,
+        // against both. The run after a gap starts with the gap's share of its first slice held
+        // back — more than the buckets before it would take in the middle of a level, since the
+        // gap has nowhere further to spill and the run does.
+        let reach = (((slice + 2) * buckets).div_ceil(n) + 1).min(buckets / 2);
+        let first_of = |k: usize| starts[k];
+        let end_of = |k: usize| starts.get(k + 1).copied().unwrap_or(buckets);
+        let run_end = |k: usize| end_of(k) - reach;
+        let longest = (0..chunks)
+            .map(|k| end_of(k) - first_of(k))
+            .max()
+            .unwrap_or(0);
         // The smallest value a key of bucket `b` can take.
         let lo = |b: u64| ((b as u128 * n as u128) / buckets as u128) as u64;
-        let run_end = |k: usize| {
-            if k + 1 < chunks {
-                (k as u64 + 1) * CHUNK - gap
-            } else {
-                (buckets - gap).max(k as u64 * CHUNK)
-            }
-        };
-
-        // Bucket boundaries, CSR-style. The keys are sorted and the bucket is monotone in the key,
-        // so counting is a pass of sequential increments, and each chunk counts its own keys.
-        let mut start = vec![0u32; buckets as usize + 1];
-        let bounds: Vec<usize> = (0..=chunks)
-            .map(|k| keys.partition_point(|&h| scale(h, buckets) < k as u64 * CHUNK))
+        let bounds: Vec<usize> = (0..chunks)
+            .map(|k| keys.partition_point(|&h| scale(h, buckets) < first_of(k)))
+            .chain(std::iter::once(keys.len()))
             .collect();
+        let shift = stride_for(slice).trailing_zeros();
+        let align = |v: u64| v & !((64 << shift) - 1);
+        let word = |o: u64| (o >> shift) as i64 / 64;
+
+        // Chunks are claimed in order from a counter. A chunk finds its buckets' boundaries and
+        // seeds its run into a private occupancy map covering just the values its buckets can
+        // reach — a few dozen KiB, which is what keeps the search in L1. A gap is placed by
+        // whichever thread finished the later of its two chunks, against a map prefilled from
+        // theirs, which is all that reaches it. The maps are merged afterwards, and the gap at
+        // the level's end, whose values wrap, is placed then, against everything.
+        let pieces: Vec<OnceLock<Piece>> = (0..chunks).map(|_| OnceLock::new()).collect();
+        let gaps: Vec<OnceLock<Piece>> = (1..chunks).map(|_| OnceLock::new()).collect();
+        let done: Vec<AtomicBool> = (0..chunks).map(|_| AtomicBool::new(false)).collect();
+        let claimed: Vec<AtomicBool> = (1..chunks).map(|_| AtomicBool::new(false)).collect();
+        let next = AtomicUsize::new(0);
+        let level_ref = &level;
         std::thread::scope(|scope| {
-            for (g, counts) in start[1..].chunks_mut(CHUNK as usize * group).enumerate() {
-                let keys = &keys[bounds[g * group]..bounds[(g * group + group).min(chunks)]];
-                let base = (g * group) as u64 * CHUNK;
-                scope.spawn(move || {
-                    for &h in keys {
-                        counts[(scale(h, buckets) - base) as usize] += 1;
+            for _ in 0..threads.clamp(1, chunks) {
+                scope.spawn(|| {
+                    let mut start = vec![0u32; longest as usize + 1];
+                    loop {
+                        let k = next.fetch_add(1, Ordering::Relaxed);
+                        if k >= chunks {
+                            break;
+                        }
+                        let (first, end, last) = (first_of(k), run_end(k), end_of(k));
+                        let len = (last - first) as usize + 1;
+                        start[..len].fill(0);
+                        start[0] = bounds[k] as u32;
+                        let ks = &keys[bounds[k]..bounds[k + 1]];
+                        bucket_ends(ks, bounds[k], buckets, first, &mut start[1..len]);
+                        let run = Run {
+                            level: level_ref,
+                            keys,
+                            start: &start[..len],
+                        };
+                        let origin = align(lo(first));
+                        let mut map = Map::new((lo(end) + slice).min(n) - origin, shift);
+                        let marked = reserve(level_ref, first, origin, &mut map);
+                        let mut seeds = vec![0u8; (end - first) as usize];
+                        seed_run(&run, &mut seeds, &mut map, origin);
+                        for v in marked {
+                            map.clear(v);
+                        }
+                        let mut bumped = Vec::new();
+                        bumped_keys(&run, &seeds, 0, (end - first) as u32, &mut bumped);
+                        let piece = Piece {
+                            first: first as u32,
+                            seeds,
+                            map,
+                            origin,
+                            tail: start[(end - first) as usize..len].to_vec(),
+                            bumped,
+                        };
+                        assert!(pieces[k].set(piece).is_ok(), "a chunk is claimed once");
+                        done[k].store(true, Ordering::SeqCst);
+                        // The two flags are set before either is read, so of the two threads
+                        // finishing a gap's chunks at least one sees both set.
+                        for g in [k.wrapping_sub(1), k] {
+                            if g >= gaps.len()
+                                || !done[g].load(Ordering::SeqCst)
+                                || !done[g + 1].load(Ordering::SeqCst)
+                                || claimed[g].swap(true, Ordering::SeqCst)
+                            {
+                                continue;
+                            }
+                            let (left, right) = (
+                                pieces[g].get().expect("done follows set"),
+                                pieces[g + 1].get().expect("done follows set"),
+                            );
+                            let (first, end) = (run_end(g), end_of(g));
+                            let origin = align(lo(first));
+                            let mut map = Map::new(lo(end) + slice - origin, shift);
+                            map.merge(&left.map, word(left.origin) - word(origin));
+                            map.merge(&right.map, word(right.origin) - word(origin));
+                            let run = Run {
+                                level: level_ref,
+                                keys,
+                                start: &left.tail,
+                            };
+                            let mut seeds = vec![0u8; (end - first) as usize];
+                            seed_run(&run, &mut seeds, &mut map, origin);
+                            let mut bumped = Vec::new();
+                            bumped_keys(&run, &seeds, 0, (end - first) as u32, &mut bumped);
+                            let piece = Piece {
+                                first: first as u32,
+                                seeds,
+                                map,
+                                origin,
+                                tail: Vec::new(),
+                                bumped,
+                            };
+                            assert!(gaps[g].set(piece).is_ok(), "a gap is claimed once");
+                        }
                     }
                 });
             }
         });
-        for b in 0..buckets as usize {
-            start[b + 1] += start[b];
-        }
+        phase("chunks");
 
-        // Seeds, chunk by chunk. A chunk writes a private occupancy map covering just the values
-        // its buckets can reach — a few dozen KiB, which is what keeps the search in L1 — and the
-        // maps are merged afterwards; the gap guarantees their set bits are disjoint.
         let mut seeds = vec![0u8; buckets as usize];
-        let shift = stride_for(level.slice).trailing_zeros();
         let mut taken = Map::new(n, shift);
-        let mut bumped = 0u64;
+        let mut bumped = Vec::new();
+        let mut tail = Vec::new();
+        for slot in pieces.into_iter().chain(gaps) {
+            let mut piece = slot.into_inner().expect("every chunk and gap was placed");
+            seeds[piece.first as usize..][..piece.seeds.len()].copy_from_slice(&piece.seeds);
+            taken.merge(&piece.map, word(piece.origin));
+            bumped.append(&mut piece.bumped);
+            if !piece.tail.is_empty() {
+                tail = piece.tail;
+            }
+        }
+        phase("merge");
         let run = Run {
             level: &level,
             keys,
-            start: &start,
+            start: &tail,
         };
-        let merged: Vec<(usize, Map, u64)> = std::thread::scope(|scope| {
-            let handles: Vec<_> = seeds
-                .chunks_mut(CHUNK as usize * group)
-                .enumerate()
-                .map(|(g, sd)| {
-                    let run = &run;
-                    scope.spawn(move || {
-                        let mut out = Vec::new();
-                        for (j, sd) in sd.chunks_mut(CHUNK as usize).enumerate() {
-                            let k = g * group + j;
-                            let (first, end) = (k as u64 * CHUNK, run_end(k));
-                            let origin = lo(first) & !((64 << shift) - 1);
-                            let values = (lo(end) + level.slice).min(n) - origin;
-                            let mut local = Map::new(values, shift);
-                            let sd = &mut sd[..(end - first) as usize];
-                            let b = seed_run(run, first as u32, end as u32, sd, &mut local, origin);
-                            out.push(((origin >> shift) as usize / 64, local, b));
-                        }
-                        out
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().expect("a placement thread panicked"))
-                .collect()
-        });
-        for (at, local, b) in merged {
-            bumped += b;
-            taken.merge(&local, at);
-        }
-        // The gaps, in order, against everything their neighbours placed.
-        for k in 0..chunks {
-            let (first, end) = (run_end(k), ((k as u64 + 1) * CHUNK).min(buckets));
-            if first < end {
-                let sd = &mut seeds[first as usize..end as usize];
-                bumped += seed_run(&run, first as u32, end as u32, sd, &mut taken, 0);
-            }
-        }
+        let sd = &mut seeds[(buckets - reach) as usize..];
+        seed_run(&run, sd, &mut taken, 0);
+        bumped_keys(&run, sd, 0, reach as u32, &mut bumped);
+        phase("gaps");
         level.seeds = seeds;
         (level, taken, bumped)
     }
@@ -1070,6 +1531,7 @@ impl V2 {
                 buckets,
                 slice,
                 stride: stride_for(slice),
+                per_log: per_log(),
                 seeds: Vec::new(),
             });
         }
@@ -1202,38 +1664,35 @@ impl V2 {
     }
 }
 
-/// Seed the buckets `first..end` of a level against `taken`, whose bit 0 is value `origin`.
-/// `seeds` is those buckets' slice of the level's table. Returns the number of keys bumped.
+/// Seed the buckets of a run against `taken`, whose bit 0 is value `origin`. `seeds` is those
+/// buckets' slice of the level's table, one per bucket of the run.
 ///
 /// Buckets are taken from a window of [`WINDOW`] starting at the lowest one still unplaced, by
 /// priority: larger buckets slightly ahead of their index, single keys held back by about the
 /// slice — a single key fits any hole and is the one to leave for last. Within the window the
 /// occupancy map's live edge is a few hundred bytes, so the search runs out of L1.
-fn seed_run(
-    run: &Run<'_>,
-    first: u32,
-    end: u32,
-    seeds: &mut [u8],
-    taken: &mut Map,
-    origin: u64,
-) -> u64 {
-    debug_assert_eq!(seeds.len(), (end - first) as usize);
+fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
+    let end = seeds.len() as u32;
+    debug_assert!(run.start.len() > end as usize);
     let level = run.level;
-    // In buckets: how far a single key waits, and the unit a larger bucket is pulled forward by.
-    let per_slice = level.slice * level.buckets / level.n;
     let window = tun(6, f64::from(WINDOW)) as u32;
-    let lag1 = (tun(2, LAG1 * per_slice as f64) as i64).min(i64::from(window) - 1);
-    let unit = tun(3, LAG_UNIT * per_slice as f64) as i64;
-    let priority =
-        |b: u32| -> i64 { ell(run.size(b) as usize, lag1, unit) - 1024 * i64::from(b - first) };
-    let mut heap: BinaryHeap<(i64, Reverse<u32>)> = BinaryHeap::with_capacity(window as usize);
-    let mut done = vec![0u64; ((end - first) as usize).div_ceil(64)];
-    let mut starts = [0u64; MAX_BUCKET];
-    let (mut front, mut pushed, mut bumped) = (first, first, 0u64);
+    // Buckets wait in a queue per size class, each in index order, which is priority order
+    // within the class: the priority is the class's term less 1024 per bucket of index. The next
+    // bucket is the best of the class heads, kept in a heap of at most one entry per class.
+    let mut term = [0i64; CLASSES];
+    for (c, t) in term.iter_mut().enumerate() {
+        *t = ell(c + 1, level.slice);
+    }
+    let class = |b: u32| (run.size(b) as usize).min(CLASSES) - 1;
+    let priority = |b: u32| -> i64 { term[class(b)] - 1024 * i64::from(b) };
+    let mut queue: [std::collections::VecDeque<u32>; CLASSES] = Default::default();
+    let mut heads: BinaryHeap<(i64, Reverse<u32>)> = BinaryHeap::with_capacity(CLASSES);
+    let mut done = vec![0u64; (end as usize).div_ceil(64)];
+    let mut scratch = Scratch::new();
+    let (mut front, mut pushed) = (0u32, 0u32);
     loop {
         while front < end
-            && (run.size(front) == 0
-                || done[((front - first) / 64) as usize] >> ((front - first) % 64) & 1 == 1)
+            && (run.size(front) == 0 || done[(front / 64) as usize] >> (front % 64) & 1 == 1)
         {
             front += 1;
         }
@@ -1243,21 +1702,25 @@ fn seed_run(
         let limit = end.min(front.saturating_add(window));
         while pushed < limit {
             if run.size(pushed) != 0 {
-                heap.push((priority(pushed), Reverse(pushed)));
+                let q = &mut queue[class(pushed)];
+                if q.is_empty() {
+                    heads.push((priority(pushed), Reverse(pushed)));
+                }
+                q.push_back(pushed);
             }
             pushed += 1;
         }
-        let (_, Reverse(b)) = heap.pop().expect("the front bucket is in the window");
-        let ks = run.keys_of(b);
-        let seed = seed_bucket(level, ks, taken, origin, &mut starts);
-        seeds[(b - first) as usize] = seed;
-        if seed == 0 {
-            bumped += ks.len() as u64;
+        let (_, Reverse(b)) = heads.pop().expect("the front bucket is in a queue");
+        let q = &mut queue[class(b)];
+        let head = q.pop_front();
+        debug_assert_eq!(head, Some(b));
+        if let Some(&next) = q.front() {
+            heads.push((priority(next), Reverse(next)));
         }
-        let d = u64::from(b - first);
-        done[(d / 64) as usize] |= 1 << (d % 64);
+        let ks = run.keys_of(b);
+        seeds[b as usize] = seed_bucket(level, ks, taken, origin, &mut scratch);
+        done[(b / 64) as usize] |= 1 << (b % 64);
     }
-    bumped
 }
 
 /// The seed that lands every key of the bucket on a distinct free value, marking those values
@@ -1279,135 +1742,189 @@ fn seed_bucket(
     ks: &[u64],
     taken: &mut Map,
     origin: u64,
-    starts: &mut [u64; MAX_BUCKET],
+    scratch: &mut Scratch,
 ) -> u8 {
     let k = ks.len();
     if k > MAX_BUCKET {
         return 0;
     }
+    let Scratch {
+        starts,
+        offs,
+        cuts,
+        nc,
+        cut,
+        plane,
+        bit,
+        vals,
+        margin,
+    } = scratch;
+    let margin = *margin;
+    count!(BUCKETS, 1);
     let (slice, mask) = (level.slice, level.slice - 1);
-    let delta = stride_for(slice);
+    let bits = u64::from(slice.trailing_zeros());
+    let delta = level.stride;
     let (shift, dm) = (delta.trailing_zeros(), delta - 1);
     let period = slice >> shift;
-    let mut offs = [0u64; MAX_BUCKET];
-    for i in 0..k {
-        starts[i] = scale(ks[i], level.n) - origin;
-        offs[i] = ks[i] & mask;
-    }
+    let per = 1u64 << level.per_log;
+    let families = (256 / per) as usize;
+    let ks_delta = k as u64 * delta;
     // Values past the range's end wrap to its beginning; `limit` is where that is on this map,
-    // which a chunk's private map never reaches.
+    // which a chunk's private map never reaches. A key whose slice crosses it is read bit by bit.
     let limit = level.n - origin;
     let fold = |v: u64| if v >= limit { v - limit } else { v };
-    let mut vals = [0u64; MAX_BUCKET];
+    let mut slow = 0u64;
     for i in 0..k {
-        vals[i] = fold(starts[i] + offs[i]);
+        starts[i] = scale(ks[i], level.n) - origin;
+        slow |= u64::from(starts[i] + slice > limit) << i;
     }
-    if k <= 16 {
+    // A family's shifts are `1..end`; the last family loses the shift seed 256 would be.
+    let end_of = |family: usize| per.min(255 - per * family as u64) + 1;
+    // Per family: the keys' offsets, the shifts at which they wrap (sorted), and the least sum
+    // any of its intervals starts at. Inside an interval the sum grows by `k` strides per shift
+    // and at each cut a key drops by a slice, so the intervals' floors follow from the first.
+    let mut order = [(0u64, 0usize); MAX_FAMILIES];
+    for family in 0..families {
+        let end = end_of(family);
+        let (offs, cuts, cut) = (&mut offs[family], &mut cuts[family], &mut cut[family]);
+        let mut n = 0;
+        let mut floor = 0u64;
         for i in 0..k {
-            if vals[i + 1..k].contains(&vals[i]) {
-                return 0;
+            let o = (ks[i] >> (bits * family as u64)) & mask;
+            offs[i] = o;
+            floor += o;
+            let c = (slice - o + dm) >> shift;
+            cut[i] = c;
+            if c < end {
+                let mut at = n;
+                while at > 0 && cuts[at - 1] > c {
+                    cuts[at] = cuts[at - 1];
+                    at -= 1;
+                }
+                cuts[at] = c;
+                n += 1;
             }
         }
-    } else {
-        let mut sorted = vals[..k].to_vec();
-        sorted.sort_unstable();
-        if sorted.windows(2).any(|w| w[0] == w[1]) {
-            return 0;
+        nc[family] = n;
+        let mut least = floor;
+        let mut from = 0;
+        for &c in &cuts[..n] {
+            floor = floor + ks_delta * (c - from) - slice;
+            from = c;
+            least = least.min(floor);
         }
+        order[family] = (least, family);
     }
-    // The value of key `i` under shift `t`, and the shift at which it wraps inside its slice.
-    let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
-    let cut = |i: usize| (slice - offs[i] + dm) >> shift;
-    // 64 shifts of key `i` from `t0`: consecutive bits of one plane, from two places across the
-    // slice's wrap, and one by one for the few keys whose slice crosses the range's end.
-    let cyc = |taken: &Map, i: usize, t0: u64| -> u64 {
-        let (p, base) = taken.at(starts[i] + offs[i]);
-        if starts[i] + slice > limit {
-            return (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j));
-        }
-        // `head` shifts before the wrap, 0 to 64; both windows are read and the parts not
-        // wanted are shifted out, which is cheaper than choosing.
-        let c = cut(i);
-        let head = c.saturating_sub(t0).min(64);
-        let before = taken.window(p, base + t0.min(c)) & ((1u128 << head) - 1) as u64;
-        let after = taken.window(p, (base + t0 + head).saturating_sub(period));
-        before | (u128::from(after) << head) as u64
-    };
-    // First feasible shift in `[from, to)`; one where two keys fold onto one value is skipped.
-    let first_feasible = |taken: &Map, from: u64, to: u64, vals: &mut [u64]| -> Option<u64> {
-        let mut t0 = from;
-        while t0 < to {
-            let mut used = u64::from(t0 == 0);
-            if to - t0 < 64 {
-                used |= u64::MAX << (to - t0);
-            }
-            for i in 0..k {
-                used |= cyc(taken, i, t0);
-                if used == u64::MAX {
-                    break;
-                }
-            }
-            while used != u64::MAX {
-                let j = u64::from((!used).trailing_zeros());
-                for (i, v) in vals[..k].iter_mut().enumerate() {
-                    *v = value(i, t0 + j);
-                }
-                if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
-                    return Some(t0 + j);
-                }
-                used |= 1 << j;
-            }
-            t0 += 64;
-        }
-        None
-    };
-    // Interval boundaries: the shift at which each key first wraps.
-    let end = 256u64;
-    let mut cuts = [0u64; MAX_BUCKET + 1];
-    let mut nc = 0;
-    for i in 0..k {
-        let c = cut(i);
-        if c < end {
-            // Kept sorted as they come; a bucket has a handful.
-            let mut at = nc;
-            while at > 0 && cuts[at - 1] > c {
-                cuts[at] = cuts[at - 1];
-                at -= 1;
-            }
-            cuts[at] = c;
-            nc += 1;
-        }
+    if families > 1 {
+        order[..families].sort_unstable();
     }
-    let sum_at = |t: u64| -> u64 { (0..k).map(|i| (offs[i] + (t << shift)) & mask).sum() };
+    // Families from the lowest floor; one whose floor cannot beat the best seed found is skipped.
     let mut best: Option<(u64, u64)> = None;
-    for j in (0..=nc).rev() {
-        let from = if j == 0 { 0 } else { cuts[j - 1] };
-        let to = if j == nc { end } else { cuts[j] };
-        if from == to {
+    for &(least, family) in &order[..families] {
+        if best.is_some_and(|(sum, _)| least + margin >= sum) {
+            break;
+        }
+        let end = end_of(family);
+        let (offs, cuts, nc, cut) = (&offs[family], &cuts[family], nc[family], &cut[family]);
+        for i in 0..k {
+            vals[i] = fold(starts[i] + offs[i]);
+            let (p, b) = taken.at(vals[i]);
+            plane[i] = p;
+            bit[i] = b;
+        }
+        // Two keys on one value under shift 0 stay together under every shift.
+        let collides = if k <= 16 {
+            (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
+        } else {
+            let mut sorted = vals[..k].to_vec();
+            sorted.sort_unstable();
+            sorted.windows(2).any(|w| w[0] == w[1])
+        };
+        if collides {
             continue;
         }
-        // Inside an interval the sum grows by `k` strides per shift, so an interval is worth
-        // scanning only while it can still come in under the best so far.
-        let floor = sum_at(from);
-        let to = match best {
-            Some((sum, _)) if floor >= sum => continue,
-            Some((sum, _)) => to.min(from + (sum - floor).div_ceil(k as u64 * delta)),
-            None => to,
+        // The value of key `i` under shift `t`.
+        let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
+        // First feasible shift in `[from, to)`, an interval no key wraps inside, so each key's
+        // occupancy under 64 consecutive shifts is one window of its plane: from the bit of
+        // shift 0, or `period` bits before it once the key has wrapped. A shift where two keys
+        // fold onto one value is skipped.
+        let first_feasible = |taken: &Map, from: u64, to: u64, vals: &mut [u64]| -> Option<u64> {
+            let mut t0 = from;
+            while t0 < to {
+                let mut u = u64::from(t0 == 0);
+                if to - t0 < 64 {
+                    u |= u64::MAX << (to - t0);
+                }
+                for i in 0..k {
+                    count!(WINDOWS, 1);
+                    u |= if slow >> i & 1 == 1 {
+                        (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j))
+                    } else {
+                        let back = if cut[i] <= t0 { period } else { 0 };
+                        taken.window(plane[i], bit[i] + t0 - back)
+                    };
+                    if u == u64::MAX {
+                        break;
+                    }
+                }
+                while u != u64::MAX {
+                    count!(CANDIDATES, 1);
+                    let j = u64::from((!u).trailing_zeros());
+                    for (i, v) in vals[..k].iter_mut().enumerate() {
+                        *v = value(i, t0 + j);
+                    }
+                    if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
+                        return Some(t0 + j);
+                    }
+                    u |= 1 << j;
+                }
+                t0 += 64;
+            }
+            None
         };
-        if let Some(t) = first_feasible(taken, from, to, &mut vals) {
-            let sum = sum_at(t);
-            if best.is_none_or(|(s, _)| sum < s) {
-                best = Some((sum, t));
+        // Intervals from the last, whose values are lowest: one is worth scanning only while it
+        // can still beat the best, and at each cut going back one key un-wraps.
+        let mut from = if nc == 0 { 0 } else { cuts[nc - 1] };
+        let mut floor: u64 = (0..k).map(|i| (offs[i] + (from << shift)) & mask).sum();
+        let mut to = end;
+        for j in (0..=nc).rev() {
+            if from < to {
+                let stop = match best {
+                    Some((sum, _)) if floor + margin >= sum => None,
+                    Some((sum, _)) => Some(to.min(from + (sum - floor).div_ceil(ks_delta))),
+                    None => Some(to),
+                };
+                if let Some(stop) = stop {
+                    count!(INTERVALS, 1);
+                    if let Some(t) = first_feasible(taken, from, stop, vals) {
+                        let sum = floor + ks_delta * (t - from);
+                        let seed = per * family as u64 + t;
+                        if best.is_none_or(|(s, sd)| sum < s || (sum == s && seed < sd)) {
+                            best = Some((sum, seed));
+                        }
+                    }
+                }
+            }
+            if j > 0 {
+                let prev = if j == 1 { 0 } else { cuts[j - 2] };
+                floor = floor + slice - ks_delta * (from - prev);
+                to = from;
+                from = prev;
             }
         }
     }
-    let Some((_, t)) = best else {
+    let Some((_, seed)) = best else {
         return 0;
     };
+    let (family, t) = (
+        ((seed - 1) >> level.per_log) as usize,
+        ((seed - 1) & (per - 1)) + 1,
+    );
     for i in 0..k {
-        taken.set(value(i, t));
+        taken.set(fold(starts[i] + ((offs[family][i] + (t << shift)) & mask)));
     }
-    t as u8
+    seed as u8
 }
 
 impl Mphf {
@@ -2440,24 +2957,25 @@ mod spike {
     fn build_single_threaded() {
         let n = env("LEXINDEX_MPHF_N", 10_000_000);
         let rounds = env("LEXINDEX_MPHF_ROUNDS", 3);
+        let threads = env("LEXINDEX_MPHF_THREADS", 1);
         let hs = bigram_hashes(n);
         let mut best = f64::INFINITY;
         let mut bits = 0.0;
         let mut shape_s = String::new();
         for _ in 0..rounds {
             let t = std::time::Instant::now();
-            let m = Mphf::build_with_threads(&hs, 1).expect("build");
+            let m = Mphf::build_with_threads(&hs, threads).expect("build");
             best = best.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
             bits = m.bits_per_key();
             shape_s = shape(&m);
             std::hint::black_box(m);
         }
         println!(
-            "n {n:>9}   bits/key {bits:>6.3}   build {best:>7.1} ns/key (1 thread, min of {rounds})   {shape_s}"
+            "n {n:>9}   bits/key {bits:>6.3}   build {best:>7.1} ns/key ({threads} thread(s), min of {rounds})   {shape_s}"
         );
     }
 
-    /// Parameter sweep: `LEXINDEX_MPHF_SWEEP="lambda=4.15,slice=1024,lag1=108,unit=55;..."`,
+    /// Parameter sweep: `LEXINDEX_MPHF_SWEEP="lambda=4.15,slice=1024,w1=-50137,w2=65904;..."`,
     /// one build per config, single-threaded, on `LEXINDEX_MPHF_N` keys. Prints the size and its
     /// parts, and every level's bumped fraction.
     #[test]
@@ -2467,8 +2985,10 @@ mod spike {
         let hs = bigram_hashes(n);
         let spec = std::env::var("LEXINDEX_MPHF_SWEEP").unwrap_or_default();
         let names = [
-            "lambda", "slice", "lag1", "unit", "tlambda", "talpha", "window", "delta",
+            "lambda", "slice", "unused2", "unused3", "tlambda", "talpha", "window", "delta", "w1",
+            "w2", "w3", "w4", "w5", "w6", "w7", "fam", "margin", "chunk", "phantom", "tail",
         ];
+        let threads = env("LEXINDEX_MPHF_THREADS", 1);
         for cfg in spec.split(';').filter(|c| !c.trim().is_empty()) {
             for i in 0..names.len() {
                 tune::SET[i].store(0, std::sync::atomic::Ordering::Relaxed);
@@ -2481,9 +3001,13 @@ mod spike {
                     .expect("a known parameter");
                 tune::set(i, v.parse().expect("a number"));
             }
+            work::reset(std::env::var_os("LEXINDEX_MPHF_WORK").is_some());
             let t = std::time::Instant::now();
-            let m = Mphf::build_with_threads(&hs, 1).expect("build");
+            let m = Mphf::build_with_threads(&hs, threads).expect("build");
             let ns = t.elapsed().as_secs_f64() * 1e9 / n as f64;
+            if std::env::var_os("LEXINDEX_MPHF_WORK").is_some() {
+                println!("    {}", work::report());
+            }
             let mut seen = vec![false; n];
             for &h in &hs {
                 let id = m.index(h) as usize;
@@ -2521,6 +3045,97 @@ mod spike {
                 .windows(2)
                 .map(|w| format!("{:.2}%", 100.0 * w[1] as f64 / w[0] as f64))
                 .collect();
+            // Where the first level's bumped keys come from: buckets by size, and the share of
+            // each size's keys that were bumped.
+            if let Some(l) = &v.first {
+                let mut size = vec![0u32; l.buckets as usize];
+                for &h in &hs {
+                    size[scale(h, l.buckets) as usize] += 1;
+                }
+                let mut keys = [0u64; 24];
+                let mut lost = [0u64; 24];
+                for (b, &k) in size.iter().enumerate() {
+                    let c = (k as usize).min(23);
+                    keys[c] += u64::from(k);
+                    if l.seeds[b] == 0 {
+                        lost[c] += u64::from(k);
+                    }
+                }
+                let total: u64 = lost.iter().sum();
+                let row: Vec<String> = (1..24)
+                    .filter(|&c| keys[c] > 0)
+                    .map(|c| {
+                        format!(
+                            "{}{}:{:.1}%/{:.0}%",
+                            c,
+                            if c == 23 { "+" } else { "" },
+                            100.0 * lost[c] as f64 / keys[c].max(1) as f64,
+                            100.0 * lost[c] as f64 / total.max(1) as f64
+                        )
+                    })
+                    .collect();
+                println!(
+                    "    bumped by bucket size (share of its keys / share of all bumped): {}",
+                    row.join(" ")
+                );
+                // Where in its slice a placed key lands: the cumulative share of keys at or
+                // below each sixteenth of the slice.
+                if std::env::var_os("LEXINDEX_MPHF_OFFSETS").is_some() {
+                    let mut bins = [0u64; 16];
+                    for &h in &hs {
+                        let b = scale(h, l.buckets);
+                        let seed = l.seeds[b as usize];
+                        if seed == 0 {
+                            continue;
+                        }
+                        let lo = ((b as u128 * l.n as u128) / l.buckets as u128) as u64;
+                        let off = (l.value(h, seed) + l.n - lo) % l.n;
+                        bins[((off * 16 / l.slice) as usize).min(15)] += 1;
+                    }
+                    let total: u64 = bins.iter().sum();
+                    let mut acc = 0u64;
+                    let row: Vec<String> = bins
+                        .iter()
+                        .map(|&c| {
+                            acc += c;
+                            format!("{:.3}", acc as f64 / total.max(1) as f64)
+                        })
+                        .collect();
+                    println!(
+                        "    offset cdf by sixteenth of the slice: {}",
+                        row.join(" ")
+                    );
+                    // Where in a chunk the bumped buckets are: sixteenths of the run, then the
+                    // last `gap` buckets of it.
+                    let starts = chunk_starts(l.buckets, false);
+                    let chunk = starts.get(1).copied().unwrap_or(l.buckets);
+                    let gap = ((l.slice + 2) * l.buckets).div_ceil(l.n) + 1;
+                    let mut all = [0u64; 17];
+                    let mut lost = [0u64; 17];
+                    for (b, &k) in size.iter().enumerate() {
+                        let k0 = starts.partition_point(|&s| s <= b as u64) - 1;
+                        let end = starts.get(k0 + 1).copied().unwrap_or(l.buckets);
+                        let (p, len) = (b as u64 - starts[k0], end - starts[k0]);
+                        let bin = if p >= len - gap {
+                            16
+                        } else {
+                            (p * 16 / (len - gap)) as usize
+                        };
+                        all[bin] += u64::from(k);
+                        if l.seeds[b] == 0 {
+                            lost[bin] += u64::from(k);
+                        }
+                    }
+                    let row: Vec<String> = (0..17)
+                        .map(|i| format!("{:.1}", 100.0 * lost[i] as f64 / all[i].max(1) as f64))
+                        .collect();
+                    println!(
+                        "    bumped % by sixteenth of the run, then the gap ({} chunks, first {chunk}, gap {gap}): {}",
+                        starts.len(),
+                        row.join(" ")
+                    );
+                }
+            }
             println!(
                 "{cfg:<28} bits {:>6.3} = seeds {:.3} + set {:.3} + holes {:.3}  bumped [{}]  build {ns:>5.1} ns/key  id {id_ns:.2} ns",
                 m.bits_per_key(),

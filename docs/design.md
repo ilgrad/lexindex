@@ -50,7 +50,7 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (0.26 B/key — 2.118 bits/key,
+Because the keys themselves are never stored, size is just the MPH (0.26 B/key — 2.089 bits/key,
 measured, and flat in `n`: `8/λ` bits of seed plus what the few percent of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.80 B/key at 4 bits
 (6.25% false positives), 1.30 at the 8-bit default (0.39%), 2.30 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
@@ -88,8 +88,8 @@ lengths in the same slot order.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
-and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 2.171
-bits/key at 4.15, 2.118 at 4.5, 2.11 at 4.7, within three nanoseconds per key of each other to
+and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 2.154
+bits/key at 4.15, 2.089 at 4.5, 2.070 at 4.7, within three nanoseconds per key of each other to
 build. The table has no load factor at all — every level's range is exactly its key count, and the
 slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
 one way and nothing the other is not worth the API surface; `fingerprint_bits` is the knob that

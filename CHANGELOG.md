@@ -52,9 +52,12 @@ All notable changes to this project are documented here. The format follows
   over the lower tables' values and an Elias–Fano list of the holes, which is what keeps a bumped
   key at about eight bits instead of the sixteen a plain offset table costs. Buckets are placed in
   fixed chunks with the gaps between them placed serially afterwards, so the table is the same
-  whatever the thread count. Measured on 10 M real word-bigram hashes: **61 ns/key on one thread
-  against 280** (134 ms on eight threads against 625), and **2.12 bits/key against 2.39**; lookups
-  are unchanged at 5.4 ns/key. Every `BMP6` and `BCH6` blob written from here on carries an `MPH2`
+  whatever the thread count, and within a chunk the buckets follow PHast's size-weighted priority
+  scaled with the slice, which is what lets a small table place as well as a large one. Measured
+  on 10 M real word-bigram hashes: **49 ns/key on one thread against 280** (85 ms on eight threads
+  against 625), and **2.09 bits/key against 2.39**; in-order lookups cost 4.2 ns/key. Small tables
+  gain the most, and nobody had measured them before: 2.78 bits/key at 1 000 keys against 3.19,
+  2.19 at 10 000 against 2.37. Every `BMP6` and `BCH6` blob written from here on carries an `MPH2`
   table, which 1.0 cannot read; the `MPH1` tables 1.0 wrote still load. The 1.0 hash fixtures are
   now held to what a reader must promise them, and 1.1 fixtures take over the byte-identity pin.
 

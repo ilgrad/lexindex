@@ -553,8 +553,8 @@ that owned it, and `from_bytes` and `load_mmap` had to be `unsafe fn` on both ha
 whose every array length is written and checked here makes those loaders safe, and that is the whole
 of the trade. 1.0's own table was PtrHash-shaped and paid for the safety with a build about ten
 times slower than `ptr_hash`'s; 1.1's is PHast-shaped, and over 10 M real word-bigram hashes it
-builds in **61 ns/key on one thread** (0.61 s; 13 ns/key on eight) at **2.12 bits/key**, against
-280 ns/key and 2.39 bits for 1.0 — its lookup unchanged at 5.4 ns/key. Those are this crate's
+builds in **49 ns/key on one thread** (0.49 s; 9 ns/key on eight) at **2.09 bits/key**, against
+280 ns/key and 2.39 bits for 1.0, and its lookup costs 4.2 ns/key on in-order probes. Those are this crate's
 numbers on this machine from the spike in `src/mphf.rs`; nothing here is a claim about the
 libraries above.
 
