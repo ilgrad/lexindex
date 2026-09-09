@@ -485,6 +485,19 @@ impl PyStringIndex {
         })
     }
 
+    /// `load` for a file **someone else wrote**: the bytes go through `from_untrusted_bytes`,
+    /// whose validation and cost this inherits. For a file too large to read into memory there is
+    /// `load_mmap_untrusted`, under `load_mmap`'s obligation.
+    #[staticmethod]
+    fn load_untrusted(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py
+            .detach(|| StringIndex::load_untrusted(&path))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
     /// Zero-copy load: memory-map the file and borrow the index from it — no read into RAM, so a
     /// multi-gigabyte index is ready instantly and its pages are shared across processes.
     ///
@@ -499,6 +512,39 @@ impl PyStringIndex {
         // stay unmodified for the index's lifetime. There is no way to enforce it from Python.
         let inner = py
             .detach(|| unsafe { StringIndex::load_mmap(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// `load_mmap` plus the checksum `load` makes: one pass over the mapping at load, pages still
+    /// shared, nothing copied. For a file you wrote but did not carry yourself.
+    ///
+    /// The same obligation as `load_mmap`: the file must not change while the index is alive. The
+    /// checksum is computed once, at load, and says nothing about later.
+    #[staticmethod]
+    fn load_mmap_verified(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { StringIndex::load_mmap_verified(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// `load_mmap` for a file **someone else wrote** and too large to copy: the validation of
+    /// `from_untrusted_bytes` over the mapping, pages shared, nothing copied.
+    ///
+    /// The same obligation as `load_mmap`, and it weighs more here: the validation reads the
+    /// mapping once and trusts what it saw, so a file that changes afterwards — the stranger's, if
+    /// they can still write it — is exactly what the obligation forbids. Map a copy you own.
+    #[staticmethod]
+    fn load_mmap_untrusted(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { StringIndex::load_mmap_untrusted(&path) })
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
@@ -848,6 +894,22 @@ impl PyPerfectHashIndex {
             inner: Arc::new(inner),
         })
     }
+
+    /// `load_mmap` plus the payload checksum `load` makes: one pass over the mapping at load,
+    /// the key arena still borrowed. For a file you wrote but did not carry yourself.
+    ///
+    /// The same obligation as `load_mmap`: the file must not change while the index is alive. The
+    /// checksum is computed once, at load, and says nothing about later.
+    #[staticmethod]
+    fn load_mmap_verified(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { PerfectHashIndex::load_mmap_verified(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
 }
 
 /// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
@@ -1080,6 +1142,22 @@ impl PyCompactHashIndex {
         // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
         let inner = py
             .detach(|| unsafe { CompactHashIndex::load_mmap(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// `load_mmap` plus the payload checksum `load` makes: one pass over the mapping at load,
+    /// the fingerprint table still borrowed. For a file you wrote but did not carry yourself.
+    ///
+    /// The same obligation as `load_mmap`: the file must not change while the index is alive. The
+    /// checksum is computed once, at load, and says nothing about later.
+    #[staticmethod]
+    fn load_mmap_verified(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { CompactHashIndex::load_mmap_verified(&path) })
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
@@ -1394,6 +1472,16 @@ impl PyOverlay {
             .detach(|| std::fs::read(&path))
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
         Self::load_blob(py, &data, base, BaseTrust::Own)
+    }
+
+    /// [`from_untrusted_bytes`](Self::from_untrusted_bytes) from a file: the overlay's framing
+    /// checked as always, the embedded base handed to the strict loader.
+    #[staticmethod]
+    fn load_untrusted(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
+        let data = py
+            .detach(|| std::fs::read(&path))
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+        Self::load_blob(py, &data, base, BaseTrust::Stranger)
     }
 }
 

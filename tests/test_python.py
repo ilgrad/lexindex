@@ -978,3 +978,58 @@ def test_overlay_untrusted_loader_accepts_a_real_blob():
     back = lexindex.Overlay.from_untrusted_bytes(ov.to_bytes(), lexindex.StringIndex)
     assert len(back) == 3
     assert back.id("cherry") == ov.id("cherry")
+
+
+def test_path_forms_of_the_strict_loader_refuse_the_specimen_file(tmp_path):
+    p = str(tmp_path / "hostile.bix")
+    with open(p, "wb") as f:
+        f.write(_specimen())
+    with pytest.raises(ValueError):
+        lexindex.StringIndex.load_untrusted(p)
+    with pytest.raises(ValueError):
+        lexindex.StringIndex.load_mmap_untrusted(p)
+    hostile = os.path.join(os.path.dirname(__file__), "data", "panicking-1.0.0-overlay.ovl")
+    with pytest.raises(ValueError):
+        lexindex.Overlay.load_untrusted(hostile, lexindex.StringIndex)
+
+
+def test_path_forms_of_the_strict_loader_accept_a_real_file(tmp_path):
+    words = ["apple", "apricot", "banana"]
+    p = str(tmp_path / "own.bix")
+    lexindex.StringIndex(words).save(p)
+    for idx in [
+        lexindex.StringIndex.load_untrusted(p),
+        lexindex.StringIndex.load_mmap_untrusted(p),
+        lexindex.StringIndex.load_mmap_verified(p),
+    ]:
+        assert [idx.key(i) for i in range(len(idx))] == words
+    ov = lexindex.Overlay(lexindex.StringIndex(words))
+    ov.add("cherry")
+    q = str(tmp_path / "own.ovl")
+    ov.save(q)
+    assert lexindex.Overlay.load_untrusted(q, lexindex.StringIndex).id("cherry") == ov.id("cherry")
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lambda keys: lexindex.StringIndex(keys),
+        lambda keys: lexindex.PerfectHashIndex(keys),
+        lambda keys: lexindex.CompactHashIndex(keys, 4),
+    ],
+)
+def test_load_mmap_verified_refuses_a_flipped_byte_the_plain_mapping_takes(tmp_path, ctor):
+    idx = ctor(["apple", "banana"])
+    p = str(tmp_path / "idx.blob")
+    idx.save(p)
+    assert len(type(idx).load_mmap_verified(p)) == 2
+    with open(p, "rb") as f:
+        data = bytearray(f.read())
+    data[-1] ^= 0x55  # the last byte is payload: a CRC byte, a key byte, a fingerprint
+    with open(p, "wb") as f:
+        f.write(data)
+    assert len(type(idx).load_mmap(p)) == 2  # no payload checksum, by design
+    with pytest.raises(ValueError):
+        type(idx).load_mmap_verified(p)
+    with pytest.raises(ValueError):
+        type(idx).load(p)

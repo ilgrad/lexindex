@@ -210,7 +210,10 @@ them; that is the whole migration.
 
 All three indexes load two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
 file and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of
-the index size and the OS shares the pages across processes.
+the index size and the OS shares the pages across processes. Two shades of the mapping exist for
+files that were not carried by their author: `load_mmap_verified` is the same mapping with the
+payload checksum `load` makes, one pass at load; `load_mmap_untrusted` (`StringIndex`) runs
+`from_untrusted_bytes`'s validation over the mapping.
 
 The mechanism is a single `SharedBytes` byte source: an owned `Arc<[u8]>` **or** an `Arc<memmap2::Mmap>`,
 exposed as `AsRef<[u8]>` and `'static`. It backs the FST (`Map<SharedBytes>`), the fingerprint table and
@@ -220,11 +223,11 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
 and reads only the small MPH structure into memory.
 
-The one caveat is the usual mmap contract: the mapped file must not be mutated while an index borrows
-it. That obligation is the caller's, so `load_mmap` is an **`unsafe fn`** on all three indexes —
-`memmap2::Mmap::map` is `unsafe` for precisely this reason, and wrapping it in a safe function would
-hide a precondition that a perfectly ordinary safe program (another handle writing to the same path)
-can violate.
+The one caveat is the usual mmap contract: the mapped file must not be mutated while an index
+borrows it. That obligation is the caller's, so the `load_mmap` family are **`unsafe fn`s** on all
+three indexes — `memmap2::Mmap::map` is `unsafe` for precisely this reason, and wrapping it in a
+safe function would hide a precondition that a perfectly ordinary safe program (another handle
+writing to the same path) can violate.
 
 The load-time trust boundary is worth stating precisely. Against **accidental** corruption — a
 truncated download, a flipped byte, a lost header field — every owned `load`/`from_bytes` fails

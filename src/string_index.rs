@@ -518,7 +518,13 @@ impl StringIndex {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn from_untrusted_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        let blob = SharedBytes::from_owned(bytes.to_vec());
+        Self::from_shared_untrusted(SharedBytes::from_owned(bytes.to_vec()))
+    }
+
+    /// [`from_untrusted_bytes`](Self::from_untrusted_bytes) over any byte source: the owned copy
+    /// that method makes, the file [`load_untrusted`](Self::load_untrusted) reads, or the mapping
+    /// [`load_mmap_untrusted`](Self::load_mmap_untrusted) borrows.
+    fn from_shared_untrusted(blob: SharedBytes) -> Result<Self, IndexError> {
         // `AssertUnwindSafe` because nothing crosses the boundary on the panic path: the half-built
         // index is dropped inside, and the caller gets an `Err` that borrows nothing from it.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -708,6 +714,14 @@ impl StringIndex {
         Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
+    /// [`load`](Self::load) for a file **someone else wrote**: the bytes go through
+    /// [`from_untrusted_bytes`](Self::from_untrusted_bytes), whose validation and cost this
+    /// inherits. For a file too large to read into memory there is
+    /// [`load_mmap_untrusted`](Self::load_mmap_untrusted), under `load_mmap`'s obligation.
+    pub fn load_untrusted(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+        Self::from_shared_untrusted(SharedBytes::from_owned(std::fs::read(path)?))
+    }
+
     /// **Zero-copy load**: memory-map the file and borrow the index directly from the mapped pages —
     /// no read into RAM, so a multi-gigabyte index is ready instantly and its pages are shared across
     /// processes by the OS page cache. `key(id)` still returns an owned `String`; all other queries
@@ -730,6 +744,45 @@ impl StringIndex {
         // not mutated while the mapping lives.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+    }
+
+    /// [`load_mmap`](Self::load_mmap) plus the checksum [`load`](Self::load) makes: one pass over
+    /// the mapping at load, so the load costs a read of the file — but the pages stay shared and
+    /// nothing is copied, which is what separates it from `load` on a multi-gigabyte blob. For a
+    /// file you wrote but did not carry yourself.
+    ///
+    /// # Safety
+    /// The same obligation as [`load_mmap`](Self::load_mmap): the file must not change while the
+    /// index is alive. The checksum is computed once, at load, and says nothing about later.
+    #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
+    pub unsafe fn load_mmap_verified(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: forwarded to this function's own contract.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), true)
+    }
+
+    /// [`load_mmap`](Self::load_mmap) for a file **someone else wrote** and you cannot afford to
+    /// copy: the validation of [`from_untrusted_bytes`](Self::from_untrusted_bytes) over the
+    /// mapping, pages shared, nothing copied.
+    ///
+    /// # Safety
+    /// The same obligation as [`load_mmap`](Self::load_mmap), and it weighs more here: the
+    /// validation reads the mapping once and trusts what it saw, so a file that changes afterwards
+    /// — the stranger's, if they can still write it — is exactly what the obligation forbids. Map
+    /// a copy you own.
+    #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
+    pub unsafe fn load_mmap_untrusted(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: forwarded to this function's own contract.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared_untrusted(SharedBytes::from_mmap(std::sync::Arc::new(mmap)))
     }
 }
 
@@ -1257,6 +1310,50 @@ mod tests {
         assert_eq!(idx.id(&keys[0]), Some(0));
         assert_eq!(idx.id(&keys[65_535]), Some(65_535));
         assert_eq!(idx.key(40_000).as_deref(), Some(keys[40_000].as_str()));
+    }
+
+    /// The path loaders agree with the byte loaders and refuse in the same places:
+    /// `load_untrusted` is `from_untrusted_bytes` over the file, `load_mmap_verified` is
+    /// `load_mmap` plus the checksum `load` makes, `load_mmap_untrusted` is the full validation
+    /// over the mapping.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn the_path_loaders_agree_with_the_byte_loaders_and_refuse_alike() {
+        let idx = StringIndex::build(["apple", "banana", "cherry"]).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("lexindex_loaders_{}.bix", std::process::id()));
+        idx.save(&path).unwrap();
+        // SAFETY: this test owns the file and nothing writes to it while a map is alive.
+        for back in [
+            StringIndex::load_untrusted(&path).unwrap(),
+            unsafe { StringIndex::load_mmap_verified(&path) }.unwrap(),
+            unsafe { StringIndex::load_mmap_untrusted(&path) }.unwrap(),
+        ] {
+            assert_eq!(back.id("banana"), Some(1));
+            assert_eq!(back.key(2).as_deref(), Some("cherry"));
+        }
+        // A flipped checksum byte: the plain mapping never looks at it, every other loader does.
+        let mut bytes = std::fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x55;
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(StringIndex::load(&path).is_err());
+        assert!(unsafe { StringIndex::load_mmap(&path) }.is_ok());
+        assert!(unsafe { StringIndex::load_mmap_verified(&path) }.is_err());
+        assert!(StringIndex::load_untrusted(&path).is_err());
+        assert!(unsafe { StringIndex::load_mmap_untrusted(&path) }.is_err());
+        // A permutation of the ranks, CRC-correct: the spot check passes, the full one does not.
+        let mut b = fst::MapBuilder::memory();
+        for (k, v) in [("a", 0u64), ("b", 2), ("c", 1), ("d", 3)] {
+            b.insert(k, v).unwrap();
+        }
+        let mut permuted = b"BIX4".to_vec();
+        permuted.extend_from_slice(&b.into_inner().unwrap());
+        std::fs::write(&path, &permuted).unwrap();
+        assert!(unsafe { StringIndex::load_mmap_verified(&path) }.is_ok());
+        assert!(unsafe { StringIndex::load_mmap_untrusted(&path) }.is_err());
+        assert!(StringIndex::load_untrusted(&path).is_err());
+        std::fs::remove_file(&path).ok();
     }
 
     /// A blob whose FST is structurally valid — and CRC-correct, because it was built by `fst`

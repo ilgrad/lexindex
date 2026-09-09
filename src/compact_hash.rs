@@ -591,6 +591,24 @@ impl CompactHashIndex {
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
     }
+
+    /// [`load_mmap`](Self::load_mmap) plus the payload checksum [`load`](Self::load) makes: one
+    /// pass over the mapping at load, pages still shared and the bulk still borrowed. For a file
+    /// you wrote but did not carry yourself.
+    ///
+    /// # Safety
+    /// The same obligation as [`load_mmap`](Self::load_mmap): the file must not change while the
+    /// index is alive. The checksum is computed once, at load, and says nothing about later.
+    #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
+    pub unsafe fn load_mmap_verified(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: forwarded from this function's own contract.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), true)
+    }
 }
 
 fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
@@ -1138,6 +1156,28 @@ mod tests {
         let path = std::env::temp_dir().join(format!("lexindex_ch_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
         assert_eq!(CompactHashIndex::load(&path).unwrap().id("b"), idx.id("b"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// `load_mmap` skips the payload checksum by design; `load_mmap_verified` is the same mapping
+    /// with it, so a flipped payload byte the plain mapping serves is refused.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn load_mmap_verified_refuses_a_flipped_payload_byte_the_plain_mapping_takes() {
+        let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
+        let path = std::env::temp_dir().join(format!("lexindex_mmapv_{}.bch", std::process::id()));
+        idx.save(&path).unwrap();
+        // SAFETY: this test owns the file and nothing writes to it while a map is alive.
+        let mapped = unsafe { CompactHashIndex::load_mmap_verified(&path) }.unwrap();
+        assert_eq!(mapped.id("POST"), idx.id("POST"));
+        drop(mapped);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x55;
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(unsafe { CompactHashIndex::load_mmap(&path) }.is_ok());
+        assert!(unsafe { CompactHashIndex::load_mmap_verified(&path) }.is_err());
+        assert!(CompactHashIndex::load(&path).is_err());
         std::fs::remove_file(&path).ok();
     }
 

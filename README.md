@@ -183,8 +183,9 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
 - **`PerfectHashIndex` verifies every hit against the stored key.** The pair in a billion that
   collides in the 64-bit hash is served, still exactly, from a side table the hot path never reads.
 - **`from_bytes` and `load` are safe on every index — the reason the perfect hash is in-crate** —
-  and a crafted blob answers wrong ids, never out-of-range ones. **`load_mmap` is the one
-  `unsafe fn`**: it borrows the mapped pages, so the file must not change while the index is alive.
+  and a crafted blob answers wrong ids, never out-of-range ones. **`load_mmap` and its `_verified`
+  and `_untrusted` forms are the `unsafe fn`s**: they borrow the mapped pages, so the file must not
+  change while the index is alive.
 - **Blobs move forward, not backward.** 1.1 reads everything 1.0 wrote; 1.0 refuses what 1.1 writes
   (`BMP6`, and a `BCH6` with the `MPH2` hash inside). Pre-1.0 blobs are refused by name: they
   embed a `ptr_hash` image the crate no longer links, and rebuilding from the keys is the migration.
@@ -291,11 +292,11 @@ every number — is in [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## Security
 
-Every loader is a safe fn on arbitrary bytes since 1.0, and `load_mmap` is the one that is not — its
-obligation is about the file, not the bytes. What the blob formats do and do not defend against is
-[`SECURITY.md`](SECURITY.md): a crafted blob answers wrong ids, never out-of-range ones; the
-checksums are integrity and not authentication; and the hashes are unseeded, so this is not a HashDoS
-defence.
+Every loader is a safe fn on arbitrary bytes since 1.0, and the `load_mmap` family is what is not —
+its obligation is about the file, not the bytes. What the blob formats do and do not defend against
+is [`SECURITY.md`](SECURITY.md): a crafted blob answers wrong ids, never out-of-range ones; the
+checksums are integrity and not authentication; and the hashes are unseeded, so this is not a
+HashDoS defence.
 
 ## Prior art
 

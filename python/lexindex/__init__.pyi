@@ -105,12 +105,27 @@ class StringIndex:
     @staticmethod
     def load(path: str | os.PathLike[str]) -> StringIndex: ...
     @staticmethod
+    def load_untrusted(path: str | os.PathLike[str]) -> StringIndex:
+        """``load`` for a file **someone else wrote**: ``from_untrusted_bytes`` over its bytes."""
+    @staticmethod
     def load_mmap(path: str | os.PathLike[str]) -> StringIndex:
         """Memory-map the file and borrow the index from it — no read into RAM.
 
         The file must not be modified or truncated by any process while the index is alive: the
         bytes are borrowed, not copied, so a concurrent write is undefined behaviour rather than a
         stale answer (the Rust loader is ``unsafe fn``). Use ``load`` if the file may change.
+        The payload checksum is skipped by design; ``load_mmap_verified`` adds it back.
+        """
+    @staticmethod
+    def load_mmap_verified(path: str | os.PathLike[str]) -> StringIndex:
+        """``load_mmap`` plus the checksum ``load`` makes: one pass over the mapping at load,
+        pages still shared, nothing copied. Same obligation as ``load_mmap``.
+        """
+    @staticmethod
+    def load_mmap_untrusted(path: str | os.PathLike[str]) -> StringIndex:
+        """``load_mmap`` for a file someone else wrote and too large to copy: the validation of
+        ``from_untrusted_bytes`` over the mapping. Same obligation as ``load_mmap``, weighing more
+        here -- the validation trusts what it saw once -- so map a copy you own.
         """
 
 @final
@@ -184,7 +199,13 @@ class PerfectHashIndex:
 
         One obligation, and it is about the mapping rather than the bytes: the file must not be
         modified or truncated by any process while the index is alive (see
-        ``StringIndex.load_mmap``). The bytes themselves are validated as in ``from_bytes``.
+        ``StringIndex.load_mmap``). The header is validated as in ``from_bytes``; the payload
+        checksum is skipped by design, and ``load_mmap_verified`` adds it back.
+        """
+    @staticmethod
+    def load_mmap_verified(path: str | os.PathLike[str]) -> PerfectHashIndex:
+        """``load_mmap`` plus the payload checksum ``load`` makes: one pass over the mapping at
+        load, the bulk still borrowed. Same obligation as ``load_mmap``.
         """
 
 @final
@@ -254,7 +275,13 @@ class CompactHashIndex:
 
         One obligation, and it is about the mapping rather than the bytes: the file must not be
         modified or truncated by any process while the index is alive (see
-        ``StringIndex.load_mmap``). The bytes themselves are validated as in ``from_bytes``.
+        ``StringIndex.load_mmap``). The header is validated as in ``from_bytes``; the payload
+        checksum is skipped by design, and ``load_mmap_verified`` adds it back.
+        """
+    @staticmethod
+    def load_mmap_verified(path: str | os.PathLike[str]) -> CompactHashIndex:
+        """``load_mmap`` plus the payload checksum ``load`` makes: one pass over the mapping at
+        load, the bulk still borrowed. Same obligation as ``load_mmap``.
         """
 
 @final
@@ -354,3 +381,9 @@ class Overlay:
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
         """:meth:`from_bytes` from a file: checksummed and validated the same way."""
+    @staticmethod
+    def load_untrusted(
+        path: str | os.PathLike[str],
+        base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
+    ) -> Overlay:
+        """:meth:`from_untrusted_bytes` from a file."""

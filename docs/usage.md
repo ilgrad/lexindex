@@ -103,6 +103,8 @@ no intermediate `Vec` at all.
 idx.save("catalog.bix")                            # write a flat, relocatable blob
 idx = lexindex.StringIndex.load("catalog.bix")     # read it back into RAM
 idx = lexindex.StringIndex.load_mmap("catalog.bix") # …or memory-map it: no read, borrowed zero-copy
+idx = lexindex.StringIndex.load_mmap_verified("catalog.bix")  # …mapped, with the payload checksum
+idx = lexindex.StringIndex.load_untrusted("theirs.bix")       # a file someone else wrote, see below
 
 data = idx.to_bytes()                              # or go through bytes directly
 idx = lexindex.StringIndex.from_bytes(data)
@@ -121,6 +123,16 @@ the pages instead of copying them.
 `load_mmap` maps the file and borrows the index from the mapped pages, so load time is independent of
 the index size and the pages are shared across processes. The mapped file must stay immutable while an
 index borrows it.
+
+The loaders, on two axes — whether the bytes are copied and how far they are checked:
+
+| Loader | Copies | Checks | For |
+|---|---|---|---|
+| `from_bytes` / `load` | yes | header, payload checksum, rank spot check | your own blob |
+| `from_untrusted_bytes` / `load_untrusted` | yes | the above plus the full validation of the transducer (`StringIndex`; the two hash indexes need none, their loaders are total) | a stranger's blob |
+| `load_mmap` | no | header only — the payload checksum is skipped by design, since reading every page is what a mapping avoids | your own file, unchanged while mapped |
+| `load_mmap_verified` | no | header and payload checksum, one pass over the mapping at load | your own file, carried by someone else |
+| `load_mmap_untrusted` (`StringIndex`) | no | the full validation, over the mapping | a stranger's file too large to copy — map a copy you own, since the check trusts what it saw once |
 
 A truncated or corrupt blob is refused with `ValueError`, and no load can produce undefined
 behaviour. `StringIndex` has one documented exception, and it is the reason `SECURITY.md` states a
@@ -314,7 +326,7 @@ assert_eq!(idx.prefix("ap").len(), 2);
 let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
 assert_eq!(near, ["apple"]);
 
-// `save` / `load` / `load_mmap` take anything that is `AsRef<Path>`.
+// `save`, `load`, `load_mmap` and their `_untrusted` / `_verified` forms take any `AsRef<Path>`.
 let path = std::env::temp_dir().join("lexindex-usage-catalog.bix");
 idx.save(&path)?;
 // SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).

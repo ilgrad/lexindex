@@ -56,11 +56,14 @@ ids for keys it does not hold. It cannot answer ids outside `[0, n)`, allocate f
 merely claims, or index past a section. If you serve queries against a blob supplied by an untrusted
 party, treat its answers as untrusted; the process is safe either way.
 
-**`load_mmap` is the one `unsafe fn`, and its obligation is about the file, not the bytes.** The
-index borrows the mapped pages, so another process writing that file while it is mapped is undefined
-behaviour and nothing in the library can check for it. Use `load` if the file is not yours alone.
-`load_mmap` also skips the payload checksum by design — verifying it would read every page and
-defeat the point.
+**The `load_mmap` family are the `unsafe fn`s, and their obligation is about the file, not the
+bytes.** The index borrows the mapped pages, so another process writing that file while it is mapped
+is undefined behaviour and nothing in the library can check for it. Use `load` if the file is not
+yours alone. `load_mmap` also skips the payload checksum by design — verifying it reads every page.
+`load_mmap_verified` does exactly that, once at load, for a file carried by someone else, and
+`load_mmap_untrusted` runs `StringIndex`'s full validation over the mapping — both under the same
+obligation, which weighs more for a stranger's file, since the check trusts what it saw once: map a
+copy you own.
 
 **The checksums are integrity, not authentication.** Both the header check and the payload hash are
 public, deterministic and unkeyed, so anyone can recompute them after editing a blob. They catch a
@@ -76,9 +79,10 @@ costs a side-table probe, and construction cannot be made to fail by one — but
 HashDoS defence and must not be used as one. If your keys come from an adversary and lookup latency
 is a resource you are protecting, put a keyed hash in front.
 
-**`unsafe` is confined to memory mapping and one prefetch.** The whole crate contains three
-`unsafe fn`s — `load_mmap`, once per index — and five `unsafe` blocks: four memory maps, counting the
-writable one `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
+**`unsafe` is confined to memory mapping and one prefetch.** The whole crate contains seven
+`unsafe fn`s — `load_mmap` and `load_mmap_verified` on every index, `load_mmap_untrusted` on
+`StringIndex` — and nine `unsafe` blocks: eight memory maps, counting the writable one
+`build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
 target, and libFuzzer over the four parsers a target can hold to a return value: `BCH6`, `BMP6`

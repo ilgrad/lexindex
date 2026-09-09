@@ -509,4 +509,17 @@ fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
         lexindex::StringIndex::from_untrusted_bytes(&bytes),
         Err(lexindex::IndexError::Format(_))
     ));
+    // The path forms are the same check over the file and over a mapping of it.
+    assert!(matches!(
+        lexindex::StringIndex::load_untrusted(data("panicking-1.0.0-string.bix")),
+        Err(lexindex::IndexError::Format(_))
+    ));
+    #[cfg(feature = "mmap")]
+    {
+        // SAFETY: committed test data; nothing writes it while the map is alive.
+        let mapped = unsafe {
+            lexindex::StringIndex::load_mmap_untrusted(data("panicking-1.0.0-string.bix"))
+        };
+        assert!(matches!(mapped, Err(lexindex::IndexError::Format(_))));
+    }
 }
