@@ -41,7 +41,8 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 - **`PerfectHashIndex`** — a **minimal-perfect-hash** dictionary with verified membership and reverse
   lookup; exact `string → dense id`, and `id_unchecked` is the fastest lookup here for a vocabulary
   known to be closed. Use it as a fixed-vocabulary token↔id map on a hot path when you need exact
-  membership and `id → key`.
+  membership and `id → key`. Built with `fingerprints=True`, one more byte per key lets a lookup of an
+  absent key stop after one cache miss instead of two.
 
 All three assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
 (`save` / `load` / `load_mmap`). None is mutable after building — they are immutable summaries, like

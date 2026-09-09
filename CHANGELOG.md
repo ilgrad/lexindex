@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`PerfectHashIndex::build_with_fingerprints`**, and `build_to_file_with_fingerprints` (Python:
+  `PerfectHashIndex(keys, fingerprints=True)`, `build_to_file(..., fingerprints=True)`,
+  `has_fingerprints()`): one more byte per key -- a fingerprint from the second hash, stored
+  behind each block's offsets -- so a lookup of an **absent** key stops after one cache miss
+  instead of two, the key itself never read, 255 times in 256. For a workload that is mostly
+  misses: a stop list, a block list, a "seen before" check. Measured on the 480 k-word
+  dictionary, one index per process, five alternations, minimum: an absent probe 167 → 91 ns, a
+  member 168 → 171; batched `ids_of` over absent keys 70 → 44; the index 10.90 → 11.90 B/key. Ids
+  are unchanged -- it is the same perfect hash -- and an `Overlay` compaction keeps the
+  fingerprints (`OverlayKeys::rebuild_like`, with a default). The blob stays `BMP6`: the arena tag
+  carries the bit, and a reader from before 1.2 refuses it as an unknown arena encoding rather
+  than misread it.
 - **Path forms of the strict loader, and checked forms of the mapping.** `StringIndex::load_untrusted`
   is `from_untrusted_bytes` over a file (Python: `StringIndex.load_untrusted`, and
   `Overlay.load_untrusted(path, base)`). `load_mmap_verified`, on all three indexes, is `load_mmap`

@@ -284,6 +284,36 @@ Ryzen 7 5800HS, load 1.0–1.3 with an editor open; lexindex's rows match its id
 the competitors' builds repeat within 2 % and their lookups read 1–7 % slower, while lexindex's
 lookup went from 33 to 29 ns: the change, not the machine.</sub>
 
+## A fingerprinted `PerfectHashIndex` on mostly-absent keys
+
+`local/negfp`, a throwaway harness beside the crate, builds the dictionary twice — plain and with
+`build_with_fingerprints` — and a `CompactHashIndex` as the control, then probes the 480 k words as
+members and, with a digit appended (no dictionary word ends in one, so the length distribution is
+the members'), as absent keys, in a shuffled order. The headline rows are taken **one index per
+process**, so the two arenas never compete for the cache: five alternations of the five modes,
+ten passes each, the minimum. The in-process A-B-A-B (all three indexes resident, seven rounds)
+gives the batched rows and the 50/50 mix.
+
+| probe | plain | with fingerprints | |
+|---|---:|---:|---|
+| `id`, member | 168 ns | 171 ns | one index per process |
+| `id`, absent | 167 ns | **91 ns** | one index per process |
+| `id`, 50 % absent | 168 ns | 136 ns | in-process |
+| `ids_of`, member | 71 ns | 76 ns | in-process |
+| `ids_of`, absent | 70 ns | **44 ns** | in-process |
+| `CompactHashIndex::id_unchecked` (control) | 42 ns | 42 ns | |
+| bytes per key | 10.90 | 11.90 | exactly +1 |
+
+An absent probe stops at the block: the offset line says no key with that fingerprint is in the
+slot, and the key — the second cache miss — is never read. A member pays the second hash and one
+compare, three nanoseconds. The fingerprint bytes follow the block's offsets; interleaving them
+with the offsets was measured first and cost a member 6 ns instead of 3, because the offset pair
+moved up to 36 bytes from the base and split cache lines more often.
+
+<sub>Measured 2026-09-10 on the tree that adds the layout
+([`bench/results/negfp-2026-09-10-arz-8f136d3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-8f136d3.txt)),
+Ryzen 7 5800HS, load 0.8–1.2 with an editor open.</sub>
+
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow

@@ -18,9 +18,7 @@
 use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
-use crate::hash::hash_key;
-#[cfg(feature = "mmap")]
-use crate::hash::hash_pair;
+use crate::hash::{hash_key, hash_pair};
 use crate::mphf::Mphf;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
@@ -349,6 +347,36 @@ impl PerfectHashIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        Self::build_with(items, false)
+    }
+
+    /// [`build`](Self::build), storing one more byte per key: a fingerprint from a second hash,
+    /// kept next to the key's offset in the arena. A lookup of an **absent** key then stops after
+    /// one cache miss instead of two — the offset line says no key with that fingerprint is in
+    /// the slot, so the key itself is never read — 255 times in 256. Members cost what they cost
+    /// under `build`, the fingerprint sharing the line their offsets are read from, and get the
+    /// same ids: the perfect hash is the same, only the arena's layout differs.
+    ///
+    /// For a workload that is mostly misses — a stop list, a block list, a "seen before" check.
+    /// Under mostly hits the byte buys nothing, which is why it is opt-in. The blob it writes
+    /// loads in this version and later; a reader from before 1.2 refuses it as an unknown arena
+    /// encoding rather than misread it.
+    ///
+    /// Measured on the 480 k-word dictionary, each index alone in its process: an absent probe
+    /// 167 → 91 ns, a member 168 → 171, the index 10.90 → 11.90 bytes per key.
+    pub fn build_with_fingerprints<I, S>(items: I) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_with(items, true)
+    }
+
+    fn build_with<I, S>(items: I, fingerprints: bool) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
         // `String`s: the keys are copied once more into the structure below, so an intermediate
         // copy of the whole corpus bought nothing.
@@ -364,7 +392,13 @@ impl PerfectHashIndex {
         if n == 0 {
             return Ok(Self {
                 mph: None,
-                arena: StringArena::build(Vec::<&str>::new()), // a valid arena of no keys
+                // A valid arena of no keys, in the layout asked for.
+                arena: StringArena::build_exact(
+                    Vec::<&str>::new(),
+                    0,
+                    0,
+                    fingerprints.then_some(&[][..]),
+                ),
                 n: 0,
                 side: Vec::new(),
             });
@@ -373,12 +407,20 @@ impl PerfectHashIndex {
         // length — free here, because this pass already has each key in hand, and it saves the
         // arena a walk in slot order that would otherwise cost a cache miss per key.
         let mut data_len = 0usize;
+        let mut fps: Option<Vec<u8>> = fingerprints.then(|| Vec::with_capacity(n));
         let hashes: Vec<u64> = keys
             .iter()
             .map(|k| {
                 let key = k.as_ref();
                 data_len += key.len();
-                hash_key(key)
+                match &mut fps {
+                    Some(fps) => {
+                        let (h, fp) = hash_pair(key);
+                        fps.push(fp as u8);
+                        h
+                    }
+                    None => hash_key(key),
+                }
             })
             .collect();
         // A sorted copy answers whether *any* two keys share a hash, and — when none does — is
@@ -391,7 +433,7 @@ impl PerfectHashIndex {
         let mut sorted = hashes.clone();
         sorted.sort_unstable();
         if sorted.windows(2).any(|w| w[0] == w[1]) {
-            return Self::build_with_collisions(keys, hashes, data_len);
+            return Self::build_with_collisions(keys, hashes, fps, data_len);
         }
         // No collision: every key is its own representative, and `hashes` — still in key order —
         // maps each slot back to its key with no further indirection.
@@ -406,6 +448,8 @@ impl PerfectHashIndex {
             }
             by_slot[slot] = i as u32;
         }
+        let fps_by_slot: Option<Vec<u8>> =
+            fps.map(|fps| by_slot.iter().map(|&i| fps[i as usize]).collect());
         // Before the arena allocates: neither hash vector is needed alongside it.
         drop(sorted);
         drop(hashes);
@@ -413,6 +457,7 @@ impl PerfectHashIndex {
             by_slot.iter().map(|&i| keys[i as usize].as_ref()),
             n,
             data_len,
+            fps_by_slot.as_deref(),
         );
         Ok(Self {
             mph: Some(mph),
@@ -431,6 +476,7 @@ impl PerfectHashIndex {
     fn build_with_collisions<S: AsRef<str>>(
         keys: Vec<S>,
         hashes: Vec<u64>,
+        fps: Option<Vec<u8>>,
         data_len: usize,
     ) -> Result<Self, IndexError> {
         let n = keys.len();
@@ -456,6 +502,13 @@ impl PerfectHashIndex {
             }
             by_slot[slot] = i as u32;
         }
+        let fps_by_slot: Option<Vec<u8>> = fps.map(|fps| {
+            by_slot
+                .iter()
+                .chain(extras.iter().map(|(_, i)| i))
+                .map(|&i| fps[i as usize])
+                .collect()
+        });
         drop(hashes);
         drop(mph_hashes);
         let arena = StringArena::build_exact(
@@ -465,6 +518,7 @@ impl PerfectHashIndex {
                 .chain(extras.iter().map(|&(_, i)| keys[i as usize].as_ref())),
             n,
             data_len,
+            fps_by_slot.as_deref(),
         );
         let mut side: Vec<(u64, u32)> = extras
             .iter()
@@ -510,12 +564,24 @@ impl PerfectHashIndex {
         self.n == 0
     }
 
+    /// Whether the index stores fingerprints — see
+    /// [`build_with_fingerprints`](Self::build_with_fingerprints).
+    pub fn has_fingerprints(&self) -> bool {
+        self.arena.has_fingerprints()
+    }
+
     /// Dense id of `key`, or `None` if absent (membership is verified against the stored key).
     pub fn id(&self, key: &str) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
             // branch, then exactly the side-free lookup — the hash dies at slot resolution,
             // nothing stays live for a probe that cannot happen.
+            if self.arena.has_fingerprints() {
+                let (h, fp) = hash_pair(key);
+                let slot = self.slot_for(h)?;
+                return (self.arena.get_matching(slot, fp as u8) == Some(key))
+                    .then_some(slot as u32);
+            }
             let slot = self.slot_for(hash_key(key))?;
             return (self.arena.get(slot) == Some(key)).then_some(slot as u32);
         }
@@ -526,9 +592,9 @@ impl PerfectHashIndex {
     /// runs only after the arena comparison has missed.
     #[cold]
     fn id_with_side(&self, key: &str) -> Option<u32> {
-        let h = hash_key(key);
+        let (h, fp) = hash_pair(key);
         if let Some(slot) = self.slot_for(h) {
-            if self.arena.get(slot) == Some(key) {
+            if self.arena.get_matching(slot, fp as u8) == Some(key) {
                 return Some(slot as u32);
             }
         }
@@ -556,12 +622,20 @@ impl PerfectHashIndex {
         // later key's first line in now is the prefetch the per-key `id` cannot make — it has no
         // next key to look at — and the compare pass below does the same for its own second touch.
         const AHEAD: usize = 16;
+        let fingerprints = self.arena.has_fingerprints();
         let mut hashes: Vec<u64> = Vec::with_capacity(keys.len());
+        let mut fps: Vec<u8> = Vec::with_capacity(if fingerprints { keys.len() } else { 0 });
         for (i, k) in keys.iter().enumerate() {
             if let Some(next) = keys.get(i + AHEAD) {
                 crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
             }
-            hashes.push(hash_key(k.as_ref()));
+            if fingerprints {
+                let (h, fp) = hash_pair(k.as_ref());
+                hashes.push(h);
+                fps.push(fp as u8);
+            } else {
+                hashes.push(hash_key(k.as_ref()));
+            }
         }
         // Every slot is a real arena row — the MPH's remap covers its whole slot range — so the
         // three passes are just a pipeline: pilots prefetched inside `index_all`, then the arena's
@@ -572,7 +646,11 @@ impl PerfectHashIndex {
             if let Some(&s) = slots.get(i + AHEAD) {
                 self.arena.prefetch_offsets(s as usize);
             }
-            spans.push(self.arena.span(slot as usize));
+            spans.push(if fingerprints {
+                self.arena.span_matching(slot as usize, fps[i])
+            } else {
+                self.arena.span(slot as usize)
+            });
         }
         (0..keys.len())
             .map(|i| {
@@ -896,7 +974,24 @@ impl PerfectHashIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        Self::build_to_file_checked(path, source, || Ok(()))
+        Self::build_to_file_checked(path, source, || Ok(()), false)
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with the fingerprints of
+    /// [`build_with_fingerprints`](Self::build_with_fingerprints): the file
+    /// `build_with_fingerprints` and [`save`](Self::save) would have written, without holding
+    /// the keys.
+    #[cfg(feature = "mmap")]
+    pub fn build_to_file_with_fingerprints<F, I, S>(
+        path: impl AsRef<std::path::Path>,
+        source: F,
+    ) -> Result<usize, IndexError>
+    where
+        F: FnMut() -> I,
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(path, source, || Ok(()), true)
     }
 
     /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked after each
@@ -914,6 +1009,7 @@ impl PerfectHashIndex {
         path: impl AsRef<std::path::Path>,
         source: F,
         check: C,
+        fingerprints: bool,
     ) -> Result<usize, IndexError>
     where
         F: FnMut() -> I,
@@ -921,7 +1017,7 @@ impl PerfectHashIndex {
         S: AsRef<str>,
         C: FnMut() -> Result<(), IndexError>,
     {
-        Self::build_to_file_windowed(path, source, check, SPILL_WINDOW)
+        Self::build_to_file_windowed(path, source, check, SPILL_WINDOW, fingerprints)
     }
 
     /// [`build_to_file_checked`](Self::build_to_file_checked) with the arena window size exposed.
@@ -935,6 +1031,7 @@ impl PerfectHashIndex {
         mut source: F,
         mut check: C,
         window: usize,
+        fingerprints: bool,
     ) -> Result<usize, IndexError>
     where
         F: FnMut() -> I,
@@ -944,6 +1041,7 @@ impl PerfectHashIndex {
     {
         let mut hashes: Vec<u64> = Vec::new();
         let mut lens: Vec<u32> = Vec::new();
+        let mut fps: Option<Vec<u8>> = fingerprints.then(Vec::new);
         let mut digest = 0u64;
         for item in source() {
             let key = item.as_ref();
@@ -952,6 +1050,9 @@ impl PerfectHashIndex {
             })?);
             let (hash, fingerprint) = hash_pair(key);
             hashes.push(hash);
+            if let Some(fps) = &mut fps {
+                fps.push(fingerprint as u8);
+            }
             digest = fold_digest(digest, fingerprint);
         }
         check()?;
@@ -962,7 +1063,9 @@ impl PerfectHashIndex {
             ));
         }
         if n == 0 {
-            return Self::build(Vec::<&str>::new())?.save(path).map(|()| 0);
+            return Self::build_with(Vec::<&str>::new(), fingerprints)?
+                .save(path)
+                .map(|()| 0);
         }
         // Same shape as `build`: a sorted copy answers whether any two keys share a hash and, when
         // none does, is what the MPH is built from. The `(hash, index)` partition is 16 bytes per
@@ -1018,12 +1121,19 @@ impl PerfectHashIndex {
         drop(mph_hashes);
 
         let mut len_by_slot = vec![0u32; n];
+        let mut fp_by_slot: Option<Vec<u8>> = fps.as_ref().map(|_| vec![0u8; n]);
         for (i, &slot) in slot_of.iter().enumerate() {
             len_by_slot[slot as usize] = lens[i];
+            if let (Some(by_slot), Some(fps)) = (&mut fp_by_slot, &fps) {
+                by_slot[slot as usize] = fps[i];
+            }
         }
         drop(lens);
-        let (arena_prefix, data_len, tag) = StringArena::prefix_for_lengths(&len_by_slot);
+        drop(fps);
+        let (arena_prefix, data_len, tag) =
+            StringArena::prefix_for_lengths(&len_by_slot, fp_by_slot.as_deref());
         drop(len_by_slot);
+        drop(fp_by_slot);
 
         let mut side: Vec<(u64, u32)> = extras
             .iter()
@@ -1175,6 +1285,34 @@ mod stream_build_tests {
         dir.join("index.bmp")
     }
 
+    /// `build_to_file_with_fingerprints` writes the bytes `build_with_fingerprints` and `save`
+    /// would, through the direct fill and through the spill, and the file maps with its
+    /// fingerprints.
+    #[test]
+    fn build_to_file_with_fingerprints_writes_the_in_memory_blob() {
+        let keys: Vec<String> = (0..500).map(|i| format!("w{i}")).collect();
+        let mem = PerfectHashIndex::build_with_fingerprints(&keys).unwrap();
+        let want = mem.to_bytes().unwrap();
+        let direct = tmp("fp-direct.bmp");
+        assert_eq!(
+            PerfectHashIndex::build_to_file_with_fingerprints(&direct, || keys.iter()).unwrap(),
+            keys.len()
+        );
+        assert_eq!(std::fs::read(&direct).unwrap(), want);
+        let spilled = tmp("fp-spilled.bmp");
+        PerfectHashIndex::build_to_file_windowed(&spilled, || keys.iter(), || Ok(()), 64, true)
+            .unwrap();
+        assert_eq!(std::fs::read(&spilled).unwrap(), want);
+        // SAFETY: a file this test just wrote, and nothing else touches it.
+        let mapped = unsafe { PerfectHashIndex::load_mmap(&direct) }.unwrap();
+        assert!(mapped.has_fingerprints());
+        assert_eq!(mapped.id("w42"), mem.id("w42"));
+        assert_eq!(mapped.id("w42x"), None);
+        drop(mapped);
+        std::fs::remove_file(&direct).ok();
+        std::fs::remove_file(&spilled).ok();
+    }
+
     #[test]
     fn build_to_file_builds_an_index_indistinguishable_from_the_in_memory_one() {
         // Keys deliberately of different lengths and not in sorted order: the streaming build has
@@ -1215,7 +1353,7 @@ mod stream_build_tests {
     /// lands in is the perfect hash's choice — so the invariant is pinned directly.
     #[test]
     fn window_of_clamps_a_zero_length_key_at_the_end_of_the_arena() {
-        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[4, 4, 0]);
+        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[4, 4, 0], None);
         assert_eq!(data_len, 8);
         let layout = ArenaLayout {
             prefix: &prefix,
@@ -1238,7 +1376,7 @@ mod stream_build_tests {
     /// a short record and desynchronise the spill.
     #[test]
     fn a_replayed_key_of_the_wrong_length_is_refused_even_when_the_hash_matches() {
-        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[3]);
+        let (prefix, data_len, tag) = StringArena::prefix_for_lengths(&[3], None);
         let layout = ArenaLayout {
             prefix: &prefix,
             tag,
@@ -1273,8 +1411,9 @@ mod stream_build_tests {
         let wide = tmp("win_wide.bmp");
         let narrow = tmp("win_narrow.bmp");
         PerfectHashIndex::build_to_file(&wide, || keys.iter()).unwrap();
-        let n = PerfectHashIndex::build_to_file_windowed(&narrow, || keys.iter(), || Ok(()), 64)
-            .unwrap();
+        let n =
+            PerfectHashIndex::build_to_file_windowed(&narrow, || keys.iter(), || Ok(()), 64, false)
+                .unwrap();
         assert_eq!(n, keys.len());
 
         let (a, b) = (
@@ -1310,7 +1449,8 @@ mod stream_build_tests {
     fn build_to_file_lays_out_two_byte_blocks_for_long_keys() {
         let keys: Vec<String> = (0..300).map(|i| format!("{i:040}")).collect();
         let path = tmp("wide_blocks.bmp");
-        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 512).unwrap();
+        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 512, false)
+            .unwrap();
 
         let in_memory = PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), in_memory, "streamed blob");
@@ -1339,8 +1479,14 @@ mod stream_build_tests {
         keys.push("z".to_string());
         let path = tmp("win_edge.bmp");
         for window in [1usize, 2, 3, 7, 64] {
-            PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), window)
-                .unwrap();
+            PerfectHashIndex::build_to_file_windowed(
+                &path,
+                || keys.iter(),
+                || Ok(()),
+                window,
+                false,
+            )
+            .unwrap();
             // SAFETY: written by this crate a line above.
             let idx = PerfectHashIndex::load(&path).unwrap();
             for k in &keys {
@@ -1366,8 +1512,14 @@ mod stream_build_tests {
         let direct = tmp("win_flush_direct.bmp");
         let windowed = tmp("win_flush_windowed.bmp");
         PerfectHashIndex::build_to_file(&direct, || keys.iter()).unwrap();
-        PerfectHashIndex::build_to_file_windowed(&windowed, || keys.iter(), || Ok(()), 128 << 10)
-            .unwrap();
+        PerfectHashIndex::build_to_file_windowed(
+            &windowed,
+            || keys.iter(),
+            || Ok(()),
+            128 << 10,
+            false,
+        )
+        .unwrap();
         let (a, b) = (
             PerfectHashIndex::load(&direct).unwrap(),
             PerfectHashIndex::load(&windowed).unwrap(),
@@ -1401,6 +1553,7 @@ mod stream_build_tests {
             },
             || Ok(()),
             16,
+            false,
         )
         .unwrap_err();
         assert!(matches!(err, IndexError::Build(_)), "{err}");
@@ -1422,7 +1575,8 @@ mod stream_build_tests {
         let keys: Vec<String> = (0..300).map(|i| format!("k{i:04}")).collect();
         let path = tmp("win_spill.bmp");
         let dir = path.parent().unwrap().to_path_buf();
-        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 16).unwrap();
+        PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 16, false)
+            .unwrap();
 
         // A source that replays a different key set: pass two fails after the spill exists.
         let mut pass = 0;
@@ -1438,6 +1592,7 @@ mod stream_build_tests {
             },
             || Ok(()),
             16,
+            false,
         )
         .unwrap_err();
         assert!(matches!(err, IndexError::Build(_)), "{err}");
@@ -1957,5 +2112,38 @@ mod tests {
             .unwrap();
         old[0..4].copy_from_slice(b"BMP1");
         assert!(from_bytes(&old).is_err());
+    }
+
+    /// The fingerprinted build is the same perfect hash over the same keys — same ids, same
+    /// answers for members — one byte per slot larger, refusing a stranger from the offset line,
+    /// and every persistence path carries the layout.
+    #[test]
+    fn fingerprints_keep_the_ids_and_refuse_strangers() {
+        let keys: Vec<String> = (0..2000).map(|i| format!("key-{i}")).collect();
+        let plain = PerfectHashIndex::build(&keys).unwrap();
+        let fp = PerfectHashIndex::build_with_fingerprints(&keys).unwrap();
+        assert!(fp.has_fingerprints() && !plain.has_fingerprints());
+        let strangers: Vec<String> = keys.iter().map(|k| format!("{k}x")).collect();
+        for (key, stranger) in keys.iter().zip(&strangers) {
+            assert_eq!(fp.id(key), plain.id(key));
+            assert_eq!(fp.key(fp.id(key).unwrap()), Some(key.as_str()));
+            assert_eq!(fp.id_unchecked(key), plain.id_unchecked(key));
+            assert!(fp.contains(key) && !fp.contains(stranger));
+        }
+        assert_eq!(fp.ids_of(&keys), plain.ids_of(&keys));
+        assert!(fp.ids_of(&strangers).iter().all(Option::is_none));
+        let (a, b) = (plain.to_bytes().unwrap(), fp.to_bytes().unwrap());
+        assert_eq!(b.len(), a.len() + keys.len().div_ceil(16) * 16);
+        let restored = PerfectHashIndex::from_bytes(&b).unwrap();
+        assert!(restored.has_fingerprints());
+        assert_eq!(restored.id("key-7"), fp.id("key-7"));
+        assert_eq!(restored.id("key-7x"), None);
+        assert_eq!(fp.serialized_len().unwrap(), b.len());
+        // An empty fingerprinted index is still a fingerprinted one, so a compaction of it stays so.
+        let empty = PerfectHashIndex::build_with_fingerprints(Vec::<&str>::new()).unwrap();
+        assert!(empty.has_fingerprints() && empty.is_empty());
+        let empty = PerfectHashIndex::from_bytes(&empty.to_bytes().unwrap()).unwrap();
+        assert!(empty.has_fingerprints());
+        assert_eq!(empty.id("key-7"), None);
     }
 }

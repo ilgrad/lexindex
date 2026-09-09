@@ -1,0 +1,54 @@
+local/negfp (a throwaway harness beside the crate; not shipped), 2026-09-10 01:20-01:29, lexindex 8f136d3 (+ the
+fingerprinted arena this commit adds), Ryzen 7 5800HS, Fedora 44, load average 0.8-1.2 (editor open).
+/usr/share/dict/words, 479 823 keys; absent probes = each word with a digit appended (no dictionary word ends in
+one, so the length distribution is the members'); probes shuffled with a fixed seed; CompactHashIndex::id_unchecked
+(same MPH, same key hash, no arena) is the control.
+
+The headline numbers: ONE INDEX PER PROCESS -- `negfp 10 <mode>` builds all three indexes and probes one of them for
+10 passes; the five modes alternated as processes, 5 rounds; per mode min and max over the 5 processes.
+
+Final layout (fingerprints behind the offsets, `[base u32][off u8 x 17][fp u8 x 16]`):
+  member-plain   min  168.2  max  170.7  runs 169.2 168.5 168.2 170.7 168.6
+  member-fp      min  171.3  max  177.8  runs 172.4 173.4 173.8 171.3 177.8
+  absent-plain   min  166.6  max  171.0  runs 167.3 168.3 166.6 167.4 171.0
+  absent-fp      min   90.8  max   94.1  runs 92.5 92.0 90.8 91.7 94.1
+  control        min   41.9  max   42.5  runs 42.2 42.0 42.2 42.5 41.9
+
+The rejected first layout (fingerprints interleaved with the offsets, `[base u32][(off u8, fp u8) x 16][off u8]`),
+same protocol, earlier the same night:
+  member-plain   min  164.6  max  169.6  runs 164.6 167.1 168.4 169.6 167.4
+  member-fp      min  170.3  max  173.6  runs 172.3 173.6 172.6 170.3 173.1
+  absent-plain   min  164.7  max  167.0  runs 165.4 166.8 164.7 167.0 166.8
+  absent-fp      min   98.4  max  100.0  runs 98.4 99.1 99.7 99.0 100.0
+  control        min   41.5  max   42.4  runs 42.4 42.0 41.8 41.5 41.8
+
+In-process A-B-A-B (all three indexes resident, 7 rounds, min per row; `negfp 7`), final layout, two processes --
+the batched `ids_of` and the 50/50 mix come from here:
+n 479823  plain 10.899 B/key  fp 11.899 B/key  delta 1.000 B/key
+  member plain                165.2 ns  (max +4%)
+  member fp                   169.8 ns  (max +4%)
+  absent plain                167.7 ns  (max +2%)
+  absent fp                    87.4 ns  (max +4%)
+  mixed plain                 168.0 ns  (max +3%)
+  mixed fp                    137.1 ns  (max +4%)
+  ids_of absent plain          69.3 ns  (max +5%)
+  ids_of absent fp             44.2 ns  (max +29%)
+  ids_of member plain          72.2 ns  (max +7%)
+  ids_of member fp             76.1 ns  (max +4%)
+  control chi.id_unchecked     41.2 ns  (max +8%)
+n 479823  plain 10.899 B/key  fp 11.899 B/key  delta 1.000 B/key
+  member plain                163.8 ns  (max +3%)
+  member fp                   170.3 ns  (max +3%)
+  absent plain                167.2 ns  (max +1%)
+  absent fp                    86.5 ns  (max +2%)
+  mixed plain                 167.5 ns  (max +2%)
+  mixed fp                    135.5 ns  (max +4%)
+  ids_of absent plain          70.3 ns  (max +3%)
+  ids_of absent fp             43.6 ns  (max +28%)
+  ids_of member plain          70.9 ns  (max +8%)
+  ids_of member fp             75.5 ns  (max +5%)
+  control chi.id_unchecked     41.2 ns  (max +5%)
+
+perf stat, interleaved layout, `negfp 40 <mode>`, per probe after subtracting the `none` mode (builds only):
+  member-plain 375.8 instructions, 685.3 cycles, 4.86 cache-misses; member-fp 402.5 / 696.8 / 5.00 (+26.7 / +11.5 / +0.15)
+  absent-plain 354.5 / 685.2 / 4.31; absent-fp 250.9 / 417.1 / 2.85

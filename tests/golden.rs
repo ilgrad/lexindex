@@ -173,7 +173,8 @@ mod mph {
     /// pinned this way: 1.1 re-encoded the key arena in blocks and replaced the perfect hash, so
     /// the 1.0 pair is now held to what a *reader* must promise it — see
     /// [`the_1_0_perfect_hash_blob_still_loads`] and [`the_1_0_compact_hash_blob_still_loads`] —
-    /// and the 1.1 pair took over here.
+    /// and the 1.1 pair took over here. The fingerprinted arena is new in 1.2 and is pinned
+    /// beside them under its own name.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:
     /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
@@ -188,10 +189,15 @@ mod mph {
             .unwrap()
             .to_bytes()
             .unwrap();
+        let perfect_fp = lexindex::PerfectHashIndex::build_with_fingerprints(&keys)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
 
         for (name, magic, fresh) in [
             ("golden-1.1.0-compact.bch", &b"BCH6"[..], compact),
             ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], perfect),
+            ("golden-1.2.0-perfect-fp.bmp", &b"BMP6"[..], perfect_fp),
         ] {
             let path = data(name);
             let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -288,14 +294,24 @@ mod mph {
             assert!(string.id(key).is_some());
         }
 
-        for name in ["golden-1.0.0-perfect.bmp", "golden-1.1.0-perfect.bmp"] {
+        for name in [
+            "golden-1.0.0-perfect.bmp",
+            "golden-1.1.0-perfect.bmp",
+            "golden-1.2.0-perfect-fp.bmp",
+        ] {
             // SAFETY: as above.
             let perfect = unsafe { lexindex::PerfectHashIndex::load_mmap(data(name)) }
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(perfect.len(), keys.len(), "{name}");
+            assert_eq!(
+                perfect.has_fingerprints(),
+                name.ends_with("-fp.bmp"),
+                "{name}"
+            );
             for key in keys.iter().take(50) {
                 let id = perfect.id(key).unwrap_or_else(|| panic!("{name}: {key:?}"));
                 assert_eq!(perfect.key(id), Some(key.as_str()), "{name}");
+                assert_eq!(perfect.id(&format!("{key}~")), None, "{name}");
             }
         }
     }
@@ -334,6 +350,9 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
     let old_compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
     assert!(lexindex::fuzzing::parse_compact_frame(&old_compact, true));
+    // And the fingerprinted arena, the newest encoding the parser knows.
+    let fingerprinted = std::fs::read(data("golden-1.2.0-perfect-fp.bmp")).unwrap();
+    assert!(lexindex::fuzzing::parse_perfect_frame(&fingerprinted, true));
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -549,6 +568,27 @@ fn every_golden_blob_inspects_from_its_header() {
             "{v}: {err}"
         );
     }
+    // The fingerprinted arena of 1.2: the same perfect hash, one byte per arena slot more.
+    let fingerprinted = inspect_file(data("golden-1.2.0-perfect-fp.bmp")).unwrap();
+    let plain = inspect_file(data("golden-1.1.0-perfect.bmp")).unwrap();
+    assert_eq!(
+        (
+            fingerprinted.kind,
+            fingerprinted.format.as_str(),
+            fingerprinted.keys,
+            fingerprinted.mph_bytes,
+            fingerprinted.side_entries,
+            fingerprinted.arena_bytes,
+        ),
+        (
+            BlobKind::PerfectHashIndex,
+            "BMP6",
+            Some(1000),
+            plain.mph_bytes,
+            Some(0),
+            plain.arena_bytes.map(|b| b + 1008), // 63 blocks of 16 slots, one byte each
+        )
+    );
     // The hash blobs from 1.0 and 1.1: one perfect hash each, no side entries over these keys,
     // and the arena of a `CompactHashIndex` at its default width is one byte per key.
     for (v, format, mphf, mph) in [

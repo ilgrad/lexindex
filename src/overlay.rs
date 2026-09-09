@@ -84,6 +84,13 @@ pub trait OverlayKeys: OverlayBase + Sized {
     /// Build a fresh base from `keys`, for [`Overlay::compact`].
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError>;
 
+    /// [`rebuild`](Self::rebuild) in this base's own configuration, for a base whose build has
+    /// options: a `PerfectHashIndex` built with fingerprints comes out of a compaction with them.
+    /// The default is `rebuild` itself.
+    fn rebuild_like(&self, keys: Vec<String>) -> Result<Self, IndexError> {
+        Self::rebuild(keys)
+    }
+
     /// Build a fresh base straight to `path`, for [`Overlay::compact_to_file`]: the base's own
     /// keys whose id passes `live`, then `additions`, as the blob [`rebuild`](Self::rebuild) and a
     /// `save` would have written. Returns how many keys the file holds.
@@ -101,7 +108,7 @@ pub trait OverlayKeys: OverlayBase + Sized {
             .filter_map(|id| self.base_key(id))
             .collect();
         keys.extend(additions.iter().map(|k| (*k).to_owned()));
-        let fresh = Self::rebuild(keys)?;
+        let fresh = self.rebuild_like(keys)?;
         crate::blob::write_atomically_with(path, |w| fresh.write_base(w))?;
         Ok(fresh.base_len())
     }
@@ -432,7 +439,8 @@ impl<I: OverlayKeys> Overlay<I> {
     /// rank and a rebuilt perfect hash numbers by construction, so an id held across a `compact` is
     /// meaningless. That is the trade the overlay exists to postpone, not to remove.
     pub fn compact(self) -> Result<Self, IndexError> {
-        Ok(Self::new(I::rebuild(self.keys())?))
+        let keys = self.keys();
+        Ok(Self::new(self.base.rebuild_like(keys)?))
     }
 
     /// [`compact`](Self::compact) written straight to `path` as the base's own blob, without the
@@ -459,7 +467,7 @@ impl<I: OverlayKeys> Overlay<I> {
     /// A base whose [`rebuild`](OverlayKeys::rebuild) drops a key breaks the trait's contract, and
     /// this panics on it rather than report the id as retired.
     pub fn compact_with_remap(self) -> Result<(Self, Vec<u64>), IndexError> {
-        let fresh = Self::new(I::rebuild(self.keys())?);
+        let fresh = Self::new(self.base.rebuild_like(self.keys())?);
         let remap = (0..self.id_space())
             .map(|id| match self.key(id) {
                 Some(key) => fresh
@@ -508,6 +516,10 @@ impl<T: OverlayKeys> OverlayKeys for std::sync::Arc<T> {
 
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError> {
         Ok(std::sync::Arc::new(T::rebuild(keys)?))
+    }
+
+    fn rebuild_like(&self, keys: Vec<String>) -> Result<Self, IndexError> {
+        Ok(std::sync::Arc::new((**self).rebuild_like(keys)?))
     }
 }
 
@@ -596,6 +608,14 @@ impl OverlayKeys for crate::PerfectHashIndex {
         Self::build(keys)
     }
 
+    fn rebuild_like(&self, keys: Vec<String>) -> Result<Self, IndexError> {
+        if self.has_fingerprints() {
+            Self::build_with_fingerprints(keys)
+        } else {
+            Self::build(keys)
+        }
+    }
+
     /// The streaming builder replays its source twice, and this one is replayable: the arena in
     /// id order, skipping the retired, then the additions.
     #[cfg(feature = "mmap")]
@@ -606,12 +626,17 @@ impl OverlayKeys for crate::PerfectHashIndex {
         path: &std::path::Path,
     ) -> Result<usize, IndexError> {
         let n = self.len() as u64;
-        Self::build_to_file(path, || {
+        let source = || {
             (0..n)
                 .filter(|&id| live(id))
                 .filter_map(|id| self.key(id as u32))
                 .chain(additions.iter().copied())
-        })
+        };
+        if self.has_fingerprints() {
+            Self::build_to_file_with_fingerprints(path, source)
+        } else {
+            Self::build_to_file(path, source)
+        }
     }
 }
 
@@ -1955,5 +1980,36 @@ mod tests {
 
         assert!(ov.remove(A));
         assert_eq!((ov.id(A), ov.id(B)), (None, Some(b)));
+    }
+
+    /// A base built with fingerprints comes out of every compaction with them — `compact`,
+    /// `compact_with_remap`, and `compact_to_file` through `rebuild_to_file` — and a plain one
+    /// stays plain.
+    #[cfg(feature = "mph")]
+    #[test]
+    fn compaction_keeps_a_fingerprinted_base_fingerprinted() {
+        let base = crate::PerfectHashIndex::build_with_fingerprints(["a", "b", "c"]).unwrap();
+        let mut ov = Overlay::new(base);
+        ov.add("d");
+        assert!(ov.remove("b"));
+        let ov = ov.compact().unwrap();
+        assert!(ov.base().has_fingerprints());
+        assert_eq!(ov.len(), 3);
+        assert!(ov.id("d").is_some() && ov.id("b").is_none());
+        let (ov, _) = ov.compact_with_remap().unwrap();
+        assert!(ov.base().has_fingerprints());
+        #[cfg(feature = "mmap")]
+        {
+            let dir = std::env::temp_dir().join(format!("lexindex-ovl-fp-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("base.bmp");
+            assert_eq!(ov.compact_to_file(&path).unwrap(), 3);
+            let fresh = crate::PerfectHashIndex::load(&path).unwrap();
+            assert!(fresh.has_fingerprints());
+            assert!(fresh.id("d").is_some());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+        let plain = Overlay::new(crate::PerfectHashIndex::build(["a"]).unwrap());
+        assert!(!plain.compact().unwrap().base().has_fingerprints());
     }
 }

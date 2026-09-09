@@ -35,6 +35,9 @@ Three complementary, build-once / query-many structures — pick by what you nee
   **reverse lookup** (`key`); the arena stores full keys, so it is exact but larger. For a known-closed
   vocabulary, `id_unchecked` skips the membership comparison and is **faster than `std::HashMap`**. Use
   it as a fixed-vocabulary token↔id map on a hot path when you need exact membership and `id → key`.
+  Built with `fingerprints=True` (`build_with_fingerprints`), one more byte per key lets a lookup of
+  an *absent* key stop after one cache miss instead of two — misses 1.8× faster, for a stop list or
+  a block list.
 
 All three assign dense ids in `[0, n)` and **serialise to a flat blob** (`save` / `load`, or zero-copy
 `load_mmap`) — build once, persist, then reload and query many times. All are immutable after

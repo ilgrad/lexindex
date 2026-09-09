@@ -701,11 +701,20 @@ pub struct PyPerfectHashIndex {
 #[pymethods]
 impl PyPerfectHashIndex {
     /// Build from an iterable of strings (duplicates removed; ids are arbitrary dense slots).
+    /// `fingerprints=True` stores one more byte per key so that a lookup of an absent key stops
+    /// after one cache miss instead of two — for a workload that is mostly misses.
     #[new]
-    fn new(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (items, *, fingerprints=false))]
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>, fingerprints: bool) -> PyResult<Self> {
         let items = collect_strs(items)?;
         let inner = py
-            .detach(|| PerfectHashIndex::build(items.iter()))
+            .detach(|| {
+                if fingerprints {
+                    PerfectHashIndex::build_with_fingerprints(items.iter())
+                } else {
+                    PerfectHashIndex::build(items.iter())
+                }
+            })
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
@@ -722,7 +731,12 @@ impl PyPerfectHashIndex {
     /// a second pass that yields different keys, is refused with `ValueError` and `path` is left
     /// untouched. Runs with the GIL held throughout: every key comes from a Python iterator.
     #[staticmethod]
-    fn build_to_file<'py>(source: &Bound<'py, PyAny>, path: PathBuf) -> PyResult<usize> {
+    #[pyo3(signature = (source, path, *, fingerprints=false))]
+    fn build_to_file<'py>(
+        source: &Bound<'py, PyAny>,
+        path: PathBuf,
+        fingerprints: bool,
+    ) -> PyResult<usize> {
         if !source.is_callable() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "build_to_file() takes a zero-argument callable that returns an iterable of str \
@@ -745,15 +759,20 @@ impl PyPerfectHashIndex {
                 }
             }
         };
-        let written = PerfectHashIndex::build_to_file_checked(&path, replay, || {
-            if seen.borrow().is_some() {
-                Err(IndexError::Format(
-                    "perfect-hash: the source raised before it ended",
-                ))
-            } else {
-                Ok(())
-            }
-        });
+        let written = PerfectHashIndex::build_to_file_checked(
+            &path,
+            replay,
+            || {
+                if seen.borrow().is_some() {
+                    Err(IndexError::Format(
+                        "perfect-hash: the source raised before it ended",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            fingerprints,
+        );
         if let Some(e) = err.borrow_mut().take() {
             return Err(e);
         }
@@ -766,6 +785,11 @@ impl PyPerfectHashIndex {
 
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// Whether the index was built with `fingerprints=True`.
+    fn has_fingerprints(&self) -> bool {
+        self.inner.has_fingerprints()
     }
 
     fn __contains__(&self, key: &str) -> bool {

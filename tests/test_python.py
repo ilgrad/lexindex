@@ -1205,3 +1205,25 @@ def test_build_to_file_abandons_the_file_when_the_iterable_raises(tmp_path):
     with pytest.raises(TypeError):
         lexindex.StringIndex.build_to_file([1, 2], path)
     assert [p.name for p in tmp_path.iterdir()] == ["ext.bix"]
+
+
+def test_perfect_hash_fingerprints(tmp_path):
+    keys = [f"key-{i}" for i in range(2000)]
+    plain = lexindex.PerfectHashIndex(keys)
+    fp = lexindex.PerfectHashIndex(keys, fingerprints=True)
+    assert fp.has_fingerprints() and not plain.has_fingerprints()
+    assert all(fp.id(k) == plain.id(k) for k in keys)
+    assert fp.ids_of(keys) == plain.ids_of(keys)
+    strangers = [k + "x" for k in keys]
+    assert all(fp.id(k) is None for k in strangers)
+    assert fp.ids_of(strangers) == [None] * len(strangers)
+    assert len(fp.to_bytes()) == len(plain.to_bytes()) + len(keys)  # one byte per slot
+    restored = lexindex.PerfectHashIndex.from_bytes(fp.to_bytes())
+    assert restored.has_fingerprints() and restored.id("key-7") == fp.id("key-7")
+    p = tmp_path / "fp.bmp"
+    assert lexindex.PerfectHashIndex.build_to_file(lambda: iter(keys), p, fingerprints=True) == 2000
+    assert p.read_bytes() == fp.to_bytes()
+    assert lexindex.PerfectHashIndex.load_mmap(p).has_fingerprints()
+    q = tmp_path / "plain.bmp"
+    lexindex.PerfectHashIndex.build_to_file(lambda: iter(keys), q)
+    assert not lexindex.PerfectHashIndex.load(q).has_fingerprints()

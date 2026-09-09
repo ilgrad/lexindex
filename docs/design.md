@@ -162,6 +162,15 @@ blocks with two-byte offsets (`0x12`, 2.02 B/key), and one that fits neither, or
 the flat table. The encoding is chosen once at build time and recorded in the tag, so reading it is a
 branch that never changes for the life of the index.
 
+`build_with_fingerprints` sets bit `0x80` of the tag and stores one byte per slot behind the offsets —
+a fingerprint from the second hash, the one `CompactHashIndex` keeps — so a probe whose fingerprint
+does not match stops at the block and never reads the key. A lookup of an absent key is then one cache
+miss instead of two: on the dictionary 167 → 91 ns, a member 168 → 171, the index 10.90 → 11.90 B/key,
+the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
+them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
+extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic stays `BMP6`;
+a reader from before 1.2 refuses the tag as an unknown arena encoding.
+
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
 between them is purely a size-vs-exactness trade, not a different lookup path.

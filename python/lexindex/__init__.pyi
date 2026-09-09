@@ -163,11 +163,22 @@ class StringIndex:
 
 @final
 class PerfectHashIndex:
-    """Minimal-perfect-hash dictionary: exact string->dense id, with reverse lookup."""
+    """Minimal-perfect-hash dictionary: exact string->dense id, with reverse lookup.
 
-    def __new__(cls, items: Iterable[str]) -> PerfectHashIndex: ...
+    ``fingerprints=True`` stores one more byte per key, a fingerprint from a second hash kept next
+    to the key's offset, so a lookup of an **absent** key stops after one cache miss instead of two
+    (the key itself is never read, 255 times in 256). Members cost the same and get the same ids.
+    For a workload that is mostly misses -- a stop list, a block list, a "seen before" check.
+    """
+
+    def __new__(cls, items: Iterable[str], *, fingerprints: bool = False) -> PerfectHashIndex: ...
     @staticmethod
-    def build_to_file(source: Callable[[], Iterable[str]], path: str | os.PathLike[str]) -> int:
+    def build_to_file(
+        source: Callable[[], Iterable[str]],
+        path: str | os.PathLike[str],
+        *,
+        fingerprints: bool = False,
+    ) -> int:
         """Build straight to ``path`` without ever holding the keys; returns the number written.
 
         ``source`` is a zero-argument callable returning an iterable of ``str`` and is **called
@@ -183,6 +194,8 @@ class PerfectHashIndex:
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...
+    def has_fingerprints(self) -> bool:
+        """Whether the index was built with ``fingerprints=True``."""
     def id(self, key: str) -> int | None: ...
     def id_unchecked(self, key: str) -> int: ...
     def contains(self, key: str) -> bool: ...
