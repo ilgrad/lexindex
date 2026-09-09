@@ -294,6 +294,19 @@ hardcoding one. A buffer cannot carry `None`, so `MISSING_ID` stands in for an a
 largest value of the width, which is never a real id, and `ids_of_bytes` refuses outright on the one
 index size where it would be.
 
+When the same probe batch size comes round again and again, `ids_into` writes the ids into a buffer
+you already own rather than handing back a fresh `bytes` each call. Anything with a writable
+C-contiguous buffer of `ID_DTYPE` items will do; a read-only, strided or wrongly typed one raises
+`BufferError`, and one shorter than `keys` raises `ValueError`. The first `len(keys)` items are
+written and the rest are left as they were.
+
+```python
+out = np.empty(batch, dtype=idx.ID_DTYPE)    # allocate once
+for probes in batches:                       # each of exactly `batch` keys
+    idx.ids_into(probes, out)
+    consume(out)
+```
+
 ### Threads, including free-threaded CPython
 
 The module tells CPython it does not need the GIL, and the guarantee behind that is:

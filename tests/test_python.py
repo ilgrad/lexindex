@@ -1,5 +1,6 @@
 """End-to-end tests of the lexindex Python bindings."""
 
+import array
 import itertools
 import multiprocessing
 import os
@@ -604,6 +605,58 @@ def test_ids_of_bytes_reads_zero_copy_through_numpy():
     assert present.tolist() == [idx.id(k) for k in probes if idx.id(k) is not None]
     # `frombuffer` shares the bytes rather than copying them.
     assert arr.base is buf
+
+
+@pytest.mark.parametrize(
+    "ctor",
+    [
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lambda items: lexindex.CompactHashIndex(items, 4),
+    ],
+)
+def test_ids_into_writes_the_head_of_a_buffer_and_leaves_the_tail(ctor):
+    """Same items as ids_of_bytes, written in place; a longer buffer keeps its tail."""
+    words = ["alpha", "bravo", "charlie", "delta"]
+    idx = ctor(words)
+    probes = ["delta", "zulu", "alpha", "bravo"]
+    cls = type(idx)
+    out = array.array("Q" if cls.ID_DTYPE == "uint64" else "I", [7] * (len(probes) + 2))
+    assert idx.ids_into(probes, out) is None
+    expected = [cls.MISSING_ID if i is None else i for i in idx.ids_of(probes)]
+    assert out[: len(probes)].tolist() == expected
+    assert out[len(probes) :].tolist() == [7, 7]
+    assert out.tobytes()[: len(probes) * out.itemsize] == idx.ids_of_bytes(probes)
+    idx.ids_into([], array.array(out.typecode))  # nothing to write is fine
+
+
+def test_ids_into_refuses_a_short_readonly_or_mistyped_buffer():
+    idx = lexindex.PerfectHashIndex(["alpha", "bravo"])
+    with pytest.raises(ValueError, match="1 items but 2 keys"):
+        idx.ids_into(["alpha", "bravo"], array.array("I", [0]))
+    with pytest.raises(BufferError, match="read-only"):
+        idx.ids_into(["alpha"], memoryview(bytearray(4)).toreadonly().cast("I"))
+    with pytest.raises(BufferError):
+        idx.ids_into(["alpha"], array.array("Q", [0]))  # 8-byte items for a uint32 index
+    with pytest.raises(BufferError):
+        idx.ids_into(["alpha"], bytearray(4))  # bytes-typed, not uint32-typed
+    with pytest.raises(BufferError):
+        lexindex.StringIndex(["alpha"]).ids_into(["alpha"], array.array("I", [0]))
+
+
+def test_ids_into_fills_a_numpy_array_in_place():
+    np = _numpy_or_skip()
+    words = [f"w{i}" for i in range(1000)]
+    idx = lexindex.StringIndex(words)
+    probes = [*words[::3], "absent"]
+    out = np.empty(len(probes), dtype=idx.ID_DTYPE)
+    idx.ids_into(probes, out)
+    assert out[-1] == idx.MISSING_ID
+    assert out[:-1].tolist() == [idx.id(k) for k in probes[:-1]]
+    with pytest.raises(BufferError, match="C-contiguous"):
+        idx.ids_into(probes[: len(probes) // 2], out[::2])
+    with pytest.raises(BufferError):
+        idx.ids_into(probes, np.empty(len(probes), dtype="uint32"))
 
 
 def test_overlay_core():

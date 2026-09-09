@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format follows
   more for them: the check trusts what it saw once, so map a copy you own. `docs/usage.md` has the
   loader matrix. The stubs no longer say a mapped hash index is "validated as in `from_bytes`": its
   header is, its payload checksum is skipped by design.
+- **Python `ids_into(keys, out)`** on all three index types: `ids_of_bytes` written into a buffer
+  the caller owns -- a `numpy` array, an `array.array`, a writable `memoryview` -- so a hot loop can
+  reuse one allocation. A read-only, strided or wrongly typed buffer is a `BufferError`, one shorter
+  than `keys` a `ValueError`.
 
 ### Deprecated
 

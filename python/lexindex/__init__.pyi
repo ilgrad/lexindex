@@ -4,6 +4,8 @@ import os
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import ClassVar, TypeVar, final
 
+from typing_extensions import Buffer
+
 __all__ = ["CompactHashIndex", "Overlay", "PerfectHashIndex", "StringIndex", "__version__"]
 
 _T = TypeVar("_T")
@@ -58,6 +60,16 @@ class StringIndex:
         One 8-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
         key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
+        """
+
+    def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
+        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+
+        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
+        one array. The first ``len(keys)`` items are written; the rest are left as they were. A
+        read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
+        raises ``ValueError``.
         """
 
     ID_DTYPE: ClassVar[str]
@@ -171,6 +183,16 @@ class PerfectHashIndex:
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
         """
 
+    def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
+        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+
+        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
+        one array. The first ``len(keys)`` items are written; the rest are left as they were. A
+        read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
+        raises ``ValueError``.
+        """
+
     ID_DTYPE: ClassVar[str]
     """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
@@ -246,6 +268,16 @@ class CompactHashIndex:
         One 4-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
         key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
+        """
+
+    def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
+        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+
+        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
+        one array. The first ``len(keys)`` items are written; the rest are left as they were. A
+        read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
+        raises ``ValueError``.
         """
 
     ID_DTYPE: ClassVar[str]

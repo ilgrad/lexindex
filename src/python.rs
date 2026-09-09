@@ -36,7 +36,8 @@
 //! released with the GIL held.
 
 use crate::{IndexError, Overlay, StringIndex};
-use pyo3::exceptions::{PyIOError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::buffer::PyBuffer;
+use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
@@ -274,6 +275,28 @@ impl PyStringIndex {
             out
         });
         PyBytes::new(py, &packed)
+    }
+
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
+    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
+    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
+    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    ///
+    /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint32` array handed to this
+    /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let sink = id_sink::<u64>(out, keys.len())?;
+        let ids: Vec<u64> = py.detach(|| {
+            keys.iter()
+                .map(|k| self.inner.id(k).unwrap_or(u64::MAX))
+                .collect()
+        });
+        write_ids(py, &sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
@@ -800,6 +823,35 @@ impl PyPerfectHashIndex {
         Ok(PyBytes::new(py, &packed))
     }
 
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
+    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
+    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
+    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    ///
+    /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
+    /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let sink = id_sink::<u32>(out, keys.len())?;
+        let ids: Vec<u32> = py.detach(|| {
+            self.inner
+                .ids_of(&keys)
+                .into_iter()
+                .map(|id| id.unwrap_or(u32::MAX))
+                .collect()
+        });
+        write_ids(py, &sink, &ids)
+    }
+
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
     /// buffer without hardcoding a width that differs between the index types.
     #[classattr]
@@ -1063,6 +1115,35 @@ impl PyCompactHashIndex {
             out
         });
         Ok(PyBytes::new(py, &packed))
+    }
+
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
+    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
+    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
+    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    ///
+    /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
+    /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let sink = id_sink::<u32>(out, keys.len())?;
+        let ids: Vec<u32> = py.detach(|| {
+            self.inner
+                .ids_of(&keys)
+                .into_iter()
+                .map(|id| id.unwrap_or(u32::MAX))
+                .collect()
+        });
+        write_ids(py, &sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
@@ -1529,6 +1610,39 @@ impl PyOverlay {
         };
         Ok(Self::wrap(inner))
     }
+}
+
+/// The buffer `ids_into` fills: `T`-typed, writable, C-contiguous and at least `n` items long.
+fn id_sink<T: pyo3::buffer::Element>(out: &Bound<'_, PyAny>, n: usize) -> PyResult<PyBuffer<T>> {
+    let buf = PyBuffer::<T>::get(out)?;
+    if buf.readonly() {
+        return Err(PyBufferError::new_err("out is read-only"));
+    }
+    if !buf.is_c_contiguous() {
+        return Err(PyBufferError::new_err("out is not C-contiguous"));
+    }
+    if buf.item_count() < n {
+        return Err(PyValueError::new_err(format!(
+            "out holds {} items but {n} keys were given",
+            buf.item_count()
+        )));
+    }
+    Ok(buf)
+}
+
+/// Writes `ids` over the head of a buffer `id_sink` accepted.
+fn write_ids<T: pyo3::buffer::Element>(
+    py: Python<'_>,
+    buf: &PyBuffer<T>,
+    ids: &[T],
+) -> PyResult<()> {
+    let cells = buf
+        .as_mut_slice(py)
+        .ok_or_else(|| PyBufferError::new_err("out is not writable"))?;
+    for (cell, &id) in cells.iter().zip(ids) {
+        cell.set(id);
+    }
+    Ok(())
 }
 
 /// `gil_used = false` is spelled out rather than left to PyO3's default, which is already `false`:
