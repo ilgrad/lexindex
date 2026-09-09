@@ -243,13 +243,18 @@ FST can panic. That is measured, not assumed: a libFuzzer target over `from_byte
 bytes in minutes, and the 111-byte specimen it could not shrink further is committed under
 `tests/data/` with a test that it still panics. The `from_bytes` docstring used to promise the
 checksum ruled that out; it no longer does. `from_untrusted_bytes` is the answer for a blob from a
-stranger: it walks every reachable node — each transition must point strictly below the node that
-holds it, which is how `fst` lays nodes out and what makes the walk terminate on bytes that were
-not laid out that way — then streams every key and requires its value to be its rank, all inside a
-`catch_unwind` that turns the decoder's panic into an `IndexError`. The catch is load-bearing, not
-a backstop: a node cannot be checked without decoding it, and the specimen above is rejected by
-the catch, not by the address check. It costs 42× the owned load (50.8 ms against 1.2 ms on
-479 823 words), which is the right price once and the wrong price every time. `load_mmap`
+stranger: it checks the transducer as a graph, in two sweeps over the nodes reachable from the root
+— each transition must point strictly below the node that holds it, which is how `fst` lays nodes
+out and what makes the sweeps terminate on bytes that were not laid out that way; every accepted
+path must spell valid UTF-8, tracked as the set of decoder states each node is reachable in; and
+the outputs must be ranks by construction, a final node carrying none and each transition carrying
+the count of keys its node spells before it, with the root's count equal to the footer's length —
+all inside a `catch_unwind` that turns the decoder's panic into an `IndexError`. Nothing streams
+the keys, so the cost is the graph's and not the language's: `fst` can spell a billion strings in
+896 bytes. The catch is load-bearing, not a backstop: a node cannot be checked without decoding
+it, and the specimen above is rejected by the catch, not by the address check. It costs
+32× the owned load (22.9 ms against 0.7 ms on 479 823 words), which
+is the right price once and the wrong price every time. `load_mmap`
 skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
 independent of blob size — the structural checks still run.
 

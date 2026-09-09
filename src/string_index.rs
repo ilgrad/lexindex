@@ -465,8 +465,8 @@ impl StringIndex {
     /// a query. `fst` is safe Rust throughout, so the worst case stays a panic or a wrong answer,
     /// never an out-of-bounds read — which is why this is a safe `fn`, as every loader in the crate
     /// has been since 1.0. What it is not is *total*: the perfect-hash loaders answer a crafted blob
-    /// with an `Err`, and this one may panic instead. Blobs from an untrusted source need a check
-    /// this crate does not make for you.
+    /// with an `Err`, and this one may panic instead. Blobs from an untrusted source go through
+    /// [`from_untrusted_bytes`](Self::from_untrusted_bytes), which makes that check.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
     }
@@ -479,14 +479,21 @@ impl StringIndex {
     /// and a blob crafted to carry a matching one can panic instead of returning. This method
     /// closes that gap in the only two ways available from outside `fst`.
     ///
-    /// It **walks the whole transducer** rather than spot-checking it. Every node reachable from
-    /// the root is decoded once and every transition is read, so a node that would panic a query
-    /// panics here instead, where it is caught; every transition must point strictly *below* the
-    /// node holding it, which is how `fst` lays nodes out and what makes the walk terminate on
-    /// bytes that were not laid out that way at all. Then every key is streamed in order and its
-    /// value must be its rank — the check [`from_bytes`](Self::from_bytes) only samples at both
-    /// ends, so a blob whose values are a *permutation* of the ranks is refused here and accepted
-    /// there.
+    /// It **checks the transducer as a graph** rather than spot-checking it, in time proportional
+    /// to its nodes and transitions and never to the keys they spell — `fst` documents a billion
+    /// strings in 896 bytes, and a loader that streamed them would be the denial of service it
+    /// exists to prevent. Every node reachable from the root is decoded once and every transition
+    /// read, so a node that would panic a query panics here instead, where it is caught. Every
+    /// transition must point strictly *below* the node holding it, which is how `fst` lays nodes
+    /// out and what makes the walk terminate on bytes that were not laid out that way at all.
+    /// Every accepted path must spell valid UTF-8, so [`key`](Self::key) is total on what loads:
+    /// `fst` stores byte strings, and a blob with a non-UTF-8 key passes every check `fst` makes.
+    /// And the outputs must be ranks by construction — a final node carries none of its own and
+    /// each transition carries exactly the number of keys its node spells before it, which is what
+    /// the builder writes and what makes value `i` mean "the `i`-th key in byte order" — so a blob
+    /// whose values are a *permutation* of the ranks, or whose footer claims a length its graph
+    /// does not spell, is refused here and accepted by [`from_bytes`](Self::from_bytes), which
+    /// only samples both ends.
     ///
     /// And it **catches the panic**, at the load boundary, turning it into
     /// [`IndexError::Format`]. Two consequences worth knowing before relying on it: under
@@ -496,9 +503,10 @@ impl StringIndex {
     /// stderr. Nothing is suppressed, because the hook is global and another thread's panic is not
     /// this loader's to silence.
     ///
-    /// What it costs is one decode of every node plus one full pass over the keys: 50.8 ms against
-    /// 1.2 ms for the owned load, on the 479 823-word `/usr/share/dict/words`, or 106 ns per key
-    /// and 42× the load it replaces. That ratio is the whole design — it is a price worth paying
+    /// What it costs is two decodes of every node and the checksum: 22.9 ms against
+    /// 0.7 ms for the owned load, on the 479 823-word `/usr/share/dict/words`, or
+    /// 48 ns per key and 32× the load it replaces. That ratio is the whole
+    /// design — it is a price worth paying
     /// once for a blob from a stranger and not worth paying at all for one of your own, so use
     /// [`from_bytes`](Self::from_bytes) for the latter.
     ///
@@ -520,61 +528,121 @@ impl StringIndex {
             // crafted blob and an abort. The checksum runs after the walk for the same reason --
             // it reads the whole blob, and is worth doing only once the layout is known good.
             let idx = Self::from_shared(blob, false)?;
-            idx.validate_nodes()?;
+            idx.validate()?;
             idx.map.as_fst().verify()?;
-            idx.validate_ranks()?;
             Ok(idx)
         }))
         .map_err(|_| IndexError::Format("fst node decoder panicked on this blob"))?
     }
 
-    /// Decode every node reachable from the root, once each, and check that the transducer is laid
-    /// out the way `fst` lays one out: a transition points strictly below the node that holds it.
+    /// Check the transducer as a graph — layout, UTF-8, ranks, length — in time proportional to
+    /// its nodes and transitions, never to the keys they spell.
     ///
-    /// `fst` writes nodes in reverse — a node's targets are already on disk when it is written, so
-    /// their addresses are smaller. Enforcing that is worth two things at once. It rejects a blob
-    /// whose transitions form a cycle, which is what would otherwise make this walk run forever;
-    /// and, with each address visited at most once, it bounds the walk at one decode per byte of
-    /// the blob rather than one per path through it.
-    fn validate_nodes(&self) -> Result<(), IndexError> {
+    /// Two sweeps over the addresses reachable from the root. `fst` writes a node after its
+    /// targets, so a transition must point strictly below the node holding it: parents have the
+    /// larger addresses and children the smaller, which is what lets each sweep visit every node
+    /// after the ones it depends on, and what rules out a cycle.
+    ///
+    /// **Downwards**, parents first: reachability, the layout rule, and UTF-8. Two paths can reach
+    /// one node at a character boundary and inside a character, so what is propagated is the *set*
+    /// of decoder states a node is reachable in, a bit per state; every transition byte must be
+    /// legal from every state in the set, and a final node — a key ends here — must be reachable
+    /// at the boundary only.
+    ///
+    /// **Upwards**, children first: the outputs. The builder puts the whole of a key's rank on the
+    /// transitions leading to it: a final node carries no output of its own, and the `i`-th
+    /// transition out of a node carries exactly the number of keys the node spells before it — one
+    /// if the node is final, plus the size of each earlier subtree. Sizes are summed here from the
+    /// leaves up, and the root's must be the length in the footer.
+    ///
+    /// Together these say that streaming the transducer yields keys in byte order with values
+    /// `0, 1, 2, …`, every key decodes as a `str`, and `len` is honest — without streaming it.
+    fn validate(&self) -> Result<(), IndexError> {
         let fst = self.map.as_fst();
-        let len = fst.as_bytes().len();
-        let mut seen = vec![0u64; len / 64 + 1];
-        let mut stack = vec![fst.root().addr()];
-        while let Some(addr) = stack.pop() {
-            if addr >= len {
-                return Err(IndexError::Format("fst node address is outside the blob"));
-            }
-            let (w, b) = (addr / 64, addr % 64);
-            if seen[w] >> b & 1 == 1 {
+        let root = fst.root().addr();
+        if root >= fst.as_bytes().len() {
+            return Err(IndexError::Format("fst node address is outside the blob"));
+        }
+        // One byte per blob byte up to the root: the UTF-8 states a node is reachable in, zero
+        // where no node is reachable. State 0 is a character boundary, so bit 0 alone is "at a
+        // boundary, only".
+        let mut states = vec![0u8; root + 1];
+        states[root] = 1;
+        for addr in (0..=root).rev() {
+            let reached = states[addr];
+            if reached == 0 {
                 continue;
             }
-            seen[w] |= 1 << b;
-            for t in fst.node(addr).transitions() {
-                if t.addr >= addr && addr != 0 {
+            let node = fst.node(addr);
+            if node.is_final() && reached != 1 {
+                return Err(IndexError::Format("fst key ends inside a UTF-8 character"));
+            }
+            for t in node.transitions() {
+                if t.addr >= addr {
                     return Err(IndexError::Format(
                         "fst transition does not point below its own node",
                     ));
                 }
-                stack.push(t.addr);
+                let mut from = reached;
+                while from != 0 {
+                    let state = from.trailing_zeros() as u8;
+                    from &= from - 1;
+                    let next = utf8_step(state, t.inp)
+                        .ok_or(IndexError::Format("fst key is not UTF-8"))?;
+                    states[t.addr] |= 1 << next;
+                }
             }
         }
-        Ok(())
-    }
-
-    /// Stream every key in order and require its value to be its rank. This is
-    /// [`verify_ranks`](Self::verify_ranks) without the sampling: it costs a full pass, and it is
-    /// the only form that rules out a permutation of the ranks.
-    fn validate_ranks(&self) -> Result<(), IndexError> {
-        let mut expect = 0u64;
-        let mut stream = self.map.stream();
-        while let Some((_, v)) = stream.next() {
-            if v != expect {
-                return Err(IndexError::Format("fst value is not the key's rank"));
+        // A dense index over the reachable addresses — a bitset with prefix popcounts — keeps the
+        // subtree sizes at one word per node rather than one per blob byte.
+        let words = root / 64 + 1;
+        let mut bits = vec![0u64; words];
+        let mut below = vec![0u64; words + 1];
+        for (w, chunk) in states.chunks(64).enumerate() {
+            let mut word = 0u64;
+            for (i, &s) in chunk.iter().enumerate() {
+                if s != 0 {
+                    word |= 1 << i;
+                }
             }
-            expect += 1;
+            bits[w] = word;
+            below[w + 1] = below[w] + u64::from(word.count_ones());
         }
-        if expect != self.map.len() as u64 {
+        drop(states);
+        let index = |addr: usize| {
+            let seen_in_word = bits[addr / 64] & ((1u64 << (addr % 64)) - 1);
+            (below[addr / 64] + u64::from(seen_in_word.count_ones())) as usize
+        };
+        let mut size = vec![0u64; below[words] as usize];
+        for (w, &reachable) in bits.iter().enumerate() {
+            let mut word = reachable;
+            while word != 0 {
+                let addr = w * 64 + word.trailing_zeros() as usize;
+                word &= word - 1;
+                let node = fst.node(addr);
+                if node.is_final() && node.final_output().value() != 0 {
+                    return Err(IndexError::Format("fst value is not the key's rank"));
+                }
+                let mut keys = u64::from(node.is_final());
+                let mut prev: Option<u8> = None;
+                for t in node.transitions() {
+                    if prev.is_some_and(|p| t.inp <= p) {
+                        return Err(IndexError::Format(
+                            "fst transitions are not in increasing byte order",
+                        ));
+                    }
+                    prev = Some(t.inp);
+                    if t.out.value() != keys {
+                        return Err(IndexError::Format("fst value is not the key's rank"));
+                    }
+                    keys = keys
+                        .checked_add(size[index(t.addr)])
+                        .ok_or(IndexError::Format("fst key count overflows"))?;
+                }
+                size[index(addr)] = keys;
+            }
+        }
+        if size[index(root)] != self.map.len() as u64 {
             return Err(IndexError::Format(
                 "fst holds a different number of keys than its header says",
             ));
@@ -701,6 +769,28 @@ fn rank_walk(fst: &fst::raw::Fst<SharedBytes>, id: u64) -> Option<String> {
         key.push(t.inp);
         node = fst.node(t.addr);
     }
+}
+
+/// One byte of the UTF-8 decoder, over the states `core::str::from_utf8` recognises: `0` is a
+/// character boundary; `1` wants one continuation byte; `2` wants one from `A0..=BF` (after `E0`,
+/// no overlongs); `3` wants two; `4` wants one from `80..=9F` (after `ED`, no surrogates); `5`
+/// wants two, the first from `90..=BF` (after `F0`, no overlongs); `6` wants three; `7` wants two,
+/// the first from `80..=8F` (after `F4`, nothing past U+10FFFF). `None` is a byte the state does
+/// not accept.
+fn utf8_step(state: u8, byte: u8) -> Option<u8> {
+    Some(match (state, byte) {
+        (0, 0x00..=0x7f) | (1, 0x80..=0xbf) => 0,
+        (0, 0xc2..=0xdf) | (2, 0xa0..=0xbf) | (3, 0x80..=0xbf) | (4, 0x80..=0x9f) => 1,
+        (0, 0xe0) => 2,
+        (0, 0xe1..=0xec | 0xee..=0xef) | (5, 0x90..=0xbf) | (6, 0x80..=0xbf) | (7, 0x80..=0x8f) => {
+            3
+        }
+        (0, 0xed) => 4,
+        (0, 0xf0) => 5,
+        (0, 0xf1..=0xf3) => 6,
+        (0, 0xf4) => 7,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -1017,6 +1107,156 @@ mod tests {
                 "accepted {bytes:?}"
             );
         }
+    }
+
+    /// The decoder table against the standard library's, over every one- and two-byte string,
+    /// every three-byte string that starts with a lead byte, and the four-byte strings whose
+    /// continuation bytes sit on the range edges.
+    #[test]
+    fn utf8_steps_agree_with_from_utf8() {
+        fn accepts(bytes: &[u8]) -> bool {
+            let mut state = 0u8;
+            for &b in bytes {
+                match utf8_step(state, b) {
+                    Some(next) => state = next,
+                    None => return false,
+                }
+            }
+            state == 0
+        }
+        let check = |bytes: &[u8]| {
+            assert_eq!(
+                accepts(bytes),
+                std::str::from_utf8(bytes).is_ok(),
+                "{bytes:02x?}"
+            );
+        };
+        check(b"");
+        for a in 0..=255u8 {
+            check(&[a]);
+            for b in 0..=255u8 {
+                check(&[a, b]);
+                if a >= 0xe0 {
+                    for c in 0..=255u8 {
+                        check(&[a, b, c]);
+                    }
+                }
+                if a >= 0xf0 {
+                    let edges = [0x00, 0x7f, 0x80, 0x8f, 0x90, 0xbf, 0xc0, 0xff];
+                    for c in edges {
+                        for d in edges {
+                            check(&[a, b, c, d]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A blob over byte strings that are not UTF-8 is a valid `fst` — its builder takes any bytes
+    /// — and the owned loader takes it, then answers `None` for a live id. (Its spot check
+    /// decodes the *last* key, so that one has to be UTF-8 for the blob to get in.) The strict
+    /// loader refuses it, including the case a minimised transducer makes subtle: a node shared
+    /// between a path at a character boundary and a path inside a character.
+    #[test]
+    fn the_untrusted_loader_refuses_a_key_that_is_not_utf8() {
+        fn raw_blob(keys: &[&[u8]]) -> Vec<u8> {
+            let mut b = fst::MapBuilder::memory();
+            for (i, k) in keys.iter().enumerate() {
+                b.insert(k, i as u64).unwrap();
+            }
+            let mut out = b"BIX4".to_vec();
+            out.extend_from_slice(&b.into_inner().unwrap());
+            out
+        }
+        let loose = StringIndex::from_bytes(&raw_blob(&[b"a\xff", b"b"])).unwrap();
+        assert_eq!(loose.len(), 2);
+        assert_eq!(loose.key(0), None, "a live id with no key is the bug");
+        for keys in [
+            &[&b"a\xff"[..], &b"b"[..]][..],
+            &[&b"ab"[..], &b"a\xff"[..]][..],
+            &[&b"\xc3"[..]][..], // ends inside a character
+            // One shared `\xa9` node, legal after `\xc3` and not after `a`.
+            &[&b"a\xa9"[..], &b"\xc3\xa9"[..]][..],
+            &[&b"\xed\xa0\x80"[..]][..],     // a surrogate
+            &[&b"\xf4\x90\x80\x80"[..]][..], // past U+10FFFF
+            &[&b"\xc0\xaf"[..]][..],         // an overlong slash
+        ] {
+            assert!(
+                StringIndex::from_untrusted_bytes(&raw_blob(keys)).is_err(),
+                "accepted {keys:02x?}"
+            );
+        }
+        let ok =
+            StringIndex::from_untrusted_bytes(&raw_blob(&[b"a", b"\xc3\xa9", "中".as_bytes()]))
+                .unwrap();
+        assert_eq!(ok.key(1).as_deref(), Some("é"));
+    }
+
+    /// The footer's length is what `len` answers, and it is not derived from the graph. A blob
+    /// whose graph spells fewer keys than the footer claims — re-sealed, so the checksum passes —
+    /// is refused, however large the claim: the check counts nodes, not keys.
+    #[test]
+    fn the_untrusted_loader_refuses_a_length_the_graph_does_not_spell() {
+        fn crc32c(data: &[u8]) -> u32 {
+            let mut crc = !0u32;
+            for &b in data {
+                crc ^= u32::from(b);
+                for _ in 0..8 {
+                    crc = if crc & 1 == 1 {
+                        (crc >> 1) ^ 0x82f6_3b78
+                    } else {
+                        crc >> 1
+                    };
+                }
+            }
+            !crc
+        }
+        // `fst` v3: `[..nodes][len u64][root u64][masked crc32c u32]`, the mask being Snappy's.
+        fn with_len(blob: &[u8], len: u64) -> Vec<u8> {
+            let mut out = blob.to_vec();
+            let end = out.len();
+            out[end - 20..end - 12].copy_from_slice(&len.to_le_bytes());
+            let sum = crc32c(&out[4..end - 4]);
+            let masked = sum.rotate_right(15).wrapping_add(0xa282_ead8);
+            out[end - 4..].copy_from_slice(&masked.to_le_bytes());
+            out
+        }
+        let blob = StringIndex::build(["a", "b", "c"]).unwrap().to_bytes();
+        assert_eq!(
+            StringIndex::from_untrusted_bytes(&with_len(&blob, 3))
+                .unwrap()
+                .len(),
+            3,
+            "re-sealing alone changes nothing"
+        );
+        for claimed in [0, 2, 4, 1 << 40, u64::MAX] {
+            assert!(
+                StringIndex::from_untrusted_bytes(&with_len(&blob, claimed)).is_err(),
+                "accepted a footer claiming {claimed} keys over three"
+            );
+        }
+    }
+
+    /// The cost is the graph's, not the language's: every 16-letter word over `{a, b}` is 65 536
+    /// keys in a transducer of a few dozen nodes, and the check is exact on it.
+    #[test]
+    fn the_untrusted_loader_counts_nodes_not_keys() {
+        let keys: Vec<String> = (0..1u32 << 16)
+            .map(|i| {
+                (0..16)
+                    .rev()
+                    .map(|b| if i >> b & 1 == 1 { 'b' } else { 'a' })
+                    .collect()
+            })
+            .collect();
+        let blob = StringIndex::build(keys.iter()).unwrap().to_bytes();
+        assert!(blob.len() < 1024, "{} bytes for 65 536 keys", blob.len());
+        let idx = StringIndex::from_untrusted_bytes(&blob).unwrap();
+        assert_eq!(idx.len(), 1 << 16);
+        assert_eq!(idx.id(&keys[0]), Some(0));
+        assert_eq!(idx.id(&keys[65_535]), Some(65_535));
+        assert_eq!(idx.key(40_000).as_deref(), Some(keys[40_000].as_str()));
     }
 
     /// A blob whose FST is structurally valid — and CRC-correct, because it was built by `fst`

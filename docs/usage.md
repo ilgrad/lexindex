@@ -135,10 +135,12 @@ idx = lexindex.StringIndex.from_untrusted_bytes(data)          # a blob someone 
 ov = lexindex.Overlay.from_untrusted_bytes(data, lexindex.StringIndex)   # …or one wrapping it
 ```
 
-That loader walks every reachable node, requires every transition to point below the node holding
-it, streams every key to check its rank, and catches the panic at the load boundary, so a crafted
-blob raises `ValueError` like any other bad input. It costs 42× `from_bytes` (50.8 ms against
-1.2 ms on 479 823 words), which is the trade: pay it once for a stranger's blob, never for your
+That loader checks the transducer as a graph — every reachable node once, in time proportional to
+nodes and transitions rather than to the keys they spell, so a tiny blob spelling a billion keys is
+refused or accepted in microseconds — requires its values to be ranks and its keys to be UTF-8,
+and catches the panic at the load boundary, so a crafted blob raises `ValueError` like any other
+bad input. It costs 32× `from_bytes` (22.9 ms against 0.7 ms on
+479 823 words), which is the trade: pay it once for a stranger's blob, never for your
 own. The overlay form exists for the same reason — an overlay's own framing is checksummed and
 validated either way, but the base region inside it is handed to a base loader, and over a
 `StringIndex` base that is exactly the choice above. The two hash indexes need no such call: their

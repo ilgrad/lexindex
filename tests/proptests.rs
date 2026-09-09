@@ -254,6 +254,47 @@ proptest! {
         }
     }
 
+    // `fst` takes any byte strings; the strict loader takes exactly the transducers whose every key
+    // is UTF-8, and hands back their ranks. The alphabet is the interesting bytes: ASCII, the
+    // continuation range's edges, lead bytes with a restricted second byte, and two beyond range.
+    #[test]
+    fn string_index_untrusted_accepts_exactly_the_utf8_key_sets(
+        keys in prop::collection::vec(
+            prop::collection::vec(
+                prop::sample::select(vec![
+                    0x61u8, 0x7f, 0x80, 0x8f, 0x9f, 0xa0, 0xbf, 0xc2, 0xc3, 0xe0, 0xed, 0xef, 0xf0,
+                    0xf4, 0xff,
+                ]),
+                0..5,
+            ),
+            0..8,
+        ),
+    ) {
+        let mut keys = keys;
+        keys.sort();
+        keys.dedup();
+        let mut b = fst::MapBuilder::memory();
+        for (rank, key) in keys.iter().enumerate() {
+            b.insert(key, rank as u64).unwrap();
+        }
+        let mut blob = b"BIX4".to_vec();
+        blob.extend_from_slice(&b.into_inner().unwrap());
+        let all_utf8 = keys.iter().all(|k| std::str::from_utf8(k).is_ok());
+        match StringIndex::from_untrusted_bytes(&blob) {
+            Ok(idx) => {
+                prop_assert!(all_utf8, "loaded a transducer with a non-UTF-8 key: {:02x?}", keys);
+                prop_assert_eq!(idx.len(), keys.len());
+                for (rank, key) in keys.iter().enumerate() {
+                    let key = std::str::from_utf8(key).unwrap();
+                    prop_assert_eq!(idx.id(key), Some(rank as u64));
+                    let back = idx.key(rank as u64);
+                    prop_assert_eq!(back.as_deref(), Some(key));
+                }
+            }
+            Err(e) => prop_assert!(!all_utf8, "refused a UTF-8 transducer {:02x?}: {}", keys, e),
+        }
+    }
+
     // Random bytes never spell `OVL2`, so the overlay's framing is fuzzed outward from a real blob:
     // one byte flipped, or the blob cut short, or one of its four claimed lengths replaced by a
     // hostile value. Only `Ok`/`Err` — never a panic, and in particular never an allocation sized

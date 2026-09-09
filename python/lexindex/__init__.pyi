@@ -92,10 +92,11 @@ class StringIndex:
         ``from_bytes`` documents the one exception to "arbitrary bytes raise ``ValueError``": the
         blob is an ``fst`` transducer whose node decoder is safe but not *total*, so bytes crafted
         to carry a matching checksum raise ``pyo3_runtime.PanicException`` instead. This loader
-        walks every reachable node, streams every key to check its rank, and catches the panic, so
-        a crafted blob raises ``ValueError`` like any other bad input.
+        checks the transducer as a graph -- values are ranks, keys are UTF-8, in time proportional
+        to nodes rather than to keys -- and catches the panic, so a crafted blob raises
+        ``ValueError`` like any other bad input.
 
-        42x the cost of ``from_bytes`` (50.8 ms against 1.2 on 479 823 words): worth paying once for
+        32x the cost of ``from_bytes`` (22.9 ms against 0.7 on 479 823 words): worth paying once for
         a stranger's blob, not for one of your own. The contained panic still prints through the
         process-wide hook before the ``ValueError`` is raised.
         """
