@@ -99,6 +99,19 @@ def environment() -> dict[str, Any]:
     }
 
 
+def versions(*distributions: str) -> dict[str, str | None]:
+    """The installed version of each competitor, ``None`` where it is not installed."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    out: dict[str, str | None] = {}
+    for name in distributions:
+        try:
+            out[name] = version(name)
+        except PackageNotFoundError:
+            out[name] = None
+    return out
+
+
 def summary(samples: Sequence[float]) -> dict[str, Any]:
     """One cell: the minimum, with the spread it came from kept next to it."""
     return {

@@ -233,6 +233,7 @@ def main() -> None:
             "raw_bytes_per_key": RAW,
         },
         false_positive_rate=false_positives,
+        competitors=_results.versions("marisa-trie", "dawg2", "datrie"),
     )
     print(f"\nplots → {OUT}/  (raw keys = {RAW:.1f} bytes/key, n = {N:,})")
     print(f"results → {path}")
