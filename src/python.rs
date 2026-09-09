@@ -41,7 +41,7 @@ use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValu
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyIterator, PyString, PyType};
+use pyo3::types::{PyBytes, PyIterator, PyMemoryView, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -281,6 +281,7 @@ impl PyStringIndex {
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
     /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    /// With no keys nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint32` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -290,6 +291,9 @@ impl PyStringIndex {
         keys: Vec<PyBackedStr>,
         out: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
         let sink = id_sink::<u64>(out, keys.len())?;
         let ids: Vec<u64> = py.detach(|| {
             keys.iter()
@@ -827,6 +831,7 @@ impl PyPerfectHashIndex {
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
     /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    /// With no keys nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -836,6 +841,9 @@ impl PyPerfectHashIndex {
         keys: Vec<PyBackedStr>,
         out: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
         if self.inner.len() > u32::MAX as usize {
             return Err(PyValueError::new_err(
                 "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
@@ -1121,6 +1129,7 @@ impl PyCompactHashIndex {
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
     /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
+    /// With no keys nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -1130,6 +1139,9 @@ impl PyCompactHashIndex {
         keys: Vec<PyBackedStr>,
         out: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
         if self.inner.len() > u32::MAX as usize {
             return Err(PyValueError::new_err(
                 "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
@@ -1647,6 +1659,17 @@ impl PyOverlay {
         };
         Ok(Self::wrap(inner))
     }
+}
+
+/// What `ids_into` asks of `out` when there is nothing to write: a buffer, and a writable one. Not
+/// the typed view `id_sink` takes -- an empty `array.array` hands out a pointer that fails the
+/// alignment check on some interpreter builds, and there is no item for alignment to matter to.
+fn writable_buffer(out: &Bound<'_, PyAny>) -> PyResult<()> {
+    let view = PyMemoryView::from(out)?;
+    if view.getattr("readonly")?.is_truthy()? {
+        return Err(PyBufferError::new_err("out is read-only"));
+    }
+    Ok(())
 }
 
 /// The buffer `ids_into` fills: `T`-typed, writable, C-contiguous and at least `n` items long.

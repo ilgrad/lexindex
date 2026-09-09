@@ -69,7 +69,8 @@ class StringIndex:
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
-        raises ``ValueError``.
+        raises ``ValueError``. With no keys nothing is written and ``out`` need only be a
+        writable buffer.
         """
 
     ID_DTYPE: ClassVar[str]
@@ -190,7 +191,8 @@ class PerfectHashIndex:
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
-        raises ``ValueError``.
+        raises ``ValueError``. With no keys nothing is written and ``out`` need only be a
+        writable buffer.
         """
 
     ID_DTYPE: ClassVar[str]
@@ -277,7 +279,8 @@ class CompactHashIndex:
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
-        raises ``ValueError``.
+        raises ``ValueError``. With no keys nothing is written and ``out`` need only be a
+        writable buffer.
         """
 
     ID_DTYPE: ClassVar[str]

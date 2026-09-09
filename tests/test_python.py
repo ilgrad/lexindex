@@ -627,7 +627,14 @@ def test_ids_into_writes_the_head_of_a_buffer_and_leaves_the_tail(ctor):
     assert out[: len(probes)].tolist() == expected
     assert out[len(probes) :].tolist() == [7, 7]
     assert out.tobytes()[: len(probes) * out.itemsize] == idx.ids_of_bytes(probes)
-    idx.ids_into([], array.array(out.typecode))  # nothing to write is fine
+    # Nothing to write: any writable buffer will do, even an empty `array.array`, whose buffer
+    # pointer is unaligned on some interpreter builds.
+    idx.ids_into([], array.array(out.typecode))
+    idx.ids_into([], bytearray())
+    with pytest.raises(BufferError):
+        idx.ids_into([], b"")  # read-only is still refused
+    with pytest.raises(TypeError):
+        idx.ids_into([], 42)  # not a buffer at all
 
 
 def test_ids_into_refuses_a_short_readonly_or_mistyped_buffer():
