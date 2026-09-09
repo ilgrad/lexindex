@@ -50,12 +50,12 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (0.30 B/key — 2.390 bits/key,
-measured, and flat in `n`: `8/λ` bits of pilot plus a block remap over the `1−α` of slots above `n`)
+Because the keys themselves are never stored, size is just the MPH (0.26 B/key — 2.118 bits/key,
+measured, and flat in `n`: `8/λ` bits of seed plus what the few percent of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.80 B/key at 4 bits
 (6.25% false positives), 1.30 at the 8-bit default (0.39%), 2.30 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH6"][n][fp_bits][mph length][side_len]
-[payload][check][MPH1 blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
+[payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — it frames every section, so it is
 not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
@@ -86,24 +86,25 @@ on ids, and a blob can be checksummed against a rebuild. `build_to_file` writes 
 for the same key set, and is tested that way: both derive the arena's encoding from the same key
 lengths in the same slot order.
 
-**The MPH's load factor is not exposed, and that is a measurement, not an omission.** `α` sets the
-slot count to `n / α`; the natural expectation is that lowering it trades size for an easier build.
-The measured surface is not that shape. A window pilot is not 256 independent tries but four runs of
-64 correlated shifts, so a large bucket is far dearer than a Poisson model predicts, and λ dominates:
-at 10 M real-word bigram hashes, (3.6, 0.98) costs 2.555 bits/key and builds in 2.0 s while
-(4.0, 0.98) costs 2.333 and takes 5.5 s, and (3.9, 0.99) — a *smaller* index at 2.218 — takes 11.8 s.
-The shipped (3.9, 0.98) sits at the knee. A knob whose settings are all worse in one direction or the
-other is not worth the API surface; `fingerprint_bits` is the knob that *does* have a monotone trade,
-and it is public.
+**The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
+keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
+and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 2.171
+bits/key at 4.15, 2.118 at 4.5, 2.11 at 4.7, within three nanoseconds per key of each other to
+build. The table has no load factor at all — every level's range is exactly its key count, and the
+slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
+one way and nothing the other is not worth the API surface; `fingerprint_bits` is the knob that
+*does* have a monotone trade, and it is public.
 
 **Every read the MPH makes is bounded by a length in its own header.** That is the whole reason it is
-in-crate. `index` touches four arrays — the part seeds, the pilots, and the remap's block bases and
-offsets — and each of those lengths is *derived* on load from the eight scalars in the `MPH1` header
+in-crate. `index` touches a seed table per level, the tail's, and the remap — a rank bit vector
+over the lower levels' values and the Elias–Fano hole list's three arrays — and each of those
+lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH2` header
 rather than read beside them, so a loader that recomputes them cannot be handed a length that
 disagrees with the table it describes. The remap is the one table whose *contents* can leave the
-image, so it is the one checked by value: every entry must land below `n`. What that buys is a
-`from_bytes` that is a safe fn on arbitrary bytes — a crafted blob answers wrong ids, never
-out-of-range ones.
+image, so it is the one checked by value: every rank sample must count what it claims, and every
+hole must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
+crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
+the same rule over their own eight scalars.
 
 **Pre-1.0 blobs are refused, by name.** Every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash`
 image, and the crate that could decode it is no longer linked — so the refusal names the version that
@@ -139,7 +140,7 @@ key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
 where membership is already guaranteed. The serialised blob is `[magic "BMP6"][n][mph length]
-[side_len][payload][check][MPH1 blob][arena bytes][side]` — the payload hash covers everything after
+[side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
 names one of four encodings.
 
@@ -283,9 +284,9 @@ or — never — read it wrong.
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
 | `BMP6` | 1.1 | `PerfectHashIndex` | `BMP5` **read**; `BMP1`–`BMP4` **refused by name** |
-| `BCH6` | 1.0 | `CompactHashIndex` | `BCH1`–`BCH5` **refused by name** |
+| `BCH6` | 1.0, 1.1 | `CompactHashIndex` | a 1.0 `BCH6` (an `MPH1` inside) **read**; `BCH1`–`BCH5` **refused by name** |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH1` | 1.0 | the minimal perfect hash, inside `BMP6` and `BCH6` | first version |
+| `MPH2` | 1.1 | the minimal perfect hash, inside `BMP6` and `BCH6` | `MPH1` (1.0) **read** |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so both

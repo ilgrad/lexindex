@@ -304,7 +304,7 @@ where
 /// the MPH region validates itself (see [`Mphf::from_bytes`]).
 struct Frame {
     n: usize,
-    mph: std::ops::Range<usize>, // the `MPH1` region; ignored when `n == 0`
+    mph: std::ops::Range<usize>, // the MPH region; ignored when `n == 0`
     arena: StringArena,
     side: Vec<(u64, u32)>,
 }
@@ -629,7 +629,7 @@ impl PerfectHashIndex {
     }
 
     /// Serialise to a self-describing blob: `[magic "BMP5"][n u64][mph_len u64][side_len u32]
-    /// [payload u64][check u32][MPH1 blob][arena bytes][side entries]`. Reloading queries correctly
+    /// [payload u64][check u32][MPH blob][arena bytes][side entries]`. Reloading queries correctly
     /// because the key hash is version-stable. `check` is a hash of the preceding header bytes and
     /// `payload` a streaming hash of everything after the header, so a blob that lost bytes in
     /// transit fails cleanly at load; the MPH region carries its own header and validates its own

@@ -15,6 +15,10 @@
 //! assertions are the invariants a correct load must satisfy — a bijection onto `[0, n)`, an exact
 //! reverse where the index has one — rather than pinned id values. A blob that loaded but
 //! deserialised to a different structure would fail them.
+//!
+//! 1.1 changed the perfect hash once more (`MPH2`, a different function over the same keys) and
+//! re-encoded the key arena, so the hash blobs 1.0 wrote are held to the same invariants, and the
+//! blobs 1.1 writes are the ones pinned byte for byte.
 
 use std::path::PathBuf;
 
@@ -166,9 +170,10 @@ mod mph {
     /// once, and byte-identity is what rules it out.
     ///
     /// Each is named by the release whose writer first produced it, and only the current pair is
-    /// pinned this way: 1.1 re-encoded the key arena in blocks, so `golden-1.0.0-perfect.bmp` is
-    /// now held to what a *reader* must promise it — see
-    /// [`the_1_0_perfect_hash_blob_still_loads`] — and `golden-1.1.0-perfect.bmp` took over here.
+    /// pinned this way: 1.1 re-encoded the key arena in blocks and replaced the perfect hash, so
+    /// the 1.0 pair is now held to what a *reader* must promise it — see
+    /// [`the_1_0_perfect_hash_blob_still_loads`] and [`the_1_0_compact_hash_blob_still_loads`] —
+    /// and the 1.1 pair took over here.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:
     /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
@@ -185,7 +190,7 @@ mod mph {
             .unwrap();
 
         for (name, magic, fresh) in [
-            ("golden-1.0.0-compact.bch", &b"BCH6"[..], compact),
+            ("golden-1.1.0-compact.bch", &b"BCH6"[..], compact),
             ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], perfect),
         ] {
             let path = data(name);
@@ -206,9 +211,10 @@ mod mph {
     }
 
     /// What a `BMP5` blob is promised now that it is no longer the format this version writes:
-    /// it loads, it answers every key with the id a fresh build assigns, it refuses every
-    /// non-member, and it maps zero-copy. The bytes are free to differ — 1.1's arena is 2.7 bytes
-    /// per key smaller — but nothing a caller can observe through the API may.
+    /// it loads, it answers every key with a distinct id below `n` and the exact key back, it
+    /// refuses every non-member, and it maps zero-copy. The bytes are free to differ — 1.1's arena
+    /// is 2.7 bytes per key smaller — and so are the ids, since 1.1's perfect hash is a different
+    /// function over the same keys; nothing else a caller can observe through the API may.
     ///
     /// This is the whole reason `BMP6` exists as a separate magic rather than a silent change to
     /// the arena: the format has two readable versions now, and this test is the statement that
@@ -221,16 +227,52 @@ mod mph {
         assert_eq!(&stored[..4], b"BMP5", "the 1.0 fixture must stay 1.0");
 
         let old = lexindex::PerfectHashIndex::load(&path).expect("a 1.0 blob still loads");
-        let fresh = lexindex::PerfectHashIndex::build(&keys).unwrap();
         assert_eq!(old.len(), keys.len());
+        let mut seen = vec![false; keys.len()];
         for key in &keys {
-            let id = fresh.id(key).expect("member");
-            assert_eq!(old.id(key), Some(id), "id({key:?})");
+            let id = old.id(key).unwrap_or_else(|| panic!("id({key:?})"));
+            assert!(
+                !std::mem::replace(&mut seen[id as usize], true),
+                "id {id} answered twice"
+            );
             assert_eq!(old.key(id), Some(key.as_str()), "key({id})");
         }
         for absent in non_members() {
             assert_eq!(old.id(&absent), None, "{absent:?} is not a member");
         }
+    }
+
+    /// The `BCH6` that 1.0 wrote carries an `MPH1` table inside a container 1.1 still writes, so
+    /// the magic alone cannot tell the two apart; the embedded table's own magic does, and the
+    /// 1.0 reader of it is kept. Held to the same invariants as the perfect-hash blob above, with
+    /// membership probabilistic as always for this index.
+    #[test]
+    fn the_1_0_compact_hash_blob_still_loads() {
+        let keys = keys();
+        let path = data("golden-1.0.0-compact.bch");
+        let stored = std::fs::read(&path).unwrap();
+        assert_eq!(&stored[..4], b"BCH6");
+        assert!(
+            stored.windows(4).any(|w| w == b"MPH1"),
+            "the 1.0 fixture must carry a 1.0 perfect hash"
+        );
+
+        let old = lexindex::CompactHashIndex::load(&path).expect("a 1.0 blob still loads");
+        assert_eq!(old.len(), keys.len());
+        let mut seen = vec![false; keys.len()];
+        for key in &keys {
+            assert!(old.contains(key), "false negative on {key:?}");
+            let id = old.id(key).unwrap_or_else(|| panic!("id({key:?})"));
+            assert!(
+                (id as usize) < keys.len() && !std::mem::replace(&mut seen[id as usize], true),
+                "{key:?}: id {id} is not distinct"
+            );
+        }
+        let false_positives = non_members().iter().filter(|k| old.contains(k)).count();
+        assert!(
+            false_positives <= 20,
+            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
+        );
     }
 
     /// The zero-copy path against a real file on disk, not a buffer this process just wrote.
@@ -270,7 +312,7 @@ mod mph {
 #[cfg(all(feature = "fuzzing", feature = "mph"))]
 #[test]
 fn the_fuzz_shims_accept_a_real_blob() {
-    let compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
+    let compact = std::fs::read(data("golden-1.1.0-compact.bch")).unwrap();
     let perfect = std::fs::read(data("golden-1.1.0-perfect.bmp")).unwrap();
     for verify in [false, true] {
         assert!(
@@ -285,10 +327,13 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
 
-    // Both arena encodings are seeds: the flat table is still parsed, and a target that only ever
-    // saw blocked offsets would leave that half of the reader unexplored.
+    // The 1.0 pair are seeds too: the flat arena is still parsed, and so is the `MPH1` table both
+    // carry, and a target that only ever saw the 1.1 encodings would leave those readers
+    // unexplored.
     let flat = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
     assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
+    let old_compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
+    assert!(lexindex::fuzzing::parse_compact_frame(&old_compact, true));
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -310,13 +355,21 @@ fn the_fuzz_shims_accept_a_real_blob() {
     let old = std::fs::read(data("golden-0.9.1-compact.bch")).unwrap();
     assert!(!lexindex::fuzzing::parse_compact_frame(&old, false));
 
-    // The standalone MPH seed. `parse_mphf` starts inside the format the other two only reach
-    // behind their own header, so without this file its target would have nothing to mutate: an
-    // `MPH1` header is eight scalars, a checksum and a length identity, and no blob written for
-    // another format gets past the magic.
-    let mphf = std::fs::read(data("golden-1.0.0-mphf.bin")).unwrap();
-    assert_eq!(&mphf[..4], b"MPH1");
-    assert!(lexindex::fuzzing::parse_mphf(&mphf), "MPH seed rejected");
+    // The standalone MPH seeds, one per readable format. `parse_mphf` starts inside the format
+    // the other two only reach behind their own header, so without these files its target would
+    // have nothing to mutate: each header is a handful of scalars, a checksum and a length
+    // identity, and no blob written for another format gets past the magic.
+    for (name, magic) in [
+        ("golden-1.0.0-mphf.bin", &b"MPH1"[..]),
+        ("golden-1.1.0-mphf.bin", &b"MPH2"[..]),
+    ] {
+        let mphf = std::fs::read(data(name)).unwrap();
+        assert_eq!(&mphf[..4], magic, "{name}");
+        assert!(
+            lexindex::fuzzing::parse_mphf(&mphf),
+            "{name}: MPH seed rejected"
+        );
+    }
     assert!(!lexindex::fuzzing::parse_mphf(&compact));
     assert!(!lexindex::fuzzing::parse_mphf(&perfect));
 }

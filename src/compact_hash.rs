@@ -35,7 +35,7 @@ type SerialisedParts = ([u8; HEADER_V6], Vec<u8>, Vec<u8>);
 struct Frame {
     n: usize,
     fp_bits: u32,
-    mph: std::ops::Range<usize>, // the `MPH1` region; ignored when `n == 0`
+    mph: std::ops::Range<usize>, // the MPH region; ignored when `n == 0`
     fps: SharedBytes,
     side: Vec<(u64, u64, u32)>,
 }
@@ -370,7 +370,7 @@ impl CompactHashIndex {
     }
 
     /// Serialise to `[magic "BCH6"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
-    /// [check u32][MPH1 blob][bit-packed fingerprints][side entries]`. `check` is a hash of the
+    /// [check u32][MPH blob][bit-packed fingerprints][side entries]`. `check` is a hash of the
     /// preceding header bytes and `payload` a streaming hash of everything after it, verified on
     /// owned loads; the MPH region carries its own header and validates its own lengths, which is
     /// what makes [`from_bytes`](Self::from_bytes) a safe fn even though this index stores no keys

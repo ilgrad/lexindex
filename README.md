@@ -194,7 +194,7 @@ assert_eq!(raw, id);
   tunable false-positive rate
   (`fingerprint_bits` ∈ 1..=64, bit-packed). Dropping the key arena is what takes it below
   `marisa-trie`; the price is that membership is probabilistic and there is no `id → key`. The blob
-  is `[magic "BCH6"][n][fp_bits][mph_len][side_len][payload][check][MPH1 blob][bit-packed
+  is `[magic "BCH6"][n][fp_bits][mph_len][side_len][payload][check][MPH blob][bit-packed
   fingerprints][side]` — the payload hash is verified on owned loads, so a corrupted blob fails
   cleanly. Its build **streams**: only a 16-byte `(hash, second hash)` pair is kept per key, never
   the strings. Blobs written before 1.0 (`BCH1`–`BCH5`) are **refused**: each embeds a `ptr_hash`
@@ -234,11 +234,12 @@ assert_eq!(raw, id);
   replaced that MPH with one whose every array length is written and checked by this crate, which
   turns a crafted blob from undefined behaviour into a wrong answer. The cost is that pre-1.0 blobs
   cannot be read at all — they are refused with a message naming the version that wrote them.
-- **Blobs move forward, not backward — upgrade the reader first.** 1.1 reads every `BMP5` that 1.0
-  wrote, but the `BMP6` it writes is not readable by 1.0, which has never heard of that magic and
-  refuses it as a malformed blob rather than as a version mismatch. Only `PerfectHashIndex` is
-  affected: `BIX4`, `BCH6` and `OVL2` are byte-for-byte what 1.0 wrote, so a `StringIndex`,
-  `CompactHashIndex` or `Overlay` file crosses the two versions in either direction.
+- **Blobs move forward, not backward — upgrade the reader first.** 1.1 reads every `BMP5` and
+  every `BCH6` that 1.0 wrote, but what it writes is not readable by 1.0: `BMP6` is a magic 1.0 has
+  never heard of, and a 1.1 `BCH6` carries the new `MPH2` perfect hash inside a container 1.0 does
+  recognise, so 1.0 refuses both as malformed rather than as a version mismatch. `BIX4` and `OVL2`
+  are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses the two versions
+  in either direction.
 - `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst` (and keeps
   `StringIndex`). Enabling `mph` pulls **no dependency at all** — the perfect hash is in-crate — so
   the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either build.
@@ -543,22 +544,30 @@ defence.
 ## Prior art
 
 `PerfectHashIndex` and `CompactHashIndex` are built on a minimal perfect hash implemented in this
-crate, and its construction is **PTHash's**: keys grouped into buckets by a first hash, a one-byte
-pilot per bucket searched largest-first, and a remap that pulls the slots above `n` down into the
-holes below it.
+crate, and its construction is **PHast's** map-or-bump: keys grouped into buckets by a first hash, a
+one-byte seed per bucket that slides the bucket's keys along a short slice of the table until every
+one lands on a free value, buckets that no seed places *bumped* to a smaller table under a fresh
+hash, and a remap that pulls every bumped key into a hole the first table left. Nothing is ever
+displaced, which is what makes the build one streaming pass over sorted hashes.
 
 - Giulio Ermanno Pibiri and Roberto Trani, *PTHash: Revisiting FCH Minimal Perfect Hashing*,
   SIGIR 2021 — [arXiv:2104.10402](https://arxiv.org/abs/2104.10402).
+- Piotr Beling and Peter Sanders, *PHast — Perfect Hashing with fast evaluation*, 2025 —
+  [arXiv:2504.17918](https://arxiv.org/abs/2504.17918).
 - Ragnar Groot Koerkamp, *PtrHash: Minimal Perfect Hashing at RAM Throughput*, 2025 —
   [arXiv:2502.15539](https://arxiv.org/abs/2502.15539),
   [`ptr_hash`](https://github.com/RagnarGrootKoerkamp/PtrHash).
 
-Until 1.0 the perfect hash **was** `ptr_hash`. It was not replaced for being slow — it still builds
-about an order of magnitude faster than this crate's does — but because its pilot table was
+Until 1.0 the perfect hash **was** `ptr_hash`. It was replaced because its pilot table was
 serialised behind private fields, so a blob holding one could not be validated from outside the crate
 that owned it, and `from_bytes` and `load_mmap` had to be `unsafe fn` on both hash indexes. An MPH
 whose every array length is written and checked here makes those loaders safe, and that is the whole
-of the trade.
+of the trade. 1.0's own table was PtrHash-shaped and paid for the safety with a build about ten
+times slower than `ptr_hash`'s; 1.1's is PHast-shaped, and over 10 M real word-bigram hashes it
+builds in **61 ns/key on one thread** (0.61 s; 13 ns/key on eight) at **2.12 bits/key**, against
+280 ns/key and 2.39 bits for 1.0 — its lookup unchanged at 5.4 ns/key. Those are this crate's
+numbers on this machine from the spike in `src/mphf.rs`; nothing here is a claim about the
+libraries above.
 
 ## License
 

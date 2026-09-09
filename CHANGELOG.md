@@ -41,6 +41,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The perfect hash is rebuilt as PHast's map-or-bump, and its blob format moves to `MPH2`.**
+  1.0's table was PtrHash-shaped — buckets placed largest-first, with the buckets in the way
+  evicted and re-placed — and three quarters of its build was that eviction pass reading a random
+  slot-owner table. The new builder never displaces anything: each bucket's one-byte seed slides
+  its keys two values at a time along a 1024-value slice of the table, the seed whose values are
+  lowest is taken, since low values are what the buckets still to come cannot use, and a bucket no
+  seed places is bumped to a smaller table under a fresh hash, down to a tail of a few hundred
+  keys placed exhaustively. Bumped keys reach the first table's holes through a rank bit vector
+  over the lower tables' values and an Elias–Fano list of the holes, which is what keeps a bumped
+  key at about eight bits instead of the sixteen a plain offset table costs. Buckets are placed in
+  fixed chunks with the gaps between them placed serially afterwards, so the table is the same
+  whatever the thread count. Measured on 10 M real word-bigram hashes: **61 ns/key on one thread
+  against 280** (134 ms on eight threads against 625), and **2.12 bits/key against 2.39**; lookups
+  are unchanged at 5.4 ns/key. Every `BMP6` and `BCH6` blob written from here on carries an `MPH2`
+  table, which 1.0 cannot read; the `MPH1` tables 1.0 wrote still load. The 1.0 hash fixtures are
+  now held to what a reader must promise them, and 1.1 fixtures take over the byte-identity pin.
+
 - **Both latency tables are re-measured on 1.1, and the Python one now says what it can support.**
   The Rust table resolves the arena change cleanly: `PerfectHashIndex::id` went 1.103× → 1.010× of
   `std::HashMap` (290 → 274 ns on a control that got 3.4 % *slower*) while four rows whose code did
