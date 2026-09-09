@@ -8,7 +8,7 @@ Build once over a set of strings (entity names, cluster labels, vocabulary terms
 then query many times: exact `string ↔ id` both ways, plus **prefix**, **range**, **fuzzy**
 (Levenshtein) and **subsequence** iteration — all automaton-driven over the FST (exact, prefix and
 range seek directly; a broad fuzzy or subsequence pattern may still traverse most of the automaton).
-The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.3 bytes/key, 2.3× below
+The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.26 bytes/key, 2.4× below
 `marisa-trie`**, and `StringIndex` 5.95 — and each can be **memory-mapped and borrowed zero-copy**, so
 a multi-gigabyte index is ready instantly and its pages are shared across processes.
 

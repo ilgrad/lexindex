@@ -60,8 +60,8 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
 
 Because the keys themselves are never stored, size is just the MPH (0.26 B/key — 2.089 bits/key,
 measured, and flat in `n`: `8/λ` bits of seed plus what the few percent of bumped keys cost)
-plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.80 B/key at 4 bits
-(6.25% false positives), 1.30 at the 8-bit default (0.39%), 2.30 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
+plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.76 B/key at 4 bits
+(6.25% false positives), 1.26 at the 8-bit default (0.39%), 2.26 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH6"][n][fp_bits][mph length][side_len]
 [payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a

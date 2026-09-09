@@ -26,8 +26,8 @@ Three complementary, build-once / query-many structures — pick by what you nee
   ordered scans of a large catalog.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
   (in-crate, no dependency) plus a small fingerprint per key, storing *no keys
-  at all*. **1.27 bytes/key** on real dictionary words — **2.3× smaller than `marisa-trie`**, down to
-  **0.77 bytes/key** at a 4-bit fingerprint (`fingerprint_bits=4`, 6.25% false-positive rate) — below
+  at all*. **1.26 bytes/key** on real dictionary words — **2.4× smaller than `marisa-trie`**, down to
+  **0.76 bytes/key** at a 4-bit fingerprint (`fingerprint_bits=4`, 6.25% false-positive rate) — below
   every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
   (a tunable `2^-bits` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
   footprint is paramount and rare false positives are acceptable.
@@ -201,23 +201,23 @@ better; the capability columns are why you would still pick a larger one.
 
 | library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.77** |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.27** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.27** |
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
-| `datrie` | ✅ | — | — | — | ✅ | — | 30.91 |
+| `datrie` | ✅ | — | — | — | ✅ | — | 30.92 |
 
 <sub>Raw numbers and the machine that produced them:
-[`bench/results/compare-2026-09-09-arz-94c67e7.json`](bench/results/compare-2026-09-09-arz-94c67e7.json)
+[`bench/results/compare-2026-09-09-arz-0c637f6.json`](bench/results/compare-2026-09-09-arz-0c637f6.json)
 — every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
 load average at both ends of the run.</sub>
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
-is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.3×
+is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.4×
 below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
 false-positive rate (about `2^-fingerprint_bits` by design — the fingerprint comes from a second hash,
 uncorrelated with the slot hash for well-distributed keys — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
@@ -241,9 +241,10 @@ In decision order:
 - **Do the keys need to come back out, or be scanned in order?** If yes, the fingerprint indexes are
   out; `StringIndex` (ordered, prefix / range / fuzzy / subsequence) or `PerfectHashIndex` (exact
   membership, `id → key`, no ordering) are the candidates, and both pay for the keys they store.
-- **Is a bounded false-positive rate acceptable?** If yes, `CompactHashIndex` is 2.3× smaller than
-  `marisa-trie` on single words, 4.9× on random pairs and 3.3× at 10 M — and 1.7× *larger* than a bare
-  MPHF, which is exactly the byte of fingerprint that buys the membership check.
+- **Is a bounded false-positive rate acceptable?** If yes, `CompactHashIndex` is 2.4× smaller than
+  `marisa-trie` on single words, 4.9× on random pairs and 3.3× at 10 M — and one byte per key
+  *larger* than a bare MPHF (1.26 against 0.26), which is exactly the fingerprint that buys the
+  membership check.
 - **Do the keys share a lot of structure** (a path namespace, a versioned catalogue, a cross product)?
   Then measure before choosing: that is the regime where an FST can beat a keyless hash outright.
 - **A `dict` / `HashMap` is not in the table** because it has no serialised form to measure. It cost
@@ -256,26 +257,27 @@ In decision order:
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
-Measured on the 1.1 code with its new perfect hash (min of 12 runs, four seconds between runs so
-clocks settle), and **validated against a second independent session**: every lookup row's minimum
-agrees within 2.1 %, the `std::HashMap` control within 0.2 %. Absolute numbers are machine-dependent
-— that control reads 14 % slower than in the session that produced the previous table, because an
-editor held a core for the whole of this one — so compare the **ratios**, and only within a column.
+Measured on 1.1.0 (one run of the example; each lookup cell is the minimum of five timed passes
+after a warm-up pass) on a machine idle throughout (load 1.0). Absolute numbers are
+machine-dependent — the `std::HashMap` control reads 21 % *faster* than in the session that
+produced the previous table, which had an editor holding a core — so compare the **ratios**, and
+only within a column: against that `HashMap`, `CompactHashIndex::id` is 0.44×, `id_unchecked`
+0.27×, `PerfectHashIndex::id` 0.95×, `StringIndex` 1.30×, `BTreeMap` 3.19×.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `CompactHashIndex::id` (fp=1) | **~88 ms** | ~142 ns | fingerprint-verified, `2^-8` false-positive rate |
-| lexindex `PerfectHashIndex::id_unchecked` | ~298 ms | **~90 ns** | closed vocabulary, no membership check |
-| `std::HashMap<String, u32>` | ~229 ms | ~311 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~305 ms | ~312 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~275 ms | ~430 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~224 ms | ~974 ns | in-RAM |
+| lexindex `CompactHashIndex::id` (fp=1) | **~69 ms** | ~106 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~246 ms | **~66 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~178 ms | ~245 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~255 ms | ~232 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~248 ms | ~317 ns | *and* prefix / range / fuzzy |
+| `std::BTreeMap<String, u32>` | ~197 ms | ~779 ns | in-RAM |
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
-**fastest of the structures in the table above** — roughly twice as quick as the SipHash `HashMap`
-(1.7–2.2× depending on the session; no probing, no membership comparison) *and* compact +
-serialisable. `CompactHashIndex::id` keeps a probabilistic membership check and *still* beats that
-`HashMap` on lookup (~1.6× here), and builds faster than it too. Full verification (`id`) pays one extra
+**fastest of the structures in the table above** — 3.7× as quick as the SipHash `HashMap` and 2.2×
+the FxHash one (no probing, no membership comparison) *and* compact + serialisable.
+`CompactHashIndex::id` keeps a probabilistic membership check and *still* beats the SipHash
+`HashMap` on lookup (2.3× here), and builds faster than it too. Full verification (`id`) pays one extra
 cache line + a key comparison; `StringIndex` trades more latency for **ordered / prefix / range /
 fuzzy** queries the hash maps cannot answer at all. So: `CompactHashIndex` when footprint dominates
 and a rare false positive is fine; `PerfectHashIndex::id` for exact membership + reverse;

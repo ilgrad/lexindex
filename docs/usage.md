@@ -188,7 +188,7 @@ dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zer
 
 ### Choosing the fingerprint width
 
-Size is the minimal perfect hash (0.30 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
+Size is the minimal perfect hash (0.26 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
 per key, and
 the membership false-positive rate is about `2^-fingerprint_bits` — a design rate for
 well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes;
@@ -198,12 +198,12 @@ same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 
 | `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
 |---:|---:|---:|---:|
-| 4 | **0.80** | 6.25% | 62 500 |
-| 6 | 1.05 | 1.56% | 15 625 |
-| 8 (= `fingerprint_bytes=1`, default) | 1.30 | 0.39% | 3 906 |
-| 12 | 1.80 | 0.024% | 244 |
-| 16 (= `fingerprint_bytes=2`) | 2.30 | 0.0015% | 15 |
-| 32 (= `fingerprint_bytes=4`) | 4.30 | 2.3×10⁻⁸% | ~0 |
+| 4 | **0.76** | 6.25% | 62 500 |
+| 6 | 1.01 | 1.56% | 15 625 |
+| 8 (= `fingerprint_bytes=1`, default) | 1.26 | 0.39% | 3 906 |
+| 12 | 1.76 | 0.024% | 244 |
+| 16 (= `fingerprint_bytes=2`) | 2.26 | 0.0015% | 15 |
+| 32 (= `fingerprint_bytes=4`) | 4.26 | 2.3×10⁻⁸% | ~0 |
 
 Pick by the probe mix, not the key count: the rate is per *non-member* lookup, so a workload that
 only ever queries members never sees a false positive at any width, while a filter in front of a
@@ -212,7 +212,7 @@ index costs 2.98 B/key on this corpus — `CompactHashIndex` is below it at *eve
 21 bits (rate 2⁻²¹ ≈ 5×10⁻⁵%).
 
 ```python
-tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.80 B/key, 1-in-16 false positives
+tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.76 B/key, 1-in-16 false positives
 tiny.fingerprint_bits                               # -> 4
 ```
 
