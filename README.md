@@ -234,6 +234,11 @@ assert_eq!(raw, id);
   replaced that MPH with one whose every array length is written and checked by this crate, which
   turns a crafted blob from undefined behaviour into a wrong answer. The cost is that pre-1.0 blobs
   cannot be read at all — they are refused with a message naming the version that wrote them.
+- **Blobs move forward, not backward — upgrade the reader first.** 1.1 reads every `BMP5` that 1.0
+  wrote, but the `BMP6` it writes is not readable by 1.0, which has never heard of that magic and
+  refuses it as a malformed blob rather than as a version mismatch. Only `PerfectHashIndex` is
+  affected: `BIX4`, `BCH6` and `OVL2` are byte-for-byte what 1.0 wrote, so a `StringIndex`,
+  `CompactHashIndex` or `Overlay` file crosses the two versions in either direction.
 - `mph` is opt-in-by-default: with `--no-default-features` the crate depends only on `fst` (and keeps
   `StringIndex`). Enabling `mph` pulls **no dependency at all** — the perfect hash is in-crate — so
   the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either build.
@@ -534,6 +539,26 @@ obligation is about the file, not the bytes. What the blob formats do and do not
 [`SECURITY.md`](SECURITY.md): a crafted blob answers wrong ids, never out-of-range ones; the
 checksums are integrity and not authentication; and the hashes are unseeded, so this is not a HashDoS
 defence.
+
+## Prior art
+
+`PerfectHashIndex` and `CompactHashIndex` are built on a minimal perfect hash implemented in this
+crate, and its construction is **PTHash's**: keys grouped into buckets by a first hash, a one-byte
+pilot per bucket searched largest-first, and a remap that pulls the slots above `n` down into the
+holes below it.
+
+- Giulio Ermanno Pibiri and Roberto Trani, *PTHash: Revisiting FCH Minimal Perfect Hashing*,
+  SIGIR 2021 — [arXiv:2104.10402](https://arxiv.org/abs/2104.10402).
+- Ragnar Groot Koerkamp, *PtrHash: Minimal Perfect Hashing at RAM Throughput*, 2025 —
+  [arXiv:2502.15539](https://arxiv.org/abs/2502.15539),
+  [`ptr_hash`](https://github.com/RagnarGrootKoerkamp/PtrHash).
+
+Until 1.0 the perfect hash **was** `ptr_hash`. It was not replaced for being slow — it still builds
+about an order of magnitude faster than this crate's does — but because its pilot table was
+serialised behind private fields, so a blob holding one could not be validated from outside the crate
+that owned it, and `from_bytes` and `load_mmap` had to be `unsafe fn` on both hash indexes. An MPH
+whose every array length is written and checked here makes those loaders safe, and that is the whole
+of the trade.
 
 ## License
 
