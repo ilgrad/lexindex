@@ -747,6 +747,50 @@ def _saved_and_loaded(ov, path, ctor):
     return lexindex.Overlay.load(path, ctor)
 
 
+def _edited_overlay(ctor):
+    ov = lexindex.Overlay(ctor(["apple", "banana", "cherry"]))
+    ov.add("durian")
+    ov.add("fig")
+    assert ov.remove("banana") and ov.remove("fig")
+    return ov
+
+
+@pytest.mark.parametrize(
+    "ctor", [lexindex.StringIndex, lexindex.PerfectHashIndex], ids=["string", "perfect"]
+)
+def test_overlay_compact_to_file_writes_the_compacted_base(ctor, tmp_path):
+    ov = _edited_overlay(ctor)
+    assert ov.compact_to_file(tmp_path / "base.bin") == len(ov) == 3
+    assert (tmp_path / "base.bin").read_bytes() == ov.compact().base().to_bytes()
+    back = lexindex.Overlay(ctor.load(tmp_path / "base.bin"))
+    assert sorted(back.keys()) == ["apple", "cherry", "durian"]
+
+
+@pytest.mark.parametrize(
+    "ctor", [lexindex.StringIndex, lexindex.PerfectHashIndex], ids=["string", "perfect"]
+)
+def test_overlay_compact_with_remap_carries_every_live_id(ctor):
+    ov = _edited_overlay(ctor)
+    old = {i: ov.key(i) for i in range(ov.id_space())}
+    fresh, remap = ov.compact_with_remap()
+    assert len(remap) == 8 * ov.id_space()
+    ids = [int.from_bytes(remap[i * 8 : (i + 1) * 8], sys.byteorder) for i in old]
+    for i, key in old.items():
+        if key is None:
+            assert ids[i] == 2**64 - 1
+        else:
+            assert fresh.key(ids[i]) == key
+    assert len(fresh) == 3 and len(ov) == 3, "the overlay it was taken from is untouched"
+
+
+def test_overlay_compact_family_needs_a_keyed_base(tmp_path):
+    ov = lexindex.Overlay(lexindex.CompactHashIndex(["apple"], 2))
+    with pytest.raises(TypeError, match="stores no keys"):
+        ov.compact_to_file(tmp_path / "base.bin")
+    with pytest.raises(TypeError, match="stores no keys"):
+        ov.compact_with_remap()
+
+
 def test_overlay_blob_refuses_the_wrong_base():
     ov = lexindex.Overlay(lexindex.StringIndex(["apple"]))
     blob = ov.to_bytes()

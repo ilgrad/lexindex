@@ -367,6 +367,18 @@ class Overlay:
         """Fold the edits into a fresh base. This renumbers: ids do not survive it. Raises
         ``TypeError`` on a :class:`CompactHashIndex` base."""
 
+    def compact_to_file(self, path: str | os.PathLike[str]) -> int:
+        """:meth:`compact` written straight to ``path`` as the base's own blob, without the live
+        keys ever being held in memory at once; load it with the base class's ``load`` or
+        ``load_mmap`` and wrap it in a new :class:`Overlay`. Returns how many keys the file holds.
+        Raises ``TypeError`` on a :class:`CompactHashIndex` base."""
+
+    def compact_with_remap(self) -> tuple[Overlay, bytes]:
+        """:meth:`compact`, and the renumbering it did: one native-endian ``uint64`` per id the
+        overlay had issued (``np.frombuffer(remap, dtype="uint64")``), the new id of each old one,
+        ``2**64 - 1`` where the id was retired. Raises ``TypeError`` on a
+        :class:`CompactHashIndex` base."""
+
     def base(self) -> StringIndex | PerfectHashIndex | CompactHashIndex:
         """The index underneath, unchanged and shared with this overlay."""
 

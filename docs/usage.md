@@ -252,6 +252,8 @@ ov.save("vocab.ovl")
 
 back = Overlay.load("vocab.ovl", PerfectHashIndex)   # pass the base class, not an instance
 folded = back.compact()                              # rebuild the base; this renumbers
+folded, remap = back.compact_with_remap()            # ...with old id -> new id, uint64 bytes
+n = back.compact_to_file("vocab2.bmp")               # the same rebuilt base, streamed to a file
 ```
 
 An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning until
@@ -414,15 +416,18 @@ let blob = ov.to_bytes()?;                // base + additions + tombstones in on
 let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes)?;
 assert_eq!(back.len(), 2);
 
-let folded = back.compact()?;             // rebuild the base from the live keys — this renumbers
+let (folded, remap) = back.compact_with_remap()?;   // rebuild the base — this renumbers…
 assert_eq!(folded.len(), 2);
+assert_eq!(folded.key(remap[cherry as usize]).as_deref(), Some("cherry")); // …and says how
 # Ok::<(), lexindex::IndexError>(())
 ```
 
 An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning for
 the overlay's lifetime; `compact()` is the one call that breaks that, and it is explicit for exactly
-that reason. Lookups cost one base lookup plus a bitset probe, and a miss in the base costs a hash
-map probe on top.
+that reason. `compact_with_remap()` returns the old → new id table alongside, and
+`compact_to_file(path)` writes the rebuilt base straight to a file, streaming the live keys from
+where the base holds them, for a base too large to hold twice. Lookups cost one base lookup plus a
+bitset probe, and a miss in the base costs a hash map probe on top.
 
 The base may be shared: `OverlayBase` is implemented for `Arc<I>`, so `Overlay<Arc<StringIndex>>`
 leaves the index usable and lets several overlays sit on one base. That is what the Python bindings

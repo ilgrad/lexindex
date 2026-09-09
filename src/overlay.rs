@@ -83,6 +83,44 @@ pub trait OverlayKeys: OverlayBase + Sized {
 
     /// Build a fresh base from `keys`, for [`Overlay::compact`].
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError>;
+
+    /// Build a fresh base straight to `path`, for [`Overlay::compact_to_file`]: the base's own
+    /// keys whose id passes `live`, then `additions`, as the blob [`rebuild`](Self::rebuild) and a
+    /// `save` would have written. Returns how many keys the file holds.
+    ///
+    /// The default materialises every live key and goes through `rebuild`; the two indexes with a
+    /// streaming builder override it, so the base is never held in memory twice.
+    fn rebuild_to_file(
+        &self,
+        live: &dyn Fn(u64) -> bool,
+        additions: &[&str],
+        path: &std::path::Path,
+    ) -> Result<usize, IndexError> {
+        let mut keys: Vec<String> = (0..self.base_len() as u64)
+            .filter(|&id| live(id))
+            .filter_map(|id| self.base_key(id))
+            .collect();
+        keys.extend(additions.iter().map(|k| (*k).to_owned()));
+        let fresh = Self::rebuild(keys)?;
+        crate::blob::write_atomically_with(path, |w| fresh.write_base(w))?;
+        Ok(fresh.base_len())
+    }
+}
+
+/// Two ascending streams as one ascending stream, for a sorted builder.
+fn merge_sorted<'a>(
+    a: impl Iterator<Item = String> + 'a,
+    b: impl Iterator<Item = &'a str> + 'a,
+) -> impl Iterator<Item = std::borrow::Cow<'a, str>> + 'a {
+    use std::borrow::Cow;
+    let mut a = a.peekable();
+    let mut b = b.peekable();
+    std::iter::from_fn(move || match (a.peek(), b.peek()) {
+        (Some(x), Some(y)) if x.as_str() > *y => b.next().map(Cow::Borrowed),
+        (Some(_), _) => a.next().map(Cow::Owned),
+        (None, Some(_)) => b.next().map(Cow::Borrowed),
+        (None, None) => None,
+    })
 }
 
 /// The `BuildHasher` of [`Overlay`]'s addition lookup, whose keys are already hashes: it hands back
@@ -396,6 +434,42 @@ impl<I: OverlayKeys> Overlay<I> {
     pub fn compact(self) -> Result<Self, IndexError> {
         Ok(Self::new(I::rebuild(self.keys())?))
     }
+
+    /// [`compact`](Self::compact) written straight to `path` as the base's own blob, without the
+    /// live keys ever being held in memory at once: the base streams its live keys from where it
+    /// holds them and the additions follow. Returns how many keys the file holds. Load it with the
+    /// base's `load` or `load_mmap` and wrap it in a new overlay. Ids are renumbered exactly as
+    /// `compact` renumbers them, so [`compact_with_remap`](Self::compact_with_remap) is how an id
+    /// held elsewhere is carried across.
+    pub fn compact_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<usize, IndexError> {
+        let base_n = self.base.base_len() as u64;
+        let additions: Vec<&str> = (0..self.added_starts.len())
+            .filter(|&i| !self.is_dead(base_n + i as u64))
+            .map(|i| self.added_key(i))
+            .collect();
+        self.base
+            .rebuild_to_file(&|id| !self.is_dead(id), &additions, path.as_ref())
+    }
+
+    /// [`compact`](Self::compact), and the renumbering it did: `remap[old]` is the new id of old
+    /// id `old`, `u64::MAX` where the id was retired. Its length is the old
+    /// [`id_space`](Self::id_space), so an id table kept elsewhere is carried across in one
+    /// indexing pass.
+    ///
+    /// A base whose [`rebuild`](OverlayKeys::rebuild) drops a key breaks the trait's contract, and
+    /// this panics on it rather than report the id as retired.
+    pub fn compact_with_remap(self) -> Result<(Self, Vec<u64>), IndexError> {
+        let fresh = Self::new(I::rebuild(self.keys())?);
+        let remap = (0..self.id_space())
+            .map(|id| match self.key(id) {
+                Some(key) => fresh
+                    .id(&key)
+                    .expect("the rebuilt base holds every key it was built from"),
+                None => u64::MAX,
+            })
+            .collect();
+        Ok((fresh, remap))
+    }
 }
 
 /// Share one base between several overlays, and let a caller hold on to it as well.
@@ -470,6 +544,20 @@ impl OverlayKeys for crate::StringIndex {
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError> {
         Self::build(keys)
     }
+
+    /// The base's keys come out of the transducer in order and its ids are ranks, so the live
+    /// ones merge with the sorted additions into the sorted builder without a sort of the whole.
+    fn rebuild_to_file(
+        &self,
+        live: &dyn Fn(u64) -> bool,
+        additions: &[&str],
+        path: &std::path::Path,
+    ) -> Result<usize, IndexError> {
+        let mut added = additions.to_vec();
+        added.sort_unstable();
+        let base = self.iter().filter(|(_, id)| live(*id)).map(|(k, _)| k);
+        Self::build_sorted_to_file(merge_sorted(base, added.into_iter()), path)
+    }
 }
 
 #[cfg(feature = "mph")]
@@ -506,6 +594,24 @@ impl OverlayKeys for crate::PerfectHashIndex {
 
     fn rebuild(keys: Vec<String>) -> Result<Self, IndexError> {
         Self::build(keys)
+    }
+
+    /// The streaming builder replays its source twice, and this one is replayable: the arena in
+    /// id order, skipping the retired, then the additions.
+    #[cfg(feature = "mmap")]
+    fn rebuild_to_file(
+        &self,
+        live: &dyn Fn(u64) -> bool,
+        additions: &[&str],
+        path: &std::path::Path,
+    ) -> Result<usize, IndexError> {
+        let n = self.len() as u64;
+        Self::build_to_file(path, || {
+            (0..n)
+                .filter(|&id| live(id))
+                .filter_map(|id| self.key(id as u32))
+                .chain(additions.iter().copied())
+        })
     }
 }
 
@@ -1212,6 +1318,97 @@ mod tests {
             (4, Some(4), None)
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A base that can only rebuild, so `compact_to_file` runs on the trait's default.
+    struct VecBase(Vec<String>);
+
+    impl OverlayBase for VecBase {
+        const BASE_TAG: u8 = 201;
+        const EXACT_MEMBERSHIP: bool = true;
+
+        fn base_len(&self) -> usize {
+            self.0.len()
+        }
+
+        fn base_id(&self, key: &str) -> Option<u64> {
+            self.0.iter().position(|k| k == key).map(|i| i as u64)
+        }
+
+        fn base_to_bytes(&self) -> Result<Vec<u8>, IndexError> {
+            Ok(self.0.join("\n").into_bytes())
+        }
+    }
+
+    impl OverlayKeys for VecBase {
+        fn base_key(&self, id: u64) -> Option<String> {
+            self.0.get(id as usize).cloned()
+        }
+
+        fn rebuild(mut keys: Vec<String>) -> Result<Self, IndexError> {
+            keys.sort_unstable();
+            keys.dedup();
+            Ok(Self(keys))
+        }
+    }
+
+    fn fruit<I: OverlayKeys>(base: I) -> Overlay<I> {
+        let mut ov = Overlay::new(base);
+        ov.add("kiwi");
+        ov.add("fig");
+        assert!(ov.remove("banana") && ov.remove("fig"));
+        ov
+    }
+
+    /// `compact_to_file` writes the blob `compact` would have saved — streamed on the two indexes
+    /// that can, through the default on a base that can only rebuild — and returns the live count.
+    #[test]
+    fn compact_to_file_writes_what_compact_saves() {
+        let dir = std::env::temp_dir().join(format!("lexindex-ovl-compact-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("base.bin");
+        fn check<I: OverlayKeys>(ov: Overlay<I>, path: &std::path::Path) {
+            assert_eq!(ov.compact_to_file(path).unwrap(), 3);
+            let folded = ov.compact().unwrap();
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                folded.base.base_to_bytes().unwrap()
+            );
+        }
+        let keys = ["apple", "banana", "cherry"];
+        check(fruit(StringIndex::build(keys).unwrap()), &path);
+        #[cfg(feature = "mph")]
+        check(fruit(crate::PerfectHashIndex::build(keys).unwrap()), &path);
+        check(
+            fruit(VecBase::rebuild(keys.map(str::to_owned).to_vec()).unwrap()),
+            &path,
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Every id the overlay had issued maps to the id of the same key in the rebuilt base, and a
+    /// retired one to `u64::MAX`.
+    #[test]
+    fn compact_with_remap_carries_every_live_id_across() {
+        fn check<I: OverlayKeys>(ov: Overlay<I>) {
+            let old: Vec<Option<String>> = (0..ov.id_space()).map(|id| ov.key(id)).collect();
+            let (fresh, remap) = ov.compact_with_remap().unwrap();
+            assert_eq!(remap.len(), old.len());
+            assert_eq!(fresh.len(), 3);
+            for (id, key) in old.iter().enumerate() {
+                match key {
+                    Some(k) => assert_eq!(fresh.key(remap[id]).as_deref(), Some(k.as_str())),
+                    None => assert_eq!(remap[id], u64::MAX),
+                }
+            }
+        }
+        let keys = ["apple", "banana", "cherry"];
+        check(fruit(StringIndex::build(keys).unwrap()));
+        #[cfg(feature = "mph")]
+        check(fruit(crate::PerfectHashIndex::build(keys).unwrap()));
+        check(fruit(
+            VecBase::rebuild(keys.map(str::to_owned).to_vec()).unwrap(),
+        ));
     }
 
     /// The length a base declares is the length it writes, on every base and on the defaults.

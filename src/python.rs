@@ -1287,7 +1287,7 @@ macro_rules! on_keyed_base {
 
 fn no_keys() -> PyErr {
     PyTypeError::new_err(
-        "a CompactHashIndex stores no keys, so an overlay over it has no key(), keys() or compact()",
+        "a CompactHashIndex stores no keys, so an overlay over it has no key(), keys(), compact(), compact_to_file() or compact_with_remap()",
     )
 }
 
@@ -1441,6 +1441,43 @@ impl PyOverlay {
                 OverlayInner::Compact(_) => return Err(no_keys()),
             }))
         })
+    }
+
+    /// `compact` written straight to `path` as the base's own blob, without the live keys ever
+    /// being held in memory at once; load it with the base class's `load` or `load_mmap` and wrap
+    /// it in a new `Overlay`. Returns how many keys the file holds. Raises `TypeError` on a
+    /// `CompactHashIndex` base.
+    fn compact_to_file(&self, py: Python<'_>, path: PathBuf) -> PyResult<usize> {
+        let guard = self.lock(py);
+        let inner = &*guard;
+        py.detach(|| on_keyed_base!(inner, |ov| ov.compact_to_file(&path).map_err(to_py)?))
+    }
+
+    /// `compact`, and the renumbering it did: one native-endian `uint64` per id the overlay had
+    /// issued (`np.frombuffer(remap, dtype="uint64")`), the new id of each old one, `2**64 - 1`
+    /// where the id was retired -- so an id table kept elsewhere is carried across in one indexing
+    /// pass. Raises `TypeError` on a `CompactHashIndex` base.
+    fn compact_with_remap<'py>(&self, py: Python<'py>) -> PyResult<(Self, Bound<'py, PyBytes>)> {
+        let guard = self.lock(py);
+        let inner = &*guard;
+        let (fresh, remap) = py.detach(|| match inner {
+            OverlayInner::String(ov) => ov
+                .clone()
+                .compact_with_remap()
+                .map(|(f, r)| (OverlayInner::String(f), r))
+                .map_err(to_py),
+            OverlayInner::Perfect(ov) => ov
+                .clone()
+                .compact_with_remap()
+                .map(|(f, r)| (OverlayInner::Perfect(f), r))
+                .map_err(to_py),
+            OverlayInner::Compact(_) => Err(no_keys()),
+        })?;
+        let mut packed = Vec::with_capacity(remap.len() * 8);
+        for id in remap {
+            packed.extend_from_slice(&id.to_ne_bytes());
+        }
+        Ok((Self::wrap(fresh), PyBytes::new(py, &packed)))
     }
 
     /// The index underneath, unchanged and shared with this overlay.

@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format follows
   more for them: the check trusts what it saw once, so map a copy you own. `docs/usage.md` has the
   loader matrix. The stubs no longer say a mapped hash index is "validated as in `from_bytes`": its
   header is, its payload checksum is skipped by design.
+- **`Overlay::compact_to_file(path)` and `compact_with_remap()`.** The first writes the rebuilt
+  base straight to a file, streaming the live keys from where the base holds them -- `StringIndex`
+  merges its ordered iterator with the sorted additions into `build_sorted_to_file`,
+  `PerfectHashIndex` replays them into `build_to_file` -- so a base too large to hold twice can
+  still be compacted; the second is `compact` plus the old-id → new-id table (`u64::MAX` for a
+  retired id). Behind them, `OverlayKeys::rebuild_to_file`, with a default that materialises and
+  rebuilds. Python: `Overlay.compact_to_file(path)` and `compact_with_remap()`, the table as
+  native-endian `uint64` bytes.
 - **Python `ids_into(keys, out)`** on all three index types: `ids_of_bytes` written into a buffer
   the caller owns -- a `numpy` array, an `array.array`, a writable `memoryview` -- so a hot loop can
   reuse one allocation. A read-only, strided or wrongly typed buffer is a `BufferError`, one shorter
