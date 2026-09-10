@@ -1,0 +1,129 @@
+Memory of the perfect hash's construction inside the streamed CompactHashIndex build. src/mphf.rs `phase()` with
+VmRSS/VmHWM columns (the cfg widened to non-test builds for the runs below, then restored), driven by
+examples/peak.rs `compact-stream` (one fingerprint byte, LEXINDEX_PEAK_DIR=local/peak on /home, not tmpfs).
+2026-09-10 05:00-06:20, lexindex 71363e5 (+ the build-memory change this commit adds), Ryzen 7 5800HS, 38 GB RAM,
+Fedora 44, editor open, nothing else running. `rss` is the current VmRSS at the mark, `hwm` the process high-water
+mark so far; the process baseline (vocabulary, 29 MB) is inside both. Every number is one run; the digest rows
+prove the blobs identical, which is what lets the profile be compared across runs at all.
+
+10^8 before (71363e5): level-1 pieces held whole until a merge, level-2 grouping with `his` + `from`, holes listed.
+phase chunks                1527.99 ms  rss    137 MB  hwm    288 MB
+phase merge                   35.81 ms  rss    193 MB  hwm    288 MB
+phase his                     14.12 ms  rss    216 MB  hwm    288 MB
+phase count                   13.50 ms  rss    217 MB  hwm    288 MB
+phase level pairs             48.65 ms  rss    240 MB  hwm    288 MB
+phase chunks                  23.46 ms  rss    240 MB  hwm    288 MB
+phase merge                    0.29 ms  rss    240 MB  hwm    288 MB
+phase level remaining          5.80 ms  rss    217 MB  hwm    288 MB
+phase his                      3.58 ms  rss    171 MB  hwm    288 MB
+phase count                    0.38 ms  rss    171 MB  hwm    288 MB
+phase level pairs              0.93 ms  rss    171 MB  hwm    288 MB
+phase chunks                   2.24 ms  rss    171 MB  hwm    288 MB
+CompactStream n  99999999  build 50853.9 ms  keys    29.4 MB (  0.3 B/key)  peak   302.2 MB (  3.0 B/key)  build adds   272.8 MB (  2.7 B/key)  blob  1.26 B/key
+
+10^8 after step 1 (pieces settle as they finish, grouping without `his`/`from`, holes yielded lazily):
+phase chunks                1463.23 ms  rss    136 MB  hwm    288 MB
+phase merge                   12.85 ms  rss    159 MB  hwm    288 MB
+phase count                   10.07 ms  rss    159 MB  hwm    288 MB
+phase level pairs             30.60 ms  rss    182 MB  hwm    288 MB
+phase chunks                  25.01 ms  rss    182 MB  hwm    288 MB
+phase merge                    0.14 ms  rss    182 MB  hwm    288 MB
+phase level remaining         12.09 ms  rss    159 MB  hwm    288 MB
+phase count                    0.24 ms  rss    159 MB  hwm    288 MB
+CompactStream n  99999999  build 51202.2 ms  keys    29.2 MB (  0.3 B/key)  peak   302.1 MB (  3.0 B/key)  build adds   272.9 MB (  2.7 B/key)  blob  1.26 B/key
+
+10^8 after step 2 (a stream's chunk read into a per-thread buffer instead of a fresh Vec): no change --
+phase chunks                1494.76 ms  rss    136 MB  hwm    288 MB
+phase merge                   13.92 ms  rss    159 MB  hwm    288 MB
+phase chunks                  22.21 ms  rss    183 MB  hwm    288 MB
+phase merge                    0.16 ms  rss    183 MB  hwm    288 MB
+
+The same binary under glibc malloc settings, to tell live data from allocator retention (peak = level-2 "chunks"):
+=== X=0
+phase chunks                1467.05 ms  rss    136 MB  hwm    287 MB
+phase merge                   12.99 ms  rss    159 MB  hwm    287 MB
+phase level pairs             34.05 ms  rss    182 MB  hwm    287 MB
+phase chunks                  18.77 ms  rss    182 MB  hwm    287 MB
+phase merge                    0.13 ms  rss    182 MB  hwm    287 MB
+phase level remaining         12.05 ms  rss    160 MB  hwm    287 MB
+phase level pairs              1.05 ms  rss    160 MB  hwm    287 MB
+phase chunks                   1.90 ms  rss    160 MB  hwm    287 MB
+=== MALLOC_ARENA_MAX=1
+phase chunks                1508.30 ms  rss    129 MB  hwm    288 MB
+phase merge                    8.60 ms  rss    138 MB  hwm    288 MB
+phase level pairs             31.41 ms  rss    143 MB  hwm    288 MB
+phase chunks                  23.77 ms  rss    144 MB  hwm    288 MB
+phase merge                    0.14 ms  rss    144 MB  hwm    288 MB
+phase level remaining         10.51 ms  rss    144 MB  hwm    288 MB
+phase level pairs              1.32 ms  rss    144 MB  hwm    288 MB
+phase chunks                   1.97 ms  rss    144 MB  hwm    288 MB
+=== MALLOC_MMAP_THRESHOLD_=131072
+phase chunks                1868.65 ms  rss     90 MB  hwm    288 MB
+phase merge                   15.04 ms  rss     88 MB  hwm    288 MB
+phase level pairs             32.41 ms  rss    110 MB  hwm    288 MB
+phase chunks                  23.29 ms  rss    112 MB  hwm    288 MB
+phase merge                    0.60 ms  rss    112 MB  hwm    288 MB
+phase level remaining         12.02 ms  rss     88 MB  hwm    288 MB
+phase level pairs              1.17 ms  rss     89 MB  hwm    288 MB
+phase chunks                   2.25 ms  rss     89 MB  hwm    288 MB
+With every block over 128 KB mmap'd and returned on free, the construction's peak is 112 - 29 = 83 MB = 0.83 B/key,
+exactly the live data (seeds 0.22 + occupancy 0.125 + bumped keys 0.24 + the second level's keys 0.24); the default
+allocator kept 70 MB more, most of it blocks the worker threads allocated and the main thread freed. Hence step 3.
+
+10^8 after step 3 (the chunks' bumped keys drained in chunk order into one list reserved by the main thread):
+phase start                    0.02 ms  rss     35 MB  hwm    288 MB
+phase chunks                1479.77 ms  rss    136 MB  hwm    288 MB
+phase merge                    0.44 ms  rss    136 MB  hwm    288 MB
+phase level pairs             35.02 ms  rss    160 MB  hwm    288 MB
+phase chunks                  22.61 ms  rss    160 MB  hwm    288 MB
+phase merge                    0.06 ms  rss    160 MB  hwm    288 MB
+
+10^9 after step 3, the phases (the process peak of this instrumented run was cut from the log; see the headline):
+phase start                    0.02 ms  rss     31 MB  hwm    288 MB
+phase chunks               20792.79 ms  rss    638 MB  hwm    638 MB
+phase merge                    3.57 ms  rss    644 MB  hwm    644 MB
+phase level pairs            647.54 ms  rss    873 MB  hwm    897 MB
+phase chunks                 161.44 ms  rss    890 MB  hwm    897 MB
+phase merge                    0.21 ms  rss    890 MB  hwm    897 MB
+phase level remaining        159.41 ms  rss    660 MB  hwm    897 MB
+After the first level the construction holds 0.61 B/key (638 - 31 MB over 997.5 M keys): the table, its occupancy
+map, the bumped keys and the chunk buffers in flight; the second level's grouping adds its keys (0.24 B/key) and
+the peak is 0.87 B/key. Before, the first level's pieces were all alive until a merge that copied them again.
+
+Headline, final code (step 4 also writes the perfect hash into the file section by section instead of through a
+`to_bytes` copy, 0.26 B/key that would otherwise sit on top of the table at write time), default features:
+CompactStream n 997503996  build 586610.4 ms  keys    29.3 MB (  0.0 B/key)  peak   941.6 MB (  0.9 B/key)  build adds   912.3 MB (  0.9 B/key)  blob  1.26 B/key
+Before, same keys, same machine (bench/results/peak-compact-2026-09-10-arz-33fa8d7.txt):
+CompactStream n 997503996  build 603815.5 ms  keys    29.3 MB (  0.0 B/key)  peak  1717.1 MB (  1.7 B/key)  build adds  1687.8 MB (  1.7 B/key)  blob  1.26 B/key
+
+Byte identity (local/blobdigest: FNV-1a 64 over the blob; `mem` = `build` + `to_bytes`, `file` = `build_to_file`):
+before
+compact-mem   n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.6 s
+compact-file  n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.2 s
+perfect-mem   n    1000000  bytes     21361619  fnv 8388281d23c679f2  0.7 s
+compact-file  n  100000000  bytes    126070027  fnv b1b96c2807e95e4d  50.9 s
+after (final code)
+compact-mem   n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.7 s
+compact-file  n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.3 s
+compact-file  n  100000000  bytes    126070027  fnv b1b96c2807e95e4d  51.7 s
+plus the golden fixtures and `cargo test --release` (205 + 54 tests) green at every step.
+
+In-memory build time, 10^7, `compact-listed`, HEAD (H) and this change (N), alternated H N N H, three rounds after a
+warm-up of each (the CPU is a mobile part; the first minute after idling runs faster):
+round 1
+CompactListed n  10000000  build   842.5 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.7 MB ( 90.3 B/key)  build adds   249.7 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   837.9 ms  keys   652.9 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   837.7 ms  keys   653.0 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.1 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   841.5 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.8 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+round 2
+CompactListed n  10000000  build   832.2 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.9 MB ( 90.3 B/key)  build adds   249.9 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   848.0 ms  keys   652.8 MB ( 65.3 B/key)  peak   902.5 MB ( 90.3 B/key)  build adds   249.8 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   837.0 ms  keys   652.8 MB ( 65.3 B/key)  peak   902.8 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   842.6 ms  keys   652.9 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.1 MB ( 25.0 B/key)  blob  1.26 B/key
+round 3
+CompactListed n  10000000  build   846.1 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.7 MB ( 90.3 B/key)  build adds   249.8 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   831.6 ms  keys   653.1 MB ( 65.3 B/key)  peak   903.1 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   832.1 ms  keys   653.1 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   837.8 ms  keys   653.0 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+N - H per pair: -4.6, -3.8, +15.8, -5.6, -14.5, -5.7 ms -> mean -3 ms on 840 (noise); `build adds` 250 MB both.
+The streamed 10^8 build: 50.9 s before, 51.7 after (one run each; the generator is 36 s of it).

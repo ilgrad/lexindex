@@ -33,8 +33,9 @@ All notable changes to this project are documented here. The format follows
   **302 MB peak against 8 834 MB** for the same keys handed to `build` as a list (254 against
   903 at 10 M); the streamed build took 52 s, 36 s of it generating the keys, against 10 s for
   the list build with its keys already made. At 10⁹ keys, where the list would need about 90 GB,
-  the streamed build peaks at **1.7 GB** — the perfect hash's own construction, 1.7 bytes per key
-  — and takes ten minutes, six of them the generator. Returns the number of distinct keys; an iterable
+  the streamed build peaks at **0.94 GB** — the perfect hash's own construction, 0.9 bytes per
+  key, 0.6 of them the table being built and the keys its first level bumped — and takes ten
+  minutes, six of them the generator. Returns the number of distinct keys; an iterable
   that raises aborts the build with the target untouched; nothing is left beside the output on
   any exit path.
 - **`PerfectHashIndex::build_with_fingerprints`**, and `build_to_file_with_fingerprints` (Python:

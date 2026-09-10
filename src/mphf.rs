@@ -46,8 +46,8 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::IndexError;
 
@@ -312,48 +312,33 @@ impl Map {
     }
 
     /// The values below `n` no key landed on, in order: a word of every plane at a time, their
-    /// zero bits merged in bit order; a range of words per thread.
-    fn holes(&self, n: u64, threads: usize) -> Vec<u64> {
+    /// zero bits merged in bit order. Yielded as found, so that the list never exists.
+    fn holes(&self, n: u64) -> impl Iterator<Item = u64> + '_ {
         let planes = 1usize << self.shift;
         let words = if n == 0 {
             0
         } else {
             (((n - 1) >> self.shift) / 64 + 1) as usize
         };
-        let part = words.div_ceil(threads.max(1)).max(1 << 14);
-        let of = |range: std::ops::Range<usize>| {
-            let mut holes = Vec::new();
-            for w in range {
-                let mut free = 0u64;
-                for p in 0..planes {
-                    free |= !self.words[p * self.plane + w];
-                }
-                while free != 0 {
+        (0..words).flat_map(move |w| {
+            let mut free = 0u64;
+            for p in 0..planes {
+                free |= !self.words[p * self.plane + w];
+            }
+            std::iter::from_fn(move || {
+                (free != 0).then(|| {
                     let j = free.trailing_zeros();
                     free &= free - 1;
-                    let i = (w as u64 * 64 + u64::from(j)) << self.shift;
-                    for p in 0..planes {
-                        let v = i | p as u64;
-                        if v < n && self.words[p * self.plane + w] >> j & 1 == 0 {
-                            holes.push(v);
-                        }
-                    }
-                }
-            }
-            holes
-        };
-        if words <= part {
-            return of(0..words);
-        }
-        std::thread::scope(|scope| {
-            let parts: Vec<_> = (0..words)
-                .step_by(part)
-                .map(|w| scope.spawn(move || of(w..(w + part).min(words))))
-                .collect();
-            parts
-                .into_iter()
-                .flat_map(|p| p.join().expect("a hole scan panicked"))
-                .collect()
+                    j
+                })
+            })
+            .flat_map(move |j| {
+                let i = (w as u64 * 64 + u64::from(j)) << self.shift;
+                (0..planes).filter_map(move |p| {
+                    let v = i | p as u64;
+                    (v < n && self.words[p * self.plane + w] >> j & 1 == 0).then_some(v)
+                })
+            })
         })
     }
 
@@ -446,12 +431,22 @@ fn phase(label: &str) {
     if std::env::var_os("LEXINDEX_MPHF_PHASES").is_none() {
         return;
     }
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = |key: &str| -> u64 {
+        status
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+            .unwrap_or(0)
+    };
     LAST.with(|c| {
         let now = Instant::now();
         if let Some(prev) = c.get() {
             eprintln!(
-                "phase {label:<20} {:>8.2} ms",
-                (now - prev).as_secs_f64() * 1e3
+                "phase {label:<20} {:>8.2} ms  rss {:>6} MB  hwm {:>6} MB",
+                (now - prev).as_secs_f64() * 1e3,
+                kb("VmRSS:") / 1024,
+                kb("VmHWM:") / 1024,
             );
         }
         c.set(Some(now));
@@ -900,49 +895,43 @@ impl Run<'_> {
 }
 
 /// The keys of a level after the first, grouped by bucket in bucket order — a counting sort of
-/// their level hashes — with the hashes they came from alongside, for the next level. The order
-/// inside a bucket does not reach its seed. Each thread scatters a range of buckets, so that
-/// its writes stay together.
-fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> (Vec<u64>, Vec<u64>) {
-    let his: Vec<u64> = hs.iter().map(|&h| level_hash(h, lv)).collect();
-    phase("his");
+/// their level hashes. The order inside a bucket does not reach its seed. Each thread scatters
+/// a range of buckets, so that its writes stay together; the hash is computed again on each
+/// pass rather than listed, since the list would be as large as the result.
+fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> Vec<u64> {
     let mut at = vec![0u32; buckets as usize + 1];
-    for &hi in &his {
-        at[scale(hi, buckets) as usize + 1] += 1;
+    for &h in hs {
+        at[scale(level_hash(h, lv), buckets) as usize + 1] += 1;
     }
     for b in 0..buckets as usize {
         at[b + 1] += at[b];
     }
     phase("count");
     let mut keys = vec![0u64; hs.len()];
-    let mut from = vec![0u64; hs.len()];
     let per = (buckets as usize).div_ceil(threads.max(1)).max(1 << 12);
     std::thread::scope(|scope| {
-        let (mut keys, mut from) = (&mut keys[..], &mut from[..]);
+        let mut keys = &mut keys[..];
         for b0 in (0..buckets as usize).step_by(per) {
             let b1 = (b0 + per).min(buckets as usize);
             let (k0, k1) = (at[b0] as usize, at[b1] as usize);
-            let (out_keys, rest) = std::mem::take(&mut keys).split_at_mut(k1 - k0);
-            let (out_from, rest_from) = std::mem::take(&mut from).split_at_mut(k1 - k0);
+            let (out, rest) = std::mem::take(&mut keys).split_at_mut(k1 - k0);
             keys = rest;
-            from = rest_from;
             let slots = &at[b0..=b1];
-            let his = &his;
             scope.spawn(move || {
                 let mut next: Vec<u32> = slots.iter().map(|&s| s - k0 as u32).collect();
-                for (&hi, &h) in his.iter().zip(hs) {
+                for &h in hs {
+                    let hi = level_hash(h, lv);
                     let b = scale(hi, buckets) as usize;
                     if (b0..b1).contains(&b) {
                         let slot = &mut next[b - b0];
-                        out_keys[*slot as usize] = hi;
-                        out_from[*slot as usize] = h;
+                        out[*slot as usize] = hi;
                         *slot += 1;
                     }
                 }
             });
         }
     });
-    (keys, from)
+    keys
 }
 
 /// Whether `hashes` are sorted: in parts on `threads` when there are enough of them.
@@ -1017,17 +1006,19 @@ impl<'a> Feed<'a> {
         }
     }
 
-    /// The next chunk and its keys, grouped by bucket; `None` once every chunk is claimed.
-    fn next(&self, starts: &[u64], buckets: u64) -> Option<(usize, std::borrow::Cow<'_, [u64]>)> {
+    /// The next chunk and its keys, grouped by bucket; `None` once every chunk is claimed. A
+    /// stream's chunk is read into `buf`, the caller's, so that a thread reading chunk after
+    /// chunk fills one buffer rather than growing a fresh one each time.
+    fn next<'b>(
+        &'b self,
+        starts: &[u64],
+        buckets: u64,
+        buf: &'b mut Vec<u64>,
+    ) -> Option<(usize, &'b [u64])> {
         match self {
             Feed::Slice { keys, bounds, next } => {
                 let k = next.fetch_add(1, Ordering::Relaxed);
-                (k + 1 < bounds.len()).then(|| {
-                    (
-                        k,
-                        std::borrow::Cow::Borrowed(&keys[bounds[k]..bounds[k + 1]]),
-                    )
-                })
+                (k + 1 < bounds.len()).then(|| (k, &keys[bounds[k]..bounds[k + 1]]))
             }
             Feed::Stream(cutter) => {
                 let mut c = cutter.lock().expect("a chunk reader panicked");
@@ -1039,18 +1030,18 @@ impl<'a> Feed<'a> {
                 // end of the stream. The key that ends it is kept for the chunk it belongs to,
                 // which is not necessarily the next: a chunk can be empty.
                 let limit = starts.get(k + 1).copied();
-                let mut chunk = Vec::new();
+                buf.clear();
                 let mut carried = c.pending.take();
                 while let Some(h) = carried.take().or_else(|| c.hashes.next()) {
                     if limit.is_some_and(|l| scale(h, buckets) >= l) {
                         c.pending = Some(h);
                         break;
                     }
-                    chunk.push(h);
+                    buf.push(h);
                 }
                 c.next += 1;
-                c.fed += chunk.len() as u64;
-                Some((k, std::borrow::Cow::Owned(chunk)))
+                c.fed += buf.len() as u64;
+                Some((k, &buf[..]))
             }
         }
     }
@@ -1064,22 +1055,16 @@ impl<'a> Feed<'a> {
     }
 }
 
-/// What placing a run of buckets produced.
+/// What a placed chunk keeps for the gaps beside it, until both are placed.
 struct Piece {
-    /// Its first bucket.
-    first: u32,
-    seeds: Vec<u8>,
     /// Occupancy of the values it placed, from value `origin`.
     map: Map,
     origin: u64,
-    /// CSR offsets of the gap's buckets after it, [`Run::start`]-style, into `tail_keys`; empty
-    /// for a gap's own.
+    /// CSR offsets of the gap's buckets after it, [`Run::start`]-style, into `tail_keys`.
     tail: Vec<u32>,
     /// The keys of the gap's buckets, copied out so that the chunk's own keys can go once it is
     /// placed — a first level fed from a file holds only the chunks in flight.
     tail_keys: Vec<u64>,
-    /// The keys of the buckets it bumped.
-    bumped: Vec<u64>,
 }
 
 /// The keys of the buckets `from..to` of `run` that `seeds` bumped, appended to `out`.
@@ -1221,20 +1206,21 @@ impl V2 {
         while remaining.len() as u64 > TAIL_KEYS && levels.len() < MAX_LEVELS {
             let lv = levels.len();
             let buckets = Level::shape(remaining.len() as u64).buckets;
-            let (keys, from) = group_by_bucket(&remaining, lv, buckets, threads);
+            let keys = group_by_bucket(&remaining, lv, buckets, threads);
             phase("level pairs");
-            let (level, taken, bumped, _) =
+            let (level, taken, _, _) =
                 Self::build_level(keys.len() as u64, Source::Slice(&keys), threads, true);
-            // A level that bumps everything has spread nothing; the tail takes the keys as they are.
-            if bumped.len() == keys.len() {
+            drop(keys);
+            // The keys it bumped, in the order they came: a bucket's order does not reach its
+            // seed. A level that bumps everything has spread nothing; the tail takes the keys
+            // as they are.
+            let fed = remaining.len();
+            remaining
+                .retain(|&h| level.seeds[scale(level_hash(h, lv), level.buckets) as usize] == 0);
+            if remaining.len() == fed {
                 break;
             }
-            remaining = keys
-                .iter()
-                .zip(&from)
-                .filter(|(hi, _)| level.seeds[scale(**hi, level.buckets) as usize] == 0)
-                .map(|(_, &h)| h)
-                .collect();
+            phase("level remaining");
             levels.push(level);
             maps.push(taken);
         }
@@ -1274,11 +1260,7 @@ impl V2 {
         }
         phase("remap set");
         let holes = match maps.first() {
-            Some(first) => {
-                let holes = first.holes(n, threads);
-                phase("holes scan");
-                Ef::encode(holes.into_iter(), placed, n)
-            }
+            Some(first) => Ef::encode(first.holes(n), placed, n),
             None => Ef::default(),
         };
         debug_assert!(holes.len == placed || maps.is_empty());
@@ -1324,6 +1306,15 @@ impl V2 {
         // The smallest value a key of bucket `b` can take.
         let lo = |b: u64| ((b as u128 * n as u128) / buckets as u128) as u64;
         let feed = Feed::new(source, &starts, buckets);
+        // What a stream's chunk buffer holds: the longest chunk's share of the keys, and the
+        // spread of a Poisson count on top.
+        let expected = match feed {
+            Feed::Stream(_) => {
+                let share = (longest as u128 * n as u128 / buckets.max(1) as u128) as usize;
+                share + 4 * (share as f64).sqrt() as usize
+            }
+            Feed::Slice { .. } => 0,
+        };
         let shift = stride_for(slice).trailing_zeros();
         let align = |v: u64| v & !((64 << shift) - 1);
         let word = |o: u64| (o >> shift) as i64 / 64;
@@ -1333,25 +1324,71 @@ impl V2 {
         // buckets can reach — a few dozen KiB, which is what keeps the search in L1. A gap is
         // placed by whichever thread finished the later of its two chunks, against a map
         // prefilled from theirs, which is all that reaches it, over the gap keys the left chunk
-        // copied out. The maps are merged afterwards, and the gap at the level's end, whose
-        // values wrap, is placed then, against everything.
-        let pieces: Vec<OnceLock<Piece>> = (0..chunks).map(|_| OnceLock::new()).collect();
-        let gaps: Vec<OnceLock<Piece>> = (1..chunks).map(|_| OnceLock::new()).collect();
+        // copied out. Seeds go into the level's table as each piece is placed, and a chunk's
+        // map into the level's once the gaps on both sides of it are — so that a level holds
+        // the pieces in flight, not all of them — and the gap at the level's end, whose values
+        // wrap, is placed last, against everything. The keys the chunks bumped are listed in
+        // chunk order as the chunks finish — a chunk's once every chunk before it is in, by
+        // whichever thread finds it so — and the gaps' after them: the order the level hands
+        // on. The list is reserved here, at about the share a level bumps, so that a worker's
+        // append does not move it into that worker's heap, where it would outlive its use.
+        let placed = Mutex::new((vec![0u8; buckets as usize], Map::new(n, shift)));
+        let pieces: Vec<Mutex<Option<Piece>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
+        let bumps: Vec<Mutex<Option<Vec<u64>>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
+        let bumped = Mutex::new((0usize, Vec::with_capacity(n as usize / 32)));
+        let gap_bumps: Vec<OnceLock<Vec<u64>>> = (1..chunks).map(|_| OnceLock::new()).collect();
+        let end_tail: OnceLock<(Vec<u32>, Vec<u64>)> = OnceLock::new();
         let done: Vec<AtomicBool> = (0..chunks).map(|_| AtomicBool::new(false)).collect();
         let claimed: Vec<AtomicBool> = (1..chunks).map(|_| AtomicBool::new(false)).collect();
+        // Gaps yet to read each chunk's map: one on each side, none past the level's ends.
+        let readers: Vec<AtomicUsize> = (0..chunks)
+            .map(|k| AtomicUsize::new(usize::from(k > 0) + usize::from(k + 1 < chunks)))
+            .collect();
         let level_ref = &level;
+        let settle = |first: u64, seeds: &[u8]| {
+            let mut placed = placed.lock().expect("a chunk placer panicked");
+            placed.0[first as usize..][..seeds.len()].copy_from_slice(seeds);
+        };
+        let drain = || {
+            let mut out = bumped.lock().expect("a chunk placer panicked");
+            while out.0 < chunks {
+                let Some(keys) = bumps[out.0].lock().expect("a chunk placer panicked").take()
+                else {
+                    break;
+                };
+                out.1.extend(keys);
+                out.0 += 1;
+            }
+        };
+        let release = |k: usize| {
+            let piece = pieces[k]
+                .lock()
+                .expect("a chunk placer panicked")
+                .take()
+                .expect("a chunk is released once, after it is placed");
+            let mut placed = placed.lock().expect("a chunk placer panicked");
+            placed.1.merge(&piece.map, word(piece.origin));
+            drop(placed);
+            if k + 1 == chunks {
+                assert!(
+                    end_tail.set((piece.tail, piece.tail_keys)).is_ok(),
+                    "one chunk ends the level"
+                );
+            }
+        };
         std::thread::scope(|scope| {
             for _ in 0..threads.clamp(1, chunks) {
                 scope.spawn(|| {
                     let mut start = vec![0u32; longest as usize + 1];
-                    while let Some((k, chunk)) = feed.next(&starts, buckets) {
+                    let mut buf = Vec::with_capacity(expected);
+                    while let Some((k, chunk)) = feed.next(&starts, buckets, &mut buf) {
                         let (first, end, last) = (first_of(k), run_end(k), end_of(k));
                         let len = (last - first) as usize + 1;
                         start[..len].fill(0);
-                        bucket_ends(&chunk, 0, buckets, first, &mut start[1..len]);
+                        bucket_ends(chunk, 0, buckets, first, &mut start[1..len]);
                         let run = Run {
                             level: level_ref,
-                            keys: &chunk,
+                            keys: chunk,
                             start: &start[..len],
                         };
                         let origin = align(lo(first));
@@ -1371,55 +1408,63 @@ impl V2 {
                             .iter()
                             .map(|&s| s - tail_from)
                             .collect();
-                        let piece = Piece {
-                            first: first as u32,
-                            seeds,
+                        settle(first, &seeds);
+                        *bumps[k].lock().expect("a chunk placer panicked") = Some(bumped);
+                        drain();
+                        *pieces[k].lock().expect("a chunk placer panicked") = Some(Piece {
                             map,
                             origin,
                             tail,
                             tail_keys,
-                            bumped,
-                        };
-                        assert!(pieces[k].set(piece).is_ok(), "a chunk is claimed once");
+                        });
                         done[k].store(true, Ordering::SeqCst);
+                        if readers[k].load(Ordering::SeqCst) == 0 {
+                            release(k);
+                        }
                         // The two flags are set before either is read, so of the two threads
                         // finishing a gap's chunks at least one sees both set.
                         for g in [k.wrapping_sub(1), k] {
-                            if g >= gaps.len()
+                            if g >= claimed.len()
                                 || !done[g].load(Ordering::SeqCst)
                                 || !done[g + 1].load(Ordering::SeqCst)
                                 || claimed[g].swap(true, Ordering::SeqCst)
                             {
                                 continue;
                             }
-                            let (left, right) = (
-                                pieces[g].get().expect("done follows set"),
-                                pieces[g + 1].get().expect("done follows set"),
-                            );
                             let (first, end) = (run_end(g), end_of(g));
                             let origin = align(lo(first));
                             let mut map = Map::new(lo(end) + slice - origin, shift);
-                            map.merge(&left.map, word(left.origin) - word(origin));
-                            map.merge(&right.map, word(right.origin) - word(origin));
-                            let run = Run {
-                                level: level_ref,
-                                keys: &left.tail_keys,
-                                start: &left.tail,
-                            };
                             let mut seeds = vec![0u8; (end - first) as usize];
-                            seed_run(&run, &mut seeds, &mut map, origin);
                             let mut bumped = Vec::new();
-                            bumped_keys(&run, &seeds, 0, (end - first) as u32, &mut bumped);
-                            let piece = Piece {
-                                first: first as u32,
-                                seeds,
-                                map,
-                                origin,
-                                tail: Vec::new(),
-                                tail_keys: Vec::new(),
-                                bumped,
-                            };
-                            assert!(gaps[g].set(piece).is_ok(), "a gap is claimed once");
+                            {
+                                // Locked in index order, as every gap does, so two gaps sharing
+                                // a chunk take turns rather than wait on each other.
+                                let left = pieces[g].lock().expect("a chunk placer panicked");
+                                let right = pieces[g + 1].lock().expect("a chunk placer panicked");
+                                let left = left.as_ref().expect("done follows set");
+                                let right = right.as_ref().expect("done follows set");
+                                map.merge(&left.map, word(left.origin) - word(origin));
+                                map.merge(&right.map, word(right.origin) - word(origin));
+                                let run = Run {
+                                    level: level_ref,
+                                    keys: &left.tail_keys,
+                                    start: &left.tail,
+                                };
+                                seed_run(&run, &mut seeds, &mut map, origin);
+                                bumped_keys(&run, &seeds, 0, (end - first) as u32, &mut bumped);
+                            }
+                            settle(first, &seeds);
+                            assert!(gap_bumps[g].set(bumped).is_ok(), "a gap is placed once");
+                            placed
+                                .lock()
+                                .expect("a chunk placer panicked")
+                                .1
+                                .merge(&map, word(origin));
+                            for c in [g, g + 1] {
+                                if readers[c].fetch_sub(1, Ordering::SeqCst) == 1 {
+                                    release(c);
+                                }
+                            }
                         }
                     }
                 });
@@ -1428,20 +1473,14 @@ impl V2 {
         phase("chunks");
         let fed = feed.fed();
 
-        let mut seeds = vec![0u8; buckets as usize];
-        let mut taken = Map::new(n, shift);
-        let mut bumped = Vec::new();
-        let mut tail = Vec::new();
-        let mut tail_keys = Vec::new();
-        for slot in pieces.into_iter().chain(gaps) {
-            let mut piece = slot.into_inner().expect("every chunk and gap was placed");
-            seeds[piece.first as usize..][..piece.seeds.len()].copy_from_slice(&piece.seeds);
-            taken.merge(&piece.map, word(piece.origin));
-            bumped.append(&mut piece.bumped);
-            if !piece.tail.is_empty() {
-                tail = piece.tail;
-                tail_keys = piece.tail_keys;
-            }
+        let (mut seeds, mut taken) = placed.into_inner().expect("a chunk placer panicked");
+        let (tail, tail_keys) = end_tail
+            .into_inner()
+            .expect("the last chunk ends the level");
+        let (drained, mut bumped) = bumped.into_inner().expect("a chunk placer panicked");
+        debug_assert_eq!(drained, chunks, "every chunk's bumped keys were listed");
+        for slot in gap_bumps {
+            bumped.extend(slot.into_inner().expect("every gap was placed"));
         }
         phase("merge");
         let run = Run {
@@ -1551,6 +1590,14 @@ impl V2 {
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.byte_len());
+        self.write_into(&mut out).expect("a Vec takes every write");
+        debug_assert_eq!(out.len(), self.byte_len());
+        out
+    }
+
+    /// The blob, section by section into `w`: what [`to_bytes`](Self::to_bytes) assembles,
+    /// without the copy, for a table on its way to a file.
+    fn write_into(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         let hl = header_len(self.level_count());
         let mut header = vec![0u8; hl];
         header[0..4].copy_from_slice(MAGIC);
@@ -1572,31 +1619,30 @@ impl V2 {
         }
         let check = crate::blob::hash_bytes(&header[..hl - 4]) as u32;
         header[hl - 4..].copy_from_slice(&check.to_le_bytes());
-        out.extend_from_slice(&header);
+        w.write_all(&header)?;
 
         for l in self.levels() {
-            out.extend_from_slice(&l.seeds);
+            w.write_all(&l.seeds)?;
         }
         for &s in &self.tail.seeds {
-            out.extend_from_slice(&s.to_le_bytes());
+            w.write_all(&s.to_le_bytes())?;
         }
-        for &w in &self.remap.set {
-            out.extend_from_slice(&w.to_le_bytes());
+        for &word in &self.remap.set {
+            w.write_all(&word.to_le_bytes())?;
         }
         for &r in &self.remap.rank {
-            out.extend_from_slice(&r.to_le_bytes());
+            w.write_all(&r.to_le_bytes())?;
         }
-        for &w in &self.remap.holes.low {
-            out.extend_from_slice(&w.to_le_bytes());
+        for &word in &self.remap.holes.low {
+            w.write_all(&word.to_le_bytes())?;
         }
-        for &w in &self.remap.holes.high {
-            out.extend_from_slice(&w.to_le_bytes());
+        for &word in &self.remap.holes.high {
+            w.write_all(&word.to_le_bytes())?;
         }
         for &p in &self.remap.holes.sel {
-            out.extend_from_slice(&p.to_le_bytes());
+            w.write_all(&p.to_le_bytes())?;
         }
-        debug_assert_eq!(out.len(), self.byte_len());
-        out
+        Ok(())
     }
 
     /// Every read `index` makes is bounded by a scalar in the header, and the checks are exactly
@@ -2122,6 +2168,15 @@ impl Mphf {
         match &self.table {
             Table::V2(t) => t.to_bytes(),
             Table::V1(t) => t.to_bytes(),
+        }
+    }
+
+    /// [`to_bytes`](Self::to_bytes) written to `w` section by section rather than assembled
+    /// first: the same bytes, without holding a second copy of the table.
+    pub(crate) fn write_into(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        match &self.table {
+            Table::V2(t) => t.write_into(w),
+            Table::V1(t) => w.write_all(&t.to_bytes()),
         }
     }
 

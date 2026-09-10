@@ -448,12 +448,14 @@ the same keys handed to `build` as a list; the streamed `StringIndex` build peak
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
 
 The streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
-for the same keys handed to `build` as a list (254 against 903 at 10 M), and **1.7 GB at 10⁹**,
+for the same keys handed to `build` as a list (254 against 903 at 10 M), and **0.94 GB at 10⁹**,
 where the list would need about 90 GB. Under 256 MiB of fingerprint table the peak is the run
 buffer itself or the perfect hash's construction plus the table, whichever is larger — at 100 M
 they are within 5 MB of each other; past it the fingerprints go through range files and the peak
-is the perfect hash's own construction, 1.7 bytes per key. Its transient disk is the distinct
-pairs twice, 32 bytes per key, beside the output, plus twelve more per key for the range files
+is the perfect hash's own construction, 0.9 bytes per key: 0.6 of it the table being built and
+the keys its first level bumped, the rest the second level's grouping of those keys. Its
+transient disk is the distinct pairs twice, 32 bytes per key, beside the output, plus twelve more
+per key for the range files
 past 268 M keys at the default width, so that no byte of the output is ever written at a random
 offset. The 10⁹ build took ten minutes here, six of them generating the keys.
 

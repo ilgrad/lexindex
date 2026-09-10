@@ -302,6 +302,21 @@ impl Iterator for Reps<'_> {
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V6], Vec<u8>, Vec<u8>);
 
+/// A writer that hashes what passes through it, for a payload written in pieces.
+struct Hashed<'a, W: std::io::Write>(&'a mut W, &'a mut crate::blob::BlockHasher);
+
+impl<W: std::io::Write> std::io::Write for Hashed<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write_all(buf)?;
+        self.1.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 /// The validated framing of a blob — every field a query will trust — with the MPH region located
 /// but not parsed. Produced by `parse_frame` and consumed by `from_shared`; both are safe, because
 /// the MPH region validates itself (see [`Mphf::from_bytes`]).
@@ -636,7 +651,7 @@ impl CompactHashIndex {
         debug_assert_eq!(side.len(), side_len);
         drop(pairs);
 
-        let mph_buf = mph.as_ref().map_or_else(Vec::new, Mphf::to_bytes);
+        let mph_len = mph.as_ref().map_or(0, Mphf::byte_len);
         let mut side_buf = Vec::with_capacity(side.len() * SIDE_ENTRY);
         for &(h, fp, id) in &side {
             side_buf.extend_from_slice(&h.to_le_bytes());
@@ -647,8 +662,11 @@ impl CompactHashIndex {
         crate::blob::write_atomically_with(path, |w| {
             let mut payload = crate::blob::BlockHasher::new();
             w.write_all(&[0u8; HEADER_V6])?;
-            w.write_all(&mph_buf)?;
-            payload.update(&mph_buf);
+            // Straight from the table: at 10⁹ keys its blob is a quarter of a gigabyte, and a
+            // copy of it here would be the build's peak.
+            if let Some(mph) = &mph {
+                mph.write_into(&mut Hashed(w, &mut payload))?;
+            }
             if in_memory {
                 w.write_all(&fps)?;
                 payload.update(&fps);
@@ -671,13 +689,7 @@ impl CompactHashIndex {
             w.write_all(&side_buf)?;
             payload.update(&side_buf);
             check()?;
-            let header = header_v6(
-                n,
-                fingerprint_bits,
-                mph_buf.len(),
-                side.len(),
-                payload.finish(),
-            );
+            let header = header_v6(n, fingerprint_bits, mph_len, side.len(), payload.finish());
             w.flush()?;
             w.get_mut().seek(std::io::SeekFrom::Start(0))?;
             w.write_all(&header)?;

@@ -134,8 +134,10 @@ The fingerprints are then written at their slots, into memory while the table is
 and past that through range files of 16 M slots each, read back one at a time, so that no byte
 of the output is written at a random offset — the lesson the perfect-hash arena taught. Measured
 at 100 M real-word pairs: 302 MB peak against 8 834 MB for the list, the run buffer and the
-perfect hash's construction plus the table within 5 MB of each other; at 10⁹, 1.7 GB, which is
-the perfect hash's construction alone at 1.7 bytes per key.
+perfect hash's construction plus the table within 5 MB of each other; at 10⁹, 0.94 GB, which is
+the perfect hash's construction alone at 0.9 bytes per key — 0.6 of it the table and the keys its
+first level bumped, since a level's pieces go into the table as they finish rather than being kept
+for a merge, so what a first level holds beyond that is the chunks in flight.
 
 ## `ClosedHashIndex`
 
