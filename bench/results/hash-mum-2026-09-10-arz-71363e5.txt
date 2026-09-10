@@ -63,3 +63,43 @@ In situ (local/closedbench, /usr/share/dict/words, 479 823 members probed shuffl
   A  closed.id 40.1  compact.id_unchecked 42.6  compact.id 71.8  closed.ids_of 14.2  compact.ids_of 27.4
   means: compact.id 71.4 -> 74.3 (+2.9 ns), compact.ids_of 27.7 -> 28.7 (+1.0); the one-hash paths
   (closed.id 40.8 -> 40.2, id_unchecked 42.0 -> 41.0) within noise.
+
+In situ again, 2026-09-10 08:10-08:25, after the harness gained a single-loop mode (local/closedbench, source
+identical for both builds; M = main 0e177fd, U = this branch 54f37b8; the lookup code is the same in 71363e5 and
+0e177fd, only the build changed). One warm-up of each, then M U M U M U, each a process of 7 rounds, minimum:
+M	min: closed.id 40.0 ns  compact.id_unchecked 40.9 ns  compact.id 70.0 ns  closed.ids_of 13.4 ns  compact.ids_of 27.3 ns
+U	min: closed.id 40.0 ns  compact.id_unchecked 39.9 ns  compact.id 69.6 ns  closed.ids_of 13.9 ns  compact.ids_of 27.9 ns
+M	min: closed.id 40.7 ns  compact.id_unchecked 42.3 ns  compact.id 70.7 ns  closed.ids_of 13.6 ns  compact.ids_of 27.1 ns
+U	min: closed.id 39.0 ns  compact.id_unchecked 39.2 ns  compact.id 70.1 ns  closed.ids_of 13.4 ns  compact.ids_of 28.3 ns
+M	min: closed.id 40.9 ns  compact.id_unchecked 40.8 ns  compact.id 71.5 ns  closed.ids_of 12.9 ns  compact.ids_of 26.7 ns
+U	min: closed.id 40.8 ns  compact.id_unchecked 39.7 ns  compact.id 69.1 ns  closed.ids_of 13.4 ns  compact.ids_of 28.3 ns
+  means: compact.id 70.7 -> 69.6 (-1.1 ns), id_unchecked 41.3 -> 39.6, closed.id 40.5 -> 39.9, compact.ids_of
+  27.0 -> 28.2 (+1.2), closed.ids_of 13.3 -> 13.6.
+So the +2.9 ns above is not a property of the hash: rebuilt, the same harness puts the new round 1 ns *ahead* on
+the same probe, consistently over three alternations, as the morning's run had it 2.9 behind over four. What
+survives both is the batched path, +1.0-1.2 ns, and the hash's own latency, +0.6 ns on a word.
+`perf stat` over the single loop (ONLY=compact.id REPS=20, M U M U):
+=== M compact.id
+compact.id: 71.8 ns/probe over 20 passes
+     3,951,175,725      cycles                                                                  (83.47%)
+     3,710,846,777      instructions                                                            (83.50%)
+        18,845,441      branch-misses                                                           (83.51%)
+=== U compact.id
+compact.id: 70.2 ns/probe over 20 passes
+     3,862,009,712      cycles                                                                  (83.43%)
+     3,755,769,834      instructions                                                            (83.34%)
+        18,488,071      branch-misses                                                           (83.24%)
+=== M compact.id
+compact.id: 71.0 ns/probe over 20 passes
+     3,920,903,446      cycles                                                                  (83.77%)
+     3,740,000,166      instructions                                                            (83.63%)
+        18,461,084      branch-misses                                                           (83.16%)
+=== U compact.id
+compact.id: 70.1 ns/probe over 20 passes
+     3,888,290,170      cycles                                                                  (83.53%)
+     3,796,704,457      instructions                                                            (83.65%)
+        18,356,093      branch-misses                                                           (83.50%)
+  instructions +1.5 % for the new round (the 128-bit multiply is `mul` + `xor` with its register moves against
+  `imul` + `rol`), cycles -1.5 %; branch misses and cache misses the same. The probe is bound by its misses; the
+  extra instructions hide under them, and which build lands its loop on the better alignment decides the last
+  nanosecond.

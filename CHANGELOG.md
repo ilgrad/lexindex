@@ -23,8 +23,11 @@ All notable changes to this project are documented here. The format follows
   keys where the old hash lost nine, and the distribution gates (avalanche, low-bit χ², slot ×
   fingerprint independence) read the same. Cost: the pair hash at 0.90–0.97× on 9–11-byte
   keys and 0.89× on 80-byte ones; in a lookup, process-alternated on the shuffled dictionary,
-  `CompactHashIndex::id` 71.4 → 74.3 ns and batched `ids_of` 27.7 → 28.7, while the paths that
-  compute one hash — `ClosedHashIndex::id`, `id_unchecked` — do not move. Magics move to **`BMP7`**
+  `CompactHashIndex::id` moves by less than the harness's own layout noise — 71.4 → 74.3 ns with
+  one build of the harness, 70.7 → 69.6 with another the same day, the hash's own latency 0.6 ns
+  longer — batched `ids_of` 27.7 → 28.7 and 27.0 → 28.2 (a throughput path: 1.5 % more
+  instructions), while the paths that compute one hash — `ClosedHashIndex::id`, `id_unchecked` —
+  do not move. Magics move to **`BMP7`**
   and **`BCH7`** (`BCL1` never shipped and keeps its name); `BMP5`, `BMP6` and `BCH6` join the
   refused list with a message naming `lexindex < 1.2` and the rebuild, since a blob keyed on the
   old hash would answer wrong ids under the new one. `BIX4` and `OVL2` are untouched. Rebuilding
