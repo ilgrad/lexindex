@@ -2999,14 +2999,14 @@ mod tests {
     /// only after a deliberate change, with the `write_golden_mphf` spike.
     #[test]
     fn the_current_golden_blob_is_byte_identical_to_a_fresh_build() {
-        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-1.2.0-mphf.bin");
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-2.0.0-mphf.bin");
         let mphf = Mphf::build(&golden_hashes()).expect("build");
         assert!(matches!(mphf.table, Table::V2(_)));
         assert_eq!(&GOLDEN[..4], MAGIC);
         assert_eq!(
             mphf.to_bytes(),
             GOLDEN,
-            "regenerate tests/data/golden-1.2.0-mphf.bin"
+            "regenerate tests/data/golden-2.0.0-mphf.bin"
         );
         assert_eq!(Mphf::from_bytes(GOLDEN).expect("parses"), mphf);
     }
@@ -3426,7 +3426,7 @@ mod spike {
         let blob = Mphf::build(&golden_hashes()).expect("build").to_bytes();
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/golden-1.2.0-mphf.bin"
+            "/tests/data/golden-2.0.0-mphf.bin"
         );
         std::fs::write(path, &blob).expect("write the fixture");
         println!("{path}: {} bytes", blob.len());

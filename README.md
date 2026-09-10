@@ -213,7 +213,7 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
   and a crafted blob answers wrong ids, never out-of-range ones. **`load_mmap` and its `_verified`
   and `_untrusted` forms are the `unsafe fn`s**: they borrow the mapped pages, so the file must not
   change while the index is alive.
-- **Blobs move forward, not backward.** 1.2 replaced the key hash — the round it shipped with had
+- **Blobs move forward, not backward.** 2.0 replaced the key hash — the round it shipped with had
   a two-word collision family on ordinary text — so every hash blob written before it (`BMP5`,
   `BMP6`, `BCH6`) is refused by name, and rebuilding from the keys is the migration. `BIX4` and
   `OVL2` are unchanged in either direction.

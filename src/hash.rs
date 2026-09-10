@@ -183,7 +183,7 @@ mod golden {
     /// tweaked constant, a reordered finalizer, a byte-order slip in a refactor — would make every
     /// previously-saved index load wrong without any test failing. These pinned values turn that
     /// into a loud CI failure instead. **Do not "fix" them to match new output: changing the hash
-    /// is a breaking blob-format change and must bump the format magic, not this table.** 1.2 did
+    /// is a breaking blob-format change and must bump the format magic, not this table.** 2.0 did
     /// exactly that — `BMP7` and `BCH7` — when the round was replaced.
     #[test]
     fn hash_key_is_stable() {

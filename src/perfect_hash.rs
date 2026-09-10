@@ -27,7 +27,7 @@ use crate::mphf::Mphf;
 /// rather than half-supported.
 const LEGACY_MAGICS: [&[u8; 4]; 5] = [b"BMP2", b"BMP3", b"BMP4", b"BMP5", b"BMP6"];
 /// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`, the framing `BMP5`
-/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marks 1.2's key hash, under which every
+/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marks 2.0's key hash, under which every
 /// slot of an older blob would answer wrong, so `BMP5` and `BMP6` are refused by name too.
 const MAGIC_V7: &[u8; 4] = b"BMP7";
 const HEADER_V5: usize = 36;
@@ -358,7 +358,7 @@ impl PerfectHashIndex {
     ///
     /// For a workload that is mostly misses — a stop list, a block list, a "seen before" check.
     /// Under mostly hits the byte buys nothing, which is why it is opt-in. The blob it writes
-    /// loads in this version and later; a reader from before 1.2 refuses it as an unknown arena
+    /// loads in this version and later; a reader from before 2.0 refuses it as an unknown arena
     /// encoding rather than misread it.
     ///
     /// Measured on the 480 k-word dictionary, each index alone in its process: an absent probe
@@ -786,7 +786,7 @@ impl PerfectHashIndex {
         }
         if LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes")) {
             return Err(IndexError::Format(
-                "perfect-hash: blob written by lexindex < 1.2, keyed on a hash this version no \
+                "perfect-hash: blob written by lexindex < 2.0, keyed on a hash this version no \
                  longer computes; rebuild the index from its keys",
             ));
         }
@@ -1937,7 +1937,7 @@ mod tests {
         assert!(batch[keys.len()..].iter().all(Option::is_none));
     }
 
-    /// Every blob from before 1.2 is keyed on a hash this version does not compute (and the
+    /// Every blob from before 2.0 is keyed on a hash this version does not compute (and the
     /// pre-1.0 ones embedded a `ptr_hash` image it cannot read either). The refusal has to *name*
     /// that — a bare "bad magic" would send someone hunting for a corrupt file when the file is
     /// intact and merely old.
@@ -1952,7 +1952,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 1.2"), "{err}");
+            assert!(err.contains("lexindex < 2.0"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }

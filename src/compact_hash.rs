@@ -1501,7 +1501,7 @@ impl CompactHashIndex {
             && LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes"))
         {
             return Err(IndexError::Format(
-                "compact-hash: blob written by lexindex < 1.2, keyed on a hash this version no \
+                "compact-hash: blob written by lexindex < 2.0, keyed on a hash this version no \
                  longer computes; the keys are not stored, so it cannot be converted - rebuild the \
                  index from its keys",
             ));
@@ -1949,7 +1949,7 @@ mod tests {
         ));
     }
 
-    /// This index stores no keys, so a blob from before 1.2 cannot even be converted — the refusal
+    /// This index stores no keys, so a blob from before 2.0 cannot even be converted — the refusal
     /// has to say so, and say which lexindex wrote it, rather than report a bad magic on an intact
     /// file.
     #[test]
@@ -1964,7 +1964,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 1.2"), "{err}");
+            assert!(err.contains("lexindex < 2.0"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }

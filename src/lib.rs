@@ -267,16 +267,6 @@ pub enum IndexError {
     /// A fuzzy/automaton query could not be compiled (e.g. the Levenshtein automaton for the given
     /// query and edit distance would be too large).
     Automaton(String),
-    /// (De)serialisation of a [`PerfectHashIndex`] blob failed (corrupt or incompatible MPH bytes).
-    ///
-    /// Never constructed since 1.0, when the crate's own perfect hash replaced the `epserde`
-    /// loader; a malformed blob is [`Format`](Self::Format). Removed in 2.0.
-    #[cfg(feature = "mph")]
-    #[deprecated(
-        since = "1.2.0",
-        note = "never constructed since 1.0; a malformed blob is `IndexError::Format`"
-    )]
-    Serde(String),
     /// Constructing the minimal perfect hash failed after exhausting its retry seeds — extremely
     /// rare; rebuilding with a different key set is the only recourse.
     #[cfg(feature = "mph")]
@@ -291,9 +281,6 @@ impl fmt::Display for IndexError {
             IndexError::Format(m) => write!(f, "format error: {m}"),
             IndexError::Automaton(m) => write!(f, "automaton error: {m}"),
             #[cfg(feature = "mph")]
-            #[allow(deprecated)]
-            IndexError::Serde(m) => write!(f, "serde error: {m}"),
-            #[cfg(feature = "mph")]
             IndexError::Build(m) => write!(f, "build error: {m}"),
         }
     }
@@ -305,9 +292,6 @@ impl std::error::Error for IndexError {
             IndexError::Fst(e) => Some(e),
             IndexError::Io(e) => Some(e),
             IndexError::Format(_) | IndexError::Automaton(_) => None,
-            #[cfg(feature = "mph")]
-            #[allow(deprecated)]
-            IndexError::Serde(_) => None,
             #[cfg(feature = "mph")]
             IndexError::Build(_) => None,
         }
@@ -352,14 +336,5 @@ mod tests {
         let fst_err: IndexError = b.insert("a", 0).unwrap_err().into();
         assert!(fst_err.to_string().contains("fst error"));
         assert!(fst_err.source().is_some());
-    }
-
-    #[cfg(feature = "mph")]
-    #[test]
-    fn serde_error_display_has_no_source() {
-        #[allow(deprecated)]
-        let e = IndexError::Serde("corrupt mph".into());
-        assert!(e.to_string().contains("serde error") && e.to_string().contains("corrupt mph"));
-        assert!(e.source().is_none());
     }
 }

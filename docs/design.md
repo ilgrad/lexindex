@@ -90,10 +90,10 @@ it: its per-word round, a 64-bit multiply and a rotate, kept a difference in the
 word confined to the top bits of the product and dropped it into byte 3 of the next word, where
 that word's own difference XORed it away — in both hashes, whatever their constants. Keys differing
 at bytes 8i+7 and 8i+11 alone (`d`↔`t` with `e`↔`o`; a case flip with `e`↔`i`) collided with
-13–100 % probability and merged into one id. 1.2's round folds the full 128-bit product, whose high
+13–100 % probability and merged into one id. 2.0's round folds the full 128-bit product, whose high
 half depends on every input bit through the carries, so no difference keeps a fixed shape: a
 single-bit scan over every position pair of a 24-byte key finds no weak pair where the old round had
-35 (`local/collide.rs`). Every blob written before 1.2 (`BCH1`–`BCH6`) is refused; see below. On
+35 (`local/collide.rs`). Every blob written before 2.0 (`BCH1`–`BCH6`) is refused; see below. On
 load, side-table ids are structurally required to be exactly the tail range `[m, n)` — the
 checksums vouch for transport, not construction.
 
@@ -124,7 +124,7 @@ hole must lie below `n`. What that buys is a `from_bytes` that is a safe fn on a
 crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
 the same rule over their own eight scalars.
 
-**Blobs from before 1.2 are refused, by name.** Every slot in a `BMP5`, `BMP6` or `BCH6` blob is
+**Blobs from before 2.0 are refused, by name.** Every slot in a `BMP5`, `BMP6` or `BCH6` blob is
 keyed on the 1.0 hash, a value this version does not compute — loaded under the new hash it would
 answer wrong ids, silently — and every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash` image
 on top, from a crate no longer linked. So the refusal names the version that wrote the file and
@@ -132,7 +132,7 @@ says to rebuild, rather than reporting a bad magic on an intact one. There is no
 for either index: `PerfectHashIndex`'s arena is readable but its slots came from the old hash, and
 `CompactHashIndex` stores no keys at all. Rebuilding from the key list is the migration, and it is
 the only one a keyless index could ever have had. Soundness outranks compatibility: 1.0 paid that
-debt for the perfect hash, 1.2 for the key hash.
+debt for the perfect hash, 2.0 for the key hash.
 
 `build_to_file` is that streaming build carried past memory: the pairs go to runs of 256 MiB,
 sorted and spilled beside the output, the runs are merged into one sorted file, and the perfect
@@ -198,12 +198,12 @@ share a `u32` base and carry one-byte *cumulative* offsets after it (tag `0x11`,
 so a key is `data[base + off[k] .. base + off[k + 1]]` — 1.31 bytes per key instead of 4, and the
 whole index is **10.94 B/key**. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot
 blocks with two-byte offsets (`0x12`, 2.02 B/key) — but a few long keys among short ones do not
-decide the layout: since 1.2 a block whose keys outgrow its offsets keeps its place and stride,
+decide the layout: since 2.0 a block whose keys outgrow its offsets keeps its place and stride,
 stores all ones in its first offset (zero in every other block) with an index after it, and its
 real offsets sit in an *overflow table* behind the data (tag bit `0x40`, 68 bytes per such block
 plus an 8-byte trailer), so one 10 kB key among a million costs 76 bytes where it used to cost 0.7
 bytes per key. Past 4 GiB of data the blocks keep their offsets and widen their bases to `u64`
-(`0x31` / `0x32`, 1.56 / 2.04 B/key — the flat `u64` table that size took before 1.2 cost 8), and
+(`0x31` / `0x32`, 1.56 / 2.04 B/key — the flat `u64` table that size took before 2.0 cost 8), and
 only a handful of keys none of which any block holds keeps the flat table. The encoding is chosen
 once at build time and recorded in the tag, so reading it is a branch that never changes for the
 life of the index.
@@ -214,8 +214,8 @@ does not match stops at the block and never reads the key. A lookup of an absent
 miss instead of two: on the dictionary 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 B/key,
 the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
-extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 1.2's
-`BMP7`; the tag alone would already stop a reader from before 1.2, as an unknown arena encoding.
+extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 2.0's
+`BMP7`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -354,17 +354,17 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP7` | 1.2 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
-| `BCH7` | 1.2 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
-| `BCL1` | 1.2 | `ClosedHashIndex` | new in 1.2 |
+| `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
+| `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
+| `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so both
 hash-index loaders carry the list of magics they used to write and answer with a sentence naming
-`lexindex < 1.2` and the fix. That is worth more than a conversion path would have been, because for
-these two formats there is no conversion path to offer: every blob before 1.2 is keyed on a hash
+`lexindex < 2.0` and the fix. That is worth more than a conversion path would have been, because for
+these two formats there is no conversion path to offer: every blob before 2.0 is keyed on a hash
 this version does not compute (and the pre-1.0 ones embed a `ptr_hash` image it no longer links),
 `PerfectHashIndex`'s arena survives but its slots came from that hash, and `CompactHashIndex`
 stores no keys at all. **Rebuilding from the key list is the migration.**
@@ -374,7 +374,7 @@ tombstone count in a different place — so it is read rather than refused. Comp
 where it cannot be kept, not where keeping it is merely inconvenient.
 
 **Blobs move forward, not backward — upgrade the reader first.** 1.1 read every `BMP5` and
-every `BCH6` that 1.0 wrote; 1.2 refuses all three by name, and what it writes — `BMP7`, `BCH7` —
+every `BCH6` that 1.0 wrote; 2.0 refuses all three by name, and what it writes — `BMP7`, `BCH7` —
 is a magic neither has heard of, so they refuse it as malformed rather than as a version mismatch.
 `BIX4` and `OVL2` are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses
 the versions in either direction.

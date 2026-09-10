@@ -260,11 +260,11 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             overlay(w, format, bytes, tag, 21, base_len, additions, retired)
         }
         b"BMP1" | b"BMP2" | b"BMP3" | b"BMP4" | b"BMP5" | b"BMP6" => Err(IndexError::Format(
-            "a PerfectHashIndex blob from lexindex < 1.2, keyed on a hash this version no longer \
+            "a PerfectHashIndex blob from lexindex < 2.0, keyed on a hash this version no longer \
              computes; rebuild it from its keys with PerfectHashIndex::build",
         )),
         b"BCH1" | b"BCH2" | b"BCH3" | b"BCH4" | b"BCH5" | b"BCH6" => Err(IndexError::Format(
-            "a CompactHashIndex blob from lexindex < 1.2, keyed on a hash this version no longer \
+            "a CompactHashIndex blob from lexindex < 2.0, keyed on a hash this version no longer \
              computes, and which stores no keys; rebuild it from its keys with \
              CompactHashIndex::build",
         )),
@@ -507,8 +507,8 @@ mod tests {
         assert!(msg(b"BMP7 too short").contains("truncated"));
         assert!(msg(b"BIX4").contains("truncated"));
         // The hash blobs of 1.0 and 1.1 are old, not corrupt, and the message says which.
-        assert!(msg(b"BMP6 and whatever followed").contains("lexindex < 1.2"));
-        assert!(msg(b"BCH6 and whatever followed").contains("lexindex < 1.2"));
+        assert!(msg(b"BMP6 and whatever followed").contains("lexindex < 2.0"));
+        assert!(msg(b"BCH6 and whatever followed").contains("lexindex < 2.0"));
         // A header whose lengths run past the end, whatever the checksums say.
         let mut lying = vec![0u8; 36];
         lying[..4].copy_from_slice(b"BMP7");

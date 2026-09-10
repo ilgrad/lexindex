@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Breaking: the key hash is replaced, and every hash blob written before 1.2 is refused by
+- **Breaking: the key hash is replaced, and every hash blob written before 2.0 is refused by
   name.** The per-word round of the 1.0 hash -- a 64-bit multiply and a rotate -- had a two-word
   collision family on ordinary text: a difference in the top bits of one word stays in the top
   bits of a 64-bit product, and the rotate dropped it into byte 3 of the next word, where that
@@ -29,7 +29,7 @@ All notable changes to this project are documented here. The format follows
   instructions), while the paths that compute one hash — `ClosedHashIndex::id`, `id_unchecked` —
   do not move. Magics move to **`BMP7`**
   and **`BCH7`** (`BCL1` never shipped and keeps its name); `BMP5`, `BMP6` and `BCH6` join the
-  refused list with a message naming `lexindex < 1.2` and the rebuild, since a blob keyed on the
+  refused list with a message naming `lexindex < 2.0` and the rebuild, since a blob keyed on the
   old hash would answer wrong ids under the new one. `BIX4` and `OVL2` are untouched. Rebuilding
   from the keys is the migration. Found by the streaming builder's distinct-key count disagreeing
   with its input.
@@ -76,7 +76,7 @@ All notable changes to this project are documented here. The format follows
   member 163 → 171; batched `ids_of` over absent keys 70 → 47; the index 10.90 → 11.90 B/key. Ids
   are unchanged -- it is the same perfect hash -- and an `Overlay` compaction keeps the
   fingerprints (`OverlayKeys::rebuild_like`, with a default). The blob stays `BMP6`: the arena tag
-  carries the bit, and a reader from before 1.2 refuses it as an unknown arena encoding rather
+  carries the bit, and a reader from before 2.0 refuses it as an unknown arena encoding rather
   than misread it.
 - **Path forms of the strict loader, and checked forms of the mapping.** `StringIndex::load_untrusted`
   is `from_untrusted_bytes` over a file (Python: `StringIndex.load_untrusted`, and
@@ -122,11 +122,11 @@ All notable changes to this project are documented here. The format follows
   100 M real-word pairs: 414 MB peak against 11 985 MB for `build` over the same generator, 150 s
   against 211, blobs identical.
 
-### Deprecated
+### Removed
 
-- `IndexError::Serde`. Nothing has constructed it since 1.0 replaced the `epserde` loader; a
-  malformed perfect-hash blob is `IndexError::Format`. Removed in 2.0. (A deprecation is a minor
-  change under SemVer, which is one reason this release is 1.2.0.)
+- `IndexError::Serde`. Nothing had constructed it since 1.0 replaced the `epserde` loader; a
+  malformed perfect-hash blob is `IndexError::Format`. Removed outright rather than deprecated
+  first: the key hash above already makes this release a major one.
 
 ### Fixed
 
@@ -236,8 +236,8 @@ All notable changes to this project are documented here. The format follows
   the data past 4 GiB widens to `u64` (arena tags `0x31` / `0x32`, bit `0x20`) instead of the
   layout falling back to the flat `u64` table: 1.56 bytes per key of offsets instead of 8 -- 0.78 GB
   instead of 4 for 500 M ten-byte keys. The flat table remains only for a 256-key run past 64 KiB.
-  Below 4 GiB nothing changes, byte for byte; the blob stays `BMP6`, and a reader from before 1.2
-  refuses the wide-base tags as an unknown encoding, the same way it refuses the fingerprinted
+  Below 4 GiB nothing changes, byte for byte, beyond the magic the key hash above moves; a reader
+  from before 2.0 refuses the wide-base tags as an unknown encoding, the same way it refuses the fingerprinted
   ones. The threshold is injectable in the tests, so both layouts are exercised on a 40-byte
   arena. `PerfectHashIndex::build` now refuses a key longer than `u32::MAX` bytes with the error
   `build_to_file` already gave, instead of laying out a truncated length.
@@ -249,7 +249,7 @@ All notable changes to this project are documented here. The format follows
   block of which overflows is unchanged byte for byte; a corpus of long keys still takes the
   wider blocks, and the flat table remains for a handful of keys none of which any block holds --
   once the one-byte blocks do not fit, the layout is the cheapest by the lengths. The file build
-  writes the table behind the data too, and a reader from before 1.2 refuses the tag. Alongside,
+  writes the table behind the data too, and a reader from before 2.0 refuses the tag. Alongside,
   an absent probe under fingerprints is decided on the fingerprint byte before the slot's offsets
   are read, which took it from 91 to 75 ns: that path is about as long as the reorder buffer is
   wide, and its one cache miss overlaps the next probe's only while it stays that short.

@@ -37,12 +37,12 @@
 //! such a block keeps its place and stride, stores all ones in its first offset (zero in every
 //! other block) with an index after it, and its real offsets sit in the table as base-wide words.
 //! One 10 kB key among a million short ones costs 68 bytes and one more read on its own block;
-//! before 1.2 it cost the arena 0.7 bytes per key, or 2.7 past 64 KiB. The layout is the cheapest
+//! before 2.0 it cost the arena 0.7 bytes per key, or 2.7 past 64 KiB. The layout is the cheapest
 //! by the lengths once `0x11` does not fit as it is: 256-slot blocks when enough 16-key runs
 //! overflow, the flat table only for a handful of keys none of which any block holds. Past 4 GiB
 //! of data the bases widen to `u64` instead — bit `0x20` of the tag — and the offsets stay
 //! blocked: 1.56 bytes per key where the flat `u64` table, the only encoding for that size before
-//! 1.2, cost 8.
+//! 2.0, cost 8.
 //!
 //! This is the second narrowing of the same table, and both were worth what they cost. Before
 //! 0.5.0 every offset was 8 bytes: on the 479 823-word dictionary that was 8.0 of
