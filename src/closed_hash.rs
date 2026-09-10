@@ -93,8 +93,12 @@ impl ClosedHashIndex {
         let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
         // One bit per slot: this only has to catch a construction that was not minimal/perfect.
         let mut seen = vec![0u64; m.div_ceil(64)];
-        for h in pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0) {
-            let slot = mph.index(h) as usize;
+        crate::compact_hash::slots_in_place(&mut pairs, &mph, threads);
+        for &(slot, _) in &pairs {
+            if slot == crate::compact_hash::NO_SLOT {
+                continue;
+            }
+            let slot = slot as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
                 return Err(IndexError::Format(
                     "closed-hash: construction was not minimal/perfect",

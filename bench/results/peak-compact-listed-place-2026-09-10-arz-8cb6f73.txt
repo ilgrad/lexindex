@@ -1,0 +1,33 @@
+peak compact-listed: slots on every thread, a fingerprint as one store — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: 8cb6f73 (base) against the working tree of the commit that carries this file (new).
+Harness: examples/peak.rs `compact-listed 10000000` — CompactHashIndex::build over 10 M real-word bigrams from
+/usr/share/dict/words, held in memory. Phase times from a scratch copy of the tree with eprintln! marks in
+build_bits/build_from_pairs (local/wt-prof, never committed); the totals are the uninstrumented example. The
+change: once the perfect hash is built, each thread overwrites its share of the sorted pairs' hashes with their
+slots (a same-hash follower gets NO_SLOT; its id is in the side table), and one pass writes the fingerprints with
+the row a later key needs prefetched; write_fp at 8/16/32 bits is a single store instead of a memcpy call whose
+length is only known at run time.
+
+== phases, 10 M keys (ms; two runs each) ==
+                 base (8cb6f73)     slots on every thread     + write_fp as one store
+hash             170.9 / 171.3      170.1 / 170.0             169.3 / 170.5
+sort             165.2 / 164.6      168.2 / 170.9             165.1 / 166.7
+dedup              9.5 /   9.6        9.8 /   9.5              11.3 /  10.8
+side              14.7 /  14.6       11.5 /  11.6              11.5 /  10.2
+mphf              97.4 /  96.3       99.5 /  95.2             100.8 /  99.0
+slots                —                15.6 /  15.4              18.1 /  17.7
+place            103.1 / 101.9       64.9 /  63.4              41.0 /  40.2
+total (example)  580.3 / 579.6      558.8 / 552.2             533.4 / 531.6   (main build: 530.2 / 525.6)
+The placement phase was one thread computing `mph.index` per representative and writing a fingerprint
+through `copy_from_slice(&fp.to_le_bytes()[..k])`, a memcpy call per key: 2.4 ns of every key placed, in the
+streamed build's output and fingerprint pass as much as here. The slots come 10 ns a key on one thread and
+1.5 ns on eight; the remaining pass is 4 ns a key — the seen-bitmap word and the fingerprint row, both random.
+Prefetching the seen-bitmap word as well: 41.7 / 41.8 / 42.4 ms against 41.0 / 40.2 — nothing, not shipped.
+Peak unchanged: 868.2–868.4 MB (215.3–215.6 MB above the keys) in every run; the slots overwrite the hashes
+in place.
+
+== Digests (local/blobdigest: FNV-1a 64 of the whole blob), new against 8cb6f73 ==
+compact-mem   10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10^8    b1b96c2807e95e4d   = b1b96c2807e95e4d

@@ -130,6 +130,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Both hash builds compute their slots on every thread, and a fingerprint of a shipped width is
+  one store**: once the perfect hash is built, each thread overwrites its share of the sorted
+  pairs' hashes with their slots — the order is the hash's, so a chunk's first pair continues
+  the one before it exactly when the hashes are equal — and one pass then writes the fingerprints
+  with the row a later key needs pulled into cache. `write_fp` at 8, 16 and 32 bits is a single
+  store instead of a `memcpy` call whose length is only known at run time; that call was 2.4 ns
+  of every key placed, in the streamed build's output and fingerprint pass as much as here.
+  Byte-identical (blob digests at 10 M and 10^8 keys), same peak. 10 M real-word keys in memory:
+  placement 102 → 16 + 41 ms, the whole build **580 → 526–530 ms**.
+  `bench/results/peak-compact-listed-place-2026-09-10-arz-8cb6f73.txt`.
 - **The streamed build places its fingerprints on every thread when they go to range files**:
   the merge cuts as many ranges as the machine has threads whatever the open-file budget lets
   it merge at once, and the fingerprint pass then takes one merged segment per thread, staging

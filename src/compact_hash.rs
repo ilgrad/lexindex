@@ -618,6 +618,46 @@ fn place_fingerprints(
     Ok(side)
 }
 
+/// A hash value no slot can equal: `m` is at most `u32::MAX`.
+pub(crate) const NO_SLOT: u64 = u64::MAX;
+
+/// Replaces every pair's hash with its slot in `mph` — `NO_SLOT` for a same-hash follower, whose
+/// id is in the side table — on every thread. The hashes are sorted, so a chunk's first pair
+/// continues the chunk before it exactly when their hashes are equal.
+pub(crate) fn slots_in_place(pairs: &mut [(u64, u64)], mph: &Mphf, threads: usize) {
+    let parts = if threads <= 1 || pairs.len() < threads * 4096 {
+        1
+    } else {
+        threads
+    };
+    let chunk = pairs.len().div_ceil(parts).max(1);
+    let joins: Vec<bool> = (0..pairs.len())
+        .step_by(chunk)
+        .map(|s| s > 0 && pairs[s - 1].0 == pairs[s].0)
+        .collect();
+    let fill = |chunk: &mut [(u64, u64)], joins: bool| {
+        let mut last = if joins { Some(chunk[0].0) } else { None };
+        for p in chunk.iter_mut() {
+            let h = p.0;
+            p.0 = if last == Some(h) {
+                NO_SLOT
+            } else {
+                mph.index(h)
+            };
+            last = Some(h);
+        }
+    };
+    if parts == 1 {
+        fill(pairs, false);
+        return;
+    }
+    std::thread::scope(|scope| {
+        for (c, &j) in pairs.chunks_mut(chunk).zip(&joins) {
+            scope.spawn(move || fill(c, j));
+        }
+    });
+}
+
 fn pair_bytes(pair: (u64, u64)) -> [u8; PAIR_BYTES] {
     let mut rec = [0u8; PAIR_BYTES];
     rec[..8].copy_from_slice(&pair.0.to_le_bytes());
@@ -871,21 +911,28 @@ impl CompactHashIndex {
         // One bit per slot, not one byte: this only has to catch a construction that was not
         // minimal/perfect, and at 100 M keys a `Vec<bool>` would be 100 MB of the peak.
         let mut seen = vec![0u64; m.div_ceil(64)];
-        for run in pairs.chunk_by(|a, b| a.0 == b.0) {
-            let (h, fp) = run[0];
-            let slot = mph.index(h) as usize;
+        slots_in_place(&mut pairs, &mph, threads);
+        // The slots are random, so the row a later key writes is pulled in while this one's
+        // resolves, as the file build's fingerprint pass does.
+        const AHEAD: usize = 16;
+        let mask = fp_mask(fingerprint_bits);
+        for i in 0..pairs.len() {
+            let (slot, fp) = pairs[i];
+            if slot == NO_SLOT {
+                continue;
+            }
+            if let Some(&(next, _)) = pairs.get(i + AHEAD) {
+                let at = next.saturating_mul(fingerprint_bits as u64) / 8;
+                crate::blob::prefetch_byte(&fps, at as usize);
+            }
+            let slot = slot as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
                 return Err(IndexError::Format(
                     "compact-hash: construction was not minimal/perfect",
                 ));
             }
             seen[slot / 64] |= 1 << (slot % 64);
-            write_fp(
-                &mut fps,
-                slot,
-                fingerprint_bits,
-                fp & fp_mask(fingerprint_bits),
-            );
+            write_fp(&mut fps, slot, fingerprint_bits, fp & mask);
         }
         drop(pairs);
         Ok(Self {
@@ -1702,7 +1749,14 @@ fn write_fp(fps: &mut [u8], slot: usize, bits: u32, fp: u64) {
         // OR-in loop below costs a measurable ~2.5% of build time at 1 M keys.
         let k = (bits / 8) as usize;
         let start = slot * k;
-        fps[start..start + k].copy_from_slice(&fp.to_le_bytes()[..k]);
+        // A copy whose length is only known at run time is a `memcpy` call per key; the shipped
+        // widths are single stores.
+        match k {
+            1 => fps[start] = fp as u8,
+            2 => fps[start..start + 2].copy_from_slice(&(fp as u16).to_le_bytes()),
+            4 => fps[start..start + 4].copy_from_slice(&(fp as u32).to_le_bytes()),
+            _ => fps[start..start + k].copy_from_slice(&fp.to_le_bytes()[..k]),
+        }
         return;
     }
     let bitpos = slot as u64 * bits as u64;
