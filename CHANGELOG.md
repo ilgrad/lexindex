@@ -21,6 +21,22 @@ All notable changes to this project are documented here. The format follows
   because a membership check that always says yes would be a signature that lies. Blob magic
   `BCL1`; `inspect` names it (`BlobKind::ClosedHashIndex`); a `parse_closed` fuzz target covers
   its framing. No `load_mmap`: the whole blob is the perfect hash, read into memory either way.
+- **`CompactHashIndex::build_to_file`** and `build_bits_to_file` (Python:
+  `CompactHashIndex.build_to_file(items, path, fingerprint_bytes=1, *, fingerprint_bits=None)`):
+  the constructor for a corpus that does not fit in memory, written straight to a file. One pass
+  hashes the keys to their 16-byte pairs, sorted in 256 MiB runs spilled beside the output and
+  merged; the perfect hash is built from the merged file one first-level chunk at a time -- the
+  first level's chunks are now pulled from a feed, a slice or a sequential reader, so the
+  in-memory build runs the same placement and the file is byte for byte what `build` and `save`
+  write -- and the fingerprints are written at their slots, in memory under 256 MiB of table and
+  through range files past it. Measured at 100 M real-word pairs, one index per process:
+  **302 MB peak against 8 834 MB** for the same keys handed to `build` as a list (254 against
+  903 at 10 M); the streamed build took 52 s, 36 s of it generating the keys, against 10 s for
+  the list build with its keys already made. At 10⁹ keys, where the list would need about 90 GB,
+  the streamed build peaks at **1.7 GB** — the perfect hash's own construction, 1.7 bytes per key
+  — and takes ten minutes, six of them the generator. Returns the number of distinct keys; an iterable
+  that raises aborts the build with the target untouched; nothing is left beside the output on
+  any exit path.
 - **`PerfectHashIndex::build_with_fingerprints`**, and `build_to_file_with_fingerprints` (Python:
   `PerfectHashIndex(keys, fingerprints=True)`, `build_to_file(..., fingerprints=True)`,
   `has_fingerprints()`): one more byte per key -- a fingerprint from the second hash, stored

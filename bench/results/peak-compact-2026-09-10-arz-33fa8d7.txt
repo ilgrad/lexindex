@@ -1,0 +1,31 @@
+examples/peak.rs (modes `compact-stream` and `compact-listed`, added with `CompactHashIndex::build_to_file`),
+2026-09-10 03:00-03:54, lexindex 33fa8d7 (+ the streaming builder this commit adds), Ryzen 7 5800HS, 38 GB RAM,
+Fedora 44, editor open, nothing else running. One index per process, so each row is its own process.
+
+Keys: `iter_sparse_sorted_keys` -- every filtered word of /usr/share/dict/words followed by a pseudo-random handful
+of second words (`word.word`), ascending, all distinct; the generator dedups within a block, so at 10^8 and 10^9 it
+yields fewer than the requested n (99 999 999 and 997 503 996); both modes report the index's distinct-key count.
+`compact-stream` pipes the generator straight into `build_to_file` (its `build` column therefore includes generating
+the keys, and its `keys` column is the process baseline); `compact-listed` materialises the keys first and hands
+the `Vec<String>` to `build` (generation excluded from `build`, the list charged to `keys`). One fingerprint byte.
+Scratch files for the streamed build on /home (`LEXINDEX_PEAK_DIR=local/peak`), not tmpfs.
+
+10^7 (two rounds, alternated):
+CompactStream n  10000000  build  4351.0 ms  keys    29.4 MB (  2.9 B/key)  peak   254.1 MB ( 25.4 B/key)  build adds   224.7 MB ( 22.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   878.5 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.8 MB ( 90.3 B/key)  build adds   249.8 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactStream n  10000000  build  4355.8 ms  keys    29.2 MB (  2.9 B/key)  peak   254.0 MB ( 25.4 B/key)  build adds   224.8 MB ( 22.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   868.0 ms  keys   652.9 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.1 MB ( 25.0 B/key)  blob  1.26 B/key
+
+10^8 (the generator alone first, to separate its time and allocator retention from the build's):
+generator/sparse n 100000000  build 35537.6 ms  keys    29.3 MB (  0.3 B/key)  peak    32.9 MB (  0.3 B/key)  build adds     3.6 MB (  0.0 B/key)  blob  0.00 B/key
+CompactStream n  99999999  build 52086.3 ms  keys    29.2 MB (  0.3 B/key)  peak   301.9 MB (  3.0 B/key)  build adds   272.7 MB (  2.7 B/key)  blob  1.26 B/key
+CompactListed n 100000000  build 10155.3 ms  keys  6334.5 MB ( 63.3 B/key)  peak  8834.1 MB ( 88.3 B/key)  build adds  2499.6 MB ( 25.0 B/key)  blob  1.26 B/key
+(the listed row's n is the generated count before the index's own dedup; the index holds 99 999 999 keys in both)
+
+10^9 (streamed only: the list would need about 90 GB; 03:43-03:53, scratch peaked at about 44 GB on /home):
+CompactStream n 997503996  build 603815.5 ms  keys    29.3 MB (  0.0 B/key)  peak  1717.1 MB (  1.7 B/key)  build adds  1687.8 MB (  1.7 B/key)  blob  1.26 B/key
+
+Reading. Under 256 MiB of fingerprint table the streamed build's peak is the run buffer (256 MiB of 16-byte pairs,
+reserved whole) or the perfect hash's construction plus the table, whichever is larger -- at 10^8 the two are within
+5 MB of each other. At 10^9 the table goes through range files and the peak is the perfect hash's own construction,
+1.7 bytes per key. The blob is byte for byte what `build` + `save` write (unit tests across widths and budgets).

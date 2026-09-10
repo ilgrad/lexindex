@@ -219,6 +219,10 @@ dict_.id_unchecked("GET")      # fastest lookup; no fingerprint check (closed-vo
 
 dict_.save("verbs.bch")
 dict_ = CompactHashIndex.load_mmap("verbs.bch")   # fingerprint table mapped zero-copy
+
+# A corpus that does not fit in memory: hashed as it streams, the pairs sorted in runs beside the
+# output, the perfect hash built from them a chunk at a time -- the same file `save` writes.
+n = CompactHashIndex.build_to_file((line.rstrip() for line in open("keys.txt")), "verbs.bch")
 ```
 
 ### Choosing the fingerprint width
@@ -414,9 +418,13 @@ Every index has a build that never holds the keys, and each takes the shape its 
 use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
 # let dir = std::env::temp_dir();
 # let (bix, bmp) = (dir.join("lexindex-usage-stream.bix"), dir.join("lexindex-usage-stream.bmp"));
+# let bch = dir.join("lexindex-usage-stream.bch");
 
-// `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do.
+// `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do...
 let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
+// ...and past memory the pairs are sorted in runs spilled beside the output, the perfect hash is
+// built from the merged runs a chunk at a time, and the file is what `build` + `save` would write.
+CompactHashIndex::build_to_file(["c", "a", "b"], &bch, 1)?;
 
 // `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
 StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
@@ -427,8 +435,10 @@ StringIndex::build_to_file(["c", "a", "b"], &bix)?;
 // hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
 PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
 # assert!(small.contains("a"));
+# assert_eq!(std::fs::read(&bch)?, small.to_bytes()?);
 # std::fs::remove_file(&bix).ok();
 # std::fs::remove_file(&bmp).ok();
+# std::fs::remove_file(&bch).ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
@@ -436,6 +446,16 @@ At 10 M real-word pairs the streamed `PerfectHashIndex` build peaks at 471 MB ag
 the same keys handed to `build` as a list; the streamed `StringIndex` build peaks at 49.6 MB against
 721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
+
+The streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
+for the same keys handed to `build` as a list (254 against 903 at 10 M), and **1.7 GB at 10⁹**,
+where the list would need about 90 GB. Under 256 MiB of fingerprint table the peak is the run
+buffer itself or the perfect hash's construction plus the table, whichever is larger — at 100 M
+they are within 5 MB of each other; past it the fingerprints go through range files and the peak
+is the perfect hash's own construction, 1.7 bytes per key. Its transient disk is the distinct
+pairs twice, 32 bytes per key, beside the output, plus twelve more per key for the range files
+past 268 M keys at the default width, so that no byte of the output is ever written at a random
+offset. The 10⁹ build took ten minutes here, six of them generating the keys.
 
 The perfect hash also needs **transient disk space**: an output whose key arena exceeds 32 MB is
 filled window by window through a spill file next to it, so about 2.2× the output size has to be

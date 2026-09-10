@@ -234,6 +234,50 @@ fn main() {
         return;
     }
 
+    // The streaming compact hash: one pass over the generator, hashes sorted in runs beside the
+    // output, the perfect hash built from the merged runs a chunk at a time. Like `perfect-stream`
+    // its `keys` column is the process baseline.
+    #[cfg(feature = "mph")]
+    if which == "compact-stream" {
+        let vocab = load_vocab();
+        reset_peak_rss();
+        let keys_rss = peak_rss();
+        let dir = std::env::var("LEXINDEX_PEAK_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        let path = dir.join(format!("lexindex_peak_{}.bch", std::process::id()));
+        let t0 = std::time::Instant::now();
+        let written = CompactHashIndex::build_to_file(
+            iter_sparse_sorted_keys(n, &vocab).take(n),
+            &path,
+            fp_bytes,
+        )
+        .unwrap();
+        let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let blob = std::fs::metadata(&path).map(|m| m.len() as usize).unwrap();
+        std::fs::remove_file(&path).ok();
+        report("CompactStream", written, keys_rss, blob, build_ms);
+        return;
+    }
+
+    // The same keys materialised and handed to the constructor, for the A/B.
+    #[cfg(feature = "mph")]
+    if which == "compact-listed" {
+        let vocab = load_vocab();
+        let keys: Vec<String> = iter_sparse_sorted_keys(n, &vocab).take(n).collect();
+        drop(vocab);
+        reset_peak_rss();
+        let keys_rss = peak_rss();
+        let t0 = std::time::Instant::now();
+        let idx = CompactHashIndex::build(&keys, fp_bytes).unwrap();
+        let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let blob = idx.serialized_len().unwrap();
+        // Distinct keys, as the streamed mode reports them, so the two rows are comparable.
+        report("CompactListed", idx.len(), keys_rss, blob, build_ms);
+        std::hint::black_box(idx);
+        return;
+    }
+
     if let Some(sorted) = which.strip_prefix("string-sorted") {
         let sparse = sorted.starts_with("-sparse");
         let drain = sorted.ends_with("-gen");

@@ -26,6 +26,279 @@ const HEADER_V6: usize = 40;
 const CHECKED_V6: usize = 36; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 
+/// One `(hash, second hash)` pair in a run or the merged file.
+const PAIR_BYTES: usize = 16;
+/// One `(slot u32, fingerprint u64)` record in a range file.
+const SLOT_BYTES: usize = 12;
+/// The largest fingerprint table the streaming builder fills in memory rather than through range
+/// files: 256 MiB, 268 M keys at the default width.
+const FP_MEMORY: usize = 256 << 20;
+/// Slots per range file past that budget: 16 M, a 16 MB segment at eight bits, and a multiple
+/// of eight so that every segment starts on a byte.
+const RANGE_SLOTS: usize = 1 << 24;
+
+/// What the streaming builder may hold; only the tests pass anything but [`Budget::DEFAULT`],
+/// to route a corpus of thousands the way one of billions goes.
+#[derive(Clone, Copy)]
+pub(crate) struct Budget {
+    /// Pairs held before a run is sorted and spilled; reserved whole at the first key.
+    pub(crate) run_bytes: usize,
+    /// The fingerprint table filled in memory up to this size; range files past it.
+    pub(crate) fp_memory: usize,
+    pub(crate) range_slots: usize,
+}
+
+impl Budget {
+    pub(crate) const DEFAULT: Self = Self {
+        run_bytes: crate::string_index::RUN_BYTES,
+        fp_memory: FP_MEMORY,
+        range_slots: RANGE_SLOTS,
+    };
+}
+
+/// Process-wide counter in the scratch directory's name, so two builds in one process aimed at
+/// the same path do not share one.
+static SCRATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The streaming builder's files, in a directory beside the output: the spilled runs, the merged
+/// pairs, the range files. Created at the first spill, removed when this is dropped, whichever way
+/// the build ends; a corpus that fits one run and whose table fits the budget leaves no trace.
+struct Scratch {
+    beside: std::path::PathBuf,
+    dir: Option<std::path::PathBuf>,
+    runs: usize,
+}
+
+impl Scratch {
+    fn beside(target: &std::path::Path) -> Self {
+        Self {
+            beside: target.to_path_buf(),
+            dir: None,
+            runs: 0,
+        }
+    }
+
+    fn dir(&mut self) -> Result<&std::path::Path, IndexError> {
+        if self.dir.is_none() {
+            let mut dir = self.beside.clone();
+            let seq = SCRATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            dir.as_mut_os_string()
+                .push(format!(".{}.{seq}.runs", std::process::id()));
+            // `create_dir`, not `create_dir_all`: a directory already at this pid-and-counter
+            // name is someone else's, and an error rather than a place to write.
+            std::fs::create_dir(&dir)?;
+            self.dir = Some(dir);
+        }
+        Ok(self.dir.as_deref().expect("just created"))
+    }
+
+    fn create(&mut self, name: &str) -> Result<std::io::BufWriter<std::fs::File>, IndexError> {
+        let path = self.dir()?.join(name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(std::io::BufWriter::with_capacity(1 << 20, file))
+    }
+
+    fn path(&mut self, name: &str) -> Result<std::path::PathBuf, IndexError> {
+        Ok(self.dir()?.join(name))
+    }
+
+    /// `run`, sorted and distinct, as the next run file; the buffer is emptied for reuse.
+    fn spill(&mut self, run: &mut Vec<(u64, u64)>) -> Result<(), IndexError> {
+        use std::io::Write;
+        run.sort_unstable();
+        run.dedup();
+        let mut w = self.create(&self.runs.to_string())?;
+        for &(h, second) in run.iter() {
+            w.write_all(&h.to_le_bytes())?;
+            w.write_all(&second.to_le_bytes())?;
+        }
+        w.flush()?;
+        run.clear();
+        self.runs += 1;
+        Ok(())
+    }
+
+    /// Every run as one ascending, distinct file of pairs, counting them and the same-hash
+    /// leftovers on the way, so the perfect hash knows its size before it reads a key.
+    fn merge(&mut self) -> Result<Pairs, IndexError> {
+        use std::cmp::Reverse;
+        use std::io::Write;
+        let mut readers = Vec::with_capacity(self.runs);
+        let mut heap = std::collections::BinaryHeap::with_capacity(self.runs);
+        for i in 0..self.runs {
+            let mut reader = Records::<PAIR_BYTES>::open(&self.path(&i.to_string())?)?;
+            if let Some(pair) = reader.next()?.map(pair_of) {
+                heap.push(Reverse((pair, i)));
+            }
+            readers.push(reader);
+        }
+        let path = self.path("merged")?;
+        let mut w = self.create("merged")?;
+        let (mut n, mut side) = (0usize, 0usize);
+        let mut last: Option<(u64, u64)> = None;
+        while let Some(Reverse((pair, i))) = heap.pop() {
+            if let Some(next) = readers[i].next()?.map(pair_of) {
+                heap.push(Reverse((next, i)));
+            }
+            if last == Some(pair) {
+                continue;
+            }
+            if last.is_some_and(|l| l.0 == pair.0) {
+                side += 1;
+            }
+            w.write_all(&pair.0.to_le_bytes())?;
+            w.write_all(&pair.1.to_le_bytes())?;
+            n += 1;
+            last = Some(pair);
+        }
+        w.flush()?;
+        Ok(Pairs::File { path, n, side })
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if let Some(dir) = &self.dir {
+            std::fs::remove_dir_all(dir).ok();
+        }
+    }
+}
+
+/// Fixed-size records read back from a scratch file, `None` at a clean end; a torn record is an
+/// error, since this process wrote whole ones moments ago.
+struct Records<const N: usize> {
+    reader: std::io::BufReader<std::fs::File>,
+}
+
+impl<const N: usize> Records<N> {
+    fn open(path: &std::path::Path) -> Result<Self, IndexError> {
+        Ok(Self {
+            reader: std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?),
+        })
+    }
+
+    fn next(&mut self) -> std::io::Result<Option<[u8; N]>> {
+        use std::io::Read;
+        let mut buf = [0u8; N];
+        let mut got = 0;
+        while got < N {
+            match self.reader.read(&mut buf[got..])? {
+                0 if got == 0 => return Ok(None),
+                0 => {
+                    return Err(std::io::Error::other(
+                        "compact-hash: a scratch file is torn",
+                    ));
+                }
+                k => got += k,
+            }
+        }
+        Ok(Some(buf))
+    }
+}
+
+fn pair_of(rec: [u8; PAIR_BYTES]) -> (u64, u64) {
+    (
+        u64::from_le_bytes(rec[0..8].try_into().expect("8 bytes")),
+        u64::from_le_bytes(rec[8..16].try_into().expect("8 bytes")),
+    )
+}
+
+/// The distinct pairs of a streaming build, ascending: in memory when the source fit one run,
+/// else the merged file, read back once for the perfect hash and once for the fingerprints.
+enum Pairs {
+    Memory(Vec<(u64, u64)>),
+    File {
+        path: std::path::PathBuf,
+        n: usize,
+        side: usize,
+    },
+}
+
+impl Pairs {
+    /// Distinct pairs, and how many of them share their hash with an earlier one.
+    fn counts(&self) -> (usize, usize) {
+        match self {
+            Pairs::Memory(pairs) => (
+                pairs.len(),
+                pairs.windows(2).filter(|w| w[0].0 == w[1].0).count(),
+            ),
+            Pairs::File { n, side, .. } => (*n, *side),
+        }
+    }
+
+    fn reps(&self) -> Result<Reps<'_>, IndexError> {
+        Ok(Reps {
+            from: match self {
+                Pairs::Memory(pairs) => From::Memory(pairs),
+                Pairs::File { path, .. } => From::File(Records::open(path)?),
+            },
+            last: None,
+            error: None,
+        })
+    }
+
+    fn scan(
+        &self,
+        mut each: impl FnMut((u64, u64)) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        match self {
+            Pairs::Memory(pairs) => pairs.iter().try_for_each(|&p| each(p)),
+            Pairs::File { path, .. } => {
+                let mut records = Records::<PAIR_BYTES>::open(path)?;
+                while let Some(rec) = records.next()? {
+                    each(pair_of(rec))?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+enum From<'a> {
+    Memory(&'a [(u64, u64)]),
+    File(Records<PAIR_BYTES>),
+}
+
+/// One hash per distinct value — the first pair of each equal-hash run — for the perfect hash,
+/// which cannot take a `Result`: a read error is parked and ends the stream, and the builder
+/// asks for it before it trusts the table.
+struct Reps<'a> {
+    from: From<'a>,
+    last: Option<u64>,
+    error: Option<std::io::Error>,
+}
+
+impl Iterator for Reps<'_> {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        loop {
+            let h = match &mut self.from {
+                From::Memory(pairs) => {
+                    let (&(h, _), rest) = pairs.split_first()?;
+                    *pairs = rest;
+                    h
+                }
+                From::File(records) => match records.next() {
+                    Ok(Some(rec)) => pair_of(rec).0,
+                    Ok(None) => return None,
+                    Err(e) => {
+                        self.error = Some(e);
+                        return None;
+                    }
+                },
+            };
+            if self.last != Some(h) {
+                self.last = Some(h);
+                return Some(h);
+            }
+        }
+    }
+}
+
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
 type SerialisedParts = ([u8; HEADER_V6], Vec<u8>, Vec<u8>);
 
@@ -181,6 +454,236 @@ impl CompactHashIndex {
             n,
             side,
         })
+    }
+
+    /// Build straight to a file, from a source that need not fit in memory: the file
+    /// [`build`](Self::build) and [`save`](Self::save) would have written, byte for byte, without
+    /// ever holding the keys, their hashes or the fingerprint table whole. Returns the number of
+    /// distinct keys written. `fingerprint_bytes` is [`build`](Self::build)'s;
+    /// [`build_bits_to_file`](Self::build_bits_to_file) takes a width in bits.
+    ///
+    /// One pass over `items` hashes each key to its 16-byte pair and drops the string; every
+    /// 256 MiB of pairs is sorted, deduplicated and spilled as a run beside the output, and the
+    /// runs are merged into one sorted file. The perfect hash is built from that file one
+    /// first-level chunk at a time — the table `build` gives the same keys, since both feed the
+    /// same placement — and a second read writes every fingerprint at its slot: into memory while
+    /// the table is under 256 MiB (268 M keys at the default width), past that through range
+    /// files of 16 M slots each, so that no byte of the output is ever written at a random
+    /// offset. Peak memory is one run plus the perfect hash's own construction, whatever the key
+    /// count; the transient disk beside the output is the distinct pairs twice, 32 bytes per key,
+    /// and twelve more past the table budget, all removed on every exit path.
+    ///
+    /// The source is read once, so any iterator will do; unlike
+    /// [`PerfectHashIndex::build_to_file`](crate::PerfectHashIndex::build_to_file) nothing is
+    /// replayed, because nothing here depends on the slot order before the keys are hashed.
+    pub fn build_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        fingerprint_bytes: usize,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if !matches!(fingerprint_bytes, 1 | 2 | 4) {
+            return Err(IndexError::Format(
+                "compact-hash: fingerprint_bytes must be 1, 2, or 4",
+            ));
+        }
+        Self::build_bits_to_file(items, path, fingerprint_bytes as u32 * 8)
+    }
+
+    /// [`build_to_file`](Self::build_to_file) at exactly `fingerprint_bits` (1..=64) per key —
+    /// [`build_bits`](Self::build_bits) written straight to `path`.
+    pub fn build_bits_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        fingerprint_bits: u32,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(items, path, fingerprint_bits, || Ok(()))
+    }
+
+    /// [`build_bits_to_file`](Self::build_bits_to_file) with a last word from the caller, asked
+    /// once the input has ended — before the merge, so a source that failed does not pay for one
+    /// — and again **inside** the atomic write, before the rename that publishes the file. It
+    /// exists for a source that cannot report failure through its iterator: the Python binding
+    /// adapts an arbitrary iterable, and one that raises halfway simply stops.
+    pub(crate) fn build_to_file_checked<I, S, C>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        fingerprint_bits: u32,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        check_fingerprint_bits(fingerprint_bits)?;
+        Self::build_to_file_with(
+            items.into_iter().map(|s| hash_pair(s.as_ref())),
+            path.as_ref(),
+            fingerprint_bits,
+            check,
+            Budget::DEFAULT,
+        )
+    }
+
+    /// The streaming build over hashed pairs, with its memory budget exposed.
+    pub(crate) fn build_to_file_with(
+        pairs: impl Iterator<Item = (u64, u64)>,
+        path: &std::path::Path,
+        fingerprint_bits: u32,
+        mut check: impl FnMut() -> Result<(), IndexError>,
+        budget: Budget,
+    ) -> Result<usize, IndexError> {
+        use std::io::{Seek, Write};
+        check_fingerprint_bits(fingerprint_bits)?;
+        debug_assert_eq!(budget.range_slots % 8, 0, "a range must start on a byte");
+
+        // Pass one: hash, in runs sorted and spilled beside the output.
+        let mut scratch = Scratch::beside(path);
+        let cap = (budget.run_bytes / PAIR_BYTES).max(1);
+        let mut run: Vec<(u64, u64)> = Vec::new();
+        for pair in pairs {
+            if run.capacity() == 0 {
+                run.reserve_exact(cap);
+            }
+            run.push(pair);
+            if run.len() == cap {
+                scratch.spill(&mut run)?;
+            }
+        }
+        check()?;
+        let pairs = if scratch.runs == 0 {
+            run.sort_unstable();
+            run.dedup();
+            Pairs::Memory(run)
+        } else {
+            if !run.is_empty() {
+                scratch.spill(&mut run)?;
+            }
+            drop(run);
+            scratch.merge()?
+        };
+        let (n, side_len) = pairs.counts();
+        if n > u32::MAX as usize {
+            return Err(IndexError::Format(
+                "compact-hash: more than u32::MAX keys; ids are u32",
+            ));
+        }
+        let m = n - side_len;
+
+        // Pass two: the perfect hash over one hash per distinct value, a chunk at a time.
+        let mph = if m == 0 {
+            None
+        } else {
+            let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+            let mut reps = pairs.reps()?;
+            let built = Mphf::build_from_sorted(m as u64, &mut reps, threads);
+            if let Some(e) = reps.error.take() {
+                return Err(e.into());
+            }
+            Some(built?)
+        };
+
+        // Pass three: every representative's fingerprint at its slot — into the table when it
+        // fits the budget, else into the range file its slot falls in — and the rest of each
+        // equal-hash run into the side table, with the tail ids `build` gives them.
+        let mask = fp_mask(fingerprint_bits);
+        let table_len = fp_table_len(m, fingerprint_bits)?;
+        let in_memory = table_len <= budget.fp_memory;
+        let ranges = if in_memory {
+            0
+        } else {
+            m.div_ceil(budget.range_slots)
+        };
+        let mut fps = vec![0u8; if in_memory { table_len } else { 0 }];
+        let mut range_files = Vec::with_capacity(ranges);
+        for i in 0..ranges {
+            range_files.push(scratch.create(&format!("r{i}"))?);
+        }
+        let mut side: Vec<(u64, u64, u32)> = Vec::with_capacity(side_len);
+        let mut last: Option<u64> = None;
+        pairs.scan(|(h, second)| {
+            if last == Some(h) {
+                side.push((h, second, (m + side.len()) as u32));
+                return Ok(());
+            }
+            last = Some(h);
+            let slot = mph
+                .as_ref()
+                .expect("a representative exists only when m > 0")
+                .index(h) as usize;
+            let fp = second & mask;
+            if in_memory {
+                write_fp(&mut fps, slot, fingerprint_bits, fp);
+            } else {
+                let w = &mut range_files[slot / budget.range_slots];
+                w.write_all(&(slot as u32).to_le_bytes())?;
+                w.write_all(&fp.to_le_bytes())?;
+            }
+            Ok(())
+        })?;
+        for w in &mut range_files {
+            w.flush()?;
+        }
+        drop(range_files);
+        debug_assert_eq!(side.len(), side_len);
+        drop(pairs);
+
+        let mph_buf = mph.as_ref().map_or_else(Vec::new, Mphf::to_bytes);
+        let mut side_buf = Vec::with_capacity(side.len() * SIDE_ENTRY);
+        for &(h, fp, id) in &side {
+            side_buf.extend_from_slice(&h.to_le_bytes());
+            side_buf.extend_from_slice(&fp.to_le_bytes());
+            side_buf.extend_from_slice(&id.to_le_bytes());
+        }
+        // The header carries the payload's hash, so it goes in last, over the space left for it.
+        crate::blob::write_atomically_with(path, |w| {
+            let mut payload = crate::blob::BlockHasher::new();
+            w.write_all(&[0u8; HEADER_V6])?;
+            w.write_all(&mph_buf)?;
+            payload.update(&mph_buf);
+            if in_memory {
+                w.write_all(&fps)?;
+                payload.update(&fps);
+            } else {
+                for i in 0..ranges {
+                    let base = i * budget.range_slots;
+                    let slots = budget.range_slots.min(m - base);
+                    let mut segment = vec![0u8; fp_table_len(slots, fingerprint_bits)?];
+                    let mut records =
+                        Records::<SLOT_BYTES>::open(&scratch.path(&format!("r{i}"))?)?;
+                    while let Some(rec) = records.next()? {
+                        let slot = u32::from_le_bytes(rec[0..4].try_into().expect("4 bytes"));
+                        let fp = u64::from_le_bytes(rec[4..12].try_into().expect("8 bytes"));
+                        write_fp(&mut segment, slot as usize - base, fingerprint_bits, fp);
+                    }
+                    w.write_all(&segment)?;
+                    payload.update(&segment);
+                }
+            }
+            w.write_all(&side_buf)?;
+            payload.update(&side_buf);
+            check()?;
+            let header = header_v6(
+                n,
+                fingerprint_bits,
+                mph_buf.len(),
+                side.len(),
+                payload.finish(),
+            );
+            w.flush()?;
+            w.get_mut().seek(std::io::SeekFrom::Start(0))?;
+            w.write_all(&header)?;
+            Ok(())
+        })?;
+        Ok(n)
     }
 
     /// Ids of keys whose 64-bit hash collides with another key's, matched by the **full** 64-bit
@@ -357,15 +860,13 @@ impl CompactHashIndex {
         payload.update(&mph_buf);
         payload.update(self.fps.as_ref());
         payload.update(&side_buf);
-        let mut header = [0u8; HEADER_V6];
-        header[0..4].copy_from_slice(MAGIC_V6);
-        header[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
-        header[12..16].copy_from_slice(&self.fp_bits.to_le_bytes());
-        header[16..24].copy_from_slice(&(mph_buf.len() as u64).to_le_bytes());
-        header[24..28].copy_from_slice(&(self.side.len() as u32).to_le_bytes());
-        header[28..36].copy_from_slice(&payload.finish().to_le_bytes());
-        let check = crate::blob::hash_bytes(&header[..CHECKED_V6]) as u32;
-        header[CHECKED_V6..].copy_from_slice(&check.to_le_bytes());
+        let header = header_v6(
+            self.n,
+            self.fp_bits,
+            mph_buf.len(),
+            self.side.len(),
+            payload.finish(),
+        );
         Ok((header, mph_buf, side_buf))
     }
 
@@ -612,6 +1113,26 @@ impl CompactHashIndex {
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), true)
     }
+}
+
+/// The `BCH6` header over its scalars and the payload hash, checksummed.
+fn header_v6(
+    n: usize,
+    fp_bits: u32,
+    mph_len: usize,
+    side_len: usize,
+    payload: u64,
+) -> [u8; HEADER_V6] {
+    let mut header = [0u8; HEADER_V6];
+    header[0..4].copy_from_slice(MAGIC_V6);
+    header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
+    header[12..16].copy_from_slice(&fp_bits.to_le_bytes());
+    header[16..24].copy_from_slice(&(mph_len as u64).to_le_bytes());
+    header[24..28].copy_from_slice(&(side_len as u32).to_le_bytes());
+    header[28..36].copy_from_slice(&payload.to_le_bytes());
+    let check = crate::blob::hash_bytes(&header[..CHECKED_V6]) as u32;
+    header[CHECKED_V6..].copy_from_slice(&check.to_le_bytes());
+    header
 }
 
 fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
@@ -1159,6 +1680,196 @@ mod tests {
         let path = std::env::temp_dir().join(format!("lexindex_ch_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
         assert_eq!(CompactHashIndex::load(&path).unwrap().id("b"), idx.id("b"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("lexindex_chf_{}_{name}", std::process::id()))
+    }
+
+    /// Nothing of the build is left beside its output.
+    fn no_scratch_beside(path: &std::path::Path) {
+        let stem = path.file_name().unwrap().to_string_lossy().into_owned();
+        let left: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&stem) && name != &stem)
+            .collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    /// Byte for byte the blob `build` and `save` write, whichever way the budget routes it: one
+    /// run in memory or many spilled and merged, the fingerprint table in memory or through
+    /// range files, at five widths, over keys with duplicates and a real 64-bit hash collision.
+    #[test]
+    fn build_to_file_writes_the_blob_build_would_have() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let mut keys: Vec<String> = (0..30_000).map(|i| format!("key-{}", i % 20_000)).collect();
+        keys.push(a.to_string());
+        keys.push(b.to_string());
+        let budgets = [
+            Budget::DEFAULT,
+            Budget {
+                run_bytes: PAIR_BYTES * 1000,
+                fp_memory: 0,
+                range_slots: 1000,
+            },
+            Budget {
+                run_bytes: PAIR_BYTES * 4096,
+                fp_memory: usize::MAX,
+                range_slots: 8,
+            },
+            Budget {
+                run_bytes: PAIR_BYTES * 100_000,
+                fp_memory: 0,
+                range_slots: 8,
+            },
+        ];
+        for bits in [1u32, 4, 8, 16, 33] {
+            let expected = CompactHashIndex::build_bits(&keys, bits)
+                .unwrap()
+                .to_bytes()
+                .unwrap();
+            for (i, budget) in budgets.iter().enumerate() {
+                let path = tmp(&format!("blob-{bits}-{i}.bch"));
+                let n = CompactHashIndex::build_to_file_with(
+                    keys.iter().map(|k| hash_pair(k)),
+                    &path,
+                    bits,
+                    || Ok(()),
+                    *budget,
+                )
+                .unwrap();
+                assert_eq!(n, 20_002, "bits {bits}, budget {i}");
+                let written = std::fs::read(&path).unwrap();
+                assert!(written == expected, "bits {bits}, budget {i}");
+                no_scratch_beside(&path);
+                std::fs::remove_file(&path).ok();
+            }
+        }
+    }
+
+    /// Enough keys for the first level to be several chunks, fed from the merged file: the
+    /// chunk feed's cutting at bucket boundaries is what this exercises, against `build`.
+    #[test]
+    fn build_to_file_streams_the_perfect_hash_from_the_merged_file() {
+        let keys: Vec<String> = (0..200_000).map(|i| format!("k{i}")).collect();
+        let expected = CompactHashIndex::build(&keys, 1)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let path = tmp("chunks.bch");
+        let n = CompactHashIndex::build_to_file_with(
+            keys.iter().map(|k| hash_pair(k)),
+            &path,
+            8,
+            || Ok(()),
+            Budget {
+                run_bytes: PAIR_BYTES * 50_000,
+                fp_memory: 0,
+                range_slots: 65_536,
+            },
+        )
+        .unwrap();
+        assert_eq!(n, keys.len());
+        assert!(std::fs::read(&path).unwrap() == expected);
+        let back = CompactHashIndex::load(&path).unwrap();
+        assert!(keys.iter().all(|k| back.contains(k)));
+        no_scratch_beside(&path);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// The public forms: bytes and bits, and a width refused before the source is touched.
+    #[test]
+    fn build_to_file_public_forms_match_build() {
+        let keys = ["alpha", "beta", "gamma", "beta"];
+        let path = tmp("public.bch");
+        assert_eq!(CompactHashIndex::build_to_file(keys, &path, 2).unwrap(), 3);
+        assert!(
+            std::fs::read(&path).unwrap()
+                == CompactHashIndex::build(keys, 2)
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap()
+        );
+        assert_eq!(
+            CompactHashIndex::build_bits_to_file(keys, &path, 5).unwrap(),
+            3
+        );
+        assert!(
+            std::fs::read(&path).unwrap()
+                == CompactHashIndex::build_bits(keys, 5)
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap()
+        );
+        std::fs::remove_file(&path).ok();
+        let never = std::iter::from_fn(|| -> Option<&str> { panic!("the source was read") });
+        assert!(CompactHashIndex::build_to_file(never, &path, 3).is_err());
+        let never = std::iter::from_fn(|| -> Option<&str> { panic!("the source was read") });
+        assert!(CompactHashIndex::build_bits_to_file(never, &path, 0).is_err());
+        assert!(!path.exists());
+        let empty = tmp("empty.bch");
+        assert_eq!(
+            CompactHashIndex::build_to_file(Vec::<String>::new(), &empty, 1).unwrap(),
+            0
+        );
+        assert!(
+            std::fs::read(&empty).unwrap()
+                == CompactHashIndex::build(Vec::<String>::new(), 1)
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap()
+        );
+        std::fs::remove_file(&empty).ok();
+    }
+
+    /// A failing check aborts before the merge and, asked again inside the write, before the
+    /// rename: the target is untouched either way and the scratch is gone.
+    #[test]
+    fn build_to_file_aborts_on_the_check_and_leaves_nothing() {
+        let keys: Vec<String> = (0..3000).map(|i| format!("k{i}")).collect();
+        let path = tmp("aborted.bch");
+        std::fs::write(&path, b"previous").unwrap();
+        let spilled = Budget {
+            run_bytes: PAIR_BYTES * 1000,
+            fp_memory: 0,
+            range_slots: 1000,
+        };
+        let mut asked = 0;
+        let err = CompactHashIndex::build_to_file_with(
+            keys.iter().map(|k| hash_pair(k)),
+            &path,
+            8,
+            || {
+                asked += 1;
+                Err(IndexError::Format("the source raised"))
+            },
+            spilled,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("the source raised"));
+        assert_eq!(asked, 1, "refused before the merge");
+        let mut asked = 0;
+        let err = CompactHashIndex::build_to_file_with(
+            keys.iter().map(|k| hash_pair(k)),
+            &path,
+            8,
+            || {
+                asked += 1;
+                if asked == 2 {
+                    Err(IndexError::Format("the source raised late"))
+                } else {
+                    Ok(())
+                }
+            },
+            spilled,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("raised late"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        no_scratch_beside(&path);
         std::fs::remove_file(&path).ok();
     }
 

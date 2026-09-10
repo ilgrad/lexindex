@@ -281,6 +281,23 @@ class CompactHashIndex:
         *,
         fingerprint_bits: int | None = None,
     ) -> CompactHashIndex: ...
+    @staticmethod
+    def build_to_file(
+        items: Iterable[str],
+        path: str | os.PathLike[str],
+        fingerprint_bytes: int = 1,
+        *,
+        fingerprint_bits: int | None = None,
+    ) -> int:
+        """The constructor for a corpus that does not fit in memory, written straight to ``path``.
+
+        The keys, in any order, are hashed as they come and their 16-byte pairs sorted in runs
+        that spill beside the output; the perfect hash is built from the merged runs a chunk at a
+        time and the fingerprints written at their slots, so neither the corpus, its hashes nor
+        the finished table is ever held whole. Byte for byte what the constructor and ``save``
+        write. Returns the number of distinct keys written; an iterable that raises aborts the
+        build with ``path`` untouched.
+        """
     @property
     def fingerprint_bits(self) -> int: ...
     def __len__(self) -> int: ...

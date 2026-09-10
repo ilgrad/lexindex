@@ -125,6 +125,18 @@ old MPH, and `CompactHashIndex` stores no keys at all. Rebuilding from the key l
 and it is the only one a keyless index could ever have had. Soundness outranks compatibility, and
 this is the release where that debt is paid rather than carried.
 
+`build_to_file` is that streaming build carried past memory: the pairs go to runs of 256 MiB,
+sorted and spilled beside the output, the runs are merged into one sorted file, and the perfect
+hash is built from it one first-level chunk at a time — the level's chunks are pulled from a
+feed, a slice in memory or a sequential reader cutting at bucket boundaries, so `build` runs
+the same placement over its slice and the file is byte for byte what `build` and `save` write.
+The fingerprints are then written at their slots, into memory while the table is under 256 MiB
+and past that through range files of 16 M slots each, read back one at a time, so that no byte
+of the output is written at a random offset — the lesson the perfect-hash arena taught. Measured
+at 100 M real-word pairs: 302 MB peak against 8 834 MB for the list, the run buffer and the
+perfect hash's construction plus the table within 5 MB of each other; at 10⁹, 1.7 GB, which is
+the perfect hash's construction alone at 1.7 bytes per key.
+
 ## `ClosedHashIndex`
 
 `CompactHashIndex` with the fingerprint table removed, and the `Option` with it. The minimal

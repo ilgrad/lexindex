@@ -965,6 +965,105 @@ fn is_sorted(hashes: &[u64], threads: usize) -> bool {
     })
 }
 
+/// Where a level's keys come from.
+enum Source<'a> {
+    /// Grouped by bucket in bucket order, all in memory.
+    Slice(&'a [u64]),
+    /// Sorted, pulled as the level's chunks are claimed, so that a first level over more keys
+    /// than fit in memory is built from a file. Only a first level is fed this way; the bumped
+    /// keys are a few per cent and stay in memory.
+    Stream(&'a mut (dyn Iterator<Item = u64> + Send)),
+}
+
+/// A level's chunks, claimed in order together with their keys: a subslice of the grouped keys,
+/// or what a sequential reader cut at the chunk's last bucket. Claiming and reading are one
+/// step under one lock, so the stream is only ever read in chunk order, whichever thread asks.
+enum Feed<'a> {
+    Slice {
+        keys: &'a [u64],
+        /// Where each chunk's keys begin, and where the last one's end.
+        bounds: Vec<usize>,
+        next: AtomicUsize,
+    },
+    Stream(std::sync::Mutex<Cutter<'a>>),
+}
+
+struct Cutter<'a> {
+    hashes: &'a mut (dyn Iterator<Item = u64> + Send),
+    /// The key that ended the previous chunk: the first of a later one.
+    pending: Option<u64>,
+    next: usize,
+    fed: u64,
+}
+
+impl<'a> Feed<'a> {
+    fn new(source: Source<'a>, starts: &[u64], buckets: u64) -> Self {
+        match source {
+            Source::Slice(keys) => Feed::Slice {
+                keys,
+                bounds: starts
+                    .iter()
+                    .map(|&first| keys.partition_point(|&h| scale(h, buckets) < first))
+                    .chain(std::iter::once(keys.len()))
+                    .collect(),
+                next: AtomicUsize::new(0),
+            },
+            Source::Stream(hashes) => Feed::Stream(std::sync::Mutex::new(Cutter {
+                hashes,
+                pending: None,
+                next: 0,
+                fed: 0,
+            })),
+        }
+    }
+
+    /// The next chunk and its keys, grouped by bucket; `None` once every chunk is claimed.
+    fn next(&self, starts: &[u64], buckets: u64) -> Option<(usize, std::borrow::Cow<'_, [u64]>)> {
+        match self {
+            Feed::Slice { keys, bounds, next } => {
+                let k = next.fetch_add(1, Ordering::Relaxed);
+                (k + 1 < bounds.len()).then(|| {
+                    (
+                        k,
+                        std::borrow::Cow::Borrowed(&keys[bounds[k]..bounds[k + 1]]),
+                    )
+                })
+            }
+            Feed::Stream(cutter) => {
+                let mut c = cutter.lock().expect("a chunk reader panicked");
+                let k = c.next;
+                if k >= starts.len() {
+                    return None;
+                }
+                // The chunk ends where the next one's first bucket begins; the last runs to the
+                // end of the stream. The key that ends it is kept for the chunk it belongs to,
+                // which is not necessarily the next: a chunk can be empty.
+                let limit = starts.get(k + 1).copied();
+                let mut chunk = Vec::new();
+                let mut carried = c.pending.take();
+                while let Some(h) = carried.take().or_else(|| c.hashes.next()) {
+                    if limit.is_some_and(|l| scale(h, buckets) >= l) {
+                        c.pending = Some(h);
+                        break;
+                    }
+                    chunk.push(h);
+                }
+                c.next += 1;
+                c.fed += chunk.len() as u64;
+                Some((k, std::borrow::Cow::Owned(chunk)))
+            }
+        }
+    }
+
+    /// Keys handed out in all.
+    fn fed(&self) -> u64 {
+        match self {
+            Feed::Slice { keys, .. } => keys.len() as u64,
+            Feed::Stream(cutter) => cutter.lock().expect("a chunk reader panicked").fed,
+        }
+    }
+}
+
 /// What placing a run of buckets produced.
 struct Piece {
     /// Its first bucket.
@@ -973,8 +1072,12 @@ struct Piece {
     /// Occupancy of the values it placed, from value `origin`.
     map: Map,
     origin: u64,
-    /// CSR offsets of the gap's buckets after it, [`Run::start`]-style; empty for a gap's own.
+    /// CSR offsets of the gap's buckets after it, [`Run::start`]-style, into `tail_keys`; empty
+    /// for a gap's own.
     tail: Vec<u32>,
+    /// The keys of the gap's buckets, copied out so that the chunk's own keys can go once it is
+    /// placed — a first level fed from a file holds only the chunks in flight.
+    tail_keys: Vec<u64>,
     /// The keys of the buckets it bumped.
     bumped: Vec<u64>,
 }
@@ -1062,12 +1165,7 @@ impl V2 {
     }
 
     fn build(hashes: &[u64], threads: usize) -> Result<Self, IndexError> {
-        let n = hashes.len() as u64;
-        let mut levels: Vec<Level> = Vec::new();
-        let mut maps: Vec<Map> = Vec::new();
-        let mut remaining: Vec<u64>;
         phase("start");
-
         // Both callers hand over sorted hashes, and a bucket is monotone in its hash, so sorted
         // input is already grouped by bucket; anything else is sorted first.
         let sorted: std::borrow::Cow<[u64]> = if is_sorted(hashes, threads) {
@@ -1078,14 +1176,46 @@ impl V2 {
             std::borrow::Cow::Owned(v)
         };
         phase("sort");
+        Self::build_from(sorted.len() as u64, Source::Slice(&sorted), threads)
+    }
+
+    /// [`build`](Self::build) over `n` sorted, distinct hashes pulled from `hashes` one chunk of
+    /// the first level at a time, so that a set too large to hold is built from a file. The
+    /// table is the one `build` gives the same keys, by construction: both feed the same
+    /// placement. A stream that yields other than `n` keys is refused.
+    fn build_streaming(
+        n: u64,
+        hashes: &mut (dyn Iterator<Item = u64> + Send),
+        threads: usize,
+    ) -> Result<Self, IndexError> {
+        phase("start");
+        Self::build_from(n, Source::Stream(hashes), threads)
+    }
+
+    fn build_from(n: u64, source: Source<'_>, threads: usize) -> Result<Self, IndexError> {
+        const SHORT: IndexError = IndexError::Build(
+            "minimal perfect hash: the source yielded other than the promised number of keys",
+        );
+        let mut levels: Vec<Level> = Vec::new();
+        let mut maps: Vec<Map> = Vec::new();
+        let mut remaining: Vec<u64>;
 
         if n > TAIL_KEYS {
-            let (level, taken, bumped) = Self::build_level(&sorted, threads, false);
+            let (level, taken, bumped, fed) = Self::build_level(n, source, threads, false);
+            if fed != n {
+                return Err(SHORT);
+            }
             remaining = bumped;
             levels.push(level);
             maps.push(taken);
         } else {
-            remaining = sorted.into_owned();
+            remaining = match source {
+                Source::Slice(keys) => keys.to_vec(),
+                Source::Stream(hashes) => hashes.collect(),
+            };
+            if remaining.len() as u64 != n {
+                return Err(SHORT);
+            }
         }
 
         while remaining.len() as u64 > TAIL_KEYS && levels.len() < MAX_LEVELS {
@@ -1093,7 +1223,8 @@ impl V2 {
             let buckets = Level::shape(remaining.len() as u64).buckets;
             let (keys, from) = group_by_bucket(&remaining, lv, buckets, threads);
             phase("level pairs");
-            let (level, taken, bumped) = Self::build_level(&keys, threads, true);
+            let (level, taken, bumped, _) =
+                Self::build_level(keys.len() as u64, Source::Slice(&keys), threads, true);
             // A level that bumps everything has spread nothing; the tail takes the keys as they are.
             if bumped.len() == keys.len() {
                 break;
@@ -1163,10 +1294,14 @@ impl V2 {
         })
     }
 
-    /// One bumping level over `keys`, which are grouped by bucket in bucket order. Returns the
-    /// level, its occupancy map, and the keys it bumped.
-    fn build_level(keys: &[u64], threads: usize, deep: bool) -> (Level, Map, Vec<u64>) {
-        let n = keys.len() as u64;
+    /// One bumping level over `n` keys from `source`, grouped by bucket in bucket order. Returns
+    /// the level, its occupancy map, the keys it bumped, and how many keys the source fed it.
+    fn build_level(
+        n: u64,
+        source: Source<'_>,
+        threads: usize,
+        deep: bool,
+    ) -> (Level, Map, Vec<u64>, u64) {
         let mut level = Level::shape(n);
         let buckets = level.buckets;
         let slice = level.slice;
@@ -1188,44 +1323,35 @@ impl V2 {
             .unwrap_or(0);
         // The smallest value a key of bucket `b` can take.
         let lo = |b: u64| ((b as u128 * n as u128) / buckets as u128) as u64;
-        let bounds: Vec<usize> = (0..chunks)
-            .map(|k| keys.partition_point(|&h| scale(h, buckets) < first_of(k)))
-            .chain(std::iter::once(keys.len()))
-            .collect();
+        let feed = Feed::new(source, &starts, buckets);
         let shift = stride_for(slice).trailing_zeros();
         let align = |v: u64| v & !((64 << shift) - 1);
         let word = |o: u64| (o >> shift) as i64 / 64;
 
-        // Chunks are claimed in order from a counter. A chunk finds its buckets' boundaries and
-        // seeds its run into a private occupancy map covering just the values its buckets can
-        // reach — a few dozen KiB, which is what keeps the search in L1. A gap is placed by
-        // whichever thread finished the later of its two chunks, against a map prefilled from
-        // theirs, which is all that reaches it. The maps are merged afterwards, and the gap at
-        // the level's end, whose values wrap, is placed then, against everything.
+        // Chunks are claimed in order from the feed, with their keys. A chunk finds its buckets'
+        // boundaries and seeds its run into a private occupancy map covering just the values its
+        // buckets can reach — a few dozen KiB, which is what keeps the search in L1. A gap is
+        // placed by whichever thread finished the later of its two chunks, against a map
+        // prefilled from theirs, which is all that reaches it, over the gap keys the left chunk
+        // copied out. The maps are merged afterwards, and the gap at the level's end, whose
+        // values wrap, is placed then, against everything.
         let pieces: Vec<OnceLock<Piece>> = (0..chunks).map(|_| OnceLock::new()).collect();
         let gaps: Vec<OnceLock<Piece>> = (1..chunks).map(|_| OnceLock::new()).collect();
         let done: Vec<AtomicBool> = (0..chunks).map(|_| AtomicBool::new(false)).collect();
         let claimed: Vec<AtomicBool> = (1..chunks).map(|_| AtomicBool::new(false)).collect();
-        let next = AtomicUsize::new(0);
         let level_ref = &level;
         std::thread::scope(|scope| {
             for _ in 0..threads.clamp(1, chunks) {
                 scope.spawn(|| {
                     let mut start = vec![0u32; longest as usize + 1];
-                    loop {
-                        let k = next.fetch_add(1, Ordering::Relaxed);
-                        if k >= chunks {
-                            break;
-                        }
+                    while let Some((k, chunk)) = feed.next(&starts, buckets) {
                         let (first, end, last) = (first_of(k), run_end(k), end_of(k));
                         let len = (last - first) as usize + 1;
                         start[..len].fill(0);
-                        start[0] = bounds[k] as u32;
-                        let ks = &keys[bounds[k]..bounds[k + 1]];
-                        bucket_ends(ks, bounds[k], buckets, first, &mut start[1..len]);
+                        bucket_ends(&chunk, 0, buckets, first, &mut start[1..len]);
                         let run = Run {
                             level: level_ref,
-                            keys,
+                            keys: &chunk,
                             start: &start[..len],
                         };
                         let origin = align(lo(first));
@@ -1238,12 +1364,20 @@ impl V2 {
                         }
                         let mut bumped = Vec::new();
                         bumped_keys(&run, &seeds, 0, (end - first) as u32, &mut bumped);
+                        // The gap's buckets and their keys, offsets rebased onto the copy.
+                        let tail_from = start[(end - first) as usize];
+                        let tail_keys = chunk[tail_from as usize..start[len - 1] as usize].to_vec();
+                        let tail = start[(end - first) as usize..len]
+                            .iter()
+                            .map(|&s| s - tail_from)
+                            .collect();
                         let piece = Piece {
                             first: first as u32,
                             seeds,
                             map,
                             origin,
-                            tail: start[(end - first) as usize..len].to_vec(),
+                            tail,
+                            tail_keys,
                             bumped,
                         };
                         assert!(pieces[k].set(piece).is_ok(), "a chunk is claimed once");
@@ -1269,7 +1403,7 @@ impl V2 {
                             map.merge(&right.map, word(right.origin) - word(origin));
                             let run = Run {
                                 level: level_ref,
-                                keys,
+                                keys: &left.tail_keys,
                                 start: &left.tail,
                             };
                             let mut seeds = vec![0u8; (end - first) as usize];
@@ -1282,6 +1416,7 @@ impl V2 {
                                 map,
                                 origin,
                                 tail: Vec::new(),
+                                tail_keys: Vec::new(),
                                 bumped,
                             };
                             assert!(gaps[g].set(piece).is_ok(), "a gap is claimed once");
@@ -1291,11 +1426,13 @@ impl V2 {
             }
         });
         phase("chunks");
+        let fed = feed.fed();
 
         let mut seeds = vec![0u8; buckets as usize];
         let mut taken = Map::new(n, shift);
         let mut bumped = Vec::new();
         let mut tail = Vec::new();
+        let mut tail_keys = Vec::new();
         for slot in pieces.into_iter().chain(gaps) {
             let mut piece = slot.into_inner().expect("every chunk and gap was placed");
             seeds[piece.first as usize..][..piece.seeds.len()].copy_from_slice(&piece.seeds);
@@ -1303,12 +1440,13 @@ impl V2 {
             bumped.append(&mut piece.bumped);
             if !piece.tail.is_empty() {
                 tail = piece.tail;
+                tail_keys = piece.tail_keys;
             }
         }
         phase("merge");
         let run = Run {
             level: &level,
-            keys,
+            keys: &tail_keys,
             start: &tail,
         };
         let sd = &mut seeds[(buckets - reach) as usize..];
@@ -1316,7 +1454,7 @@ impl V2 {
         bumped_keys(&run, sd, 0, reach as u32, &mut bumped);
         phase("gaps");
         level.seeds = seeds;
-        (level, taken, bumped)
+        (level, taken, bumped, fed)
     }
 
     /// The tail: every bucket placed, largest first, under the first of 65 536 seeds that lands its
@@ -2012,6 +2150,27 @@ impl Mphf {
         Self::build_with_threads(hashes, threads)
     }
 
+    /// [`build`](Self::build) over `n` distinct hashes in ascending order, pulled from `hashes`
+    /// one first-level chunk at a time rather than held in a slice: the table a set too large
+    /// to hold in memory is built from, and byte for byte the one `build` gives the same
+    /// hashes. A source that yields other than `n` hashes is refused, as is one out of order —
+    /// by a wrong table, not an error, so the caller sorts. Borrowed, so a source that parks a
+    /// read error can be asked about it afterwards.
+    pub(crate) fn build_from_sorted(
+        n: u64,
+        hashes: &mut (dyn Iterator<Item = u64> + Send),
+        threads: usize,
+    ) -> Result<Self, IndexError> {
+        if n > u64::from(u32::MAX) {
+            return Err(IndexError::Build(
+                "minimal perfect hash: more than u32::MAX keys",
+            ));
+        }
+        Ok(Self {
+            table: Table::V2(V2::build_streaming(n, hashes, threads)?),
+        })
+    }
+
     /// [`build`](Self::build) on a fixed number of threads.
     ///
     /// The result does not depend on `threads` — a chunk is placed from its own buckets into its
@@ -2323,6 +2482,60 @@ fn golden_hashes() -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Distinct pseudo-random hashes, ascending: what the streaming build is promised.
+    fn sorted_hashes(n: usize) -> Vec<u64> {
+        let mut hs: Vec<u64> = (0..n as u64)
+            .map(|i| mix(i ^ 0x5DEE_CE66_D1CE_4E5B))
+            .collect();
+        hs.sort_unstable();
+        hs.dedup();
+        assert_eq!(hs.len(), n);
+        hs
+    }
+
+    /// The table built from a stream is the table built from the slice, byte for byte: below
+    /// the tail's size, in one chunk, and over enough keys for several chunks and the pieces at
+    /// the level's end — on one thread and on several, since the chunks are claimed in whatever
+    /// order the threads reach them.
+    #[test]
+    fn a_streamed_build_is_byte_identical_to_the_sliced_one() {
+        for n in [0usize, 1, 100, 300, 5_000, 1_000_000] {
+            let hs = sorted_hashes(n);
+            for threads in [1usize, 4] {
+                let sliced = Mphf::build_with_threads(&hs, threads).unwrap().to_bytes();
+                let streamed = Mphf::build_from_sorted(n as u64, &mut hs.iter().copied(), threads)
+                    .unwrap()
+                    .to_bytes();
+                assert!(sliced == streamed, "n = {n}, threads = {threads}");
+            }
+        }
+    }
+
+    /// A stream that yields fewer or more hashes than promised cannot have built the level it
+    /// was shaped for, and says so instead of handing back a table over the wrong set.
+    #[test]
+    fn a_streamed_build_refuses_a_source_of_the_wrong_length() {
+        let hs = sorted_hashes(5_000);
+        for (n, take) in [
+            (5_000u64, 4_999usize),
+            (5_000, 5_000 - 1),
+            (4_999, 5_000),
+            (100, 99),
+            (100, 101),
+        ] {
+            let result = Mphf::build_from_sorted(n, &mut hs.iter().copied().take(take), 2);
+            if take as u64 == n {
+                assert!(result.is_ok(), "n = {n}, yielded {take}");
+            } else {
+                let err = result.err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(
+                    err.contains("promised number of keys"),
+                    "n = {n}, yielded {take}: {err}"
+                );
+            }
+        }
+    }
 
     /// Distinct pseudo-random hashes, standing in for `hash_key` over a real corpus. The
     /// construction only ever sees hashes, so the corpus matters to the *measurement*, not to

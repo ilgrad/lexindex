@@ -201,7 +201,9 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
 - **`CompactHashIndex` stores no keys**: a minimal perfect hash plus one `fingerprint_bits`-wide
   fingerprint per slot, from a second hash uncorrelated with the first, so a non-member survives
   with probability about `2^-bits` — a design rate, not a defence against chosen queries — and
-  there is no `id → key`. Its build streams: 16 bytes per key, never the strings.
+  there is no `id → key`. Its build streams: 16 bytes per key, never the strings — and
+  `build_to_file` spills those beside the output: 302 MB peak at 100 M keys against 8.8 GB for a list,
+  1.7 GB at 10⁹.
 - **`ClosedHashIndex` is that perfect hash alone.** Nothing stored can tell a member from a
   stranger, so nothing tries: `id` is a `u32`, the same slot `CompactHashIndex::id_unchecked`
   gives over the same keys, and the type exists so that the signature says so.

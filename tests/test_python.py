@@ -194,6 +194,38 @@ def test_serialized_len_matches_to_bytes():
         assert idx.serialized_len() == len(idx.to_bytes())
 
 
+def test_compact_hash_build_to_file_writes_what_the_constructor_would(tmp_path):
+    keys = [f"tok-{i % 700}" for i in range(1000)]  # duplicates fold
+    for kwargs in ({}, {"fingerprint_bytes": 2}, {"fingerprint_bits": 4}):
+        p = tmp_path / "dict.bch"  # a pathlib.Path, not a str
+        written = lexindex.CompactHashIndex.build_to_file((k for k in keys), p, **kwargs)
+        assert written == 700
+        assert p.read_bytes() == lexindex.CompactHashIndex(keys, **kwargs).to_bytes()
+        assert lexindex.CompactHashIndex.load(p).id("tok-5") is not None
+    assert [e.name for e in tmp_path.iterdir()] == ["dict.bch"]  # no scratch left beside it
+    with pytest.raises(ValueError):
+        lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "x.bch", 3)
+    with pytest.raises(ValueError):
+        lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "x.bch", 2, fingerprint_bits=8)
+
+
+def test_compact_hash_build_to_file_aborts_when_the_iterable_raises(tmp_path):
+    p = tmp_path / "dict.bch"
+    p.write_bytes(b"previous")
+
+    def raising():
+        yield "alpha"
+        yield "beta"
+        raise RuntimeError("source failed")
+
+    with pytest.raises(RuntimeError, match="source failed"):
+        lexindex.CompactHashIndex.build_to_file(raising(), p)
+    assert p.read_bytes() == b"previous"
+    with pytest.raises(TypeError):
+        lexindex.CompactHashIndex.build_to_file([1, 2], p)
+    assert [e.name for e in tmp_path.iterdir()] == ["dict.bch"]
+
+
 def test_compact_hash_empty_and_corrupt():
     ch = lexindex.CompactHashIndex([])
     assert ch.is_empty() and ch.id("x") is None and "x" not in ch

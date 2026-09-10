@@ -1023,6 +1023,36 @@ impl PyPerfectHashIndex {
     }
 }
 
+/// The fingerprint width a `CompactHashIndex` constructor was asked for: `fingerprint_bytes`
+/// (1, 2 or 4) or, keyword-only and instead of it, `fingerprint_bits` (1..=64).
+#[cfg(feature = "mph")]
+fn fingerprint_width(fingerprint_bytes: usize, fingerprint_bits: Option<u32>) -> PyResult<u32> {
+    let bits = match fingerprint_bits {
+        Some(bits) => {
+            if fingerprint_bytes != 1 {
+                return Err(PyValueError::new_err(
+                    "pass fingerprint_bytes or fingerprint_bits, not both",
+                ));
+            }
+            bits
+        }
+        None => {
+            if !matches!(fingerprint_bytes, 1 | 2 | 4) {
+                return Err(to_py(IndexError::Format(
+                    "compact-hash: fingerprint_bytes must be 1, 2, or 4",
+                )));
+            }
+            fingerprint_bytes as u32 * 8
+        }
+    };
+    if !(1..=64).contains(&bits) {
+        return Err(to_py(IndexError::Format(
+            "compact-hash: fingerprint_bits must be in 1..=64",
+        )));
+    }
+    Ok(bits)
+}
+
 /// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
 /// probabilistic (false-positive rate `2 ** -fingerprint_bits`) and there is no reverse `id -> key`.
 #[cfg(feature = "mph")]
@@ -1046,29 +1076,7 @@ impl PyCompactHashIndex {
         fingerprint_bytes: usize,
         fingerprint_bits: Option<u32>,
     ) -> PyResult<Self> {
-        let bits = match fingerprint_bits {
-            Some(bits) => {
-                if fingerprint_bytes != 1 {
-                    return Err(PyValueError::new_err(
-                        "pass fingerprint_bytes or fingerprint_bits, not both",
-                    ));
-                }
-                bits
-            }
-            None => {
-                if !matches!(fingerprint_bytes, 1 | 2 | 4) {
-                    return Err(to_py(IndexError::Format(
-                        "compact-hash: fingerprint_bytes must be 1, 2, or 4",
-                    )));
-                }
-                fingerprint_bytes as u32 * 8
-            }
-        };
-        if !(1..=64).contains(&bits) {
-            return Err(to_py(IndexError::Format(
-                "compact-hash: fingerprint_bits must be in 1..=64",
-            )));
-        }
+        let bits = fingerprint_width(fingerprint_bytes, fingerprint_bits)?;
         // Unlike the key-storing indexes, this one needs only 16 hashed bytes per key — so the
         // items are hashed as they come off the iterator (under the GIL) and the strings dropped,
         // keeping a generator-fed build streaming on the Python side too.
@@ -1079,6 +1087,45 @@ impl PyCompactHashIndex {
         Ok(Self {
             inner: Arc::new(inner),
         })
+    }
+
+    /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
+    /// keys, in any order, are hashed as they come and their 16-byte pairs sorted in runs that
+    /// spill beside the output; the perfect hash is built from the merged runs a chunk at a time
+    /// and the fingerprints written at their slots, so neither the corpus, its hashes nor the
+    /// finished table is ever held whole. The file is byte for byte what the constructor and
+    /// `save` write. Returns the number of distinct keys written. Widths as in the constructor.
+    #[staticmethod]
+    #[pyo3(signature = (items, path, fingerprint_bytes=1, *, fingerprint_bits=None))]
+    fn build_to_file(
+        items: &Bound<'_, PyAny>,
+        path: PathBuf,
+        fingerprint_bytes: usize,
+        fingerprint_bits: Option<u32>,
+    ) -> PyResult<usize> {
+        let bits = fingerprint_width(fingerprint_bytes, fingerprint_bits)?;
+        let err = Rc::new(RefCell::new(None));
+        let seen = Rc::clone(&err);
+        // The check runs once the input has ended and again inside the atomic write, so an
+        // iterable that raises halfway aborts the build with `path` untouched.
+        let written = CompactHashIndex::build_to_file_checked(
+            stream_strs(items.try_iter()?, Rc::clone(&err)),
+            &path,
+            bits,
+            move || {
+                if seen.borrow().is_some() {
+                    Err(crate::IndexError::Format(
+                        "compact-hash: the input iterable raised before it ended",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        written.map_err(to_py)
     }
 
     /// Width of the stored fingerprints in bits; the false-positive rate is `2 ** -fingerprint_bits`.
