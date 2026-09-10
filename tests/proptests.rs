@@ -2,7 +2,7 @@
 //! robustness — `from_bytes` on arbitrary bytes (`StringIndex`, whose loader is safe) or on a
 //! corrupted self-produced blob (all three) must fail cleanly, never panic.
 
-use lexindex::{Overlay, StringIndex};
+use lexindex::{DictIndex, Overlay, StringIndex};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,6 +50,44 @@ fn check_string_index_roundtrip(keys: &[String]) {
     for (rank, key) in expected.iter().enumerate() {
         assert_eq!(restored.id(key), Some(rank as u64));
         assert_eq!(restored.key(rank as u64).as_deref(), Some(key.as_str()));
+    }
+}
+
+/// Every key's id is its rank and comes back as the key, every stranger built from a key -- a
+/// character more, a character less, a NUL appended -- is absent with the lower bound the sorted
+/// list gives, and a serialise round-trip changes nothing; at three block sizes, so that the
+/// front-coded entries, the block heads and the single-key blocks are all exercised.
+fn check_dict_index_roundtrip(keys: &[String]) {
+    let expected = distinct_sorted(keys.to_vec());
+    let mut probes: Vec<String> = Vec::new();
+    for key in &expected {
+        probes.push(format!("{key}a"));
+        probes.push(format!("{key}\0"));
+        let mut shorter = key.clone();
+        shorter.pop();
+        probes.push(shorter);
+    }
+    for block in [1, 3, 32] {
+        let idx = DictIndex::build_with_block(keys, block).unwrap();
+        let restored = DictIndex::from_bytes(&idx.to_bytes()).unwrap();
+        for idx in [&idx, &restored] {
+            assert_eq!(idx.len(), expected.len());
+            for (rank, key) in expected.iter().enumerate() {
+                let id = rank as u64;
+                assert_eq!(idx.id(key), Some(id), "id({key:?}) at block {block}");
+                assert_eq!(idx.lower_bound(key), id, "lower_bound({key:?})");
+                assert_eq!(idx.key(id).as_deref(), Some(key.as_str()), "key({id})");
+            }
+            assert_eq!(idx.key(expected.len() as u64), None);
+            for probe in &probes {
+                let at = expected.partition_point(|k| k.as_bytes() < probe.as_bytes());
+                let member = expected.get(at).is_some_and(|k| k == probe);
+                assert_eq!(idx.id(probe), member.then_some(at as u64), "id({probe:?})");
+                assert_eq!(idx.lower_bound(probe), at as u64, "lower_bound({probe:?})");
+            }
+            let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+            assert_eq!(walked, expected);
+        }
     }
 }
 
@@ -179,6 +217,16 @@ proptest! {
     #[test]
     fn string_index_roundtrip_multibyte(keys in multibyte_keys()) {
         check_string_index_roundtrip(&keys);
+    }
+
+    #[test]
+    fn dict_index_roundtrip_prefix_nested(keys in prop::collection::vec("[ab]{0,6}", 0..40)) {
+        check_dict_index_roundtrip(&keys);
+    }
+
+    #[test]
+    fn dict_index_roundtrip_multibyte(keys in multibyte_keys()) {
+        check_dict_index_roundtrip(&keys);
     }
 
     // The subsequence automaton must agree, key for key, with the character-level reference over

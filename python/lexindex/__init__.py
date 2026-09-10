@@ -9,6 +9,9 @@ many times:
   probabilistic membership, no reverse.
 - :class:`ClosedHashIndex` — the perfect hash and nothing else, a fifth of that: ``id`` never
   says absent, for a vocabulary known to be closed.
+- :class:`DictIndex` — ordered dictionary with the key stored for every id: exact
+  ``string <-> rank`` both ways plus ``lower_bound``, no automata; about 3.5 B/key, a third of
+  ``StringIndex``.
 
 All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge
 index and borrow it instantly).
@@ -23,6 +26,7 @@ from typing import Literal, TypedDict
 from lexindex._core import (
     ClosedHashIndex,
     CompactHashIndex,
+    DictIndex,
     Overlay,
     PerfectHashIndex,
     StringIndex,
@@ -39,7 +43,13 @@ class BlobInfo(TypedDict):
     """What :func:`inspect` reads out of a blob's header; nothing in it is verified."""
 
     kind: Literal[
-        "StringIndex", "PerfectHashIndex", "CompactHashIndex", "ClosedHashIndex", "Mphf", "Overlay"
+        "StringIndex",
+        "PerfectHashIndex",
+        "CompactHashIndex",
+        "ClosedHashIndex",
+        "DictIndex",
+        "Mphf",
+        "Overlay",
     ]
     format: str
     bytes: int
@@ -64,6 +74,7 @@ __all__ = [
     "BlobInfo",
     "ClosedHashIndex",
     "CompactHashIndex",
+    "DictIndex",
     "Overlay",
     "OverlayInfo",
     "PerfectHashIndex",

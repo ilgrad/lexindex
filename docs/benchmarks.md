@@ -340,6 +340,31 @@ the batched `ids_of` loses the fingerprint line's prefetch and compare.
 ([`bench/results/closed-2026-09-10-arz-50f240c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/closed-2026-09-10-arz-50f240c.txt)),
 Ryzen 7 5800HS, load about 0.9 with an editor open.</sub>
 
+## `DictIndex`: the ordered dictionary against `StringIndex`
+
+`local/dictbench` builds the dictionary as a `StringIndex` and as a `DictIndex` at three block
+sizes, then probes all 479 823 words in a shuffled order — members, strangers (each word with a
+byte appended), and every id for the reverse lookup — five rounds in one process, the variants
+alternated within each round, the minimum per cell; `StringIndex` is the control.
+
+| | `StringIndex` | `DictIndex` 16 | `DictIndex` **32** | `DictIndex` 64 |
+|---|---:|---:|---:|---:|
+| bytes per key | 5.95 | 4.35 | **3.52** | 3.10 |
+| build | 105–127 ms | 40–50 | 44–45 | 39–49 |
+| `id`, member | 344 ns | 283 | **301–306** | 344–346 |
+| `id`, stranger | 238 ns | 181 | 204 | 247 |
+| `key_into` (no allocation) | — | 121 | **197** | 351 |
+| `key` (owned string) | 505 ns | 188 | 274 | 440 |
+| `lower_bound`, stranger | — | 179 | 203–206 | 245–247 |
+
+The two runs in the results file take the block sizes in opposite orders; where they differ the
+table gives both. `DictIndex` at 32 keeps `id` 12 % under `StringIndex` and `key` at 0.4× of it
+while storing 41 % less; 64 per block matches `StringIndex` on `id` at 3.10 B/key.
+
+<sub>Measured 2026-09-10 on the tree that adds the type
+([`bench/results/dict-2026-09-10-arz-64b0d35.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-10-arz-64b0d35.txt)),
+Ryzen 7 5800HS, load about 1 with an editor open.</sub>
+
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow

@@ -155,6 +155,7 @@ jobs:
         target:
           - parse_compact
           - parse_closed
+          - parse_dict
           - parse_perfect
           - parse_overlay
           - parse_overlay_untrusted

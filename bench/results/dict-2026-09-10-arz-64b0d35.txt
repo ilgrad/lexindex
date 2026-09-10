@@ -1,0 +1,47 @@
+DictIndex against StringIndex on the dictionary — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: the working tree of the commit that adds DictIndex, on 64b0d35. Harness: local/dictbench (release, codegen-units 1):
+/usr/share/dict/words sorted and deduplicated, every index built in one process; probes = all words shuffled with a
+fixed seed (members), the same words with a byte appended (strangers), every id for the reverse lookups; five
+rounds per block size, the eight variants alternated within each round, min per variant, ns per probe.
+StringIndex is the control, built once and probed in every round. Load about 1 with an editor open.
+
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 105 ms
+DictIndex k=16   4.35 B/key  build 50 ms
+  id member   dict  228.4  string  283.6
+  id stranger dict  166.0  string  222.5
+  key_into    dict  113.4  key dict  174.4  string  465.9
+  lower_bound dict  164.3
+DictIndex k=32   3.52 B/key  build 44 ms
+  id member   dict  300.5  string  343.4
+  id stranger dict  203.8  string  238.0
+  key_into    dict  196.6  key dict  273.8  string  504.3
+  lower_bound dict  202.7
+DictIndex k=64   3.10 B/key  build 39 ms
+  id member   dict  344.0  string  344.3
+  id stranger dict  246.2  string  237.4
+  key_into    dict  351.3  key dict  439.1  string  502.0
+  lower_bound dict  245.0
+
+The same run with the block sizes in the opposite order, since the first block size above ran on a CPU fresh
+from the build (its StringIndex control reads 284 ns against 343 in the later rows): the paired rows are the
+ones to compare.
+
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 127 ms
+DictIndex k=64   3.10 B/key  build 49 ms
+  id member   dict  345.6  string  347.1
+  id stranger dict  247.2  string  237.4
+  key_into    dict  350.6  key dict  440.4  string  505.0
+  lower_bound dict  246.9
+DictIndex k=32   3.52 B/key  build 45 ms
+  id member   dict  305.7  string  345.0
+  id stranger dict  204.3  string  238.8
+  key_into    dict  197.9  key dict  274.4  string  508.1
+  lower_bound dict  205.7
+DictIndex k=16   4.35 B/key  build 40 ms
+  id member   dict  283.4  string  344.3
+  id stranger dict  181.1  string  238.4
+  key_into    dict  120.9  key dict  188.1  string  505.8
+  lower_bound dict  179.2

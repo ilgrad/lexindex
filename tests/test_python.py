@@ -324,6 +324,54 @@ def test_closed_hash_ids_of_bytes_and_ids_into():
     assert ch.ids_of_bytes([]) == b""
 
 
+def test_dict_index_core():
+    di = lexindex.DictIndex(["banana", "apple", "apricot", "cherry", "apple"])
+    assert len(di) == 4 and not di.is_empty() and di.block == 32
+    assert di.id("apple") == 0 and di.id("banana") == 2  # sorted rank
+    assert di.id("missing") is None and di.get("missing") is None
+    assert di.get("missing", -1) == -1 and di.get("cherry") == 3
+    assert "cherry" in di and "durian" not in di and di.contains("cherry")
+    assert di["cherry"] == 3
+    with pytest.raises(KeyError):
+        di["durian"]
+    assert [di.key(i) for i in range(5)] == ["apple", "apricot", "banana", "cherry", None]
+    assert di.keys_of([3, 0, 9]) == ["cherry", "apple", None]
+    assert (di.lower_bound("apple"), di.lower_bound("b"), di.lower_bound("zzz")) == (0, 2, 4)
+    assert list(di) == [("apple", 0), ("apricot", 1), ("banana", 2), ("cherry", 3)]
+    assert di.ids_of(["cherry", "x", "apple"]) == [3, None, 0]
+    assert di.ID_DTYPE == "uint64" and di.MISSING_ID == 2**64 - 1
+    empty = lexindex.DictIndex([])
+    assert empty.is_empty() and empty.id("") is None and empty.key(0) is None
+    assert list(empty) == [] and empty.lower_bound("x") == 0
+
+
+def test_dict_index_block_argument_and_persistence(tmp_path):
+    words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
+    for block in (1, 5, 32, 1024):
+        di = lexindex.DictIndex(words, block=block)
+        assert di.block == block and len(di) == len(words)
+        assert [di.id(w) for w in words[:300]] == list(range(300))
+        assert di.keys_of(list(range(len(words) - 300, len(words)))) == words[-300:]
+    with pytest.raises(ValueError, match="block"):
+        lexindex.DictIndex(words, block=0)
+    with pytest.raises(ValueError, match="block"):
+        lexindex.DictIndex(words, 1025)
+    di = lexindex.DictIndex(words)
+    blob = di.to_bytes()
+    assert blob[:4] == b"BDX1" and len(blob) == di.serialized_len() < 4.5 * len(words)
+    back = lexindex.DictIndex.from_bytes(blob)
+    assert back.ids_of(words[:100]) == list(range(100)) and back.to_bytes() == blob
+    p = tmp_path / "words.bdx"  # a pathlib.Path, not a str
+    di.save(p)
+    assert lexindex.DictIndex.load(p).key(17) == words[17]
+    assert not hasattr(lexindex.DictIndex, "load_mmap")
+    with pytest.raises(ValueError):
+        lexindex.DictIndex.from_bytes(b"nope")
+    # The lazy iterator crosses its refill boundary without repeating or skipping.
+    walked = list(itertools.islice(lexindex.DictIndex(words), 1500))
+    assert walked == [(w, i) for i, w in enumerate(words[:1500])]
+
+
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
     assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]
@@ -606,6 +654,7 @@ def test_query_limit_truncates_and_matches_unlimited():
         lexindex.PerfectHashIndex,
         lexindex.CompactHashIndex,
         lexindex.ClosedHashIndex,
+        lexindex.DictIndex,
     ],
 )
 def test_bulk_arguments_reject_non_strings(ctor):
@@ -667,6 +716,7 @@ def test_subsequence_matches_whole_characters():
         lexindex.StringIndex,
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
+        lexindex.DictIndex,
     ],
 )
 def test_ids_of_bytes_matches_ids_of(ctor):
@@ -712,6 +762,7 @@ def test_ids_of_bytes_reads_zero_copy_through_numpy():
         lexindex.StringIndex,
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
+        lexindex.DictIndex,
     ],
 )
 def test_ids_into_writes_the_head_of_a_buffer_and_leaves_the_tail(ctor):
@@ -988,6 +1039,7 @@ def _hammer(fn, threads=8):
         lexindex.StringIndex,
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
+        lexindex.DictIndex,
     ],
 )
 def test_an_index_is_safe_to_share_across_threads(ctor):
@@ -1044,6 +1096,7 @@ def test_pickle_round_trips_every_class():
     ph = lexindex.PerfectHashIndex(words)
     ch = lexindex.CompactHashIndex(words, 1)
     cl = lexindex.ClosedHashIndex(words)
+    di = lexindex.DictIndex(words)
     ov = lexindex.Overlay(si)
     ov.add("durian")
     ov.remove("apple")
@@ -1051,7 +1104,7 @@ def test_pickle_round_trips_every_class():
     # Protocol 2 as well as the default: `__reduce__` names a static method by qualname, which is
     # the part of the protocol that differs between them.
     for protocol in (2, pickle.HIGHEST_PROTOCOL):
-        for original in (si, ph, ch, cl, ov):
+        for original in (si, ph, ch, cl, di, ov):
             back = pickle.loads(pickle.dumps(original, protocol=protocol))
             assert type(back) is type(original)
             assert len(back) == len(original)
@@ -1246,6 +1299,7 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
         (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP7"),
         (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH7"),
         (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL1"),
+        (lexindex.DictIndex(keys), "DictIndex", "BDX1"),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)
@@ -1368,6 +1422,7 @@ _ARROW_CLASSES = [
     lexindex.PerfectHashIndex,
     lexindex.StringIndex,
     lexindex.ClosedHashIndex,
+    lexindex.DictIndex,
 ]
 
 

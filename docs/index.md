@@ -29,11 +29,15 @@ idx.save("catalog.bix")
 idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into RAM
 ```
 
-## Four indexes
+## Five indexes
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers ordered and
   typo-tolerant queries. Use it for autocomplete, fuzzy search, ordered browse.
+- **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
+  both ways, `lower_bound`, in-order iteration, no automata. The sorted keys front-coded in blocks
+  with the suffixes under a static symbol table: 3.5 bytes/key, a third of `StringIndex`. Use it
+  where the queries are exact and every id has to map back to its key.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map (a minimal perfect hash plus a
   fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no
   reverse lookup.
@@ -48,7 +52,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   membership and `id → key`. Built with `fingerprints=True`, one more byte per key lets a lookup of an
   absent key stop after one cache miss instead of two.
 
-All four assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
+All five assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
 (`save` / `load`, and `load_mmap` where there is more than the perfect hash to map). None is mutable after building — they are immutable summaries, like
 the clustering features in the companion [`betula-cluster`](https://github.com/ilgrad/betula-cluster)
 crate.

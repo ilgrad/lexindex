@@ -16,6 +16,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 #[test]
 fn index_types_are_send_and_sync() {
     assert_send_sync::<StringIndex>();
+    assert_send_sync::<lexindex::DictIndex>();
     #[cfg(feature = "mph")]
     {
         assert_send_sync::<lexindex::CompactHashIndex>();

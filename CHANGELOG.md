@@ -38,6 +38,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`DictIndex`** (Python: `DictIndex`): an ordered dictionary with the key stored for every id —
+  exact `string ↔ rank` both ways, `lower_bound`, in-order iteration, and no automata. The sorted
+  keys front-coded in blocks of 32 (a build parameter, `1..=1024`), the suffixes under a static
+  symbol table — an in-crate FSST codec, 300 lines, trained deterministically on the index's own
+  suffixes — so a blob is a function of its keys. On the dictionary: 3.52 B/key against
+  `StringIndex`'s 5.95, `id` 300 ns against 345, `key` 197 against 505 (`key_into` decodes into a
+  string the caller keeps); `id` compares the stored suffixes against the probe without decoding
+  them. Blob `BDX1`, checked on load like the others and fuzzed after loading (`parse_dict`, in the
+  weekly job); `inspect` names it; no feature needed, so an `fst`-only build has it too.
+  `bench/results/dict-2026-09-10-arz-64b0d35.txt`.
 - **Arrow columns as batch input** (Python): `ids_of_arrow(column)` and `ids_into_arrow(column,
   out)` on every index take an Arrow `utf8`/`large_utf8` column — a pyarrow `Array` or
   `ChunkedArray`, a pandas `ArrowDtype` column, a polars `Series` — and read the keys straight

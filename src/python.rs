@@ -35,7 +35,7 @@
 //! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
 //! released with the GIL held.
 
-use crate::{IndexError, Overlay, StringIndex};
+use crate::{DictIndex, IndexError, Overlay, StringIndex};
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -1692,6 +1692,308 @@ impl PyClosedHashIndex {
     }
 }
 
+/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, about 3.5 B/key.
+#[pyclass(name = "DictIndex", module = "lexindex._core", frozen)]
+pub struct PyDictIndex {
+    inner: Arc<DictIndex>,
+}
+
+#[pymethods]
+impl PyDictIndex {
+    /// Build from an iterable of strings, in any order; duplicates are removed and the ids are
+    /// the ranks of the distinct keys in byte order. `block` keys share one stored head,
+    /// `1..=1024`: a lookup scans up to `block - 1` entries and a reverse lookup decodes up to
+    /// that many, so smaller blocks are faster and larger ones smaller.
+    #[new]
+    #[pyo3(signature = (items, block=32))]
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: usize) -> PyResult<Self> {
+        let keys = collect_strs(items)?;
+        let inner = py
+            .detach(|| DictIndex::build_with_block(&keys, block))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Keys per block, as given at build time.
+    #[getter]
+    fn block(&self) -> usize {
+        self.inner.block()
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Rank of `key`, or `None` if absent.
+    fn id(&self, key: &str) -> Option<u64> {
+        self.inner.id(key)
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Rank of `key`, raising `KeyError` if it is absent — the dict spelling of [`id`](Self::id).
+    /// No `__setitem__`, no `keys` / `values` / `items`: an immutable `str -> int` lookup.
+    fn __getitem__(&self, key: &str) -> PyResult<u64> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Rank of `key`, or `default` (`None` unless given).
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
+    }
+
+    /// The rank of the first key not below `key`: its own id if it is a member, otherwise the
+    /// id it would have, `len(self)` past every key. Two of these bound a range of keys as a
+    /// range of ids.
+    fn lower_bound(&self, key: &str) -> u64 {
+        self.inner.lower_bound(key)
+    }
+
+    /// Key at rank `id`, or `None` past the end.
+    fn key(&self, id: u64) -> Option<String> {
+        self.inner.key(id)
+    }
+
+    /// Batched [`key`](Self::key): a list aligned with `ids`, `None` where an id is out of
+    /// range. One decode buffer serves the whole batch.
+    fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
+        py.detach(|| {
+            let mut buf = String::new();
+            ids.iter()
+                .map(|&i| self.inner.key_into(i, &mut buf).then(|| buf.clone()))
+                .collect()
+        })
+    }
+
+    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`, `None` where a
+    /// key is absent.
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
+        py.detach(|| self.inner.ids_of(&keys))
+    }
+
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 8-byte
+    /// native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID) where a
+    /// key is absent, for `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
+    fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 8);
+            for id in self.inner.ids_of(&keys) {
+                out.extend_from_slice(&id.unwrap_or(u64::MAX).to_ne_bytes());
+            }
+            out
+        });
+        PyBytes::new(py, &packed)
+    }
+
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
+    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from
+    /// the column's offset and data buffers, so no Python string exists per key.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
+    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u64>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
+    }
+
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
+    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
+    /// long; the first `len(keys)` items are written and the rest left as they were. A read-only,
+    /// strided or mistyped buffer is a `BufferError`; one shorter than `keys` is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u64>(out, keys.len())?;
+        let ids: Vec<u64> = py.detach(|| {
+            self.inner
+                .ids_of(&keys)
+                .into_iter()
+                .map(|id| id.unwrap_or(u64::MAX))
+                .collect()
+        });
+        write_ids(py, &sink, &ids)
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint64";
+
+    /// The [`ids_of_bytes`](Self::ids_of_bytes) item standing for an absent key.
+    #[classattr]
+    const MISSING_ID: u64 = u64::MAX;
+
+    /// Iterate every `(key, id)` in key (= id) order, lazily, a chunk of decodes at a time.
+    fn __iter__(slf: Bound<'_, Self>) -> DictIndexIterator {
+        DictIndexIterator {
+            parent: slf.unbind(),
+            state: std::sync::Mutex::new(DictIterState {
+                buf: Vec::new().into_iter(),
+                next: 0,
+            }),
+        }
+    }
+
+    /// Serialise to a `bytes` blob.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let bytes = py.detach(|| self.inner.to_bytes());
+        PyBytes::new(py, &bytes)
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> usize {
+        self.inner.serialized_len()
+    }
+
+    /// Pickle support: the blob, and the loader that reads it back.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py),)))
+    }
+
+    /// Reconstruct from a [`PyDictIndex::to_bytes`] blob. Every length, both checksums, the
+    /// symbol table and the per-block arrays are validated, so arbitrary input raises rather
+    /// than misbehaving.
+    #[staticmethod]
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py.detach(|| DictIndex::from_bytes(data)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the index to `path`.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
+    }
+
+    /// Load a file written with `save`. Validated like `from_bytes`; there is no `load_mmap`.
+    #[staticmethod]
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| DictIndex::load(&path)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
+/// [`PyDictIndex::__iter__`]: ids are dense, so the cursor is the next id and a refill is one
+/// walk from it. Behind a lock for the reason [`StringIndexIterator`] gives.
+#[pyclass(frozen, name = "DictIndexIterator", module = "lexindex._core")]
+pub struct DictIndexIterator {
+    parent: Py<PyDictIndex>,
+    state: std::sync::Mutex<DictIterState>,
+}
+
+struct DictIterState {
+    buf: std::vec::IntoIter<(String, u64)>,
+    next: u64,
+}
+
+#[pymethods]
+impl DictIndexIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&self, py: Python<'_>) -> Option<(String, u64)> {
+        let mut state = self
+            .state
+            .lock_py_attached(py)
+            .expect("iterator state poisoned by an earlier panic");
+        if let Some(item) = state.buf.next() {
+            return Some(item);
+        }
+        let chunk: Vec<(String, u64)> = self
+            .parent
+            .get()
+            .inner
+            .iter_from(state.next)
+            .take(ITER_CHUNK)
+            .collect();
+        // A walk that ends -- past the last key, or on a stream the crate did not write --
+        // stays ended.
+        state.next = chunk
+            .last()
+            .map_or(u64::MAX, |(_, id)| id.saturating_add(1));
+        state.buf = chunk.into_iter();
+        state.buf.next()
+    }
+}
+
+impl PyDictIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`](Self::MISSING_ID) where the column holds
+    /// a null or a key the index does not have.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u64>> {
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                let ids = inner.ids_of_with(c.len, |i| c.key(i));
+                out.extend(ids.into_iter().enumerate().map(|(i, id)| match id {
+                    Some(id) if c.valid(i) => id,
+                    _ => u64::MAX,
+                }));
+            }
+            out
+        }))
+    }
+}
+
 /// The three bases an [`PyOverlay`] can sit on. `Overlay<I>` is generic and a `#[pyclass]` cannot
 /// be, so the choice becomes a runtime tag — and with it, `key`/`keys`/`compact` become a runtime
 /// `TypeError` on a `CompactHashIndex` base where Rust refuses at compile time.
@@ -2372,6 +2674,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
             BlobKind::PerfectHashIndex => "PerfectHashIndex",
             BlobKind::CompactHashIndex => "CompactHashIndex",
             BlobKind::ClosedHashIndex => "ClosedHashIndex",
+            BlobKind::DictIndex => "DictIndex",
             BlobKind::Mphf => "Mphf",
             BlobKind::Overlay => "Overlay",
         },
@@ -2413,6 +2716,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "mph")]
     m.add_class::<PyClosedHashIndex>()?;
     m.add_class::<PyOverlay>()?;
+    m.add_class::<PyDictIndex>()?;
+    m.add_class::<DictIndexIterator>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     Ok(())
 }

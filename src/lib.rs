@@ -1,6 +1,6 @@
 //! lexindex: compact, immutable string↔id indexes for huge catalogs.
 //!
-//! Four complementary, build-once / query-many indexes over a set of strings (entity names, cluster
+//! Five complementary, build-once / query-many indexes over a set of strings (entity names, cluster
 //! labels, document keys, vocabulary terms):
 //!
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
@@ -20,8 +20,13 @@
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
 //!   at 10.9 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
 //!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
+//! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
+//!   `string ↔ rank` both ways, plus `lower_bound` and in-order iteration, and nothing else — no
+//!   automata, so no prefix or fuzzy queries. The sorted keys front-coded in blocks with the
+//!   suffixes under a static symbol table: about 3.5 B/key on real words, a third of
+//!   `StringIndex`. Use it where the queries are exact and the index has to be small.
 //!
-//! All four assign dense ids in `[0, n)`. None is mutable after building — they are immutable
+//! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
 //! The minimal perfect hash under the two hash indexes implements [PHast]'s map-or-bump
@@ -61,11 +66,14 @@ mod mphf;
 #[cfg(feature = "bench-mphf")]
 #[doc(hidden)]
 pub use mphf::Mphf;
+mod dict_index;
+mod fsst;
 mod inspect;
 mod overlay;
 mod string_index;
 mod subsequence;
 
+pub use dict_index::DictIndex;
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;
@@ -122,6 +130,14 @@ pub mod fuzzing {
     /// no fingerprint table, and the payload checksum always verified.
     pub fn parse_closed_frame(bytes: &[u8]) -> bool {
         crate::ClosedHashIndex::fuzz_parse_frame(bytes)
+    }
+
+    /// Load a `DictIndex` blob and query what loaded; `true` if it loaded. Its loader checks
+    /// the framing and the three per-block arrays, but the front-coded block data is read as the
+    /// queries reach it, each access bounded — so this target queries: ids inside `[0, n)`,
+    /// `lower_bound` at most `n`, `key` `None` past the end, a walk that ends.
+    pub fn load_dict(bytes: &[u8]) -> bool {
+        crate::DictIndex::fuzz_load_and_query(bytes)
     }
 
     /// [`parse_compact_frame`] for a `PerfectHashIndex` blob, whose framing also has to validate an

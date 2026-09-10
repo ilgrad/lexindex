@@ -13,6 +13,7 @@ pub enum BlobKind {
     PerfectHashIndex,
     CompactHashIndex,
     ClosedHashIndex,
+    DictIndex,
     /// A standalone minimal perfect hash, the region the two hash indexes embed.
     Mphf,
     Overlay,
@@ -39,7 +40,8 @@ pub struct BlobInfo {
     /// The minimal perfect hash's region, for the kinds that hold one; `8 * mph_bytes / keys` is
     /// its bits per key.
     pub mph_bytes: Option<u64>,
-    /// `PerfectHashIndex`: the key arena; `CompactHashIndex`: the fingerprint table.
+    /// `PerfectHashIndex`: the key arena; `CompactHashIndex`: the fingerprint table;
+    /// `DictIndex`: the head keys and the front-coded block data.
     pub arena_bytes: Option<u64>,
     /// Keys in the hash indexes' collision side table.
     pub side_entries: Option<u64>,
@@ -214,6 +216,21 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             i.side_entries = Some(side);
             // Nothing follows the side table; a blob shorter than its header claims is truncated.
             rest(bytes, [36, mph, side * 20])?;
+            Ok(i)
+        }
+        b"BDX1" => {
+            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][check u32]`
+            w.bytes(0, 48)?;
+            let (n, block) = (w.u64(4)?, u64::from(w.u32(12)?));
+            let (heads, data, table) = (w.u64(16)?, w.u64(24)?, u64::from(w.u32(32)?));
+            let mut i = info(BlobKind::DictIndex, format, bytes, n);
+            let keyed = heads.checked_add(data).ok_or(TRUNCATED)?;
+            i.arena_bytes = Some(keyed);
+            // Three arrays of 20 bytes per block follow the keys; a block size of zero is not
+            // a blob this crate wrote, and reads as no blocks rather than a division by it.
+            let blocks = if block == 0 { 0 } else { n.div_ceil(block) };
+            let arrays = blocks.checked_mul(20).ok_or(TRUNCATED)?;
+            rest(bytes, [48 + table, keyed, arrays])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" => {
@@ -443,6 +460,37 @@ mod tests {
             (i.kind, i.format.as_str(), i.keys, i.mph_bytes),
             (BlobKind::Mphf, "MPH2", Some(300), Some(blob.len() as u64))
         );
+    }
+
+    #[test]
+    fn a_dict_index_inspects_to_its_keys_and_arena() {
+        let keys: Vec<String> = (0..300).map(|i| format!("key-{i:03}")).collect();
+        let idx = crate::DictIndex::build(&keys).unwrap();
+        let blob = idx.to_bytes();
+        let i = inspect(&blob).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.bytes),
+            (BlobKind::DictIndex, "BDX1", Some(300), blob.len() as u64)
+        );
+        assert_eq!(
+            (i.mph_bytes, i.side_entries, i.fingerprint_bits),
+            (None, None, None)
+        );
+        // The keys and their block data, without the header, the symbol table and the ten
+        // blocks' three arrays.
+        let arena = i.arena_bytes.unwrap();
+        assert!(
+            arena > 0 && arena + 48 + 10 * 20 < i.bytes,
+            "{arena} of {}",
+            i.bytes
+        );
+        // A header claiming more blocks than the blob holds is truncated, not a panic.
+        let mut short = blob.clone();
+        short[4..12].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert!(inspect(&short).is_err());
+        short[4..12].copy_from_slice(&300u64.to_le_bytes());
+        short[12..16].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(inspect(&short).unwrap().keys, Some(300));
     }
 
     #[test]

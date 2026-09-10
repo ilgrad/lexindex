@@ -164,6 +164,36 @@ under the same 64-bit hash collision rule: keys sharing a hash resolve through t
 their full second hash, exact for members. There is no `load_mmap`: the blob is the perfect hash,
 which every loader reads into memory whichever way it is opened, so there is nothing to borrow.
 
+## `DictIndex`
+
+The sorted keys front-coded in blocks, so that an id is a rank and a rank is a place. A block of
+`block` keys (32 by default, `1..=1024`) stores its first key whole and every other as the length
+of the prefix it shares with its predecessor and the suffix after it — one header byte
+`lcp << 4 | len` when both are below fifteen, else a marker and two varints — with the suffix
+under a static symbol table: FSST (Boncz, Neumann and Leis, VLDB 2020), up to 255 symbols of one
+to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
+parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
+kilobyte. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
+parity with `fsst-rs`, which would have raised the MSRV — and the training is deterministic, so a
+blob is a function of its keys like every other. Beside the blocks sit three flat arrays with one
+entry per block: where its head ends (`u32`), an eight-byte sample of the head in byte order
+(`u64`), and where its entries start (`u64`, so the block data may pass 4 GiB).
+
+`id` is a binary search over the samples — a flat array, eight bytes a block — then over the
+heads of the few blocks whose sample equals the probe's, then one block scanned without decoding
+anything: an entry's stored suffix is compared against the probe symbol by symbol, eight bytes at
+a time, and the shared-prefix length alone decides most entries — shorter than what the probe has
+matched so far means the entry is past the probe, longer means it is still below with nothing new
+matched. `key(id)` is the head of block `id / block` and up to `block − 1` decodes, one eight-byte
+store per code, into a string the caller can keep (`key_into`). On the dictionary at
+`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 300 ns against 345, `key_into` 197
+against `key`'s 505; 16 and 64 per block give 4.35 and 3.10 B/key at 283 and 345 ns. The serialised blob is
+`[magic "BDX1"][n][block][head bytes][data bytes][table bytes][payload][check]`, then the table,
+the heads, the three arrays and the data; the loader checks every length, both checksums, the
+table and the arrays' order before anything is trusted, and the block data — bounded on every
+read rather than validated up front — is what the fuzz target queries after loading. There is no
+`load_mmap`, and there are no automata: a prefix or fuzzy question is `StringIndex`'s.
+
 ## `PerfectHashIndex`
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
@@ -357,6 +387,7 @@ or — never — read it wrong.
 | `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
 | `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
 | `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
+| `BDX1` | 2.0 | `DictIndex` | new in 2.0 |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 

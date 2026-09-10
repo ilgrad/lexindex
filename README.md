@@ -24,6 +24,12 @@ Four complementary, build-once / query-many structures — pick by what you need
   form. The only structure here that
   answers **ordered and typo-tolerant** queries. Use it for autocomplete, fuzzy search, browse, and
   ordered scans of a large catalog.
+- **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
+  both ways, `lower_bound`, in-order iteration, and nothing else — no automata, so no prefix or
+  fuzzy queries. The sorted keys front-coded in blocks of 32 with the suffixes under a static
+  symbol table trained on the index itself: **3.52 bytes/key** on the dictionary, 41 % below
+  `StringIndex`, with `id` at 300 ns and `key` at 200 against its 345 and 505. Use it where the
+  queries are exact, every id has to map back to its key, and the index has to be small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: a minimal perfect hash
   (in-crate, no dependency) plus a small fingerprint per key, storing *no keys
   at all*. **1.26 bytes/key** on real dictionary words — **2.4× smaller than `marisa-trie`**, down to
@@ -60,7 +66,7 @@ pip install lexindex
 ```
 
 ```python
-from lexindex import ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex
+from lexindex import ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex
 
 idx = StringIndex(["apple", "apricot", "banana", "cherry"])
 idx.id("banana")             # 2  (sorted rank)
@@ -81,6 +87,9 @@ c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])  # the perfect hash alone (~0.26 B/key)
 z.id("POST")                 # a member's id; any other string gets *some* id in [0, n)
 
+w = DictIndex(["GET", "POST", "PUT", "DELETE"])  # ordered, keys stored (~3.5 B/key at scale)
+w.id("POST")                 # 2  (sorted rank); w.key(2) == "POST"; w.lower_bound("P") == 2
+
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
 d.id("POST")                 # dense id in [0, n); membership verified, returns None if absent
 d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
@@ -88,7 +97,7 @@ d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
 
 No runtime dependencies; a single abi3 wheel covers CPython 3.11+. See
 [`examples/quickstart.py`](https://github.com/ilgrad/lexindex/blob/main/examples/quickstart.py) for all
-four indexes end to end, and the [documentation site](https://ilgrad.github.io/lexindex/).
+five indexes end to end, and the [documentation site](https://ilgrad.github.io/lexindex/).
 
 ### Pairs with betula-cluster
 
@@ -185,6 +194,17 @@ assert!((id as usize) < vocab.len());
 # Ok::<(), lexindex::IndexError>(())
 ```
 
+```rust
+use lexindex::DictIndex;                  // no feature needed: an `fst`-only build has it too
+
+// Ordered, the key stored for every id: ~3.5 B/key, a third of StringIndex; no prefix or fuzzy.
+let dict = DictIndex::build(["GET", "POST", "PUT", "DELETE"])?;
+assert_eq!(dict.id("POST"), Some(2));                    // the sorted rank
+assert_eq!(dict.key(2).as_deref(), Some("POST"));        // exact reverse lookup
+assert_eq!(dict.lower_bound("P"), 2);                    // the "P…" keys are ids 2..lower_bound("Q")
+# Ok::<(), lexindex::IndexError>(())
+```
+
 ## Design notes
 
 Each of these is a section of [`docs/design.md`](docs/design.md); the one-line versions:
@@ -207,6 +227,11 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
 - **`ClosedHashIndex` is that perfect hash alone.** Nothing stored can tell a member from a
   stranger, so nothing tries: `id` is a `u32`, the same slot `CompactHashIndex::id_unchecked`
   gives over the same keys, and the type exists so that the signature says so.
+- **`DictIndex` is front coding under a symbol table.** Blocks of 32 sorted keys, the first whole
+  and the rest as (shared-prefix length, suffix), the suffixes under a 255-symbol table trained on
+  the index's own suffixes — an in-crate FSST codec, deterministic, so the blob is a function of
+  its keys. `id` compares the stored suffixes against the probe symbol by symbol without decoding
+  them; the shared-prefix length alone says when the probe has been passed.
 - **`PerfectHashIndex` verifies every hit against the stored key.** The pair in a billion that
   collides in the 64-bit hash is served, still exactly, from a side table the hot path never reads.
 - **`from_bytes` and `load` are safe on every index — the reason the perfect hash is in-crate** —
@@ -217,7 +242,8 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
   a two-word collision family on ordinary text — so every hash blob written before it (`BMP5`,
   `BMP6`, `BCH6`) is refused by name, and rebuilding from the keys is the migration. `BIX4` and
   `OVL2` are unchanged in either direction.
-- With `--no-default-features` the crate is `fst` only; `mph` adds no dependency, so the whole tree
+- With `--no-default-features` the crate is `fst` only (`StringIndex`, `Overlay`, and `DictIndex`,
+  which needs no feature); `mph` adds no dependency, so the whole tree
   is `fst` plus `memmap2`, and `cargo audit` reports nothing on either build.
 
 ## Benchmarks
@@ -236,6 +262,7 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
+| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | — | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |

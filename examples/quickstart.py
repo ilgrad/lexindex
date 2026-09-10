@@ -1,8 +1,9 @@
-"""Quickstart: the four lexindex structures and when to reach for each.
+"""Quickstart: the five lexindex structures and when to reach for each.
 
-One vocabulary, four indexes, each answering a different question:
+One vocabulary, five indexes, each answering a different question:
 
   - StringIndex       ordered + typo-tolerant: autocomplete, fuzzy, range, exact both ways
+  - DictIndex         ordered, every key stored: exact both ways + lower_bound, a third of the size
   - CompactHashIndex  smallest string -> id (probabilistic membership, no reverse)
   - ClosedHashIndex   the perfect hash alone: string -> id for a vocabulary known to be closed
   - PerfectHashIndex  exact membership + reverse id -> string, fastest closed-vocabulary lookup
@@ -18,7 +19,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from lexindex import ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex
+from lexindex import ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex
 
 VOCAB = [
     "apple",
@@ -85,6 +86,18 @@ def closed_hash_demo() -> None:
     print("ClosedHashIndex:  id('grape') ->", vocab.id("grape"), "(dense [0, n); ~0.26 B/key)")
 
 
+def dict_index_demo() -> None:
+    """Ordered, every key stored, a third of StringIndex: exact both ways, plus lower_bound."""
+    words = DictIndex(VOCAB)
+    lo, hi = words.lower_bound("b"), words.lower_bound("c")  # the "b..." keys as an id range
+    print("DictIndex:        id('cherry') ->", words.id("cherry"), " key(0) ->", words.key(0))
+    print(
+        "DictIndex:        keys in ['b', 'c') ->",
+        words.keys_of(list(range(lo, hi))),
+        "(~3.5 B/key)",
+    )
+
+
 def perfect_hash_demo() -> None:
     """Exact membership + reverse lookup, fastest closed-vocabulary map."""
     d = PerfectHashIndex(VOCAB)
@@ -109,6 +122,7 @@ if __name__ == "__main__":
     string_index_demo()
     compact_hash_demo()
     closed_hash_demo()
+    dict_index_demo()
     perfect_hash_demo()
     persistence_demo()
     print("\nquickstart OK")

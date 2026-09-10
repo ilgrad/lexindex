@@ -395,6 +395,13 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_compact_frame(&closed, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&closed, true));
 
+    // The dictionary blob, through its own target -- loaded and queried -- and refused by the
+    // framing parsers, as their blobs are by it.
+    let dict = std::fs::read(data("golden-2.0.0-dict.bdx")).unwrap();
+    assert!(lexindex::fuzzing::load_dict(&dict));
+    assert!(!lexindex::fuzzing::load_dict(&closed));
+    assert!(!lexindex::fuzzing::parse_closed_frame(&dict));
+
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
     // checksums, so it is the one a mutation can still reach the framing through.
@@ -585,6 +592,42 @@ fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
     }
 }
 
+/// The dictionary blob of 2.0, pinned byte for byte like the hash blobs: the symbol table is
+/// trained deterministically and the layout has no seed, so a fresh build over the golden keys
+/// is the file. It loads, answers every key with its rank and every stranger with `None`, and
+/// gives every key back in order.
+#[test]
+fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
+    let keys = keys();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    sorted.dedup();
+    let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
+    let path = data("golden-2.0.0-dict.bdx");
+    let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&fresh[..4], b"BDX1");
+    assert!(
+        stored == fresh,
+        "golden-2.0.0-dict.bdx changed; regenerate {}",
+        path.display()
+    );
+    let idx = lexindex::DictIndex::load(&path).unwrap();
+    assert_eq!(idx.len(), sorted.len());
+    for (rank, key) in sorted.iter().enumerate() {
+        assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
+        assert_eq!(
+            idx.key(rank as u64).as_deref(),
+            Some(key.as_str()),
+            "{rank}"
+        );
+    }
+    for stranger in non_members() {
+        assert_eq!(idx.id(&stranger), None, "{stranger:?}");
+    }
+    let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+    assert_eq!(walked, sorted);
+}
+
 /// `inspect` names every blob in `tests/data/` from its header alone, and refuses the pre-1.0
 /// hash blobs the way the loaders do: by the type to rebuild, not as corrupt.
 #[test]
@@ -673,6 +716,20 @@ fn every_golden_blob_inspects_from_its_header() {
             36 + plain.mph_bytes.unwrap(),
         )
     );
+    // The dictionary of 2.0: 48 bytes of header, the symbol table, the keys and the arrays.
+    let dict = inspect_file(data("golden-2.0.0-dict.bdx")).unwrap();
+    assert_eq!(
+        (
+            dict.kind,
+            dict.format.as_str(),
+            dict.keys,
+            dict.mph_bytes,
+            dict.side_entries,
+            dict.fingerprint_bits,
+        ),
+        (BlobKind::DictIndex, "BDX1", Some(1000), None, None, None)
+    );
+    assert!(dict.arena_bytes.unwrap() < dict.bytes);
     // The hash blobs of 1.0 and 1.1 are refused the way the loaders refuse them — old, not
     // corrupt — while their standalone perfect-hash tables still inspect: a table is keyed on
     // nothing but the hashes it was handed.

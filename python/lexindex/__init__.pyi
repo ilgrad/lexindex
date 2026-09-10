@@ -10,6 +10,7 @@ __all__ = [
     "BlobInfo",
     "ClosedHashIndex",
     "CompactHashIndex",
+    "DictIndex",
     "Overlay",
     "OverlayInfo",
     "PerfectHashIndex",
@@ -448,6 +449,84 @@ class ClosedHashIndex:
         ``load_mmap``: the whole blob is the perfect hash, read into memory either way."""
 
 @final
+class DictIndex:
+    """Ordered dictionary with the key stored for every id: exact ``string <-> rank`` both ways.
+
+    Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
+    ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
+    sorted keys are front-coded in blocks with the suffixes under a static symbol table: about
+    3.5 bytes per key on real words, a third of ``StringIndex``, and no automata -- no prefix or
+    fuzzy queries. Built in memory; ``save`` / ``load`` only, no ``load_mmap``.
+    """
+
+    def __new__(cls, items: Iterable[str], block: int = 32) -> DictIndex:
+        """``block`` keys per block, ``1..=1024``: a lookup scans up to ``block - 1`` entries and a
+        reverse lookup decodes up to that many, so smaller blocks are faster and larger ones
+        smaller (16 / 32 / 64 gave 4.35 / 3.52 / 3.10 bytes per key on the dictionary)."""
+
+    def __len__(self) -> int: ...
+    def __contains__(self, key: str, /) -> bool: ...
+    def is_empty(self) -> bool: ...
+    @property
+    def block(self) -> int:
+        """Keys per block, as given at build time."""
+
+    def id(self, key: str) -> int | None: ...
+    def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Rank of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Rank of ``key``, or ``default`` (``None`` unless given)."""
+
+    def lower_bound(self, key: str) -> int:
+        """The rank of the first key not below ``key``: its own id if it is a member, otherwise
+        the id it would have, ``len(self)`` past every key. Two of these bound a range of keys as
+        a range of ids."""
+
+    def key(self, id: int) -> str | None: ...
+    def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
+    def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
+        """Batched ``id`` packed into a buffer: one 8-byte native-endian item per key, aligned
+        with ``keys``, :attr:`MISSING_ID` where a key is absent, for
+        ``np.frombuffer(buf, dtype=index.ID_DTYPE)``."""
+
+    def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
+        """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
+        buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
+        mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
+
+    def ids_of_arrow(self, column: object) -> bytes:
+        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
+        from its offset and data buffers, so no Python string exists per key. A null comes
+        back as :attr:`MISSING_ID`."""
+
+    def ids_into_arrow(self, column: object, out: Buffer) -> None:
+        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+
+    ID_DTYPE: ClassVar[str]
+    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64)."""
+
+    MISSING_ID: ClassVar[int]
+    """The :meth:`ids_of_bytes` item standing for an absent key."""
+
+    def __iter__(self) -> Iterator[tuple[str, int]]: ...
+    def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
+    @staticmethod
+    def from_bytes(data: bytes) -> DictIndex:
+        """Reconstruct from a ``to_bytes`` blob; arbitrary input raises ``ValueError``."""
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @staticmethod
+    def load(path: str | os.PathLike[str]) -> DictIndex:
+        """Load a file written by ``save``. Validated like ``from_bytes``; there is no
+        ``load_mmap``."""
+
+@final
 class Overlay:
     """Add and remove keys on top of an index that is expensive to rebuild.
 
@@ -571,13 +650,20 @@ class BlobInfo(TypedDict):
     the key count -- for an overlay, the live keys -- and is ``None`` only for an overlay over a
     base this library did not write. ``mph_bytes`` is the perfect hash's region where there is one
     (``8 * mph_bytes / keys`` is its bits per key); ``arena_bytes`` is the key arena of a
-    ``PerfectHashIndex`` or the fingerprint table of a ``CompactHashIndex``; ``side_entries`` the
+    ``PerfectHashIndex``, the fingerprint table of a ``CompactHashIndex`` or the keys and block
+    data of a ``DictIndex``; ``side_entries`` the
     keys in a hash index's collision side table; ``fingerprint_bits`` the width a
     ``CompactHashIndex`` was built with.
     """
 
     kind: Literal[
-        "StringIndex", "PerfectHashIndex", "CompactHashIndex", "ClosedHashIndex", "Mphf", "Overlay"
+        "StringIndex",
+        "PerfectHashIndex",
+        "CompactHashIndex",
+        "ClosedHashIndex",
+        "DictIndex",
+        "Mphf",
+        "Overlay",
     ]
     format: str
     bytes: int

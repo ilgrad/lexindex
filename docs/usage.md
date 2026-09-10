@@ -281,6 +281,30 @@ Reach for it as a token → id map on a hot path where the caller controls the q
 tokenizer over its own vocabulary, a join on a key column the index was built from — and for
 `CompactHashIndex` the moment a stranger can ask.
 
+## `DictIndex` — ordered, every key stored, a third of `StringIndex`
+
+```python
+from lexindex import DictIndex
+
+# Exact string <-> rank both ways, about 3.5 B/key: the sorted keys front-coded in blocks of 32
+# with the suffixes under a symbol table trained on the index itself. Ordered, so ranges of keys
+# are ranges of ids -- but no automata: prefix and fuzzy queries stay with StringIndex.
+words = DictIndex(["apple", "apricot", "banana", "cherry"])
+words.id("banana")                 # 2 -- the sorted rank; None if absent
+words.key(2)                       # "banana"
+lo, hi = words.lower_bound("ap"), words.lower_bound("aq")   # 0, 2: the "ap" keys as an id range
+words.keys_of(list(range(lo, hi)))   # ["apple", "apricot"]
+list(words)                        # [("apple", 0), ...], lazily
+smaller = DictIndex(words_list, block=64)   # 3.1 B/key against 3.5; a lookup scans up to block - 1 entries
+words.save("words.bdx")
+words = DictIndex.load("words.bdx")   # checked like the others; no load_mmap
+```
+
+`id` finds the block by its head's first eight bytes and then compares the stored suffixes against
+the query without decoding them; `key` decodes at most `block - 1` suffixes onto the block's
+head. On the dictionary: 3.52 bytes per key, `id` 300 ns and `key` 200, against 5.95 / 345 / 505
+for `StringIndex` — which keeps prefix, range, fuzzy and subsequence iteration, and `Overlay`.
+
 ## `Overlay` — edits without a rebuild
 
 All three indexes are built once from the whole key set, so adding a single key has always meant
@@ -404,7 +428,7 @@ version-specific, and everything above holds for it.
 ## Rust
 
 ```rust
-use lexindex::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex};
+use lexindex::{ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
 
 let idx = StringIndex::build(["apple", "apricot", "banana"])?;
 assert_eq!(idx.id("banana"), Some(2));
@@ -430,6 +454,10 @@ assert!(small.contains("POST"));
 
 let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.26 B/key
 assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
+
+let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~3.5 B/key
+assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
+assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 # drop(idx);
 # std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())
