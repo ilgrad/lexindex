@@ -56,7 +56,8 @@ impl ClosedHashIndex {
 
     /// [`build`](Self::build) over hashed keys — the streaming entry the Python constructor uses.
     pub(crate) fn build_from_pairs(mut pairs: Vec<(u64, u64)>) -> Result<Self, IndexError> {
-        pairs.sort_unstable();
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        crate::compact_hash::sort_run(&mut pairs, threads);
         // Duplicate keys produce identical pairs; distinct keys deduplicate here only by colliding
         // in both 64-bit hashes at once.
         pairs.dedup();
@@ -88,7 +89,6 @@ impl ClosedHashIndex {
         for (j, e) in side.iter_mut().enumerate() {
             e.2 = (m + j) as u32;
         }
-        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         let mut reps = pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0);
         let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
         // One bit per slot: this only has to catch a construction that was not minimal/perfect.

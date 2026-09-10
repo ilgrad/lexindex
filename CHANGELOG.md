@@ -130,6 +130,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Both hash builds sort their pairs on every thread, and the streamed build merges runs and places
+  fingerprints with less work per pair**: a run — or the in-memory pair list — is partitioned in
+  place by the top of the hash into one part per thread and each part is sorted on its own
+  thread (the parts abut, so there is no merge and no second buffer); the run merge replaces the
+  heap's top in place instead of popping and pushing, takes whole records straight out of its
+  read buffer and writes a pair in one call; the fingerprint pass sends its representatives
+  through `index_all` a thousand at a time with each fingerprint row prefetched ahead.
+  Byte-identical (blob digests at 10 M and 10^8 keys before and after). At 10^8 real-word pairs
+  the streamed build's own share of a 51 s run — the rest is the example's key generator — falls
+  from about 16 s to 12 s (run sort 0.63 → 0.31 s per 16.7 M pairs, merge 5.6 → 4.2 s, perfect
+  hash 1.55 → 1.27 s, fingerprint pass 2.85 → 2.2 s); the in-memory `CompactHashIndex::build` at
+  10 M takes **575–591 ms against 762–783** (alternated, two rounds), its memory unchanged.
+  `bench/results/peak-compact-stream-time-2026-09-10-arz-0e177fd.txt`.
 - **The perfect hash's construction holds a level's pieces only while the gaps beside them are
   placed**: a chunk's seeds go into the level table as it is placed, its occupancy map into the
   level's once both neighbouring gaps have read it, and the keys it bumped are listed in chunk

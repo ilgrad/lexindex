@@ -56,6 +56,51 @@ impl Budget {
     };
 }
 
+/// `run` sorted on `threads` threads: partitioned in place by the top of the hash into one part
+/// per thread — near-equal, the hashes being uniform — and each part sorted on its own thread.
+/// The parts abut in order, so the run is sorted with no merge and no second buffer.
+pub(crate) fn sort_run(run: &mut [(u64, u64)], threads: usize) {
+    let parts = threads.clamp(1, 256);
+    if parts == 1 || run.len() < parts * 4096 {
+        run.sort_unstable();
+        return;
+    }
+    let part = |h: u64| (((h >> 32) * parts as u64) >> 32) as usize;
+    let mut counts = vec![0usize; parts];
+    for &(h, _) in run.iter() {
+        counts[part(h)] += 1;
+    }
+    let (mut next, mut ends) = (Vec::with_capacity(parts), Vec::with_capacity(parts));
+    let mut start = 0;
+    for &c in &counts {
+        next.push(start);
+        start += c;
+        ends.push(start);
+    }
+    // American-flag pass: an element met inside another part's range is swapped to the next
+    // free slot of its own part, and the element that arrives in its place is examined next.
+    for p in 0..parts {
+        while next[p] < ends[p] {
+            let i = next[p];
+            let d = part(run[i].0);
+            if d == p {
+                next[p] += 1;
+            } else {
+                run.swap(i, next[d]);
+                next[d] += 1;
+            }
+        }
+    }
+    std::thread::scope(|scope| {
+        let mut rest = run;
+        for &c in &counts {
+            let (head, tail) = std::mem::take(&mut rest).split_at_mut(c);
+            rest = tail;
+            scope.spawn(move || head.sort_unstable());
+        }
+    });
+}
+
 /// Process-wide counter in the scratch directory's name, so two builds in one process aimed at
 /// the same path do not share one.
 static SCRATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -67,14 +112,16 @@ struct Scratch {
     beside: std::path::PathBuf,
     dir: Option<std::path::PathBuf>,
     runs: usize,
+    threads: usize,
 }
 
 impl Scratch {
-    fn beside(target: &std::path::Path) -> Self {
+    fn beside(target: &std::path::Path, threads: usize) -> Self {
         Self {
             beside: target.to_path_buf(),
             dir: None,
             runs: 0,
+            threads,
         }
     }
 
@@ -108,12 +155,11 @@ impl Scratch {
     /// `run`, sorted and distinct, as the next run file; the buffer is emptied for reuse.
     fn spill(&mut self, run: &mut Vec<(u64, u64)>) -> Result<(), IndexError> {
         use std::io::Write;
-        run.sort_unstable();
+        sort_run(run, self.threads);
         run.dedup();
         let mut w = self.create(&self.runs.to_string())?;
-        for &(h, second) in run.iter() {
-            w.write_all(&h.to_le_bytes())?;
-            w.write_all(&second.to_le_bytes())?;
+        for &pair in run.iter() {
+            w.write_all(&pair_bytes(pair))?;
         }
         w.flush()?;
         run.clear();
@@ -139,9 +185,15 @@ impl Scratch {
         let mut w = self.create("merged")?;
         let (mut n, mut side) = (0usize, 0usize);
         let mut last: Option<(u64, u64)> = None;
-        while let Some(Reverse((pair, i))) = heap.pop() {
-            if let Some(next) = readers[i].next()?.map(pair_of) {
-                heap.push(Reverse((next, i)));
+        // The top is replaced in place: one sift-down per pair, where a pop and a push would
+        // sift twice.
+        while let Some(mut top) = heap.peek_mut() {
+            let Reverse((pair, i)) = *top;
+            match readers[i].next()? {
+                Some(rec) => *top = Reverse((pair_of(rec), i)),
+                None => {
+                    std::collections::binary_heap::PeekMut::pop(top);
+                }
             }
             if last == Some(pair) {
                 continue;
@@ -149,8 +201,7 @@ impl Scratch {
             if last.is_some_and(|l| l.0 == pair.0) {
                 side += 1;
             }
-            w.write_all(&pair.0.to_le_bytes())?;
-            w.write_all(&pair.1.to_le_bytes())?;
+            w.write_all(&pair_bytes(pair))?;
             n += 1;
             last = Some(pair);
         }
@@ -181,7 +232,15 @@ impl<const N: usize> Records<N> {
     }
 
     fn next(&mut self) -> std::io::Result<Option<[u8; N]>> {
-        use std::io::Read;
+        use std::io::{BufRead, Read};
+        // Almost every record is whole in the buffer; the ones that straddle its end, and the
+        // last one, take the assembling loop below.
+        let buffered = self.reader.fill_buf()?;
+        if buffered.len() >= N {
+            let rec: [u8; N] = buffered[..N].try_into().expect("N bytes");
+            self.reader.consume(N);
+            return Ok(Some(rec));
+        }
         let mut buf = [0u8; N];
         let mut got = 0;
         while got < N {
@@ -197,6 +256,13 @@ impl<const N: usize> Records<N> {
         }
         Ok(Some(buf))
     }
+}
+
+fn pair_bytes(pair: (u64, u64)) -> [u8; PAIR_BYTES] {
+    let mut rec = [0u8; PAIR_BYTES];
+    rec[..8].copy_from_slice(&pair.0.to_le_bytes());
+    rec[8..].copy_from_slice(&pair.1.to_le_bytes());
+    rec
 }
 
 fn pair_of(rec: [u8; PAIR_BYTES]) -> (u64, u64) {
@@ -399,7 +465,8 @@ impl CompactHashIndex {
         fingerprint_bits: u32,
     ) -> Result<Self, IndexError> {
         check_fingerprint_bits(fingerprint_bits)?;
-        pairs.sort_unstable();
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        sort_run(&mut pairs, threads);
         // Duplicate keys produce identical pairs. Distinct keys deduplicate here only by colliding
         // in both full 64-bit hashes at once — never because the fingerprint table is narrow.
         pairs.dedup();
@@ -435,7 +502,6 @@ impl CompactHashIndex {
         for (j, e) in side.iter_mut().enumerate() {
             e.2 = (m + j) as u32;
         }
-        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         let mut reps = pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0);
         let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
         let mut fps = vec![0u8; fp_table_len(m, fingerprint_bits)?];
@@ -558,7 +624,8 @@ impl CompactHashIndex {
         debug_assert_eq!(budget.range_slots % 8, 0, "a range must start on a byte");
 
         // Pass one: hash, in runs sorted and spilled beside the output.
-        let mut scratch = Scratch::beside(path);
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let mut scratch = Scratch::beside(path, threads);
         let cap = (budget.run_bytes / PAIR_BYTES).max(1);
         let mut run: Vec<(u64, u64)> = Vec::new();
         for pair in pairs {
@@ -572,7 +639,7 @@ impl CompactHashIndex {
         }
         check()?;
         let pairs = if scratch.runs == 0 {
-            run.sort_unstable();
+            sort_run(&mut run, threads);
             run.dedup();
             Pairs::Memory(run)
         } else {
@@ -594,7 +661,6 @@ impl CompactHashIndex {
         let mph = if m == 0 {
             None
         } else {
-            let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
             let mut reps = pairs.reps()?;
             let built = Mphf::build_from_sorted(m as u64, &mut reps, threads);
             if let Some(e) = reps.error.take() {
@@ -620,6 +686,40 @@ impl CompactHashIndex {
             range_files.push(scratch.create(&format!("r{i}"))?);
         }
         let mut side: Vec<(u64, u64, u32)> = Vec::with_capacity(side_len);
+        // The representatives go through the perfect hash a batch at a time: `index_all` pulls
+        // each seed byte in ahead of its lookup, and the fingerprint row is pulled in the same
+        // way here. At 10⁹ both tables are far past any cache, and one key at a time would pay
+        // two full misses per key.
+        const BATCH: usize = 1024;
+        const AHEAD: usize = 16;
+        let mut batch: Vec<(u64, u64)> = Vec::with_capacity(BATCH);
+        let mut place = |batch: &mut Vec<(u64, u64)>| -> Result<(), IndexError> {
+            if batch.is_empty() {
+                return Ok(());
+            }
+            let mph = mph
+                .as_ref()
+                .expect("a representative exists only when m > 0");
+            let hashes: Vec<u64> = batch.iter().map(|&(h, _)| h).collect();
+            let slots = mph.index_all(&hashes);
+            for (i, (&(_, second), &slot)) in batch.iter().zip(&slots).enumerate() {
+                let slot = slot as usize;
+                let fp = second & mask;
+                if in_memory {
+                    if let Some(&ahead) = slots.get(i + AHEAD) {
+                        let at = (ahead * fingerprint_bits as u64 / 8) as usize;
+                        crate::blob::prefetch_byte(&fps, at);
+                    }
+                    write_fp(&mut fps, slot, fingerprint_bits, fp);
+                } else {
+                    let w = &mut range_files[slot / budget.range_slots];
+                    w.write_all(&(slot as u32).to_le_bytes())?;
+                    w.write_all(&fp.to_le_bytes())?;
+                }
+            }
+            batch.clear();
+            Ok(())
+        };
         let mut last: Option<u64> = None;
         pairs.scan(|(h, second)| {
             if last == Some(h) {
@@ -627,20 +727,13 @@ impl CompactHashIndex {
                 return Ok(());
             }
             last = Some(h);
-            let slot = mph
-                .as_ref()
-                .expect("a representative exists only when m > 0")
-                .index(h) as usize;
-            let fp = second & mask;
-            if in_memory {
-                write_fp(&mut fps, slot, fingerprint_bits, fp);
-            } else {
-                let w = &mut range_files[slot / budget.range_slots];
-                w.write_all(&(slot as u32).to_le_bytes())?;
-                w.write_all(&fp.to_le_bytes())?;
+            batch.push((h, second));
+            if batch.len() == BATCH {
+                place(&mut batch)?;
             }
             Ok(())
         })?;
+        place(&mut batch)?;
         for w in &mut range_files {
             w.flush()?;
         }
@@ -1790,6 +1883,38 @@ mod tests {
     }
 
     /// The public forms: bytes and bits, and a width refused before the source is touched.
+    #[test]
+    fn sort_run_matches_sort_unstable_at_every_thread_count() {
+        // Duplicates, and a skewed distribution — two thirds of the hashes have their top two
+        // bits clear — so the parts are far from equal and the partition still has to hold. The
+        // short run takes the single-thread path below the threshold; the long one partitions.
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut run: Vec<(u64, u64)> = (0..100_000)
+            .map(|i| {
+                let h = next();
+                (if i % 3 == 0 { h } else { h >> 2 }, next() % 4)
+            })
+            .collect();
+        for i in (0..run.len()).step_by(97) {
+            run[i] = run[i / 2];
+        }
+        for len in [100, run.len()] {
+            let mut expected = run[..len].to_vec();
+            expected.sort_unstable();
+            for threads in [1, 2, 3, 8, 13] {
+                let mut got = run[..len].to_vec();
+                sort_run(&mut got, threads);
+                assert!(got == expected, "len {len}, threads {threads}");
+            }
+        }
+    }
+
     #[test]
     fn build_to_file_public_forms_match_build() {
         let keys = ["alpha", "beta", "gamma", "beta"];

@@ -1,0 +1,41 @@
+peak compact-stream / compact-listed timing — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: 0e177fd (base) against the working tree of the commit that carries this file (new).
+Harness: examples/peak.rs — `compact-stream 100000000 1`, the streamed CompactHashIndex::build_to_file over
+real-word bigrams from /usr/share/dict/words with LEXINDEX_PEAK_DIR=local/peak (on /home, not tmpfs), and
+`compact-listed 10000000`, the in-memory build from a key list. Phase times come from a scratch copy of the
+tree with eprintln! marks in build_to_file_with and Scratch::spill (local/wt-prof, never committed); the
+`base` binary is that instrumented copy of 0e177fd, `new` the same marks over the change. The first run of a
+session is discarded (this mobile part runs faster for a minute after idling); every number below comes
+from back-to-back runs after it.
+
+== Profile of 0e177fd at 10^8 (second of two runs) ==
+spill (6 runs of 16.7 M pairs, 256 MiB): sort 0.60–0.65 s each, dedup 0.017, write 0.20–0.22
+pass 1  40.60 s  (spill sort 3.14, dedup 0.10, write 1.09; the rest is the example's key generator and the hashing)
+merge    5.64 s  (n 99999999, side 2)                  56 ns per pair, one thread
+mphf     1.52 s  (level 1 "chunks" 1.40 s, the remaining levels 0.1 s)
+scan     2.83 s  (the table fits memory at 10^8: no range files)   28 ns per pair
+output   0.18 s
+total   50.76 s, peak 302 MB
+The library's own share is about 16 s of the 51; the generator is the rest.
+
+== A/B streamed 10^8: base, new, base, new ==
+                  base 1   new 1   base 2   new 2
+spill sort / run   0.63    0.32    0.63    0.31   s per 16.7 M pairs   (sort_run: partition, 8 threads)
+pass 1            40.40   39.41   40.79   39.18   s
+merge              5.60    4.23    5.69    4.12   s   (peek_mut, whole records out of the buffer, one write per pair)
+mphf               1.59    1.28    1.55    1.25   s   (the merged file goes through the same reader)
+scan               2.85    2.23    2.82    2.19   s   (index_all batches of 1024, fingerprint row prefetched 16 ahead)
+output             0.17    0.18    1.04    0.19   s
+total             50.62   47.32   51.89   46.93   s
+peak              302.4   302.5   302.1   302.4   MB
+
+== A/B in-memory compact-listed 10 M: H (0e177fd) N (new) N H, two rounds ==
+round 1   767.9   575.2   584.0   766.1   ms
+round 2   761.7   591.3   583.8   783.2   ms
+build adds 21.5 B/key and blob 1.26 B/key in every row.
+
+== Digests (local/blobdigest: FNV-1a 64 of the whole blob), new against 0e177fd ==
+compact-mem   10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10^8    b1b96c2807e95e4d   = b1b96c2807e95e4d
