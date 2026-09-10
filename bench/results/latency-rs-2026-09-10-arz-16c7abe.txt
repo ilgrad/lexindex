@@ -1,0 +1,75 @@
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    271.0 ms   lookup  425.6 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    304.2 ms   lookup  299.8 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    295.3 ms   lookup   79.6 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     55.2 ms   lookup  132.0 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    248.8 ms   lookup  294.8 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    191.1 ms   lookup  175.7 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    232.8 ms   lookup  974.2 ns/op   (checksum 499999500000)
+
+serialised size (bytes/key):
+  lexindex CompactHashIndex     1.26
+  lexindex StringIndex blob     0.68
+  lexindex PerfectHashIndex    12.52
+  raw key bytes (no index)   10.94
+
+StringIndex extras: fuzzy("&c.-sided", 1) hit 2 match(es), prefix("&c.-") hit 560, in 0.42 ms
+
+--- the run above followed the compile on a warm CPU (load 1.46); two more after a rest:
+load before: 0.88, 1.37, 1.08
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    272.9 ms   lookup  424.9 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    303.7 ms   lookup  300.3 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    299.4 ms   lookup   78.7 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     54.0 ms   lookup  127.1 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    232.6 ms   lookup  297.4 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    192.1 ms   lookup  177.2 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    231.9 ms   lookup  975.7 ns/op   (checksum 499999500000)
+load before: 0.79, 1.30, 1.06
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    285.8 ms   lookup  420.7 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    300.6 ms   lookup  301.2 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    297.6 ms   lookup   73.9 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     55.0 ms   lookup  127.3 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    232.6 ms   lookup  293.8 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    190.0 ms   lookup  175.9 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    233.4 ms   lookup  961.4 ns/op   (checksum 499999500000)
+
+--- the example with a DictIndex row added (the other rows' code unchanged), two runs after a rest:
+load before: 1.08, 1.13, 1.02
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    270.5 ms   lookup  424.3 ns/op   (checksum 499999500000)
+lexindex DictIndex (k=32)  build    204.5 ms   lookup  510.5 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    285.5 ms   lookup  300.8 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    278.9 ms   lookup   74.5 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     44.8 ms   lookup  129.7 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    210.6 ms   lookup  290.3 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    185.5 ms   lookup  174.3 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    226.4 ms   lookup  967.0 ns/op   (checksum 499999500000)
+
+serialised size (bytes/key):
+  lexindex CompactHashIndex     1.26
+  lexindex StringIndex blob     0.68
+  lexindex DictIndex (k=32)     3.19
+  lexindex PerfectHashIndex    12.52
+load before: 0.90, 1.09, 1.02
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    279.6 ms   lookup  424.0 ns/op   (checksum 499999500000)
+lexindex DictIndex (k=32)  build    202.8 ms   lookup  506.8 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    279.4 ms   lookup  301.4 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    275.0 ms   lookup   73.2 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     46.7 ms   lookup  131.3 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    208.4 ms   lookup  288.1 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    187.7 ms   lookup  172.9 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    226.1 ms   lookup  960.4 ns/op   (checksum 499999500000)
+
+serialised size (bytes/key):
+  lexindex CompactHashIndex     1.26
+  lexindex StringIndex blob     0.68
+  lexindex DictIndex (k=32)     3.19
+  lexindex PerfectHashIndex    12.52

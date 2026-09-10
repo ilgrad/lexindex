@@ -11,7 +11,7 @@
 //! from `$LEXINDEX_BENCH_WORDS` or `/usr/share/dict/words`; the benchmark refuses to run without
 //! one rather than silently substituting synthetic keys.
 
-use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
+use lexindex::{CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::time::Instant;
@@ -127,6 +127,12 @@ fn main() {
         |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
     );
     bench(
+        "lexindex DictIndex (k=32)",
+        n,
+        || DictIndex::build(&keys).unwrap(),
+        |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
+    );
+    bench(
         "lexindex PerfectHashIndex",
         n,
         || PerfectHashIndex::build(&keys).unwrap(),
@@ -212,6 +218,7 @@ fn main() {
     // prefixes than single words, so StringIndex compresses further here than the single-word
     // figures quoted in the README's size table — different corpus, different number.
     let si = StringIndex::build(&keys).unwrap();
+    let di = DictIndex::build(&keys).unwrap();
     let ph = PerfectHashIndex::build(&keys).unwrap();
     let ch = CompactHashIndex::build(&keys, 1).unwrap();
     let raw = keys.iter().map(String::len).sum::<usize>();
@@ -223,6 +230,10 @@ fn main() {
     println!(
         "  lexindex StringIndex blob   {:6.2}",
         si.to_bytes().len() as f64 / n as f64
+    );
+    println!(
+        "  lexindex DictIndex (k=32)   {:6.2}",
+        di.serialized_len() as f64 / n as f64
     );
     println!(
         "  lexindex PerfectHashIndex   {:6.2}",

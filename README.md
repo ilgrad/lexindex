@@ -119,9 +119,9 @@ Runnable: [`examples/bridge_clustering.py`](https://github.com/ilgrad/lexindex/b
 
 ```toml
 [dependencies]
-lexindex = "1.1"
+lexindex = "2.0"
 # fst-only (drop the memory-mapping and perfect-hash code):
-# lexindex = { version = "1.1", default-features = false }
+# lexindex = { version = "2.0", default-features = false }
 ```
 
 ## Usage
@@ -315,27 +315,33 @@ In decision order:
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
-Measured on 1.1.0 (one run of the example; each lookup cell is the minimum of five timed passes
-after a warm-up pass) on a machine idle throughout (load 1.0). Absolute numbers are
-machine-dependent — the `std::HashMap` control reads 21 % *faster* than in the session that
-produced the previous table, which had an editor holding a core — so compare the **ratios**, and
-only within a column: against that `HashMap`, `CompactHashIndex::id` is 0.44×, `id_unchecked`
-0.27×, `PerfectHashIndex::id` 0.95×, `StringIndex` 1.30×, `BTreeMap` 3.19×.
+Measured on 2.0.0 (the better of two runs of the example on a rested machine, load 0.9–1.1;
+each lookup cell is the minimum of five timed passes after a warm-up pass;
+[`bench/results/latency-rs-2026-09-10-arz-16c7abe.txt`](bench/results/latency-rs-2026-09-10-arz-16c7abe.txt)).
+Absolute numbers are machine-dependent — this session reads the `std::HashMap` control 18 %
+*slower* than the one that produced the 1.1.0 table (245 → 289 ns), and `StringIndex`, whose
+lookup code has not changed since 0.5.1, moved from 1.30× to 1.47× of it — so compare the
+**ratios**, only within a column, and read a shift under ~15 % between tables as the session:
+against that `HashMap`, `CompactHashIndex::id` is 0.45×, `id_unchecked` 0.26×,
+`PerfectHashIndex::id` 1.04×, `StringIndex` 1.47×, `DictIndex` 1.76×, `BTreeMap` 3.34×. What did
+move past the drift is a build: `CompactHashIndex` builds in 45 ms against 69 on 1.1.0 while every
+other build cell reads 10–17 % slower than there — 2.0's placement on every thread.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `CompactHashIndex::id` (fp=1) | **~69 ms** | ~106 ns | fingerprint-verified, `2^-8` false-positive rate |
-| lexindex `PerfectHashIndex::id_unchecked` | ~246 ms | **~66 ns** | closed vocabulary, no membership check |
-| `std::HashMap<String, u32>` | ~178 ms | ~245 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~255 ms | ~232 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~248 ms | ~317 ns | *and* prefix / range / fuzzy |
-| `std::BTreeMap<String, u32>` | ~197 ms | ~779 ns | in-RAM |
+| lexindex `CompactHashIndex::id` (fp=1) | **~45 ms** | ~130 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~275 ms | **~74 ns** | closed vocabulary, no membership check |
+| `std::HashMap<String, u32>` | ~208 ms | ~289 ns | in-RAM, not serialisable |
+| lexindex `PerfectHashIndex::id` (verified) | ~280 ms | ~301 ns | one extra cache line + full key compare |
+| lexindex `StringIndex` (FST) | ~271 ms | ~424 ns | *and* prefix / range / fuzzy |
+| lexindex `DictIndex` (32 per block) | ~203 ms | ~507 ns | ordered, exact reverse; 3.19 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 3.52 against 5.95, 301 ns against 344) |
+| `std::BTreeMap<String, u32>` | ~226 ms | ~960 ns | in-RAM |
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
-**fastest of the structures in the table above** — 3.7× as quick as the SipHash `HashMap` and 2.2×
+**fastest of the structures in the table above** — 3.9× as quick as the SipHash `HashMap` and 2.3×
 the FxHash one (no probing, no membership comparison) *and* compact + serialisable.
 `CompactHashIndex::id` keeps a probabilistic membership check and *still* beats the SipHash
-`HashMap` on lookup (2.3× here), and builds faster than it too. Full verification (`id`) pays one extra
+`HashMap` on lookup (2.2× here), and builds in a fifth of its time. Full verification (`id`) pays one extra
 cache line + a key comparison; `StringIndex` trades more latency for **ordered / prefix / range /
 fuzzy** queries the hash maps cannot answer at all. So: `CompactHashIndex` when footprint dominates
 and a rare false positive is fine; `PerfectHashIndex::id` for exact membership + reverse;

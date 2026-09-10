@@ -8,8 +8,8 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 1.1.x | yes |
-| 1.0.x | no — 1.1 reads every blob 1.0 wrote, so the fix is to upgrade |
+| 2.0.x | yes |
+| 1.x | no — 2.0 refuses the hash blobs 1.x wrote (the key hash changed), so the fix is to upgrade and rebuild them; `BIX4` and `OVL2` load as they are |
 | 0.x | no — its blob formats are refused by 1.0 anyway, and the fix is to rebuild |
 
 ## Reporting a vulnerability
