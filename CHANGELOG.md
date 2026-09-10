@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`ClosedHashIndex`** (Python: `ClosedHashIndex`): the minimal perfect hash and nothing else,
+  for a vocabulary known to be closed. `id(key) -> u32`, no `Option` -- a member's id, and for any
+  other string some id in `[0, n)`, which is what a perfect hash answers and all this index
+  promises; `ids_of`, `ids_of_bytes` and `ids_into` alongside, and no `contains`, `[]` or `in`.
+  The same hash as `CompactHashIndex` over the same keys, so the ids agree with its
+  `id_unchecked`; without the fingerprint table the blob is **0.26 bytes per key** on the
+  480 k-word dictionary, a fifth of the smallest fingerprinted index, and a lookup is one
+  perfect-hash probe with no compare behind it: 40 ns against 68 for `CompactHashIndex::id`
+  over the shuffled dictionary, batched `ids_of` 14 against 28 (`local/closedbench`, nine
+  alternated rounds in one process, minimum). A new type rather than `fingerprint_bits = 0`,
+  because a membership check that always says yes would be a signature that lies. Blob magic
+  `BCL1`; `inspect` names it (`BlobKind::ClosedHashIndex`); a `parse_closed` fuzz target covers
+  its framing. No `load_mmap`: the whole blob is the perfect hash, read into memory either way.
 - **`PerfectHashIndex::build_with_fingerprints`**, and `build_to_file_with_fingerprints` (Python:
   `PerfectHashIndex(keys, fingerprints=True)`, `build_to_file(..., fingerprints=True)`,
   `has_fingerprints()`): one more byte per key -- a fingerprint from the second hash, stored

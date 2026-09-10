@@ -321,6 +321,25 @@ the whole span computation and took the absent probe from 91 to 74.
 Ryzen 7 5800HS, load 1.0–1.1 with an editor open; the fingerprint layout itself was chosen on
 [`negfp-2026-09-10-arz-8f136d3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-8f136d3.txt).</sub>
 
+## `ClosedHashIndex`: the perfect hash alone
+
+`local/closedbench` builds the dictionary as a `ClosedHashIndex` and as a `CompactHashIndex` at the
+default width, checks that every word gets the same id from both, then probes the 480 k words in a
+shuffled order: nine rounds in one process, the order of the modes reversed on every other round,
+the minimum per row. The two `id_unchecked`-style lookups are the same perfect-hash probe and
+measure the same; the fingerprint compare on top of it is what `CompactHashIndex::id` pays, and
+the batched `ids_of` loses the fingerprint line's prefetch and compare.
+
+| | `ClosedHashIndex` | `CompactHashIndex` (fp=1) |
+|---|---:|---:|
+| `id`, member | **40 ns** | 68 ns (`id`), 40 ns (`id_unchecked`) |
+| `ids_of`, member | **14 ns** | 28 ns |
+| bytes per key | **0.263** | 1.263 |
+
+<sub>Measured 2026-09-10 on the tree that adds the type
+([`bench/results/closed-2026-09-10-arz-50f240c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/closed-2026-09-10-arz-50f240c.txt)),
+Ryzen 7 5800HS, load about 0.9 with an editor open.</sub>
+
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow

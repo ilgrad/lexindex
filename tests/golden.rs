@@ -173,8 +173,8 @@ mod mph {
     /// pinned this way: 1.1 re-encoded the key arena in blocks and replaced the perfect hash, so
     /// the 1.0 pair is now held to what a *reader* must promise it — see
     /// [`the_1_0_perfect_hash_blob_still_loads`] and [`the_1_0_compact_hash_blob_still_loads`] —
-    /// and the 1.1 pair took over here. The fingerprinted arena is new in 1.2 and is pinned
-    /// beside them under its own name.
+    /// and the 1.1 pair took over here. The fingerprinted arena, the overflow arena and the
+    /// `ClosedHashIndex` blob are new in 1.2 and are pinned beside them under their own names.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:
     /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
@@ -199,6 +199,7 @@ mod mph {
             .unwrap()
             .to_bytes()
             .unwrap();
+        let closed = lexindex::ClosedHashIndex::build(&keys).unwrap().to_bytes();
 
         for (name, magic, fresh) in [
             ("golden-1.1.0-compact.bch", &b"BCH6"[..], compact),
@@ -209,6 +210,7 @@ mod mph {
                 &b"BMP6"[..],
                 perfect_overflow,
             ),
+            ("golden-1.2.0-closed.bcl", &b"BCL1"[..], closed),
         ] {
             let path = data(name);
             let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -290,6 +292,29 @@ mod mph {
             false_positives <= 20,
             "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
         );
+    }
+
+    /// The closed index's blob: it loads, every golden key gets a distinct id below `n`, and so
+    /// does every stranger -- the only promise this index makes, and the one byte-identity
+    /// cannot state.
+    #[test]
+    fn the_closed_blob_loads_and_answers_every_key() {
+        let keys = keys();
+        let idx = lexindex::ClosedHashIndex::load(data("golden-1.2.0-closed.bcl")).unwrap();
+        assert_eq!(idx.len(), keys.len());
+        let mut seen = vec![false; keys.len()];
+        for key in &keys {
+            let id = idx.id(key) as usize;
+            assert!(
+                id < keys.len() && !std::mem::replace(&mut seen[id], true),
+                "{key:?}: id {id} is not distinct"
+            );
+        }
+        let singular: Vec<u32> = keys.iter().map(|k| idx.id(k)).collect();
+        assert_eq!(idx.ids_of(&keys), singular);
+        for stranger in non_members() {
+            assert!((idx.id(&stranger) as usize) < keys.len(), "{stranger:?}");
+        }
     }
 
     /// The zero-copy path against a real file on disk, not a buffer this process just wrote.
@@ -393,6 +418,15 @@ fn the_fuzz_shims_accept_a_real_blob() {
             "{name}"
         );
     }
+
+    // The closed index's blob, through its own target; the other hash blobs are refused at the
+    // magic, and its blob at theirs.
+    let closed = std::fs::read(data("golden-1.2.0-closed.bcl")).unwrap();
+    assert!(lexindex::fuzzing::parse_closed_frame(&closed));
+    assert!(!lexindex::fuzzing::parse_closed_frame(&compact));
+    assert!(!lexindex::fuzzing::parse_closed_frame(&perfect));
+    assert!(!lexindex::fuzzing::parse_compact_frame(&closed, true));
+    assert!(!lexindex::fuzzing::parse_perfect_frame(&closed, true));
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -644,6 +678,31 @@ fn every_golden_blob_inspects_from_its_header() {
             Some(1001),
             Some(0),
             plain.arena_bytes.map(|b| b + 300 + 68 + 8),
+        )
+    );
+    // The closed index of 1.2: the same perfect hash over the same keys as the 1.1 hash blobs,
+    // and nothing else -- 36 bytes of header, then the `MPH2` region.
+    let closed = inspect_file(data("golden-1.2.0-closed.bcl")).unwrap();
+    assert_eq!(
+        (
+            closed.kind,
+            closed.format.as_str(),
+            closed.keys,
+            closed.mph_bytes,
+            closed.side_entries,
+            closed.arena_bytes,
+            closed.fingerprint_bits,
+            closed.bytes,
+        ),
+        (
+            BlobKind::ClosedHashIndex,
+            "BCL1",
+            Some(1000),
+            plain.mph_bytes,
+            Some(0),
+            None,
+            None,
+            36 + plain.mph_bytes.unwrap(),
         )
     );
     // The hash blobs from 1.0 and 1.1: one perfect hash each, no side entries over these keys,

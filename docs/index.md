@@ -29,7 +29,7 @@ idx.save("catalog.bix")
 idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into RAM
 ```
 
-## Three indexes
+## Four indexes
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers ordered and
@@ -38,14 +38,18 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no
   reverse lookup.
   Use it when a fixed vocabulary's footprint is paramount.
+- **`ClosedHashIndex`** — the perfect hash **and nothing else**: `id(key) -> u32`, no `Option`, for
+  a vocabulary known to be closed. A member's id, and for anything else some id in `[0, n)`.
+  0.26 bytes/key, a fifth of `CompactHashIndex`. Use it as a token → id map where every query is a
+  member by construction.
 - **`PerfectHashIndex`** — a **minimal-perfect-hash** dictionary with verified membership and reverse
   lookup; exact `string → dense id`, and `id_unchecked` is the fastest lookup here for a vocabulary
   known to be closed. Use it as a fixed-vocabulary token↔id map on a hot path when you need exact
   membership and `id → key`. Built with `fingerprints=True`, one more byte per key lets a lookup of an
   absent key stop after one cache miss instead of two.
 
-All three assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
-(`save` / `load` / `load_mmap`). None is mutable after building — they are immutable summaries, like
+All four assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
+(`save` / `load`, and `load_mmap` where there is more than the perfect hash to map). None is mutable after building — they are immutable summaries, like
 the clustering features in the companion [`betula-cluster`](https://github.com/ilgrad/betula-cluster)
 crate.
 

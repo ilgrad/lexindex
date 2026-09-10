@@ -34,6 +34,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "parse_closed"
+path = "fuzz_targets/parse_closed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "parse_perfect"
 path = "fuzz_targets/parse_perfect.rs"
 test = false

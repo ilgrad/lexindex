@@ -230,6 +230,67 @@ def test_compact_hash_false_positive_rate_bounded():
     assert fp <= 10, f"false-positive rate too high: {fp}/{trials}"
 
 
+def test_closed_hash_index():
+    ch = lexindex.ClosedHashIndex(["alpha", "beta", "gamma", "delta", "alpha"])
+    assert len(ch) == 4 and not ch.is_empty()  # duplicate "alpha" deduped
+    assert sorted(ch.id(w) for w in ["alpha", "beta", "gamma", "delta"]) == [0, 1, 2, 3]
+    # A stranger gets *some* id below n: the index stores nothing that could say otherwise, so
+    # there is no membership spelling to promise one.
+    assert 0 <= ch.id("epsilon") < 4
+    assert not hasattr(ch, "__contains__") and not hasattr(ch, "__getitem__")
+    probes = ["delta", "alpha", "nope"]
+    assert ch.ids_of(probes) == [ch.id(w) for w in probes]
+    assert ch.ids_of([]) == []
+    assert ch.ID_DTYPE == "uint32" and not hasattr(ch, "MISSING_ID")
+
+
+def test_closed_hash_keeps_colliding_keys_distinct():
+    a, b = "x5iojurfgtipm", "7gvob4sxctomf"  # collide in the 64-bit slot hash (pinned in Rust)
+    ch = lexindex.ClosedHashIndex(k for k in [a, b, "filler"])
+    assert len(ch) == 3
+    assert sorted([ch.id(a), ch.id(b), ch.id("filler")]) == [0, 1, 2]
+    back = lexindex.ClosedHashIndex.from_bytes(ch.to_bytes())
+    assert (back.id(a), back.id(b)) == (ch.id(a), ch.id(b))
+
+
+def test_closed_hash_persistence_and_size(tmp_path):
+    words = [f"token-{i}" for i in range(20_000)]
+    ch = lexindex.ClosedHashIndex(words)
+    assert ch.serialized_len() == len(ch.to_bytes()) < 0.30 * len(words)
+    # The same perfect hash as CompactHashIndex over the same keys, and only that.
+    compact = lexindex.CompactHashIndex(words, 1)
+    assert [ch.id(w) for w in words[:500]] == [compact.id_unchecked(w) for w in words[:500]]
+    p = tmp_path / "vocab.bcl"  # a pathlib.Path, not a str
+    ch.save(p)
+    assert lexindex.ClosedHashIndex.load(p).ids_of(words[:100]) == ch.ids_of(words[:100])
+    assert not hasattr(lexindex.ClosedHashIndex, "load_mmap")
+    with pytest.raises(ValueError):
+        lexindex.ClosedHashIndex.from_bytes(b"nope")
+    empty = lexindex.ClosedHashIndex([])
+    assert empty.is_empty() and empty.id("x") == 0 and empty.ids_of(["x"]) == [0]
+    assert lexindex.ClosedHashIndex.from_bytes(empty.to_bytes()).is_empty()
+
+
+def test_closed_hash_ids_of_bytes_and_ids_into():
+    ch = lexindex.ClosedHashIndex(["alpha", "bravo", "charlie", "delta"])
+    probes = ["delta", "zulu", "alpha"]
+    raw = ch.ids_of_bytes(probes)
+    assert len(raw) == 12
+    unpacked = [int.from_bytes(raw[i * 4 : (i + 1) * 4], sys.byteorder) for i in range(3)]
+    assert unpacked == ch.ids_of(probes)
+    out = array.array("I", [7] * 5)
+    assert ch.ids_into(probes, out) is None
+    assert list(out) == [*ch.ids_of(probes), 7, 7]
+    with pytest.raises(ValueError, match="1 items but 3 keys"):
+        ch.ids_into(probes, array.array("I", [0]))
+    with pytest.raises(BufferError):
+        ch.ids_into(probes, array.array("Q", [0] * 3))  # 8-byte items for a uint32 index
+    ch.ids_into([], bytearray())
+    with pytest.raises(BufferError):
+        ch.ids_into([], b"")  # read-only is still refused
+    assert ch.ids_of_bytes([]) == b""
+
+
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
     assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]
@@ -507,7 +568,12 @@ def test_query_limit_truncates_and_matches_unlimited():
 
 @pytest.mark.parametrize(
     "ctor",
-    [lexindex.StringIndex, lexindex.PerfectHashIndex, lexindex.CompactHashIndex],
+    [
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lexindex.CompactHashIndex,
+        lexindex.ClosedHashIndex,
+    ],
 )
 def test_bulk_arguments_reject_non_strings(ctor):
     """Keys are read as borrowed views of the Python `str` rather than copied into `String`.
@@ -944,6 +1010,7 @@ def test_pickle_round_trips_every_class():
     si = lexindex.StringIndex(words)
     ph = lexindex.PerfectHashIndex(words)
     ch = lexindex.CompactHashIndex(words, 1)
+    cl = lexindex.ClosedHashIndex(words)
     ov = lexindex.Overlay(si)
     ov.add("durian")
     ov.remove("apple")
@@ -951,7 +1018,7 @@ def test_pickle_round_trips_every_class():
     # Protocol 2 as well as the default: `__reduce__` names a static method by qualname, which is
     # the part of the protocol that differs between them.
     for protocol in (2, pickle.HIGHEST_PROTOCOL):
-        for original in (si, ph, ch, ov):
+        for original in (si, ph, ch, cl, ov):
             back = pickle.loads(pickle.dumps(original, protocol=protocol))
             assert type(back) is type(original)
             assert len(back) == len(original)
@@ -1145,6 +1212,7 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
         (lexindex.StringIndex(keys), "StringIndex", "BIX4"),
         (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP6"),
         (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH6"),
+        (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL1"),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)

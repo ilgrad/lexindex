@@ -13,7 +13,7 @@ Build once over a set of strings (entity names, document keys, vocabulary terms,
 query many times. Pairs naturally with [`betula-cluster`](https://github.com/ilgrad/betula-cluster) —
 map string ids to cluster ids and back — but stands on its own.
 
-Three complementary, build-once / query-many structures — pick by what you need to ask:
+Four complementary, build-once / query-many structures — pick by what you need to ask:
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer
   ([`fst`](https://crates.io/crates/fst)). Exact `string → id` and `id → string`, plus **prefix**,
@@ -31,6 +31,11 @@ Three complementary, build-once / query-many structures — pick by what you nee
   every trie benchmarked (see [Benchmarks](#benchmarks)) — at the cost of **probabilistic membership**
   (a tunable `2^-bits` false-positive rate) and **no reverse lookup**. Use it when a fixed vocabulary's
   footprint is paramount and rare false positives are acceptable.
+- **`ClosedHashIndex`** — the perfect hash **and nothing else**: `id(key) -> u32`, no `Option`,
+  for a vocabulary known to be closed. A member's id, and for anything else *some* id in `[0, n)`.
+  **0.26 bytes/key**, a fifth of `CompactHashIndex`, and a lookup as fast as `id_unchecked` (40 ns
+  on the dictionary, against 68 for a fingerprint-checked `id`). Use it as a token → id map where
+  every query is a member by construction.
 - **`PerfectHashIndex`** — a minimal-perfect-hash dictionary with **verified membership** (`id`) and
   **reverse lookup** (`key`); the arena stores full keys, so it is exact but larger. For a known-closed
   vocabulary, `id_unchecked` skips the membership comparison and is **faster than `std::HashMap`**. Use
@@ -39,9 +44,10 @@ Three complementary, build-once / query-many structures — pick by what you nee
   an *absent* key stop after one cache miss instead of two — misses 1.8× faster, for a stop list or
   a block list.
 
-All three assign dense ids in `[0, n)` and **serialise to a flat blob** (`save` / `load`, or zero-copy
-`load_mmap`) — build once, persist, then reload and query many times. All are immutable after
-building; **`Overlay`** sits on top of any of them to add and remove keys without a rebuild, keeping
+All four assign dense ids in `[0, n)` and **serialise to a flat blob** (`save` / `load`, or zero-copy
+`load_mmap` where there is more than the perfect hash to map) — build once, persist, then reload and
+query many times. All are immutable after building; **`Overlay`** sits on top of the three that
+check membership to add and remove keys without a rebuild, keeping
 every id stable, and folds the edits back into a fresh base with `compact()`.
 The `mph` feature (on by default) provides the two hash indexes. Every configuration builds for
 **32-bit targets**, `wasm32-unknown-unknown` included; `mmap` is the one to leave off there, since
@@ -54,7 +60,7 @@ pip install lexindex
 ```
 
 ```python
-from lexindex import CompactHashIndex, PerfectHashIndex, StringIndex
+from lexindex import ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex
 
 idx = StringIndex(["apple", "apricot", "banana", "cherry"])
 idx.id("banana")             # 2  (sorted rank)
@@ -72,6 +78,9 @@ c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # smallest string->id (~
 c.id("POST")                 # dense id in [0, n); probabilistic membership, no id->key
 c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 
+z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])  # the perfect hash alone (~0.26 B/key)
+z.id("POST")                 # a member's id; any other string gets *some* id in [0, n)
+
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])
 d.id("POST")                 # dense id in [0, n); membership verified, returns None if absent
 d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
@@ -79,7 +88,7 @@ d.key(d.id("POST"))          # "POST"  — exact reverse lookup (keys stored)
 
 No runtime dependencies; a single abi3 wheel covers CPython 3.11+. See
 [`examples/quickstart.py`](https://github.com/ilgrad/lexindex/blob/main/examples/quickstart.py) for all
-three indexes end to end, and the [documentation site](https://ilgrad.github.io/lexindex/).
+four indexes end to end, and the [documentation site](https://ilgrad.github.io/lexindex/).
 
 ### Pairs with betula-cluster
 
@@ -166,6 +175,16 @@ assert_eq!(raw, id);
 # Ok::<(), lexindex::IndexError>(())
 ```
 
+```rust
+use lexindex::ClosedHashIndex;            // requires the default `mph` feature
+
+// The perfect hash and nothing else (~0.26 B/key), for a vocabulary known to be closed.
+let vocab = ClosedHashIndex::build(["GET", "POST", "PUT", "DELETE"])?;
+let id = vocab.id("POST");                     // a member's id; a stranger gets *some* id in [0, n)
+assert!((id as usize) < vocab.len());
+# Ok::<(), lexindex::IndexError>(())
+```
+
 ## Design notes
 
 Each of these is a section of [`docs/design.md`](docs/design.md); the one-line versions:
@@ -183,6 +202,9 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
   fingerprint per slot, from a second hash uncorrelated with the first, so a non-member survives
   with probability about `2^-bits` — a design rate, not a defence against chosen queries — and
   there is no `id → key`. Its build streams: 16 bytes per key, never the strings.
+- **`ClosedHashIndex` is that perfect hash alone.** Nothing stored can tell a member from a
+  stranger, so nothing tries: `id` is a `u32`, the same slot `CompactHashIndex::id_unchecked`
+  gives over the same keys, and the type exists so that the signature says so.
 - **`PerfectHashIndex` verifies every hit against the stored key.** The pair in a billion that
   collides in the 64-bit hash is served, still exactly, from a side table the hot path never reads.
 - **`from_bytes` and `load` are safe on every index — the reason the perfect hash is in-crate** —
@@ -206,6 +228,7 @@ better; the capability columns are why you would still pick a larger one.
 
 | library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
+| **lexindex `ClosedHashIndex`** | — | — | — | — | none (closed vocabulary) | — | **0.26** |
 | **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |

@@ -125,6 +125,22 @@ old MPH, and `CompactHashIndex` stores no keys at all. Rebuilding from the key l
 and it is the only one a keyless index could ever have had. Soundness outranks compatibility, and
 this is the release where that debt is paid rather than carried.
 
+## `ClosedHashIndex`
+
+`CompactHashIndex` with the fingerprint table removed, and the `Option` with it. The minimal
+perfect hash alone maps a key's 64-bit hash to a slot in `[0, n)`; nothing stored can say whether
+the key was one of the build's, so `id` returns a `u32` and the contract is exactly what a perfect
+hash offers: a member's id, and for any other string some id below `n`. It is a separate type
+rather than `fingerprint_bits = 0` because a membership check that always says yes would be a
+signature that lies, and because the hot path is then one call with no compare behind it — the
+`id_unchecked` of the other two hash indexes as the only method. Size is the perfect hash and a
+36-byte header: **0.26 B/key** on real words, a fifth of the smallest fingerprinted index and a
+tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL1"][n][mph length][side_len]
+[payload][check][MPH blob][side]`, the `CompactHashIndex` layout without its fingerprint section,
+under the same 64-bit hash collision rule: keys sharing a hash resolve through the side table on
+their full second hash, exact for members. There is no `load_mmap`: the blob is the perfect hash,
+which every loader reads into memory whichever way it is opened, so there is nothing to borrow.
+
 ## `PerfectHashIndex`
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
@@ -317,6 +333,7 @@ or — never — read it wrong.
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
 | `BMP6` | 1.1 | `PerfectHashIndex` | `BMP5` **read**; `BMP1`–`BMP4` **refused by name** |
 | `BCH6` | 1.0, 1.1 | `CompactHashIndex` | a 1.0 `BCH6` (an `MPH1` inside) **read**; `BCH1`–`BCH5` **refused by name** |
+| `BCL1` | 1.2 | `ClosedHashIndex` | new in 1.2 |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP6` and `BCH6` | `MPH1` (1.0) **read** |
 

@@ -10,6 +10,10 @@ The typed public surface of the `lexindex` Python package.
 
 ::: lexindex.CompactHashIndex
 
+## ClosedHashIndex
+
+::: lexindex.ClosedHashIndex
+
 ## PerfectHashIndex
 
 ::: lexindex.PerfectHashIndex

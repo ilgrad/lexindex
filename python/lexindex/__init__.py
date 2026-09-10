@@ -7,6 +7,8 @@ many times:
 - :class:`PerfectHashIndex` — fastest exact ``string -> dense id`` with membership + reverse.
 - :class:`CompactHashIndex` — smallest ``string -> dense id`` (perfect hash + fingerprints);
   probabilistic membership, no reverse.
+- :class:`ClosedHashIndex` — the perfect hash and nothing else, a fifth of that: ``id`` never
+  says absent, for a vocabulary known to be closed.
 
 All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge
 index and borrow it instantly).
@@ -18,7 +20,14 @@ index and borrow it instantly).
 from importlib.metadata import PackageNotFoundError, version
 from typing import Literal, TypedDict
 
-from lexindex._core import CompactHashIndex, Overlay, PerfectHashIndex, StringIndex, inspect
+from lexindex._core import (
+    ClosedHashIndex,
+    CompactHashIndex,
+    Overlay,
+    PerfectHashIndex,
+    StringIndex,
+    inspect,
+)
 
 try:
     __version__ = version("lexindex")
@@ -29,7 +38,9 @@ except PackageNotFoundError:  # pragma: no cover - source tree without install m
 class BlobInfo(TypedDict):
     """What :func:`inspect` reads out of a blob's header; nothing in it is verified."""
 
-    kind: Literal["StringIndex", "PerfectHashIndex", "CompactHashIndex", "Mphf", "Overlay"]
+    kind: Literal[
+        "StringIndex", "PerfectHashIndex", "CompactHashIndex", "ClosedHashIndex", "Mphf", "Overlay"
+    ]
     format: str
     bytes: int
     keys: int | None
@@ -51,6 +62,7 @@ class OverlayInfo(TypedDict):
 
 __all__ = [
     "BlobInfo",
+    "ClosedHashIndex",
     "CompactHashIndex",
     "Overlay",
     "OverlayInfo",

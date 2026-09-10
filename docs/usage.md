@@ -256,6 +256,27 @@ false-positive chance on a non-member, and it cannot map an id back to a string.
 fixed vocabulary's on-disk / mmap footprint dominates; use `PerfectHashIndex` when you need exact
 membership or `id → key`, or `StringIndex` when you need order or fuzzy/prefix.
 
+## `ClosedHashIndex` — the perfect hash and nothing else
+
+```python
+from lexindex import ClosedHashIndex
+
+# For a vocabulary known to be closed: every query is a member by construction, so nothing is
+# stored to say otherwise. `id` returns a member's id, and for any other string *some* id in
+# [0, n) -- there is no `in`, no `[]`, no `contains`. About 0.26 B/key, a fifth of CompactHashIndex.
+vocab = ClosedHashIndex(["the", "of", "and", "to"])
+i = vocab.id("the")            # the id CompactHashIndex([...]).id_unchecked("the") gives
+ids = vocab.ids_of(["to", "of"])   # list[int]; ids_of_bytes / ids_into as on the other indexes
+vocab.save("vocab.bcl")
+vocab = ClosedHashIndex.load("vocab.bcl")   # no load_mmap: the whole blob is the perfect hash
+```
+
+The same perfect hash as `CompactHashIndex` over the same keys, so the ids agree with its
+`id_unchecked`; what is missing is the fingerprint table, and with it the ability to say no.
+Reach for it as a token → id map on a hot path where the caller controls the queries — a
+tokenizer over its own vocabulary, a join on a key column the index was built from — and for
+`CompactHashIndex` the moment a stranger can ask.
+
 ## `Overlay` — edits without a rebuild
 
 All three indexes are built once from the whole key set, so adding a single key has always meant
@@ -354,7 +375,7 @@ version-specific, and everything above holds for it.
 ## Rust
 
 ```rust
-use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
+use lexindex::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex};
 
 let idx = StringIndex::build(["apple", "apricot", "banana"])?;
 assert_eq!(idx.id("banana"), Some(2));
@@ -377,6 +398,9 @@ assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse l
 let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // ~1.3 B/key, no reverse
 let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // ~0.8 B/key, 6.25% FP rate
 assert!(small.contains("POST"));
+
+let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.26 B/key
+assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 # drop(idx);
 # std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())

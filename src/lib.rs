@@ -1,6 +1,6 @@
 //! lexindex: compact, immutable string↔id indexes for huge catalogs.
 //!
-//! Three complementary, build-once / query-many indexes over a set of strings (entity names, cluster
+//! Four complementary, build-once / query-many indexes over a set of strings (entity names, cluster
 //! labels, document keys, vocabulary terms):
 //!
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
@@ -12,12 +12,16 @@
 //!   (in-crate, the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
 //!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
 //!   no reverse lookup. Use it when footprint is paramount.
+//! - [`ClosedHashIndex`] — the perfect hash **and nothing else**: `id(key) -> u32`, no
+//!   `Option`, for a vocabulary known to be closed. A member's id, and for anything else some id
+//!   in `[0, n)`. 0.26 B/key, a fifth of `CompactHashIndex`, as a token → id map where every
+//!   query is a member by construction.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
 //!   at 10.9 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
 //!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //!
-//! All three assign dense ids in `[0, n)`. None is mutable after building — they are immutable
+//! All four assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
 //! The minimal perfect hash under the two hash indexes implements [PHast]'s map-or-bump
@@ -78,11 +82,16 @@ pub use string_index::StringIndex;
 #[cfg(feature = "mph")]
 mod arena;
 #[cfg(feature = "mph")]
+mod closed_hash;
+#[cfg(feature = "mph")]
 mod compact_hash;
 #[cfg(feature = "mph")]
 mod hash;
 #[cfg(feature = "mph")]
 mod perfect_hash;
+#[cfg(feature = "mph")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
+pub use closed_hash::ClosedHashIndex;
 #[cfg(feature = "mph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use compact_hash::CompactHashIndex;
@@ -107,6 +116,12 @@ pub mod fuzzing {
     /// not the point — not panicking, hanging or reading out of bounds is.
     pub fn parse_compact_frame(bytes: &[u8], verify: bool) -> bool {
         crate::CompactHashIndex::fuzz_parse_frame(bytes, verify)
+    }
+
+    /// [`parse_compact_frame`] for a `ClosedHashIndex` blob, the framing with the fewest fields:
+    /// no fingerprint table, and the payload checksum always verified.
+    pub fn parse_closed_frame(bytes: &[u8]) -> bool {
+        crate::ClosedHashIndex::fuzz_parse_frame(bytes)
     }
 
     /// [`parse_compact_frame`] for a `PerfectHashIndex` blob, whose framing also has to validate an

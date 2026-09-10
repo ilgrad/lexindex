@@ -8,6 +8,7 @@ from typing_extensions import Buffer
 
 __all__ = [
     "BlobInfo",
+    "ClosedHashIndex",
     "CompactHashIndex",
     "Overlay",
     "OverlayInfo",
@@ -353,6 +354,47 @@ class CompactHashIndex:
         """
 
 @final
+class ClosedHashIndex:
+    """Minimal perfect hash and nothing else: ``string -> dense id`` for a closed vocabulary.
+
+    ``id`` never says absent: a member's id, or some id in ``[0, n)`` for any other string. The
+    index is the perfect hash alone, about 0.26 bytes per key. Use it when every query is a
+    member by construction; ``CompactHashIndex`` the moment a stranger can ask.
+    """
+
+    def __new__(cls, items: Iterable[str]) -> ClosedHashIndex: ...
+    def __len__(self) -> int: ...
+    def is_empty(self) -> bool: ...
+    def id(self, key: str) -> int:
+        """Dense id of ``key`` if it is a member; some id in ``[0, n)`` otherwise, ``0`` for an
+        empty index. Nothing stored can tell the two apart, so there is no ``__contains__`` and
+        no ``__getitem__``."""
+
+    def ids_of(self, keys: Sequence[str]) -> list[int]: ...
+    def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
+        """Batched ``id`` packed into a buffer: one 4-byte native-endian item per key, aligned
+        with ``keys``, for ``np.frombuffer(buf, dtype=index.ID_DTYPE)``."""
+
+    def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
+        """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
+        buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
+        mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
+
+    ID_DTYPE: ClassVar[str]
+    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32)."""
+
+    def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
+    @staticmethod
+    def from_bytes(data: bytes) -> ClosedHashIndex:
+        """Reconstruct from a ``to_bytes`` blob; arbitrary input raises ``ValueError``."""
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @staticmethod
+    def load(path: str | os.PathLike[str]) -> ClosedHashIndex:
+        """Load a file written by ``save``. Validated like ``from_bytes``. There is no
+        ``load_mmap``: the whole blob is the perfect hash, read into memory either way."""
+
+@final
 class Overlay:
     """Add and remove keys on top of an index that is expensive to rebuild.
 
@@ -481,7 +523,9 @@ class BlobInfo(TypedDict):
     ``CompactHashIndex`` was built with.
     """
 
-    kind: Literal["StringIndex", "PerfectHashIndex", "CompactHashIndex", "Mphf", "Overlay"]
+    kind: Literal[
+        "StringIndex", "PerfectHashIndex", "CompactHashIndex", "ClosedHashIndex", "Mphf", "Overlay"
+    ]
     format: str
     bytes: int
     keys: int | None

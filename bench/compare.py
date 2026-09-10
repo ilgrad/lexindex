@@ -113,6 +113,10 @@ def build_lexindex_mph():
     return lexindex.PerfectHashIndex(KEYS)
 
 
+def build_lexindex_closed():
+    return lexindex.ClosedHashIndex(KEYS)
+
+
 def build_lexindex_compact4bit():
     return lexindex.CompactHashIndex(KEYS, fingerprint_bits=4)
 
@@ -150,6 +154,11 @@ def build_datrie():
 # caps keys: prefix, range, fuzzy, reverse (id->str), exact (exact vs probabilistic membership),
 # serialise, mmap
 CANDIDATES = [
+    (
+        "lexindex\nClosedHashIndex",
+        build_lexindex_closed,
+        dict(prefix=0, rangeq=0, fuzzy=0, reverse=0, exact=0, serialise=1, mmap=0),
+    ),
     (
         "lexindex\nCompactHashIndex\n(fp=4 bits)",
         build_lexindex_compact4bit,

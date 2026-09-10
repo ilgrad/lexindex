@@ -48,7 +48,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 #[cfg(feature = "mph")]
-use crate::{CompactHashIndex, PerfectHashIndex};
+use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
 
 /// Collect any Python iterable of `str` — list, tuple, generator, an open file — into borrowed
 /// strings. `Vec<PyBackedStr>` as a parameter would accept only sequences, which rules out building
@@ -1309,6 +1309,138 @@ impl PyCompactHashIndex {
     }
 }
 
+/// Minimal perfect hash and nothing else: `string -> dense id` for a vocabulary known to be closed.
+/// `id` never says "absent" -- a member's id, or some id in `[0, n)` for any other string -- and the
+/// index is the perfect hash alone, about 0.26 bytes per key.
+#[cfg(feature = "mph")]
+#[pyclass(name = "ClosedHashIndex", module = "lexindex._core", frozen)]
+pub struct PyClosedHashIndex {
+    inner: Arc<ClosedHashIndex>,
+}
+
+#[cfg(feature = "mph")]
+#[pymethods]
+impl PyClosedHashIndex {
+    /// Build from an iterable of strings. Duplicates removed; ids are arbitrary dense slots. The
+    /// items are hashed as they come off the iterator and the strings dropped, so a generator-fed
+    /// build streams on the Python side too.
+    #[new]
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let pairs = collect_pairs(items)?;
+        let inner = py
+            .detach(|| ClosedHashIndex::build_from_pairs(pairs))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Dense id of `key` if it is a member; **some** id in `[0, n)` otherwise, and `0` for an
+    /// empty index. Nothing stored can tell the two apart, so nothing tries: every query must be
+    /// a member by construction. There is no `__contains__` and no `__getitem__` -- a membership
+    /// test this index cannot make would be a lie in the dict spelling.
+    fn id(&self, key: &str) -> u32 {
+        self.inner.id(key)
+    }
+
+    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`.
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<u32> {
+        py.detach(|| self.inner.ids_of(&keys))
+    }
+
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 4-byte
+    /// native-endian item per key, aligned with `keys`, for
+    /// `np.frombuffer(buf, dtype=index.ID_DTYPE)`. No item stands for an absent key, because
+    /// this index never reports one.
+    fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 4);
+            for id in self.inner.ids_of(&keys) {
+                out.extend_from_slice(&id.to_ne_bytes());
+            }
+            out
+        });
+        PyBytes::new(py, &packed)
+    }
+
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
+    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
+    /// long; the first `len(keys)` items are written and the rest left as they were. A read-only,
+    /// strided or mistyped buffer is a `BufferError`; one shorter than `keys` is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u32>(out, keys.len())?;
+        let ids = py.detach(|| self.inner.ids_of(&keys));
+        write_ids(py, &sink, &ids)
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint32";
+
+    /// Serialise to a `bytes` blob.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let bytes = py.detach(|| self.inner.to_bytes());
+        PyBytes::new(py, &bytes)
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> usize {
+        self.inner.serialized_len()
+    }
+
+    /// Pickle support: the blob, and the loader that reads it back.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py),)))
+    }
+
+    /// Reconstruct from a [`PyClosedHashIndex::to_bytes`] blob. Every length the index will read
+    /// is validated against the bytes present, so arbitrary input raises rather than misbehaving.
+    #[staticmethod]
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| ClosedHashIndex::from_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the index to `path`.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
+    }
+
+    /// Load a file written with `save`. Validated like `from_bytes`. There is no `load_mmap`: the
+    /// whole blob is the perfect hash, which is read into memory whichever way it is loaded.
+    #[staticmethod]
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| ClosedHashIndex::load(&path)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
 /// The three bases an [`PyOverlay`] can sit on. `Overlay<I>` is generic and a `#[pyclass]` cannot
 /// be, so the choice becomes a runtime tag — and with it, `key`/`keys`/`compact` become a runtime
 /// `TypeError` on a `CompactHashIndex` base where Rust refuses at compile time.
@@ -1790,6 +1922,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
             BlobKind::StringIndex => "StringIndex",
             BlobKind::PerfectHashIndex => "PerfectHashIndex",
             BlobKind::CompactHashIndex => "CompactHashIndex",
+            BlobKind::ClosedHashIndex => "ClosedHashIndex",
             BlobKind::Mphf => "Mphf",
             BlobKind::Overlay => "Overlay",
         },
@@ -1828,6 +1961,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPerfectHashIndex>()?;
     #[cfg(feature = "mph")]
     m.add_class::<PyCompactHashIndex>()?;
+    #[cfg(feature = "mph")]
+    m.add_class::<PyClosedHashIndex>()?;
     m.add_class::<PyOverlay>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     Ok(())

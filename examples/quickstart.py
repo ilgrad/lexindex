@@ -1,9 +1,10 @@
-"""Quickstart: the three lexindex structures and when to reach for each.
+"""Quickstart: the four lexindex structures and when to reach for each.
 
-One vocabulary, three indexes, each answering a different question:
+One vocabulary, four indexes, each answering a different question:
 
   - StringIndex       ordered + typo-tolerant: autocomplete, fuzzy, range, exact both ways
   - CompactHashIndex  smallest string -> id (probabilistic membership, no reverse)
+  - ClosedHashIndex   the perfect hash alone: string -> id for a vocabulary known to be closed
   - PerfectHashIndex  exact membership + reverse id -> string, fastest closed-vocabulary lookup
 
 Run::
@@ -17,7 +18,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from lexindex import CompactHashIndex, PerfectHashIndex, StringIndex
+from lexindex import ClosedHashIndex, CompactHashIndex, PerfectHashIndex, StringIndex
 
 VOCAB = [
     "apple",
@@ -69,6 +70,21 @@ def compact_hash_demo() -> None:
     print("CompactHashIndex:  id('grape') ->", ids["grape"], "(dense [0, n); ~1.3 B/key)")
 
 
+def closed_hash_demo() -> None:
+    """The perfect hash and nothing else, when every query is a member by construction."""
+    vocab = ClosedHashIndex(VOCAB)
+
+    # the same ids CompactHashIndex gives over the same keys, without the fingerprint table:
+    # ~0.26 B/key at scale, and a lookup with no compare behind it
+    assert vocab.id("grape") == CompactHashIndex(VOCAB).id_unchecked("grape")
+    assert sorted(vocab.ids_of(VOCAB)) == list(range(len(VOCAB)))
+
+    # nothing stored can tell a stranger from a member, so `id` never says "absent" -- a
+    # stranger gets *some* id in [0, n), and there is no `in` / `contains` to pretend otherwise
+    assert 0 <= vocab.id("durian") < len(VOCAB)
+    print("ClosedHashIndex:  id('grape') ->", vocab.id("grape"), "(dense [0, n); ~0.26 B/key)")
+
+
 def perfect_hash_demo() -> None:
     """Exact membership + reverse lookup, fastest closed-vocabulary map."""
     d = PerfectHashIndex(VOCAB)
@@ -92,6 +108,7 @@ def persistence_demo() -> None:
 if __name__ == "__main__":
     string_index_demo()
     compact_hash_demo()
+    closed_hash_demo()
     perfect_hash_demo()
     persistence_demo()
     print("\nquickstart OK")

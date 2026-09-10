@@ -12,6 +12,7 @@ pub enum BlobKind {
     StringIndex,
     PerfectHashIndex,
     CompactHashIndex,
+    ClosedHashIndex,
     /// A standalone minimal perfect hash, the region the two hash indexes embed.
     Mphf,
     Overlay,
@@ -202,6 +203,17 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             i.mph_bytes = Some(mph);
             i.side_entries = Some(side);
             i.arena_bytes = Some(rest(bytes, [40, mph, side * 20])?);
+            Ok(i)
+        }
+        b"BCL1" => {
+            // `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`
+            w.bytes(0, 36)?;
+            let (n, mph, side) = (w.u64(4)?, w.u64(12)?, u64::from(w.u32(20)?));
+            let mut i = info(BlobKind::ClosedHashIndex, format, bytes, n);
+            i.mph_bytes = Some(mph);
+            i.side_entries = Some(side);
+            // Nothing follows the side table; a blob shorter than its header claims is truncated.
+            rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" => {
@@ -408,6 +420,18 @@ mod tests {
             i.bytes
         );
         assert_eq!(i.arena_bytes, Some(300 * 2), "one fingerprint per key");
+
+        let blob = crate::ClosedHashIndex::build(keys()).unwrap().to_bytes();
+        let i = inspect(&blob).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys),
+            (BlobKind::ClosedHashIndex, "BCL1", Some(300))
+        );
+        assert_eq!((i.fingerprint_bits, i.arena_bytes), (None, None));
+        assert_eq!(
+            36 + i.mph_bytes.unwrap() + 20 * i.side_entries.unwrap(),
+            i.bytes
+        );
 
         let hashes: Vec<u64> = (1..=300u64)
             .map(|k| k.wrapping_mul(0x9E37_79B9_7F4A_7C15))

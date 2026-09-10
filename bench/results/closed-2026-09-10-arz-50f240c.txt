@@ -1,0 +1,23 @@
+local/closedbench (a throwaway harness beside the crate; not shipped), 2026-09-10 03:20, lexindex 50f240c (+ the
+ClosedHashIndex this commit adds), Ryzen 7 5800HS, Fedora 44, load average 0.82, 0.90, 0.91 (editor open).
+
+/usr/share/dict/words, 479 823 keys, probed as members in a shuffled order. Nine rounds in one process, both indexes
+resident; the five modes run in the order listed on even rounds and reversed on odd rounds; ns per probe, the
+minimum per mode across rounds. Every word was first checked to get the same id from ClosedHashIndex::id and
+CompactHashIndex::id_unchecked, and ClosedHashIndex::ids_of to agree with its id.
+
+n 479823  closed 0.263 B/key (126053 B)  compact fp=1 1.263 B/key (605880 B)
+round 0: closed.id 41.2  compact.id_unchecked 39.6  compact.id 68.1  closed.ids_of 16.4  compact.ids_of 28.3
+round 1: closed.id 42.1  compact.id_unchecked 44.1  compact.id 79.8  closed.ids_of 23.2  compact.ids_of 37.1
+round 2: closed.id 42.7  compact.id_unchecked 44.7  compact.id 73.1  closed.ids_of 15.4  compact.ids_of 28.1
+round 3: closed.id 42.2  compact.id_unchecked 44.6  compact.id 73.9  closed.ids_of 23.6  compact.ids_of 37.7
+round 4: closed.id 44.7  compact.id_unchecked 42.1  compact.id 71.3  closed.ids_of 14.4  compact.ids_of 29.2
+round 5: closed.id 43.2  compact.id_unchecked 41.2  compact.id 73.6  closed.ids_of 24.5  compact.ids_of 36.8
+round 6: closed.id 40.1  compact.id_unchecked 44.0  compact.id 70.0  closed.ids_of 16.5  compact.ids_of 27.9
+round 7: closed.id 41.6  compact.id_unchecked 42.4  compact.id 70.8  closed.ids_of 24.9  compact.ids_of 37.6
+round 8: closed.id 43.9  compact.id_unchecked 41.3  compact.id 72.0  closed.ids_of 14.5  compact.ids_of 28.8
+min: closed.id 40.1 ns  compact.id_unchecked 39.6 ns  compact.id 68.1 ns  closed.ids_of 14.4 ns  compact.ids_of 27.9 ns
+
+closed.ids_of and compact.ids_of are 8-9 ns/key slower on the odd rounds, when each runs after the other index's
+three per-key modes; the paired gap between the two batched rows is 13-14 ns in both orders.
+closed.id and compact.id_unchecked are the same perfect-hash probe and trade places round by round.
