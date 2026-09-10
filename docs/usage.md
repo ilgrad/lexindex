@@ -356,6 +356,31 @@ for probes in batches:                       # each of exactly `batch` keys
     consume(out)
 ```
 
+### Arrow columns, without a Python string per key
+
+`ids_of_arrow` takes an Arrow `utf8`/`large_utf8` column — a pyarrow `Array` or `ChunkedArray`, a
+pandas column of `ArrowDtype` (through its `__arrow_array__`), a polars `Series` (through
+`to_arrow()`) — and reads the keys straight out of its offset and data buffers, so no Python `str`
+is built or borrowed per key; that was half to two thirds of what the list forms cost. The answer
+is packed like `ids_of_bytes`, with `MISSING_ID` for an absent key and for a null
+(`ClosedHashIndex` raises on a null — a closed vocabulary has no id for it), and `ids_into_arrow`
+writes it into a buffer you own, as `ids_into` does. The buffers are copied once per call, which
+is the price of doing this through the buffer protocol rather than Arrow's C Data Interface: a
+`memcpy` against a hash and a cache miss per key.
+
+```python
+import pyarrow as pa
+
+col = pa.array(probes)                       # or table["word"], a polars Series, a pandas column
+ids = np.frombuffer(idx.ids_of_arrow(col), dtype=idx.ID_DTYPE)
+idx.ids_into_arrow(col, out)                 # into memory you own
+```
+
+On the shuffled dictionary (479 823 member probes, min of seven alternated rounds in one process,
+`local/arrowbench.py`): `CompactHashIndex` 48 ns a key against 145 for `ids_of` and 105 for
+`ids_of_bytes`; `PerfectHashIndex` 55 against 153 / 121; `ClosedHashIndex` 20 against 116 / 87;
+`StringIndex` 264 against 468 / 435, where the transducer walk is most of the cost either way.
+
 ### Threads, including free-threaded CPython
 
 The module tells CPython it does not need the GIL, and the guarantee behind that is:

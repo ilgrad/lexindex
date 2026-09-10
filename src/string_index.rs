@@ -276,6 +276,17 @@ impl StringIndex {
         self.map.get(key)
     }
 
+    /// [`id`](Self::id) over `n` keys given as bytes by position, for a caller whose keys are
+    /// not `str`s — a lookup reading an Arrow buffer.
+    #[cfg(feature = "python")]
+    pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
+        &self,
+        n: usize,
+        key: F,
+    ) -> Vec<Option<u64>> {
+        (0..n).map(|i| self.map.get(key(i))).collect()
+    }
+
     /// Whether `key` is present.
     pub fn contains(&self, key: &str) -> bool {
         self.map.get(key).is_some()

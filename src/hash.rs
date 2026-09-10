@@ -81,7 +81,11 @@ fn fmix(mut h: u64, len: u64) -> u64 {
 /// ever sees them.
 #[inline]
 pub(crate) fn hash_key(s: &str) -> u64 {
-    let b = s.as_bytes();
+    hash_key_bytes(s.as_bytes())
+}
+
+/// [`hash_key`] over the key's bytes: what a lookup reading an Arrow buffer holds.
+pub(crate) fn hash_key_bytes(b: &[u8]) -> u64 {
     let mut h = SLOT_SEED;
     let mut c = b.chunks_exact(8);
     for w in &mut c {
@@ -102,8 +106,13 @@ pub(crate) fn hash_key(s: &str) -> u64 {
 /// Callers keep all 64 bits and truncate to the table width themselves; the collision side table
 /// stores the full value, so two distinct keys merge only when they collide in *both* 64-bit hashes
 /// at once (~`2^-128` per pair) — not at the `2^-(64+b)` a truncated side match would allow.
+#[inline]
 pub(crate) fn fingerprint_full(s: &str) -> u64 {
-    let b = s.as_bytes();
+    fingerprint_full_bytes(s.as_bytes())
+}
+
+/// [`fingerprint_full`] over the key's bytes: what a lookup reading an Arrow buffer holds.
+pub(crate) fn fingerprint_full_bytes(b: &[u8]) -> u64 {
     let mut h = FP_SEED;
     let mut c = b.chunks_exact(8);
     for w in &mut c {
@@ -119,7 +128,11 @@ pub(crate) fn fingerprint_full(s: &str) -> u64 {
 /// alone, and `build_to_file` takes both, the second for its replay digest.
 #[inline]
 pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
-    let b = s.as_bytes();
+    hash_pair_bytes(s.as_bytes())
+}
+
+/// [`hash_pair`] over the key's bytes: what a lookup reading an Arrow buffer holds.
+pub(crate) fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
     let (mut slot, mut fp) = (SLOT_SEED, FP_SEED);
     let mut c = b.chunks_exact(8);
     for w in &mut c {

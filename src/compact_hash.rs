@@ -12,7 +12,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::hash::{fingerprint_full, hash_key, hash_pair};
+use crate::hash::{fingerprint_full, hash_key, hash_pair, hash_pair_bytes};
 use crate::mphf::Mphf;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
@@ -1301,12 +1301,18 @@ impl CompactHashIndex {
     /// Dense id of `key`, or `None`. Membership is checked against the stored fingerprint, so a `Some`
     /// result is correct except for a `2^-fingerprint_bits` false-positive chance on a non-member.
     pub fn id(&self, key: &str) -> Option<u32> {
+        self.id_bytes(key.as_bytes())
+    }
+
+    /// [`id`](Self::id) over the key's bytes.
+    #[inline]
+    pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
             // branch, then exactly the side-free lookup. Both hashes come from a single pass over
             // the key — a hit needs both, and only a non-member landing past the remap (rarer than
             // 1 in 100 queries) pays for a fingerprint it never compares.
-            let (h, full) = hash_pair(key);
+            let (h, full) = hash_pair_bytes(key);
             let slot = self.slot_for(h)?;
             return (read_fp(self.fps.as_ref(), slot, self.fp_bits)?
                 == full & fp_mask(self.fp_bits))
@@ -1320,8 +1326,8 @@ impl CompactHashIndex {
     /// answer for a side key whose fingerprint bits tie its representative's), then the ordinary
     /// slot-and-fingerprint path.
     #[cold]
-    fn id_with_side(&self, key: &str) -> Option<u32> {
-        let (h, full) = hash_pair(key);
+    fn id_with_side(&self, key: &[u8]) -> Option<u32> {
+        let (h, full) = hash_pair_bytes(key);
         if let Some(id) = self.side_lookup(h, full) {
             return Some(id);
         }
@@ -1366,11 +1372,21 @@ impl CompactHashIndex {
     /// The rare index holding a hash collision takes the per-key path instead — the side probe must
     /// precede the fingerprint compare, which defeats the batched layout.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u32>> {
+        self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
+    }
+
+    /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
+    /// are not `str`s — a lookup reading an Arrow buffer.
+    pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
+        &self,
+        n: usize,
+        key: F,
+    ) -> Vec<Option<u32>> {
         let Some(mph) = &self.mph else {
-            return vec![None; keys.len()];
+            return vec![None; n];
         };
         if !self.side.is_empty() {
-            return keys.iter().map(|k| self.id_with_side(k.as_ref())).collect();
+            return (0..n).map(|i| self.id_with_side(key(i))).collect();
         }
         // Both hashes are computed in one pass over the keys, so the verify pass below never
         // touches the strings again — it is a pure fingerprint-table compare with the lines
@@ -1378,18 +1394,18 @@ impl CompactHashIndex {
         // Prefetch distance, shared by the hashing pass and the fingerprint compare below: far
         // enough ahead that a DRAM miss has time to land, near enough that the line is still there.
         const AHEAD: usize = 32;
-        let mut hashes = Vec::with_capacity(keys.len());
-        let mut wanted = Vec::with_capacity(keys.len());
+        let mut hashes = Vec::with_capacity(n);
+        let mut wanted = Vec::with_capacity(n);
         let mask = fp_mask(self.fp_bits);
-        for (i, k) in keys.iter().enumerate() {
+        for i in 0..n {
             // The slice holds the `String` headers contiguously, but their bytes are wherever the
             // allocator put them, so hashing a batch is one dependent cache miss per key and the
             // hashes cannot start until each arrives. Pulling a later key's first line in now is
             // the one prefetch the per-key `id` cannot make — it has no next key to look at.
-            if let Some(next) = keys.get(i + AHEAD) {
-                crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
+            if i + AHEAD < n {
+                crate::blob::prefetch_byte(key(i + AHEAD), 0);
             }
-            let (h, full) = hash_pair(k.as_ref());
+            let (h, full) = hash_pair_bytes(key(i));
             hashes.push(h);
             wanted.push(full & mask);
         }
@@ -1398,7 +1414,7 @@ impl CompactHashIndex {
         // the fingerprint line prefetched ahead of the compare.
         let slots = mph.index_all(&hashes);
         let fps = self.fps.as_ref();
-        (0..keys.len())
+        (0..n)
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {
                     crate::blob::prefetch_byte(fps, (s * self.fp_bits as u64 / 8) as usize);

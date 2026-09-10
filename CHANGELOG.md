@@ -38,6 +38,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Arrow columns as batch input** (Python): `ids_of_arrow(column)` and `ids_into_arrow(column,
+  out)` on every index take an Arrow `utf8`/`large_utf8` column — a pyarrow `Array` or
+  `ChunkedArray`, a pandas `ArrowDtype` column, a polars `Series` — and read the keys straight
+  from its offset and data buffers, so no Python string is built or borrowed per key. Packed like
+  `ids_of_bytes`, `MISSING_ID` for a null (`ClosedHashIndex` raises on one). Through the buffer
+  protocol, not the C Data Interface: no dependency, no `unsafe`, one copy of the buffers per
+  call. On the shuffled dictionary, per key: `CompactHashIndex` 48 ns against 145 (`ids_of`) and
+  105 (`ids_of_bytes`), `PerfectHashIndex` 55 against 153 / 121, `ClosedHashIndex` 20 against
+  116 / 87, `StringIndex` 264 against 468 / 435.
+  `bench/results/arrow-2026-09-10-arz-b6ae463.txt`.
 - **`ClosedHashIndex`** (Python: `ClosedHashIndex`): the minimal perfect hash and nothing else,
   for a vocabulary known to be closed. `id(key) -> u32`, no `Option` -- a member's id, and for any
   other string some id in `[0, n)`, which is what a perfect hash answers and all this index

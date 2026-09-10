@@ -1,0 +1,39 @@
+ids_of_arrow against the list forms — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: the working tree of the commit that carries this file (Arrow batch input), on b6ae463.
+Harness: local/arrowbench.py — every index built over /usr/share/dict/words (479 823 keys), the probes the same
+words shuffled with a fixed seed (all members), one pyarrow utf8 array of them; five variants per index, seven
+rounds in one process with the variant order rotated each round, min per variant, ns per key. pyarrow from an
+ephemeral `uv run --with pyarrow`; the extension built by `maturin develop --release`.
+
+479823 probes (members, shuffled), 7 rounds, min ns/key
+== CompactHashIndex
+  ids_of (list)      144.6 ns/key   x1.00 of ids_of   x1.38 of ids_of_bytes
+  ids_of_bytes       104.5 ns/key   x0.72 of ids_of   x1.00 of ids_of_bytes
+  ids_into           110.8 ns/key   x0.77 of ids_of   x1.06 of ids_of_bytes
+  ids_of_arrow        48.2 ns/key   x0.33 of ids_of   x0.46 of ids_of_bytes
+  ids_into_arrow      47.0 ns/key   x0.32 of ids_of   x0.45 of ids_of_bytes
+== PerfectHashIndex
+  ids_of (list)      153.0 ns/key   x1.00 of ids_of   x1.26 of ids_of_bytes
+  ids_of_bytes       121.4 ns/key   x0.79 of ids_of   x1.00 of ids_of_bytes
+  ids_into           120.7 ns/key   x0.79 of ids_of   x0.99 of ids_of_bytes
+  ids_of_arrow        54.8 ns/key   x0.36 of ids_of   x0.45 of ids_of_bytes
+  ids_into_arrow      53.8 ns/key   x0.35 of ids_of   x0.44 of ids_of_bytes
+== ClosedHashIndex
+  ids_of (list)      116.4 ns/key   x1.00 of ids_of   x1.34 of ids_of_bytes
+  ids_of_bytes        87.1 ns/key   x0.75 of ids_of   x1.00 of ids_of_bytes
+  ids_into            84.2 ns/key   x0.72 of ids_of   x0.97 of ids_of_bytes
+  ids_of_arrow        20.4 ns/key   x0.18 of ids_of   x0.23 of ids_of_bytes
+  ids_into_arrow      19.7 ns/key   x0.17 of ids_of   x0.23 of ids_of_bytes
+== StringIndex
+  ids_of (list)      468.0 ns/key   x1.00 of ids_of   x1.08 of ids_of_bytes
+  ids_of_bytes       435.0 ns/key   x0.93 of ids_of   x1.00 of ids_of_bytes
+  ids_into           435.4 ns/key   x0.93 of ids_of   x1.00 of ids_of_bytes
+  ids_of_arrow       264.0 ns/key   x0.56 of ids_of   x0.61 of ids_of_bytes
+  ids_into_arrow     263.5 ns/key   x0.56 of ids_of   x0.61 of ids_of_bytes
+
+The 1.3-04 gate was "per key at most 0.5x ids_of on this corpus": met on the three hash indexes (0.32-0.36x,
+ClosedHashIndex 0.17x) and missed on StringIndex (0.56x), where the transducer walk is most of the cost with
+either input. The Rust ids_of over a Vec<String> of the same probes reads 28 ns a key on CompactHashIndex
+(local/closedbench), so the Arrow path's 48 is the copy of the buffers, the offsets check and the id
+packing; the list forms' 105-145 were mostly the per-key str.

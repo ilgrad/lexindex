@@ -304,6 +304,41 @@ impl PyStringIndex {
         PyBytes::new(py, &packed)
     }
 
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
+    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
+    /// column's offset and data buffers, so no Python string exists per key — building and
+    /// borrowing those was half to two thirds of what the list forms cost.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
+    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u64>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
+    }
+
     /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
@@ -690,6 +725,24 @@ impl StringIndexIterator {
     }
 }
 
+impl PyStringIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`] where the column holds a null.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u64>> {
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                let ids = inner.ids_of_with(c.len, |i| c.key(i));
+                out.extend(ids.into_iter().enumerate().map(|(i, id)| match id {
+                    Some(id) if c.valid(i) => id,
+                    _ => u64::MAX,
+                }));
+            }
+            out
+        }))
+    }
+}
+
 /// Minimal-perfect-hash dictionary: exact `string → dense id` with reverse lookup and persistence.
 #[cfg(feature = "mph")]
 #[pyclass(name = "PerfectHashIndex", module = "lexindex._core", frozen)]
@@ -878,6 +931,46 @@ impl PyPerfectHashIndex {
         Ok(PyBytes::new(py, &packed))
     }
 
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
+    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
+    /// column's offset and data buffers, so no Python string exists per key — building and
+    /// borrowing those was half to two thirds of what the list forms cost.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
+    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let sink = id_sink::<u32>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
+    }
+
     /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
@@ -1053,6 +1146,24 @@ fn fingerprint_width(fingerprint_bytes: usize, fingerprint_bits: Option<u32>) ->
     Ok(bits)
 }
 
+impl PyPerfectHashIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`] where the column holds a null.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u32>> {
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                let ids = inner.ids_of_with(c.len, |i| c.key(i));
+                out.extend(ids.into_iter().enumerate().map(|(i, id)| match id {
+                    Some(id) if c.valid(i) => id,
+                    _ => u32::MAX,
+                }));
+            }
+            out
+        }))
+    }
+}
+
 /// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
 /// probabilistic (false-positive rate `2 ** -fingerprint_bits`) and there is no reverse `id -> key`.
 #[cfg(feature = "mph")]
@@ -1223,6 +1334,46 @@ impl PyCompactHashIndex {
         Ok(PyBytes::new(py, &packed))
     }
 
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
+    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
+    /// column's offset and data buffers, so no Python string exists per key — building and
+    /// borrowing those was half to two thirds of what the list forms cost.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
+    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        if self.inner.len() > u32::MAX as usize {
+            return Err(PyValueError::new_err(
+                "index holds more than u32::MAX keys, so MISSING_ID is a real id here; use ids_of",
+            ));
+        }
+        let sink = id_sink::<u32>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
+    }
+
     /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
     /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
     /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
@@ -1356,6 +1507,24 @@ impl PyCompactHashIndex {
     }
 }
 
+impl PyCompactHashIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`] where the column holds a null.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u32>> {
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                let ids = inner.ids_of_with(c.len, |i| c.key(i));
+                out.extend(ids.into_iter().enumerate().map(|(i, id)| match id {
+                    Some(id) if c.valid(i) => id,
+                    _ => u32::MAX,
+                }));
+            }
+            out
+        }))
+    }
+}
+
 /// Minimal perfect hash and nothing else: `string -> dense id` for a vocabulary known to be closed.
 /// `id` never says "absent" -- a member's id, or some id in `[0, n)` for any other string -- and the
 /// index is the perfect hash alone, about 0.26 bytes per key.
@@ -1416,6 +1585,41 @@ impl PyClosedHashIndex {
             out
         });
         PyBytes::new(py, &packed)
+    }
+
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
+    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// a `ValueError` for an absent key and for a null. The keys are read from the
+    /// column's offset and data buffers, so no Python string exists per key — building and
+    /// borrowing those was half to two thirds of what the list forms cost.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
+    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u32>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
     }
 
     /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
@@ -1541,6 +1745,25 @@ fn no_keys() -> PyErr {
 /// a reasonable thing for a Python caller to do, so they are serialised instead.
 /// What [`PyOverlay::__reduce__`] hands pickle: the loader, the blob and the base's class.
 type OverlayReduce<'py> = (Bound<'py, PyAny>, (Bound<'py, PyBytes>, Bound<'py, PyType>));
+
+impl PyClosedHashIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`] where the column holds a null.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u32>> {
+        if chunks.iter().any(Utf8Chunk::has_nulls) {
+            return Err(PyValueError::new_err(
+                "a closed vocabulary has no id for a null: fill the nulls first",
+            ));
+        }
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                out.extend(inner.ids_of_with(c.len, |i| c.key(i)));
+            }
+            out
+        }))
+    }
+}
 
 #[pyclass(frozen, name = "Overlay", module = "lexindex")]
 pub struct PyOverlay {
@@ -1894,6 +2117,185 @@ impl PyOverlay {
 /// What `ids_into` asks of `out` when there is nothing to write: a buffer, and a writable one. Not
 /// the typed view `id_sink` takes -- an empty `array.array` hands out a pointer that fails the
 /// alignment check on some interpreter builds, and there is no item for alignment to matter to.
+/// One chunk of an Arrow `utf8` / `large_utf8` column, copied out of the three buffers a pyarrow
+/// array exposes — validity, offsets, data — so a lookup can run with the GIL released over
+/// memory it owns. The copy is the price of the buffer protocol over the C Data Interface, and it
+/// is a `memcpy` against a hash and a cache miss per key; no per-key Python object exists at all.
+struct Utf8Chunk {
+    len: usize,
+    /// The array's `offset`: the index of its first element in `offsets` and `validity`.
+    first: usize,
+    /// `large_utf8`: eight-byte offsets.
+    wide: bool,
+    validity: Option<Vec<u8>>,
+    offsets: Vec<u8>,
+    data: Vec<u8>,
+}
+
+impl Utf8Chunk {
+    fn of(array: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let py = array.py();
+        let kind = array.getattr("type")?.str()?.to_string_lossy().into_owned();
+        let wide = match kind.as_str() {
+            "string" => false,
+            "large_string" => true,
+            other => {
+                return Err(PyTypeError::new_err(format!(
+                    "expected an Arrow utf8 or large_utf8 column, got {other}"
+                )));
+            }
+        };
+        let len = array.len()?;
+        let empty = Self {
+            len: 0,
+            first: 0,
+            wide,
+            validity: None,
+            offsets: Vec::new(),
+            data: Vec::new(),
+        };
+        if len == 0 {
+            return Ok(empty);
+        }
+        let first: usize = array.getattr("offset")?.extract()?;
+        let null_count: usize = array.getattr("null_count")?.extract()?;
+        let buffers: Vec<Option<Bound<'_, PyAny>>> = array.call_method0("buffers")?.extract()?;
+        let [validity, offsets, data] = <[_; 3]>::try_from(buffers)
+            .map_err(|_| PyTypeError::new_err("an Arrow utf8 column has three buffers"))?;
+        let copy = |b: &Bound<'_, PyAny>| -> PyResult<Vec<u8>> {
+            let view = PyMemoryView::from(b)?.call_method1("cast", ("B",))?;
+            PyBuffer::<u8>::get(&view)?.to_vec(py)
+        };
+        let validity = match (null_count, validity) {
+            (0, _) => None,
+            (_, Some(v)) => Some(copy(&v)?),
+            (_, None) => {
+                return Err(PyValueError::new_err(
+                    "the column reports nulls but has no validity buffer",
+                ));
+            }
+        };
+        let offsets = match offsets {
+            Some(o) => copy(&o)?,
+            None => return Err(PyValueError::new_err("the column has no offsets buffer")),
+        };
+        let data = match data {
+            Some(d) => copy(&d)?,
+            None => Vec::new(),
+        };
+        let chunk = Self {
+            len,
+            first,
+            wide,
+            validity,
+            offsets,
+            data,
+        };
+        chunk.check()?;
+        Ok(chunk)
+    }
+
+    fn width(&self) -> usize {
+        if self.wide { 8 } else { 4 }
+    }
+
+    /// Offset number `i` as the buffer holds it, sign and all.
+    fn raw_offset(&self, i: usize) -> i64 {
+        let at = i * self.width();
+        if self.wide {
+            i64::from_ne_bytes(self.offsets[at..at + 8].try_into().expect("8 bytes"))
+        } else {
+            i64::from(i32::from_ne_bytes(
+                self.offsets[at..at + 4].try_into().expect("4 bytes"),
+            ))
+        }
+    }
+
+    /// Every offset this chunk will read exists, is non-negative, ascends, and stays inside the
+    /// data — checked once here so that `key` can slice without a fallible path per element.
+    fn check(&self) -> PyResult<()> {
+        let end = self.first + self.len;
+        if self.offsets.len() < (end + 1) * self.width() {
+            return Err(PyValueError::new_err(
+                "the column's offsets buffer is shorter than the column",
+            ));
+        }
+        let mut prev = 0i64;
+        for i in self.first..=end {
+            let o = self.raw_offset(i);
+            if o < prev || o > self.data.len() as i64 {
+                return Err(PyValueError::new_err(
+                    "the column's offsets do not ascend within its data buffer",
+                ));
+            }
+            prev = o;
+        }
+        if self.validity.as_ref().is_some_and(|v| v.len() * 8 < end) {
+            return Err(PyValueError::new_err(
+                "the column's validity buffer is shorter than the column",
+            ));
+        }
+        Ok(())
+    }
+
+    fn key(&self, i: usize) -> &[u8] {
+        let a = self.raw_offset(self.first + i) as usize;
+        let b = self.raw_offset(self.first + i + 1) as usize;
+        &self.data[a..b]
+    }
+
+    fn valid(&self, i: usize) -> bool {
+        let at = self.first + i;
+        self.validity
+            .as_ref()
+            .is_none_or(|v| v[at / 8] >> (at % 8) & 1 == 1)
+    }
+
+    fn has_nulls(&self) -> bool {
+        (0..self.len).any(|i| !self.valid(i))
+    }
+}
+
+/// The chunks of whatever holds an Arrow string column: a pyarrow `Array` (one) or `ChunkedArray`
+/// (its `chunks`), anything with `__arrow_array__` (a pandas `ArrowDtype` column's `.array`, or
+/// the column itself), or a polars `Series` through `to_arrow()`.
+fn utf8_chunks(column: &Bound<'_, PyAny>) -> PyResult<Vec<Utf8Chunk>> {
+    if column.hasattr("buffers")? {
+        return Ok(vec![Utf8Chunk::of(column)?]);
+    }
+    if column.hasattr("chunks")? {
+        let chunks: Vec<Bound<'_, PyAny>> = column.getattr("chunks")?.extract()?;
+        return chunks.iter().map(Utf8Chunk::of).collect();
+    }
+    if column.hasattr("__arrow_array__")? {
+        return utf8_chunks(&column.call_method0("__arrow_array__")?);
+    }
+    if let Ok(inner) = column.getattr("array") {
+        if inner.hasattr("__arrow_array__")? {
+            return utf8_chunks(&inner.call_method0("__arrow_array__")?);
+        }
+    }
+    if column.hasattr("to_arrow")? {
+        return utf8_chunks(&column.call_method0("to_arrow")?);
+    }
+    Err(PyTypeError::new_err(
+        "expected a pyarrow utf8/large_utf8 Array or ChunkedArray, a pandas ArrowDtype column, \
+         or a polars Series",
+    ))
+}
+
+fn total_len(chunks: &[Utf8Chunk]) -> usize {
+    chunks.iter().map(|c| c.len).sum()
+}
+
+fn packed<T: Copy, const W: usize>(ids: &[T], bytes: impl Fn(T) -> [u8; W]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ids.len() * W);
+    for &id in ids {
+        out.extend_from_slice(&bytes(id));
+    }
+    out
+}
+
 fn writable_buffer(out: &Bound<'_, PyAny>) -> PyResult<()> {
     let view = PyMemoryView::from(out)?;
     if view.getattr("readonly")?.is_truthy()? {

@@ -13,7 +13,7 @@
 //! — and for [`CompactHashIndex`](crate::CompactHashIndex) the moment a stranger can ask.
 
 use crate::IndexError;
-use crate::hash::{hash_key, hash_pair};
+use crate::hash::{hash_key_bytes, hash_pair, hash_pair_bytes};
 use crate::mphf::Mphf;
 
 /// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`
@@ -132,8 +132,14 @@ impl ClosedHashIndex {
     /// that with one predictable branch.
     #[inline]
     pub fn id(&self, key: &str) -> u32 {
+        self.id_bytes(key.as_bytes())
+    }
+
+    /// [`id`](Self::id) over the key's bytes.
+    #[inline]
+    pub(crate) fn id_bytes(&self, key: &[u8]) -> u32 {
         if self.side.is_empty() {
-            return self.slot_for(hash_key(key));
+            return self.slot_for(hash_key_bytes(key));
         }
         self.id_with_side(key)
     }
@@ -150,8 +156,8 @@ impl ClosedHashIndex {
     /// pairwise-distinct second hashes (the build deduplicates on the pair), so the match is
     /// unambiguous.
     #[cold]
-    fn id_with_side(&self, key: &str) -> u32 {
-        let (h, second) = hash_pair(key);
+    fn id_with_side(&self, key: &[u8]) -> u32 {
+        let (h, second) = hash_pair_bytes(key);
         let start = self.side.partition_point(|e| e.0 < h);
         if let Some(id) = self.side[start..]
             .iter()
@@ -168,22 +174,28 @@ impl ClosedHashIndex {
     /// flight, so what a one-at-a-time loop serialises, this overlaps. The rare index holding a
     /// hash collision takes the per-key path instead.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<u32> {
+        self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
+    }
+
+    /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
+    /// are not `str`s — a lookup reading an Arrow buffer.
+    pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(&self, n: usize, key: F) -> Vec<u32> {
         let Some(mph) = &self.mph else {
-            return vec![0; keys.len()];
+            return vec![0; n];
         };
         if !self.side.is_empty() {
-            return keys.iter().map(|k| self.id_with_side(k.as_ref())).collect();
+            return (0..n).map(|i| self.id_with_side(key(i))).collect();
         }
         // Far enough ahead that a DRAM miss has time to land, near enough that the line is still
         // there: the slice holds the `String` headers contiguously, but their bytes are wherever
         // the allocator put them.
         const AHEAD: usize = 32;
-        let mut hashes = Vec::with_capacity(keys.len());
-        for (i, k) in keys.iter().enumerate() {
-            if let Some(next) = keys.get(i + AHEAD) {
-                crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
+        let mut hashes = Vec::with_capacity(n);
+        for i in 0..n {
+            if i + AHEAD < n {
+                crate::blob::prefetch_byte(key(i + AHEAD), 0);
             }
-            hashes.push(hash_key(k.as_ref()));
+            hashes.push(hash_key_bytes(key(i)));
         }
         mph.index_all(&hashes)
             .into_iter()

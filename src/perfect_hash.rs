@@ -18,7 +18,7 @@
 use crate::IndexError;
 use crate::arena::StringArena;
 use crate::blob::SharedBytes;
-use crate::hash::{hash_key, hash_pair};
+use crate::hash::{hash_key, hash_key_bytes, hash_pair, hash_pair_bytes};
 use crate::mphf::Mphf;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
@@ -542,12 +542,14 @@ impl PerfectHashIndex {
     /// probe runs only after the arena comparison has already missed (or, for `id_unchecked`, only
     /// when the table is non-empty — i.e. for indexes that actually contain a collision).
     #[cold]
-    fn side_lookup(&self, h: u64, key: &str) -> Option<u32> {
+    fn side_lookup(&self, h: u64, key: &[u8]) -> Option<u32> {
         let start = self.side.partition_point(|e| e.0 < h);
         self.side[start..]
             .iter()
             .take_while(|e| e.0 == h)
-            .find_map(|e| (self.arena.get(e.1 as usize) == Some(key)).then_some(e.1))
+            .find_map(|e| {
+                (self.arena.get(e.1 as usize).map(str::as_bytes) == Some(key)).then_some(e.1)
+            })
     }
 
     /// Slot for a key hash; `None` only for an empty index. The MPH's remap covers every slot it
@@ -576,18 +578,24 @@ impl PerfectHashIndex {
 
     /// Dense id of `key`, or `None` if absent (membership is verified against the stored key).
     pub fn id(&self, key: &str) -> Option<u32> {
+        self.id_bytes(key.as_bytes())
+    }
+
+    /// [`id`](Self::id) over the key's bytes.
+    #[inline]
+    pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
             // branch, then exactly the side-free lookup — the hash dies at slot resolution,
             // nothing stays live for a probe that cannot happen.
             if self.arena.has_fingerprints() {
-                let (h, fp) = hash_pair(key);
+                let (h, fp) = hash_pair_bytes(key);
                 let slot = self.slot_for(h)?;
-                return (self.arena.get_matching(slot, fp as u8) == Some(key))
+                return (self.arena.get_matching(slot, fp as u8).map(str::as_bytes) == Some(key))
                     .then_some(slot as u32);
             }
-            let slot = self.slot_for(hash_key(key))?;
-            return (self.arena.get(slot) == Some(key)).then_some(slot as u32);
+            let slot = self.slot_for(hash_key_bytes(key))?;
+            return (self.arena.get(slot).map(str::as_bytes) == Some(key)).then_some(slot as u32);
         }
         self.id_with_side(key)
     }
@@ -595,10 +603,10 @@ impl PerfectHashIndex {
     /// [`id`](Self::id) for an index that contains at least one hash collision: the side probe
     /// runs only after the arena comparison has missed.
     #[cold]
-    fn id_with_side(&self, key: &str) -> Option<u32> {
-        let (h, fp) = hash_pair(key);
+    fn id_with_side(&self, key: &[u8]) -> Option<u32> {
+        let (h, fp) = hash_pair_bytes(key);
         if let Some(slot) = self.slot_for(h) {
-            if self.arena.get_matching(slot, fp as u8) == Some(key) {
+            if self.arena.get_matching(slot, fp as u8).map(str::as_bytes) == Some(key) {
                 return Some(slot as u32);
             }
         }
@@ -618,8 +626,18 @@ impl PerfectHashIndex {
     /// detail — this index pays for the stored keys it compares against, which is why it is the
     /// slower of the two either way.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u32>> {
+        self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
+    }
+
+    /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
+    /// are not `str`s — a lookup reading an Arrow buffer.
+    pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
+        &self,
+        n: usize,
+        key: F,
+    ) -> Vec<Option<u32>> {
         let Some(mph) = &self.mph else {
-            return vec![None; keys.len()];
+            return vec![None; n];
         };
         // The slice holds the `String`/`&str` headers contiguously, but their bytes are wherever
         // they were allocated, so hashing a batch is one dependent cache miss per key. Pulling a
@@ -627,18 +645,18 @@ impl PerfectHashIndex {
         // next key to look at — and the compare pass below does the same for its own second touch.
         const AHEAD: usize = 16;
         let fingerprints = self.arena.has_fingerprints();
-        let mut hashes: Vec<u64> = Vec::with_capacity(keys.len());
-        let mut fps: Vec<u8> = Vec::with_capacity(if fingerprints { keys.len() } else { 0 });
-        for (i, k) in keys.iter().enumerate() {
-            if let Some(next) = keys.get(i + AHEAD) {
-                crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
+        let mut hashes: Vec<u64> = Vec::with_capacity(n);
+        let mut fps: Vec<u8> = Vec::with_capacity(if fingerprints { n } else { 0 });
+        for i in 0..n {
+            if i + AHEAD < n {
+                crate::blob::prefetch_byte(key(i + AHEAD), 0);
             }
             if fingerprints {
-                let (h, fp) = hash_pair(k.as_ref());
+                let (h, fp) = hash_pair_bytes(key(i));
                 hashes.push(h);
                 fps.push(fp as u8);
             } else {
-                hashes.push(hash_key(k.as_ref()));
+                hashes.push(hash_key_bytes(key(i)));
             }
         }
         // Every slot is a real arena row — the MPH's remap covers its whole slot range — so the
@@ -656,19 +674,20 @@ impl PerfectHashIndex {
                 self.arena.span(slot as usize)
             });
         }
-        (0..keys.len())
+        (0..n)
             .map(|i| {
                 if let Some(Some(sp)) = spans.get(i + AHEAD / 2) {
                     self.arena.prefetch_span(*sp);
                 }
-                if let Some(next) = keys.get(i + AHEAD / 2) {
-                    crate::blob::prefetch_byte(next.as_ref().as_bytes(), 0);
+                if i + AHEAD / 2 < n {
+                    crate::blob::prefetch_byte(key(i + AHEAD / 2), 0);
                 }
                 let hit = spans[i].and_then(|sp| {
-                    (self.arena.str_at(sp) == Some(keys[i].as_ref())).then_some(slots[i] as u32)
+                    (self.arena.str_at(sp).map(str::as_bytes) == Some(key(i)))
+                        .then_some(slots[i] as u32)
                 });
                 if hit.is_none() && !self.side.is_empty() {
-                    return self.side_lookup(hashes[i], keys[i].as_ref());
+                    return self.side_lookup(hashes[i], key(i));
                 }
                 hit
             })
@@ -690,7 +709,7 @@ impl PerfectHashIndex {
     pub fn id_unchecked(&self, key: &str) -> u32 {
         let h = hash_key(key);
         if !self.side.is_empty() {
-            if let Some(id) = self.side_lookup(h, key) {
+            if let Some(id) = self.side_lookup(h, key.as_bytes()) {
                 return id;
             }
         }

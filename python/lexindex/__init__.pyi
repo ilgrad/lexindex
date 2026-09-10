@@ -94,6 +94,15 @@ class StringIndex:
         writable buffer.
         """
 
+    def ids_of_arrow(self, column: object) -> bytes:
+        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
+        from its offset and data buffers, so no Python string exists per key. A null comes
+        back as :attr:`MISSING_ID`."""
+
+    def ids_into_arrow(self, column: object, out: Buffer) -> None:
+        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+
     ID_DTYPE: ClassVar[str]
     """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
@@ -229,6 +238,15 @@ class PerfectHashIndex:
         writable buffer.
         """
 
+    def ids_of_arrow(self, column: object) -> bytes:
+        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
+        from its offset and data buffers, so no Python string exists per key. A null comes
+        back as :attr:`MISSING_ID`."""
+
+    def ids_into_arrow(self, column: object, out: Buffer) -> None:
+        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+
     ID_DTYPE: ClassVar[str]
     """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
@@ -334,6 +352,15 @@ class CompactHashIndex:
         writable buffer.
         """
 
+    def ids_of_arrow(self, column: object) -> bytes:
+        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
+        from its offset and data buffers, so no Python string exists per key. A null comes
+        back as :attr:`MISSING_ID`."""
+
+    def ids_into_arrow(self, column: object, out: Buffer) -> None:
+        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+
     ID_DTYPE: ClassVar[str]
     """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
@@ -396,6 +423,15 @@ class ClosedHashIndex:
         """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
         buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
         mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
+
+    def ids_of_arrow(self, column: object) -> bytes:
+        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
+        from its offset and data buffers, so no Python string exists per key. A null raises
+        ``ValueError``: a closed vocabulary has no id for it."""
+
+    def ids_into_arrow(self, column: object, out: Buffer) -> None:
+        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
 
     ID_DTYPE: ClassVar[str]
     """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32)."""

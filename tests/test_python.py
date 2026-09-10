@@ -9,6 +9,7 @@ import random
 import sys
 import threading
 import time
+import types
 
 import lexindex
 import pytest
@@ -1327,3 +1328,160 @@ def test_perfect_hash_fingerprints(tmp_path):
     q = tmp_path / "plain.bmp"
     lexindex.PerfectHashIndex.build_to_file(lambda: iter(keys), q)
     assert not lexindex.PerfectHashIndex.load(q).has_fingerprints()
+
+
+class _Utf8Column:
+    """What ``ids_of_arrow`` reads off a pyarrow string array, without pyarrow: ``type``,
+    ``offset``, ``null_count``, ``buffers()`` and ``len``. ``lead`` elements sit before ``offset``
+    as they do in a sliced array; ``nulls`` are positions within the visible keys."""
+
+    def __init__(self, keys, *, nulls=(), large=False, lead=0):
+        full = ["padding"] * lead + list(keys)
+        self.type = "large_string" if large else "string"
+        self.offset = lead
+        self._len = len(keys)
+        data = bytearray()
+        offsets = [0]
+        for k in full:
+            data += k.encode()
+            offsets.append(len(data))
+        self._offsets = array.array("q" if large else "i", offsets).tobytes()
+        self._data = bytes(data)
+        self.null_count = len(nulls)
+        self._validity = None
+        if nulls:
+            bits = bytearray((len(full) + 7) // 8)
+            for i in range(len(full)):
+                if i - lead not in nulls:
+                    bits[i // 8] |= 1 << (i % 8)
+            self._validity = bytes(bits)
+
+    def __len__(self):
+        return self._len
+
+    def buffers(self):
+        return [self._validity, self._offsets, self._data]
+
+
+_ARROW_CLASSES = [
+    lexindex.CompactHashIndex,
+    lexindex.PerfectHashIndex,
+    lexindex.StringIndex,
+    lexindex.ClosedHashIndex,
+]
+
+
+def _unpack(idx, raw):
+    width = 8 if idx.ID_DTYPE == "uint64" else 4
+    return [
+        int.from_bytes(raw[i * width : (i + 1) * width], sys.byteorder)
+        for i in range(len(raw) // width)
+    ]
+
+
+def _expected(idx, probes):
+    ids = idx.ids_of(probes)
+    if isinstance(idx, lexindex.ClosedHashIndex):
+        return ids
+    return [idx.MISSING_ID if v is None else v for v in ids]
+
+
+@pytest.mark.parametrize("cls", _ARROW_CLASSES)
+def test_ids_of_arrow_reads_the_column_buffers(cls):
+    keys = ["alpha", "bravo", "charlie", "delta", "échelle", ""]
+    idx = cls(keys)
+    probes = ["delta", "zulu", "", "échelle", "alpha", "alphabet"]
+    expected = _expected(idx, probes)
+    code = "Q" if idx.ID_DTYPE == "uint64" else "I"
+    for col in (
+        _Utf8Column(probes),
+        _Utf8Column(probes, large=True),
+        _Utf8Column(probes, lead=3),
+        _Utf8Column(probes, large=True, lead=5),
+    ):
+        assert _unpack(idx, idx.ids_of_arrow(col)) == expected
+        out = array.array(code, [7] * (len(probes) + 2))
+        assert idx.ids_into_arrow(col, out) is None
+        assert list(out) == [*expected, 7, 7]
+    # a ChunkedArray, a polars Series, an object with the Arrow protocol, a pandas column
+    chunked = types.SimpleNamespace(
+        chunks=[_Utf8Column(probes[:2]), _Utf8Column(probes[2:], lead=1)]
+    )
+    assert _unpack(idx, idx.ids_of_arrow(chunked)) == expected
+    polars_like = types.SimpleNamespace(to_arrow=lambda: _Utf8Column(probes))
+    assert _unpack(idx, idx.ids_of_arrow(polars_like)) == expected
+    protocol = types.SimpleNamespace(__arrow_array__=lambda: _Utf8Column(probes))
+    assert _unpack(idx, idx.ids_of_arrow(protocol)) == expected
+    pandas_like = types.SimpleNamespace(array=protocol)
+    assert _unpack(idx, idx.ids_of_arrow(pandas_like)) == expected
+    # empty, and the buffer checks ids_into makes
+    assert idx.ids_of_arrow(_Utf8Column([])) == b""
+    idx.ids_into_arrow(_Utf8Column([]), bytearray())
+    with pytest.raises(BufferError):
+        idx.ids_into_arrow(_Utf8Column([]), b"")
+    with pytest.raises(ValueError, match="2 items but 6 keys"):
+        idx.ids_into_arrow(_Utf8Column(probes), array.array(code, [0, 0]))
+    wrong = _Utf8Column(probes)
+    wrong.type = "int64"
+    with pytest.raises(TypeError, match="int64"):
+        idx.ids_of_arrow(wrong)
+    with pytest.raises(TypeError, match="pyarrow"):
+        idx.ids_of_arrow(["not", "a", "column"])
+
+
+def test_ids_of_arrow_nulls_are_missing():
+    keys = ["a", "b", "c"]
+    for cls in _ARROW_CLASSES[:3]:
+        idx = cls(keys)
+        col = _Utf8Column(["a", "b", "c", "zz"], nulls={1, 3}, lead=2)
+        assert _unpack(idx, idx.ids_of_arrow(col)) == [
+            idx.id("a"),
+            idx.MISSING_ID,
+            idx.id("c"),
+            idx.MISSING_ID,
+        ]
+    closed = lexindex.ClosedHashIndex(keys)
+    with pytest.raises(ValueError, match="null"):
+        closed.ids_of_arrow(_Utf8Column(["a", "b"], nulls={0}))
+
+
+def test_ids_of_arrow_refuses_a_broken_column():
+    idx = lexindex.CompactHashIndex(["a"])
+    col = _Utf8Column(["a", "bb"])
+    col._offsets = array.array("i", [0, 5, 3]).tobytes()
+    with pytest.raises(ValueError, match="ascend"):
+        idx.ids_of_arrow(col)
+    col._offsets = array.array("i", [0, 1]).tobytes()
+    with pytest.raises(ValueError, match="shorter"):
+        idx.ids_of_arrow(col)
+    col = _Utf8Column(["a"])
+    col.null_count = 1
+    with pytest.raises(ValueError, match="validity"):
+        idx.ids_of_arrow(col)
+
+
+def test_ids_of_arrow_with_pyarrow():
+    pa = pytest.importorskip("pyarrow")
+    np = _numpy_or_skip()
+    keys = ["alpha", "bravo", "charlie", "delta"]
+    probes = ["delta", "zulu", "alpha", "", "charlie"]
+    for cls in _ARROW_CLASSES:
+        idx = cls(keys)
+        expected = _expected(idx, probes)
+        for col in (
+            pa.array(probes),
+            pa.array(probes, pa.large_string()),
+            pa.chunked_array([probes[:2], probes[2:]]),
+            pa.array(["x", "y", *probes])[2:],
+        ):
+            got = np.frombuffer(idx.ids_of_arrow(col), dtype=idx.ID_DTYPE)
+            assert got.tolist() == expected
+            out = np.full(len(probes) + 1, 7, dtype=idx.ID_DTYPE)
+            idx.ids_into_arrow(col, out)
+            assert out.tolist() == [*expected, 7]
+        with pytest.raises(TypeError, match="int64"):
+            idx.ids_of_arrow(pa.array([1, 2]))
+    idx = lexindex.CompactHashIndex(keys)
+    with_null = pa.array([probes[0], None, *probes[1:]])
+    got = np.frombuffer(idx.ids_of_arrow(with_null), dtype=idx.ID_DTYPE).tolist()
+    assert got == [_expected(idx, probes)[0], idx.MISSING_ID, *_expected(idx, probes)[1:]]

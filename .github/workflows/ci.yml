@@ -154,7 +154,7 @@ jobs:
         run: |
           wheels=(dist/*.whl)
           wheel="${wheels[0]}"
-          uv run --python ${{ matrix.python-version }} --with pytest --with numpy --with "$wheel" \
+          uv run --python ${{ matrix.python-version }} --with pytest --with numpy --with pyarrow --with "$wheel" \
             pytest tests/test_python.py -q
       - name: stubtest
         run: |
