@@ -2388,6 +2388,52 @@ mod tests {
     }
 
     #[test]
+    fn slots_in_place_agrees_with_one_thread_across_chunk_boundaries() {
+        // Same-hash followers straddle every chunk boundary: one follower at the boundary of an
+        // even-numbered chunk, a run of four around an odd one — so a chunk joined to the one
+        // before it, and a follower that opens a chunk, are both met at every thread count.
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut hashes: Vec<u64> = (0..120_000).map(|_| next()).collect();
+        hashes.sort_unstable();
+        hashes.dedup();
+        let mph = Mphf::build_with_threads(&hashes, 2).unwrap();
+        for threads in [2usize, 3, 8, 13] {
+            let n = threads * 4096 * 2;
+            let chunk = n.div_ceil(threads);
+            let mut follower = vec![false; n];
+            for k in 1..threads {
+                let b = k * chunk;
+                for (p, f) in follower.iter_mut().enumerate().take(b + 2).skip(b - 1) {
+                    if p == b || k % 2 == 1 {
+                        *f = true;
+                    }
+                }
+            }
+            let mut reps = hashes.iter().copied();
+            let (mut pairs, mut expected) = (Vec::with_capacity(n), Vec::with_capacity(n));
+            let mut h = 0u64;
+            for (i, &f) in follower.iter().enumerate() {
+                if !f {
+                    h = reps.next().unwrap();
+                }
+                pairs.push((h, i as u64));
+                expected.push((if f { NO_SLOT } else { mph.index(h) }, i as u64));
+            }
+            let mut got = pairs.clone();
+            slots_in_place(&mut got, &mph, threads);
+            assert!(got == expected, "threads {threads}");
+            slots_in_place(&mut pairs, &mph, 1);
+            assert!(pairs == expected, "one thread against {threads}");
+        }
+    }
+
+    #[test]
     fn build_to_file_public_forms_match_build() {
         let keys = ["alpha", "beta", "gamma", "beta"];
         let path = tmp("public.bch");
