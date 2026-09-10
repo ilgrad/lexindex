@@ -85,8 +85,9 @@ is a resource you are protecting, put a keyed hash in front.
 `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
-target, and libFuzzer over the four parsers a target can hold to a return value: `BCH6`, `BMP6`
-(and the `BMP5` it still reads), `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside. `BIX4` is
+target, and libFuzzer over the five parsers a target can hold to a return value: `BCH7`, `BMP7`,
+`BCL1`, `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run starting from the
+corpus the last one left. `BIX4` is
 fuzzed through `from_untrusted_bytes`, which holds it to a return value too — twice: on its own,
 and as the base region of an overlay, which is the composition a caller loading a stranger's
 overlay runs; a target over `from_bytes` would only re-find the panic above

@@ -33,6 +33,8 @@ All notable changes to this project are documented here. The format follows
   old hash would answer wrong ids under the new one. `BIX4` and `OVL2` are untouched. Rebuilding
   from the keys is the migration. Found by the streaming builder's distinct-key count disagreeing
   with its input.
+- The weekly libFuzzer job runs `parse_closed` as well, and every target now starts from the
+  corpus the previous run left — an Actions cache per target — rather than from the seeds alone.
 
 ### Added
 

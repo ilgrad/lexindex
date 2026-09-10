@@ -154,6 +154,7 @@ jobs:
       matrix:
         target:
           - parse_compact
+          - parse_closed
           - parse_perfect
           - parse_overlay
           - parse_overlay_untrusted
@@ -169,6 +170,14 @@ jobs:
           workspaces: ". -> target\nfuzz -> fuzz/target"
       - name: install cargo-fuzz
         run: cargo install cargo-fuzz --locked
+      # The corpus lives across runs: what one week's ten minutes reached, the next starts from.
+      # A key that no run shares makes every run save; the prefix restores the newest one saved.
+      - name: restore the corpus the last run left
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
       # The blobs `tests/golden.rs` checks are the seed corpus: reaching a valid header by chance is
       # hopeless (magic, two checksums and a length that must agree), so without seeds the fuzzer
       # only ever exercises the rejection paths. Ten minutes per target is the budget that keeps this
@@ -198,6 +207,12 @@ jobs:
           cargo +nightly fuzz run ${{ matrix.target }} \
             fuzz/corpus/${{ matrix.target }} tests/data \
             -- -max_total_time=600 -print_final_stats=1
+      - name: save the corpus for the next run
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
       - name: upload the crashing input
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
