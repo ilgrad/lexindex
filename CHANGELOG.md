@@ -130,6 +130,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The streamed build places its fingerprints on every thread when they go to range files**:
+  the merge cuts as many ranges as the machine has threads whatever the open-file budget lets
+  it merge at once, and the fingerprint pass then takes one merged segment per thread, staging
+  its range records in a share of one allocation and writing them under each file's lock a
+  stage at a time; a range record is the slot and the fingerprint at its own width, 5 bytes at
+  the default instead of 12. The table that fits memory is still filled by one thread — below a
+  byte, a row shares its byte with its neighbours. Byte-identical (blob digests at 10 M and
+  10^8 keys). At 10^9 real-word pairs the fingerprint pass takes 12 s against 46, the output
+  13.5 against 15, the whole build **457 s against 504** (six minutes of either being the
+  example's key generator) at the same 943 MB peak; at 3·10^8 the pass takes 2.1 s against 10.3.
+  `bench/results/peak-compact-stream-fp-2026-09-10-arz-3ddad05.txt`.
 - **The streamed build merges its runs on every thread**: each run counts its pairs per
   top-bits bin as it is spilled; the merge cuts the hash space into ranges holding equal shares
   of the pairs — as many as threads, fewer when the runs would need more open files than a

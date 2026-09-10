@@ -29,7 +29,8 @@ const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 /// One `(hash, second hash)` pair in a run or the merged file.
 const PAIR_BYTES: usize = 16;
 /// One `(slot u32, fingerprint u64)` record in a range file.
-const SLOT_BYTES: usize = 12;
+/// Bytes a fingerprint thread stages per range file before writing them under the file's lock.
+const STAGE: usize = 1 << 16;
 /// The merge splits the hash space on these top bits: every run counts its pairs per bin as it
 /// is spilled, and each merge thread takes a range of bins holding its share of the pairs.
 const BIN_BITS: u32 = 10;
@@ -189,14 +190,15 @@ impl Scratch {
             let in_bin: u64 = self.bins.iter().map(|o| o[b + 1] - o[b]).sum();
             total[b + 1] = total[b] + in_bin;
         }
-        // A range holds a reader per run, so the merge takes fewer threads than the machine has
-        // when the corpus spilled many runs: the open files stay within what a default limit
-        // allows (macOS starts at 256), and the buffers stay small.
+        // As many ranges as threads, for the fingerprint pass to take one each. The workers
+        // merging them are fewer when the runs would need more open files than a default limit
+        // allows (macOS starts at 256), each holding a reader per run; they take ranges in turn.
         const READERS: usize = 192;
-        let threads = self.threads.min(READERS / self.runs.max(1)).max(1);
+        let ranges = self.threads.max(1);
+        let workers = ranges.min(READERS / self.runs.max(1)).max(1);
         let mut cuts = vec![0usize];
-        for t in 1..threads {
-            let target = total[BINS] * t as u64 / threads as u64;
+        for t in 1..ranges {
+            let target = total[BINS] * t as u64 / ranges as u64;
             let b = total.partition_point(|&x| x < target).min(BINS);
             if b > *cuts.last().expect("starts at 0") {
                 cuts.push(b);
@@ -217,36 +219,41 @@ impl Scratch {
         // with how many threads had done so.
         const READ_BUF: usize = 1 << 16;
         const WRITE_BUF: usize = 1 << 20;
-        let per_range = WRITE_BUF + self.runs * READ_BUF;
-        let mut arena = vec![0u8; paths.len() * per_range];
-        let mut jobs = Vec::with_capacity(paths.len());
-        let regions = arena.chunks_mut(per_range);
-        for ((range, out), region) in cuts.windows(2).zip(&paths).zip(regions) {
-            let (b0, b1) = (range[0], range[1]);
-            let (write_buf, mut read_bufs) = region.split_at_mut(WRITE_BUF);
-            let mut slices = Vec::with_capacity(runs.len());
-            for (run, offsets) in runs.iter().zip(&self.bins) {
-                let (buf, rest) = std::mem::take(&mut read_bufs).split_at_mut(READ_BUF);
-                read_bufs = rest;
-                slices.push(Slice::open(
-                    run,
-                    offsets[b0],
-                    offsets[b1] - offsets[b0],
-                    buf,
-                )?);
-            }
-            let sink = Sink {
-                file: create_new(out)?,
-                buf: write_buf,
-                len: 0,
-            };
-            let heap = std::collections::BinaryHeap::with_capacity(slices.len());
-            jobs.push((slices, sink, heap));
-        }
+        let per_worker = WRITE_BUF + self.runs * READ_BUF;
+        let mut arena = vec![0u8; workers * per_worker];
+        let next = std::sync::atomic::AtomicUsize::new(0);
         let counted = std::thread::scope(|scope| {
-            let handles: Vec<_> = jobs
-                .into_iter()
-                .map(|(slices, sink, heap)| scope.spawn(move || merge_range(slices, sink, heap)))
+            let (runs, bins, cuts, paths, next) = (&runs, &self.bins, &cuts, &paths, &next);
+            let handles: Vec<_> = arena
+                .chunks_mut(per_worker)
+                .map(|region| {
+                    let mut heap = std::collections::BinaryHeap::with_capacity(runs.len());
+                    let mut done = Vec::with_capacity(paths.len());
+                    scope.spawn(move || -> Result<Vec<(usize, usize)>, IndexError> {
+                        let (write_buf, read_bufs) = region.split_at_mut(WRITE_BUF);
+                        loop {
+                            let t = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if t >= paths.len() {
+                                return Ok(done);
+                            }
+                            let (b0, b1) = (cuts[t], cuts[t + 1]);
+                            let mut rest = &mut *read_bufs;
+                            let mut slices = Vec::with_capacity(runs.len());
+                            for (run, offsets) in runs.iter().zip(bins) {
+                                let (buf, tail) = std::mem::take(&mut rest).split_at_mut(READ_BUF);
+                                rest = tail;
+                                let left = offsets[b1] - offsets[b0];
+                                slices.push(Slice::open(run, offsets[b0], left, buf)?);
+                            }
+                            let sink = Sink {
+                                file: create_new(&paths[t])?,
+                                buf: &mut *write_buf,
+                                len: 0,
+                            };
+                            done.push(merge_range(slices, sink, &mut heap)?);
+                        }
+                    })
+                })
                 .collect();
             handles
                 .into_iter()
@@ -256,9 +263,10 @@ impl Scratch {
         drop(arena);
         let (mut n, mut side) = (0usize, 0usize);
         for counts in counted {
-            let (in_range, same_hash) = counts?;
-            n += in_range;
-            side += same_hash;
+            for (in_range, same_hash) in counts? {
+                n += in_range;
+                side += same_hash;
+            }
         }
         Ok(Pairs::File { paths, n, side })
     }
@@ -269,47 +277,6 @@ impl Drop for Scratch {
         if let Some(dir) = &self.dir {
             std::fs::remove_dir_all(dir).ok();
         }
-    }
-}
-
-/// Fixed-size records read back from a scratch file, `None` at a clean end; a torn record is an
-/// error, since this process wrote whole ones moments ago.
-struct Records<const N: usize> {
-    reader: std::io::BufReader<std::fs::File>,
-}
-
-impl<const N: usize> Records<N> {
-    fn open(path: &std::path::Path) -> Result<Self, IndexError> {
-        Ok(Self {
-            reader: std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?),
-        })
-    }
-
-    #[inline]
-    fn next(&mut self) -> std::io::Result<Option<[u8; N]>> {
-        use std::io::{BufRead, Read};
-        // Almost every record is whole in the buffer; the ones that straddle its end, and the
-        // last one, take the assembling loop below.
-        let buffered = self.reader.fill_buf()?;
-        if buffered.len() >= N {
-            let rec: [u8; N] = buffered[..N].try_into().expect("N bytes");
-            self.reader.consume(N);
-            return Ok(Some(rec));
-        }
-        let mut buf = [0u8; N];
-        let mut got = 0;
-        while got < N {
-            match self.reader.read(&mut buf[got..])? {
-                0 if got == 0 => return Ok(None),
-                0 => {
-                    return Err(std::io::Error::other(
-                        "compact-hash: a scratch file is torn",
-                    ));
-                }
-                k => got += k,
-            }
-        }
-        Ok(Some(buf))
     }
 }
 
@@ -329,9 +296,10 @@ fn bin(h: u64) -> usize {
 fn merge_range(
     mut slices: Vec<Slice<'_>>,
     mut w: Sink<'_>,
-    mut heap: std::collections::BinaryHeap<std::cmp::Reverse<((u64, u64), usize)>>,
+    heap: &mut std::collections::BinaryHeap<std::cmp::Reverse<((u64, u64), usize)>>,
 ) -> Result<(usize, usize), IndexError> {
     use std::cmp::Reverse;
+    heap.clear();
     for (i, slice) in slices.iter_mut().enumerate() {
         if let Some(pair) = slice.next()?.map(pair_of) {
             heap.push(Reverse((pair, i)));
@@ -508,6 +476,148 @@ impl<'a> Segments<'a> {
     }
 }
 
+/// What one fingerprint thread reads: the pairs in memory, or the merged files it was given.
+enum Source<'a> {
+    List(std::slice::Chunks<'a, (u64, u64)>),
+    Files(Segments<'a>),
+}
+
+impl Source<'_> {
+    fn fill(&mut self, out: &mut Vec<(u64, u64)>) -> std::io::Result<bool> {
+        match self {
+            Source::List(chunks) => {
+                out.clear();
+                Ok(chunks.next().map(|c| out.extend_from_slice(c)).is_some())
+            }
+            Source::Files(segments) => segments.fill(out),
+        }
+    }
+}
+
+/// Where a fingerprint goes: the table in memory, or a staged record for the range file its
+/// slot falls in, written out under that file's lock a stage at a time.
+enum Out<'a> {
+    Table(&'a mut [u8]),
+    Ranges {
+        files: &'a [std::sync::Mutex<std::fs::File>],
+        stage: &'a mut [u8],
+        lens: Vec<usize>,
+        range_slots: usize,
+        fp_width: usize,
+    },
+}
+
+impl Out<'_> {
+    fn put(&mut self, slot: usize, fp: u64, ahead: Option<u64>, bits: u32) -> std::io::Result<()> {
+        match self {
+            Out::Table(fps) => {
+                let fps: &mut [u8] = fps;
+                if let Some(ahead) = ahead {
+                    crate::blob::prefetch_byte(fps, (ahead * bits as u64 / 8) as usize);
+                }
+                write_fp(fps, slot, bits, fp);
+            }
+            Out::Ranges {
+                files,
+                stage,
+                lens,
+                range_slots,
+                fp_width,
+            } => {
+                let r = slot / *range_slots;
+                let rec = 4 + *fp_width;
+                if lens[r] + rec > STAGE {
+                    Self::flush_range(files, stage, lens, r)?;
+                }
+                let at = r * STAGE + lens[r];
+                stage[at..at + 4].copy_from_slice(&(slot as u32).to_le_bytes());
+                stage[at + 4..at + rec].copy_from_slice(&fp.to_le_bytes()[..*fp_width]);
+                lens[r] += rec;
+            }
+        }
+        Ok(())
+    }
+
+    fn flush_range(
+        files: &[std::sync::Mutex<std::fs::File>],
+        stage: &[u8],
+        lens: &mut [usize],
+        r: usize,
+    ) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = files[r].lock().expect("a fingerprint thread panicked");
+        file.write_all(&stage[r * STAGE..r * STAGE + lens[r]])?;
+        lens[r] = 0;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Out::Ranges {
+            files, stage, lens, ..
+        } = self
+        {
+            for r in 0..lens.len() {
+                Self::flush_range(files, stage, lens, r)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Pass three over one source of ascending, distinct pairs: every representative's fingerprint
+/// to `out` at its slot, the rest of each equal-hash run returned for the side table, in order.
+/// The representatives go through the perfect hash a batch at a time: `index_all` pulls each
+/// seed byte in ahead of its lookup, and a table in memory has its row pulled in the same way.
+fn place_fingerprints(
+    source: &mut Source<'_>,
+    pending: &mut Vec<(u64, u64)>,
+    mph: Option<&Mphf>,
+    mask: u64,
+    bits: u32,
+    out: &mut Out<'_>,
+) -> Result<Vec<(u64, u64)>, IndexError> {
+    const BATCH: usize = 1024;
+    const AHEAD: usize = 16;
+    let mut batch: Vec<(u64, u64)> = Vec::with_capacity(BATCH);
+    let mut hashes: Vec<u64> = Vec::with_capacity(BATCH);
+    let mut side = Vec::new();
+    let mut last: Option<u64> = None;
+    let mut place = |batch: &mut Vec<(u64, u64)>, out: &mut Out<'_>| -> std::io::Result<()> {
+        let mph = mph.expect("a representative exists only when m > 0");
+        hashes.clear();
+        hashes.extend(batch.iter().map(|&(h, _)| h));
+        let slots = mph.index_all(&hashes);
+        for (i, (&(_, second), &slot)) in batch.iter().zip(&slots).enumerate() {
+            out.put(
+                slot as usize,
+                second & mask,
+                slots.get(i + AHEAD).copied(),
+                bits,
+            )?;
+        }
+        batch.clear();
+        Ok(())
+    };
+    while source.fill(pending)? {
+        for &(h, second) in pending.iter() {
+            if last == Some(h) {
+                side.push((h, second));
+                continue;
+            }
+            last = Some(h);
+            batch.push((h, second));
+            if batch.len() == BATCH {
+                place(&mut batch, out)?;
+            }
+        }
+    }
+    if !batch.is_empty() {
+        place(&mut batch, out)?;
+    }
+    out.flush()?;
+    Ok(side)
+}
+
 fn pair_bytes(pair: (u64, u64)) -> [u8; PAIR_BYTES] {
     let mut rec = [0u8; PAIR_BYTES];
     rec[..8].copy_from_slice(&pair.0.to_le_bytes());
@@ -558,25 +668,6 @@ impl Pairs {
             last: None,
             error: None,
         })
-    }
-
-    fn scan(
-        &self,
-        mut each: impl FnMut((u64, u64)) -> Result<(), IndexError>,
-    ) -> Result<(), IndexError> {
-        match self {
-            Pairs::Memory(pairs) => pairs.iter().try_for_each(|&p| each(p)),
-            Pairs::File { paths, .. } => {
-                let mut segments = Segments::open(paths)?;
-                let mut pending = Vec::with_capacity((1 << 20) / PAIR_BYTES);
-                while segments.fill(&mut pending)? {
-                    for &pair in &pending {
-                        each(pair)?;
-                    }
-                }
-                Ok(())
-            }
-        }
     }
 }
 
@@ -953,63 +1044,78 @@ impl CompactHashIndex {
             m.div_ceil(budget.range_slots)
         };
         let mut fps = vec![0u8; if in_memory { table_len } else { 0 }];
+        // A range record is the slot and the fingerprint at its own width.
+        let fp_width = fingerprint_bits.div_ceil(8) as usize;
         let mut range_files = Vec::with_capacity(ranges);
         for i in 0..ranges {
-            range_files.push(scratch.create(&format!("r{i}"))?);
+            let file = create_new(&scratch.path(&format!("r{i}"))?)?;
+            range_files.push(std::sync::Mutex::new(file));
         }
-        let mut side: Vec<(u64, u64, u32)> = Vec::with_capacity(side_len);
-        // The representatives go through the perfect hash a batch at a time: `index_all` pulls
-        // each seed byte in ahead of its lookup, and the fingerprint row is pulled in the same
-        // way here. At 10⁹ both tables are far past any cache, and one key at a time would pay
-        // two full misses per key.
-        const BATCH: usize = 1024;
-        const AHEAD: usize = 16;
-        let mut batch: Vec<(u64, u64)> = Vec::with_capacity(BATCH);
-        let mut place = |batch: &mut Vec<(u64, u64)>| -> Result<(), IndexError> {
-            if batch.is_empty() {
-                return Ok(());
+        // The table in memory is filled by one thread — below a byte, a row shares its byte with
+        // its neighbours — and the range files by a thread per merged segment, each staging its
+        // records per range in a share of one allocation released whole. Every buffer a thread
+        // reads or stages through is made here, on the calling thread.
+        let mut sources = Vec::new();
+        match &pairs {
+            Pairs::Memory(list) => sources.push(Source::List(list.chunks((1 << 20) / PAIR_BYTES))),
+            Pairs::File { paths, .. } if in_memory => {
+                sources.push(Source::Files(Segments::open(paths)?));
             }
-            let mph = mph
-                .as_ref()
-                .expect("a representative exists only when m > 0");
-            let hashes: Vec<u64> = batch.iter().map(|&(h, _)| h).collect();
-            let slots = mph.index_all(&hashes);
-            for (i, (&(_, second), &slot)) in batch.iter().zip(&slots).enumerate() {
-                let slot = slot as usize;
-                let fp = second & mask;
-                if in_memory {
-                    if let Some(&ahead) = slots.get(i + AHEAD) {
-                        let at = (ahead * fingerprint_bits as u64 / 8) as usize;
-                        crate::blob::prefetch_byte(&fps, at);
-                    }
-                    write_fp(&mut fps, slot, fingerprint_bits, fp);
-                } else {
-                    let w = &mut range_files[slot / budget.range_slots];
-                    w.write_all(&(slot as u32).to_le_bytes())?;
-                    w.write_all(&fp.to_le_bytes())?;
+            Pairs::File { paths, .. } => {
+                for path in paths {
+                    sources.push(Source::Files(Segments::open(std::slice::from_ref(path))?));
                 }
             }
-            batch.clear();
-            Ok(())
-        };
-        let mut last: Option<u64> = None;
-        pairs.scan(|(h, second)| {
-            if last == Some(h) {
-                side.push((h, second, (m + side.len()) as u32));
-                return Ok(());
-            }
-            last = Some(h);
-            batch.push((h, second));
-            if batch.len() == BATCH {
-                place(&mut batch)?;
-            }
-            Ok(())
-        })?;
-        place(&mut batch)?;
-        for w in &mut range_files {
-            w.flush()?;
         }
+        let scanners = sources.len();
+        let mut stages = vec![
+            0u8;
+            if in_memory {
+                0
+            } else {
+                scanners * ranges * STAGE
+            }
+        ];
+        let mut outs = Vec::with_capacity(scanners);
+        if in_memory {
+            outs.push(Out::Table(&mut fps));
+        } else {
+            for stage in stages.chunks_mut(ranges * STAGE) {
+                outs.push(Out::Ranges {
+                    files: &range_files,
+                    stage,
+                    lens: vec![0; ranges],
+                    range_slots: budget.range_slots,
+                    fp_width,
+                });
+            }
+        }
+        let table = mph.as_ref();
+        let sides = std::thread::scope(|scope| {
+            let handles: Vec<_> = sources
+                .into_iter()
+                .zip(outs)
+                .map(|(mut source, mut out)| {
+                    let mut pending = Vec::with_capacity((1 << 20) / PAIR_BYTES);
+                    scope.spawn(move || {
+                        let bits = fingerprint_bits;
+                        place_fingerprints(&mut source, &mut pending, table, mask, bits, &mut out)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a fingerprint thread does not panic"))
+                .collect::<Vec<_>>()
+        });
+        drop(stages);
         drop(range_files);
+        let mut side: Vec<(u64, u64, u32)> = Vec::with_capacity(side_len);
+        for found in sides {
+            for (h, fp) in found? {
+                side.push((h, fp, (m + side.len()) as u32));
+            }
+        }
         debug_assert_eq!(side.len(), side_len);
         drop(pairs);
 
@@ -1033,16 +1139,41 @@ impl CompactHashIndex {
                 w.write_all(&fps)?;
                 payload.update(&fps);
             } else {
+                let rec_len = 4 + fp_width;
+                let mut buf = vec![0u8; (1 << 20) / rec_len * rec_len];
                 for i in 0..ranges {
+                    use std::io::Read;
                     let base = i * budget.range_slots;
                     let slots = budget.range_slots.min(m - base);
                     let mut segment = vec![0u8; fp_table_len(slots, fingerprint_bits)?];
-                    let mut records =
-                        Records::<SLOT_BYTES>::open(&scratch.path(&format!("r{i}"))?)?;
-                    while let Some(rec) = records.next()? {
-                        let slot = u32::from_le_bytes(rec[0..4].try_into().expect("4 bytes"));
-                        let fp = u64::from_le_bytes(rec[4..12].try_into().expect("8 bytes"));
-                        write_fp(&mut segment, slot as usize - base, fingerprint_bits, fp);
+                    let mut file = std::fs::File::open(scratch.path(&format!("r{i}"))?)?;
+                    let mut len = 0;
+                    loop {
+                        while len < buf.len() {
+                            match file.read(&mut buf[len..])? {
+                                0 => break,
+                                got => len += got,
+                            }
+                        }
+                        let whole = len / rec_len * rec_len;
+                        if whole == 0 {
+                            if len != 0 {
+                                return Err(std::io::Error::other(
+                                    "compact-hash: a scratch file is torn",
+                                )
+                                .into());
+                            }
+                            break;
+                        }
+                        for rec in buf[..whole].chunks_exact(rec_len) {
+                            let slot = u32::from_le_bytes(rec[..4].try_into().expect("4 bytes"));
+                            let mut fp = [0u8; 8];
+                            fp[..fp_width].copy_from_slice(&rec[4..]);
+                            let fp = u64::from_le_bytes(fp);
+                            write_fp(&mut segment, slot as usize - base, fingerprint_bits, fp);
+                        }
+                        buf.copy_within(whole..len, 0);
+                        len -= whole;
                     }
                     w.write_all(&segment)?;
                     payload.update(&segment);

@@ -1,0 +1,27 @@
+peak compact-stream: the fingerprint pass on every thread — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: 3ddad05 (base) against the working tree of the commit that carries this file (new).
+Harness: examples/peak.rs `compact-stream N 1` — the streamed CompactHashIndex::build_to_file over real-word
+bigrams from /usr/share/dict/words, LEXINDEX_PEAK_DIR=local/peak (on /home). Phase times from a scratch copy of
+the tree with eprintln! marks in build_to_file_with (local/wt-prof, never committed); `base` is that
+instrumented copy of 3ddad05, `new` the same marks over the change. The merge now cuts as many ranges as the
+machine has threads (8) whatever the worker count the open-file budget allows (3 at 10^9, where a worker holds a
+reader per run and there are 60 runs); the fingerprint pass takes one merged segment per thread when the table
+goes to range files (3·10^8 and 10^9 here), and stays on one thread when the table fits memory (10^8).
+
+== new against base ==
+                 10^8 new (base 3ddad05: 43.6/43.7 s)   3·10^8 base → new      10^9 base (3ddad05 run) → new
+pass 1           38.70 s                                116.87 → 116.86 s      401.55 → 387.47 s (the generator)
+merge             1.19 s                                  3.49 →   3.76 s       25.36 →  26.91 s
+mphf              1.21 s                                  3.49 →   3.61 s       16.34 →  17.57 s
+scan              1.84 s  (one thread, table in memory)  10.26 →   2.09 s       45.52 →  11.88 s
+output            0.20 s                                  2.60 →   3.71 s       15.14 →  13.50 s
+total            43.14 s                                136.70 → 130.03 s      503.92 → 457.33 s
+peak            302.4 MB                                338.8 → 339.3 MB       942.7 → 943.1 MB
+The range records are 4 + ⌈bits/8⌉ bytes now (5 at the 8-bit default) instead of 12: 5 GB written and read
+back at 10^9 instead of 12. The output at 3·10^8 is one sample each way; at 10^9 it is 1.6 s faster.
+
+== Digests (local/blobdigest: FNV-1a 64 of the whole blob), new against 3ddad05 ==
+compact-mem   10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10^8    b1b96c2807e95e4d   = b1b96c2807e95e4d
