@@ -30,6 +30,10 @@ const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 const PAIR_BYTES: usize = 16;
 /// One `(slot u32, fingerprint u64)` record in a range file.
 const SLOT_BYTES: usize = 12;
+/// The merge splits the hash space on these top bits: every run counts its pairs per bin as it
+/// is spilled, and each merge thread takes a range of bins holding its share of the pairs.
+const BIN_BITS: u32 = 10;
+const BINS: usize = 1 << BIN_BITS;
 /// The largest fingerprint table the streaming builder fills in memory rather than through range
 /// files: 256 MiB, 268 M keys at the default width.
 const FP_MEMORY: usize = 256 << 20;
@@ -113,6 +117,8 @@ struct Scratch {
     dir: Option<std::path::PathBuf>,
     runs: usize,
     threads: usize,
+    /// Per run, where each bin starts, in pairs: `BINS + 1` entries, the last the run's length.
+    bins: Vec<Vec<u64>>,
 }
 
 impl Scratch {
@@ -122,6 +128,7 @@ impl Scratch {
             dir: None,
             runs: 0,
             threads,
+            bins: Vec::new(),
         }
     }
 
@@ -140,11 +147,7 @@ impl Scratch {
     }
 
     fn create(&mut self, name: &str) -> Result<std::io::BufWriter<std::fs::File>, IndexError> {
-        let path = self.dir()?.join(name);
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)?;
+        let file = create_new(&self.dir()?.join(name))?;
         Ok(std::io::BufWriter::with_capacity(1 << 20, file))
     }
 
@@ -157,6 +160,14 @@ impl Scratch {
         use std::io::Write;
         sort_run(run, self.threads);
         run.dedup();
+        let mut offsets = vec![0u64; BINS + 1];
+        for &(h, _) in run.iter() {
+            offsets[bin(h) + 1] += 1;
+        }
+        for b in 0..BINS {
+            offsets[b + 1] += offsets[b];
+        }
+        self.bins.push(offsets);
         let mut w = self.create(&self.runs.to_string())?;
         for &pair in run.iter() {
             w.write_all(&pair_bytes(pair))?;
@@ -167,46 +178,89 @@ impl Scratch {
         Ok(())
     }
 
-    /// Every run as one ascending, distinct file of pairs, counting them and the same-hash
-    /// leftovers on the way, so the perfect hash knows its size before it reads a key.
+    /// Every run as ascending, distinct files of pairs — one per thread, each a range of the
+    /// hash — counting them and the same-hash leftovers on the way, so the perfect hash knows its
+    /// size before it reads a key. The ranges are cut on bin boundaries to hold near-equal
+    /// numbers of pairs; equal pairs and equal hashes share a bin, so deduplication and the side
+    /// count are complete within a range.
     fn merge(&mut self) -> Result<Pairs, IndexError> {
-        use std::cmp::Reverse;
-        use std::io::Write;
-        let mut readers = Vec::with_capacity(self.runs);
-        let mut heap = std::collections::BinaryHeap::with_capacity(self.runs);
-        for i in 0..self.runs {
-            let mut reader = Records::<PAIR_BYTES>::open(&self.path(&i.to_string())?)?;
-            if let Some(pair) = reader.next()?.map(pair_of) {
-                heap.push(Reverse((pair, i)));
-            }
-            readers.push(reader);
+        let mut total = vec![0u64; BINS + 1];
+        for b in 0..BINS {
+            let in_bin: u64 = self.bins.iter().map(|o| o[b + 1] - o[b]).sum();
+            total[b + 1] = total[b] + in_bin;
         }
-        let path = self.path("merged")?;
-        let mut w = self.create("merged")?;
+        // A range holds a reader per run, so the merge takes fewer threads than the machine has
+        // when the corpus spilled many runs: the open files stay within what a default limit
+        // allows (macOS starts at 256), and the buffers stay small.
+        const READERS: usize = 192;
+        let threads = self.threads.min(READERS / self.runs.max(1)).max(1);
+        let mut cuts = vec![0usize];
+        for t in 1..threads {
+            let target = total[BINS] * t as u64 / threads as u64;
+            let b = total.partition_point(|&x| x < target).min(BINS);
+            if b > *cuts.last().expect("starts at 0") {
+                cuts.push(b);
+            }
+        }
+        if *cuts.last().expect("starts at 0") != BINS {
+            cuts.push(BINS);
+        }
+        let runs: Vec<std::path::PathBuf> = (0..self.runs)
+            .map(|i| self.path(&i.to_string()))
+            .collect::<Result<_, _>>()?;
+        let paths: Vec<std::path::PathBuf> = (0..cuts.len() - 1)
+            .map(|t| self.path(&format!("m{t}")))
+            .collect::<Result<_, _>>()?;
+        // Every reader and writer of the merge lives in one allocation, released whole when the
+        // merge ends: a buffer a merge thread allocated for itself would stay in that thread's
+        // arena after it exits, and the perfect hash's high-water mark moved by a few megabytes
+        // with how many threads had done so.
+        const READ_BUF: usize = 1 << 16;
+        const WRITE_BUF: usize = 1 << 20;
+        let per_range = WRITE_BUF + self.runs * READ_BUF;
+        let mut arena = vec![0u8; paths.len() * per_range];
+        let mut jobs = Vec::with_capacity(paths.len());
+        let regions = arena.chunks_mut(per_range);
+        for ((range, out), region) in cuts.windows(2).zip(&paths).zip(regions) {
+            let (b0, b1) = (range[0], range[1]);
+            let (write_buf, mut read_bufs) = region.split_at_mut(WRITE_BUF);
+            let mut slices = Vec::with_capacity(runs.len());
+            for (run, offsets) in runs.iter().zip(&self.bins) {
+                let (buf, rest) = std::mem::take(&mut read_bufs).split_at_mut(READ_BUF);
+                read_bufs = rest;
+                slices.push(Slice::open(
+                    run,
+                    offsets[b0],
+                    offsets[b1] - offsets[b0],
+                    buf,
+                )?);
+            }
+            let sink = Sink {
+                file: create_new(out)?,
+                buf: write_buf,
+                len: 0,
+            };
+            let heap = std::collections::BinaryHeap::with_capacity(slices.len());
+            jobs.push((slices, sink, heap));
+        }
+        let counted = std::thread::scope(|scope| {
+            let handles: Vec<_> = jobs
+                .into_iter()
+                .map(|(slices, sink, heap)| scope.spawn(move || merge_range(slices, sink, heap)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a merge thread does not panic"))
+                .collect::<Vec<_>>()
+        });
+        drop(arena);
         let (mut n, mut side) = (0usize, 0usize);
-        let mut last: Option<(u64, u64)> = None;
-        // The top is replaced in place: one sift-down per pair, where a pop and a push would
-        // sift twice.
-        while let Some(mut top) = heap.peek_mut() {
-            let Reverse((pair, i)) = *top;
-            match readers[i].next()? {
-                Some(rec) => *top = Reverse((pair_of(rec), i)),
-                None => {
-                    std::collections::binary_heap::PeekMut::pop(top);
-                }
-            }
-            if last == Some(pair) {
-                continue;
-            }
-            if last.is_some_and(|l| l.0 == pair.0) {
-                side += 1;
-            }
-            w.write_all(&pair_bytes(pair))?;
-            n += 1;
-            last = Some(pair);
+        for counts in counted {
+            let (in_range, same_hash) = counts?;
+            n += in_range;
+            side += same_hash;
         }
-        w.flush()?;
-        Ok(Pairs::File { path, n, side })
+        Ok(Pairs::File { paths, n, side })
     }
 }
 
@@ -231,6 +285,7 @@ impl<const N: usize> Records<N> {
         })
     }
 
+    #[inline]
     fn next(&mut self) -> std::io::Result<Option<[u8; N]>> {
         use std::io::{BufRead, Read};
         // Almost every record is whole in the buffer; the ones that straddle its end, and the
@@ -258,6 +313,201 @@ impl<const N: usize> Records<N> {
     }
 }
 
+fn create_new(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+fn bin(h: u64) -> usize {
+    (h >> (64 - BIN_BITS)) as usize
+}
+
+/// One thread's share of the merge: the same range of every run, merged with a heap into `w`.
+/// Returns how many pairs it wrote and how many of them share their hash with the one before.
+fn merge_range(
+    mut slices: Vec<Slice<'_>>,
+    mut w: Sink<'_>,
+    mut heap: std::collections::BinaryHeap<std::cmp::Reverse<((u64, u64), usize)>>,
+) -> Result<(usize, usize), IndexError> {
+    use std::cmp::Reverse;
+    for (i, slice) in slices.iter_mut().enumerate() {
+        if let Some(pair) = slice.next()?.map(pair_of) {
+            heap.push(Reverse((pair, i)));
+        }
+    }
+    let (mut n, mut side) = (0usize, 0usize);
+    let mut last: Option<(u64, u64)> = None;
+    // The top is replaced in place: one sift-down per pair, where a pop and a push would sift
+    // twice.
+    while let Some(mut top) = heap.peek_mut() {
+        let Reverse((pair, i)) = *top;
+        match slices[i].next()? {
+            Some(rec) => *top = Reverse((pair_of(rec), i)),
+            None => {
+                std::collections::binary_heap::PeekMut::pop(top);
+            }
+        }
+        if last == Some(pair) {
+            continue;
+        }
+        if last.is_some_and(|l| l.0 == pair.0) {
+            side += 1;
+        }
+        w.write(&pair_bytes(pair))?;
+        n += 1;
+        last = Some(pair);
+    }
+    w.flush()?;
+    Ok((n, side))
+}
+
+/// One merge thread's share of one run: `left` records from record `from`, read through a
+/// slice of the merge's buffer.
+struct Slice<'a> {
+    file: std::fs::File,
+    buf: &'a mut [u8],
+    pos: usize,
+    len: usize,
+    left: u64,
+}
+
+impl<'a> Slice<'a> {
+    fn open(
+        path: &std::path::Path,
+        from: u64,
+        left: u64,
+        buf: &'a mut [u8],
+    ) -> Result<Self, IndexError> {
+        use std::io::Seek;
+        let mut file = std::fs::File::open(path)?;
+        file.seek(std::io::SeekFrom::Start(from * PAIR_BYTES as u64))?;
+        Ok(Self {
+            file,
+            buf,
+            pos: 0,
+            len: 0,
+            left,
+        })
+    }
+
+    fn next(&mut self) -> std::io::Result<Option<[u8; PAIR_BYTES]>> {
+        use std::io::Read;
+        if self.left == 0 {
+            return Ok(None);
+        }
+        if self.pos + PAIR_BYTES > self.len {
+            self.buf.copy_within(self.pos..self.len, 0);
+            self.len -= self.pos;
+            self.pos = 0;
+            while self.len < PAIR_BYTES {
+                match self.file.read(&mut self.buf[self.len..])? {
+                    0 => {
+                        return Err(std::io::Error::other(
+                            "compact-hash: a scratch file is torn",
+                        ));
+                    }
+                    got => self.len += got,
+                }
+            }
+        }
+        let rec = self.buf[self.pos..self.pos + PAIR_BYTES]
+            .try_into()
+            .expect("a whole record");
+        self.pos += PAIR_BYTES;
+        self.left -= 1;
+        Ok(Some(rec))
+    }
+}
+
+/// A merge thread's output, written through a slice of the merge's buffer.
+struct Sink<'a> {
+    file: std::fs::File,
+    buf: &'a mut [u8],
+    len: usize,
+}
+
+impl Sink<'_> {
+    fn write(&mut self, rec: &[u8; PAIR_BYTES]) -> std::io::Result<()> {
+        if self.len + PAIR_BYTES > self.buf.len() {
+            self.flush()?;
+        }
+        self.buf[self.len..self.len + PAIR_BYTES].copy_from_slice(rec);
+        self.len += PAIR_BYTES;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        use std::io::Write;
+        self.file.write_all(&self.buf[..self.len])?;
+        self.len = 0;
+        Ok(())
+    }
+}
+
+/// The merged files in order, read as one stream through one buffer: the buffer is allocated
+/// once, on the thread that opens the stream, and a change of file is a new descriptor only —
+/// the perfect hash pulls this stream from whichever of its threads holds the cutter, and a
+/// buffer allocated there would stay in that thread's arena.
+struct Segments<'a> {
+    rest: &'a [std::path::PathBuf],
+    file: std::fs::File,
+    buf: Vec<u8>,
+    /// Bytes of `buf` that hold data: a record that straddled the last batch, then what was read.
+    len: usize,
+}
+
+impl<'a> Segments<'a> {
+    fn open(paths: &'a [std::path::PathBuf]) -> std::io::Result<Self> {
+        let (first, rest) = paths
+            .split_first()
+            .expect("the merge wrote a file per range");
+        Ok(Self {
+            rest,
+            file: std::fs::File::open(first)?,
+            buf: vec![0u8; 1 << 20],
+            len: 0,
+        })
+    }
+
+    /// The next batch of pairs, a buffer's worth decoded in one pass, or `false` after the last
+    /// file. A partial record at the end of a file is a torn file.
+    fn fill(&mut self, out: &mut Vec<(u64, u64)>) -> std::io::Result<bool> {
+        use std::io::Read;
+        out.clear();
+        loop {
+            while self.len < self.buf.len() {
+                match self.file.read(&mut self.buf[self.len..])? {
+                    0 => break,
+                    got => self.len += got,
+                }
+            }
+            let whole = self.len / PAIR_BYTES * PAIR_BYTES;
+            if whole > 0 {
+                out.extend(
+                    self.buf[..whole]
+                        .chunks_exact(PAIR_BYTES)
+                        .map(|rec| pair_of(rec.try_into().expect("a whole record"))),
+                );
+                self.buf.copy_within(whole..self.len, 0);
+                self.len -= whole;
+                return Ok(true);
+            }
+            if self.len != 0 {
+                return Err(std::io::Error::other(
+                    "compact-hash: a scratch file is torn",
+                ));
+            }
+            let Some((first, rest)) = self.rest.split_first() else {
+                return Ok(false);
+            };
+            self.rest = rest;
+            self.file = std::fs::File::open(first)?;
+        }
+    }
+}
+
 fn pair_bytes(pair: (u64, u64)) -> [u8; PAIR_BYTES] {
     let mut rec = [0u8; PAIR_BYTES];
     rec[..8].copy_from_slice(&pair.0.to_le_bytes());
@@ -273,11 +523,11 @@ fn pair_of(rec: [u8; PAIR_BYTES]) -> (u64, u64) {
 }
 
 /// The distinct pairs of a streaming build, ascending: in memory when the source fit one run,
-/// else the merged file, read back once for the perfect hash and once for the fingerprints.
+/// else the merged files, read back once for the perfect hash and once for the fingerprints.
 enum Pairs {
     Memory(Vec<(u64, u64)>),
     File {
-        path: std::path::PathBuf,
+        paths: Vec<std::path::PathBuf>,
         n: usize,
         side: usize,
     },
@@ -299,7 +549,11 @@ impl Pairs {
         Ok(Reps {
             from: match self {
                 Pairs::Memory(pairs) => From::Memory(pairs),
-                Pairs::File { path, .. } => From::File(Records::open(path)?),
+                Pairs::File { paths, .. } => From::File {
+                    segments: Segments::open(paths)?,
+                    pending: Vec::with_capacity((1 << 20) / PAIR_BYTES),
+                    at: 0,
+                },
             },
             last: None,
             error: None,
@@ -312,10 +566,13 @@ impl Pairs {
     ) -> Result<(), IndexError> {
         match self {
             Pairs::Memory(pairs) => pairs.iter().try_for_each(|&p| each(p)),
-            Pairs::File { path, .. } => {
-                let mut records = Records::<PAIR_BYTES>::open(path)?;
-                while let Some(rec) = records.next()? {
-                    each(pair_of(rec))?;
+            Pairs::File { paths, .. } => {
+                let mut segments = Segments::open(paths)?;
+                let mut pending = Vec::with_capacity((1 << 20) / PAIR_BYTES);
+                while segments.fill(&mut pending)? {
+                    for &pair in &pending {
+                        each(pair)?;
+                    }
                 }
                 Ok(())
             }
@@ -325,7 +582,11 @@ impl Pairs {
 
 enum From<'a> {
     Memory(&'a [(u64, u64)]),
-    File(Records<PAIR_BYTES>),
+    File {
+        segments: Segments<'a>,
+        pending: Vec<(u64, u64)>,
+        at: usize,
+    },
 }
 
 /// One hash per distinct value — the first pair of each equal-hash run — for the perfect hash,
@@ -348,14 +609,25 @@ impl Iterator for Reps<'_> {
                     *pairs = rest;
                     h
                 }
-                From::File(records) => match records.next() {
-                    Ok(Some(rec)) => pair_of(rec).0,
-                    Ok(None) => return None,
-                    Err(e) => {
-                        self.error = Some(e);
-                        return None;
+                From::File {
+                    segments,
+                    pending,
+                    at,
+                } => {
+                    if *at == pending.len() {
+                        match segments.fill(pending) {
+                            Ok(true) => *at = 0,
+                            Ok(false) => return None,
+                            Err(e) => {
+                                self.error = Some(e);
+                                return None;
+                            }
+                        }
                     }
-                },
+                    let (h, _) = pending[*at];
+                    *at += 1;
+                    h
+                }
             };
             if self.last != Some(h) {
                 self.last = Some(h);

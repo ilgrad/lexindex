@@ -130,6 +130,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The streamed build merges its runs on every thread**: each run counts its pairs per
+  top-bits bin as it is spilled; the merge cuts the hash space into ranges holding equal shares
+  of the pairs — as many as threads, fewer when the runs would need more open files than a
+  default limit allows — and merges each range out of every run into its own segment. The
+  segments are read back as one stream decoded a buffer at a time rather than a record at a
+  time, which is where the previous reader lost 5 ns a key behind the perfect hash's `dyn`
+  iterator; and every buffer of the merge lives in one allocation released whole, so the
+  build's high-water mark stays where it was. Byte-identical (blob digests at 10 M and 10^8
+  keys). At 10^9 real-word pairs: merge 59 → 25 s, fingerprint pass 49 → 46 s, the whole build
+  **548 → 504 s** with six minutes of either being the example's key generator, peak 942 → 943 MB;
+  at 10^8, alternated twice: merge 4.2 → 1.3 s, total 46.4/47.4 → 43.7/43.6 s.
+  `bench/results/peak-compact-stream-merge-2026-09-10-arz-b687f89.txt`.
 - **Both hash builds sort their pairs on every thread, and the streamed build merges runs and places
   fingerprints with less work per pair**: a run — or the in-memory pair list — is partitioned in
   place by the top of the hash into one part per thread and each part is sorted on its own

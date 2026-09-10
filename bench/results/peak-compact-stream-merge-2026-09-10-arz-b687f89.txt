@@ -1,0 +1,50 @@
+peak compact-stream: the run merge on every thread — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: b687f89 (base) against the working tree of the commit that carries this file (new).
+Harness: examples/peak.rs `compact-stream N 1` — the streamed CompactHashIndex::build_to_file over real-word
+bigrams from /usr/share/dict/words, LEXINDEX_PEAK_DIR=local/peak (on /home, not tmpfs). Phase times and the
+in-process VmHWM come from a scratch copy of the tree with eprintln! marks in build_to_file_with (local/wt-prof,
+never committed); `base` is that instrumented copy of b687f89, `new` the same marks over the change. The 256 MiB
+run buffer makes 6 runs at 10^8, 18 at 3·10^8, 60 at 10^9; the merge takes min(threads, 192 / runs) threads —
+8, 8 and 3 here.
+
+== Final, new against base ==
+                      10^8 (base new base new)      3·10^8 (base ×3 / new ×2)        10^9 (one run each)
+pass 1               38.5/39.3/39.4/39.0 s          117–120 / 117–119 s              405.9 → 401.6 s
+merge                 4.16/1.28/4.21/1.26 s         13.4–13.9 → 3.56/3.57 s           59.3 → 25.4 s
+mphf                  1.28/1.13/1.27/1.33 s         3.6–3.7 → 3.5/3.6 s               18.9 → 16.3 s
+scan                  2.24/1.80/2.30/1.82 s         11.7 → 10.1/10.4 s                48.8 → 45.5 s
+output                0.22/0.23/0.19/0.18 s         2.7–2.9 → 2.7/2.8 s               15.6 → 15.1 s
+total                46.35/43.72/47.41/43.58 s      148.6–151.6 → 137.2/139.2 s       548.4 → 503.9 s
+peak (example)       302.2–302.5 MB both            338.5–338.8 → 339.2/339.6 MB      941.6 → 942.7 MB
+The 10^8 rows are from the bulk-read variant (readers still BufReader-based); the 3·10^8 and 10^9 rows from the
+final tree. In-process VmHWM at 10^9: 289 MiB after pass 1 and the merge, 899 MiB after the perfect hash (its
+second level's grouping), unchanged after.
+
+== What was tried on the way (all at 10^8 unless said, base new base new) ==
+bucket merge (partitions of the idle run buffer, sort_run per partition): merge 4.14/4.20 → 5.77/5.72 s,
+  peak +3 MB — rejected; pdqsort over concatenated sorted runs is no faster than over random pairs, and a
+  six-way heap is only ~2.6 levels deep.
+parallel merge, per-record Segments reader: merge → 1.24/1.13 s but mphf 1.26/1.23 → 1.76/1.79 and scan
+  2.25/2.27 → 2.73/2.68 s: +4.5 ns a pair on both reads of the merged data.
+  #[inline] on the readers: scan back to 2.31, mphf still 1.74.  3 s sleep after the merge: mphf 1.66 (not
+  thermal).  Segments with a non-optional current reader and a #[cold] switch: mphf 1.83/1.67.  One segment
+  (merge threads forced to 1): mphf 1.60.  Eight segments written serially by one thread: mphf 1.64.  So the
+  files were never the cause; the feed path was — build_from_sorted takes `&mut dyn Iterator<Item = u64>`, one
+  virtual call a key into Reps::next → Segments::next → Records::next, nested io::Result<Option<[u8; 16]>>.
+bulk decode (Segments::fill: a whole fill_buf into Vec<(u64, u64)>, Reps and scan walk the vector):
+  merge 4.16/4.21 → 1.28/1.26, mphf 1.28/1.27 → 1.13/1.33, scan 2.24/2.30 → 1.80/1.82, total 46.35/47.41 →
+  43.72/43.58 s.  At 10^9 (one run each): 548.4 → 509.4 s — but peak 941.6 → 968.7 MB.
+the peak: 8 threads × 60 runs × 64 KiB readers + 8 × 1 MiB writers, allocated by the merge threads and left
+  in their glibc arenas after they exit.  16 KiB readers + the 192-file budget: 10^9 peak 946.1 MB (3 merge
+  threads), 3·10^8 347.1 (8).  Readers and writers allocated by the calling thread: 3·10^8 352.2, 10^9 946.1.
+  Segments through one owned buffer (a file change is a new descriptor only): 3·10^8 346.2/339.8/339.6/344.3
+  against base 338.6/338.5/338.5 — timing-dependent.  In-process VmHWM per phase put every excess inside the
+  perfect hash's second-level grouping: unchanged code, a different allocator state on entry.
+  Every merge buffer carved out of one Vec<u8> (mmap'd whole, released whole) and the heaps made by the
+  calling thread: 3·10^8 339.2/339.6, 10^9 942.7 MB.  That is the shipped form.
+
+== Digests (local/blobdigest: FNV-1a 64 of the whole blob), new against b687f89 ==
+compact-mem   10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10^8    b1b96c2807e95e4d   = b1b96c2807e95e4d
