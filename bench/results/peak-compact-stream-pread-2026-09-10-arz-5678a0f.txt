@@ -1,0 +1,30 @@
+peak compact-stream: the merge workers share one handle per run — 2026-09-10, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: 5678a0f (base) against the working tree of the commit that carries this file (new).
+Harness: examples/peak.rs `compact-stream N 1` — the streamed CompactHashIndex::build_to_file over real-word
+bigrams from /usr/share/dict/words, LEXINDEX_PEAK_DIR=local/peak (on /home). Phase times from a scratch copy of
+the tree with eprintln! marks in build_to_file_with (local/wt-prof, never committed). The change: the merge opens
+each run once and every worker reads its range of every run through that handle at its own offset (pread on
+unix, seek_read on Windows; elsewhere one worker owns every cursor), so the workers are as many as the ranges
+(8) however many runs there are. Before, a worker opened a reader per run and a budget of 192 open readers
+held the workers to 192 / runs: 3 at 10^9 (60 runs); at 3·10^8 (18 runs) and 10^8 (6 runs) there were 8
+already, so those are controls.
+
+== new (one run each) against the base runs recorded in peak-compact-stream-fp-2026-09-10-arz-3ddad05.txt ==
+                 3·10^8 base → new (control)      10^9 base → new
+pass 1           116.86 → 103.93 s (generator)   387.47 → 375.42 s (generator)
+merge              3.76 →   3.47 s                26.91 →  20.28 s   (25.36 in the 3ddad05 run)
+mphf               3.61 →   3.21 s                17.57 →  17.20 s
+scan               2.09 →   2.69 s                11.88 →  12.31 s
+output             3.71 →   3.20 s                13.50 →  12.61 s
+total            130.03 → 116.51 s               457.33 → 437.83 s
+peak              339.3 → 339.7 MB               943.1 → 943.3 MB
+The pass-1 and MPHF differences are the machine (a cold laptop runs its first minutes faster; both are
+untouched by the change). The merge at 10^9 with eight workers is 20 s for 16 GB read and 16 GB written — I/O
+bound from here, not a third of the three-worker time. The output at 10^9 carries 5678a0f's single-store
+write_fp, first measured here at that scale: 13.50 → 12.61 s.
+
+== Digests (local/blobdigest: FNV-1a 64 of the whole blob), new against 5678a0f ==
+compact-mem   10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10 M    d465cd041d327dbc   = d465cd041d327dbc
+compact-file  10^8    b1b96c2807e95e4d   = b1b96c2807e95e4d

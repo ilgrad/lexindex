@@ -457,7 +457,7 @@ the keys its first level bumped, the rest the second level's grouping of those k
 transient disk is the distinct pairs twice, 32 bytes per key, beside the output, plus twelve more
 per key for the range files
 past 268 M keys at the default width, so that no byte of the output is ever written at a random
-offset. The 10⁹ build took seven and a half minutes here, six of them generating the keys.
+offset. The 10⁹ build took seven and a quarter minutes here, six of them generating the keys.
 
 The perfect hash also needs **transient disk space**: an output whose key arena exceeds 32 MB is
 filled window by window through a spill file next to it, so about 2.2× the output size has to be

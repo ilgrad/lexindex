@@ -130,6 +130,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The streamed build's merge workers share one handle per run**: each reads its range of every
+  run at its own offset (`pread`; `seek_read` on Windows), so the workers are as many as the
+  ranges however many runs there are, where a budget of open readers had held them to three at
+  10^9 keys (60 runs). Byte-identical (blob digests at 10 M and 10^8 keys), same peak. 10^9
+  real-word pairs: merge 25–27 → 20 s (I/O-bound from there: 16 GB read and 16 GB written), the
+  whole build **457 → 438 s**; at 3·10^8 (18 runs, eight workers before as after) 3.5 s either way.
+  `bench/results/peak-compact-stream-pread-2026-09-10-arz-5678a0f.txt`.
 - **Both hash builds compute their slots on every thread, and a fingerprint of a shipped width is
   one store**: once the perfect hash is built, each thread overwrites its share of the sorted
   pairs' hashes with their slots — the order is the hash's, so a chunk's first pair continues
@@ -141,8 +148,8 @@ All notable changes to this project are documented here. The format follows
   placement 102 → 16 + 41 ms, the whole build **580 → 526–530 ms**.
   `bench/results/peak-compact-listed-place-2026-09-10-arz-8cb6f73.txt`.
 - **The streamed build places its fingerprints on every thread when they go to range files**:
-  the merge cuts as many ranges as the machine has threads whatever the open-file budget lets
-  it merge at once, and the fingerprint pass then takes one merged segment per thread, staging
+  the merge cuts as many ranges as the machine has threads, and the fingerprint pass then takes
+  one merged segment per thread, staging
   its range records in a share of one allocation and writing them under each file's lock a
   stage at a time; a range record is the slot and the fingerprint at its own width, 5 bytes at
   the default instead of 12. The table that fits memory is still filled by one thread — below a
@@ -153,8 +160,8 @@ All notable changes to this project are documented here. The format follows
   `bench/results/peak-compact-stream-fp-2026-09-10-arz-3ddad05.txt`.
 - **The streamed build merges its runs on every thread**: each run counts its pairs per
   top-bits bin as it is spilled; the merge cuts the hash space into ranges holding equal shares
-  of the pairs — as many as threads, fewer when the runs would need more open files than a
-  default limit allows — and merges each range out of every run into its own segment. The
+  of the pairs, as many as threads, and merges each range out of every run into its own
+  segment. The
   segments are read back as one stream decoded a buffer at a time rather than a record at a
   time, which is where the previous reader lost 5 ns a key behind the perfect hash's `dyn`
   iterator; and every buffer of the merge lives in one allocation released whole, so the

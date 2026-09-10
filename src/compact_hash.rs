@@ -190,12 +190,11 @@ impl Scratch {
             let in_bin: u64 = self.bins.iter().map(|o| o[b + 1] - o[b]).sum();
             total[b + 1] = total[b] + in_bin;
         }
-        // As many ranges as threads, for the fingerprint pass to take one each. The workers
-        // merging them are fewer when the runs would need more open files than a default limit
-        // allows (macOS starts at 256), each holding a reader per run; they take ranges in turn.
-        const READERS: usize = 192;
+        // As many ranges as threads, for the fingerprint pass to take one each, and a worker per
+        // range: every worker reads every run through the one handle opened below, at its own
+        // offset, so the open files are the runs' however many threads merge them.
         let ranges = self.threads.max(1);
-        let workers = ranges.min(READERS / self.runs.max(1)).max(1);
+        let workers = if cfg!(any(unix, windows)) { ranges } else { 1 };
         let mut cuts = vec![0usize];
         for t in 1..ranges {
             let target = total[BINS] * t as u64 / ranges as u64;
@@ -207,9 +206,9 @@ impl Scratch {
         if *cuts.last().expect("starts at 0") != BINS {
             cuts.push(BINS);
         }
-        let runs: Vec<std::path::PathBuf> = (0..self.runs)
-            .map(|i| self.path(&i.to_string()))
-            .collect::<Result<_, _>>()?;
+        let runs: Vec<std::fs::File> = (0..self.runs)
+            .map(|i| Ok(std::fs::File::open(self.path(&i.to_string())?)?))
+            .collect::<Result<_, IndexError>>()?;
         let paths: Vec<std::path::PathBuf> = (0..cuts.len() - 1)
             .map(|t| self.path(&format!("m{t}")))
             .collect::<Result<_, _>>()?;
@@ -243,7 +242,7 @@ impl Scratch {
                                 let (buf, tail) = std::mem::take(&mut rest).split_at_mut(READ_BUF);
                                 rest = tail;
                                 let left = offsets[b1] - offsets[b0];
-                                slices.push(Slice::open(run, offsets[b0], left, buf)?);
+                                slices.push(Slice::new(run, offsets[b0], left, buf));
                             }
                             let sink = Sink {
                                 file: create_new(&paths[t])?,
@@ -334,7 +333,8 @@ fn merge_range(
 /// One merge thread's share of one run: `left` records from record `from`, read through a
 /// slice of the merge's buffer.
 struct Slice<'a> {
-    file: std::fs::File,
+    file: &'a std::fs::File,
+    at: u64,
     buf: &'a mut [u8],
     pos: usize,
     len: usize,
@@ -342,26 +342,18 @@ struct Slice<'a> {
 }
 
 impl<'a> Slice<'a> {
-    fn open(
-        path: &std::path::Path,
-        from: u64,
-        left: u64,
-        buf: &'a mut [u8],
-    ) -> Result<Self, IndexError> {
-        use std::io::Seek;
-        let mut file = std::fs::File::open(path)?;
-        file.seek(std::io::SeekFrom::Start(from * PAIR_BYTES as u64))?;
-        Ok(Self {
+    fn new(file: &'a std::fs::File, from: u64, left: u64, buf: &'a mut [u8]) -> Self {
+        Self {
             file,
+            at: from * PAIR_BYTES as u64,
             buf,
             pos: 0,
             len: 0,
             left,
-        })
+        }
     }
 
     fn next(&mut self) -> std::io::Result<Option<[u8; PAIR_BYTES]>> {
-        use std::io::Read;
         if self.left == 0 {
             return Ok(None);
         }
@@ -370,13 +362,16 @@ impl<'a> Slice<'a> {
             self.len -= self.pos;
             self.pos = 0;
             while self.len < PAIR_BYTES {
-                match self.file.read(&mut self.buf[self.len..])? {
+                match read_at(self.file, &mut self.buf[self.len..], self.at)? {
                     0 => {
                         return Err(std::io::Error::other(
                             "compact-hash: a scratch file is torn",
                         ));
                     }
-                    got => self.len += got,
+                    got => {
+                        self.len += got;
+                        self.at += got as u64;
+                    }
                 }
             }
         }
@@ -387,6 +382,26 @@ impl<'a> Slice<'a> {
         self.left -= 1;
         Ok(Some(rec))
     }
+}
+
+/// Into `buf` from `file` at byte `at`, leaving the file's own cursor alone: the merge's readers
+/// share one handle per run across its threads.
+#[cfg(unix)]
+fn read_at(file: &std::fs::File, buf: &mut [u8], at: u64) -> std::io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(file, buf, at)
+}
+
+#[cfg(windows)]
+fn read_at(file: &std::fs::File, buf: &mut [u8], at: u64) -> std::io::Result<usize> {
+    std::os::windows::fs::FileExt::seek_read(file, buf, at)
+}
+
+/// Through the cursor, so only one thread may read a handle: `Scratch::merge` runs one worker here.
+#[cfg(not(any(unix, windows)))]
+fn read_at(mut file: &std::fs::File, buf: &mut [u8], at: u64) -> std::io::Result<usize> {
+    use std::io::{Read, Seek};
+    file.seek(std::io::SeekFrom::Start(at))?;
+    file.read(buf)
 }
 
 /// A merge thread's output, written through a slice of the merge's buffer.
