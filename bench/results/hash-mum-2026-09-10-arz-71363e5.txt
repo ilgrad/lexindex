@@ -1,0 +1,51 @@
+The key-hash round replaced: the shipped rotl29((h ^ w) * m) against the 128-bit product folded to 64 bits
+((h ^ w) as u128 * m, lo ^ hi). lexindex 71363e5 + the branch that makes the change, Ryzen 7 5800HS, Fedora 44,
+2026-09-10 04:00-04:45, editor open, nothing else running during the timed parts.
+
+Why. CompactHashIndex::build_to_file over 10^8 generated `word.word` keys reported 99 999 999 distinct while the
+generator yields 100 000 000 distinct strings (local/gencount.rs, no index involved); 9 short at 10^9. The pairs:
+  "sering.dampening" / "sering.tamponing"   byte 7 d^t = 0x10, byte 11 e^o = 0x0a   (both hashes equal -> one id)
+  "mutely.solodization" / "mutely.colonization"   byte 7 0x10, byte 11 0x0a   (slot hash only)
+  "cheveret.Timonian" / "cheverel.Tironian"       byte 7 0x18, byte 11 0x1f   (slot hash only)
+A difference confined to the top k bits of a word stays in the top k bits of a 64-bit product; the rotate moved
+those bits to [29-k, 29), byte 3 of the next word, where that word's own difference cancelled them -- in both
+hashes, whatever their constants.
+
+Differential probability (local/collide.rs diff; 4096 random 16-byte lowercase keys, byte 7 flipped by d0, byte
+11 by every d1; "P(both)" = some d1 cancels both hashes):
+  d0 0x80: P(both) 1.0000 (d1 0x10 always)     d0 0x40: 0.4988    d0 0x20: 0.3840    d0 0x10: 0.1565
+  d0 0x08: 0.1311    d0 0x30: 0.0881    d0 0x50: 0.3433       slot hash alone: 1.0000 for every d0 >= 0x08
+  new round: 0 for every d0 (no d1 ever cancels either hash in 4096 x 255 trials per d0)
+
+Single-bit scan (local/collide.rs scan; 64 random 24-byte keys, every (position p, bit) against every other
+position q and every single-byte change there, both hashes):
+  shipped round      35 weak position pairs  (8i+7 <-> 8i+11 both ways, 8i+6 -> 8i+10, ...)
+  rotate-then-multiply  38 weak pairs  (8i+3/8i+4 <-> 8(i+1)+7)  -- rejected
+  128-bit fold        0 weak pairs
+
+Same 10^8 generated keys (local/collide.rs 100000000):
+  shipped     slot-only collisions 2   full pair collisions 1
+  128-bit fold                     0                        0
+  rotate-then-multiply             1 ("heals.stabilized" / "heads.stabilizes": bytes 3 and 15)   0
+Real corpora, shipped round: /usr/share/dict/words 479 823 keys -> 0; local/paths.txt 909 776 keys -> 0.
+
+10^9 generated keys through CompactHashIndex::build_to_file (examples/peak.rs compact-stream, scratch on /home):
+  shipped   n 997503996  build 603815.5 ms  peak 1717.1 MB
+  new       n 997504005  build 592971.0 ms  peak 1702.2 MB     (997 504 005 = the generator's count)
+
+Distribution gate (local/hashbench/src/bin/quality.rs and quality_mum.rs; "old" there is the pre-1.0 FNV chain):
+                                    shipped round        128-bit fold
+  avalanche worst |z|                   4.50                 4.38
+  low-16-bit chi2, 479 823 words       z 0.54               z 0.07
+  low-20-bit chi2, 1 M bigrams         z 0.88               z 0.26
+  slot x fingerprint joint chi2        z -1.00              z -1.07
+  64-bit collisions among 1 M bigrams  0                    0
+
+Speed (local/hashbench/src/bin/mum.rs; A-B-A-B in one process, 4 rounds, median, with a control the change cannot
+touch; ns per key):
+  words   n 479 823  mean 9.3 B    hash_key  6.00 -> 5.71 (1.05x)   hash_pair  6.66 -> 6.89 (0.97x)   control 8.39
+  bigrams n 1 M      mean 10.9 B   hash_key  3.46 -> 3.49 (0.99x)   hash_pair  4.68 -> 5.21 (0.90x)   control 3.74
+  uri80   n 1 M      mean 80 B     hash_key  9.59 -> 10.88 (0.88x)  hash_pair 13.57 -> 15.31 (0.89x)  control 26.40
+
+Pinned slot-only pair for the new round, Pollard rho (local/hashcollide-mum, seed 0):
+  "lgywf6nnfq3in" / "sax4tnfbfpa7n"  hash_key 0x6e3065fe6c854ff2, fingerprints 0xed4f0957c6d42d03 / 0xebb975f22f342ed0

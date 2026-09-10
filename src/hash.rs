@@ -3,14 +3,15 @@
 //! Stability across Rust versions and platforms is what lets a *serialised* MPH be reloaded and
 //! queried — `std`'s `DefaultHasher` is explicitly not guaranteed stable, so it cannot back
 //! persistence. Every word is read with `from_le_bytes`, so a blob written on one endianness reads
-//! the same on the other, and nothing here uses `u128`, so a 32-bit target computes the same values
-//! at its own speed.
+//! the same on the other.
 //!
 //! Both hashes are the same shape — seed, one [`round`] per 8-byte word, one round for the tail,
 //! one finalizer — differing only in their constants. Eight bytes at a time rather than the byte
 //! chain that shipped before 1.0: measured 1.5× on a 9.3-byte dictionary word, 1.7× on a 10.9-byte
 //! bigram and 6.2–6.6× on an 80-byte URI-like key, A-B-A-B in one process
-//! (`local/hashbench`).
+//! (`local/hashbench`). The round is a 64×64→128 multiply folded to 64 bits; the `u128` is one
+//! `mul` on a 64-bit machine and a short software product on a 32-bit one, and the values are the
+//! same everywhere.
 
 /// The slot hash's seed and multiplier. The seed is π's first 64 bits; the multiplier is the
 /// golden-ratio odd constant.
@@ -22,24 +23,30 @@ const SLOT_MUL: u64 = 0x9e37_79b9_7f4a_7c15;
 const FP_SEED: u64 = 0x1319_8a2e_0370_7344;
 const FP_MUL: u64 = 0xff51_afd7_ed55_8ccd;
 
-/// One 8-byte word into an accumulator.
+/// One 8-byte word into an accumulator: the full 128-bit product, its halves folded together.
 ///
-/// The rotate is not decoration. Multiplication never moves bit 63 anywhere else, so without it a
-/// difference confined to the top bit of one word is cancelled *exactly* by the same difference in
-/// the next word — a two-word collision anyone could construct. Rotating is a bijection and one
-/// instruction, so it costs a cycle and removes the whole family.
+/// The fold is the whole point. A 64-bit product never carries downward, so a difference confined
+/// to the top *k* bits of a word stays confined to the top *k* bits of the product, and any fixed
+/// bijection after it — the rotate that shipped through 1.1 — only moves those bits to where the
+/// next word's own difference XORs them away. That was a two-word collision family on ordinary
+/// text: keys differing at bytes 8i+7 and 8i+11 alone (`d`↔`t` with `e`↔`o`, or a case flip with
+/// `e`↔`i`) collided in *both* hashes with probability 13–100 %, whatever the multiplier, and
+/// `CompactHashIndex` merged them into one id. The high half of the product depends on every
+/// input bit through the carries, so folding it in leaves no difference with a fixed shape to
+/// cancel; a single-bit scan over every position pair of a 24-byte key finds no weak pair
+/// (`local/collide.rs`), where the rotate round had 35.
 #[inline(always)]
 fn round(h: u64, w: u64, m: u64) -> u64 {
-    (h ^ w).wrapping_mul(m).rotate_left(29)
+    let p = (h ^ w) as u128 * m as u128;
+    (p as u64) ^ ((p >> 64) as u64)
 }
 
 /// The trailing 0–7 bytes as one word, without a byte loop and without reading out of bounds: two
 /// overlapping 4-byte loads above 3 bytes, a three-way fan-out below.
 ///
 /// The packing is injective at every length — 4..=7 covers every byte through the overlap, and
-/// 1..=3 places `b[0]`, `b[n / 2]` and `b[n - 1]` in separate octets — which is why keys of 7 bytes
-/// or fewer cannot collide with each other at all: one bijective round of a value that determines
-/// the key, then a bijective finalizer.
+/// 1..=3 places `b[0]`, `b[n / 2]` and `b[n - 1]` in separate octets — so the tail word, with the
+/// length folded into the finalizer, determines a short key completely.
 #[inline(always)]
 fn tail(b: &[u8]) -> u64 {
     match b.len() {
@@ -156,7 +163,7 @@ pub(crate) fn split_collisions(hashes: &[u64]) -> (Vec<u64>, Vec<(u64, u32)>) {
 /// the golden test below pins the collision itself, so a changed hash breaks loudly here before
 /// anything subtle happens in tests built on the pair.
 #[cfg(test)]
-pub(crate) const COLLIDING_PAIR: (&str, &str) = ("r4hihyolekgha", "jzugh6yr2hynd");
+pub(crate) const COLLIDING_PAIR: (&str, &str) = ("lgywf6nnfq3in", "sax4tnfbfpa7n");
 
 #[cfg(test)]
 mod golden {
@@ -167,7 +174,7 @@ mod golden {
         let (a, b) = super::COLLIDING_PAIR;
         assert_ne!(a, b);
         assert_eq!(hash_key(a), hash_key(b));
-        assert_eq!(hash_key(a), 0xc316_0266_294a_5562);
+        assert_eq!(hash_key(a), 0x6e30_65fe_6c85_4ff2);
         // The pair collides in the slot hash only — the independent fingerprint tells them apart.
         assert_ne!(fingerprint_full(a), fingerprint_full(b));
     }
@@ -176,25 +183,26 @@ mod golden {
     /// tweaked constant, a reordered finalizer, a byte-order slip in a refactor — would make every
     /// previously-saved index load wrong without any test failing. These pinned values turn that
     /// into a loud CI failure instead. **Do not "fix" them to match new output: changing the hash
-    /// is a breaking blob-format change and must bump the format magic, not this table.**
+    /// is a breaking blob-format change and must bump the format magic, not this table.** 1.2 did
+    /// exactly that — `BMP7` and `BCH7` — when the round was replaced.
     #[test]
     fn hash_key_is_stable() {
-        assert_eq!(hash_key(""), 0xe216_6f5a_d8b5_db1d);
-        assert_eq!(hash_key("a"), 0x2255_89b1_a67a_80f5);
-        assert_eq!(hash_key("apple"), 0x26dd_5403_343b_524c);
-        assert_eq!(hash_key("GET"), 0xd359_3bc2_df78_a0da);
-        assert_eq!(hash_key("é中🎉"), 0x7f47_597c_9d79_b825);
-        assert_eq!(hash_key("member-00042"), 0xaf25_53ba_9a2d_2ddf);
+        assert_eq!(hash_key(""), 0x6d83_15b9_dee0_feb1);
+        assert_eq!(hash_key("a"), 0xbf7c_cb3a_479f_1a5d);
+        assert_eq!(hash_key("apple"), 0xc147_ef0f_5b30_8081);
+        assert_eq!(hash_key("GET"), 0x51b7_ea28_3181_36d8);
+        assert_eq!(hash_key("é中🎉"), 0xdc3c_6a40_ff1a_bc88);
+        assert_eq!(hash_key("member-00042"), 0xb5f8_5009_b647_c12a);
     }
 
     #[test]
     fn fingerprint_is_stable() {
-        assert_eq!(fingerprint_full(""), 0xf889_7f3e_41b5_73b1);
-        assert_eq!(fingerprint_full("apple"), 0x8317_3a0f_d05e_64d6);
-        assert_eq!(fingerprint_full("é中🎉"), 0xd5be_cd61_4b4d_efb5);
+        assert_eq!(fingerprint_full(""), 0x9e7e_cf5b_d57d_4fa1);
+        assert_eq!(fingerprint_full("apple"), 0x4b6a_e8cc_993f_a404);
+        assert_eq!(fingerprint_full("é中🎉"), 0x7c27_66ce_cb21_5389);
         // The table stores the low `b` bits of that value — the widths the indexes actually write.
-        assert_eq!(fingerprint_full("GET") & 0xf, 0x7);
-        assert_eq!(fingerprint_full("member-00042") & 0xffff, 0x2d4a);
+        assert_eq!(fingerprint_full("GET") & 0xf, 0xf);
+        assert_eq!(fingerprint_full("member-00042") & 0xffff, 0x0b01);
     }
 
     /// The fused pass is an optimisation, not a second hash function: it must agree with the two

@@ -27,7 +27,7 @@ pub enum BlobKind {
 #[non_exhaustive]
 pub struct BlobInfo {
     pub kind: BlobKind,
-    /// The four-byte magic as text — `"BMP6"` — which is the format version.
+    /// The four-byte magic as text — `"BMP7"` — which is the format version.
     pub format: String,
     /// The whole blob, in bytes.
     pub bytes: u64,
@@ -184,7 +184,7 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             let keys = w.u64(bytes.checked_sub(footer).ok_or(TRUNCATED)?)?;
             Ok(info(BlobKind::StringIndex, format, bytes, keys))
         }
-        b"BMP5" | b"BMP6" => {
+        b"BMP7" => {
             // `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`
             w.bytes(0, 36)?;
             let (n, mph, side) = (w.u64(4)?, w.u64(12)?, u64::from(w.u32(20)?));
@@ -194,7 +194,7 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             i.arena_bytes = Some(rest(bytes, [36, mph, side * 12])?);
             Ok(i)
         }
-        b"BCH6" => {
+        b"BCH7" => {
             // `[magic 4][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64][check u32]`
             w.bytes(0, 40)?;
             let (n, fp, mph, side) = (w.u64(4)?, w.u32(12)?, w.u64(16)?, u64::from(w.u32(24)?));
@@ -259,13 +259,14 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             let retired = popcount(w, at + 8, words)?;
             overlay(w, format, bytes, tag, 21, base_len, additions, retired)
         }
-        b"BMP1" | b"BMP2" | b"BMP3" | b"BMP4" => Err(IndexError::Format(
-            "a PerfectHashIndex blob from lexindex < 1.0, whose perfect hash this version cannot \
-             read; rebuild it from its keys with PerfectHashIndex::build",
+        b"BMP1" | b"BMP2" | b"BMP3" | b"BMP4" | b"BMP5" | b"BMP6" => Err(IndexError::Format(
+            "a PerfectHashIndex blob from lexindex < 1.2, keyed on a hash this version no longer \
+             computes; rebuild it from its keys with PerfectHashIndex::build",
         )),
-        b"BCH1" | b"BCH2" | b"BCH3" | b"BCH4" | b"BCH5" => Err(IndexError::Format(
-            "a CompactHashIndex blob from lexindex < 1.0, whose perfect hash this version cannot \
-             read and which stores no keys; rebuild it from its keys with CompactHashIndex::build",
+        b"BCH1" | b"BCH2" | b"BCH3" | b"BCH4" | b"BCH5" | b"BCH6" => Err(IndexError::Format(
+            "a CompactHashIndex blob from lexindex < 1.2, keyed on a hash this version no longer \
+             computes, and which stores no keys; rebuild it from its keys with \
+             CompactHashIndex::build",
         )),
         _ => Err(IndexError::Format("not a lexindex blob: unknown magic")),
     }
@@ -394,7 +395,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys),
-            (BlobKind::PerfectHashIndex, "BMP6", Some(300))
+            (BlobKind::PerfectHashIndex, "BMP7", Some(300))
         );
         assert_eq!(
             36 + i.mph_bytes.unwrap() + i.arena_bytes.unwrap() + 12 * i.side_entries.unwrap(),
@@ -412,7 +413,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys),
-            (BlobKind::CompactHashIndex, "BCH6", Some(300))
+            (BlobKind::CompactHashIndex, "BCH7", Some(300))
         );
         assert_eq!(i.fingerprint_bits, Some(16));
         assert_eq!(
@@ -478,7 +479,7 @@ mod tests {
             inspect_file(&path).unwrap(),
             inspect(&idx.to_bytes()).unwrap()
         );
-        std::fs::write(&path, b"BMP6 too short").unwrap();
+        std::fs::write(&path, b"BMP7 too short").unwrap();
         assert!(
             inspect_file(&path)
                 .unwrap_err()
@@ -503,11 +504,14 @@ mod tests {
         assert!(msg(b"nope").contains("unknown magic"));
         assert!(msg(b"BI").contains("shorter than a magic"));
         assert!(msg(b"").contains("shorter than a magic"));
-        assert!(msg(b"BMP6 too short").contains("truncated"));
+        assert!(msg(b"BMP7 too short").contains("truncated"));
         assert!(msg(b"BIX4").contains("truncated"));
+        // The hash blobs of 1.0 and 1.1 are old, not corrupt, and the message says which.
+        assert!(msg(b"BMP6 and whatever followed").contains("lexindex < 1.2"));
+        assert!(msg(b"BCH6 and whatever followed").contains("lexindex < 1.2"));
         // A header whose lengths run past the end, whatever the checksums say.
         let mut lying = vec![0u8; 36];
-        lying[..4].copy_from_slice(b"BMP6");
+        lying[..4].copy_from_slice(b"BMP7");
         lying[12..20].copy_from_slice(&u64::MAX.to_le_bytes());
         assert!(msg(&lying).contains("truncated"));
     }

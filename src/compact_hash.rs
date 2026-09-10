@@ -19,11 +19,11 @@ use crate::mphf::Mphf;
 /// loader could validate — and this index, storing no keys, could not even recompute the bound that
 /// made queries safe. 1.0 replaced the backend precisely so that a blob could be checked; the old
 /// images cannot be read without the crate that is now gone, so they are refused by name.
-const LEGACY_MAGICS: [&[u8; 4]; 5] = [b"BCH1", b"BCH2", b"BCH3", b"BCH4", b"BCH5"];
+const LEGACY_MAGICS: [&[u8; 4]; 6] = [b"BCH1", b"BCH2", b"BCH3", b"BCH4", b"BCH5", b"BCH6"];
 /// `[magic 4][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64][check u32]`
-const MAGIC_V6: &[u8; 4] = b"BCH6";
-const HEADER_V6: usize = 40;
-const CHECKED_V6: usize = 36; // header bytes the trailing check covers
+const MAGIC_V7: &[u8; 4] = b"BCH7";
+const HEADER_V7: usize = 40;
+const CHECKED_V7: usize = 36; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 
 /// One `(hash, second hash)` pair in a run or the merged file.
@@ -790,7 +790,7 @@ impl Iterator for Reps<'_> {
 }
 
 /// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
-type SerialisedParts = ([u8; HEADER_V6], Vec<u8>, Vec<u8>);
+type SerialisedParts = ([u8; HEADER_V7], Vec<u8>, Vec<u8>);
 
 /// A writer that hashes what passes through it, for a payload written in pieces.
 struct Hashed<'a, W: std::io::Write>(&'a mut W, &'a mut crate::blob::BlockHasher);
@@ -1197,7 +1197,7 @@ impl CompactHashIndex {
         // The header carries the payload's hash, so it goes in last, over the space left for it.
         crate::blob::write_atomically_with(path, |w| {
             let mut payload = crate::blob::BlockHasher::new();
-            w.write_all(&[0u8; HEADER_V6])?;
+            w.write_all(&[0u8; HEADER_V7])?;
             // Straight from the table: at 10⁹ keys its blob is a quarter of a gigabyte, and a
             // copy of it here would be the build's peak.
             if let Some(mph) = &mph {
@@ -1250,7 +1250,7 @@ impl CompactHashIndex {
             w.write_all(&side_buf)?;
             payload.update(&side_buf);
             check()?;
-            let header = header_v6(n, fingerprint_bits, mph_len, side.len(), payload.finish());
+            let header = header_v7(n, fingerprint_bits, mph_len, side.len(), payload.finish());
             w.flush()?;
             w.get_mut().seek(std::io::SeekFrom::Start(0))?;
             w.write_all(&header)?;
@@ -1433,7 +1433,7 @@ impl CompactHashIndex {
         payload.update(&mph_buf);
         payload.update(self.fps.as_ref());
         payload.update(&side_buf);
-        let header = header_v6(
+        let header = header_v7(
             self.n,
             self.fp_bits,
             mph_buf.len(),
@@ -1443,7 +1443,7 @@ impl CompactHashIndex {
         Ok((header, mph_buf, side_buf))
     }
 
-    /// Serialise to `[magic "BCH6"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
+    /// Serialise to `[magic "BCH7"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
     /// [check u32][MPH blob][bit-packed fingerprints][side entries]`. `check` is a hash of the
     /// preceding header bytes and `payload` a streaming hash of everything after it, verified on
     /// owned loads; the MPH region carries its own header and validates its own lengths, which is
@@ -1452,7 +1452,7 @@ impl CompactHashIndex {
     pub fn to_bytes(&self) -> Result<Vec<u8>, IndexError> {
         let (header, mph_buf, side_buf) = self.serialised_parts()?;
         let fp = self.fps.as_ref();
-        let mut out = Vec::with_capacity(HEADER_V6 + mph_buf.len() + fp.len() + side_buf.len());
+        let mut out = Vec::with_capacity(HEADER_V7 + mph_buf.len() + fp.len() + side_buf.len());
         out.extend_from_slice(&header);
         out.extend_from_slice(&mph_buf);
         out.extend_from_slice(fp);
@@ -1467,7 +1467,7 @@ impl CompactHashIndex {
             Some(mph) => mph.byte_len(),
             None => 0,
         };
-        Ok(HEADER_V6 + mph + self.fps.len() + self.side.len() * SIDE_ENTRY)
+        Ok(HEADER_V7 + mph + self.fps.len() + self.side.len() * SIDE_ENTRY)
     }
 
     /// Reconstruct from [`CompactHashIndex::to_bytes`] output (copies the blob into owned memory).
@@ -1501,16 +1501,16 @@ impl CompactHashIndex {
             && LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes"))
         {
             return Err(IndexError::Format(
-                "compact-hash: blob written by lexindex < 1.0, whose minimal perfect hash came \
-                 from a crate this version no longer links; the keys are not stored, so it cannot \
-                 be converted - rebuild the index from its keys",
+                "compact-hash: blob written by lexindex < 1.2, keyed on a hash this version no \
+                 longer computes; the keys are not stored, so it cannot be converted - rebuild the \
+                 index from its keys",
             ));
         }
-        if bytes.len() < HEADER_V6 || &bytes[0..4] != MAGIC_V6 {
+        if bytes.len() < HEADER_V7 || &bytes[0..4] != MAGIC_V7 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
-        let check = u32::from_le_bytes(bytes[CHECKED_V6..HEADER_V6].try_into().unwrap());
-        if check != crate::blob::hash_bytes(&bytes[..CHECKED_V6]) as u32 {
+        let check = u32::from_le_bytes(bytes[CHECKED_V7..HEADER_V7].try_into().unwrap());
+        if check != crate::blob::hash_bytes(&bytes[..CHECKED_V7]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
         }
         // Owned loads verify the whole payload — one streaming pass over everything after the
@@ -1518,11 +1518,11 @@ impl CompactHashIndex {
         // rejected here rather than perturbing answers later.
         if verify {
             let stored = u64::from_le_bytes(bytes[28..36].try_into().unwrap());
-            if stored != crate::blob::hash_block(&bytes[HEADER_V6..]) {
+            if stored != crate::blob::hash_block(&bytes[HEADER_V7..]) {
                 return Err(IndexError::Format("payload checksum mismatch"));
             }
         }
-        let header = HEADER_V6;
+        let header = HEADER_V7;
         let n64 = u64::from_le_bytes(bytes[4..12].try_into().unwrap());
         if n64 > u32::MAX as u64 {
             return Err(IndexError::Format(
@@ -1688,23 +1688,23 @@ impl CompactHashIndex {
     }
 }
 
-/// The `BCH6` header over its scalars and the payload hash, checksummed.
-fn header_v6(
+/// The `BCH7` header over its scalars and the payload hash, checksummed.
+fn header_v7(
     n: usize,
     fp_bits: u32,
     mph_len: usize,
     side_len: usize,
     payload: u64,
-) -> [u8; HEADER_V6] {
-    let mut header = [0u8; HEADER_V6];
-    header[0..4].copy_from_slice(MAGIC_V6);
+) -> [u8; HEADER_V7] {
+    let mut header = [0u8; HEADER_V7];
+    header[0..4].copy_from_slice(MAGIC_V7);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..16].copy_from_slice(&fp_bits.to_le_bytes());
     header[16..24].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[24..28].copy_from_slice(&(side_len as u32).to_le_bytes());
     header[28..36].copy_from_slice(&payload.to_le_bytes());
-    let check = crate::blob::hash_bytes(&header[..CHECKED_V6]) as u32;
-    header[CHECKED_V6..].copy_from_slice(&check.to_le_bytes());
+    let check = crate::blob::hash_bytes(&header[..CHECKED_V7]) as u32;
+    header[CHECKED_V7..].copy_from_slice(&check.to_le_bytes());
     header
 }
 
@@ -1949,13 +1949,14 @@ mod tests {
         ));
     }
 
-    /// This index stores no keys, so a pre-1.0 blob cannot even be converted — the refusal has to
-    /// say so, and say which lexindex wrote it, rather than report a bad magic on an intact file.
+    /// This index stores no keys, so a blob from before 1.2 cannot even be converted — the refusal
+    /// has to say so, and say which lexindex wrote it, rather than report a bad magic on an intact
+    /// file.
     #[test]
-    fn a_pre_1_0_blob_is_refused_by_name() {
+    fn a_blob_from_before_1_2_is_refused_by_name() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
         let good = idx.to_bytes().unwrap();
-        assert_eq!(&good[0..4], b"BCH6");
+        assert_eq!(&good[0..4], b"BCH7");
         for magic in LEGACY_MAGICS {
             let mut old = good.clone();
             old[0..4].copy_from_slice(magic);
@@ -1963,7 +1964,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 1.0"), "{err}");
+            assert!(err.contains("lexindex < 1.2"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }
@@ -1981,7 +1982,7 @@ mod tests {
             bad[pos] ^= 0x40;
             assert!(from_bytes(&bad).is_err(), "header byte {pos} was accepted");
         }
-        for pos in (HEADER_V6..good.len()).step_by(5) {
+        for pos in (HEADER_V7..good.len()).step_by(5) {
             let mut bad = good.clone();
             bad[pos] ^= 0x40;
             assert!(from_bytes(&bad).is_err(), "payload byte {pos} was accepted");
@@ -2066,10 +2067,10 @@ mod tests {
             let mut bad = good.clone();
             let at = bad.len() - 4;
             bad[at..].copy_from_slice(&bad_id.to_le_bytes());
-            let payload = crate::blob::hash_block(&bad[HEADER_V6..]);
+            let payload = crate::blob::hash_block(&bad[HEADER_V7..]);
             bad[28..36].copy_from_slice(&payload.to_le_bytes());
-            let check = crate::blob::hash_bytes(&bad[..CHECKED_V6]) as u32;
-            bad[CHECKED_V6..HEADER_V6].copy_from_slice(&check.to_le_bytes());
+            let check = crate::blob::hash_bytes(&bad[..CHECKED_V7]) as u32;
+            bad[CHECKED_V7..HEADER_V7].copy_from_slice(&check.to_le_bytes());
             let err = match from_bytes(&bad) {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("side id {bad_id} was accepted"),

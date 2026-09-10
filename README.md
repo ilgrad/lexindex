@@ -213,9 +213,10 @@ Each of these is a section of [`docs/design.md`](docs/design.md); the one-line v
   and a crafted blob answers wrong ids, never out-of-range ones. **`load_mmap` and its `_verified`
   and `_untrusted` forms are the `unsafe fn`s**: they borrow the mapped pages, so the file must not
   change while the index is alive.
-- **Blobs move forward, not backward.** 1.1 reads everything 1.0 wrote; 1.0 refuses what 1.1 writes
-  (`BMP6`, and a `BCH6` with the `MPH2` hash inside). Pre-1.0 blobs are refused by name: they
-  embed a `ptr_hash` image the crate no longer links, and rebuilding from the keys is the migration.
+- **Blobs move forward, not backward.** 1.2 replaced the key hash — the round it shipped with had
+  a two-word collision family on ordinary text — so every hash blob written before it (`BMP5`,
+  `BMP6`, `BCH6`) is refused by name, and rebuilding from the keys is the migration. `BIX4` and
+  `OVL2` are unchanged in either direction.
 - With `--no-default-features` the crate is `fst` only; `mph` adds no dependency, so the whole tree
   is `fst` plus `memmap2`, and `cargo audit` reports nothing on either build.
 

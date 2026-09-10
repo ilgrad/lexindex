@@ -17,13 +17,18 @@
 //! deserialised to a different structure would fail them.
 //!
 //! 1.1 changed the perfect hash once more (`MPH2`, a different function over the same keys) and
-//! re-encoded the key arena, so the hash blobs 1.0 wrote are held to the same invariants, and the
-//! blobs 1.1 writes are the ones pinned byte for byte.
+//! re-encoded the key arena, and 1.2 replaced the key hash itself — the round it shipped with had
+//! a two-word collision family on ordinary text — so the hash blobs 1.0 and 1.1 wrote are refused
+//! by name like the pre-1.0 ones, and the blobs 1.2 writes are the ones pinned byte for byte.
 
 use std::path::PathBuf;
 
-/// Versions whose blobs are kept. `0.5.1` is the oldest still-accepted `PerfectHashIndex` format.
+/// Versions whose blobs are kept. `0.5.1` is the oldest still-accepted `StringIndex` format.
 const VERSIONS: [&str; 5] = ["0.5.1", "0.7.0", "0.8.0", "0.8.1", "0.9.1"];
+
+/// The versions whose hash blobs 1.2 refuses on top of those: keyed on the hash 1.2 replaced.
+#[cfg(feature = "mph")]
+const HASH_VERSIONS_REFUSED: [&str; 2] = ["1.0.0", "1.1.0"];
 
 fn data(name: &str) -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data")).join(name)
@@ -83,20 +88,21 @@ fn string_index_blobs_from_every_published_version_load() {
 
 #[cfg(feature = "mph")]
 mod mph {
-    use super::{VERSIONS, data, keys, non_members};
+    use super::{HASH_VERSIONS_REFUSED, VERSIONS, data, keys, non_members};
 
     /// The refusal has to be *legible*: someone with a five-year-old blob and a fresh lexindex
     /// gets one message, and it must tell them the file is old and rebuildable rather than send
-    /// them looking for disk corruption.
+    /// them looking for disk corruption. The 1.0 and 1.1 blobs are held to it too: loaded under
+    /// 1.2's hash they would answer wrong ids, so the loader must not get that far.
     #[test]
     fn perfect_hash_blobs_from_every_published_version_are_refused_by_name() {
-        for version in VERSIONS {
+        for version in VERSIONS.iter().chain(HASH_VERSIONS_REFUSED.iter()) {
             let path = data(&format!("golden-{version}-perfect.bmp"));
             let err = match lexindex::PerfectHashIndex::load(&path) {
                 Err(e) => e.to_string(),
-                Ok(_) => panic!("{version}: a pre-1.0 blob was accepted"),
+                Ok(_) => panic!("{version}: a blob from before 1.2 was accepted"),
             };
-            assert!(err.contains("lexindex < 1.0"), "{version}: {err}");
+            assert!(err.contains("lexindex < 1.2"), "{version}: {err}");
             assert!(err.contains("rebuild"), "{version}: {err}");
         }
     }
@@ -108,7 +114,7 @@ mod mph {
         let keys = keys();
         let idx = lexindex::PerfectHashIndex::build(&keys).unwrap();
         let blob = idx.to_bytes().unwrap();
-        assert_eq!(&blob[0..4], b"BMP6");
+        assert_eq!(&blob[0..4], b"BMP7");
         let back = lexindex::PerfectHashIndex::from_bytes(&blob).expect("its own blob loads");
         for key in &keys {
             let id = idx.id(key).expect("member");
@@ -121,16 +127,16 @@ mod mph {
     }
 
     /// Same as the perfect-hash refusal, and a shade stronger: this index stores no keys, so its
-    /// pre-1.0 blobs cannot even be converted, and the message has to say so.
+    /// old blobs cannot even be converted, and the message has to say so.
     #[test]
     fn compact_hash_blobs_from_every_published_version_are_refused_by_name() {
-        for version in VERSIONS {
+        for version in VERSIONS.iter().chain(HASH_VERSIONS_REFUSED.iter()) {
             let path = data(&format!("golden-{version}-compact.bch"));
             let err = match lexindex::CompactHashIndex::load(&path) {
                 Err(e) => e.to_string(),
-                Ok(_) => panic!("{version}: a pre-1.0 blob was accepted"),
+                Ok(_) => panic!("{version}: a blob from before 1.2 was accepted"),
             };
-            assert!(err.contains("lexindex < 1.0"), "{version}: {err}");
+            assert!(err.contains("lexindex < 1.2"), "{version}: {err}");
             assert!(err.contains("rebuild"), "{version}: {err}");
         }
     }
@@ -139,11 +145,11 @@ mod mph {
     /// be found (a false negative is impossible by construction), while non-members are held to the
     /// 8-bit table's false-positive rate with room to spare — 1 000 probes at 2^-8 expect ~4.
     #[test]
-    fn a_1_0_compact_hash_blob_round_trips_exactly() {
+    fn a_compact_hash_blob_round_trips_exactly() {
         let keys = keys();
         let idx = lexindex::CompactHashIndex::build(&keys, 1).unwrap();
         let blob = idx.to_bytes().unwrap();
-        assert_eq!(&blob[0..4], b"BCH6");
+        assert_eq!(&blob[0..4], b"BCH7");
         let back = lexindex::CompactHashIndex::from_bytes(&blob).expect("its own blob loads");
         assert_eq!(back.len(), keys.len());
         for key in &keys {
@@ -169,12 +175,11 @@ mod mph {
     /// parses but no longer resembles what the writer emits is the failure mode 1.0 already hit
     /// once, and byte-identity is what rules it out.
     ///
-    /// Each is named by the release whose writer first produced it, and only the current pair is
-    /// pinned this way: 1.1 re-encoded the key arena in blocks and replaced the perfect hash, so
-    /// the 1.0 pair is now held to what a *reader* must promise it — see
-    /// [`the_1_0_perfect_hash_blob_still_loads`] and [`the_1_0_compact_hash_blob_still_loads`] —
-    /// and the 1.1 pair took over here. The fingerprinted arena, the overflow arena and the
-    /// `ClosedHashIndex` blob are new in 1.2 and are pinned beside them under their own names.
+    /// Each is named by the release whose writer first produced it, and only the current set is
+    /// pinned this way: 1.1 re-encoded the key arena and replaced the perfect hash, 1.2 replaced
+    /// the key hash, so the 1.0 and 1.1 files are now the refused fixtures and every hash blob
+    /// here is 1.2's — the plain pair, the fingerprinted arena, the overflow arena and the
+    /// `ClosedHashIndex` blob.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:
     /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
@@ -202,12 +207,12 @@ mod mph {
         let closed = lexindex::ClosedHashIndex::build(&keys).unwrap().to_bytes();
 
         for (name, magic, fresh) in [
-            ("golden-1.1.0-compact.bch", &b"BCH6"[..], compact),
-            ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], perfect),
-            ("golden-1.2.0-perfect-fp.bmp", &b"BMP6"[..], perfect_fp),
+            ("golden-1.2.0-compact.bch", &b"BCH7"[..], compact),
+            ("golden-1.2.0-perfect.bmp", &b"BMP7"[..], perfect),
+            ("golden-1.2.0-perfect-fp.bmp", &b"BMP7"[..], perfect_fp),
             (
                 "golden-1.2.0-perfect-overflow.bmp",
-                &b"BMP6"[..],
+                &b"BMP7"[..],
                 perfect_overflow,
             ),
             ("golden-1.2.0-closed.bcl", &b"BCL1"[..], closed),
@@ -229,69 +234,24 @@ mod mph {
         }
     }
 
-    /// What a `BMP5` blob is promised now that it is no longer the format this version writes:
-    /// it loads, it answers every key with a distinct id below `n` and the exact key back, it
-    /// refuses every non-member, and it maps zero-copy. The bytes are free to differ — 1.1's arena
-    /// is 2.7 bytes per key smaller — and so are the ids, since 1.1's perfect hash is a different
-    /// function over the same keys; nothing else a caller can observe through the API may.
-    ///
-    /// This is the whole reason `BMP6` exists as a separate magic rather than a silent change to
-    /// the arena: the format has two readable versions now, and this test is the statement that
-    /// the older one is genuinely readable and not merely parsed.
+    /// The refused fixtures must stay what they were: a `BMP5`, a `BMP6` and two `BCH6` — one
+    /// with 1.0's `MPH1` inside, one with `MPH2` — so that the refusal tests above keep refusing
+    /// the real thing and not a file someone regenerated by mistake.
     #[test]
-    fn the_1_0_perfect_hash_blob_still_loads() {
-        let keys = keys();
-        let path = data("golden-1.0.0-perfect.bmp");
-        let stored = std::fs::read(&path).unwrap();
-        assert_eq!(&stored[..4], b"BMP5", "the 1.0 fixture must stay 1.0");
-
-        let old = lexindex::PerfectHashIndex::load(&path).expect("a 1.0 blob still loads");
-        assert_eq!(old.len(), keys.len());
-        let mut seen = vec![false; keys.len()];
-        for key in &keys {
-            let id = old.id(key).unwrap_or_else(|| panic!("id({key:?})"));
+    fn the_refused_fixtures_are_still_the_old_formats() {
+        for (name, magic, mphf) in [
+            ("golden-1.0.0-perfect.bmp", &b"BMP5"[..], &b"MPH1"[..]),
+            ("golden-1.1.0-perfect.bmp", &b"BMP6"[..], &b"MPH2"[..]),
+            ("golden-1.0.0-compact.bch", &b"BCH6"[..], &b"MPH1"[..]),
+            ("golden-1.1.0-compact.bch", &b"BCH6"[..], &b"MPH2"[..]),
+        ] {
+            let stored = std::fs::read(data(name)).unwrap();
+            assert_eq!(&stored[..4], magic, "{name}");
             assert!(
-                !std::mem::replace(&mut seen[id as usize], true),
-                "id {id} answered twice"
-            );
-            assert_eq!(old.key(id), Some(key.as_str()), "key({id})");
-        }
-        for absent in non_members() {
-            assert_eq!(old.id(&absent), None, "{absent:?} is not a member");
-        }
-    }
-
-    /// The `BCH6` that 1.0 wrote carries an `MPH1` table inside a container 1.1 still writes, so
-    /// the magic alone cannot tell the two apart; the embedded table's own magic does, and the
-    /// 1.0 reader of it is kept. Held to the same invariants as the perfect-hash blob above, with
-    /// membership probabilistic as always for this index.
-    #[test]
-    fn the_1_0_compact_hash_blob_still_loads() {
-        let keys = keys();
-        let path = data("golden-1.0.0-compact.bch");
-        let stored = std::fs::read(&path).unwrap();
-        assert_eq!(&stored[..4], b"BCH6");
-        assert!(
-            stored.windows(4).any(|w| w == b"MPH1"),
-            "the 1.0 fixture must carry a 1.0 perfect hash"
-        );
-
-        let old = lexindex::CompactHashIndex::load(&path).expect("a 1.0 blob still loads");
-        assert_eq!(old.len(), keys.len());
-        let mut seen = vec![false; keys.len()];
-        for key in &keys {
-            assert!(old.contains(key), "false negative on {key:?}");
-            let id = old.id(key).unwrap_or_else(|| panic!("id({key:?})"));
-            assert!(
-                (id as usize) < keys.len() && !std::mem::replace(&mut seen[id as usize], true),
-                "{key:?}: id {id} is not distinct"
+                stored.windows(4).any(|w| w == mphf),
+                "{name}: no {mphf:?} inside"
             );
         }
-        let false_positives = non_members().iter().filter(|k| old.contains(k)).count();
-        assert!(
-            false_positives <= 20,
-            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
-        );
     }
 
     /// The closed index's blob: it loads, every golden key gets a distinct id below `n`, and so
@@ -330,11 +290,7 @@ mod mph {
             assert!(string.id(key).is_some());
         }
 
-        for name in [
-            "golden-1.0.0-perfect.bmp",
-            "golden-1.1.0-perfect.bmp",
-            "golden-1.2.0-perfect-fp.bmp",
-        ] {
+        for name in ["golden-1.2.0-perfect.bmp", "golden-1.2.0-perfect-fp.bmp"] {
             // SAFETY: as above.
             let perfect = unsafe { lexindex::PerfectHashIndex::load_mmap(data(name)) }
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -384,8 +340,8 @@ mod mph {
 #[cfg(all(feature = "fuzzing", feature = "mph"))]
 #[test]
 fn the_fuzz_shims_accept_a_real_blob() {
-    let compact = std::fs::read(data("golden-1.1.0-compact.bch")).unwrap();
-    let perfect = std::fs::read(data("golden-1.1.0-perfect.bmp")).unwrap();
+    let compact = std::fs::read(data("golden-1.2.0-compact.bch")).unwrap();
+    let perfect = std::fs::read(data("golden-1.2.0-perfect.bmp")).unwrap();
     for verify in [false, true] {
         assert!(
             lexindex::fuzzing::parse_compact_frame(&compact, verify),
@@ -399,13 +355,24 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
 
-    // The 1.0 pair are seeds too: the flat arena is still parsed, and so is the `MPH1` table both
-    // carry, and a target that only ever saw the 1.1 encodings would leave those readers
-    // unexplored.
-    let flat = std::fs::read(data("golden-1.0.0-perfect.bmp")).unwrap();
-    assert!(lexindex::fuzzing::parse_perfect_frame(&flat, true));
-    let old_compact = std::fs::read(data("golden-1.0.0-compact.bch")).unwrap();
-    assert!(lexindex::fuzzing::parse_compact_frame(&old_compact, true));
+    // The 1.0 and 1.1 pairs stopped being seeds when 1.2 replaced the key hash: refused at the
+    // magic, one branch in, like the 0.9.1 blob below.
+    for name in [
+        "golden-1.0.0-perfect.bmp",
+        "golden-1.1.0-perfect.bmp",
+        "golden-1.0.0-compact.bch",
+        "golden-1.1.0-compact.bch",
+    ] {
+        let blob = std::fs::read(data(name)).unwrap();
+        assert!(
+            !lexindex::fuzzing::parse_perfect_frame(&blob, false),
+            "{name}"
+        );
+        assert!(
+            !lexindex::fuzzing::parse_compact_frame(&blob, false),
+            "{name}"
+        );
+    }
     // And the two encodings 1.2 added: the fingerprinted arena, and the one with an overflow
     // table behind its data.
     for name in [
@@ -455,6 +422,7 @@ fn the_fuzz_shims_accept_a_real_blob() {
     for (name, magic) in [
         ("golden-1.0.0-mphf.bin", &b"MPH1"[..]),
         ("golden-1.1.0-mphf.bin", &b"MPH2"[..]),
+        ("golden-1.2.0-mphf.bin", &b"MPH2"[..]),
     ] {
         let mphf = std::fs::read(data(name)).unwrap();
         assert_eq!(&mphf[..4], magic, "{name}");
@@ -632,19 +600,19 @@ fn every_golden_blob_inspects_from_its_header() {
         let err = inspect_file(data(&format!("golden-{v}-perfect.bmp"))).unwrap_err();
         let err = err.to_string();
         assert!(
-            err.contains("< 1.0") && err.contains("PerfectHashIndex::build"),
+            err.contains("< 1.2") && err.contains("PerfectHashIndex::build"),
             "{v}: {err}"
         );
         let err = inspect_file(data(&format!("golden-{v}-compact.bch"))).unwrap_err();
         let err = err.to_string();
         assert!(
-            err.contains("< 1.0") && err.contains("CompactHashIndex::build"),
+            err.contains("< 1.2") && err.contains("CompactHashIndex::build"),
             "{v}: {err}"
         );
     }
     // The fingerprinted arena of 1.2: the same perfect hash, one byte per arena slot more.
     let fingerprinted = inspect_file(data("golden-1.2.0-perfect-fp.bmp")).unwrap();
-    let plain = inspect_file(data("golden-1.1.0-perfect.bmp")).unwrap();
+    let plain = inspect_file(data("golden-1.2.0-perfect.bmp")).unwrap();
     assert_eq!(
         (
             fingerprinted.kind,
@@ -656,7 +624,7 @@ fn every_golden_blob_inspects_from_its_header() {
         ),
         (
             BlobKind::PerfectHashIndex,
-            "BMP6",
+            "BMP7",
             Some(1000),
             plain.mph_bytes,
             Some(0),
@@ -674,7 +642,7 @@ fn every_golden_blob_inspects_from_its_header() {
             overflow.arena_bytes,
         ),
         (
-            "BMP6",
+            "BMP7",
             Some(1001),
             Some(0),
             plain.arena_bytes.map(|b| b + 300 + 68 + 8),
@@ -705,47 +673,18 @@ fn every_golden_blob_inspects_from_its_header() {
             36 + plain.mph_bytes.unwrap(),
         )
     );
-    // The hash blobs from 1.0 and 1.1: one perfect hash each, no side entries over these keys,
-    // and the arena of a `CompactHashIndex` at its default width is one byte per key.
-    for (v, format, mphf, mph) in [
-        ("1.0.0", "BMP5", "MPH1", 521),
-        ("1.1.0", "BMP6", "MPH2", 429),
-    ] {
-        let i = inspect_file(data(&format!("golden-{v}-perfect.bmp"))).unwrap();
-        assert_eq!(
-            (
-                i.kind,
-                i.format.as_str(),
-                i.keys,
-                i.mph_bytes,
-                i.side_entries
-            ),
-            (
-                BlobKind::PerfectHashIndex,
-                format,
-                Some(1000),
-                Some(mph),
-                Some(0)
-            ),
-            "{v}"
-        );
-        assert_eq!(i.arena_bytes, Some(i.bytes - 36 - mph), "{v}");
-        let i = inspect_file(data(&format!("golden-{v}-compact.bch"))).unwrap();
-        assert_eq!(
-            (i.kind, i.format.as_str(), i.keys),
-            (BlobKind::CompactHashIndex, "BCH6", Some(1000)),
-            "{v}"
-        );
-        assert_eq!(
-            (
-                i.fingerprint_bits,
-                i.mph_bytes,
-                i.arena_bytes,
-                i.side_entries
-            ),
-            (Some(8), Some(mph), Some(1000), Some(0)),
-            "{v}"
-        );
+    // The hash blobs of 1.0 and 1.1 are refused the way the loaders refuse them — old, not
+    // corrupt — while their standalone perfect-hash tables still inspect: a table is keyed on
+    // nothing but the hashes it was handed.
+    for (v, mphf, mph) in [("1.0.0", "MPH1", 521), ("1.1.0", "MPH2", 429)] {
+        for (kind, ext) in [
+            ("PerfectHashIndex", "perfect.bmp"),
+            ("CompactHashIndex", "compact.bch"),
+        ] {
+            let err = inspect_file(data(&format!("golden-{v}-{ext}"))).unwrap_err();
+            let err = err.to_string();
+            assert!(err.contains("< 1.2") && err.contains(kind), "{v}: {err}");
+        }
         let i = inspect_file(data(&format!("golden-{v}-mphf.bin"))).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
@@ -753,6 +692,49 @@ fn every_golden_blob_inspects_from_its_header() {
             "{v}"
         );
     }
+    // The 1.2 pair and the table inside them: one perfect hash, no side entries over these keys,
+    // and the arena of a `CompactHashIndex` at its default width is one byte per key.
+    let mph = plain.mph_bytes.unwrap();
+    assert_eq!(
+        (
+            plain.kind,
+            plain.keys,
+            plain.side_entries,
+            plain.arena_bytes
+        ),
+        (
+            BlobKind::PerfectHashIndex,
+            Some(1000),
+            Some(0),
+            Some(plain.bytes - 36 - mph)
+        )
+    );
+    let i = inspect_file(data("golden-1.2.0-compact.bch")).unwrap();
+    assert_eq!(
+        (
+            i.kind,
+            i.format.as_str(),
+            i.keys,
+            i.fingerprint_bits,
+            i.mph_bytes,
+            i.arena_bytes,
+            i.side_entries
+        ),
+        (
+            BlobKind::CompactHashIndex,
+            "BCH7",
+            Some(1000),
+            Some(8),
+            Some(mph),
+            Some(1000),
+            Some(0)
+        )
+    );
+    let i = inspect_file(data("golden-1.2.0-mphf.bin")).unwrap();
+    assert_eq!(
+        (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
+        (BlobKind::Mphf, "MPH2", Some(1000), Some(mph), mph)
+    );
     // Both overlay formats: three keys added and three retired over the 1000-key ordered base.
     for (name, format) in [
         ("golden-0.12.0-overlay.ovl", "OVL1"),

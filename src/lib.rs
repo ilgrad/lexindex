@@ -132,7 +132,7 @@ pub mod fuzzing {
 
     /// Load a standalone `MPH2` (or 1.0's `MPH1`) blob and query the table it produced.
     ///
-    /// The other targets reach this format only through a `BMP5`/`BCH6` header, which means a
+    /// The other targets reach this format only through a `BMP7`/`BCH7` header, which means a
     /// mutation has to keep two checksums and a length identity intact before the MPH region is
     /// read at all — so in practice they fuzz the framing and never the body. This one starts
     /// inside it.

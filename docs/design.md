@@ -62,7 +62,7 @@ Because the keys themselves are never stored, size is just the MPH (0.26 B/key �
 measured, and flat in `n`: `8/λ` bits of seed plus what the few percent of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.76 B/key at 4 bits
 (6.25% false positives), 1.26 at the 8-bit default (0.39%), 2.26 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH6"][n][fp_bits][mph length][side_len]
+`id → key`. The serialised blob is `[magic "BCH7"][n][fp_bits][mph length][side_len]
 [payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — it frames every section, so it is
@@ -84,10 +84,18 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
 one silent case left is a pair colliding in *both* 64-bit hashes at once (`≈ 2^-128` per pair), which
-is indistinguishable from a duplicate key by construction and collapses into one entry. Every blob
-written before 1.0 (`BCH1`–`BCH5`) is refused; see below. On load, side-table ids are structurally
-required to be exactly the tail range `[m, n)` — the checksums vouch for transport, not
-construction.
+is indistinguishable from a duplicate key by construction and collapses into one entry. That rate
+holds only if no *structured* difference collides in both, and the hash through 1.1 did not manage
+it: its per-word round, a 64-bit multiply and a rotate, kept a difference in the top bits of one
+word confined to the top bits of the product and dropped it into byte 3 of the next word, where
+that word's own difference XORed it away — in both hashes, whatever their constants. Keys differing
+at bytes 8i+7 and 8i+11 alone (`d`↔`t` with `e`↔`o`; a case flip with `e`↔`i`) collided with
+13–100 % probability and merged into one id. 1.2's round folds the full 128-bit product, whose high
+half depends on every input bit through the carries, so no difference keeps a fixed shape: a
+single-bit scan over every position pair of a 24-byte key finds no weak pair where the old round had
+35 (`local/collide.rs`). Every blob written before 1.2 (`BCH1`–`BCH6`) is refused; see below. On
+load, side-table ids are structurally required to be exactly the tail range `[m, n)` — the
+checksums vouch for transport, not construction.
 
 **Construction is deterministic, so a blob *is* a reproducible artefact.** Two `build` calls over
 the same key set produce the same bytes, on any thread count and any machine: the seed sequence is
@@ -116,16 +124,15 @@ hole must lie below `n`. What that buys is a `from_bytes` that is a safe fn on a
 crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
 the same rule over their own eight scalars.
 
-**Pre-1.0 blobs are refused, by name.** Every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash`
-image, and the crate that could decode it is no longer linked — so the refusal names the version that
-wrote the file and says to rebuild, rather than reporting a bad magic on an intact one. There is a
-second, independent reason, which is why no amount of decoding work would have bought a conversion:
-1.0 also replaced the key hash, so every slot in an old blob is keyed on a value this version does
-not compute. There is no
-conversion path for either index: `PerfectHashIndex`'s arena is readable but its ids came from the
-old MPH, and `CompactHashIndex` stores no keys at all. Rebuilding from the key list is the migration,
-and it is the only one a keyless index could ever have had. Soundness outranks compatibility, and
-this is the release where that debt is paid rather than carried.
+**Blobs from before 1.2 are refused, by name.** Every slot in a `BMP5`, `BMP6` or `BCH6` blob is
+keyed on the 1.0 hash, a value this version does not compute — loaded under the new hash it would
+answer wrong ids, silently — and every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash` image
+on top, from a crate no longer linked. So the refusal names the version that wrote the file and
+says to rebuild, rather than reporting a bad magic on an intact one. There is no conversion path
+for either index: `PerfectHashIndex`'s arena is readable but its slots came from the old hash, and
+`CompactHashIndex` stores no keys at all. Rebuilding from the key list is the migration, and it is
+the only one a keyless index could ever have had. Soundness outranks compatibility: 1.0 paid that
+debt for the perfect hash, 1.2 for the key hash.
 
 `build_to_file` is that streaming build carried past memory: the pairs go to runs of 256 MiB,
 sorted and spilled beside the output, the runs are merged into one sorted file, and the perfect
@@ -179,7 +186,7 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP6"][n][mph length]
+where membership is already guaranteed. The serialised blob is `[magic "BMP7"][n][mph length]
 [side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
 names one of four encodings.
@@ -207,8 +214,8 @@ does not match stops at the block and never reads the key. A lookup of an absent
 miss instead of two: on the dictionary 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 B/key,
 the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
-extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic stays `BMP6`;
-a reader from before 1.2 refuses the tag as an unknown arena encoding.
+extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 1.2's
+`BMP7`; the tag alone would already stop a reader from before 1.2, as an unknown arena encoding.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -347,30 +354,30 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP6` | 1.1 | `PerfectHashIndex` | `BMP5` **read**; `BMP1`–`BMP4` **refused by name** |
-| `BCH6` | 1.0, 1.1 | `CompactHashIndex` | a 1.0 `BCH6` (an `MPH1` inside) **read**; `BCH1`–`BCH5` **refused by name** |
+| `BMP7` | 1.2 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
+| `BCH7` | 1.2 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
 | `BCL1` | 1.2 | `ClosedHashIndex` | new in 1.2 |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH2` | 1.1 | the minimal perfect hash, inside `BMP6` and `BCH6` | `MPH1` (1.0) **read** |
+| `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so both
 hash-index loaders carry the list of magics they used to write and answer with a sentence naming
-`lexindex < 1.0` and the fix. That is worth more than a conversion path would have been, because for
-these two formats there is no conversion path to offer: every pre-1.0 blob embeds a `ptr_hash` image
-this crate no longer links, `PerfectHashIndex`'s arena survives but its ids came from that image, and
-`CompactHashIndex` stores no keys at all. **Rebuilding from the key list is the migration.**
+`lexindex < 1.2` and the fix. That is worth more than a conversion path would have been, because for
+these two formats there is no conversion path to offer: every blob before 1.2 is keyed on a hash
+this version does not compute (and the pre-1.0 ones embed a `ptr_hash` image it no longer links),
+`PerfectHashIndex`'s arena survives but its slots came from that hash, and `CompactHashIndex`
+stores no keys at all. **Rebuilding from the key list is the migration.**
 
 `OVL1` is the exception that proves the rule: it is decodable — the same three sections with the
 tombstone count in a different place — so it is read rather than refused. Compatibility is broken
 where it cannot be kept, not where keeping it is merely inconvenient.
 
-**Blobs move forward, not backward — upgrade the reader first.** 1.1 reads every `BMP5` and
-every `BCH6` that 1.0 wrote, but what it writes is not readable by 1.0: `BMP6` is a magic 1.0 has
-never heard of, and a 1.1 `BCH6` carries the new `MPH2` perfect hash inside a container 1.0 does
-recognise, so 1.0 refuses both as malformed rather than as a version mismatch. `BIX4` and `OVL2`
-are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses the two versions
-in either direction.
+**Blobs move forward, not backward — upgrade the reader first.** 1.1 read every `BMP5` and
+every `BCH6` that 1.0 wrote; 1.2 refuses all three by name, and what it writes — `BMP7`, `BCH7` —
+is a magic neither has heard of, so they refuse it as malformed rather than as a version mismatch.
+`BIX4` and `OVL2` are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses
+the versions in either direction.
 
 What a blob does *not* promise is that it will load into the same **ids** across a format change.
 Since 1.0 construction is deterministic, so the same keys rebuilt on the same version give the same

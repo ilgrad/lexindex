@@ -25,13 +25,11 @@ use crate::mphf::Mphf;
 /// loader could validate. 1.0 replaced the backend precisely so that a blob could be checked, and
 /// the old images cannot be read without the crate that is now gone — so they are refused by name
 /// rather than half-supported.
-const LEGACY_MAGICS: [&[u8; 4]; 3] = [b"BMP2", b"BMP3", b"BMP4"];
-const MAGIC_V5: &[u8; 4] = b"BMP5"; // [magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]
-/// 1.1's key arena encodes its offsets in blocks, which a 1.0 reader would reject from inside the
-/// arena with "unknown offset encoding". The framing is byte for byte `BMP5`'s, so the magic exists
-/// only to make that refusal legible — and, read the other way, `BMP5` blobs are still ordinary
-/// input here: the arena says which encoding it uses, so both load through the same parser.
-const MAGIC_V6: &[u8; 4] = b"BMP6";
+const LEGACY_MAGICS: [&[u8; 4]; 5] = [b"BMP2", b"BMP3", b"BMP4", b"BMP5", b"BMP6"];
+/// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`, the framing `BMP5`
+/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marks 1.2's key hash, under which every
+/// slot of an older blob would answer wrong, so `BMP5` and `BMP6` are refused by name too.
+const MAGIC_V7: &[u8; 4] = b"BMP7";
 const HEADER_V5: usize = 36;
 const CHECKED_V5: usize = 32;
 const SIDE_ENTRY: usize = 12; // hash u64 + id u32
@@ -44,7 +42,7 @@ const NO_KEY: u32 = u32::MAX;
 /// without ever holding the index — one writer of this layout, so the two cannot drift.
 fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V5] {
     let mut header = [0u8; HEADER_V5];
-    header[0..4].copy_from_slice(MAGIC_V6);
+    header[0..4].copy_from_slice(MAGIC_V7);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
@@ -788,12 +786,12 @@ impl PerfectHashIndex {
         }
         if LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes")) {
             return Err(IndexError::Format(
-                "perfect-hash: blob written by lexindex < 1.0, whose minimal perfect hash came \
-                 from a crate this version no longer links; rebuild the index from its keys",
+                "perfect-hash: blob written by lexindex < 1.2, keyed on a hash this version no \
+                 longer computes; rebuild the index from its keys",
             ));
         }
         let magic = &bytes[0..4];
-        if (magic != MAGIC_V5 && magic != MAGIC_V6) || bytes.len() < HEADER_V5 {
+        if magic != MAGIC_V7 || bytes.len() < HEADER_V5 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
@@ -1939,11 +1937,12 @@ mod tests {
         assert!(batch[keys.len()..].iter().all(Option::is_none));
     }
 
-    /// Every pre-1.0 blob embedded a `ptr_hash` image this crate can no longer read. The refusal
-    /// has to *name* that — a bare "bad magic" would send someone hunting for a corrupt file when
-    /// the file is intact and merely old.
+    /// Every blob from before 1.2 is keyed on a hash this version does not compute (and the
+    /// pre-1.0 ones embedded a `ptr_hash` image it cannot read either). The refusal has to *name*
+    /// that — a bare "bad magic" would send someone hunting for a corrupt file when the file is
+    /// intact and merely old.
     #[test]
-    fn a_pre_1_0_blob_is_refused_by_name() {
+    fn a_blob_from_before_1_2_is_refused_by_name() {
         let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
         let good = idx.to_bytes().unwrap();
         for magic in LEGACY_MAGICS {
@@ -1953,7 +1952,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 1.0"), "{err}");
+            assert!(err.contains("lexindex < 1.2"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: the key hash is replaced, and every hash blob written before 1.2 is refused by
+  name.** The per-word round of the 1.0 hash -- a 64-bit multiply and a rotate -- had a two-word
+  collision family on ordinary text: a difference in the top bits of one word stays in the top
+  bits of a 64-bit product, and the rotate dropped it into byte 3 of the next word, where that
+  word's own difference cancelled it -- in *both* hashes, whatever their constants. Keys of 16
+  bytes or more differing at bytes 8i+7 and 8i+11 alone collided with probability 13–100 %
+  (`d`↔`t` with `e`↔`o`; a case flip with `e`↔`i`; an ASCII/non-ASCII flip with `a`↔`q`, always),
+  and `CompactHashIndex` and `ClosedHashIndex` merged such pairs into one id, silently:
+  `sering.dampening` and `sering.tamponing` were one key, and 10⁹ generated `word.word` keys held
+  nine such pairs. The round is now the full 64×64→128 product folded to 64 bits (`lo ^ hi`): a
+  single-bit scan over every position pair of a 24-byte key finds no weak pair where the old
+  round had 35, the same 10⁸ keys collide nowhere, the 10⁹ set builds to all 997 504 005 of its
+  keys where the old hash lost nine, and the distribution gates (avalanche, low-bit χ², slot ×
+  fingerprint independence) read the same. Cost: the pair hash at 0.90–0.97× on 9–11-byte
+  keys and 0.89× on 80-byte ones, a nanosecond or two under a lookup. Magics move to **`BMP7`**
+  and **`BCH7`** (`BCL1` never shipped and keeps its name); `BMP5`, `BMP6` and `BCH6` join the
+  refused list with a message naming `lexindex < 1.2` and the rebuild, since a blob keyed on the
+  old hash would answer wrong ids under the new one. `BIX4` and `OVL2` are untouched. Rebuilding
+  from the keys is the migration. Found by the streaming builder's distinct-key count disagreeing
+  with its input.
+
 ### Added
 
 - **`ClosedHashIndex`** (Python: `ClosedHashIndex`): the minimal perfect hash and nothing else,

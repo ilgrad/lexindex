@@ -1242,8 +1242,8 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
     keys = ["apple", "banana", "cherry"]
     for idx, kind, fmt in [
         (lexindex.StringIndex(keys), "StringIndex", "BIX4"),
-        (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP6"),
-        (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH6"),
+        (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP7"),
+        (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH7"),
         (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL1"),
     ]:
         blob = idx.to_bytes()
@@ -1275,7 +1275,7 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
     with pytest.raises(ValueError, match="PerfectHashIndex"):
         lexindex.inspect(b"BMP4 from before 1.0")
     with pytest.raises(ValueError, match="truncated"):
-        lexindex.inspect(b"BCH6 cut short")
+        lexindex.inspect(b"BCH7 cut short")
     with pytest.raises(TypeError):
         lexindex.inspect(42)
     with pytest.raises(OSError):
