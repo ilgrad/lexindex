@@ -49,3 +49,17 @@ touch; ns per key):
 
 Pinned slot-only pair for the new round, Pollard rho (local/hashcollide-mum, seed 0):
   "lgywf6nnfq3in" / "sax4tnfbfpa7n"  hash_key 0x6e3065fe6c854ff2, fingerprints 0xed4f0957c6d42d03 / 0xebb975f22f342ed0
+
+In situ (local/closedbench, /usr/share/dict/words, 479 823 members probed shuffled; the harness built against
+71363e5 in a worktree = A, against the branch = B; one warm-up run, then A B B A A B B A, each a process of
+3 rounds, its minimum per mode; ns per probe):
+  A  closed.id 40.6  compact.id_unchecked 43.4  compact.id 71.2  closed.ids_of 14.0  compact.ids_of 27.5
+  B  closed.id 40.1  compact.id_unchecked 42.1  compact.id 74.0  closed.ids_of 13.2  compact.ids_of 29.1
+  B  closed.id 40.4  compact.id_unchecked 40.7  compact.id 74.1  closed.ids_of 13.8  compact.ids_of 28.8
+  A  closed.id 41.6  compact.id_unchecked 40.9  compact.id 72.1  closed.ids_of 14.2  compact.ids_of 27.8
+  A  closed.id 40.7  compact.id_unchecked 41.1  compact.id 70.4  closed.ids_of 13.2  compact.ids_of 27.9
+  B  closed.id 40.4  compact.id_unchecked 41.0  compact.id 74.3  closed.ids_of 14.8  compact.ids_of 28.7
+  B  closed.id 39.7  compact.id_unchecked 40.2  compact.id 74.7  closed.ids_of 14.8  compact.ids_of 28.0
+  A  closed.id 40.1  compact.id_unchecked 42.6  compact.id 71.8  closed.ids_of 14.2  compact.ids_of 27.4
+  means: compact.id 71.4 -> 74.3 (+2.9 ns), compact.ids_of 27.7 -> 28.7 (+1.0); the one-hash paths
+  (closed.id 40.8 -> 40.2, id_unchecked 42.0 -> 41.0) within noise.

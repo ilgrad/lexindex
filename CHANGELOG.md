@@ -22,7 +22,9 @@ All notable changes to this project are documented here. The format follows
   round had 35, the same 10⁸ keys collide nowhere, the 10⁹ set builds to all 997 504 005 of its
   keys where the old hash lost nine, and the distribution gates (avalanche, low-bit χ², slot ×
   fingerprint independence) read the same. Cost: the pair hash at 0.90–0.97× on 9–11-byte
-  keys and 0.89× on 80-byte ones, a nanosecond or two under a lookup. Magics move to **`BMP7`**
+  keys and 0.89× on 80-byte ones; in a lookup, process-alternated on the shuffled dictionary,
+  `CompactHashIndex::id` 71.4 → 74.3 ns and batched `ids_of` 27.7 → 28.7, while the paths that
+  compute one hash — `ClosedHashIndex::id`, `id_unchecked` — do not move. Magics move to **`BMP7`**
   and **`BCH7`** (`BCL1` never shipped and keeps its name); `BMP5`, `BMP6` and `BCH6` join the
   refused list with a message naming `lexindex < 1.2` and the rebuild, since a blob keyed on the
   old hash would answer wrong ids under the new one. `BIX4` and `OVL2` are untouched. Rebuilding
