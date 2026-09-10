@@ -170,8 +170,14 @@ impl Scratch {
         }
         self.bins.push(offsets);
         let mut w = self.create(&self.runs.to_string())?;
-        for &pair in run.iter() {
-            w.write_all(&pair_bytes(pair))?;
+        // Converted a slab at a time: a 16-byte write into the writer is a call per pair.
+        const SLAB: usize = 4096;
+        let mut slab = vec![0u8; SLAB * PAIR_BYTES];
+        for pairs in run.chunks(SLAB) {
+            for (rec, &pair) in slab.chunks_exact_mut(PAIR_BYTES).zip(pairs) {
+                rec.copy_from_slice(&pair_bytes(pair));
+            }
+            w.write_all(&slab[..pairs.len() * PAIR_BYTES])?;
         }
         w.flush()?;
         run.clear();

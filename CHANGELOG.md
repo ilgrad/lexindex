@@ -175,7 +175,9 @@ All notable changes to this project are documented here. The format follows
   place by the top of the hash into one part per thread and each part is sorted on its own
   thread (the parts abut, so there is no merge and no second buffer); the run merge replaces the
   heap's top in place instead of popping and pushing, takes whole records straight out of its
-  read buffer and writes a pair in one call; the fingerprint pass sends its representatives
+  read buffer and writes a pair in one call, and a run is spilled a 64 KiB slab at a time rather
+  than a pair per call (212 → 193 ms per 256 MiB run; the rest is the disk); the fingerprint
+  pass sends its representatives
   through `index_all` a thousand at a time with each fingerprint row prefetched ahead.
   Byte-identical (blob digests at 10 M and 10^8 keys before and after). At 10^8 real-word pairs
   the streamed build's own share of a 51 s run — the rest is the example's key generator — falls
