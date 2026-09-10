@@ -1,0 +1,44 @@
+In-memory CompactHashIndex::build fed the perfect hash straight from its sorted pairs (Mphf::build_from_sorted over
+the representatives) instead of extracting a hash array and staged fingerprints first. examples/peak.rs, modes
+`compact-listed` (10 M, the A/B) and `compact` (2 M, the documented widths), one fingerprint byte unless stated.
+2026-09-10 07:20-07:35, lexindex e3e910a (H) against this change (N), Ryzen 7 5800HS, 38 GB RAM, Fedora 44, editor
+open, nothing else running. Keys: `iter_sparse_sorted_keys` over /usr/share/dict/words, as in the other peak files.
+
+Byte identity first (local/blobdigest, FNV-1a 64 of the blob; `mem` = build + to_bytes, `file` = build_to_file):
+compact-mem   n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.5 s
+compact-file  n   10000000  bytes     12609301  fnv d465cd041d327dbc  4.3 s
+(the same digests as before the change: d465cd041d327dbc at 10 M); cargo test --release green (205 + 54).
+
+10 M, alternated H N N H, three rounds after a warm-up of each:
+round 1
+CompactListed n  10000000  build   841.7 ms  keys   652.8 MB ( 65.3 B/key)  peak   902.7 MB ( 90.3 B/key)  build adds   249.9 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   774.6 ms  keys   652.8 MB ( 65.3 B/key)  peak   868.1 MB ( 86.8 B/key)  build adds   215.3 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   772.9 ms  keys   652.9 MB ( 65.3 B/key)  peak   868.2 MB ( 86.8 B/key)  build adds   215.3 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   847.3 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.6 MB ( 90.3 B/key)  build adds   249.7 MB ( 25.0 B/key)  blob  1.26 B/key
+round 2
+CompactListed n  10000000  build   843.0 ms  keys   653.0 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   249.9 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   768.0 ms  keys   653.1 MB ( 65.3 B/key)  peak   868.1 MB ( 86.8 B/key)  build adds   215.0 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   775.9 ms  keys   653.0 MB ( 65.3 B/key)  peak   868.2 MB ( 86.8 B/key)  build adds   215.2 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   846.4 ms  keys   652.9 MB ( 65.3 B/key)  peak   902.5 MB ( 90.3 B/key)  build adds   249.7 MB ( 25.0 B/key)  blob  1.26 B/key
+round 3
+CompactListed n  10000000  build   845.8 ms  keys   653.0 MB ( 65.3 B/key)  peak   902.9 MB ( 90.3 B/key)  build adds   249.9 MB ( 25.0 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   777.9 ms  keys   652.9 MB ( 65.3 B/key)  peak   868.3 MB ( 86.8 B/key)  build adds   215.3 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   774.5 ms  keys   652.9 MB ( 65.3 B/key)  peak   868.3 MB ( 86.8 B/key)  build adds   215.4 MB ( 21.5 B/key)  blob  1.26 B/key
+CompactListed n  10000000  build   841.4 ms  keys   653.0 MB ( 65.3 B/key)  peak   903.0 MB ( 90.3 B/key)  build adds   250.0 MB ( 25.0 B/key)  blob  1.26 B/key
+build adds 25.0 -> 21.5 B/key (-3.5, the 8 B/key hash array and the staged fingerprints, less the chunk buffers);
+build 843 -> 774 ms (-8 %; per pair -67, -74, -75, -71, -68, -67 ms).
+
+2 M at 8 / 16 / 32 fingerprint bits, the widths the docs quote (one run each; HEAD after the A/B, new before it):
+HEAD:
+CompactHash/1 n   2000000  build   158.5 ms  keys   130.6 MB ( 65.3 B/key)  peak   178.4 MB ( 89.2 B/key)  build adds    47.9 MB ( 23.9 B/key)  blob  1.26 B/key
+CompactHash/2 n   2000000  build   159.0 ms  keys   130.6 MB ( 65.3 B/key)  peak   182.4 MB ( 91.2 B/key)  build adds    51.8 MB ( 25.9 B/key)  blob  2.26 B/key
+CompactHash/4 n   2000000  build   166.0 ms  keys   130.7 MB ( 65.3 B/key)  peak   186.6 MB ( 93.3 B/key)  build adds    55.9 MB ( 28.0 B/key)  blob  4.26 B/key
+new:
+CompactHash/1 n   2000000  build   146.7 ms  keys   130.4 MB ( 65.2 B/key)  peak   181.7 MB ( 90.9 B/key)  build adds    51.3 MB ( 25.7 B/key)  blob  1.26 B/key
+CompactHash/2 n   2000000  build   144.7 ms  keys   130.6 MB ( 65.3 B/key)  peak   181.5 MB ( 90.8 B/key)  build adds    50.9 MB ( 25.4 B/key)  blob  2.26 B/key
+CompactHash/4 n   2000000  build   154.9 ms  keys   130.5 MB ( 65.2 B/key)  peak   190.3 MB ( 95.1 B/key)  build adds    59.8 MB ( 29.9 B/key)  blob  4.26 B/key
+At 2 M the change is a wash (25.7 / 25.4 / 29.9 against 23.9 / 25.9 / 28.0): the stream feed keeps one chunk buffer
+per thread -- a chunk is 65 536 buckets, about 295 k keys, 2.4 MB -- and six of them are 7 B/key at 2 M, a fixed
+cost that is 1.9 B/key at 10 M and 0.2 at 100 M, which is where the 8 B/key it replaces was going. The documented
+2 M figures were 30.9 / 33.0 / 34.9 from 1.1; HEAD already measured 23.9 / 25.9 / 28.0 here, the morning's
+perfect-hash construction work having taken the rest.

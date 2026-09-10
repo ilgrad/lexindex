@@ -368,11 +368,11 @@ impl CompactHashIndex {
     ///
     /// The build **streams**: only a `(hash, second hash)` pair — 16 bytes — is kept per key, never
     /// the strings, so building from a lazy iterator costs the same whatever the keys weigh. Those
-    /// pairs dominate the peak but are not all of it: the perfect hash is built from a plain array
-    /// of the representatives' hashes, extracted from the pairs alongside their truncated
-    /// fingerprints. The measured high-water mark, on top of whatever holds the keys, is **30.9
-    /// bytes per key** at n = 2 M with the 8-bit default, 33.0 at 16 bits and 34.9 at 32
-    /// (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
+    /// pairs are the peak, all but the perfect hash's own construction, which is fed the
+    /// representatives straight from them, and a chunk buffer per thread, a few megabytes each.
+    /// The measured high-water mark, on top of whatever holds the keys, is **21.5 bytes per key**
+    /// at n = 10 M with the 8-bit default; at 2 M, where the buffers still show, 25.7, and 25.4 at
+    /// 16 bits, 29.9 at 32 (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
     /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
     /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys
     /// colliding in **both**
@@ -419,49 +419,46 @@ impl CompactHashIndex {
             });
         }
         // One representative per distinct hash value builds the MPH and owns the slot; the (almost
-        // always zero) same-hash leftovers get tail ids [m, n) in the side table. The second half
-        // of the build needs only the representatives' hashes and their *truncated* fingerprints,
-        // so those are extracted here — the truncated ones into a bit-packed table of the same
-        // width the index will ship — and `pairs` is dropped before the perfect hash is built. It
-        // used to stay live alongside a full 64-bit fingerprint per key, which put 24 bytes per key
-        // next to the MPH's own construction memory instead of 8 + `fingerprint_bits`/8.
-        let mut mph_hashes = Vec::with_capacity(n);
+        // always zero) same-hash leftovers get tail ids [m, n) in the side table. The perfect
+        // hash is fed the representatives straight from the sorted pairs, a chunk at a time, as
+        // the file build feeds it from its merged file — the same table, byte for byte — so the
+        // pairs are the only thing per key beside its construction: no list of the
+        // representatives' hashes, no staged fingerprints.
         let mut side: Vec<(u64, u64, u32)> = Vec::new();
-        let mut rep_fps = vec![0u8; fp_table_len(n, fingerprint_bits)?];
+        let mut m = 0usize;
         for run in pairs.chunk_by(|a, b| a.0 == b.0) {
-            write_fp(
-                &mut rep_fps,
-                mph_hashes.len(),
-                fingerprint_bits,
-                run[0].1 & fp_mask(fingerprint_bits),
-            );
-            mph_hashes.push(run[0].0);
+            m += 1;
             for &(h, fp) in &run[1..] {
                 side.push((h, fp, 0)); // ids assigned once m is known
             }
         }
-        let m = mph_hashes.len();
         for (j, e) in side.iter_mut().enumerate() {
             e.2 = (m + j) as u32;
         }
-        drop(pairs);
-        let mph = Mphf::build(&mph_hashes)?;
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let mut reps = pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0);
+        let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
         let mut fps = vec![0u8; fp_table_len(m, fingerprint_bits)?];
         // One bit per slot, not one byte: this only has to catch a construction that was not
         // minimal/perfect, and at 100 M keys a `Vec<bool>` would be 100 MB of the peak.
         let mut seen = vec![0u64; m.div_ceil(64)];
-        for (i, h) in mph_hashes.iter().enumerate() {
-            let slot = mph.index(*h) as usize;
+        for run in pairs.chunk_by(|a, b| a.0 == b.0) {
+            let (h, fp) = run[0];
+            let slot = mph.index(h) as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
                 return Err(IndexError::Format(
                     "compact-hash: construction was not minimal/perfect",
                 ));
             }
             seen[slot / 64] |= 1 << (slot % 64);
-            let fp = read_fp(&rep_fps, i, fingerprint_bits)
-                .expect("the representative table was sized for every representative");
-            write_fp(&mut fps, slot, fingerprint_bits, fp);
+            write_fp(
+                &mut fps,
+                slot,
+                fingerprint_bits,
+                fp & fp_mask(fingerprint_bits),
+            );
         }
+        drop(pairs);
         Ok(Self {
             mph: Some(mph),
             fps: SharedBytes::from_owned(fps),

@@ -74,24 +74,26 @@ impl ClosedHashIndex {
             });
         }
         // One representative per distinct hash value builds the MPH and owns the slot; the (almost
-        // always zero) same-hash leftovers get tail ids [m, n) in the side table.
-        let mut hashes = Vec::with_capacity(n);
+        // always zero) same-hash leftovers get tail ids [m, n) in the side table. The perfect
+        // hash is fed the representatives straight from the sorted pairs, as the compact index
+        // feeds it, so nothing per key is held beside the pairs and its construction.
         let mut side: Vec<(u64, u64, u32)> = Vec::new();
+        let mut m = 0usize;
         for run in pairs.chunk_by(|a, b| a.0 == b.0) {
-            hashes.push(run[0].0);
+            m += 1;
             for &(h, second) in &run[1..] {
                 side.push((h, second, 0)); // ids assigned once m is known
             }
         }
-        let m = hashes.len();
         for (j, e) in side.iter_mut().enumerate() {
             e.2 = (m + j) as u32;
         }
-        drop(pairs);
-        let mph = Mphf::build(&hashes)?;
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let mut reps = pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0);
+        let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
         // One bit per slot: this only has to catch a construction that was not minimal/perfect.
         let mut seen = vec![0u64; m.div_ceil(64)];
-        for &h in &hashes {
+        for h in pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0) {
             let slot = mph.index(h) as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
                 return Err(IndexError::Format(

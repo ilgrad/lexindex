@@ -130,6 +130,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The perfect hash's construction holds a level's pieces only while the gaps beside them are
+  placed**: a chunk's seeds go into the level table as it is placed, its occupancy map into the
+  level's once both neighbouring gaps have read it, and the keys it bumped are listed in chunk
+  order as chunks finish, instead of every piece staying alive until a merge that copied all
+  three again; the next level groups by level hash alone and keeps its input by `retain`, the
+  holes are yielded into their encoder rather than listed, and a table on its way to a file is
+  written section by section instead of through a `to_bytes` copy. Byte-identical (golden
+  fixtures, and blob digests at 10 M and 10^8 keys before and after). The streamed
+  `CompactHashIndex` build at 10^9 real-word pairs peaks at **942 MB, down from 1 717** (0.9 bytes
+  per key: 0.6 after the first level, 0.87 at the second level's grouping), in 587 s against 604;
+  the in-memory build's time is unchanged. `bench/results/peak-compact-mem-2026-09-10-arz-71363e5.txt`.
+- **`CompactHashIndex::build` and `ClosedHashIndex::build` feed the perfect hash straight from
+  the sorted pairs**, a chunk at a time as the file build does, rather than extracting the
+  representatives' hashes and staged fingerprints first. Same blob. At 10 M real-word pairs the
+  build adds **21.5 bytes per key** above the key list, down from 25.0, and takes 774 ms against
+  843 (alternated, three rounds); at 2 M the chunk buffers the feed keeps, one per thread, are
+  still visible and the peak is a wash (25.7 / 25.4 / 29.9 bytes per key at 8 / 16 / 32
+  fingerprint bits against 23.9 / 25.9 / 28.0). `bench/results/peak-compact-inmem-2026-09-10-arz-e3e910a.txt`.
+
 - **An arena past 4 GiB keeps its blocked offsets.** The `u32` block base that could not reach
   the data past 4 GiB widens to `u64` (arena tags `0x31` / `0x32`, bit `0x20`) instead of the
   layout falling back to the flat `u64` table: 1.56 bytes per key of offsets instead of 8 -- 0.78 GB

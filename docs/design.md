@@ -69,14 +69,16 @@ plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.76 
 not taken on trust from a blob that lost bytes in transit — and a 64-bit streaming hash of the whole
 payload, verified on owned loads. The build **streams**: one pass keeps a `(hash, second hash)` pair
 — 16 bytes — per key and never the strings, so build memory does not grow with key length. The pairs
-dominate the peak without being all of it: the perfect hash is built from a plain array of the
-representatives' hashes, lifted out of the pairs together with their truncated fingerprints before
-the pairs are dropped. Measured on 2 M real-word bigrams (`cargo run --release --example peak --
-compact`), the high-water mark on top of whatever holds the keys is **30.9 bytes per key** at the
-8-bit default, 33.0 at 16 bits and 34.9 at 32 — the width shows up in the peak because the
-fingerprints are staged truncated, so a wider one is wider everywhere. (`peak.rs` resets `VmHWM`
-after the key list is built; without that reset the transient of loading the corpus stays in the
-mark and the build appears 11 MB cheaper than it is, which is how the 0.10.0 figures were taken.)
+are the peak, all but the perfect hash's own construction — fed the representatives straight from
+the sorted pairs, a chunk at a time, exactly as the file build feeds it from its merged file, so
+the two give the same table — and one chunk buffer per thread, a few megabytes each, which is a
+fixed cost. Measured on real-word bigrams (`cargo run --release --example peak -- compact-listed
+10000000`), the high-water mark on top of whatever holds the keys is **21.5 bytes per key** at 10 M
+with the 8-bit default; at 2 M, where the buffers still show, 25.7, and 25.4 at 16 bits, 29.9 at
+32 — the width shows up because the fingerprint table is allocated before the pairs go.
+(`peak.rs` resets `VmHWM` after the key list is built; without that reset the transient of loading
+the corpus stays in the mark and the build appears 11 MB cheaper than it is, which is how the
+0.10.0 figures were taken.)
 Keys that collide in the 64-bit hash get tail ids in a side table (see
 `PerfectHashIndex` below) holding the **full 64-bit second hash** — not the table's truncated width —
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
