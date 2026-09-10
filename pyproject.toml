@@ -42,6 +42,7 @@ Repository = "https://github.com/ilgrad/lexindex"
 Documentation = "https://ilgrad.github.io/lexindex/"
 Issues = "https://github.com/ilgrad/lexindex/issues"
 Changelog = "https://github.com/ilgrad/lexindex/blob/main/CHANGELOG.md"
+Sponsor = "https://github.com/sponsors/ilgrad"
 
 [tool.maturin]
 features = ["python"]

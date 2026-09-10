@@ -64,3 +64,6 @@ crate.
   dictionaries, and zero-copy memory-mapping work, and the serialised blob layout.
 - **[API reference](api.md)** — the typed public surface.
 - **[Changelog](changelog.md)**.
+- **[Sponsor](https://github.com/sponsors/ilgrad)** — if lexindex saves memory or latency in a system
+  you run; corporate sponsorship funds compatibility, benchmarking, security hardening and
+  large-scale performance work.
