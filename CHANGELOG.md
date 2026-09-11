@@ -6,7 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`DictIndex::build_sorted` and `build_sorted_with_block`**, for keys already in ascending byte
+  order — a sorted file, a database cursor, the output of an external sort. Adjacent duplicates are
+  dropped exactly as `build` drops them after sorting, so for the same key set the two produce
+  byte-identical blobs. It is not the faster of the two and does not pretend to be: `build`'s sort is
+  pattern-defeating, recognises an ascending run and returns almost at once (31.9 against 32.1 ms
+  over 479 823 words). What it buys is the check — an unsorted input returns an error instead of an
+  index whose every binary search is wrong, which is what `StringIndex::build_sorted` has given since
+  0.11 and `DictIndex` did not.
+
 ### Changed
+
+- **Building a `DictIndex` no longer copies every key.** `build_with_block` collected
+  `items.into_iter().map(|s| s.as_ref().to_owned())`, one owned `String` per key, before sorting.
+  Sorting the caller's items through `AsRef` instead costs nothing and removes the copy, because the
+  keys are copied into the blocks anyway. Measured with a counting allocator over 479 823 words, from
+  a `&[String]` — which is what the Python constructor and every `build(&keys)` call pass: the build
+  allocates **42.6 → 17.3 bytes per key** and takes **54.0 → 32.1 ms**. From an owned `Vec<String>`
+  moved in, the allocation was never doubled (`Vec::into_iter().map(…).collect()` reuses the buffer
+  in place and frees each source key as it copies) and the time goes 47.6 → 39.8 ms.
 
 - **`marisa-trie` is benchmarked as a curve, not a point, and `rsmarisa` joins the table.** Every
   marisa number this project published came from the default configuration, while marisa's own
