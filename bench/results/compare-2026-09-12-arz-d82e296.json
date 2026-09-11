@@ -1,0 +1,390 @@
+{
+  "table": "compare",
+  "environment": {
+    "date": "2026-09-12",
+    "host": "arz",
+    "commit": "d82e296",
+    "cpu": "AMD Ryzen 7 5800HS with Radeon Graphics",
+    "cpus": 16,
+    "kernel": "Linux 7.2.4-200.fc44.x86_64",
+    "python": "3.14.7",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "lexindex": "2.1.0",
+    "loadavg_start": [
+      1.71,
+      1.95,
+      1.61
+    ],
+    "loadavg_end": [
+      1.73,
+      1.89,
+      1.64
+    ]
+  },
+  "keys": {
+    "source": "/usr/share/dict/words",
+    "n": 479823,
+    "raw_bytes_per_key": 9.323717287416402
+  },
+  "false_positive_rate": [
+    {
+      "fingerprint_bits": 8,
+      "probes": 100000,
+      "false_positives": 406,
+      "rate": 0.00406,
+      "theory": 0.00390625
+    },
+    {
+      "fingerprint_bits": 16,
+      "probes": 100000,
+      "false_positives": 3,
+      "rate": 3e-05,
+      "theory": 1.52587890625e-05
+    }
+  ],
+  "competitors": {
+    "marisa-trie": "1.4.1",
+    "dawg2": "0.13.3",
+    "datrie": "0.8.3"
+  },
+  "cells": [
+    {
+      "library": "lexindex ClosedHashIndex",
+      "build_ms": {
+        "min": 46.31474000052549,
+        "median": 47.161260998109356,
+        "reps": 5,
+        "samples": [
+          47.161260998109356,
+          47.12367000320228,
+          47.351868997793645,
+          50.1281159959035,
+          46.31474000052549
+        ]
+      },
+      "serialised_bytes": 126186,
+      "bytes_per_key": 0.26298447552535,
+      "capabilities": {
+        "prefix": 0,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 0,
+        "serialise": 1,
+        "mmap": 0
+      }
+    },
+    {
+      "library": "lexindex CompactHashIndex (fp=4 bits)",
+      "build_ms": {
+        "min": 48.727704997872934,
+        "median": 49.91925400099717,
+        "reps": 5,
+        "samples": [
+          49.06448700057808,
+          52.838349001831375,
+          50.5085999975563,
+          48.727704997872934,
+          49.91925400099717
+        ]
+      },
+      "serialised_bytes": 366102,
+      "bytes_per_key": 0.7629938539836565,
+      "capabilities": {
+        "prefix": 0,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 0,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "lexindex CompactHashIndex (fp=1)",
+      "build_ms": {
+        "min": 46.86711800604826,
+        "median": 47.48123200261034,
+        "reps": 5,
+        "samples": [
+          47.60440300015034,
+          47.48123200261034,
+          46.86711800604826,
+          48.94855900056427,
+          47.09688999719219
+        ]
+      },
+      "serialised_bytes": 606013,
+      "bytes_per_key": 1.2629928119327336,
+      "capabilities": {
+        "prefix": 0,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 0,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "lexindex CompactHashIndex (fp=2)",
+      "build_ms": {
+        "min": 47.24573900602991,
+        "median": 48.60558499785839,
+        "reps": 5,
+        "samples": [
+          48.60558499785839,
+          50.51769800047623,
+          48.027910001110286,
+          49.121083997306414,
+          47.24573900602991
+        ]
+      },
+      "serialised_bytes": 1085836,
+      "bytes_per_key": 2.2629928119327336,
+      "capabilities": {
+        "prefix": 0,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 0,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "lexindex DictIndex (128 per block)",
+      "build_ms": {
+        "min": 225.6057359991246,
+        "median": 229.25854000641266,
+        "reps": 5,
+        "samples": [
+          225.6057359991246,
+          228.71219399530673,
+          229.25854000641266,
+          232.46413400192978,
+          232.8265559990541
+        ]
+      },
+      "serialised_bytes": 1388801,
+      "bytes_per_key": 2.894402727672496,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 1,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "marisa-trie (4 tries, tiny cache)",
+      "build_ms": {
+        "min": 278.90505099639995,
+        "median": 280.8441649976885,
+        "reps": 5,
+        "samples": [
+          279.43543800211046,
+          281.5884840019862,
+          280.8441649976885,
+          282.4673549985164,
+          278.90505099639995
+        ]
+      },
+      "serialised_bytes": 1418040,
+      "bytes_per_key": 2.9553397815444447,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "marisa-trie (default)",
+      "build_ms": {
+        "min": 278.97470199968666,
+        "median": 283.1097230009618,
+        "reps": 5,
+        "samples": [
+          279.24424900265876,
+          283.4835350004141,
+          284.1228960023727,
+          283.1097230009618,
+          278.97470199968666
+        ]
+      },
+      "serialised_bytes": 1429144,
+      "bytes_per_key": 2.9784816484411962,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "marisa-trie (huge cache)",
+      "build_ms": {
+        "min": 277.97588600515155,
+        "median": 282.30072199949063,
+        "reps": 5,
+        "samples": [
+          277.97588600515155,
+          282.30072199949063,
+          282.83598800044274,
+          286.33037399413297,
+          281.48776500165695
+        ]
+      },
+      "serialised_bytes": 1471288,
+      "bytes_per_key": 3.0663140366343424,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "lexindex DictIndex (32 per block, default)",
+      "build_ms": {
+        "min": 227.55640200193739,
+        "median": 228.6730509949848,
+        "reps": 5,
+        "samples": [
+          228.6730509949848,
+          231.1277330009034,
+          227.55640200193739,
+          231.55345300619956,
+          227.72326600534143
+        ]
+      },
+      "serialised_bytes": 1690011,
+      "bytes_per_key": 3.522155044672723,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 1,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "lexindex StringIndex",
+      "build_ms": {
+        "min": 335.71589500206755,
+        "median": 339.16340300493175,
+        "reps": 5,
+        "samples": [
+          335.71589500206755,
+          336.5194150028401,
+          342.8940439989674,
+          339.16340300493175,
+          343.6585500021465
+        ]
+      },
+      "serialised_bytes": 2856332,
+      "bytes_per_key": 5.9528867936718335,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 1,
+        "fuzzy": 1,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    },
+    {
+      "library": "DAWG (dawg2)",
+      "build_ms": {
+        "min": 1126.257734002138,
+        "median": 1130.4219700032263,
+        "reps": 5,
+        "samples": [
+          1126.6275500020129,
+          1132.3593000051915,
+          1132.7684389980277,
+          1126.257734002138,
+          1130.4219700032263
+        ]
+      },
+      "serialised_bytes": 11496968,
+      "bytes_per_key": 23.96085223092682,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 0
+      }
+    },
+    {
+      "library": "datrie",
+      "build_ms": {
+        "min": 20714.375707000727,
+        "median": 20739.97394899925,
+        "reps": 5,
+        "samples": [
+          20725.443715004076,
+          20783.923305003555,
+          20749.41729400598,
+          20714.375707000727,
+          20739.97394899925
+        ]
+      },
+      "serialised_bytes": 14829363,
+      "bytes_per_key": 30.90590280165811,
+      "capabilities": {
+        "prefix": 1,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 0,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 0
+      }
+    },
+    {
+      "library": "lexindex PerfectHashIndex",
+      "build_ms": {
+        "min": 232.16434100322658,
+        "median": 234.73645400372334,
+        "reps": 5,
+        "samples": [
+          232.16434100322658,
+          234.84188199654454,
+          233.59853500005556,
+          234.80678600026295,
+          234.73645400372334
+        ]
+      },
+      "serialised_bytes": 5229698,
+      "bytes_per_key": 10.899223255242037,
+      "capabilities": {
+        "prefix": 0,
+        "rangeq": 0,
+        "fuzzy": 0,
+        "reverse": 1,
+        "exact": 1,
+        "serialise": 1,
+        "mmap": 1
+      }
+    }
+  ]
+}

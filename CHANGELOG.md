@@ -4,6 +4,66 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`marisa-trie` is benchmarked as a curve, not a point, and `rsmarisa` joins the table.** Every
+  marisa number this project published came from the default configuration, while marisa's own
+  documentation says the right setting depends on the data — an open invitation to the objection
+  that the baseline was untuned. Measured over the whole space on the same words: `num_tries`
+  1/2/3/4/5/8/16/32 gives 3.380/2.997/2.978/2.977/2.977/2.980/2.986/2.998, flat from three and worse
+  past eight; `cache_size` TINY…HUGE gives 2.957/2.964/2.978/3.008/3.066; `order` and `binary` do
+  not move it. Its best is **2.955**, so `DictIndex` at 128 per block leads by **2.2 %**, not the
+  3.0 % against the default, and the comparison tables carry three marisa rows.
+
+  `rsmarisa` — a pure-Rust port of marisa-trie, BSD-2-Clause, first published 2026-01-26 — is in the
+  Rust table for the first time. `docs/benchmarks.md` had said no succinct LOUDS trie existed in Rust
+  to depend on and rested a "smallest pure-Rust ordered index" claim on it; **both were wrong**, and
+  the second was wrong about this crate as well, since `DictIndex` shipped at 3.52 B/key in 2.0 and
+  was never added to that table. Measured: `DictIndex` at 128 per block **dominates `rsmarisa` at its
+  most compact setting outright** — 2.894 B/key against 3.003, 435 ns against 445 on members, 442
+  against 473 on misses, and 38 ms against 174 to build — while at 32 per block it is the fastest
+  structure there (323 ns) and larger than either `rsmarisa` setting. A frontier, not a crown.
+
+- **The hash quality battery runs in CI.** It was `#[ignore]`d behind `bench-mphf` and CI only ran
+  clippy on that feature, so the battery compiled and never executed and the committed artifact was
+  a hand-run. It is a weekly job now. Bit independence covered the slot hash at one key length while
+  avalanche covered both hashes at five, and the notes claimed the wider scope for both; it now runs
+  both hashes over 8/16/24/80-byte keys, sampling at most 128 input bits per pair so the cost stays
+  flat in key length. The cell count goes 346 112 → 1 894 400, so the bound moves 6.0 → 6.5 (PARI/GP:
+  a family-wise 10⁻³ over that many wants 6.211; 6.5 leaves 1.5 × 10⁻⁴). Worst observed: avalanche
+  4.49 unchanged, bit independence 4.23 → 4.54 over seven times the cells.
+
+- **The queries 2.1 added are fuzzed, and `BDX1` is checked on a big-endian and a 32-bit target.**
+  The fuzz shim asked for `id`, `lower_bound`, `key` and a walk; `prefix_id_range`, `prefix_count`,
+  `prefix`, `range`, `range_count`, `successor`, `predecessor` and `iter_after` were untouched by any
+  target. All of them are held to bounds on malformed input now, and on a blob that passed every
+  check the whole ordered surface is cross-checked against a linear walk. The weekly Miri jobs gained
+  `dict_index::`: the format stores each block head's first eight bytes as a *big-endian* word inside
+  an otherwise little-endian blob, which is exactly what the s390x job exists to catch, and it had
+  never run there. Both targets pass — coverage for what ships, not a fix.
+
+### Fixed
+
+- **Documentation claims a reader could have checked against the table beside them.** "`StringIndex`
+  is the only structure that answers fuzzy *and range* queries at all" — `DictIndex` has answered
+  range and prefix since 2.1, and only fuzzy and subsequence need the automaton; the capability
+  matrix said it structurally too, merging prefix into one row with fuzzy so `DictIndex` read as
+  having no prefix four lines above the paragraph saying it does. "`marisa-trie` remains the pick for
+  exact membership and ordering and the smallest such index" — the table fifteen lines above it
+  disagrees. `SECURITY.md` counted seven `unsafe fn`s and nine `unsafe` blocks; it is nine and
+  eleven, "on every index" was never right since `ClosedHashIndex` has nothing to map, and the fuzz
+  inventory listed eight targets where there are nine. And nothing said why `Overlay` has no
+  `DictIndex` or `ClosedHashIndex` base, which matters now that the smallest row in the table is the
+  one that cannot take an edit: an addition takes the id after the base's last, which is not a rank,
+  and a closed vocabulary has no membership to ask.
+
+- **The benchmark artifacts behind the tables are taken on a clean tree.** The one the README cited
+  recorded `commit: 00857e2-dirty` and `lexindex: 2.0.0` while backing a 2.1.0 table, the hash
+  battery's was `c597099-dirty`, and `docs/benchmarks.md` pointed at an artifact from 2026-09-09 that
+  predated the rows above it. One run, one file, both pages citing it.
+
 ## [2.1.0] — 2026-09-11
 
 ### Added

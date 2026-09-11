@@ -1,0 +1,44 @@
+# local/rsmarisacmp (throwaway crate; rsmarisa is not a lexindex dependency)
+# lexindex 2.1.0 at d82e296, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# Why this exists: docs/benchmarks.md said no succinct LOUDS trie exists in Rust to depend on,
+# and rested a 'smallest pure-Rust ordered index' claim on it. rsmarisa -- a pure-Rust port of
+# marisa-trie, BSD-2-Clause, first published 2026-01-26 -- had existed for eight months. The
+# claim was also already wrong about this crate's own DictIndex, which shipped at 3.52 B/key in
+# 2.0 and was never added to that table.
+#
+# Size = serialised bytes / keys. rsmarisa's io_size() is asserted equal to the file save()
+# writes, so it is the same definition the Python tables use. Latency: every key as a member and
+# every key with a digit appended as a miss, shuffled with a fixed seed, seven rounds alternating
+# A-B-C-D / D-C-B-A, first two discarded, minimum reported. NOT a quiet machine -- a workstation
+# with an editor, rust-analyzer and a browser open; the load is recorded at both ends. Three runs
+# at loads 1.2, 1.3 and 2.3 gave identical sizes and latencies within 2 %.
+
+load before: 2.32 1.57 1.47 1/1076 234260
+corpus 479823 keys, raw 9.324 B/key
+
+structure                                  B/key   build ms
+rsmarisa (3 tries, Normal = default)       3.168        202
+rsmarisa (4 tries, Tiny = smallest)        3.003        174
+lexindex DictIndex block 32                3.522         39
+lexindex DictIndex block 128               2.894         38
+
+point lookup (ns/key)                        member         miss
+rsmarisa (3 tries, Normal = default)          425.7        449.9
+rsmarisa (4 tries, Tiny = smallest)           444.9        473.3
+lexindex DictIndex block 32                   323.2        335.0
+lexindex DictIndex block 128                  435.3        442.0
+load after:  2.26 1.59 1.48 1/1076 234278
+
+Reading it:
+
+- DictIndex at 128 per block strictly dominates rsmarisa at its most compact setting: smaller
+  (2.894 against 3.003), faster on members (435.3 ns against 444.9) and on misses (442.0 against
+  473.3), and 4.6x faster to build (38 ms against 174).
+- Against rsmarisa's default it is smaller and builds faster, and looks up 10 ns slower.
+- DictIndex at 32 per block is the fastest structure here -- 323.2 ns against 425.7 -- at 3.522
+  B/key, larger than either rsmarisa setting. So the two are a frontier, not a domination: the
+  block size picks the axis.
+- The Rust port is larger than the C++ original on this corpus: 3.168 against 2.978 at the default
+  (+6.4 %), 3.003 against 2.955 at the smallest (+1.6 %). The C++ sweep is in
+  local/marisa-tuning-2026-09-12.txt and three of its points are rows in bench/compare.py.

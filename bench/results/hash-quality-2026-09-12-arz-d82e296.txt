@@ -1,0 +1,39 @@
+# cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
+# lexindex 2.1.0 at d82e296, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# Every number is a standard-normal z (chi-square through Wilson-Hilferty). The battery runs
+# 88 064 avalanche cells, 1 806 336 bit-independence cells and 40 tables; a family-wise
+# false-alarm rate of 1e-3 over 1 894 400 cells wants |z| < 6.211, so the bound is 6.5 and the
+# realised rate is 1.5e-4. The largest |z| should sit near sqrt(2 ln N) ~ 5.4, and sits below it.
+#
+# Against the 2026-09-11 run: avalanche is unchanged at 4.49, and bit independence went 4.23 ->
+# 4.54 because it now covers both hashes over four key lengths instead of the slot hash over
+# one -- seven times the cells, so a higher maximum is the expected outcome, not a regression.
+
+lexindex hash quality — bound |z| < 6.5
+
+corpus source: /usr/share/dict/words plus generated families
+
+avalanche (strict, 8192 keys per cell, 5 lengths, both hashes)
+  worst |z|   4.49   fingerprint len 24 in-bit 78 out-bit 29
+
+bit independence (2048 keys, lengths 8/16/24/80, both hashes, ≤128 input bits each)
+  worst |z|   4.54   slot len 24 in-bit 167 out-bits (21,52)
+
+two-byte differential (24-byte keys, 2048 bases per combo)
+  17664 combos, worst double collision 0/2048   none
+
+per corpus (n = 100 000 where the family allows it)
+  family           n   coll   z top12   z low12     z fp8   z joint
+  words       100000      0      1.41      2.38      0.75      1.24
+  bigrams     100000      0     -1.06      1.15      2.18     -0.52
+  prefixed    100000      0      0.44     -0.29     -0.66     -0.60
+  suffixed    100000      0      0.82     -0.45     -1.52      0.88
+  numeric     100000      0     -0.48     -1.64      1.55      0.25
+  decimal     100000      0      0.89     -1.13     -0.75      1.12
+  uuid        100000      0      1.16      1.97      0.53      1.27
+  cyrillic    100000      0      0.83      2.31     -1.04      0.78
+  dna         100000      0     -0.82     -0.02     -1.03     -1.13
+  paths       100000      0      0.68      1.03     -0.19      0.12
+
+all cells within the bound

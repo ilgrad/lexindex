@@ -18,7 +18,9 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
 | **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
-| `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
+| `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 |
+| `marisa-trie` (default) | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
+| `marisa-trie` (huge cache) | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 |
 | **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
@@ -26,9 +28,11 @@ better; the capability columns are why you would still pick a larger one.
 | `datrie` | ✅ | — | — | — | ✅ | — | 30.92 |
 
 <sub>Raw numbers and the machine that produced them:
-[`bench/results/compare-2026-09-09-arz-0c637f6.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-09-arz-0c637f6.json)
+[`bench/results/compare-2026-09-12-arz-d82e296.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-12-arz-d82e296.json)
 — every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
-load average at both ends of the run.</sub>
+load average at both ends of the run. `marisa-trie` appears three times because it is a curve: its
+own documentation says the right configuration depends on the data, so the table carries its
+compact end, its default and its fast end rather than one point somebody could call untuned.</sub>
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
@@ -49,32 +53,46 @@ across corpora and marisa carries tuning parameters of its own.
 
 ## Against other Rust string indexes
 
-`marisa-trie` is C++. Of the ordered Rust string indexes benchmarked here, **none is smaller than
-`StringIndex`** — the double-array tries trade space for lookup speed, and no succinct LOUDS trie
-(marisa / XCDAT / CoCo-trie-style) exists in Rust to depend on. So `StringIndex` at 5.95 B/key is the
-**smallest of the pure-Rust ordered indexes measured below** — second only to a C++ library, and the
-only one of them that does fuzzy and range. The comparison is against the four crates in the table,
-not against all of crates.io, which no benchmark can settle. Same real words:
+`marisa-trie` is C++, but since 2026-01 it has a pure-Rust port: [`rsmarisa`](https://crates.io/crates/rsmarisa),
+BSD-2-Clause, with the same operations — exact lookup, reverse lookup, common-prefix and predictive
+search, mmap, and binary compatibility with the C++ format. **This page used to say no succinct
+LOUDS trie existed in Rust to depend on, and rested a "smallest pure-Rust ordered index" claim on
+it. Both were wrong**, and the second was wrong about this crate too: `DictIndex` shipped at
+3.52 B/key in 2.0 and was never added to the table below. Measured rather than argued, same real
+words, one process:
 
-| Rust structure | bytes/key | vs marisa |
-|---|---:|---:|
-| `marisa-trie` (C++, reference) | 2.98 | 1.0× |
-| **lexindex `StringIndex`** (ordered + fuzzy + reverse) | **5.95** | 2.0× |
-| `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.6× |
-| `yada` (double-array) | 15.98 | 5.4× |
-| `crawdad::MpTrie` (minimal-prefix) | 19.63 | 6.6× |
-| `crawdad::Trie` (double-array) | 26.22 | 8.8× |
+| Rust structure | bytes/key | vs C++ marisa | `id` member | build |
+|---|---:|---:|---:|---:|
+| **lexindex `DictIndex`** (128 per block) | **2.894** | 0.97× | 435 ns | 38 ms |
+| `marisa-trie` (C++ reference, default) | 2.978 | 1.00× | — | — |
+| `rsmarisa` (4 tries, tiny cache — its smallest) | 3.003 | 1.01× | 445 ns | 174 ms |
+| `rsmarisa` 0.4.2 (default) | 3.168 | 1.06× | 426 ns | 202 ms |
+| **lexindex `DictIndex`** (32 per block, default) | 3.522 | 1.18× | **323 ns** | **39 ms** |
+| `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.63× | — | — |
+| **lexindex `StringIndex`** (ordered + fuzzy + reverse) | 5.95 | 2.00× | — | — |
+| `yada` (double-array) | 15.98 | 5.4× | — | — |
+| `crawdad::MpTrie` (minimal-prefix) | 19.63 | 6.6× | — | — |
+| `crawdad::Trie` (double-array) | 26.22 | 8.8× | — | — |
 
-<sub>Measured with `crawdad` 0.4, `yada` 0.5, `fst` 0.4 over the same word list; size = serialised bytes
-(`serialize_to_vec().len()`) ÷ key count. Not lexindex dependencies — reproduce in a throwaway crate.</sub>
+<sub>`rsmarisa` and `DictIndex` from
+[`bench/results/rsmarisa-2026-09-12-arz-d82e296.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-d82e296.txt)
+— one process, every key probed as a member and with a digit appended as a miss, shuffled with a
+fixed seed, seven rounds alternating in both directions, minimum of the last five. The other rows
+are the older sweep with `crawdad` 0.4, `yada` 0.5, `fst` 0.4; size is serialised bytes ÷ keys
+throughout, and `rsmarisa`'s `io_size()` is asserted equal to the file it saves. None of them is a
+lexindex dependency — the harness is a throwaway crate.</sub>
 
-Reaching `marisa`'s 2.98 *as a trie* needs its recursive succinct label nesting, which the
-byte-oriented `fst` automaton is ~1.6× away from by construction (even a bare `fst::Set`, which
-stores no ids at all, is 4.85) — so that route is closed, and `StringIndex` is not the index to put
-against marisa on bytes. `DictIndex` gets under it by not being a trie: front-coded blocks under one
-FSST table store 2.89 B/key at 128 keys per block, measured in the block-size table further down,
-and pay for it in reverse-lookup latency. `CompactHashIndex` takes the size crown the third way, by
-dropping the keys entirely.
+So the honest statement is a frontier rather than a crown. **`DictIndex` at 128 per block dominates
+`rsmarisa` at its most compact setting outright** — smaller, faster on members and misses, and 4.6×
+faster to build — and at 32 per block it is the fastest structure here at 323 ns, while being larger
+than either `rsmarisa` setting. The block size picks the axis; neither choice is beaten on both.
+
+Two further things the table settles. The Rust port is *larger* than the C++ original on this corpus
+(+6.4 % at the default, +1.6 % at its smallest), so a pure-Rust project pays for the port. And
+reaching `marisa`'s 2.98 *as a trie* remains closed to the `fst` route: the byte-oriented automaton
+is ~1.6× away by construction, and even a bare `fst::Set` storing no ids at all is 4.85. `DictIndex`
+gets under marisa by not being a trie — front-coded blocks under one FSST table — and
+`CompactHashIndex` takes the size crown the third way, by dropping the keys entirely.
 
 ## Which one to pick, and how much the corpus decides it
 
@@ -477,7 +495,7 @@ shared prefix (`https://example.com/a/b/…`), a shared suffix (`…@mail.exampl
 numeric tail (`key_000000001`), plain decimal integers, UUIDs, Cyrillic, DNA, and filesystem paths.
 
 <sub>Committed output:
-[`bench/results/hash-quality-2026-09-11-arz-c597099-dirty.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-11-arz-c597099-dirty.txt).
+[`bench/results/hash-quality-2026-09-12-arz-d82e296.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-12-arz-d82e296.txt).
 The two hashes are deterministic and unseeded, so none of this is a statement about an adversary
 who picks the queries — see `SECURITY.md`.</sub>
 
