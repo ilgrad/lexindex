@@ -18,6 +18,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
+use crate::extsort::{RUN_BYTES, Run, Runs};
 use crate::fsst::{self, ESCAPE, Table};
 use std::cmp::Ordering;
 
@@ -266,6 +267,263 @@ impl DictIndex {
         }
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
         Self::from_sorted(&keys, block)
+    }
+
+    /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
+    /// keys, in any order, are sorted in runs that spill beside the output and merged back, and the
+    /// block data is encoded into the file as it is produced. Returns the number of distinct keys
+    /// written, since a caller streaming keys it does not retain has no other way to learn how many
+    /// were distinct. Blocks of 32 keys.
+    ///
+    /// The bytes are exactly what [`build`](Self::build) would produce for the same key set, through
+    /// the same atomic replace [`save`](Self::save) uses — a crash leaves either the previous file
+    /// or nothing, never a half-written index.
+    ///
+    /// **What is still held.** Not the corpus, and not the block data, which is the bulk of the
+    /// index. The block heads and the three per-block arrays are, at roughly
+    /// `(mean head length + 20) / block` bytes per key — under 1 at 32 keys per block on English
+    /// words, a quarter of that at 128. An index whose heads alone pass 4 GiB is refused with an
+    /// error naming the larger block that would fit it.
+    ///
+    /// **Transient disk**: one run file per `RUN_BYTES` of keys, in a directory beside the output,
+    /// removed however the build ends. **Three passes** over the sorted keys: the symbol table is
+    /// trained on suffixes from blocks spread over the index, that spread is a function of the key
+    /// count, and the key count is what the first pass establishes. Where the corpus needed more
+    /// than one run, each pass is a fresh merge of them.
+    pub fn build_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_with_block(items, path, DEFAULT_BLOCK)
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with `block` keys per block, `1..=1024`; the block is
+    /// the same trade-off [`build_with_block`](Self::build_with_block) documents, and it decides
+    /// what this holds as well as what it stores.
+    pub fn build_to_file_with_block<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        block: usize,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(items, path, block, || Ok(()))
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked once the
+    /// input has ended — before the merge, so a source that failed does not pay for one — and again
+    /// **inside** the atomic write, before the rename that publishes the file.
+    ///
+    /// It exists for a source that cannot report failure through its `Iterator`: the Python binding
+    /// adapts an arbitrary iterable, and an iterable that raises halfway simply stops. Without this
+    /// hook the builder would finish a truncated index and rename it over whatever was at `path`.
+    pub(crate) fn build_to_file_checked<I, S, C>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        block: usize,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        Self::build_to_file_runs(items, path.as_ref(), block, check, RUN_BYTES)
+    }
+
+    /// [`build_to_file_checked`](Self::build_to_file_checked) with the run budget exposed, so a
+    /// test can force the spill-and-merge path without a corpus of a quarter of a gigabyte.
+    fn build_to_file_runs<I, S, C>(
+        items: I,
+        path: &std::path::Path,
+        block: usize,
+        mut check: C,
+        run_bytes: usize,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        if !(1..=MAX_BLOCK).contains(&block) {
+            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+        }
+        let mut run = Run::with_budget(run_bytes);
+        let mut runs = Runs::beside(path);
+        for key in items {
+            let key = key.as_ref();
+            if !run.fits(key) {
+                if run.is_empty() {
+                    return Err(IndexError::Format("dict: a key longer than the run budget"));
+                }
+                runs.spill(run.sorted())?;
+                run.clear();
+            }
+            run.push(key);
+        }
+        check()?;
+        if runs.is_empty() {
+            return Self::write_sorted(&mut run, path, block, check);
+        }
+        if !run.is_empty() {
+            runs.spill(run.sorted())?;
+        }
+        // The run's arena is the build's largest allocation and nothing reads it again.
+        drop(run);
+        Self::write_sorted(&runs, path, block, check)
+    }
+
+    /// The three passes and the write, over a key stream that can be walked again.
+    fn write_sorted<R, C>(
+        src: R,
+        path: &std::path::Path,
+        block: usize,
+        mut check: C,
+    ) -> Result<usize, IndexError>
+    where
+        R: Replay,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        let mut src = src;
+        // Pass one: the block heads, their ends and samples, and the key count. None of the three
+        // depends on the symbol table, and the count is what fixes the training stride below.
+        let mut n = 0usize;
+        let mut heads: Vec<u8> = Vec::new();
+        let mut head_ends: Vec<u8> = Vec::new();
+        let mut samples: Vec<u8> = Vec::new();
+        src.each(&mut |key| {
+            if n % block == 0 {
+                heads.extend_from_slice(key.as_bytes());
+                let end = u32::try_from(heads.len()).map_err(|_| {
+                    IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
+                })?;
+                head_ends.extend_from_slice(&end.to_le_bytes());
+                samples.extend_from_slice(&sample_of(key.as_bytes()).to_le_bytes());
+            }
+            n += 1;
+            Ok(())
+        })?;
+        let nb = n.div_ceil(block);
+        let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
+
+        // Pass two: the training sample, in the order `from_sorted` collects it -- blocks in order,
+        // entries within a block in order -- so the table it trains is the same table.
+        let mut arena: Vec<u8> = Vec::new();
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut prev: Vec<u8> = Vec::new();
+        let mut i = 0usize;
+        src.each(&mut |key| {
+            let bytes = key.as_bytes();
+            if i % block != 0 && (i / block) % step == 0 {
+                let at = arena.len();
+                arena.extend_from_slice(&bytes[lcp(&prev, bytes)..]);
+                spans.push((at, arena.len()));
+            }
+            prev.clear();
+            prev.extend_from_slice(bytes);
+            i += 1;
+            Ok(())
+        })?;
+        let table = {
+            let pieces: Vec<&[u8]> = spans.iter().map(|&(a, b)| &arena[a..b]).collect();
+            Table::train(&pieces)
+        };
+        drop(arena);
+        drop(spans);
+
+        let mut table_bytes = Vec::with_capacity(table.serialized_len());
+        table.write_to(&mut table_bytes);
+        let encoder = table.encoder();
+        let blocks_at = HEADER + table_bytes.len() + heads.len() + head_ends.len() + samples.len();
+        let mut blocks = Vec::with_capacity(nb * 8);
+        crate::blob::write_atomically_with(path, |w| {
+            // The header is written last: it carries the block data's length and a hash over every
+            // section, and neither is known until the encoding is done.
+            w.write_all(&[0u8; HEADER])?;
+            w.write_all(&table_bytes)?;
+            w.write_all(&heads)?;
+            w.write_all(&head_ends)?;
+            w.write_all(&samples)?;
+            let zeros = [0u8; 4096];
+            let mut left = nb * 8;
+            while left > 0 {
+                let take = left.min(zeros.len());
+                w.write_all(&zeros[..take])?;
+                left -= take;
+            }
+
+            // Pass three: encode. The block starts fall out of it, which is why their section was
+            // reserved rather than written.
+            let mut data_len = 0u64;
+            let mut packed = Vec::with_capacity(64);
+            let mut entry = Vec::with_capacity(80);
+            let mut prev: Vec<u8> = Vec::new();
+            let mut i = 0usize;
+            src.each(&mut |key| {
+                let bytes = key.as_bytes();
+                if i % block == 0 {
+                    blocks.extend_from_slice(&data_len.to_le_bytes());
+                } else {
+                    let l = lcp(&prev, bytes);
+                    packed.clear();
+                    encoder.encode_into(&bytes[l..], &mut packed);
+                    entry.clear();
+                    put_header(&mut entry, l, packed.len());
+                    entry.extend_from_slice(&packed);
+                    w.write_all(&entry)?;
+                    data_len += entry.len() as u64;
+                }
+                prev.clear();
+                prev.extend_from_slice(bytes);
+                i += 1;
+                Ok(())
+            })?;
+            if i != n {
+                return Err(IndexError::Format(
+                    "dict: the key stream changed between passes",
+                ));
+            }
+
+            w.flush()?;
+            let file = w.get_mut();
+            file.seek(SeekFrom::Start(blocks_at as u64))?;
+            file.write_all(&blocks)?;
+            // The payload hash runs over the sections in blob order, and the block starts are only
+            // known once the data is encoded -- so it is taken from the file rather than from the
+            // stream, one sequential read of what was just written.
+            file.seek(SeekFrom::Start(HEADER as u64))?;
+            let mut hasher = crate::blob::BlockHasher::new();
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let got = file.read(&mut buf)?;
+                if got == 0 {
+                    break;
+                }
+                hasher.update(&buf[..got]);
+            }
+            let mut h = [0u8; HEADER];
+            h[0..4].copy_from_slice(MAGIC);
+            h[4..12].copy_from_slice(&(n as u64).to_le_bytes());
+            h[12..16].copy_from_slice(&(block as u32).to_le_bytes());
+            h[16..24].copy_from_slice(&(heads.len() as u64).to_le_bytes());
+            h[24..32].copy_from_slice(&data_len.to_le_bytes());
+            h[32..36].copy_from_slice(&(table_bytes.len() as u32).to_le_bytes());
+            h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
+            let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
+            h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
+            file.seek(SeekFrom::Start(0))?;
+            file.write_all(&h)?;
+            check()
+        })?;
+        Ok(n)
     }
 
     fn from_sorted<S: AsRef<str>>(keys: &[S], block: usize) -> Result<Self, IndexError> {
@@ -1152,6 +1410,51 @@ impl std::fmt::Debug for DictIndex {
     }
 }
 
+/// A sorted, distinct key stream [`DictIndex::build_to_file`] can walk more than once — either the
+/// single in-memory run the corpus fitted in, or a merge of the runs it spilled.
+trait Replay {
+    fn each(&mut self, f: &mut dyn FnMut(&str) -> Result<(), IndexError>)
+    -> Result<(), IndexError>;
+}
+
+impl Replay for &mut Run {
+    fn each(
+        &mut self,
+        f: &mut dyn FnMut(&str) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        for key in self.sorted() {
+            f(key)?;
+        }
+        Ok(())
+    }
+}
+
+impl Replay for &Runs {
+    fn each(
+        &mut self,
+        f: &mut dyn FnMut(&str) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        // The merge interleaves the runs but deduplicates only within one, so equal keys arrive
+        // adjacent; dropping them here is what makes this stream the one `build` sorts to.
+        let failed = std::cell::RefCell::new(None);
+        let mut prev = String::new();
+        let mut seen = false;
+        for key in self.merge(&failed)? {
+            if seen && prev == key {
+                continue;
+            }
+            f(&key)?;
+            prev.clear();
+            prev.push_str(&key);
+            seen = true;
+        }
+        if let Some(e) = failed.borrow_mut().take() {
+            return Err(IndexError::Io(e));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1398,6 +1701,119 @@ mod tests {
         assert_eq!(blob.len(), idx.serialized_len());
         let back = DictIndex::from_bytes(&blob).unwrap();
         assert!(back.is_empty() && back.to_bytes() == blob);
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lexindex_{name}_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn entries(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn build_to_file_writes_the_blob_build_would_have_run_by_run() {
+        let keys = corpus();
+        // Descending, then ascending: every key twice, its copies far enough apart that a 64-byte
+        // run budget puts them in different runs, which is where a merge that failed to
+        // deduplicate across runs would show.
+        let twice: Vec<&str> = keys
+            .iter()
+            .rev()
+            .chain(keys.iter())
+            .map(String::as_str)
+            .collect();
+        let dir = scratch("dictruns");
+        let path = dir.join("idx.bdx");
+        for block in [1usize, 3, 32, MAX_BLOCK] {
+            let want = DictIndex::build_with_block(&keys, block)
+                .unwrap()
+                .to_bytes();
+            let n = DictIndex::build_to_file_runs(&twice, &path, block, || Ok(()), 64).unwrap();
+            assert_eq!(n, keys.len());
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                want,
+                "block {block}, spilled"
+            );
+            assert_eq!(entries(&dir), ["idx.bdx"], "the runs directory is gone");
+            check(&DictIndex::load(&path).unwrap(), &keys);
+            // The same corpus in one run: sorted in memory, no runs directory at all.
+            let n = DictIndex::build_to_file_with_block(&twice, &path, block).unwrap();
+            assert_eq!(n, keys.len());
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                want,
+                "block {block}, in memory"
+            );
+            assert_eq!(entries(&dir), ["idx.bdx"]);
+        }
+        assert_eq!(DictIndex::build_to_file(&twice, &path).unwrap(), keys.len());
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            DictIndex::build(&keys).unwrap().to_bytes()
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_to_file_refuses_what_it_cannot_hold_and_publishes_nothing() {
+        let dir = scratch("dictruns_err");
+        let path = dir.join("idx.bdx");
+        assert_eq!(
+            DictIndex::build_to_file(Vec::<String>::new(), &path).unwrap(),
+            0
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            DictIndex::build(Vec::<&str>::new()).unwrap().to_bytes()
+        );
+        assert!(DictIndex::load(&path).unwrap().is_empty());
+
+        // A key no run can hold is an error, not an unbounded allocation -- and the empty index
+        // written above is still there.
+        let long = "x".repeat(65);
+        let err =
+            DictIndex::build_to_file_runs([long.as_str()], &path, 32, || Ok(()), 64).unwrap_err();
+        assert!(err.to_string().contains("run budget"), "{err}");
+        assert!(DictIndex::load(&path).unwrap().is_empty());
+        for block in [0, MAX_BLOCK + 1] {
+            let err = DictIndex::build_to_file_with_block(["a"], &path, block).unwrap_err();
+            assert!(err.to_string().contains("block must be"), "{err}");
+        }
+
+        // The caller's last word, asked once the input has ended and again inside the write.
+        std::fs::write(&path, b"previous").unwrap();
+        let keys: Vec<String> = (0..200)
+            .map(|i| format!("k{:03}", (i * 7919) % 200))
+            .collect();
+        let calls = std::cell::Cell::new(0);
+        let late = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                Err(IndexError::Format("late"))
+            } else {
+                Ok(())
+            }
+        };
+        let err = DictIndex::build_to_file_runs(&keys, &path, 32, late, 64).unwrap_err();
+        assert!(matches!(err, IndexError::Format("late")), "{err}");
+        assert_eq!(
+            calls.get(),
+            2,
+            "once after the input, once inside the write"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        assert_eq!(entries(&dir), ["idx.bdx"], "the runs directory is gone");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

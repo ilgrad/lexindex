@@ -304,6 +304,9 @@ words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
 smaller = DictIndex(words_list, block=64)   # 3.1 B/key against 3.5; a lookup scans up to block - 1 entries
 words.save("words.bdx")
+# A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
+# file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
+DictIndex.build_to_file((line.rstrip("\n") for line in open("words.txt")), "words.bdx")
 words = DictIndex.load("words.bdx")        # checked like the others
 words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, table and 8 B/block read
 ```
@@ -482,10 +485,10 @@ assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" 
 Every index has a build that never holds the keys, and each takes the shape its structure allows:
 
 ```rust
-use lexindex::{CompactHashIndex, PerfectHashIndex, StringIndex};
+use lexindex::{CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
 # let dir = std::env::temp_dir();
 # let (bix, bmp) = (dir.join("lexindex-usage-stream.bix"), dir.join("lexindex-usage-stream.bmp"));
-# let bch = dir.join("lexindex-usage-stream.bch");
+# let (bch, bdx) = (dir.join("lexindex-usage-stream.bch"), dir.join("lexindex-usage-stream.bdx"));
 
 // `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do...
 let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
@@ -498,6 +501,11 @@ StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
 // ...or takes them in any order through an external sort: runs spilled beside the output, merged.
 StringIndex::build_to_file(["c", "a", "b"], &bix)?;
 
+// `DictIndex` sorts the same way, then walks the sorted keys three times: the block heads and the
+// count, the symbol table's training sample -- whose stride depends on that count -- then the
+// encoding, which goes into the file as it is produced.
+DictIndex::build_to_file(["c", "a", "b"], &bdx)?;
+
 // `PerfectHashIndex` stores its keys in slot order, and slot order is only known once the perfect
 // hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
 PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
@@ -506,6 +514,7 @@ PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
 # std::fs::remove_file(&bix).ok();
 # std::fs::remove_file(&bmp).ok();
 # std::fs::remove_file(&bch).ok();
+# std::fs::remove_file(&bdx).ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
@@ -513,6 +522,12 @@ At 10 M real-word pairs the streamed `PerfectHashIndex` build peaks at 471 MB ag
 the same keys handed to `build` as a list; the streamed `StringIndex` build peaks at 49.6 MB against
 721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
+
+The streamed `DictIndex` build peaks at 12.7 MB against 32.1 over 479 823 real words, for the same
+bytes on disk. What it still holds is the block heads and the three per-block arrays, about
+`(mean head length + 20) / block` bytes per key, so a larger block holds less as well as storing
+less; the block data, which is the bulk of the index, goes into the file as it is encoded. It reads
+the sorted keys three times, and pays about 19 % in build time for it.
 
 The streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
 for the same keys handed to `build` as a list (254 against 903 at 10 M), and **0.94 GB at 10⁹**,

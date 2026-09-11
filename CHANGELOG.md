@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`DictIndex::build_to_file`** — the constructor for a corpus that does not fit in memory, and
+  `DictIndex.build_to_file(items, path, block=32)` in Python. The keys arrive in any order, are
+  sorted in runs spilled beside the output and merged back, and the block data goes into the file as
+  it is encoded. The bytes are exactly what `build` followed by `save` would have written, which the
+  tests assert at four block sizes over both the spilled and the single-run path. Measured over
+  479 823 words streamed from a file: peak RSS **32.1 → 12.7 MiB** for the same 3.52 bytes per key on
+  disk, at about 19 % more build time. What is still held is the block heads and the three per-block
+  arrays — roughly `(mean head length + 20) / block` bytes per key, so a larger block holds less as
+  well as storing less. The external sort it shares with `StringIndex` moved to its own module.
+
 - **`DictIndex::build_sorted` and `build_sorted_with_block`**, for keys already in ascending byte
   order — a sorted file, a database cursor, the output of an external sort. Adjacent duplicates are
   dropped exactly as `build` drops them after sorting, so for the same key set the two produce

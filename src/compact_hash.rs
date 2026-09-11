@@ -55,7 +55,7 @@ pub(crate) struct Budget {
 
 impl Budget {
     pub(crate) const DEFAULT: Self = Self {
-        run_bytes: crate::string_index::RUN_BYTES,
+        run_bytes: crate::extsort::RUN_BYTES,
         fp_memory: FP_MEMORY,
         range_slots: RANGE_SLOTS,
     };

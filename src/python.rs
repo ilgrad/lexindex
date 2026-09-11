@@ -1718,6 +1718,40 @@ impl PyDictIndex {
         })
     }
 
+    /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
+    /// keys, in any order, are sorted in runs that spill beside the output and merged back, and the
+    /// block data goes into the file as it is encoded. The bytes are exactly what the constructor
+    /// followed by `save` would have written. Returns the number of distinct keys.
+    ///
+    /// What is still held is the block heads and the three per-block arrays, about
+    /// `(mean head length + 20) / block` bytes per key -- so a bigger `block` is what a corpus
+    /// whose heads crowd memory wants. If the iterable raises, the build is abandoned with `path`
+    /// untouched.
+    #[staticmethod]
+    #[pyo3(signature = (items, path, block=32))]
+    fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf, block: usize) -> PyResult<usize> {
+        let err = Rc::new(RefCell::new(None));
+        let seen = Rc::clone(&err);
+        let written = DictIndex::build_to_file_checked(
+            stream_strs(items.try_iter()?, Rc::clone(&err)),
+            &path,
+            block,
+            move || {
+                if seen.borrow().is_some() {
+                    Err(crate::IndexError::Format(
+                        "dict: the input iterable raised before it ended",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        if let Some(e) = err.borrow_mut().take() {
+            return Err(e);
+        }
+        written.map_err(to_py)
+    }
+
     fn __len__(&self) -> usize {
         self.inner.len()
     }

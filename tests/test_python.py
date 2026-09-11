@@ -400,6 +400,37 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     assert walked == [(w, i) for i, w in enumerate(words[:1500])]
 
 
+def test_dict_index_build_to_file_writes_what_the_constructor_would(tmp_path):
+    words = [f"token-{i * 7919 % 10007:05}" for i in range(20_000)]  # duplicates fold
+    distinct = sorted(set(words))
+    for block in (1, 32, 1024):
+        p = tmp_path / "words.bdx"  # a pathlib.Path, not a str
+        written = lexindex.DictIndex.build_to_file((w for w in words), p, block=block)
+        assert written == len(distinct)
+        assert p.read_bytes() == lexindex.DictIndex(words, block=block).to_bytes()
+        assert lexindex.DictIndex.load(p).key(17) == distinct[17]
+    assert [e.name for e in tmp_path.iterdir()] == ["words.bdx"]  # no scratch left beside it
+    with pytest.raises(ValueError, match="block"):
+        lexindex.DictIndex.build_to_file(words, tmp_path / "x.bdx", block=0)
+
+
+def test_dict_index_build_to_file_aborts_when_the_iterable_raises(tmp_path):
+    p = tmp_path / "words.bdx"
+    p.write_bytes(b"previous")
+
+    def raising():
+        yield "alpha"
+        yield "beta"
+        raise RuntimeError("source failed")
+
+    with pytest.raises(RuntimeError, match="source failed"):
+        lexindex.DictIndex.build_to_file(raising(), p)
+    assert p.read_bytes() == b"previous"
+    with pytest.raises(TypeError):
+        lexindex.DictIndex.build_to_file([1, 2], p)
+    assert [e.name for e in tmp_path.iterdir()] == ["words.bdx"]
+
+
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
     assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]

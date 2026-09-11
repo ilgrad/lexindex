@@ -468,6 +468,19 @@ class DictIndex:
         4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes per key on the dictionary, and 128 is under
         ``marisa-trie``'s 2.98 there."""
 
+    @staticmethod
+    def build_to_file(items: Iterable[str], path: str | os.PathLike[str], block: int = 32) -> int:
+        """The constructor for a corpus that does not fit in memory, written straight to `path`.
+
+        The keys are taken in one pass, in any order: every 256 MiB of them is sorted in memory and
+        spilled as a run to a temporary directory beside `path`, and the runs are merged back. The
+        block data goes into the file as it is encoded, so what is still held is the block heads and
+        the three per-block arrays -- roughly ``(mean head length + 20) / block`` bytes per key. The
+        file is exactly what the constructor followed by ``save`` would have written. Returns the
+        number of distinct keys. If the iterable raises, the build is abandoned with `path`
+        untouched.
+        """
+
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...

@@ -67,6 +67,7 @@ mod mphf;
 #[doc(hidden)]
 pub use mphf::Mphf;
 mod dict_index;
+mod extsort;
 mod fsst;
 mod inspect;
 mod overlay;
