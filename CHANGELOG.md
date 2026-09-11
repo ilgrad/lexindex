@@ -49,6 +49,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex::key` and `key_into` decode a handful of entries instead of the whole block.** An
+  entry stores what it shares with its predecessor, so an entry whose shared-prefix length is at
+  least a later entry's contributes nothing that survives to the key being asked for; the ones that
+  do form a strictly increasing staircase of that length, which a monotonic stack over the block's
+  headers finds in the pass the walk already makes. Every header is still read — a header is what
+  says where the next one begins — but the decode, the expensive half, runs on the staircase alone:
+  2.5 entries deep on average over the dictionary and a path list, 12 at the deepest with a block of
+  32 and 18 with a block of 1024, out of up to 1 023. **`key_into` on the dictionary: 207 → 175 ns
+  at the default block, 697 → 463 at 128 per block, 1 361 → 851 at 256** (`id` and `lower_bound` are
+  untouched). The blob, the format and the API are unchanged, so an existing `BDX1` file gets this
+  by being read by the new version; past a staircase 32 deep the walk decodes every entry as before,
+  which a block holding a chain like `a`, `aa`, `aaa` reaches and which is slower, not wrong.
+
+- The weekly sanitizer workflow fuzzes `parse_inspect` too. The target shipped with the `inspect`
+  fix but was never listed in the matrix, so the one entry point that reads a header of *any* of the
+  five formats had no fuzz job of its own.
+
 - Documentation: the `DictIndex` block size is measured across the curve rather than at three
   points — 4.35 bytes per key at 16 through 2.78 at 256, with `id`, `key_into` and `lower_bound`
   beside each — because 32 is the middle of that curve, not a limit, and `build_with_block` has

@@ -367,32 +367,46 @@ within each round, the minimum per cell; `StringIndex` is the control.
 | | `StringIndex` | `DictIndex` 16 | `DictIndex` **32** | `DictIndex` 64 | `DictIndex` 128 | `DictIndex` 256 |
 |---|---:|---:|---:|---:|---:|---:|
 | bytes per key | 5.95 | 4.35 | **3.52** | 3.10 | 2.89 | 2.78 |
-| build | 130–131 ms | 40–50 | 40–45 | 39–40 | 39–44 | 39–49 |
-| `id`, member | 344–360 ns | 291–294 | **311–312** | 351–352 | 429–431 | 589–590 |
-| `id`, stranger | 235–241 ns | 186–190 | 210–211 | 252–253 | 333–336 | 491–492 |
-| `key_into` (no allocation) | — | 126–127 | **207** | 366–370 | 682–697 | 1353–1368 |
-| `key` (owned string) | 496–507 ns | 194 | 288 | 450–460 | 786–799 | 1462–1471 |
-| `lower_bound`, stranger | — | 187–191 | 211 | 253–255 | 335 | 492–493 |
+| build | 135–136 ms | 40–50 | 40–46 | 40–41 | 40–44 | 39–49 |
+| `id`, member | 346–363 ns | 302–311 | **314–337** | 354–358 | 437–441 | 599–602 |
+| `id`, stranger | 238–246 ns | 192–194 | 215–224 | 256–257 | 338 | 496 |
+| `key_into` (no allocation) | — | 124–125 | **173–176** | 269–272 | 462–463 | 848–853 |
+| `key` (owned string) | 504–521 ns | 170 | 228–232 | 326–331 | 523–531 | 916–921 |
+| `lower_bound`, stranger | — | 190–199 | 215–223 | 256 | 338 | 496 |
 
 The two runs in the results file take the block sizes in opposite orders; where they differ the
-table gives both. At the default 32, `DictIndex` keeps `id` 11 % under `StringIndex` and `key` at
-0.57× of it while storing 41 % less; 64 per block matches `StringIndex` on `id` at 3.10 B/key.
+table gives both. At the default 32, `DictIndex` keeps `id` under `StringIndex` and `key_into` at
+about a third of its `key` while storing 41 % less; 64 per block matches `StringIndex` on `id` at
+3.10 B/key.
+
+**The reverse lookup does not decode the whole block.** An entry stores what it shares with its
+predecessor, so an entry whose shared-prefix length is at least a later entry's contributes nothing
+that survives to the key being asked for. The ones that do contribute form a strictly increasing
+staircase of that length, and a monotonic stack over the block's headers finds it in the pass the
+walk already makes: every header is still read — a header is what says where the next one begins —
+but only the staircase is decoded. Measured over the dictionary and a path list, the staircase is
+2.5 entries deep on average and 12 at the deepest with a block of 32, 18 with a block of 1024, out
+of up to 1 023 entries; past 32 the walk stops tracking it and decodes each entry, which is slower
+and not wrong. That is worth **−16 % on `key_into` at the default block, −33 % at 128 and −37 % at
+256** ([`dict-stair-2026-09-11-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-stair-2026-09-11-arz.txt)
+holds the before and after), and it costs no bytes and no format change — the win grows with the
+block because the entries it stops decoding are the ones a larger block adds.
 
 **32 is a middle of the curve, not a limit**, and
 [`build_with_block`](https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.build_with_block)
 is the knob. The size falls because doubling the block halves the three per-block arrays — 0.625
 bytes per key at 32, 0.078 at 256 — while the front-coded block data barely notices, 2.604 against
 2.669; at 128 the arrays and the block heads together are 5.4 % of the blob and everything else is
-suffixes. The price is that both the scan and the reverse decode are linear in the block, so
-`key_into` roughly doubles at every step. At 128 the index is **2.89 bytes per key, under the 2.98
-marisa stores on this corpus** — and unlike marisa it answers `key(id)` and `lower_bound` at all,
-since a marisa id is not the lexicographic rank (7 051 of 19 999 consecutive sorted pairs come back
-with a decreasing id). Pick 16 or 32 if the reverse lookup is hot, 128 if the bytes are.
+suffixes. The price is that the scan and the header walk are linear in the block. At 128 the index
+is **2.89 bytes per key, under the 2.98 marisa stores on this corpus** — and unlike marisa it
+answers `key(id)` and `lower_bound` at all, since a marisa id is not the lexicographic rank (7 051
+of 19 999 consecutive sorted pairs come back with a decreasing id). Pick 16 or 32 if the reverse
+lookup is hot, 128 if the bytes are.
 
-<sub>Measured 2026-09-11 on `b19415e`
-([`bench/results/dict-2026-09-11-arz-b19415e.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-11-arz-b19415e.txt)),
-Ryzen 7 5800HS, load about 1.1 with an editor open. The 2026-09-10 run it replaces predates the
-mapped sections of `c597099`, which cost `id` about 1.5 %.</sub>
+<sub>Measured 2026-09-11 on the tree that adds the staircase
+([`bench/results/dict-stair-2026-09-11-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-stair-2026-09-11-arz.txt)),
+Ryzen 7 5800HS, load about 1 with an editor open. `id` and `lower_bound` are untouched code; they
+move with the session, and the `StringIndex` control moves with them.</sub>
 
 ## Hash quality
 

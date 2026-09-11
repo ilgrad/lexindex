@@ -185,15 +185,21 @@ heads of the few blocks whose sample equals the probe's, then one block scanned 
 anything: an entry's stored suffix is compared against the probe symbol by symbol, eight bytes at
 a time, and the shared-prefix length alone decides most entries — shorter than what the probe has
 matched so far means the entry is past the probe, longer means it is still below with nothing new
-matched. `key(id)` is the head of block `id / block` and up to `block − 1` decodes, one eight-byte
-store per code, into a string the caller can keep (`key_into`). On the dictionary at
-`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 300 ns against 345, `key_into` 197
-against `key`'s 505; 16 and 64 per block give 4.35 and 3.10 B/key at 283 and 345 ns. The serialised blob is
+matched. `key(id)` is the head of block `id / block` plus the entries between it and the id whose
+shared-prefix length strictly increases: an entry whose prefix is at least a later entry's writes
+nothing that survives, so a monotonic stack over the block's headers finds the few that do — 2.5
+deep on average, 12 at the deepest measured — and only those are decoded, one eight-byte store per
+code, into a string the caller can keep (`key_into`). Past a staircase 32 deep the walk stops
+tracking it and decodes every entry, which is slower and not wrong. On the dictionary at
+`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 314–337 ns against 346–363, `key_into`
+173–176 against `key`'s 504–521; 16 and 64 per block give 4.35 and 3.10 B/key at 302–311 and
+354–358 ns, and 128 gives 2.89 at 437–441. The serialised blob is
 `[magic "BDX1"][n][block][head bytes][data bytes][table bytes][payload][check]`, then the table,
 the heads, the three arrays and the data; the loader checks every length, both checksums, the
 table and the arrays' order before anything is trusted, and the block data — bounded on every
-read rather than validated up front — is what the fuzz target queries after loading. There is no
-`load_mmap`, and there are no automata: a prefix or fuzzy question is `StringIndex`'s.
+read rather than validated up front — is what the fuzz target queries after loading. `load_mmap` borrows
+every section but the per-block samples, which two binary searches read on every lookup (below);
+there are no automata, so a prefix or fuzzy question is `StringIndex`'s.
 
 ## `PerfectHashIndex`
 

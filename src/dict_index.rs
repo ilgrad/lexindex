@@ -28,6 +28,11 @@ const CHECKED: usize = 44; // header bytes the trailing check covers
 const PER_BLOCK: usize = 4 + 8 + 8; // bytes the three arrays hold per block
 const DEFAULT_BLOCK: usize = 32;
 const MAX_BLOCK: usize = 1024;
+/// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
+/// up tracking it and decodes every entry instead. The dictionary reaches 12 at the largest block
+/// and a path list 18, so the bound is slack; a block holding a chain like `a`, `aa`, `aaa` is what
+/// reaches it, which is legal input and merely slow, not wrong.
+const STAIRS: usize = 32;
 /// About how many suffixes the symbol table is trained on: every block's worth, from blocks spread
 /// evenly over the index.
 const TRAIN_PIECES: usize = 20_000;
@@ -455,8 +460,25 @@ impl DictIndex {
         self.table.decode_into(piece, cur)
     }
 
+    /// The block walk that decodes every entry. Correct at any staircase depth, and what
+    /// [`key_bytes_into`](Self::key_bytes_into) falls back to when one does not fit.
+    fn walk_to(&self, b: usize, steps: usize, out: &mut Vec<u8>) -> bool {
+        out.clear();
+        out.extend_from_slice(self.head(b));
+        let mut at = self.block_data(b);
+        (0..steps).all(|_| self.advance(&mut at, out))
+    }
+
     /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
     /// key.
+    ///
+    /// An entry stores what it shares with its predecessor, so an entry whose `lcp` is at least a
+    /// later entry's contributes nothing that survives to the key being asked for. The entries that
+    /// do contribute form a strictly increasing staircase of `lcp`, and a monotonic stack over the
+    /// headers finds it in the one pass the walk already makes. Every header is still read — a
+    /// header is what says where the next one begins — but a handful of suffixes are decoded rather
+    /// than one per entry, and the decode is the expensive half: 207 → 146 ns at the default block
+    /// on the dictionary, 751 → 454 at 128 per block, 464 → 265 on a path list.
     fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
         out.clear();
         let Ok(id) = usize::try_from(id) else {
@@ -466,9 +488,40 @@ impl DictIndex {
             return false;
         }
         let b = id / self.block;
+        let steps = id % self.block;
+        let data = self.block_data(b);
+        let mut at = data;
+        let mut stair = [(0usize, &data[..0]); STAIRS];
+        let mut depth = 0usize;
+        for _ in 0..steps {
+            let Some((l, len, rest)) = get_header(at) else {
+                return false;
+            };
+            if len > rest.len() {
+                return false;
+            }
+            let (piece, tail) = rest.split_at(len);
+            at = tail;
+            while depth > 0 && stair[depth - 1].0 >= l {
+                depth -= 1;
+            }
+            if depth == STAIRS {
+                return self.walk_to(b, steps, out);
+            }
+            stair[depth] = (l, piece);
+            depth += 1;
+        }
         out.extend_from_slice(self.head(b));
-        let mut at = self.block_data(b);
-        (0..id % self.block).all(|_| self.advance(&mut at, out))
+        for &(l, piece) in &stair[..depth] {
+            if l > out.len() {
+                return false;
+            }
+            out.truncate(l);
+            if !self.table.decode_into(piece, out) {
+                return false;
+            }
+        }
+        true
     }
 
     /// The key at rank `id`; `None` at or past `len()`.
@@ -923,6 +976,19 @@ mod tests {
             let back = DictIndex::from_bytes(&blob).unwrap();
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
+        }
+    }
+
+    #[test]
+    fn a_staircase_deeper_than_the_stack_still_answers() {
+        // Every key extends the one before it by a byte, so every entry adds a level and the
+        // staircase is as deep as the rank inside the block. Past `STAIRS` the walk stops
+        // tracking it and decodes each entry instead, which is the path this pins.
+        let keys: Vec<String> = (1..=2 * STAIRS).map(|n| "a".repeat(n)).collect();
+        for block in [STAIRS - 1, STAIRS + 1, MAX_BLOCK] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            check(&idx, &keys);
+            check(&DictIndex::from_bytes(&idx.to_bytes()).unwrap(), &keys);
         }
     }
 

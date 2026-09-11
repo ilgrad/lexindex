@@ -38,8 +38,9 @@ but stands on its own.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: `string ↔ rank` both
   ways, `lower_bound`, in-order iteration — no automata, so no prefix or fuzzy queries. The sorted
   keys front-coded in blocks of 32, the suffixes under a symbol table trained on the index itself:
-  **3.52 bytes/key**, 41 % below `StringIndex`, `id` 301 ns against its 344, `key_into` 197 against
-  its `key` at 505. Exact queries, every id back to its key, small.
+  **3.52 bytes/key**, 41 % below `StringIndex`, `id` 314–337 ns against its 346–363, `key_into`
+  173–176 against its `key` at 504–521. Blocks of 128 store **2.89 bytes/key, under `marisa-trie`**,
+  for a slower reverse lookup. Exact queries, every id back to its key, small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
   hash plus a fingerprint per key, *no keys stored*. **1.26 bytes/key** on real words — **2.4× below
   `marisa-trie`** — and **0.76** at a 4-bit fingerprint (6.25 % false positives), for
