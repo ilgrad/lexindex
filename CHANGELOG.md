@@ -29,6 +29,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **A `DictIndex` encodes its blocks on every core.** Once the symbol table is fixed a block depends
+  on nothing outside itself, so contiguous ranges of blocks go to their own threads
+  (`std::thread::scope`, no new dependency) and the parts are concatenated in order. The bytes do
+  not depend on how many threads ran, which a test pins at 1/2/3/5/8/64 threads against the
+  single-threaded blob — and the streaming builder checks from the other side, since its own
+  encoding pass is serial. Measured on this 8-core machine, one core against sixteen: **126.2 →
+  75.2 ms** over 909 776 real file paths and **34.0 → 24.6 ms** over 479 823 words. The threads take
+  a `&[&str]` view rather than the caller's `&[S]`, which would have meant adding `S: Sync` to a
+  signature that never asked for it; the view costs 16 bytes a key while the encoding runs, which on
+  the paths corpus is *less* than the doubling the single `data` buffer did (41.6 against 42.4 MiB
+  allocated) and on the shorter words costs 12.5 bytes a key.
+
 - **Building a `DictIndex` no longer copies every key.** `build_with_block` collected
   `items.into_iter().map(|s| s.as_ref().to_owned())`, one owned `String` per key, before sorting.
   Sorting the caller's items through `AsRef` instead costs nothing and removes the copy, because the

@@ -41,6 +41,8 @@ const STAIRS: usize = 32;
 const TRAIN_PIECES: usize = 20_000;
 /// Samples serialised at a time, so writing does not copy the array whole.
 const CHUNK: usize = 4096;
+/// Blocks a thread must be given before the encoding is worth splitting across threads at all.
+const PARALLEL_BLOCKS: usize = 64;
 
 /// An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways.
 ///
@@ -178,6 +180,47 @@ fn get_header(data: &[u8]) -> Option<(usize, usize, &[u8])> {
     let (lcp, rest) = get_varint(rest)?;
     let (len, rest) = get_varint(rest)?;
     Some((lcp, len, rest))
+}
+
+/// What one thread produces for its contiguous range of blocks: the sections it would have
+/// appended, with the two that are offsets kept relative to the range so the concatenation can
+/// rebase them.
+struct Part {
+    heads: Vec<u8>,
+    head_ends: Vec<u64>,
+    samples: Vec<u64>,
+    blocks: Vec<u64>,
+    data: Vec<u8>,
+}
+
+/// Encode a range of whole blocks. `keys` must start on a block boundary, which is what makes the
+/// parts concatenate into the blob a single pass would have written.
+fn encode_range<S: AsRef<str>>(keys: &[S], block: usize, encoder: &fsst::Encoder) -> Part {
+    let nb = keys.len().div_ceil(block);
+    let mut part = Part {
+        heads: Vec::new(),
+        head_ends: Vec::with_capacity(nb),
+        samples: Vec::with_capacity(nb),
+        blocks: Vec::with_capacity(nb),
+        data: Vec::new(),
+    };
+    let mut packed = Vec::with_capacity(64);
+    for chunk in keys.chunks(block) {
+        let head = chunk[0].as_ref().as_bytes();
+        part.heads.extend_from_slice(head);
+        part.head_ends.push(part.heads.len() as u64);
+        part.samples.push(sample_of(head));
+        part.blocks.push(part.data.len() as u64);
+        for w in chunk.windows(2) {
+            let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
+            let l = lcp(a, b);
+            packed.clear();
+            encoder.encode_into(&b[l..], &mut packed);
+            put_header(&mut part.data, l, packed.len());
+            part.data.extend_from_slice(&packed);
+        }
+    }
+    part
 }
 
 impl DictIndex {
@@ -527,6 +570,19 @@ impl DictIndex {
     }
 
     fn from_sorted<S: AsRef<str>>(keys: &[S], block: usize) -> Result<Self, IndexError> {
+        let threads = (keys.len().div_ceil(block) / PARALLEL_BLOCKS)
+            .min(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
+            .max(1);
+        Self::from_sorted_on(keys, block, threads)
+    }
+
+    /// [`from_sorted`](Self::from_sorted) with the thread count fixed, so a test can hold the
+    /// output to the one a single thread produces.
+    fn from_sorted_on<S: AsRef<str>>(
+        keys: &[S],
+        block: usize,
+        threads: usize,
+    ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
         // Train on the suffixes a spread of blocks would store.
@@ -542,30 +598,54 @@ impl DictIndex {
             }
         }
         let table = Table::train(&pieces);
+        drop(pieces);
         let encoder = table.encoder();
-        let mut heads = Vec::new();
+
+        // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
+        // of blocks encode on their own threads and the parts are concatenated in order — the bytes
+        // do not depend on how many threads ran. The threads take a `&[&str]` view rather than the
+        // caller's `&[S]`, which would need `S: Sync` on a signature that has not asked for it; the
+        // view costs sixteen bytes a key for the length of the encoding and is only built when
+        // there is enough work to split.
+        let span = (block * nb.div_ceil(threads)).max(1);
+        let parts: Vec<Part> = if threads == 1 {
+            keys.chunks(span)
+                .map(|range| encode_range(range, block, &encoder))
+                .collect()
+        } else {
+            let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
+            std::thread::scope(|scope| {
+                let running: Vec<_> = view
+                    .chunks(span)
+                    .map(|range| scope.spawn(|| encode_range(range, block, &encoder)))
+                    .collect();
+                running
+                    .into_iter()
+                    .map(|h| h.join().expect("encoding a range of blocks cannot panic"))
+                    .collect()
+            })
+        };
+
+        let mut heads = Vec::with_capacity(parts.iter().map(|p| p.heads.len()).sum());
         let mut head_ends = Vec::with_capacity(nb * 4);
         let mut samples = Vec::with_capacity(nb);
         let mut blocks = Vec::with_capacity(nb * 8);
-        let mut data = Vec::new();
-        let mut packed = Vec::with_capacity(64);
-        for chunk in keys.chunks(block) {
-            let head = chunk[0].as_ref().as_bytes();
-            heads.extend_from_slice(head);
-            let end = u32::try_from(heads.len()).map_err(|_| {
-                IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
-            })?;
-            head_ends.extend_from_slice(&end.to_le_bytes());
-            samples.push(sample_of(head));
-            blocks.extend_from_slice(&(data.len() as u64).to_le_bytes());
-            for w in chunk.windows(2) {
-                let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
-                let l = lcp(a, b);
-                packed.clear();
-                encoder.encode_into(&b[l..], &mut packed);
-                put_header(&mut data, l, packed.len());
-                data.extend_from_slice(&packed);
+        let mut data = Vec::with_capacity(parts.iter().map(|p| p.data.len()).sum());
+        // Each part is dropped as it is appended, so the two copies never coexist whole.
+        for part in parts {
+            let (at_head, at_data) = (heads.len() as u64, data.len() as u64);
+            for end in &part.head_ends {
+                let end = u32::try_from(at_head + end).map_err(|_| {
+                    IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
+                })?;
+                head_ends.extend_from_slice(&end.to_le_bytes());
             }
+            for start in &part.blocks {
+                blocks.extend_from_slice(&(at_data + start).to_le_bytes());
+            }
+            heads.extend_from_slice(&part.heads);
+            samples.extend_from_slice(&part.samples);
+            data.extend_from_slice(&part.data);
         }
         Ok(Self {
             block,
@@ -1823,6 +1903,21 @@ mod tests {
             assert!(err.to_string().contains("block must be"), "{err}");
             let err = DictIndex::build_sorted_with_block(["a"], block).unwrap_err();
             assert!(err.to_string().contains("block must be"), "{err}");
+        }
+    }
+
+    #[test]
+    fn the_encoding_does_not_depend_on_how_many_threads_ran() {
+        let keys = corpus();
+        for block in [1usize, 3, 32] {
+            let want = DictIndex::from_sorted_on(&keys, block, 1)
+                .unwrap()
+                .to_bytes();
+            for threads in [2usize, 3, 5, 8, 64] {
+                let got = DictIndex::from_sorted_on(&keys, block, threads).unwrap();
+                assert_eq!(got.to_bytes(), want, "block {block}, {threads} threads");
+                check(&got, &keys);
+            }
         }
     }
 
