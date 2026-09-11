@@ -390,7 +390,7 @@ release, not a patch.
 
 What is validated on load and what is merely trusted is spelled out per format above; the threat
 model that ties it together — soundness versus correctness, why the checksums are integrity and not
-authentication, and where the crate's `unsafe` lives — is [`SECURITY.md`](../SECURITY.md).
+authentication, and where the crate's `unsafe` lives — is [`SECURITY.md`](https://github.com/ilgrad/lexindex/blob/main/SECURITY.md).
 
 ## Blob compatibility
 

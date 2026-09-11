@@ -1,5 +1,5 @@
 //! An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways, in
-//! about a third of what [`StringIndex`](crate::StringIndex) takes.
+//! 41 % less than [`StringIndex`](crate::StringIndex) takes.
 //!
 //! The sorted keys are cut into blocks of `block` keys (32 by default). A block stores its first
 //! key whole and every other as the length of the prefix it shares with its predecessor and the
@@ -45,7 +45,7 @@ const CHUNK: usize = 4096;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. About 3.5 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 3.52 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the block
 /// scan, which the `block` given at build time sets — smaller blocks are faster and larger.
@@ -191,9 +191,12 @@ impl DictIndex {
     }
 
     /// [`build`](Self::build) with `block` keys per block, `1..=1024`. A lookup scans up to
-    /// `block − 1` entries and a reverse lookup decodes up to that many, so smaller blocks are
-    /// faster; larger ones share more and store less. On real words 16 / 32 / 64 give
-    /// 4.35 / 3.52 / 3.10 bytes per key, `id` at 283 / 301 / 345 ns.
+    /// `block − 1` entries, and a reverse lookup reads that many headers but decodes only the
+    /// staircase among them — so smaller blocks are faster and larger ones share more and store
+    /// less. On real words 16 / 32 / 64 / 128 / 256 give 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes
+    /// per key, `id` at 302–311 / 314–337 / 354–358 / 437–441 / 599–602 ns and `key_into` at
+    /// 124–125 / 173–176 / 269–272 / 462–463 / 848–853. At 128 the index is under `marisa-trie`'s
+    /// 2.98 on that corpus.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

@@ -204,7 +204,7 @@ other build cell reads 10–17 % slower than there — 2.0's placement on every 
 | `std::HashMap<String, u32>` | ~208 ms | ~289 ns | in-RAM, not serialisable |
 | lexindex `PerfectHashIndex::id` (verified) | ~280 ms | ~301 ns | one extra cache line + full key compare |
 | lexindex `StringIndex` (FST) | ~271 ms | ~424 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (32 per block) | ~203 ms | ~507 ns | ordered, exact reverse; 3.19 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 3.52 against 5.95, 301 ns against 344) |
+| lexindex `DictIndex` (32 per block) | ~203 ms | ~507 ns | ordered, exact reverse; 3.19 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 3.52 against 5.95, 314–337 ns against 346–363) |
 | `std::BTreeMap<String, u32>` | ~226 ms | ~960 ns | in-RAM |
 
 <sub>**Against the 1.1.0 table, the rows whose code did not move drifted together**: `StringIndex`

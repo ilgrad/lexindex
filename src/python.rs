@@ -1702,8 +1702,10 @@ pub struct PyDictIndex {
 impl PyDictIndex {
     /// Build from an iterable of strings, in any order; duplicates are removed and the ids are
     /// the ranks of the distinct keys in byte order. `block` keys share one stored head,
-    /// `1..=1024`: a lookup scans up to `block - 1` entries and a reverse lookup decodes up to
-    /// that many, so smaller blocks are faster and larger ones smaller.
+    /// `1..=1024`: a lookup scans up to `block - 1` entries, and a reverse lookup reads that many
+    /// headers but decodes only the few that contribute a byte, so smaller blocks are faster and
+    /// larger ones smaller -- 16 / 32 / 64 / 128 / 256 gave 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes
+    /// per key on the dictionary, and 128 is under `marisa-trie`'s 2.98.
     #[new]
     #[pyo3(signature = (items, block=32))]
     fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: usize) -> PyResult<Self> {
@@ -2737,11 +2739,11 @@ fn write_ids<T: pyo3::buffer::Element>(
 
 /// `gil_used = false` is spelled out rather than left to PyO3's default, which is already `false`:
 /// the claim ships either way, so it should be one somebody checked. What backs it, measured on
-/// CPython 3.14t with eight threads: the three index types are immutable after building and are
+/// CPython 3.14t with eight threads: the index types are immutable after building and are
 /// `Send + Sync`, so sharing one and calling `id`/`contains`/`ids_of` from every thread is sound and
-/// raises nothing; the two types that do hold mutable state — the `StringIndex` iterator and
-/// `Overlay` — are `frozen` with that state behind a lock, so sharing one of those serialises
-/// instead of raising `Already borrowed`.
+/// raises nothing; the types that do hold mutable state — the `StringIndex` and `DictIndex`
+/// iterators and `Overlay` — are `frozen` with that state behind a lock, so sharing one of those
+/// serialises instead of raising `Already borrowed`.
 /// What a blob is, from its header alone: its kind, its format and the sizes a caller would
 /// otherwise have to load it to learn. `blob` is a path or `bytes`; over a path only the header
 /// and the footer are read, so an index of gigabytes inspects in microseconds (an overlay's

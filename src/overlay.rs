@@ -1,7 +1,7 @@
 //! Additions and removals on top of an index that is immutable by design.
 //!
-//! The three indexes are build-once summaries: there is no way to add a key to a finite-state
-//! transducer or a minimal perfect hash without rebuilding it. [`Overlay`] is the usual answer —
+//! An index is a build-once summary: there is no way to add a key to a finite-state transducer
+//! or a minimal perfect hash without rebuilding it. [`Overlay`] is the usual answer —
 //! keep the base as it is, hold what came later beside it, and mark what went away — so a catalog
 //! that mostly grows at the edges is not rebuilt on every change.
 //!
@@ -38,7 +38,7 @@ pub trait OverlayBase {
     /// [`base_to_bytes`](Self::base_to_bytes) streamed into `w`: the same bytes, without the
     /// `Vec`. [`Overlay::save`] writes the base through this, so an overlay over a mapped base of
     /// a gigabyte saves without a gigabyte of copy. The default goes through `base_to_bytes`; the
-    /// three indexes write their sections from where they already hold them.
+    /// three bases below write their sections from where they already hold them.
     fn write_base(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
         w.write_all(&self.base_to_bytes()?)?;
         Ok(())
@@ -811,7 +811,7 @@ impl<I: OverlayBase> Overlay<I> {
     /// Write [`to_bytes`](Self::to_bytes) to `path`, atomically: a crash, a full disk or a kill
     /// mid-write leaves the previous file intact rather than a truncated one under the real name.
     /// The overlay is the crate's *mutable* layer, so it is the structure most likely to be
-    /// rewritten in place, and it gets the same guarantee the three indexes already have.
+    /// rewritten in place, and it gets the same guarantee every index already has.
     ///
     /// Streamed: the header's place first, then the sections straight through the file — the base
     /// via [`OverlayBase::write_base`] from wherever it is held — and the header last over its
@@ -1251,7 +1251,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// `save` goes through the crate's atomic writer, like the three indexes: rewriting an overlay
+    /// `save` goes through the crate's atomic writer, like every index: rewriting an overlay
     /// in place replaces it whole or not at all, and leaves no temporary behind. The overlay is the
     /// mutable layer, so it is the file most often written over a live one.
     #[test]

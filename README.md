@@ -73,9 +73,9 @@ pip install lexindex      # one abi3 wheel for CPython 3.11+, no runtime depende
 
 ```toml
 [dependencies]
-lexindex = "2.0"
+lexindex = "2.1"
 # fst-only (drop the memory-mapping and perfect-hash code):
-# lexindex = { version = "2.0", default-features = false }
+# lexindex = { version = "2.1", default-features = false }
 ```
 
 ## Python
@@ -296,7 +296,7 @@ every other build 10–17 % slower — 2.0's placement on every thread.
 | `std::HashMap<String, u32>` | ~208 ms | ~289 ns | in-RAM, not serialisable |
 | lexindex `PerfectHashIndex::id` (verified) | ~280 ms | ~301 ns | one extra cache line + full key compare |
 | lexindex `StringIndex` (FST) | ~271 ms | ~424 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (32 per block) | ~203 ms | ~507 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 3.19 here; on the dictionary 3.52 against 5.95, 301 ns against 344) |
+| lexindex `DictIndex` (32 per block) | ~203 ms | ~507 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 3.19 here; on the dictionary 3.52 against 5.95, 314–337 ns against 346–363) |
 | `std::BTreeMap<String, u32>` | ~226 ms | ~960 ns | in-RAM |
 
 **Reading it:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the fastest

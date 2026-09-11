@@ -283,7 +283,7 @@ Reach for it as a token → id map on a hot path where the caller controls the q
 tokenizer over its own vocabulary, a join on a key column the index was built from — and for
 `CompactHashIndex` the moment a stranger can ask.
 
-## `DictIndex` — ordered, every key stored, a third of `StringIndex`
+## `DictIndex` — ordered, every key stored, 41 % below `StringIndex`
 
 ```python
 from lexindex import DictIndex

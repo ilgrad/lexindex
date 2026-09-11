@@ -454,17 +454,19 @@ class DictIndex:
 
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
-    sorted keys are front-coded in blocks with the suffixes under a static symbol table: about
-    3.5 bytes per key on real words, a third of ``StringIndex``. Prefix and range are order
+    sorted keys are front-coded in blocks with the suffixes under a static symbol table:
+    3.52 bytes per key on real words, 41 % below ``StringIndex``. Prefix and range are order
     lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
     ``StringIndex``. ``block=128`` stores 2.89 bytes per key, under ``marisa-trie``, for a slower
     reverse lookup.
     """
 
     def __new__(cls, items: Iterable[str], block: int = 32) -> DictIndex:
-        """``block`` keys per block, ``1..=1024``: a lookup scans up to ``block - 1`` entries and a
-        reverse lookup decodes up to that many, so smaller blocks are faster and larger ones
-        smaller (16 / 32 / 64 gave 4.35 / 3.52 / 3.10 bytes per key on the dictionary)."""
+        """``block`` keys per block, ``1..=1024``: a lookup scans up to ``block - 1`` entries, and
+        a reverse lookup reads that many headers but decodes only the few that contribute a byte,
+        so smaller blocks are faster and larger ones smaller. 16 / 32 / 64 / 128 / 256 gave
+        4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes per key on the dictionary, and 128 is under
+        ``marisa-trie``'s 2.98 there."""
 
     def __len__(self) -> int: ...
     def __contains__(self, key: str, /) -> bool: ...
@@ -558,8 +560,8 @@ class DictIndex:
 class Overlay:
     """Add and remove keys on top of an index that is expensive to rebuild.
 
-    All three indexes are built once from the whole key set, so adding one key has always meant
-    rebuilding for the whole corpus. An overlay wraps one with the keys added since and the ids
+    An index is built once from the whole key set, so adding one key has always meant rebuilding
+    for the whole corpus. An overlay wraps one with the keys added since and the ids
     retired from it, leaving the base untouched and still usable.
 
     Ids are stable: an id is never reissued, removing a key does not renumber anything, and

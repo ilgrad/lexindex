@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] — 2026-09-11
 
 ### Added
 
@@ -98,7 +98,10 @@ All notable changes to this project are documented here. The format follows
   with a table format of its own, so that `BDX1` is not mistaken for a reader or writer of the
   reference format; the perfect-hash comparison scopes its claim to its harness (lexindex takes
   pre-hashed keys); the `build_to_file` replay digest is called what it is, a 64-bit
-  probabilistic check.
+  probabilistic check; `DictIndex` is 41 % below `StringIndex`, not "a third of" it (3.52
+  against 5.95); and the two links that pointed outside the docs tree (this file to
+  `docs/usage.md`, `docs/design.md` to `SECURITY.md`) are absolute, so they resolve both on
+  GitHub and on the docs site.
 
 ## [2.0.0] — 2026-09-10
 
@@ -1662,7 +1665,7 @@ All notable changes to this project are documented here. The format follows
   held-out real words measured 0.310% (z = −2.9). At or below theory in every case — the advertised
   rate is a ceiling in practice.
 
-- **The usage guide now explains what `limit` buys — and what it cannot** (["What `limit` buys"](docs/usage.md)),
+- **The usage guide now explains what `limit` buys — and what it cannot** (["What `limit` buys"](https://github.com/ilgrad/lexindex/blob/main/docs/usage.md)),
   replacing 0.5.0's single headline number with the measured behaviour. The speedup is the work *not
   done*, so it spans three regimes: prefix/range scale with `matches ÷ limit` (measured ~3 000× for
   `prefix("s", limit=10)` on an idle machine — the 669× in the 0.5.0 notes was the same query on a
