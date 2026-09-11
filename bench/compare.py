@@ -145,6 +145,26 @@ def build_marisa():
     return marisa_trie.Trie(KEYS)
 
 
+# marisa is a curve, not a point, and every lexindex table until 2.1.1 quoted only the middle of it.
+# Its own documentation says the right configuration depends on the data, so a single row invites the
+# fair objection that the baseline was left untuned. Measured over the whole space on this corpus:
+# `num_tries` 1/2/3/4/5/8/16/32 gives 3.380/2.997/2.978/2.977/2.977/2.980/2.986/2.998 -- flat from
+# three and worse past eight, not the monotone shrink the docs suggest -- `cache_size`
+# TINY/SMALL/NORMAL/LARGE/HUGE gives 2.957/2.964/2.978/3.008/3.066, and `order` and `binary` do
+# nothing at all. So the knobs worth a row are cache size, and the joint best is `num_tries=4` with
+# `TINY_CACHE` at 2.955.
+def build_marisa_compact():
+    import marisa_trie
+
+    return marisa_trie.Trie(KEYS, num_tries=4, cache_size=marisa_trie.TINY_CACHE)
+
+
+def build_marisa_fast():
+    import marisa_trie
+
+    return marisa_trie.Trie(KEYS, cache_size=marisa_trie.HUGE_CACHE)
+
+
 def build_dawg():
     import dawg  # provided by the `dawg2` distribution
 
@@ -190,8 +210,18 @@ CANDIDATES = [
         dict(prefix=1, rangeq=1, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
     ),
     (
-        "marisa-trie",
+        "marisa-trie\n(4 tries, tiny cache)",
+        build_marisa_compact,
+        dict(prefix=1, rangeq=0, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
+    ),
+    (
+        "marisa-trie\n(default)",
         build_marisa,
+        dict(prefix=1, rangeq=0, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
+    ),
+    (
+        "marisa-trie\n(huge cache)",
+        build_marisa_fast,
         dict(prefix=1, rangeq=0, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
     ),
     (
