@@ -161,6 +161,9 @@ jobs:
           - parse_overlay_untrusted
           - parse_mphf
           - parse_string
+          # Not a blob parser: `inspect` reads a header of any of the formats above and was found
+          # non-total on a crafted overlay, so the target holds it to a return value on any bytes.
+          - parse_inspect
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
