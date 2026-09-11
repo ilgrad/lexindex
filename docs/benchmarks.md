@@ -17,8 +17,9 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
+| **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
+| **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
@@ -100,7 +101,8 @@ So, in decision order:
 
 - **Do the keys need to come back out, or be scanned in order?** If yes, the fingerprint indexes are
   out; `StringIndex` (ordered, prefix / range / fuzzy / subsequence), `DictIndex` (ordered,
-  `id → key`, `lower_bound`, no automata — the smallest of the three on single words) or
+  `id → key`, `lower_bound`, `prefix`, `range`, no automata so no fuzzy — the smallest of the
+  three on single words) or
   `PerfectHashIndex` (exact membership, `id → key`, no ordering) are the candidates, and all three
   pay for the keys they store.
 - **Is a bounded false-positive rate acceptable?** If yes, `CompactHashIndex` is 2.4× smaller than
@@ -407,6 +409,42 @@ lookup is hot, 128 if the bytes are.
 ([`bench/results/dict-stair-2026-09-11-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-stair-2026-09-11-arz.txt)),
 Ryzen 7 5800HS, load about 1 with an editor open. `id` and `lower_bound` are untouched code; they
 move with the session, and the `StringIndex` control moves with them.</sub>
+
+## Prefix queries against the tries
+
+A prefix is a range of a sorted dictionary, so `DictIndex` answers one without an automaton:
+`prefix_id_range` is two `lower_bound`s and `prefix` walks the run they name. `local/prefixbench.py`
+puts that against the tries a Python project can install, on the same words — 20 000 three-byte
+prefixes drawn from random words, so the average prefix carries 763 keys.
+
+| | bytes/key | `prefix_count` | first 10 | every match |
+|---|---:|---:|---:|---:|
+| **lexindex `DictIndex` 32** | 3.52 | **351 ns** | **1 864 ns** | 102 397 ns |
+| **lexindex `DictIndex` 128** | **2.89** | 529 | 2 435 | 101 673 |
+| lexindex `StringIndex` | 5.95 | 580 | 4 712 | 179 540 |
+| `marisa-trie` | 2.98 | 127 657 | 2 773 | 100 990 |
+| `dawg2` | 23.96 | 74 989 | 1 659 | 54 070 |
+| `datrie` | 30.69 | 781 966 | 779 331 | 765 096 |
+
+**Counting is where the structures differ in kind rather than by a constant.** `prefix_count` costs
+two order lookups whatever the prefix carries, so it runs 242× faster than marisa's at block 128 and
+364× at the default — marisa has to enumerate all 763 matches to count them, its ids not being
+lexicographic ranks, so there is no arithmetic to do instead. At the block size that goes under
+marisa on *size*, `DictIndex` is also ahead on autocomplete (2 435 ns against 2 773) and level on
+full enumeration — while handing back each match's rank, which marisa has none to give.
+
+`dawg2` enumerates about twice as fast at 8.3× the bytes, with no reverse lookup and no mmap: a
+different point on the curve, not a smaller one. `datrie` is a double-array built for point lookups;
+prefix walking is not what it is for.
+
+One finding rather than a result: going through `prefix_id_range` and then `keys_of` is *slower*
+than `prefix` (135 595 ns at block 32, 218 542 at 128), because `keys_of` re-enters the block for
+every id while `prefix` walks the run once. `prefix` is the API for this shape of query.
+
+<sub>Measured 2026-09-11
+([`bench/results/prefix-2026-09-11-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-2026-09-11-arz.txt)),
+`marisa-trie` 1.3, `dawg2`, `datrie` over the same word list, Ryzen 7 5800HS, load about 1.3. None
+of the three is a lexindex dependency — reproduce in a throwaway environment.</sub>
 
 ## Hash quality
 

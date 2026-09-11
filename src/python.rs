@@ -1772,6 +1772,67 @@ impl PyDictIndex {
         self.inner.lower_bound(key)
     }
 
+    /// `(key, id)` pairs whose key starts with `prefix`, lexicographically ordered. `limit` stops
+    /// after that many matches, walking no further -- what autocomplete wants. A sorted dictionary
+    /// answers this as a range, so nothing is scanned that is not returned.
+    #[pyo3(signature = (prefix, limit=None))]
+    fn prefix(&self, py: Python<'_>, prefix: &str, limit: Option<usize>) -> Vec<(String, u64)> {
+        py.detach(|| {
+            let it = self.inner.prefix_iter(prefix);
+            match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            }
+        })
+    }
+
+    /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered. `limit` stops after that
+    /// many matches.
+    #[pyo3(signature = (lo, hi, limit=None))]
+    fn range(
+        &self,
+        py: Python<'_>,
+        lo: &str,
+        hi: &str,
+        limit: Option<usize>,
+    ) -> Vec<(String, u64)> {
+        py.detach(|| {
+            let it = self.inner.range_iter(lo, hi);
+            match limit {
+                Some(n) => it.take(n).collect(),
+                None => it.collect(),
+            }
+        })
+    }
+
+    /// How many keys start with `prefix`, without decoding any of them.
+    fn prefix_count(&self, prefix: &str) -> u64 {
+        self.inner.prefix_count(prefix)
+    }
+
+    /// How many keys satisfy `lo <= key < hi`, without decoding any of them.
+    fn range_count(&self, lo: &str, hi: &str) -> u64 {
+        self.inner.range_count(lo, hi)
+    }
+
+    /// The contiguous `(start, end)` id range of the keys starting with `prefix`, half-open. Ids
+    /// follow lexicographic order, so a prefix is a slice of the id space rather than a set of ids
+    /// to test one at a time -- usable directly as a `range()` or a bitset window.
+    fn prefix_id_range(&self, prefix: &str) -> (u64, u64) {
+        let r = self.inner.prefix_id_range(prefix);
+        (r.start, r.end)
+    }
+
+    /// The smallest `(key, id)` with `key >= query`, or `None` if every key is smaller.
+    fn successor(&self, query: &str) -> Option<(String, u64)> {
+        self.inner.successor(query)
+    }
+
+    /// The largest `(key, id)` with `key <= query`, or `None` if every key is larger.
+    fn predecessor(&self, query: &str) -> Option<(String, u64)> {
+        self.inner.predecessor(query)
+    }
+
     /// Key at rank `id`, or `None` past the end.
     fn key(&self, id: u64) -> Option<String> {
         self.inner.key(id)

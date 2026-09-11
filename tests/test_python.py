@@ -345,6 +345,32 @@ def test_dict_index_core():
     assert list(empty) == [] and empty.lower_bound("x") == 0
 
 
+def test_dict_index_ordered_queries():
+    """A sorted dictionary answers prefix and range as id ranges -- no automaton, no scan of
+    anything it does not return. Cross-checked against StringIndex, which answers the same
+    questions over an FST."""
+    words = ["apple", "apricot", "banana", "blueberry", "cherry"]
+    di = lexindex.DictIndex(words)
+    si = lexindex.StringIndex(words)
+    for q in ["", "a", "ap", "apple", "b", "bl", "z", "apricots"]:
+        assert di.prefix(q) == si.prefix(q), q
+        assert di.prefix_count(q) == si.prefix_count(q), q
+        assert di.prefix_id_range(q) == si.prefix_id_range(q), q
+        assert di.successor(q) == si.successor(q), q
+        assert di.predecessor(q) == si.predecessor(q), q
+    for lo, hi in [("a", "b"), ("apricot", "cherry"), ("z", "zz"), ("", "\uffff")]:
+        assert di.range(lo, hi) == si.range(lo, hi), (lo, hi)
+        assert di.range_count(lo, hi) == si.range_count(lo, hi), (lo, hi)
+    assert di.prefix("a", limit=2) == [("apple", 0), ("apricot", 1)]
+    assert di.range("a", "z", limit=1) == [("apple", 0)]
+    # The 128-key block is the configuration that goes under marisa on size; it answers the same.
+    big = lexindex.DictIndex(words, block=128)
+    assert big.prefix("ap") == di.prefix("ap") and big.prefix_id_range("b") == (2, 4)
+    empty = lexindex.DictIndex([])
+    assert empty.prefix("a") == [] and empty.prefix_id_range("a") == (0, 0)
+    assert empty.successor("a") is None and empty.predecessor("a") is None
+
+
 def test_dict_index_block_argument_and_persistence(tmp_path):
     words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
     for block in (1, 5, 32, 1024):

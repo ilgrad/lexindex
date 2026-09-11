@@ -21,8 +21,8 @@
 //!   at 10.9 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
 //!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
-//!   `string ↔ rank` both ways, plus `lower_bound` and in-order iteration, and nothing else — no
-//!   automata, so no prefix or fuzzy queries. The sorted keys front-coded in blocks with the
+//!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
+//!   automata, so no fuzzy queries. The sorted keys front-coded in blocks with the
 //!   suffixes under a static symbol table: about 3.5 B/key on real words, a third of
 //!   `StringIndex`. Use it where the queries are exact and the index has to be small.
 //!

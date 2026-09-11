@@ -455,8 +455,10 @@ class DictIndex:
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
     sorted keys are front-coded in blocks with the suffixes under a static symbol table: about
-    3.5 bytes per key on real words, a third of ``StringIndex``, and no automata -- no prefix or
-    fuzzy queries. Built in memory; ``save`` / ``load`` only, no ``load_mmap``.
+    3.5 bytes per key on real words, a third of ``StringIndex``. Prefix and range are order
+    lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
+    ``StringIndex``. ``block=128`` stores 2.89 bytes per key, under ``marisa-trie``, for a slower
+    reverse lookup.
     """
 
     def __new__(cls, items: Iterable[str], block: int = 32) -> DictIndex:
@@ -486,6 +488,16 @@ class DictIndex:
         the id it would have, ``len(self)`` past every key. Two of these bound a range of keys as
         a range of ids."""
 
+    def prefix(self, prefix: str, limit: int | None = None) -> list[tuple[str, int]]:
+        """``(key, id)`` pairs whose key starts with ``prefix``. A sorted dictionary answers this
+        as a range, so nothing is scanned that is not returned; ``limit`` stops early."""
+
+    def range(self, lo: str, hi: str, limit: int | None = None) -> list[tuple[str, int]]: ...
+    def range_count(self, lo: str, hi: str) -> int: ...
+    def prefix_count(self, prefix: str) -> int: ...
+    def prefix_id_range(self, prefix: str) -> tuple[int, int]: ...
+    def successor(self, query: str) -> tuple[str, int] | None: ...
+    def predecessor(self, query: str) -> tuple[str, int] | None: ...
     def key(self, id: int) -> str | None: ...
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...

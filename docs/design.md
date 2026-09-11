@@ -199,7 +199,9 @@ the heads, the three arrays and the data; the loader checks every length, both c
 table and the arrays' order before anything is trusted, and the block data — bounded on every
 read rather than validated up front — is what the fuzz target queries after loading. `load_mmap` borrows
 every section but the per-block samples, which two binary searches read on every lookup (below);
-there are no automata, so a prefix or fuzzy question is `StringIndex`'s.
+there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
+automaton questions here, they are two `lower_bound`s and a walk, and this index answers them
+itself: `prefix_id_range` costs two order lookups whatever the number of matches.
 
 ## `PerfectHashIndex`
 

@@ -113,6 +113,16 @@ def build_lexindex_mph():
     return lexindex.PerfectHashIndex(KEYS)
 
 
+def build_lexindex_dict():
+    return lexindex.DictIndex(KEYS)
+
+
+def build_lexindex_dict128():
+    # The block size is a knob, not a constant: 128 per block is where an ordered, reverse-capable
+    # index goes under marisa on this corpus, paying for it in reverse-lookup latency.
+    return lexindex.DictIndex(KEYS, block=128)
+
+
 def build_lexindex_closed():
     return lexindex.ClosedHashIndex(KEYS)
 
@@ -175,9 +185,19 @@ CANDIDATES = [
         dict(prefix=0, rangeq=0, fuzzy=0, reverse=0, exact=0, serialise=1, mmap=1),
     ),
     (
+        "lexindex\nDictIndex\n(128 per block)",
+        build_lexindex_dict128,
+        dict(prefix=1, rangeq=1, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
+    ),
+    (
         "marisa-trie",
         build_marisa,
         dict(prefix=1, rangeq=0, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
+    ),
+    (
+        "lexindex\nDictIndex\n(32 per block, default)",
+        build_lexindex_dict,
+        dict(prefix=1, rangeq=1, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
     ),
     (
         "lexindex\nStringIndex",

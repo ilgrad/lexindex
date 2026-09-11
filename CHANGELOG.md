@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`DictIndex` answers prefix and range queries**, in Rust and Python: `prefix`, `prefix_iter`,
+  `prefix_id_range`, `prefix_count`, `range`, `range_iter`, `range_count`, `iter_after`,
+  `successor`, `predecessor` — the ordered surface `StringIndex` already had, with the same names
+  and the same answers (a test cross-checks the two index types on every one of them). The type had
+  been documented as having none of this because it has no automaton, which conflated two things:
+  a *fuzzy* query needs the automaton, a prefix does not. Keys sharing a prefix are adjacent in
+  rank, so a prefix is one contiguous id range, and `prefix_id_range` finds it with two
+  `lower_bound`s.
+
+  That makes counting a different operation rather than a faster one: **`prefix_count` is 351 ns
+  where `marisa-trie` takes 127 657**, because marisa has to enumerate all 763 matches of an
+  average three-byte prefix to count them — its ids are not lexicographic ranks, so it has no
+  arithmetic to do instead. At `block=128`, where the index stores **2.89 bytes per key against
+  marisa's 2.98**, it is also ahead on autocomplete (2 435 ns for the first ten against 2 773) and
+  level on full enumeration, while returning each match's rank as well.
+
 - **`DictIndex::load_mmap` and `load_mmap_verified`**, in Rust and Python. The keys, the block
   data and the two offset arrays are held as the bytes they are serialised as, owned or mapped,
   an entry decoded where it is read; so a mapping borrows them and the load reads the header, the

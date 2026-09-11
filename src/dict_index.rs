@@ -10,9 +10,11 @@
 //! `id` is a binary search over the samples, then over the heads of the few blocks whose sample
 //! equals the probe's, then one block scanned without decoding anything: an entry's stored suffix
 //! is compared against the probe symbol by symbol, and the shared-prefix length says on its own
-//! when the probe has been passed. `key(id)` is the block's head and at most `block − 1` decodes,
-//! each one eight-byte store per code. There are no automata: a prefix or fuzzy query is a
-//! `StringIndex` question, and this index answers exact ones at 3–4 bytes per key.
+//! when the probe has been passed. `key(id)` is the block's head plus the entries between it and
+//! the id whose shared-prefix length strictly increases — a monotonic stack over the headers finds
+//! them, and only those are decoded, each one eight-byte store per code. There are no automata, so
+//! a fuzzy query is a `StringIndex` question; prefix and range are two order lookups and a walk,
+//! which this index answers itself at 3–4 bytes per key.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
@@ -431,6 +433,67 @@ impl DictIndex {
         self.locate(key.as_bytes()).0
     }
 
+    /// The smallest `(key, id)` with `key >= query` (the *successor*), or `None` if every key is
+    /// smaller.
+    pub fn successor(&self, query: &str) -> Option<(String, u64)> {
+        let rank = self.locate(query.as_bytes()).0;
+        self.key(rank).map(|k| (k, rank))
+    }
+
+    /// The largest `(key, id)` with `key <= query` (the *predecessor*), or `None` if every key is
+    /// larger. A present `query` is its own predecessor; otherwise the answer sits one rank below
+    /// the first key above it, ids being the sorted rank.
+    pub fn predecessor(&self, query: &str) -> Option<(String, u64)> {
+        let (rank, found) = self.locate(query.as_bytes());
+        let at = if found { rank } else { rank.checked_sub(1)? };
+        self.key(at).map(|k| (k, at))
+    }
+
+    /// How many keys satisfy `lo <= key < hi`, without decoding any of them.
+    pub fn range_count(&self, lo: &str, hi: &str) -> u64 {
+        self.lower_bound(hi).saturating_sub(self.lower_bound(lo))
+    }
+
+    /// The **contiguous** id range of the keys starting with `prefix`, half-open.
+    ///
+    /// Ids are the lexicographic rank and keys sharing a prefix are adjacent in that order, so
+    /// every match is an id in one interval — a prefix is a slice of the id space, not a set of
+    /// ids to test one at a time. Two order lookups, whatever the number of matches. Empty
+    /// (`start == end`) when nothing matches; `0..len` for an empty prefix.
+    ///
+    /// ```
+    /// use lexindex::DictIndex;
+    /// let idx = DictIndex::build(["apple", "apricot", "banana"])?;
+    /// assert_eq!(idx.prefix_id_range("ap"), 0..2);
+    /// assert_eq!(idx.prefix_id_range("z"), 3..3);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn prefix_id_range(&self, prefix: &str) -> std::ops::Range<u64> {
+        let start = self.locate(prefix.as_bytes()).0;
+        // The exclusive end is the first key that does not carry the prefix: the same bytes with
+        // the last one incremented. A trailing `0xff` cannot appear in UTF-8, so the carry loop is
+        // unreachable for a `&str` — it is here because the invariant that makes it unreachable
+        // belongs to the caller's type, not to this function.
+        let mut upper = prefix.as_bytes().to_vec();
+        let end = loop {
+            match upper.pop() {
+                Some(0xff) => continue,
+                Some(b) => {
+                    upper.push(b + 1);
+                    break self.locate(&upper).0;
+                }
+                None => break self.n as u64,
+            }
+        };
+        start..end.max(start)
+    }
+
+    /// How many keys start with `prefix` — [`prefix_id_range`](Self::prefix_id_range)'s width.
+    pub fn prefix_count(&self, prefix: &str) -> u64 {
+        let r = self.prefix_id_range(prefix);
+        r.end - r.start
+    }
+
     /// Batched [`id`](Self::id): one answer per key, aligned with `keys`.
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u64>> {
         self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
@@ -548,6 +611,59 @@ impl DictIndex {
     /// Every key with its id, in key order.
     pub fn iter(&self) -> impl Iterator<Item = (String, u64)> + '_ {
         self.iter_from(0)
+    }
+
+    /// All `(key, id)` pairs whose key starts with `prefix`, in lexicographic order.
+    ///
+    /// A sorted dictionary needs no automaton for this: the matches are the contiguous run that
+    /// [`prefix_id_range`](Self::prefix_id_range) names, so the cost is one order lookup plus one
+    /// decode per key returned.
+    ///
+    /// ```
+    /// use lexindex::DictIndex;
+    /// let idx = DictIndex::build(["apple", "apricot", "banana"])?;
+    /// assert_eq!(idx.prefix("ap"), [("apple".to_string(), 0), ("apricot".to_string(), 1)]);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn prefix(&self, prefix: &str) -> Vec<(String, u64)> {
+        self.prefix_iter(prefix).collect()
+    }
+
+    /// Like [`prefix`](Self::prefix) but **lazy**: one key is decoded per step, so an autocomplete
+    /// wanting the first handful never pays for the rest.
+    pub fn prefix_iter<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = (String, u64)> + 'a {
+        self.iter_from(self.lower_bound(prefix))
+            .take_while(move |(k, _)| k.starts_with(prefix))
+    }
+
+    /// All `(key, id)` pairs with `lo <= key < hi`, in lexicographic order.
+    pub fn range(&self, lo: &str, hi: &str) -> Vec<(String, u64)> {
+        self.range_iter(lo, hi).collect()
+    }
+
+    /// Like [`range`](Self::range) but **lazy** — see [`prefix_iter`](Self::prefix_iter).
+    pub fn range_iter<'a>(
+        &'a self,
+        lo: &'a str,
+        hi: &'a str,
+    ) -> impl Iterator<Item = (String, u64)> + 'a {
+        self.iter_from(self.lower_bound(lo))
+            .take_while(move |(k, _)| k.as_str() < hi)
+    }
+
+    /// [`iter`](Self::iter) resumed after `after`, which is excluded whether or not it is a key —
+    /// what a cursor wants.
+    ///
+    /// ```
+    /// use lexindex::DictIndex;
+    /// let idx = DictIndex::build(["apple", "apricot", "banana"])?;
+    /// let rest: Vec<_> = idx.iter_after("apricot").collect();
+    /// assert_eq!(rest, [("banana".to_string(), 2)]);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn iter_after(&self, after: &str) -> impl Iterator<Item = (String, u64)> + '_ {
+        let (rank, found) = self.locate(after.as_bytes());
+        self.iter_from(rank + u64::from(found))
     }
 
     /// [`iter`](Self::iter) from rank `start` on.
@@ -976,6 +1092,84 @@ mod tests {
             let back = DictIndex::from_bytes(&blob).unwrap();
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
+        }
+    }
+
+    #[test]
+    fn the_ordered_queries_agree_with_a_linear_scan() {
+        let keys = corpus();
+        let pairs: Vec<(String, u64)> = keys.iter().cloned().zip(0..).collect();
+        let ps = probes(&keys);
+        for block in [1usize, 3, 32, MAX_BLOCK] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            for p in &ps {
+                let want: Vec<(String, u64)> = pairs
+                    .iter()
+                    .filter(|(k, _)| k.starts_with(p))
+                    .cloned()
+                    .collect();
+                assert_eq!(&idx.prefix(p), &want, "block {block} prefix {p:?}");
+                assert_eq!(
+                    idx.prefix_iter(p).take(2).collect::<Vec<_>>(),
+                    want.iter().take(2).cloned().collect::<Vec<_>>(),
+                    "block {block} prefix_iter {p:?}"
+                );
+                let r = idx.prefix_id_range(p);
+                assert_eq!(
+                    r.end - r.start,
+                    want.len() as u64,
+                    "block {block} range {p:?}"
+                );
+                assert_eq!(
+                    idx.prefix_count(p),
+                    want.len() as u64,
+                    "block {block} count {p:?}"
+                );
+                if let Some((_, first)) = want.first() {
+                    assert_eq!(r.start, *first, "block {block} range start {p:?}");
+                }
+
+                let want = pairs
+                    .iter()
+                    .find(|(k, _)| k.as_str() >= p.as_str())
+                    .cloned();
+                assert_eq!(idx.successor(p), want, "block {block} successor {p:?}");
+                let want = pairs
+                    .iter()
+                    .rev()
+                    .find(|(k, _)| k.as_str() <= p.as_str())
+                    .cloned();
+                assert_eq!(idx.predecessor(p), want, "block {block} predecessor {p:?}");
+
+                let want: Vec<(String, u64)> = pairs
+                    .iter()
+                    .filter(|(k, _)| k.as_str() > p.as_str())
+                    .cloned()
+                    .collect();
+                assert_eq!(
+                    idx.iter_after(p).collect::<Vec<_>>(),
+                    want,
+                    "block {block} after {p:?}"
+                );
+            }
+            for w in ps.chunks(2).filter(|w| w.len() == 2) {
+                let (lo, hi) = (&w[0], &w[1]);
+                let want: Vec<(String, u64)> = pairs
+                    .iter()
+                    .filter(|(k, _)| k.as_str() >= lo.as_str() && k.as_str() < hi.as_str())
+                    .cloned()
+                    .collect();
+                assert_eq!(
+                    &idx.range(lo, hi),
+                    &want,
+                    "block {block} range {lo:?}..{hi:?}"
+                );
+                assert_eq!(
+                    idx.range_count(lo, hi),
+                    want.len() as u64,
+                    "block {block} count"
+                );
+            }
         }
     }
 

@@ -1,0 +1,26 @@
+Prefix queries head to head — 2026-09-11, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Harness: local/prefixbench.py. /usr/share/dict/words sorted and deduplicated; every structure built once in
+one process; 20 000 three-byte prefixes drawn from random words with a fixed seed, so the average prefix
+carries 763 keys; the variants alternated within each of five rounds, min per cell, ns per probe. Sizes are
+the serialised blob divided by the key count, the same measure as the README table.
+
+The columns are the three questions a prefix index is actually asked. "count" is how many keys carry the
+prefix: lexindex answers it with two order lookups and never touches a key, a trie has to enumerate. "first
+10" is autocomplete. "all+ids" returns every match with its lexicographic rank; "keys only" returns the keys
+alone, which is all a trie can return -- so marisa's two columns are the same call.
+
+Read "keys only" for lexindex as a finding, not a result: it goes through `prefix_id_range` + `keys_of`, and
+`keys_of` re-enters the block for every id, so it is worse than `prefix` and worse still at block 128 where a
+block walk is longer. `prefix` is the API for this; `keys_of` over a contiguous run wants a sequential walk.
+
+datrie is built over the full character set present in the corpus, which is what bench/compare.py does.
+
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 32       3.52        351        1864      102397      135595 
+DictIndex 128      2.89        529        2435      101673      218542 
+StringIndex        5.95        580        4712      179540      363819 
+marisa-trie        2.98     127657        2773      100990      100693 
+datrie            30.69     781966      779331      765096      785905 
+dawg2             23.96      74989        1659       54070       53906 
