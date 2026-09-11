@@ -85,6 +85,12 @@ bench = false
 # Keeps cargo from trying to fold this package into the crate above it.
 [workspace]
 
+[[bin]]
+name = "parse_inspect"
+path = "fuzz_targets/parse_inspect.rs"
+test = false
+doc = false
+
 # Link-time optimisation has to stay off, and this block is only half of saying so: cargo lets a
 # `[profile.release]` in any `config.toml` in scope override a manifest profile, so a machine whose
 # cargo config sets `lto` needs `CARGO_PROFILE_RELEASE_LTO=false` in the environment as well (an env

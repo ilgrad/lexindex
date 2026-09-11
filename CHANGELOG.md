@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`inspect` is total on an overlay too.** Its live-key count was `base + additions − retired`
+  on numbers straight from the header, which a crafted blob could make wrap (or panic in a debug
+  build); the counts are checked now, and a header whose counts do not add up is an `IndexError`,
+  as is one claiming more additions than its section could hold. A base region that is itself an
+  overlay — nothing this crate writes, since a base tag names an index — was parsed by the same
+  routine without a bound, so a few megabytes of nested headers overflowed the stack; it is
+  refused by name. The tombstone words an overlay's retired count comes from are read 64 KiB at
+  a time rather than as one allocation the size of the section (125 MB over a billion ids), and
+  the docs say what an overlay inspection reads. A `parse_inspect` fuzz target holds `inspect`
+  to a return value on any bytes.
+
+### Changed
+
+- Documentation: an `OVL2` crosses 1.x → 2.0 only over a `BIX4` base, since an overlay embeds
+  its base verbatim (README, `SECURITY.md`, `docs/design.md`); the `build_with_fingerprints`
+  entry below said the blob stays `BMP6` — it is `BMP7`, like every 2.0 `PerfectHashIndex`
+  blob; "three indexes" is five throughout; the `DictIndex` symbol table is called FSST-style,
+  with a table format of its own, so that `BDX1` is not mistaken for a reader or writer of the
+  reference format; the perfect-hash comparison scopes its claim to its harness (lexindex takes
+  pre-hashed keys); the `build_to_file` replay digest is called what it is, a 64-bit
+  probabilistic check.
+
 ## [2.0.0] — 2026-09-10
 
 ### Changed
@@ -41,7 +67,8 @@ All notable changes to this project are documented here. The format follows
 - **`DictIndex`** (Python: `DictIndex`): an ordered dictionary with the key stored for every id —
   exact `string ↔ rank` both ways, `lower_bound`, in-order iteration, and no automata. The sorted
   keys front-coded in blocks of 32 (a build parameter, `1..=1024`), the suffixes under a static
-  symbol table — an in-crate FSST codec, 300 lines, trained deterministically on the index's own
+  symbol table — an in-crate FSST-style codec with a table format of its own, 300 lines, trained
+  deterministically on the index's own
   suffixes — so a blob is a function of its keys. On the dictionary: 3.52 B/key against
   `StringIndex`'s 5.95, `id` 300 ns against 345, `key` 197 against 505 (`key_into` decodes into a
   string the caller keeps); `id` compares the stored suffixes against the probe without decoding
@@ -97,9 +124,8 @@ All notable changes to this project are documented here. The format follows
   dictionary, one index per process, six alternations, minimum: an absent probe 166 → 74 ns, a
   member 163 → 171; batched `ids_of` over absent keys 70 → 47; the index 10.90 → 11.90 B/key. Ids
   are unchanged -- it is the same perfect hash -- and an `Overlay` compaction keeps the
-  fingerprints (`OverlayKeys::rebuild_like`, with a default). The blob stays `BMP6`: the arena tag
-  carries the bit, and a reader from before 2.0 refuses it as an unknown arena encoding rather
-  than misread it.
+  fingerprints (`OverlayKeys::rebuild_like`, with a default). The magic is `BMP7` either way: the arena tag
+  carries the bit, so the format needs no new name for it.
 - **Path forms of the strict loader, and checked forms of the mapping.** `StringIndex::load_untrusted`
   is `from_untrusted_bytes` over a file (Python: `StringIndex.load_untrusted`, and
   `Overlay.load_untrusted(path, base)`). `load_mmap_verified`, on all three indexes, is `load_mmap`

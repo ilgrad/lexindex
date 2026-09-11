@@ -692,7 +692,8 @@ def inspect(blob: str | os.PathLike[str] | bytes) -> BlobInfo:
     """What a blob is, from its header alone: kind, format and sizes, without loading it.
 
     Over a path only the header and the footer are read, so an index of gigabytes inspects in
-    microseconds. Nothing is decoded or verified. Bytes that are not a lexindex blob, or a header
+    microseconds; an overlay's tombstone words are read too, to count its retired ids. Nothing
+    is decoded or verified. Bytes that are not a lexindex blob, or a header
     whose lengths run past the end, raise ``ValueError``; so does a blob from before 1.0, with the
     type to rebuild it in the message.
     """

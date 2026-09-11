@@ -1,5 +1,6 @@
-//! A static symbol table for the suffixes a [`DictIndex`](crate::DictIndex) stores — FSST
-//! (Boncz, Neumann and Leis, VLDB 2020): up to 255 symbols of one to eight bytes, a one-byte
+//! A static symbol table for the suffixes a [`DictIndex`](crate::DictIndex) stores, after FSST
+//! (Boncz, Neumann and Leis, VLDB 2020) and in a table format of its own: up to 255 symbols of
+//! one to eight bytes, a one-byte
 //! code for each, and the code `255` followed by the byte itself for what no symbol covers.
 //!
 //! The table is trained once per index over a sample of the pieces it will store, by the encoder's

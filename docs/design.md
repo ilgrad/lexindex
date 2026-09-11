@@ -170,11 +170,12 @@ The sorted keys front-coded in blocks, so that an id is a rank and a rank is a p
 `block` keys (32 by default, `1..=1024`) stores its first key whole and every other as the length
 of the prefix it shares with its predecessor and the suffix after it — one header byte
 `lcp << 4 | len` when both are below fifteen, else a marker and two varints — with the suffix
-under a static symbol table: FSST (Boncz, Neumann and Leis, VLDB 2020), up to 255 symbols of one
+under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB 2020): up to 255 symbols of one
 to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
 parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
 kilobyte. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
-parity with `fsst-rs`, which would have raised the MSRV — and the training is deterministic, so a
+parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
+so a `BDX1` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other. Beside the blocks sit three flat arrays with one
 entry per block: where its head ends (`u32`), an eight-byte sample of the head in byte order
 (`u64`), and where its entries start (`u64`, so the block data may pass 4 GiB).
@@ -268,7 +269,7 @@ whose encoding is little-endian by specification.
 
 ## `Overlay`
 
-The three indexes are build-once summaries: a finite-state transducer and a minimal perfect hash both
+The indexes are build-once summaries: a transducer, front-coded blocks and a minimal perfect hash all
 have to be rebuilt to admit one new key. An overlay keeps the base as it is, holds the keys added
 after it in a map, and marks the ids retired from it in a bitset — so a catalog that mostly grows at
 the edges is not rebuilt on every change. Removal is **by id, not by key**, which is what makes it
@@ -293,7 +294,7 @@ them; that is the whole migration.
 
 ## Zero-copy `load_mmap`
 
-All three indexes load two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
+Every index but `DictIndex` loads two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
 file and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of
 the index size and the OS shares the pages across processes. Two shades of the mapping exist for
 files that were not carried by their author: `load_mmap_verified` is the same mapping with the
@@ -309,17 +310,17 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 and reads only the small MPH structure into memory.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index
-borrows it. That obligation is the caller's, so the `load_mmap` family are **`unsafe fn`s** on all
-three indexes — `memmap2::Mmap::map` is `unsafe` for precisely this reason, and wrapping it in a
+borrows it. That obligation is the caller's, so the `load_mmap` family are **`unsafe fn`s** on every
+index that has them — `memmap2::Mmap::map` is `unsafe` for precisely this reason, and wrapping it in a
 safe function would hide a precondition that a perfectly ordinary safe program (another handle
 writing to the same path) can violate.
 
 The load-time trust boundary is worth stating precisely. Against **accidental** corruption — a
 truncated download, a flipped byte, a lost header field — every owned `load`/`from_bytes` fails
 cleanly: `StringIndex` verifies the FST's stored checksum and spot-checks that its values are the
-sorted ranks (first value 0, rank-walk to `n - 1`), and the perfect-hash indexes verify a
+sorted ranks (first value 0, rank-walk to `n - 1`), and the perfect-hash indexes and `DictIndex` verify a
 streaming hash of their whole payload plus a check over the header's framing fields, so a corrupted
-blob of any of the three is rejected rather than read. Against a **deliberately crafted** blob every
+blob of any of them is rejected rather than read. Against a **deliberately crafted** blob every
 checksum involved is public and deterministic, so an attacker can recompute them — and since 1.0 that
 no longer matters for soundness. The perfect-hash indexes validate structure, not just transport:
 every array length is derived from the header and checked against the bytes present, side-table ids
@@ -346,7 +347,7 @@ is the right price once and the wrong price every time. `load_mmap`
 skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
 independent of blob size — the structural checks still run.
 
-That is what decides the signatures. `from_bytes` and `load` are **safe fns on all three indexes**,
+That is what decides the signatures. `from_bytes` and `load` are **safe fns on every index**,
 because none of them is unsound on any input. `load_mmap` stays an `unsafe fn` everywhere, for the
 mapping obligation alone: the index borrows the pages, so a concurrent write to the file is undefined
 behaviour and nothing in the library can check for it. Until 1.0 the two perfect-hash loaders were
@@ -407,8 +408,11 @@ where it cannot be kept, not where keeping it is merely inconvenient.
 **Blobs move forward, not backward — upgrade the reader first.** 1.1 read every `BMP5` and
 every `BCH6` that 1.0 wrote; 2.0 refuses all three by name, and what it writes — `BMP7`, `BCH7` —
 is a magic neither has heard of, so they refuse it as malformed rather than as a version mismatch.
-`BIX4` and `OVL2` are byte-for-byte what 1.0 wrote, so a `StringIndex` or `Overlay` file crosses
-the versions in either direction.
+`BIX4` is byte-for-byte what 1.0 wrote, so a `StringIndex` file crosses the versions in either
+direction, and so does an `OVL2` over a `StringIndex` base. An overlay embeds its base verbatim,
+so an `OVL2` over a `BMP5`, `BMP6` or `BCH6` base is refused by 2.0 with that base, and the
+migration is the base's: list its live keys on the old version, rebuild on 2.0, and put a fresh
+overlay over it.
 
 What a blob does *not* promise is that it will load into the same **ids** across a format change.
 Since 1.0 construction is deterministic, so the same keys rebuilt on the same version give the same

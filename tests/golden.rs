@@ -354,6 +354,7 @@ fn the_fuzz_shims_accept_a_real_blob() {
     }
     assert!(!lexindex::fuzzing::parse_compact_frame(&perfect, true));
     assert!(!lexindex::fuzzing::parse_perfect_frame(&compact, true));
+    assert!(lexindex::fuzzing::inspect(&compact) && lexindex::fuzzing::inspect(&perfect));
 
     // The 1.0 and 1.1 pairs stopped being seeds when 2.0 replaced the key hash: refused at the
     // magic, one branch in, like the 0.9.1 blob below.

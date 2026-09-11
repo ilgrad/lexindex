@@ -182,8 +182,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
 - **`StringIndex` is the FST alone.** `id → key` is a rank-walk over the automaton, so the blob is
   `[magic "BIX4"][fst]` and there is no reverse map to store or keep in sync.
 - **`DictIndex` is front coding under a symbol table.** Blocks of 32 sorted keys, the first whole and
-  the rest as (shared-prefix length, suffix), the suffixes under a 255-symbol FSST table trained on
-  the index's own suffixes; `id` compares the stored suffixes against the probe without decoding them.
+  the rest as (shared-prefix length, suffix), the suffixes under a 255-symbol FSST-style table (its
+  own format) trained on the index's own suffixes; `id` compares the stored suffixes against the
+  probe without decoding them.
 - **`CompactHashIndex` stores no keys.** A minimal perfect hash plus one `fingerprint_bits`-wide
   fingerprint per slot from a second, uncorrelated hash — a design rate of about `2^-bits`, not a
   defence against chosen queries. Its build streams 16 bytes per key, never the strings: 302 MB peak
@@ -203,7 +204,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   so the file must not change while the index is alive.
 - **Blobs move forward, not backward.** 2.0 replaced the key hash (the previous one had a two-word
   collision family on ordinary text), so every hash blob written before it (`BMP5`, `BMP6`, `BCH6`)
-  is refused by name and rebuilt from the keys; `BIX4` and `OVL2` cross the versions unchanged.
+  is refused by name and rebuilt from the keys; `BIX4` crosses the versions unchanged, and an
+  `OVL2` does when its base is one — an overlay embeds its base, so one over a 1.x hash blob is
+  refused with it.
 - **`--no-default-features` is `fst` only** (`StringIndex`, `DictIndex`, `Overlay`); `mph` adds no
   dependency, so the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either.
 

@@ -960,7 +960,9 @@ impl PerfectHashIndex {
     /// Pass two must replay **the same keys in the same order**, and is held to it: every key is
     /// checked against the slot hash and length pass one recorded, and both passes fold a second,
     /// independent 64-bit hash of every key into an ordered digest that must agree before the
-    /// file is published. A source that drops, adds, reorders or substitutes a key — two keys
+    /// file is published — a 64-bit check, so probabilistic: a substitution passes it with
+    /// probability 2⁻⁶⁴, and what it certifies is a repeat of pass one, nothing about the keys
+    /// themselves. A source that drops, adds, reorders or substitutes a key — two keys
     /// sharing the slot hash at equal length included — is refused with [`IndexError::Build`]
     /// and the target is left untouched.
     ///

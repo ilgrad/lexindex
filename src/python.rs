@@ -2648,7 +2648,8 @@ fn write_ids<T: pyo3::buffer::Element>(
 /// instead of raising `Already borrowed`.
 /// What a blob is, from its header alone: its kind, its format and the sizes a caller would
 /// otherwise have to load it to learn. `blob` is a path or `bytes`; over a path only the header
-/// and the footer are read, so an index of gigabytes inspects in microseconds. Nothing is decoded
+/// and the footer are read, so an index of gigabytes inspects in microseconds (an overlay's
+/// tombstone words are read too, to count its retired ids). Nothing is decoded
 /// or verified -- a blob that inspects cleanly may still fail to load, and the sizes are what the
 /// header claims. A blob from before 1.0 is a `ValueError` naming the type to rebuild.
 #[pyfunction(name = "inspect")]

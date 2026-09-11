@@ -1,7 +1,8 @@
 //! What a blob is, from its header alone. [`inspect`] names the kind and the format and reads the
 //! sizes a caller would otherwise have to load the blob to learn: nothing is decoded, nothing is
-//! verified, so it is total on any bytes and instant on any size. A blob from before 1.0 is named
-//! as such, with the type to rebuild.
+//! verified, so it is total on any bytes and instant on any size — an overlay excepted, whose
+//! retired ids are counted from its tombstone words, one byte per eight ids. A blob from before
+//! 1.0 is named as such, with the type to rebuild.
 
 use crate::IndexError;
 
@@ -14,7 +15,7 @@ pub enum BlobKind {
     CompactHashIndex,
     ClosedHashIndex,
     DictIndex,
-    /// A standalone minimal perfect hash, the region the two hash indexes embed.
+    /// A standalone minimal perfect hash, the region the three hash indexes embed.
     Mphf,
     Overlay,
 }
@@ -65,6 +66,11 @@ pub struct OverlayInfo {
 
 const TRUNCATED: IndexError =
     IndexError::Format("blob truncated: a length in the header runs past the end");
+const INCONSISTENT: IndexError =
+    IndexError::Format("overlay header is inconsistent: its counts do not add up");
+const NESTED: IndexError = IndexError::Format(
+    "an overlay's base region is itself an overlay, which nothing in this crate writes",
+);
 
 /// A blob by ranges, so that one parser serves a slice and a file read in pieces.
 trait Source {
@@ -171,7 +177,7 @@ fn rest(whole: u64, parts: [u64; 3]) -> Result<u64, IndexError> {
         .ok_or(TRUNCATED)
 }
 
-fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
+fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
     let magic = w
         .bytes(0, 4)
         .map_err(|_| IndexError::Format("not a lexindex blob: shorter than a magic"))?;
@@ -241,6 +247,9 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             Ok(i)
         }
         b"OVL2" => {
+            if nested {
+                return Err(NESTED);
+            }
             // `[magic 4][tag u8][base len u64][additions u64][addition bytes u64][tombstone
             // words u64][payload u64][check u32]`, then the three sections in that order.
             w.bytes(0, 49)?;
@@ -248,6 +257,13 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             let (base_len, additions, added_bytes, words) =
                 (w.u64(5)?, w.u64(13)?, w.u64(21)?, w.u64(29)?);
             let tail = rest(bytes, [49, base_len, added_bytes])?;
+            // Every addition costs at least its four-byte length prefix.
+            if additions
+                .checked_mul(4)
+                .is_none_or(|floor| floor > added_bytes)
+            {
+                return Err(INCONSISTENT);
+            }
             if tail != words.checked_mul(8).ok_or(TRUNCATED)? {
                 return Err(IndexError::Format(
                     "overlay tombstone length disagrees with the blob",
@@ -257,6 +273,9 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
             overlay(w, format, bytes, tag, 49, base_len, additions, retired)
         }
         b"OVL1" => {
+            if nested {
+                return Err(NESTED);
+            }
             // `[magic 4][tag u8][base len u64][additions u64]`, then the base, the additions
             // (`u32` length, bytes), the tombstone word count as a `u64`, and the words.
             w.bytes(0, 21)?;
@@ -289,13 +308,22 @@ fn parse(w: &mut Window) -> Result<BlobInfo, IndexError> {
     }
 }
 
-/// Set bits over `words` tombstone words at `at`.
+/// Set bits over `words` tombstone words at `at`, read 64 KiB at a time: the section is a byte
+/// per eight ids, so an overlay over a billion keys has 125 MB of it, and none of that is held.
 fn popcount(w: &mut Window, at: u64, words: u64) -> Result<u64, IndexError> {
-    let n = usize::try_from(words.checked_mul(8).ok_or(TRUNCATED)?).map_err(|_| TRUNCATED)?;
-    Ok(w.bytes(at, n)?
-        .chunks_exact(8)
-        .map(|c| u64::from(u64::from_le_bytes(c.try_into().expect("8 bytes")).count_ones()))
-        .sum())
+    const CHUNK: u64 = 8192;
+    let mut total = 0u64;
+    let mut done = 0u64;
+    while done < words {
+        let take = (words - done).min(CHUNK);
+        let chunk = w.bytes(at + done * 8, (take * 8) as usize)?;
+        total += chunk
+            .chunks_exact(8)
+            .map(|c| u64::from(u64::from_le_bytes(c.try_into().expect("8 bytes")).count_ones()))
+            .sum::<u64>();
+        done += take;
+    }
+    Ok(total)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -310,13 +338,17 @@ fn overlay(
     retired: u64,
 ) -> Result<BlobInfo, IndexError> {
     let base = match tag {
-        1..=3 => Some(Box::new(parse(&mut w.sub(header, base_len)?)?)),
+        1..=3 => Some(Box::new(parse(&mut w.sub(header, base_len)?, true)?)),
         _ => None,
     };
-    let keys = base
-        .as_ref()
-        .and_then(|b| b.keys)
-        .map(|k| k + additions - retired);
+    let keys = match base.as_ref().and_then(|b| b.keys) {
+        Some(k) => Some(
+            k.checked_add(additions)
+                .and_then(|n| n.checked_sub(retired))
+                .ok_or(INCONSISTENT)?,
+        ),
+        None => None,
+    };
     Ok(BlobInfo {
         kind: BlobKind::Overlay,
         format,
@@ -352,24 +384,32 @@ fn overlay(
 pub fn inspect(bytes: &[u8]) -> Result<BlobInfo, IndexError> {
     let mut src: &[u8] = bytes;
     let len = Source::len(&src);
-    parse(&mut Window {
-        src: &mut src,
-        start: 0,
-        len,
-    })
+    parse(
+        &mut Window {
+            src: &mut src,
+            start: 0,
+            len,
+        },
+        false,
+    )
 }
 
 /// [`inspect`] over a file, reading only the header and the footer it needs rather than the
-/// file — an index of gigabytes inspects in microseconds.
+/// file — an index of gigabytes inspects in microseconds. An overlay's tombstone words are read as
+/// well, 64 KiB at a time, to count its retired ids, and an `OVL1`'s addition records to find
+/// them.
 pub fn inspect_file(path: impl AsRef<std::path::Path>) -> Result<BlobInfo, IndexError> {
     let file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
     let mut src = FileSource { file, len };
-    parse(&mut Window {
-        src: &mut src,
-        start: 0,
-        len,
-    })
+    parse(
+        &mut Window {
+            src: &mut src,
+            start: 0,
+            len,
+        },
+        false,
+    )
 }
 
 #[cfg(test)]
@@ -514,6 +554,70 @@ mod tests {
             (base.kind, base.keys, base.bytes),
             (BlobKind::StringIndex, Some(300), base_bytes)
         );
+    }
+
+    /// An `OVL2` frame around `base` with the counts the header claims and the tombstone words
+    /// given; the checksums stay zero, which `inspect` never reads.
+    fn ovl2(base: &[u8], additions: u64, added: &[u8], words: &[u64]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"OVL2");
+        out.push(1);
+        out.extend_from_slice(&(base.len() as u64).to_le_bytes());
+        out.extend_from_slice(&additions.to_le_bytes());
+        out.extend_from_slice(&(added.len() as u64).to_le_bytes());
+        out.extend_from_slice(&(words.len() as u64).to_le_bytes());
+        out.extend_from_slice(&[0u8; 12]);
+        out.extend_from_slice(base);
+        out.extend_from_slice(added);
+        for w in words {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn an_overlay_header_whose_counts_do_not_add_up_is_refused_not_wrapped() {
+        let base = StringIndex::build(["a", "b", "c"]).unwrap().to_bytes();
+        let msg = |b: &[u8]| inspect(b).unwrap_err().to_string();
+        // Three keys, nothing added, four ids retired: the live count would pass below zero.
+        assert!(msg(&ovl2(&base, 0, &[], &[0b1111])).contains("do not add up"));
+        // More additions than the section could hold at four bytes each.
+        assert!(msg(&ovl2(&base, u64::MAX, &[], &[])).contains("do not add up"));
+        assert!(msg(&ovl2(&base, 1, &[], &[])).contains("do not add up"));
+        // The same frame with consistent counts: one addition of one byte, one id retired.
+        let i = inspect(&ovl2(&base, 1, &[1, 0, 0, 0, b'd'], &[0b1])).unwrap();
+        assert_eq!(i.keys, Some(3));
+    }
+
+    #[test]
+    fn a_nested_overlay_is_refused_rather_than_recursed_into() {
+        let base = StringIndex::build(["a"]).unwrap().to_bytes();
+        let msg = |b: &[u8]| inspect(b).unwrap_err().to_string();
+        let inner = ovl2(&base, 0, &[], &[]);
+        assert!(msg(&ovl2(&inner, 0, &[], &[])).contains("itself an overlay"));
+        // Deep enough that recursing would have overflowed the stack instead of answering: one
+        // 49-byte header per level, each claiming the rest of the blob as its base.
+        let depth = 20_000u64;
+        let mut blob = Vec::with_capacity(depth as usize * 49 + base.len());
+        for i in 0..depth {
+            let base_len = (depth - 1 - i) * 49 + base.len() as u64;
+            blob.extend_from_slice(b"OVL2");
+            blob.push(1);
+            blob.extend_from_slice(&base_len.to_le_bytes());
+            blob.extend_from_slice(&[0u8; 36]);
+        }
+        blob.extend_from_slice(&base);
+        assert!(msg(&blob).contains("itself an overlay"));
+    }
+
+    #[test]
+    fn retired_ids_are_counted_across_a_tombstone_section_larger_than_one_read() {
+        let base = StringIndex::build(["a", "b", "c"]).unwrap().to_bytes();
+        let mut words = vec![0u64; 20_001];
+        words[0] = 0b1;
+        words[20_000] = 1 << 63;
+        let i = inspect(&ovl2(&base, 0, &[], &words)).unwrap();
+        assert_eq!((i.keys, i.overlay.unwrap().retired), (Some(1), 2));
     }
 
     #[test]

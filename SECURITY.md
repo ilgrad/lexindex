@@ -9,7 +9,7 @@ something that crosses the line.
 | Version | Supported |
 |---|---|
 | 2.0.x | yes |
-| 1.x | no — 2.0 refuses the hash blobs 1.x wrote (the key hash changed), so the fix is to upgrade and rebuild them; `BIX4` and `OVL2` load as they are |
+| 1.x | no — 2.0 refuses the hash blobs 1.x wrote (the key hash changed), so the fix is to upgrade and rebuild them; `BIX4` loads as it is, and so does an `OVL2` over a `BIX4` base; an `OVL2` over a 1.x hash base is refused with that base |
 | 0.x | no — its blob formats are refused by 1.0 anyway, and the fix is to rebuild |
 
 ## Reporting a vulnerability
@@ -24,7 +24,7 @@ within a week; this is a single-maintainer project, so that is a realistic figur
 ## Threat model
 
 **A blob is data you own.** Every loader takes bytes it did not write, and since 1.0 all of them are
-safe fns: `from_bytes` and `load` on all three indexes, and `Overlay`'s. No input produces undefined
+safe fns: `from_bytes` and `load` on every index, and `Overlay`'s. No input produces undefined
 behaviour, an out-of-range id, or a read outside the blob. That is what the in-crate minimal perfect
 hash bought — every array length is derived on load from the header's own scalars, so a loader cannot
 be handed a length that disagrees with the table it describes.
@@ -103,8 +103,9 @@ every week and teach us to ignore a red job.
   bounded to a panic by `fst` being safe Rust, and answered by `from_untrusted_bytes`.
 - **`CompactHashIndex` reporting a key it never held.** Its membership is probabilistic by
   construction, at the false-positive rate `fingerprint_bits` buys.
-- **`Overlay::remove` retiring an id over a probabilistic base.** Removal is by id, and a false
-  positive can supply one; the method documents it.
+- **`Overlay::remove` retiring an id over a probabilistic base, and `Overlay::add` answering a
+  stranger's id there.** Removal is by id, and a false positive can supply one; both methods
+  document it, and the base alone would have answered the same.
 - **Hash collisions found offline.** See above.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set
   you hand in, not to a number a blob claims.

@@ -130,7 +130,7 @@ The loaders, on two axes — whether the bytes are copied and how far they are c
 | Loader | Copies | Checks | For |
 |---|---|---|---|
 | `from_bytes` / `load` | yes | header, payload checksum, rank spot check | your own blob |
-| `from_untrusted_bytes` / `load_untrusted` | yes | the above plus the full validation of the transducer (`StringIndex`; the two hash indexes need none, their loaders are total) | a stranger's blob |
+| `from_untrusted_bytes` / `load_untrusted` | yes | the above plus the full validation of the transducer (`StringIndex`; the hash indexes and `DictIndex` need none, their loaders are total) | a stranger's blob |
 | `load_mmap` | no | header only — the payload checksum is skipped by design, since reading every page is what a mapping avoids | your own file, unchanged while mapped |
 | `load_mmap_verified` | no | header and payload checksum, one pass over the mapping at load | your own file, carried by someone else |
 | `load_mmap_untrusted` (`StringIndex`) | no | the full validation, over the mapping | a stranger's file too large to copy — map a copy you own, since the check trusts what it saw once |
@@ -156,7 +156,7 @@ bad input. It costs 32× `from_bytes` (22.9 ms against 0.7 ms on
 479 823 words), which is the trade: pay it once for a stranger's blob, never for your
 own. The overlay form exists for the same reason — an overlay's own framing is checksummed and
 validated either way, but the base region inside it is handed to a base loader, and over a
-`StringIndex` base that is exactly the choice above. The two hash indexes need no such call: their
+`StringIndex` base that is exactly the choice above. The hash indexes need no such call: their
 loaders are total, so `Overlay.from_untrusted_bytes` over a hash base does the same work as
 `from_bytes`.
 
@@ -174,7 +174,9 @@ The dict carries the kind, the format, the key count, and the sizes a caller wou
 to load the blob to learn: the perfect hash's region (`8 * mph_bytes / keys` is its bits per key),
 the key arena or the fingerprint table, the side table, and for an overlay its additions and
 retired ids with the base inspected in turn. Nothing is decoded or verified, so an index of
-gigabytes inspects in microseconds, and a blob that inspects cleanly may still fail to load. A
+gigabytes inspects in microseconds — an overlay excepted, since counting its retired ids reads
+its tombstone words, one byte per eight ids — and a blob that inspects cleanly may still fail to
+load. A
 blob from before 1.0 is a `ValueError` naming the type to rebuild.
 
 ## `PerfectHashIndex` — exact lookup with `id → key`
@@ -307,7 +309,7 @@ for `StringIndex` — which keeps prefix, range, fuzzy and subsequence iteration
 
 ## `Overlay` — edits without a rebuild
 
-All three indexes are built once from the whole key set, so adding a single key has always meant
+Every index is built once from the whole key set, so adding a single key has always meant
 rebuilding for the whole corpus. An overlay wraps one with the keys added since and the ids retired
 from it. The base is shared, not copied: it stays usable, and several overlays can sit on one index.
 
@@ -409,7 +411,7 @@ On the shuffled dictionary (479 823 member probes, min of seven alternated round
 
 The module tells CPython it does not need the GIL, and the guarantee behind that is:
 
-- **The three index types are immutable after building.** Share one across as many threads as you
+- **The five index types are immutable after building.** Share one across as many threads as you
   like and call `id`, `contains`, `key`, `ids_of` from all of them. Building, batch lookups and
   persistence release the GIL, so other threads keep running while a large index is built or queried.
 - **The two types that hold mutable state — the `StringIndex` iterator and `Overlay` — serialise.**
@@ -535,7 +537,7 @@ dependencies). All of them compile for 32-bit targets, `wasm32-unknown-unknown` 
 
 ### Editing without a rebuild — `Overlay`
 
-All three indexes are built once from the whole key set, so adding a single key has always meant
+Every index is built once from the whole key set, so adding a single key has always meant
 rebuilding for the whole corpus. `Overlay<I>` wraps one with the keys added since and the ids retired
 from it, making `add` and `remove` O(1) while the base stays untouched:
 
@@ -591,7 +593,7 @@ DAWG and datrie (the double-crown table above). `python bench/scale.py` measures
 memory, and lookup latency from 1 M to 100 M** real keys, each cell once with the keys handed over as
 a list and once as a generator — the second is what `CompactHashIndex`'s streaming build exists for,
 and the only way to see its own footprint rather than the corpus's. `cargo run --release --example
-bench` measures **point-lookup latency** for all three indexes against `std::HashMap` (SipHash and
+bench` measures **point-lookup latency** for the indexes against `std::HashMap` (SipHash and
 FxHash) and `BTreeMap` on real dictionary-word bigrams (it refuses to run without a word list rather
 than substitute synthetic keys); `cargo run --release --example peak` reports the **peak resident
 memory and wall time of one build**, one index per process; `cargo run --release --example

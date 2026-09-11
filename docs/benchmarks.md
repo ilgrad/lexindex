@@ -280,8 +280,9 @@ parameter sets.
 | `ptr_hash` balanced | 2.378 | 120.0 | 29.6 | 47 |
 | `ptr_hash` fast | 2.990 | 174.3 | 160.2 | 26 |
 
-At the size this crate chose, about 2.1 bits, `MPH2` builds 1.8× faster than the PHast+ it is
-modelled on and 4.2× faster than PtrHash's compact set, and its lookup is the fastest of the three;
+In this harness, at the size this crate chose, about 2.1 bits, `MPH2` builds 1.8× faster than the
+PHast+ it is modelled on and 4.2× faster than PtrHash's compact set, and its lookup is the fastest
+of the three — with the asymmetry below inside those ratios;
 regular PHast is the smallest function here, 1.92 bits, at 14× the build; PtrHash's fast set has
 the fastest lookup, 26 ns, at 3 bits. One asymmetry is in the numbers and should be read out of
 them: lexindex takes the keys as 64-bit hashes (its indexes hash the string once, before), while

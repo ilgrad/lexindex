@@ -29,7 +29,7 @@
 //! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
-//! The minimal perfect hash under the two hash indexes implements [PHast]'s map-or-bump
+//! The minimal perfect hash under the three hash indexes implements [PHast]'s map-or-bump
 //! construction, the successor of [PTHash]; the crate depended on [`ptr_hash`] for the latter until
 //! 1.0, and the README says why that changed.
 //!
@@ -120,6 +120,13 @@ mod python;
 #[cfg(all(feature = "fuzzing", feature = "mph"))]
 #[doc(hidden)]
 pub mod fuzzing {
+    /// [`inspect`](crate::inspect) on any bytes; `true` if the header parsed. The contract under
+    /// test is that module's own — total on any input: an `Err`, never a panic, a wrap or an
+    /// unbounded recursion — and no loader's target reaches it, since no loader calls it.
+    pub fn inspect(bytes: &[u8]) -> bool {
+        crate::inspect(bytes).is_ok()
+    }
+
     /// Parse the framing of a `CompactHashIndex` blob; `true` if it was accepted. The verdict is
     /// not the point — not panicking, hanging or reading out of bounds is.
     pub fn parse_compact_frame(bytes: &[u8], verify: bool) -> bool {
