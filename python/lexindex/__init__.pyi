@@ -113,6 +113,16 @@ class StringIndex:
 
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def prefix(self, prefix: str, limit: int | None = None) -> list[tuple[str, int]]: ...
+    def common_prefix(self, query: str) -> list[tuple[str, int]]:
+        """Every key that is a prefix of ``query``, shortest first -- the reverse of ``prefix``.
+
+        The dictionary-matching query: given a vocabulary and a position in a sentence, the entries
+        that start there. One walk down the transducer, whatever the index holds.
+        """
+
+    def longest_prefix(self, query: str) -> tuple[str, int] | None:
+        """The longest key that is a prefix of ``query``, or ``None`` -- the longest match."""
+
     def range(self, lo: str, hi: str, limit: int | None = None) -> list[tuple[str, int]]: ...
     def lower_bound(self, query: str) -> int: ...
     def range_count(self, lo: str, hi: str) -> int: ...
@@ -506,6 +516,16 @@ class DictIndex:
     def prefix(self, prefix: str, limit: int | None = None) -> list[tuple[str, int]]:
         """``(key, id)`` pairs whose key starts with ``prefix``. A sorted dictionary answers this
         as a range, so nothing is scanned that is not returned; ``limit`` stops early."""
+
+    def common_prefix(self, query: str) -> list[tuple[str, int]]:
+        """Every key that is a prefix of ``query``, shortest first -- the reverse of ``prefix``.
+
+        The dictionary-matching query: given a vocabulary and a position in a sentence, the entries
+        that start there. One order lookup per character boundary of ``query``.
+        """
+
+    def longest_prefix(self, query: str) -> tuple[str, int] | None:
+        """The longest key that is a prefix of ``query``, or ``None`` -- the longest match."""
 
     def range(self, lo: str, hi: str, limit: int | None = None) -> list[tuple[str, int]]: ...
     def range_count(self, lo: str, hi: str) -> int: ...

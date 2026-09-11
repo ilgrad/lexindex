@@ -400,6 +400,18 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     assert walked == [(w, i) for i, w in enumerate(words[:1500])]
 
 
+def test_common_prefix_and_longest_prefix_on_both_ordered_indexes():
+    keys = sorted({"", "a", "ap", "app", "apple", "apples", "b", "é", "éc", "école"})
+    for idx in (lexindex.StringIndex(keys), lexindex.DictIndex(keys, block=3)):
+        for q in ["", "a", "app", "apples!", "éc", "école!", "z", "apple\U0010ffff"]:
+            want = [(k, i) for i, k in enumerate(keys) if q.startswith(k)]
+            assert idx.common_prefix(q) == want, (idx, q)
+            assert idx.longest_prefix(q) == (want[-1] if want else None), (idx, q)
+    # Without the empty key nothing matches a query that starts no entry.
+    for idx in (lexindex.StringIndex(["b"]), lexindex.DictIndex(["b"])):
+        assert idx.common_prefix("a") == [] and idx.longest_prefix("a") is None
+
+
 def test_dict_index_build_to_file_writes_what_the_constructor_would(tmp_path):
     words = [f"token-{i * 7919 % 10007:05}" for i in range(20_000)]  # duplicates fold
     distinct = sorted(set(words))

@@ -12,20 +12,20 @@ vocabulary, never a synthetic `entity-{i}` sequence** — sequential keys collap
 near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
 better; the capability columns are why you would still pick a larger one.
 
-| library | prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|---:|
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
-| **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
-| `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 |
-| `marisa-trie` (default) | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| `marisa-trie` (huge cache) | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 |
-| **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
-| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
-| DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
-| `datrie` | ✅ | — | — | — | ✅ | — | 30.92 |
+| library | prefix | common prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.76** |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.26** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.26** |
+| **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
+| `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 |
+| `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
+| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 |
+| **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
+| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
+| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.90 |
+| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 |
+| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.92 |
 
 <sub>Raw numbers and the machine that produced them:
 [`bench/results/compare-2026-09-12-arz-d82e296.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-12-arz-d82e296.json)

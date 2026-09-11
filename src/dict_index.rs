@@ -1035,6 +1035,55 @@ impl DictIndex {
             .take_while(move |(k, _)| k.starts_with(prefix))
     }
 
+    /// Every key that is a **prefix of `query`**, shortest first, with its id — the reverse of
+    /// [`prefix`](Self::prefix), which returns the keys `query` is a prefix of.
+    ///
+    /// This is the dictionary-matching query: given a vocabulary and a position in a sentence, it
+    /// returns the entries that start there, and [`longest_prefix`](Self::longest_prefix) picks the
+    /// one a longest-match tokeniser takes. The empty key, if the index holds it, is a prefix of
+    /// everything and comes first.
+    ///
+    /// One order lookup per character boundary of `query`. A trie answers this in a single walk
+    /// down the query; a sorted array has no such walk, and this is what that costs.
+    ///
+    /// ```
+    /// use lexindex::DictIndex;
+    /// let idx = DictIndex::build(["a", "ap", "apple", "b"])?;
+    /// assert_eq!(idx.common_prefix("apples"), [("a".to_string(), 0), ("ap".to_string(), 1), ("apple".to_string(), 2)]);
+    /// assert_eq!(idx.longest_prefix("apples"), Some(("apple".to_string(), 2)));
+    /// assert_eq!(idx.longest_prefix("zebra"), None);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn common_prefix(&self, query: &str) -> Vec<(String, u64)> {
+        let mut found = Vec::new();
+        for end in 0..=query.len() {
+            if !query.is_char_boundary(end) {
+                continue;
+            }
+            if let Some(id) = self.id(&query[..end]) {
+                found.push((query[..end].to_owned(), id));
+            }
+        }
+        found
+    }
+
+    /// The longest key that is a prefix of `query`, or `None` if no key is — the match a
+    /// longest-match tokeniser takes. See [`common_prefix`](Self::common_prefix).
+    ///
+    /// Walks down from `query` itself and stops at the first hit, so a long match is cheap and
+    /// only a query that matches nothing pays for every boundary.
+    pub fn longest_prefix(&self, query: &str) -> Option<(String, u64)> {
+        for end in (0..=query.len()).rev() {
+            if !query.is_char_boundary(end) {
+                continue;
+            }
+            if let Some(id) = self.id(&query[..end]) {
+                return Some((query[..end].to_owned(), id));
+            }
+        }
+        None
+    }
+
     /// All `(key, id)` pairs with `lo <= key < hi`, in lexicographic order.
     pub fn range(&self, lo: &str, hi: &str) -> Vec<(String, u64)> {
         self.range_iter(lo, hi).collect()
@@ -1903,6 +1952,31 @@ mod tests {
             assert!(err.to_string().contains("block must be"), "{err}");
             let err = DictIndex::build_sorted_with_block(["a"], block).unwrap_err();
             assert!(err.to_string().contains("block must be"), "{err}");
+        }
+    }
+
+    #[test]
+    fn the_prefixes_of_a_query_agree_with_a_linear_scan() {
+        let keys = corpus();
+        let ps = probes(&keys);
+        for block in [1usize, 3, 32, MAX_BLOCK] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            for q in &ps {
+                // Prefixes of `q` sort by length, so the linear scan in rank order is already
+                // shortest first and its last element is the longest match.
+                let want: Vec<(String, u64)> = keys
+                    .iter()
+                    .zip(0u64..)
+                    .filter(|(k, _)| q.starts_with(k.as_str()))
+                    .map(|(k, id)| (k.clone(), id))
+                    .collect();
+                assert_eq!(&idx.common_prefix(q), &want, "block {block} query {q:?}");
+                assert_eq!(
+                    idx.longest_prefix(q),
+                    want.last().cloned(),
+                    "block {block} query {q:?}"
+                );
+            }
         }
     }
 

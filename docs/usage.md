@@ -31,6 +31,8 @@ idx.get("missing", -1)   # -1
 # ordered iteration — automaton-driven: prefix/range seek directly; a broad fuzzy or
 # subsequence pattern may still walk most of the FST
 idx.prefix("ap")         # [("apple", 0), ("apricot", 1)]
+idx.common_prefix("applesauce")  # [("apple", 0)]  — the keys that are prefixes OF the query
+idx.longest_prefix("applesauce") # ("apple", 0)    — what a longest-match tokeniser takes
 idx.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]  — [lo, hi)
 idx.successor("ba")      # ("banana", 2)   — smallest key ≥ query
 idx.predecessor("ba")    # ("apricot", 1)  — largest key ≤ query
@@ -296,6 +298,8 @@ words = DictIndex(["apple", "apricot", "banana", "cherry"])
 words.id("banana")                 # 2 -- the sorted rank; None if absent
 words.key(2)                       # "banana"
 words.prefix("ap")                 # [("apple", 0), ("apricot", 1)] -- a range, not an automaton
+words.common_prefix("bananas")     # [("banana", 2)] -- the keys that are prefixes OF the query
+words.longest_prefix("bananas")    # ("banana", 2) -- what a longest-match tokeniser takes
 words.prefix("ap", limit=1)        # [("apple", 0)] -- stops there, walks no further
 words.prefix_id_range("ap")        # (0, 2) -- two order lookups, whatever the number of matches
 words.prefix_count("ap")           # 2, without decoding a key
@@ -475,6 +479,7 @@ assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids
 let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~3.5 B/key
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
+assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
 # drop(idx);
 # std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())

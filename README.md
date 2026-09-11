@@ -23,6 +23,7 @@ but stands on its own.
 | `id → string` | ✅ | ✅ | — | — | ✅ |
 | ordered ids, ranges, `lower_bound` | ✅ | ✅ | — | — | — |
 | prefix | ✅ | ✅ | — | — | — |
+| common prefix · longest prefix | ✅ | ✅ | — | — | — |
 | fuzzy · subsequence | ✅ | — | — | — | — |
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
@@ -32,12 +33,14 @@ but stands on its own.
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
 
 - **`StringIndex`** — an **ordered** index that is the finite-state transducer
-  ([`fst`](https://crates.io/crates/fst)) alone: exact `string ↔ id`, **prefix**, **range**,
-  **predecessor / successor**, **fuzzy** (bounded Levenshtein distance), **subsequence** and lazy
-  in-order iteration, all automata over the FST with no key list to scan. Autocomplete, fuzzy search,
+  ([`fst`](https://crates.io/crates/fst)) alone: exact `string ↔ id`, **prefix**, **common prefix**
+  (the keys a query starts with, in one walk), **range**, **predecessor / successor**, **fuzzy**
+  (bounded Levenshtein distance), **subsequence** and lazy in-order iteration, all automata over the
+  FST with no key list to scan. Autocomplete, fuzzy search,
   ordered browse.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: `string ↔ rank` both
-  ways, `lower_bound`, `prefix`, `range`, in-order iteration — no automata, so no fuzzy. The sorted
+  ways, `lower_bound`, `prefix`, `common_prefix`, `range`, in-order iteration — no automata, so no
+  fuzzy. The sorted
   keys front-coded in blocks of 32, the suffixes under a symbol table trained on the index itself:
   **3.52 bytes/key**, 41 % below `StringIndex`, `id` 314–337 ns against its 346–363, `key_into`
   173–176 against its `key` at 504–521. A prefix is a range here, not an automaton walk, so

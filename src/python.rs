@@ -395,6 +395,20 @@ impl PyStringIndex {
         })
     }
 
+    /// Every key that is a **prefix of `query`**, shortest first -- the reverse of `prefix`, which
+    /// returns the keys `query` starts. This is the dictionary-matching query: given a vocabulary
+    /// and a position in a sentence, it returns the entries that start there. The empty key, if the
+    /// index holds it, is a prefix of everything and comes first.
+    fn common_prefix(&self, py: Python<'_>, query: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.common_prefix(query))
+    }
+
+    /// The longest key that is a prefix of `query`, or `None` -- the match a longest-match
+    /// tokeniser takes. See `common_prefix`.
+    fn longest_prefix(&self, py: Python<'_>, query: &str) -> Option<(String, u64)> {
+        py.detach(|| self.inner.longest_prefix(query))
+    }
+
     /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered. `limit` stops after that
     /// many matches.
     #[pyo3(signature = (lo, hi, limit=None))]
@@ -1820,6 +1834,20 @@ impl PyDictIndex {
                 None => it.collect(),
             }
         })
+    }
+
+    /// Every key that is a **prefix of `query`**, shortest first -- the reverse of `prefix`, which
+    /// returns the keys `query` starts. This is the dictionary-matching query: given a vocabulary
+    /// and a position in a sentence, it returns the entries that start there. The empty key, if the
+    /// index holds it, is a prefix of everything and comes first.
+    fn common_prefix(&self, py: Python<'_>, query: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.common_prefix(query))
+    }
+
+    /// The longest key that is a prefix of `query`, or `None` -- the match a longest-match
+    /// tokeniser takes. See `common_prefix`.
+    fn longest_prefix(&self, py: Python<'_>, query: &str) -> Option<(String, u64)> {
+        py.detach(|| self.inner.longest_prefix(query))
     }
 
     /// `(key, id)` pairs with `lo <= key < hi`, lexicographically ordered. `limit` stops after that

@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`common_prefix` and `longest_prefix` on both ordered indexes**, in Rust and Python: every key
+  that is a prefix *of* the query, shortest first, and the longest of them. This is the reverse of
+  `prefix` and the query a longest-match tokeniser runs — a vocabulary and a position in a sentence
+  give the entries that start there. It was the one operation `marisa-trie`, `dawg2` and `datrie`
+  all had and lexindex did not, which the comparison tables now carry as a column of its own.
+  `StringIndex` answers it in a single walk down the transducer, `O(query bytes)` whatever the index
+  holds; `DictIndex` has no such walk and pays one order lookup per character boundary, and the
+  documentation says so rather than implying they cost the same.
+
 - **`DictIndex::build_to_file`** — the constructor for a corpus that does not fit in memory, and
   `DictIndex.build_to_file(items, path, block=32)` in Python. The keys arrive in any order, are
   sorted in runs spilled beside the output and merged back, and the block data goes into the file as

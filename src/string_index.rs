@@ -328,6 +328,75 @@ impl StringIndex {
         })
     }
 
+    /// Every key that is a **prefix of `query`**, shortest first, with its id — the reverse of
+    /// [`prefix`](Self::prefix), which returns the keys `query` is a prefix of.
+    ///
+    /// This is the dictionary-matching query: given a vocabulary and a position in a sentence, it
+    /// returns the entries that start there, and [`longest_prefix`](Self::longest_prefix) picks the
+    /// one a longest-match tokeniser takes. The empty key, if the index holds it, is a prefix of
+    /// everything and comes first.
+    ///
+    /// One walk down the transducer, `O(query bytes)` whatever the index holds — the query is the
+    /// path, and every final state on it is a match.
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let idx = StringIndex::build(["a", "ap", "apple", "b"])?;
+    /// assert_eq!(idx.common_prefix("apples"), [("a".to_string(), 0), ("ap".to_string(), 1), ("apple".to_string(), 2)]);
+    /// assert_eq!(idx.longest_prefix("apples"), Some(("apple".to_string(), 2)));
+    /// assert_eq!(idx.longest_prefix("zebra"), None);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn common_prefix(&self, query: &str) -> Vec<(String, u64)> {
+        let mut found = Vec::new();
+        self.each_common_prefix(query, |end, id| found.push((query[..end].to_owned(), id)));
+        found
+    }
+
+    /// The longest key that is a prefix of `query`, or `None` if no key is — the match a
+    /// longest-match tokeniser takes. See [`common_prefix`](Self::common_prefix).
+    ///
+    /// The same single walk, keeping only the last final state it passed, so nothing is built for
+    /// the shorter matches.
+    pub fn longest_prefix(&self, query: &str) -> Option<(String, u64)> {
+        let mut last = None;
+        self.each_common_prefix(query, |end, id| last = Some((end, id)));
+        last.map(|(end, id)| (query[..end].to_owned(), id))
+    }
+
+    /// Walk `query` through the transducer, reporting `(end, id)` at every final state it passes —
+    /// every key that is a prefix of `query`, shortest first.
+    fn each_common_prefix(&self, query: &str, mut f: impl FnMut(usize, u64)) {
+        let fst = self.map.as_fst();
+        let mut node = fst.root();
+        let mut acc: u64 = 0;
+        if node.is_final() {
+            if let Some(id) = acc.checked_add(node.final_output().value()) {
+                f(0, id);
+            }
+        }
+        for (i, &b) in query.as_bytes().iter().enumerate() {
+            let Some(at) = node.find_input(b) else { return };
+            let t = node.transition(at);
+            // The outputs are read from the blob, so the rank sums are checked, exactly as the
+            // rank walk checks them: a value that would overflow ends the walk rather than
+            // wrapping into a wrong id.
+            let Some(next) = acc.checked_add(t.out.value()) else {
+                return;
+            };
+            acc = next;
+            node = fst.node(t.addr);
+            // A final state at a byte that cuts a character cannot be a key this index built, since
+            // keys come from `&str` — but `from_bytes` will load any transducer, and slicing there
+            // would panic.
+            if node.is_final() && query.is_char_boundary(i + 1) {
+                if let Some(id) = acc.checked_add(node.final_output().value()) {
+                    f(i + 1, id);
+                }
+            }
+        }
+    }
+
     /// All `(key, id)` pairs with `lo ≤ key < hi`, in lexicographic order.
     pub fn range(&self, lo: &str, hi: &str) -> Vec<(String, u64)> {
         self.range_iter(lo, hi).collect()
@@ -982,6 +1051,39 @@ mod tests {
         assert!(idx.contains("cherry") && !idx.contains("durian"));
         assert_eq!(idx.key(1).as_deref(), Some("apricot"));
         assert_eq!(idx.key(99), None);
+    }
+
+    #[test]
+    fn the_prefixes_of_a_query_agree_with_a_linear_scan() {
+        let mut keys: Vec<String> = [
+            "", "a", "a\u{0}", "ap", "app", "apple", "apples", "b", "é", "éc", "école",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        keys.sort_unstable();
+        let idx = StringIndex::build(&keys).unwrap();
+        for q in [
+            "",
+            "a",
+            "a\u{0}b",
+            "app",
+            "apples!",
+            "éc",
+            "école!",
+            "z",
+            "apple\u{10FFFF}",
+        ] {
+            // Prefixes of `q` sort by length, so the scan is already shortest first.
+            let want: Vec<(String, u64)> = keys
+                .iter()
+                .zip(0u64..)
+                .filter(|(k, _)| q.starts_with(k.as_str()))
+                .map(|(k, id)| (k.clone(), id))
+                .collect();
+            assert_eq!(idx.common_prefix(q), want, "{q:?}");
+            assert_eq!(idx.longest_prefix(q), want.last().cloned(), "{q:?}");
+        }
     }
 
     #[test]
