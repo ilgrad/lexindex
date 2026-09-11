@@ -379,6 +379,39 @@ while storing 41 % less; 64 per block matches `StringIndex` on `id` at 3.10 B/ke
 ([`bench/results/dict-2026-09-10-arz-64b0d35.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-10-arz-64b0d35.txt)),
 Ryzen 7 5800HS, load about 1 with an editor open.</sub>
 
+## Hash quality
+
+Size and speed both rest on the key hash being indistinguishable from random on *real* keys, so the
+claim is measured rather than argued. The battery lives with the hash it tests (`src/hash.rs`,
+behind `bench-mphf`) and runs as one test:
+
+```bash
+cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
+```
+
+Every statistic is reported as a standard-normal `z`, so one bound reads across the whole battery.
+A chi-square goes through the Wilson–Hilferty transform rather than the textbook
+`(x − k) / sqrt(2k)`, which is wrong exactly where a threshold sits: at 255 degrees of freedom and
+a true `z` of 6.00 the two read 5.99 and 7.07 (checked against `incgam` in PARI/GP). The bound is
+`|z| < 6`, a 10⁻⁹ tail per cell; since the battery runs about 44 000 avalanche cells and forty
+tables, the largest `|z|` it *should* produce is near `sqrt(2 ln N) ≈ 4.6`.
+
+| test | what it would catch | result |
+|---|---|---|
+| strict avalanche, both hashes, key lengths 4–33 | an input bit that does not reach every output bit | worst 4.49 over 44 032 cells |
+| bit independence, 2 016 output pairs per input bit | two output bits that flip together | worst 4.23 over 258 048 cells |
+| two-byte differential, every position pair and bit pair | the pre-2.0 collision family: keys differing at bytes `8i+7` and `8i+11` collided in **both** hashes 13–100 % of the time through 1.1 | **0** double collisions over 17 664 combinations |
+| per-corpus distribution — slot-hash collisions, top 12 bits, low 12 bits, the 8-bit fingerprint, and the joint (slot, fingerprint) table | a family of keys the hash folds together, and any correlation between the two hashes | ten corpora, no collisions, every value under 2.4 |
+
+The ten corpora are the shapes that break hashes in practice: dictionary words, word bigrams, a
+shared prefix (`https://example.com/a/b/…`), a shared suffix (`…@mail.example.com`), a dense
+numeric tail (`key_000000001`), plain decimal integers, UUIDs, Cyrillic, DNA, and filesystem paths.
+
+<sub>Committed output:
+[`bench/results/hash-quality-2026-09-11-arz-c597099-dirty.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-11-arz-c597099-dirty.txt).
+The two hashes are deterministic and unseeded, so none of this is a statement about an adversary
+who picks the queries — see `SECURITY.md`.</sub>
+
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow

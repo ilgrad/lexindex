@@ -23,6 +23,17 @@ All notable changes to this project are documented here. The format follows
   209 on the dictionary at `block = 32` (`StringIndex` control 342 → 337; min of five rounds
   alternated in one process, shuffled probes).
 
+- **A hash-quality battery** under `bench-mphf`, and its committed output in `bench/results/`.
+  Strict avalanche and bit independence over both hashes and five key lengths, the two-byte
+  differential scan that caught the pre-2.0 collision family, and per-corpus distribution tables
+  over ten key shapes — words, bigrams, a shared prefix, a shared suffix, a dense numeric tail,
+  decimal integers, UUIDs, Cyrillic, DNA and paths. Everything reads as a standard-normal `z`
+  against one bound of 6; a chi-square goes through Wilson–Hilferty rather than
+  `(x − k) / sqrt(2k)`, which understates the tail by two orders of magnitude at 255 degrees of
+  freedom. Nothing in the battery is past the bound: the worst cell of 44 032 is 4.49, where the
+  maximum of that many standard normals sits near 4.6, and the differential scan finds no double
+  collision at all.
+
 ### Fixed
 
 - **`inspect` is total on an overlay too.** Its live-key count was `base + additions − retired`
