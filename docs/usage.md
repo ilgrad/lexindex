@@ -131,7 +131,7 @@ The loaders, on two axes — whether the bytes are copied and how far they are c
 |---|---|---|---|
 | `from_bytes` / `load` | yes | header, payload checksum, rank spot check | your own blob |
 | `from_untrusted_bytes` / `load_untrusted` | yes | the above plus the full validation of the transducer (`StringIndex`; the hash indexes and `DictIndex` need none, their loaders are total) | a stranger's blob |
-| `load_mmap` | no | header only — the payload checksum is skipped by design, since reading every page is what a mapping avoids | your own file, unchanged while mapped |
+| `load_mmap` | no | header only — the payload checksum is skipped by design, since reading every page is what a mapping avoids; `DictIndex` skips the walk over its per-block arrays for the same reason and bounds every access instead | your own file, unchanged while mapped |
 | `load_mmap_verified` | no | header and payload checksum, one pass over the mapping at load | your own file, carried by someone else |
 | `load_mmap_untrusted` (`StringIndex`) | no | the full validation, over the mapping | a stranger's file too large to copy — map a copy you own, since the check trusts what it saw once |
 
@@ -299,7 +299,8 @@ words.keys_of(list(range(lo, hi)))   # ["apple", "apricot"]
 list(words)                        # [("apple", 0), ...], lazily
 smaller = DictIndex(words_list, block=64)   # 3.1 B/key against 3.5; a lookup scans up to block - 1 entries
 words.save("words.bdx")
-words = DictIndex.load("words.bdx")   # checked like the others; no load_mmap
+words = DictIndex.load("words.bdx")        # checked like the others
+words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, table and 8 B/block read
 ```
 
 `id` finds the block by its head's first eight bytes and then compares the stored suffixes against

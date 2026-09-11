@@ -364,7 +364,9 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     p = tmp_path / "words.bdx"  # a pathlib.Path, not a str
     di.save(p)
     assert lexindex.DictIndex.load(p).key(17) == words[17]
-    assert not hasattr(lexindex.DictIndex, "load_mmap")
+    mapped = lexindex.DictIndex.load_mmap(p)  # zero-copy: every section borrowed from the file
+    assert mapped.key(17) == words[17] and mapped.ids_of(words[:100]) == list(range(100))
+    assert lexindex.DictIndex.load_mmap_verified(p).to_bytes() == blob
     with pytest.raises(ValueError):
         lexindex.DictIndex.from_bytes(b"nope")
     # The lazy iterator crosses its refill boundary without repeating or skipping.
@@ -687,6 +689,7 @@ def test_multibyte_keys_survive_the_borrowed_path():
     "ctor",
     [
         lexindex.StringIndex,
+        lexindex.DictIndex,
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 1),
     ],
@@ -1271,6 +1274,7 @@ def test_path_forms_of_the_strict_loader_accept_a_real_file(tmp_path):
     "ctor",
     [
         lambda keys: lexindex.StringIndex(keys),
+        lambda keys: lexindex.DictIndex(keys),
         lambda keys: lexindex.PerfectHashIndex(keys),
         lambda keys: lexindex.CompactHashIndex(keys, 4),
     ],
@@ -1282,7 +1286,7 @@ def test_load_mmap_verified_refuses_a_flipped_byte_the_plain_mapping_takes(tmp_p
     assert len(type(idx).load_mmap_verified(p)) == 2
     with open(p, "rb") as f:
         data = bytearray(f.read())
-    data[-1] ^= 0x55  # the last byte is payload: a CRC byte, a key byte, a fingerprint
+    data[-1] ^= 0x55  # the last byte is payload: a CRC byte, a code, a key byte, a fingerprint
     with open(p, "wb") as f:
         f.write(data)
     assert len(type(idx).load_mmap(p)) == 2  # no payload checksum, by design

@@ -24,7 +24,8 @@ but stands on its own.
 | ordered ids, ranges, `lower_bound` | ✅ | ✅ | — | — | — |
 | prefix · fuzzy · subsequence | ✅ | — | — | — | — |
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
-| `Overlay` edits · zero-copy `load_mmap` | ✅ | — | ✅ | — | ✅ |
+| `Overlay` edits | ✅ | — | ✅ | — | ✅ |
+| zero-copy `load_mmap` | ✅ | ✅ | ✅ | — | ✅ |
 | **bytes/key**, 480 k English words | 5.95 | **3.52** | **1.26** · 0.76 at 4 bits | **0.26** | 10.90 |
 | `id`, 1 M word bigrams | 424 ns | 507 ns | 130 ns | the bare perfect hash | 301 ns · `id_unchecked` 74 |
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
@@ -226,7 +227,7 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | — | **3.52** |
+| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |

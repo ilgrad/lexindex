@@ -15,6 +15,7 @@
 //! `StringIndex` question, and this index answers exact ones at 3–4 bytes per key.
 
 use crate::IndexError;
+use crate::blob::SharedBytes;
 use crate::fsst::{self, ESCAPE, Table};
 use std::cmp::Ordering;
 
@@ -30,7 +31,7 @@ const MAX_BLOCK: usize = 1024;
 /// About how many suffixes the symbol table is trained on: every block's worth, from blocks spread
 /// evenly over the index.
 const TRAIN_PIECES: usize = 20_000;
-/// Entries of the per-block arrays serialised at a time.
+/// Samples serialised at a time, so writing does not copy the array whole.
 const CHUNK: usize = 4096;
 
 /// An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways.
@@ -45,19 +46,31 @@ const CHUNK: usize = 4096;
 /// Immutable once built, and built in memory: the keys are sorted and deduplicated, then encoded
 /// block by block. Persisted with [`to_bytes`](Self::to_bytes) / [`save`](Self::save) and read
 /// back by [`from_bytes`](Self::from_bytes) / [`load`](Self::load), which check every length and
-/// both checksums; there is no `load_mmap`.
+/// both checksums, or by `load_mmap`, which borrows the keys and the block data from the mapped
+/// file and reads only the per-block samples.
 pub struct DictIndex {
     block: usize,
     n: usize,
-    /// Every block's first key, whole, end to end; `head_ends[b]` closes block `b`'s.
-    heads: Vec<u8>,
-    head_ends: Vec<u32>,
+    /// The sections as they are serialised, owned or mapped. Every block's first key, whole, end
+    /// to end; `head_ends[b]` closes block `b`'s.
+    heads: SharedBytes,
+    /// A `u32` per block, little-endian, decoded where it is read — the two arrays below too.
+    head_ends: SharedBytes,
     /// The first eight bytes of each head as a big-endian word, so a search compares heads only
     /// inside the run of blocks that share the probe's.
+    ///
+    /// The one section a mapping does not borrow. Two binary searches over it open every lookup,
+    /// and `<[u64]>::partition_point` is the only form of that search that keeps its steps out of
+    /// the branch predictor: it selects with `hint::select_unpredictable`, which needs a `u64`
+    /// slice and so an alignment a section of a blob does not have. Reading the words out of the
+    /// bytes instead measured 110 ns against 26 for the two searches — a hand-written branchless
+    /// step is folded back into a branch by the compiler, and blocking that with `black_box` pays
+    /// the same back in instructions. Eight bytes a block, so a mapped index holds one byte per
+    /// four keys at the default block, and borrows everything else.
     samples: Vec<u64>,
-    /// Where block `b`'s `block − 1` front-coded entries start in `data`.
-    blocks: Vec<u64>,
-    data: Vec<u8>,
+    /// Where block `b`'s `block − 1` front-coded entries start in `data`, a `u64` per block.
+    blocks: SharedBytes,
+    data: SharedBytes,
     table: Table,
 }
 
@@ -65,6 +78,28 @@ pub struct DictIndex {
 #[inline(always)]
 fn sample_of(key: &[u8]) -> u64 {
     fsst::word_at(key, 0).swap_bytes()
+}
+
+/// Entry `i` of a little-endian `u32` array.
+#[inline(always)]
+fn u32_at(array: &[u8], i: usize) -> usize {
+    u32::from_le_bytes(array[4 * i..4 * i + 4].try_into().expect("4 bytes")) as usize
+}
+
+/// Entry `i` of a little-endian `u64` array.
+#[inline(always)]
+fn u64_at(array: &[u8], i: usize) -> u64 {
+    u64::from_le_bytes(array[8 * i..8 * i + 8].try_into().expect("8 bytes"))
+}
+
+/// Block `b`'s head out of its sections. The arrays are trusted only as far as their sections
+/// reach: a mapping is loaded without the walk over them, so an end past the heads, or before
+/// the previous one, gives a short head rather than a panic.
+#[inline(always)]
+fn head_of<'a>(heads: &'a [u8], ends: &[u8], b: usize) -> &'a [u8] {
+    let end = u32_at(ends, b);
+    let start = if b == 0 { 0 } else { u32_at(ends, b - 1) };
+    heads.get(start..end).unwrap_or_default()
 }
 
 /// How many leading bytes `a` and `b` share.
@@ -184,9 +219,9 @@ impl DictIndex {
         let table = Table::train(&pieces);
         let encoder = table.encoder();
         let mut heads = Vec::new();
-        let mut head_ends = Vec::with_capacity(nb);
+        let mut head_ends = Vec::with_capacity(nb * 4);
         let mut samples = Vec::with_capacity(nb);
-        let mut blocks = Vec::with_capacity(nb);
+        let mut blocks = Vec::with_capacity(nb * 8);
         let mut data = Vec::new();
         let mut packed = Vec::with_capacity(64);
         for chunk in keys.chunks(block) {
@@ -195,9 +230,9 @@ impl DictIndex {
             let end = u32::try_from(heads.len()).map_err(|_| {
                 IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
             })?;
-            head_ends.push(end);
+            head_ends.extend_from_slice(&end.to_le_bytes());
             samples.push(sample_of(head));
-            blocks.push(data.len() as u64);
+            blocks.extend_from_slice(&(data.len() as u64).to_le_bytes());
             for w in chunk.windows(2) {
                 let l = lcp(w[0].as_bytes(), w[1].as_bytes());
                 packed.clear();
@@ -209,11 +244,11 @@ impl DictIndex {
         Ok(Self {
             block,
             n,
-            heads,
-            head_ends,
+            heads: SharedBytes::from_owned(heads),
+            head_ends: SharedBytes::from_owned(head_ends),
             samples,
-            blocks,
-            data,
+            blocks: SharedBytes::from_owned(blocks),
+            data: SharedBytes::from_owned(data),
             table,
         })
     }
@@ -232,23 +267,39 @@ impl DictIndex {
         self.block
     }
 
+    /// Number of blocks.
     #[inline(always)]
-    fn head(&self, b: usize) -> &[u8] {
-        let start = if b == 0 {
-            0
-        } else {
-            self.head_ends[b - 1] as usize
-        };
-        &self.heads[start..self.head_ends[b] as usize]
+    fn blocks_len(&self) -> usize {
+        self.samples.len()
     }
 
     #[inline(always)]
+    fn head_end(&self, b: usize) -> usize {
+        u32_at(&self.head_ends, b)
+    }
+
+    /// Where block `b`'s entries start, as stored — past `data` on a blob nothing walked.
+    #[inline(always)]
+    fn block_start(&self, b: usize) -> u64 {
+        u64_at(&self.blocks, b)
+    }
+
+    #[inline(always)]
+    fn head(&self, b: usize) -> &[u8] {
+        head_of(&self.heads, &self.head_ends, b)
+    }
+
+    /// Block `b`'s entries, bounded the way [`head`](Self::head) is.
+    #[inline(always)]
     fn block_data(&self, b: usize) -> &[u8] {
-        let end = self
-            .blocks
-            .get(b + 1)
-            .map_or(self.data.len(), |&e| e as usize);
-        &self.data[self.blocks[b] as usize..end]
+        let (data, blocks): (&[u8], &[u8]) = (&self.data, &self.blocks);
+        let at = |b: usize| usize::try_from(u64_at(blocks, b)).unwrap_or(usize::MAX);
+        let end = if b + 1 < self.blocks_len() {
+            at(b + 1)
+        } else {
+            data.len()
+        };
+        data.get(at(b)..end).unwrap_or_default()
     }
 
     /// How many leading bytes an entry's stored suffix shares with `rest`, and how the suffix
@@ -301,13 +352,14 @@ impl DictIndex {
         // The blocks whose heads share the probe's first eight bytes, and the one before them:
         // the probe can only be in one of these.
         let s = sample_of(probe);
+        let (heads, ends): (&[u8], &[u8]) = (&self.heads, &self.head_ends);
         let lo = self.samples.partition_point(|&x| x < s);
         let hi = self.samples.partition_point(|&x| x <= s);
         // The last block in [from, hi) whose head is not past the probe.
         let (mut l, mut r) = (lo.saturating_sub(1), hi);
         while l < r {
             let m = l + (r - l) / 2;
-            if self.head(m) <= probe {
+            if head_of(heads, ends, m) <= probe {
                 l = m + 1;
             } else {
                 r = m;
@@ -318,7 +370,7 @@ impl DictIndex {
         }
         let b = l - 1;
         let base = (b * self.block) as u64;
-        let head = self.head(b);
+        let head = head_of(heads, ends, b);
         if head == probe {
             return (base, true);
         }
@@ -476,8 +528,9 @@ impl DictIndex {
         })
     }
 
-    /// The payload sections in order, each handed to `f` once; the per-block arrays go out
-    /// `CHUNK` entries at a time so nothing the size of the index is copied.
+    /// The payload sections in order, each handed to `f` once, from where they are; the symbol
+    /// table and the samples, the two the index does not hold as their serialised bytes, go out
+    /// in pieces so that nothing the size of the index is copied.
     fn sections(
         &self,
         mut f: impl FnMut(&[u8]) -> Result<(), IndexError>,
@@ -485,25 +538,21 @@ impl DictIndex {
         let mut table = Vec::with_capacity(self.table.serialized_len());
         self.table.write_to(&mut table);
         f(&table)?;
-        f(&self.heads)?;
+        for section in [&self.heads, &self.head_ends] {
+            f(section)?;
+        }
         let mut buf = Vec::with_capacity(8 * CHUNK);
-        for chunk in self.head_ends.chunks(CHUNK) {
+        for chunk in self.samples.chunks(CHUNK) {
             buf.clear();
             chunk
                 .iter()
-                .for_each(|e| buf.extend_from_slice(&e.to_le_bytes()));
+                .for_each(|w| buf.extend_from_slice(&w.to_le_bytes()));
             f(&buf)?;
         }
-        for array in [&self.samples, &self.blocks] {
-            for chunk in array.chunks(CHUNK) {
-                buf.clear();
-                chunk
-                    .iter()
-                    .for_each(|e| buf.extend_from_slice(&e.to_le_bytes()));
-                f(&buf)?;
-            }
+        for section in [&self.blocks, &self.data] {
+            f(section)?;
         }
-        f(&self.data)
+        Ok(())
     }
 
     fn header(&self) -> [u8; HEADER] {
@@ -546,7 +595,7 @@ impl DictIndex {
         HEADER
             + self.table.serialized_len()
             + self.heads.len()
-            + self.blocks.len() * PER_BLOCK
+            + self.blocks_len() * PER_BLOCK
             + self.data.len()
     }
 
@@ -557,6 +606,16 @@ impl DictIndex {
     /// crafted blob is at worst *wrong* — a key that is not the one built, a shorter walk —
     /// never out of bounds. The block data itself is read with every access bounded.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+    }
+
+    /// The loader behind every way in. The framing — magic, header checksum, block size, the
+    /// section lengths against the blob — is checked always and the symbol table parsed; with
+    /// `verify`, the payload checksum and [`check_layout`](Self::check_layout) as well, which
+    /// read every section. Without it the sections are borrowed as they are and the accessors
+    /// bound what the arrays say, so a mapping loads without touching its pages.
+    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+        let bytes: &[u8] = &blob;
         if bytes.len() < HEADER || &bytes[..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -564,9 +623,11 @@ impl DictIndex {
         if check != crate::blob::hash_bytes(&bytes[..CHECKED]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
         }
-        let stored = u64::from_le_bytes(bytes[36..44].try_into().unwrap());
-        if stored != crate::blob::hash_block(&bytes[HEADER..]) {
-            return Err(IndexError::Format("payload checksum mismatch"));
+        if verify {
+            let stored = u64::from_le_bytes(bytes[36..44].try_into().unwrap());
+            if stored != crate::blob::hash_block(&bytes[HEADER..]) {
+                return Err(IndexError::Format("payload checksum mismatch"));
+            }
         }
         let u64_at = |i: usize| u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
         let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
@@ -598,24 +659,19 @@ impl DictIndex {
         let mut at = HEADER;
         let mut take = |len: usize| {
             at += len;
-            &bytes[at - len..at]
+            blob.subslice(at - len, at)
+                .expect("the sections add up to the blob")
         };
-        let table = Table::from_bytes(take(table_len))
+        let table = Table::from_bytes(&take(table_len))
             .ok_or(IndexError::Format("dict: bad symbol table"))?;
-        let heads = take(heads_len).to_vec();
-        let head_ends = take(nb * 4)
-            .chunks_exact(4)
-            .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+        let heads = take(heads_len);
+        let head_ends = take(nb * 4);
+        let samples = take(nb * 8)
+            .chunks_exact(8)
+            .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
             .collect();
-        let words = |bytes: &[u8]| -> Vec<u64> {
-            bytes
-                .chunks_exact(8)
-                .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
-                .collect()
-        };
-        let samples = words(take(nb * 8));
-        let blocks = words(take(nb * 8));
-        let data = take(data_len).to_vec();
+        let blocks = take(nb * 8);
+        let data = take(data_len);
         let idx = Self {
             block,
             n,
@@ -626,14 +682,16 @@ impl DictIndex {
             data,
             table,
         };
-        idx.check_layout()?;
+        if verify {
+            idx.check_layout()?;
+        }
         Ok(idx)
     }
 
     /// The array invariants every query relies on: heads and blocks in order and inside their
     /// sections, every sample the one its head gives.
     fn check_layout(&self) -> Result<(), IndexError> {
-        let nb = self.blocks.len();
+        let nb = self.blocks_len();
         if nb == 0 {
             return if self.heads.is_empty() && self.data.is_empty() {
                 Ok(())
@@ -642,8 +700,7 @@ impl DictIndex {
             };
         }
         let mut prev = 0;
-        for &end in &self.head_ends {
-            let end = end as usize;
+        for end in (0..nb).map(|b| self.head_end(b)) {
             if end < prev || end > self.heads.len() {
                 return Err(IndexError::Format("dict: head table out of order"));
             }
@@ -655,13 +712,13 @@ impl DictIndex {
             ));
         }
         let mut prev = 0;
-        for &start in &self.blocks {
+        for start in (0..nb).map(|b| self.block_start(b)) {
             if start < prev || start > self.data.len() as u64 {
                 return Err(IndexError::Format("dict: block table out of order"));
             }
             prev = start;
         }
-        if self.blocks[0] != 0 {
+        if self.block_start(0) != 0 {
             return Err(IndexError::Format("dict: block table out of order"));
         }
         if (0..nb).any(|b| self.samples[b] != sample_of(self.head(b))) {
@@ -672,23 +729,29 @@ impl DictIndex {
         Ok(())
     }
 
-    /// Whether `bytes` loads, and whether what loaded answers without panicking. Exists for the
-    /// libFuzzer target in `fuzz/`; see the `lexindex::fuzzing` module.
+    /// Whether `bytes` loads, and whether what loaded answers without panicking — by the checked
+    /// path and by the mapping's, which takes the arrays as they are. Exists for the libFuzzer
+    /// target in `fuzz/`; see the `lexindex::fuzzing` module.
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_load_and_query(bytes: &[u8]) -> bool {
-        let Ok(idx) = Self::from_bytes(bytes) else {
-            return false;
-        };
-        let n = idx.len() as u64;
-        for probe in ["", "a", "zzzzzzzzzzzzzzzzz", "\u{10FFFF}"] {
-            assert!(idx.id(probe).is_none_or(|id| id < n), "{probe:?}");
-            assert!(idx.lower_bound(probe) <= n, "{probe:?}");
+        let checked = Self::from_bytes(bytes).ok();
+        let framed = Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), false).ok();
+        assert!(
+            checked.is_none() || framed.is_some(),
+            "the framing is the checked path's"
+        );
+        for idx in checked.iter().chain(&framed) {
+            let n = idx.len() as u64;
+            for probe in ["", "a", "zzzzzzzzzzzzzzzzz", "\u{10FFFF}"] {
+                assert!(idx.id(probe).is_none_or(|id| id < n), "{probe:?}");
+                assert!(idx.lower_bound(probe) <= n, "{probe:?}");
+            }
+            for id in [0, 1, n / 2, n.saturating_sub(1), n, u64::MAX] {
+                assert!(id < n || idx.key(id).is_none(), "key({id}) past {n}");
+            }
+            assert!(idx.iter().take(64).count() as u64 <= n);
         }
-        for id in [0, 1, n / 2, n.saturating_sub(1), n, u64::MAX] {
-            assert!(id < n || idx.key(id).is_none(), "key({id}) past {n}");
-        }
-        assert!(idx.iter().take(64).count() as u64 <= n);
-        true
+        checked.is_some()
     }
 
     /// Write the index to `path` — the same bytes as [`to_bytes`](Self::to_bytes), streamed
@@ -705,7 +768,47 @@ impl DictIndex {
     /// Load an index previously written with [`DictIndex::save`]. Safe on any file — see
     /// [`from_bytes`](Self::from_bytes).
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
-        Self::from_bytes(&std::fs::read(path)?)
+        Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
+    }
+
+    /// Memory-map the file and borrow it: the heads, the block data and the two offset arrays
+    /// are read where they lie, and the load touches the header, the symbol table and the
+    /// per-block samples — eight bytes a block, a byte per four keys at the default block, read
+    /// into memory because the search over them opens every lookup (see the field). Skips the
+    /// payload checksum and the walk over the arrays [`load`](Self::load) makes — the mapped file
+    /// is trusted intact, and every access bounds what the arrays say.
+    ///
+    /// # Safety
+    /// One obligation, and it is not about the bytes: the file must not be modified or truncated
+    /// by any process while the returned index is alive, because the index borrows the mapping.
+    /// A crafted file is *not* undefined behaviour here — the framing is checked, and the rest
+    /// is read with every access bounded — it is merely wrong. See
+    /// [`StringIndex::load_mmap`](crate::StringIndex::load_mmap) for the full contract.
+    #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
+    pub unsafe fn load_mmap(path: impl AsRef<std::path::Path>) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: forwarded from this function's own contract.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), false)
+    }
+
+    /// [`load_mmap`](Self::load_mmap) plus the checks [`load`](Self::load) makes — the payload
+    /// checksum and the walk over the per-block arrays — one pass over the mapping at load,
+    /// pages still shared and nothing copied. For a file you wrote but did not carry yourself.
+    ///
+    /// # Safety
+    /// The same obligation as [`load_mmap`](Self::load_mmap): the file must not change while the
+    /// index is alive. The checks run once, at load, and say nothing about later.
+    #[cfg(feature = "mmap")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "mmap")))]
+    pub unsafe fn load_mmap_verified(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, IndexError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: forwarded from this function's own contract.
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        Self::from_shared(SharedBytes::from_mmap(std::sync::Arc::new(mmap)), true)
     }
 }
 
@@ -939,9 +1042,22 @@ mod tests {
         blob[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
     }
 
+    /// `from_bytes` refuses `blob` naming `what`; the mapping's loader — framing only — refuses
+    /// it too unless the refusal is the payload checksum's or the layout walk's.
     fn refused(blob: &[u8], what: &str) {
         let err = DictIndex::from_bytes(blob).unwrap_err().to_string();
         assert!(err.contains(what), "expected {what:?}, got {err:?}");
+        let walked = [
+            "payload checksum",
+            "out of order",
+            "does not cover",
+            "head samples",
+            "empty index",
+        ];
+        let framing = !walked.iter().any(|w| what.contains(w));
+        let framed =
+            DictIndex::from_shared(crate::blob::SharedBytes::from_owned(blob.to_vec()), false);
+        assert_eq!(framed.is_err(), framing, "{what:?} on the mapping's path");
     }
 
     #[test]
@@ -1054,5 +1170,95 @@ mod tests {
         assert_eq!(idx.key(0).as_deref(), Some(keys[0].as_str()));
         let _ = idx.key(1);
         assert_eq!(idx.iter().count(), 1);
+    }
+
+    /// The mapping's loader takes the per-block arrays as they are, so every access bounds them:
+    /// an end out of order or past the heads, a start past the data, a sample that is not its
+    /// head's — wrong answers and short walks, never a panic, and the sections written back as
+    /// they were read.
+    #[test]
+    fn a_load_without_the_walk_bounds_what_the_arrays_say() {
+        let keys = corpus();
+        let blob = DictIndex::build_with_block(&keys, 4).unwrap().to_bytes();
+        let table_len = u32::from_le_bytes(blob[32..36].try_into().unwrap()) as usize;
+        let heads_len = u64::from_le_bytes(blob[16..24].try_into().unwrap()) as usize;
+        let nb = keys.len().div_ceil(4);
+        let ends_at = HEADER + table_len + heads_len;
+        let samples_at = ends_at + nb * 4;
+        let blocks_at = samples_at + nb * 8;
+        type Edit<'a> = &'a dyn Fn(&mut Vec<u8>);
+        let edits: [Edit; 8] = [
+            &|b| b[ends_at..ends_at + 4].copy_from_slice(&u32::MAX.to_le_bytes()),
+            &|b| b[ends_at + 4 * (nb - 1)..][..4].copy_from_slice(&0u32.to_le_bytes()),
+            &|b| {
+                let past = heads_len as u32 + 7;
+                b[ends_at + 4 * (nb / 2)..][..4].copy_from_slice(&past.to_le_bytes());
+            },
+            &|b| b[samples_at..samples_at + 8].fill(0xFF),
+            &|b| b[blocks_at..blocks_at + 8].copy_from_slice(&u64::MAX.to_le_bytes()),
+            &|b| b[blocks_at + 8 * (nb / 2)..][..8].copy_from_slice(&u64::MAX.to_le_bytes()),
+            &|b| b[blocks_at + 8 * (nb - 1)..][..8].copy_from_slice(&1u64.to_le_bytes()),
+            &|b| {
+                let past = blob.len() as u64 - (blocks_at + 8 * nb) as u64 + 1;
+                b[blocks_at + 8 * (nb - 1)..][..8].copy_from_slice(&past.to_le_bytes());
+            },
+        ];
+        for (i, edit) in edits.iter().enumerate() {
+            let mut b = blob.clone();
+            edit(&mut b);
+            reframe(&mut b);
+            assert!(
+                DictIndex::from_bytes(&b).is_err(),
+                "edit {i}: the walk refuses this"
+            );
+            let idx =
+                DictIndex::from_shared(crate::blob::SharedBytes::from_owned(b.clone()), false)
+                    .unwrap();
+            assert_eq!(idx.len(), keys.len());
+            for p in keys.iter().chain(probes(&keys).iter()) {
+                let _ = (idx.id(p), idx.contains(p), idx.lower_bound(p));
+            }
+            let mut buf = String::new();
+            for id in 0..=keys.len() as u64 {
+                let _ = (idx.key(id), idx.key_into(id, &mut buf));
+            }
+            assert!(idx.iter().count() <= keys.len(), "edit {i}");
+            assert_eq!(idx.to_bytes(), b, "edit {i}");
+        }
+    }
+
+    /// `load_mmap` borrows every section from the file and answers like the owned index;
+    /// `load_mmap_verified` adds the checks `load` makes, so a flipped payload byte the plain
+    /// mapping takes is refused by it.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn load_mmap_borrows_the_file_and_answers_like_the_owned_index() {
+        let keys = corpus();
+        let idx = DictIndex::build_with_block(&keys, 3).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("lexindex_dict_mmap_{}.bdx", std::process::id()));
+        idx.save(&path).unwrap();
+        // SAFETY: the file is written above and not touched while a mapping of it is alive.
+        let mapped = unsafe { DictIndex::load_mmap(&path) }.unwrap();
+        check(&mapped, &keys);
+        assert_eq!(mapped.to_bytes(), idx.to_bytes());
+        // SAFETY: as above.
+        let verified = unsafe { DictIndex::load_mmap_verified(&path) }.unwrap();
+        check(&verified, &keys);
+        drop((mapped, verified));
+        let mut bytes = std::fs::read(&path).unwrap();
+        *bytes.last_mut().unwrap() ^= 0x55; // block data: a suffix code
+        std::fs::write(&path, &bytes).unwrap();
+        // SAFETY: as above — the rewrite happened with no mapping alive.
+        let mapped = unsafe { DictIndex::load_mmap(&path) }.unwrap();
+        assert_eq!(mapped.len(), keys.len());
+        // SAFETY: as above.
+        let err = unsafe { DictIndex::load_mmap_verified(&path) }.unwrap_err();
+        assert!(err.to_string().contains("payload checksum"), "{err}");
+        assert!(DictIndex::load(&path).is_err());
+        drop(mapped);
+        std::fs::remove_file(&path).unwrap();
+        // SAFETY: nothing to map; the open fails.
+        assert!(unsafe { DictIndex::load_mmap(&path) }.is_err());
     }
 }

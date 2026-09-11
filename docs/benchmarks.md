@@ -18,7 +18,7 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | — | **3.52** |
+| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |

@@ -139,10 +139,11 @@ pub mod fuzzing {
         crate::ClosedHashIndex::fuzz_parse_frame(bytes)
     }
 
-    /// Load a `DictIndex` blob and query what loaded; `true` if it loaded. Its loader checks
-    /// the framing and the three per-block arrays, but the front-coded block data is read as the
-    /// queries reach it, each access bounded — so this target queries: ids inside `[0, n)`,
-    /// `lower_bound` at most `n`, `key` `None` past the end, a walk that ends.
+    /// Load a `DictIndex` blob both ways and query what loaded; `true` if the checked way did.
+    /// `from_bytes` walks the three per-block arrays and the mapping's loader takes them as they
+    /// are, and the front-coded block data is read as the queries reach it either way, each
+    /// access bounded — so this target queries: ids inside `[0, n)`, `lower_bound` at most `n`,
+    /// `key` `None` past the end, a walk that ends.
     pub fn load_dict(bytes: &[u8]) -> bool {
         crate::DictIndex::fuzz_load_and_query(bytes)
     }

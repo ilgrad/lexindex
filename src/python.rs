@@ -1921,10 +1921,45 @@ impl PyDictIndex {
         py.detach(|| self.inner.save(&path)).map_err(to_py)
     }
 
-    /// Load a file written with `save`. Validated like `from_bytes`; there is no `load_mmap`.
+    /// Load a file written with `save`, validated like `from_bytes`.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
         let inner = py.detach(|| DictIndex::load(&path)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Zero-copy load: memory-map the file and borrow the keys, the block data and the two offset
+    /// arrays from it — the header, the symbol table and the per-block samples (eight bytes a
+    /// block) are what the load reads.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the index is
+    /// alive — the bytes are borrowed, so a concurrent write is undefined behaviour. See
+    /// `StringIndex.load_mmap` for the full contract; use `load` if the file may change.
+    #[staticmethod]
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { DictIndex::load_mmap(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// `load_mmap` plus the checks `load` makes — the payload checksum and the walk over the
+    /// per-block arrays — one pass over the mapping at load, the keys and the block data still
+    /// borrowed. For a file you wrote but did not carry yourself.
+    ///
+    /// The same obligation as `load_mmap`: the file must not change while the index is alive. The
+    /// checks run once, at load, and say nothing about later.
+    #[staticmethod]
+    fn load_mmap_verified(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { DictIndex::load_mmap_verified(&path) })
+            .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
         })

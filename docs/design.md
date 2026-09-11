@@ -294,7 +294,7 @@ them; that is the whole migration.
 
 ## Zero-copy `load_mmap`
 
-Every index but `DictIndex` loads two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
+Every index but `ClosedHashIndex`, whose blob is the perfect hash and nothing to map, loads two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
 file and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of
 the index size and the OS shares the pages across processes. Two shades of the mapping exist for
 files that were not carried by their author: `load_mmap_verified` is the same mapping with the
@@ -307,7 +307,15 @@ the key arena, so `from_bytes` (owned) and `load_mmap` (mapped) share one code p
 self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every field is read byte-wise
 (`u64::from_le_bytes`, varints), so there is no alignment requirement — for `PerfectHashIndex` and
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
-and reads only the small MPH structure into memory.
+and reads only the small MPH structure into memory. `DictIndex` is the same shape: the keys, the block
+data and the two offset arrays are read where they lie, an array entry decoded where it is read, and
+what the load reads is the header, the symbol table and the per-block samples — eight bytes a block,
+one byte per four keys at the default block. The samples are read rather than borrowed because two
+binary searches over them open every lookup, and the only form of that search that keeps its steps
+out of the branch predictor is the standard library's, which selects with `hint::select_unpredictable`
+over a `u64` slice; a section of a blob is not aligned, and searching the bytes measured 110 ns against
+26 for the pair. In place of the walk over the arrays that `load` makes, every access bounds what they
+say, so a crafted file answers wrong, never out of bounds.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index
 borrows it. That obligation is the caller's, so the `load_mmap` family are **`unsafe fn`s** on every

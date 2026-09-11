@@ -523,8 +523,24 @@ class DictIndex:
     def save(self, path: str | os.PathLike[str]) -> None: ...
     @staticmethod
     def load(path: str | os.PathLike[str]) -> DictIndex:
-        """Load a file written by ``save``. Validated like ``from_bytes``; there is no
-        ``load_mmap``."""
+        """Load a file written by ``save``, validated like ``from_bytes``."""
+    @staticmethod
+    def load_mmap(path: str | os.PathLike[str]) -> DictIndex:
+        """Memory-map a file written by ``save`` and borrow the keys, the block data and the two
+        offset arrays from it; the header, the symbol table and the per-block samples (eight bytes
+        a block) are what the load reads.
+
+        One obligation, and it is about the mapping rather than the bytes: the file must not be
+        modified or truncated by any process while the index is alive (see
+        ``StringIndex.load_mmap``). The framing is validated as in ``from_bytes``; the payload
+        checksum and the walk over the per-block arrays are skipped by design, every access
+        bounded instead, and ``load_mmap_verified`` adds them back.
+        """
+    @staticmethod
+    def load_mmap_verified(path: str | os.PathLike[str]) -> DictIndex:
+        """``load_mmap`` plus the checks ``load`` makes: one pass over the mapping at load, the
+        keys and the block data still borrowed. Same obligation as ``load_mmap``.
+        """
 
 @final
 class Overlay:

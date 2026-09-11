@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`DictIndex::load_mmap` and `load_mmap_verified`**, in Rust and Python. The keys, the block
+  data and the two offset arrays are held as the bytes they are serialised as, owned or mapped,
+  an entry decoded where it is read; so a mapping borrows them and the load reads the header, the
+  symbol table and the per-block samples — eight bytes a block, one byte per four keys at the
+  default block. That last array is read rather than borrowed because two binary searches over it
+  open every lookup and only `<[u64]>::partition_point` keeps those searches out of the branch
+  predictor: it selects with `hint::select_unpredictable`, which needs an alignment a section of a
+  blob does not have, and searching the bytes instead measured 110 ns against 26 for the pair.
+  `load_mmap` skips the payload checksum and the walk over the arrays `load` makes, every access
+  bounding what the arrays say instead — a crafted file answers wrong, never out of bounds — and
+  `load_mmap_verified` runs both over the mapping. The `BDX1` blob is unchanged, and reading a
+  section where it lies rather than as a decoded array costs `id` 303 → 308 ns and `key` 200 →
+  209 on the dictionary at `block = 32` (`StringIndex` control 342 → 337; min of five rounds
+  alternated in one process, shuffled probes).
+
 ### Fixed
 
 - **`inspect` is total on an overlay too.** Its live-key count was `base + additions − retired`
