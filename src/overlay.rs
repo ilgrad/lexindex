@@ -5,6 +5,14 @@
 //! keep the base as it is, hold what came later beside it, and mark what went away — so a catalog
 //! that mostly grows at the edges is not rebuilt on every change.
 //!
+//! Three of the five indexes are bases here, and the other two are excluded by their own
+//! contracts rather than by omission. An addition takes the id after the base's last
+//! ([`OverlayBase::base_len`]), which [`DictIndex`](crate::DictIndex) cannot accept: its ids are
+//! the lexicographic rank, so a key inserted in the middle of the order has no id to be given
+//! short of renumbering the base — the thing an overlay exists to avoid.
+//! [`ClosedHashIndex`](crate::ClosedHashIndex) answers `id` for every string and has no
+//! membership, so "is this already in the base" is not a question it can be asked.
+//!
 //! **Removal is by id, not by key, and that is what makes it well defined over a probabilistic
 //! base.** A tombstone is a bit against the id the base already assigned, tested only after the
 //! base has said yes, so a live base key costs one bitset probe and nothing else. Over

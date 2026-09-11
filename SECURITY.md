@@ -80,9 +80,10 @@ costs a side-table probe, and construction cannot be made to fail by one — but
 HashDoS defence and must not be used as one. If your keys come from an adversary and lookup latency
 is a resource you are protecting, put a keyed hash in front.
 
-**`unsafe` is confined to memory mapping and one prefetch.** The whole crate contains seven
-`unsafe fn`s — `load_mmap` and `load_mmap_verified` on every index, `load_mmap_untrusted` on
-`StringIndex` — and nine `unsafe` blocks: eight memory maps, counting the writable one
+**`unsafe` is confined to memory mapping and one prefetch.** The whole crate contains nine
+`unsafe fn`s — `load_mmap` and `load_mmap_verified` on the four indexes that have anything to
+map (`ClosedHashIndex` is the perfect hash and nothing else), plus `load_mmap_untrusted` on
+`StringIndex` — and eleven `unsafe` blocks: ten memory maps, counting the writable one
 `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
@@ -90,7 +91,8 @@ target, and libFuzzer over the six parsers a target can hold to a return value: 
 `BCL1`, `BDX1` — loaded and then queried, since its block data is bounds-checked on the read
 rather than at load — `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run
 starting from the
-corpus the last one left. `BIX4` is
+corpus the last one left. `inspect` has a target of its own, since it reads a header of *any*
+of those formats and is the one entry point that is not a parser for a single one. `BIX4` is
 fuzzed through `from_untrusted_bytes`, which holds it to a return value too — twice: on its own,
 and as the base region of an overlay, which is the composition a caller loading a stranger's
 overlay runs; a target over `from_bytes` would only re-find the panic above

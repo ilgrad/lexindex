@@ -22,7 +22,8 @@ but stands on its own.
 | `string → id` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `id → string` | ✅ | ✅ | — | — | ✅ |
 | ordered ids, ranges, `lower_bound` | ✅ | ✅ | — | — | — |
-| prefix · fuzzy · subsequence | ✅ | — | — | — | — |
+| prefix | ✅ | ✅ | — | — | — |
+| fuzzy · subsequence | ✅ | — | — | — | — |
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
 | zero-copy `load_mmap` | ✅ | ✅ | ✅ | — | ✅ |
@@ -62,7 +63,11 @@ All five assign dense ids in `[0, n)`, **build deterministically** and **seriali
 `save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash to map.
 They are immutable; **`Overlay`** adds and removes keys on `StringIndex`, `CompactHashIndex` and
 `PerfectHashIndex` without a rebuild, keeps every id stable, and folds the edits into a fresh base
-with `compact()`. Every configuration builds on 32-bit targets, `wasm32-unknown-unknown` included
+with `compact()`. The other two are absent by design rather than omission: an overlay issues a
+new key the next id after the base, which is exactly what `DictIndex` cannot accept — its ids
+*are* the lexicographic rank, and a key added in the middle of the order would not get one —
+and `ClosedHashIndex` has no membership to ask, so there is no "already in the base" for an
+overlay to test against. Every configuration builds on 32-bit targets, `wasm32-unknown-unknown` included
 (leave `mmap` off there — nothing to map).
 
 ## Install
@@ -252,10 +257,13 @@ default 8-bit fingerprint and 3.9× at 4 bits**, when a bounded false-positive r
 about `2^-fingerprint_bits` by design, measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over
 2 M non-member probes (z = +0.18 / −0.83 against theory), ≈0.4 % at 8, ≈0.0015 % at 16. Both hashes
 are deterministic and unseeded, so an adversary who chooses the queries can find false positives at
-will — it is not a security primitive. **`StringIndex` is the only structure that answers fuzzy and
-range queries at all**, at 4× below a plain DAWG. `marisa-trie` remains the pick for *exact*
-membership *and* ordering *and* the smallest such index — lexindex does not claim that cell
-([why](https://ilgrad.github.io/lexindex/benchmarks/#against-other-rust-string-indexes)).
+will — it is not a security primitive. **`StringIndex` is the only structure here that answers
+*fuzzy* and subsequence queries**, at 4× below a plain DAWG; ordered range queries `DictIndex`
+answers too, and more cheaply. On this corpus `DictIndex` at 128 keys per block is smaller than
+`marisa-trie` while answering everything marisa does and `key(id)`, `lower_bound` and `range`
+besides — but a trie's size swings 3× across corpora and marisa has tuning parameters of its
+own, so that is a result about these words at these settings rather than a general ranking
+([how it was measured](https://ilgrad.github.io/lexindex/benchmarks/#against-other-rust-string-indexes)).
 
 ### Which one to pick
 

@@ -40,10 +40,12 @@ z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 1
 `id → key`. It is not a security primitive: both hashes are deterministic and unseeded, so an
 adversary who chooses the queries can find false positives at will. It stays below
 marisa's 2.98 B/key at every width up to 21 bits — the [width guide](usage.md) tables the
-trade-off. **`StringIndex` is the only
-structure that answers fuzzy and range queries at all**, at 4× below a plain DAWG. `marisa-trie`
-remains the pick when you need *exact* membership *and* ordering *and* the smallest such index —
-lexindex doesn't claim that particular cell (see below for why).
+trade-off. **`StringIndex` is the only structure here that answers *fuzzy* and subsequence
+queries**, at 4× below a plain DAWG; an ordered range is a range of ids on `DictIndex`, which
+needs no automaton for it. On this corpus `DictIndex` at 128 keys per block is smaller than
+`marisa-trie` and answers everything marisa does plus `key(id)`, `lower_bound` and `range` — a
+result about these words at these settings, not a general ranking: a trie's size swings 3×
+across corpora and marisa carries tuning parameters of its own.
 
 ## Against other Rust string indexes
 
