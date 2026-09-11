@@ -466,6 +466,47 @@ every id while `prefix` walks the run once. `prefix` is the API for this shape o
 `marisa-trie` 1.3, `dawg2`, `datrie` over the same word list, Ryzen 7 5800HS, load about 1.3. None
 of the three is a lexindex dependency — reproduce in a throwaway environment.</sub>
 
+## Common-prefix queries — the other direction
+
+`prefix` returns the keys a query starts. The reverse question — which *keys* are prefixes of the
+query — is what a longest-match tokeniser asks of a vocabulary, and it was the one operation
+`marisa-trie`, `dawg2` and `datrie` all answered and lexindex did not. `local/cpbench.py` measures
+it on the same words: 20 000 queries, each a real word with one to three more letters on it except
+every fourth, which is random letters. Every structure is first held to marisa's answer on 2 000 of
+them, so the timings compare the same work.
+
+| | bytes/key | `common_prefix` | `longest_prefix` |
+|---|---:|---:|---:|
+| `datrie` | 30.69 | **706 ns** | 482 ns |
+| **lexindex `StringIndex`** | 5.95 | 726 | **422** |
+| `dawg2` | 23.96 | 784 | 810 |
+| `marisa-trie` | 2.98 | 1 240 | 965 |
+| **lexindex `DictIndex` 32** | 3.52 | 2 157 | 863 |
+| **lexindex `DictIndex` 128** | **2.89** | 3 353 | 1 303 |
+
+**This is the query a transducer is shaped for, and the numbers say so.** The query *is* the path:
+one walk down the FST, every final state on it a match, `O(query bytes)` whatever the index holds.
+`StringIndex` is the fastest structure here on `longest_prefix` and within 3 % of the fastest on
+`common_prefix` — at **a fifth of `datrie`'s bytes and a quarter of `dawg2`'s**, and ahead of
+`marisa-trie` on both columns at twice marisa's size. It is the *largest* of the ordered indexes in
+this crate, and on this one query that is where the bytes went.
+
+**`DictIndex` has no walk to make and the table shows what that costs.** One order lookup per
+character boundary, so a ten-character query is ten binary searches where the trie made one
+descent: 1.7× marisa's time at block 32, 2.7× at 128. `longest_prefix` is the exception — it starts
+at the query and stops at the first hit, so it never pays for the boundaries under the match, and
+at block 32 it comes in *under* marisa (863 ns against 965) though at 3.52 bytes per key against
+2.98. At block 128, where `DictIndex` is the smaller of the two, marisa is the faster. A caller who
+asks this question often should hold a `StringIndex`; one who asks it occasionally, alongside the
+ranks and ranges only `DictIndex` gives, can have it for a binary search per character.
+
+<sub>Measured 2026-09-12
+([`bench/results/common-prefix-2026-09-12-arz-4fc92ac.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-12-arz-4fc92ac.txt)),
+three runs agreeing within 2 %, minimum of five alternated rounds each, `marisa-trie` 1.3, `dawg2`,
+`datrie`, Ryzen 7 5800HS, load about 1.2. Nanoseconds per query through Python; the call overhead
+is in every row, and the three tries are C extensions too. None of them is a lexindex
+dependency — reproduce in a throwaway environment.</sub>
+
 ## Hash quality
 
 Size and speed both rest on the key hash being indistinguishable from random on *real* keys, so the

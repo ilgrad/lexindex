@@ -14,8 +14,12 @@ All notable changes to this project are documented here. The format follows
   give the entries that start there. It was the one operation `marisa-trie`, `dawg2` and `datrie`
   all had and lexindex did not, which the comparison tables now carry as a column of its own.
   `StringIndex` answers it in a single walk down the transducer, `O(query bytes)` whatever the index
-  holds; `DictIndex` has no such walk and pays one order lookup per character boundary, and the
-  documentation says so rather than implying they cost the same.
+  holds — the fastest `longest_prefix` in the comparison at **422 ns**, against `datrie`'s 482,
+  `dawg2`'s 810 and `marisa-trie`'s 965, and within 3 % of `datrie` on `common_prefix` (726 against
+  706) at a fifth of its bytes. `DictIndex` has no such walk and pays one order lookup per character
+  boundary — 2 157 ns at 32 per block — except on `longest_prefix`, which stops at the first hit and
+  so comes in under marisa at 863 ns. The documentation says which is which rather than implying
+  they cost the same.
 
 - **`DictIndex::build_to_file`** — the constructor for a corpus that does not fit in memory, and
   `DictIndex.build_to_file(items, path, block=32)` in Python. The keys arrive in any order, are
