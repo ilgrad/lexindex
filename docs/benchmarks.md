@@ -65,10 +65,13 @@ not against all of crates.io, which no benchmark can settle. Same real words:
 <sub>Measured with `crawdad` 0.4, `yada` 0.5, `fst` 0.4 over the same word list; size = serialised bytes
 (`serialize_to_vec().len()`) ÷ key count. Not lexindex dependencies — reproduce in a throwaway crate.</sub>
 
-Reaching `marisa`'s 2.98 needs its recursive succinct-trie label nesting, which the byte-oriented `fst`
-automaton is ~1.6× away from by construction (even a bare `fst::Set`, which stores no ids at all, is
-4.85) — so beating it on the *ordered* index means reimplementing marisa from scratch, not a bounded
-tweak. `CompactHashIndex` takes the size crown the other way: by dropping the keys entirely.
+Reaching `marisa`'s 2.98 *as a trie* needs its recursive succinct label nesting, which the
+byte-oriented `fst` automaton is ~1.6× away from by construction (even a bare `fst::Set`, which
+stores no ids at all, is 4.85) — so that route is closed, and `StringIndex` is not the index to put
+against marisa on bytes. `DictIndex` gets under it by not being a trie: front-coded blocks under one
+FSST table store 2.89 B/key at 128 keys per block, measured in the block-size table further down,
+and pay for it in reverse-lookup latency. `CompactHashIndex` takes the size crown the third way, by
+dropping the keys entirely.
 
 ## Which one to pick, and how much the corpus decides it
 
@@ -356,28 +359,40 @@ Ryzen 7 5800HS, load about 0.9 with an editor open.</sub>
 
 ## `DictIndex`: the ordered dictionary against `StringIndex`
 
-`local/dictbench` builds the dictionary as a `StringIndex` and as a `DictIndex` at three block
-sizes, then probes all 479 823 words in a shuffled order — members, strangers (each word with a
-byte appended), and every id for the reverse lookup — five rounds in one process, the variants
-alternated within each round, the minimum per cell; `StringIndex` is the control.
+`local/dictbench` builds the dictionary as a `StringIndex` and as a `DictIndex` at five block sizes,
+then probes all 479 823 words in a shuffled order — members, strangers (each word with a byte
+appended), and every id for the reverse lookup — five rounds in one process, the variants alternated
+within each round, the minimum per cell; `StringIndex` is the control.
 
-| | `StringIndex` | `DictIndex` 16 | `DictIndex` **32** | `DictIndex` 64 |
-|---|---:|---:|---:|---:|
-| bytes per key | 5.95 | 4.35 | **3.52** | 3.10 |
-| build | 105–127 ms | 40–50 | 44–45 | 39–49 |
-| `id`, member | 344 ns | 283 | **301–306** | 344–346 |
-| `id`, stranger | 238 ns | 181 | 204 | 247 |
-| `key_into` (no allocation) | — | 121 | **197** | 351 |
-| `key` (owned string) | 505 ns | 188 | 274 | 440 |
-| `lower_bound`, stranger | — | 179 | 203–206 | 245–247 |
+| | `StringIndex` | `DictIndex` 16 | `DictIndex` **32** | `DictIndex` 64 | `DictIndex` 128 | `DictIndex` 256 |
+|---|---:|---:|---:|---:|---:|---:|
+| bytes per key | 5.95 | 4.35 | **3.52** | 3.10 | 2.89 | 2.78 |
+| build | 130–131 ms | 40–50 | 40–45 | 39–40 | 39–44 | 39–49 |
+| `id`, member | 344–360 ns | 291–294 | **311–312** | 351–352 | 429–431 | 589–590 |
+| `id`, stranger | 235–241 ns | 186–190 | 210–211 | 252–253 | 333–336 | 491–492 |
+| `key_into` (no allocation) | — | 126–127 | **207** | 366–370 | 682–697 | 1353–1368 |
+| `key` (owned string) | 496–507 ns | 194 | 288 | 450–460 | 786–799 | 1462–1471 |
+| `lower_bound`, stranger | — | 187–191 | 211 | 253–255 | 335 | 492–493 |
 
 The two runs in the results file take the block sizes in opposite orders; where they differ the
-table gives both. `DictIndex` at 32 keeps `id` 12 % under `StringIndex` and `key` at 0.4× of it
-while storing 41 % less; 64 per block matches `StringIndex` on `id` at 3.10 B/key.
+table gives both. At the default 32, `DictIndex` keeps `id` 11 % under `StringIndex` and `key` at
+0.57× of it while storing 41 % less; 64 per block matches `StringIndex` on `id` at 3.10 B/key.
 
-<sub>Measured 2026-09-10 on the tree that adds the type
-([`bench/results/dict-2026-09-10-arz-64b0d35.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-10-arz-64b0d35.txt)),
-Ryzen 7 5800HS, load about 1 with an editor open.</sub>
+**32 is a middle of the curve, not a limit**, and
+[`build_with_block`](https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.build_with_block)
+is the knob. The size falls because doubling the block halves the three per-block arrays — 0.625
+bytes per key at 32, 0.078 at 256 — while the front-coded block data barely notices, 2.604 against
+2.669; at 128 the arrays and the block heads together are 5.4 % of the blob and everything else is
+suffixes. The price is that both the scan and the reverse decode are linear in the block, so
+`key_into` roughly doubles at every step. At 128 the index is **2.89 bytes per key, under the 2.98
+marisa stores on this corpus** — and unlike marisa it answers `key(id)` and `lower_bound` at all,
+since a marisa id is not the lexicographic rank (7 051 of 19 999 consecutive sorted pairs come back
+with a decreasing id). Pick 16 or 32 if the reverse lookup is hot, 128 if the bytes are.
+
+<sub>Measured 2026-09-11 on `b19415e`
+([`bench/results/dict-2026-09-11-arz-b19415e.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-11-arz-b19415e.txt)),
+Ryzen 7 5800HS, load about 1.1 with an editor open. The 2026-09-10 run it replaces predates the
+mapped sections of `c597099`, which cost `id` about 1.5 %.</sub>
 
 ## Hash quality
 

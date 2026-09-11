@@ -1,0 +1,67 @@
+DictIndex across block sizes on the dictionary — 2026-09-11, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Tree: b19415e, clean. Harness: local/dictbench (release, codegen-units 1): /usr/share/dict/words sorted and
+deduplicated, every index built in one process; probes = all words shuffled with a fixed seed (members), the same
+words with a byte appended (strangers), every id for the reverse lookups; five rounds per block size, the variants
+alternated within each round, min per variant, ns per probe. StringIndex is the control, built once and probed in
+every round. The two runs take the block sizes in opposite orders, so a drift in one direction shows as a split.
+Load about 1.1 with an editor open. Supersedes dict-2026-09-10-arz-64b0d35.txt, which predates the SharedBytes
+sections of c597099 and stopped at 64 per block.
+
+--- run A: 16 32 64 128 256
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 131 ms
+DictIndex k=16   4.35 B/key  build 50 ms
+  id member   dict  291.1  string  344.0
+  id stranger dict  186.2  string  235.6
+  key_into    dict  126.4  key dict  194.1  string  499.0
+  lower_bound dict  186.9
+DictIndex k=32   3.52 B/key  build 45 ms
+  id member   dict  312.3  string  349.5
+  id stranger dict  210.0  string  237.5
+  key_into    dict  206.9  key dict  288.5  string  500.3
+  lower_bound dict  210.5
+DictIndex k=64   3.10 B/key  build 39 ms
+  id member   dict  351.0  string  348.3
+  id stranger dict  251.8  string  239.1
+  key_into    dict  369.7  key dict  459.9  string  503.4
+  lower_bound dict  252.9
+DictIndex k=128  2.89 B/key  build 39 ms
+  id member   dict  431.0  string  350.7
+  id stranger dict  332.8  string  239.7
+  key_into    dict  697.0  key dict  798.9  string  499.7
+  lower_bound dict  334.6
+DictIndex k=256  2.78 B/key  build 39 ms
+  id member   dict  589.0  string  350.7
+  id stranger dict  491.4  string  239.5
+  key_into    dict 1367.8  key dict 1461.7  string  501.6
+  lower_bound dict  492.2
+
+--- run B: 256 128 64 32 16
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 130 ms
+DictIndex k=256  2.78 B/key  build 49 ms
+  id member   dict  590.3  string  360.0
+  id stranger dict  492.4  string  240.8
+  key_into    dict 1352.6  key dict 1470.7  string  506.9
+  lower_bound dict  492.9
+DictIndex k=128  2.89 B/key  build 44 ms
+  id member   dict  429.2  string  347.7
+  id stranger dict  335.5  string  238.5
+  key_into    dict  682.4  key dict  786.0  string  497.9
+  lower_bound dict  334.6
+DictIndex k=64   3.10 B/key  build 40 ms
+  id member   dict  351.5  string  344.1
+  id stranger dict  253.4  string  237.2
+  key_into    dict  366.4  key dict  449.5  string  496.0
+  lower_bound dict  254.9
+DictIndex k=32   3.52 B/key  build 40 ms
+  id member   dict  311.2  string  347.0
+  id stranger dict  210.8  string  237.6
+  key_into    dict  207.6  key dict  288.2  string  499.5
+  lower_bound dict  211.0
+DictIndex k=16   4.35 B/key  build 40 ms
+  id member   dict  293.7  string  348.8
+  id stranger dict  189.8  string  237.2
+  key_into    dict  127.2  key dict  194.4  string  499.7
+  lower_bound dict  191.1

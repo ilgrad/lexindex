@@ -49,6 +49,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Documentation: the `DictIndex` block size is measured across the curve rather than at three
+  points — 4.35 bytes per key at 16 through 2.78 at 256, with `id`, `key_into` and `lower_bound`
+  beside each — because 32 is the middle of that curve, not a limit, and `build_with_block` has
+  always been the knob. At 128 the index stores **2.89 bytes per key, under the 2.98 `marisa-trie`
+  takes on the same words**, and unlike marisa it answers `key(id)` and `lower_bound` at all, a
+  marisa id not being the lexicographic rank. The comparison tables carry both block sizes, and the
+  older claim that beating marisa on an ordered index meant reimplementing marisa is scoped to the
+  trie route it was written about. No code changed.
+
 - Documentation: an `OVL2` crosses 1.x → 2.0 only over a `BIX4` base, since an overlay embeds
   its base verbatim (README, `SECURITY.md`, `docs/design.md`); the `build_with_fingerprints`
   entry below said the blob stays `BMP6` — it is `BMP7`, like every 2.0 `PerfectHashIndex`

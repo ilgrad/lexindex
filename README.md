@@ -226,8 +226,9 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** |
+| **lexindex `DictIndex` (128 per block)** | — | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
 | `marisa-trie` | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| **lexindex `DictIndex`** | — | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
+| **lexindex `DictIndex` (32 per block, default)** | — | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
 | **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
 | lexindex `PerfectHashIndex` | — | — | — | ✅ | ✅ | ✅ | 10.90 |
 | DAWG (`dawg2`) | ✅ | — | — | — | ✅ | — | 23.96 |
@@ -236,7 +237,11 @@ better; the capability columns are why you would still pick a larger one.
 <sub>Raw numbers and the machine that produced them:
 [`bench/results/compare-2026-09-09-arz-0c637f6.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-09-arz-0c637f6.json)
 — every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
-load average at both ends of the run.</sub>
+load average at both ends of the run. The two `DictIndex` rows are one type at two block sizes, from
+[`bench/results/dict-2026-09-11-arz-b19415e.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-2026-09-11-arz-b19415e.txt);
+the larger block trades reverse-lookup latency for the bytes, and
+[the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md) table the
+whole curve.</sub>
 
 Two claims, scoped to libraries a Python or Rust project can install — research-grade C++ tries
 (CoCo-trie, XCDAT, PDT, SuRF) have no bindings to benchmark and are not claimed against.
