@@ -68,23 +68,57 @@ jobs:
       # `mphf::` is deliberately absent. Its blob tests go through a 263 000-key build, which is
       # hours under an interpreter; `the_golden_blob_parses_and_writes_back_identically` reads the
       # committed `MPH1` fixture instead and pins the same header, in 12 seconds for the whole job.
+      #
+      # `dict_index::` earns its place here more than any other format: `BDX1` is the newest, and it
+      # stores the first eight bytes of each block head as a *big-endian* word inside an otherwise
+      # little-endian blob, which is exactly the mix this job exists to catch. Three tests, 781 s
+      # measured -- the round trip, the length/table checks, and the varints.
       - name: cargo miri test on a big-endian target (the byte formats)
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
           cargo +nightly miri test --target s390x-unknown-linux-gnu --lib -- \
-            blob:: arena:: mphf::tests::the_golden_blob_parses_and_writes_back_identically
+            blob:: arena:: mphf::tests::the_golden_blob_parses_and_writes_back_identically \
+            dict_index::tests::save_and_load \
+            dict_index::tests::every_length_and_table_in_a_blob_is_checked \
+            dict_index::tests::varints_round_trip_and_a_cut_or_oversized_one_is_refused
       # The only place 32-bit code actually *runs*. `cargo check --target i686` is its own CI job,
       # but a compilation check cannot see a `u64 -> usize` truncation, and there is no 32-bit
       # runner to test on — Miri needs neither, since it interprets. It earned this on its first
       # run, catching a test that pinned an error message which is a property of the pointer width.
       # `overlay::` builds a perfect hash under the interpreter and costs minutes: weekly, not per
-      # push.
+      # push. `dict_index::` contributes its two parser tests -- the ones whose arithmetic is
+      # pointer-width-sensitive (`usize::try_from` on an id, `id / block`, the array bounds a load
+      # without the walk relies on). `every_length_and_table_in_a_blob_is_checked` is not on this
+      # list: it is about byte layout rather than pointer width, the big-endian job runs it, and it
+      # is the expensive one (the three-test i686 set measured 1 758 s with it, far less without).
       - name: cargo miri test on a 32-bit target (the parsers)
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
-          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay::
+          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay:: \
+            dict_index::tests::a_load_without_the_walk_bounds_what_the_arrays_say \
+            dict_index::tests::corrupted_block_data_never_panics
+
+  # The hash's own quality battery. It is `#[ignore]`d and behind `bench-mphf` because it runs for
+  # tens of seconds, and until now CI only *compiled* it -- `ci.yml` runs `clippy --features
+  # bench-mphf` and nothing executes the test, so the committed artifact was a hand-run and a
+  # regression in either hash would have waited for somebody to remember. The two-byte differential
+  # scan in here is what caught the pre-2.0 collision family; that is not a check to run by hand.
+  hash-quality:
+    name: hash quality battery
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # `--release`: the battery is tens of millions of hashes and a debug build turns tens of
+      # seconds into tens of minutes. The runner has no `/usr/share/dict/words`, so the corpus
+      # families are generated -- the battery says which it ran on in its first lines.
+      - name: cargo test --release --features bench-mphf -- --ignored hash_quality
+        run: cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
 
   # Dependabot is deliberately *not* configured for this repository: any merged bot PR puts
   # `dependabot[bot]` into the contributor list, and that list is kept to people. What the bot would

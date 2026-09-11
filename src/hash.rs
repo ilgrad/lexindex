@@ -249,16 +249,21 @@ mod golden {
 /// battery. Chi-square goes through the Wilson–Hilferty transform rather than the textbook
 /// `(x − k) / sqrt(2k)`, which is wrong exactly where the thresholds live: at 255 degrees of
 /// freedom and a true `z` of 6.00 the two read 5.99 and 7.07 (checked against `incgam` in
-/// PARI/GP). The battery runs some forty tables and forty-four thousand avalanche cells, so
-/// `|z| < 6` is the bound throughout — a 10⁻⁹ tail per cell, and about 10⁻⁴ over the battery.
+/// PARI/GP). The battery runs some forty tables, 88 064 avalanche cells and 1 806 336
+/// bit-independence cells, so `|z| < 6.5` is the bound throughout — a family-wise false-alarm
+/// rate of 1.5 × 10⁻⁴ over all 1 894 400 of them.
 #[cfg(all(test, feature = "bench-mphf"))]
 mod quality {
     use super::{fingerprint_full_bytes, hash_key_bytes, hash_pair_bytes};
 
     /// `|z|` a single cell of the battery may reach before it is called a failure. Derived in
-    /// PARI/GP: 44 032 avalanche cells at a family-wise false-alarm rate of 10⁻³ want a two-sided
-    /// `z` of 5.59, and the tables want less.
-    const Z_BOUND: f64 = 6.0;
+    /// PARI/GP from the cell count, which is what a bound like this is a function of: 88 064
+    /// avalanche cells (688 input bits over five lengths × 64 output bits × two hashes) and
+    /// 1 806 336 bit-independence cells (448 input bits × two hashes × 2 016 output pairs) come
+    /// to 1 894 400, and a family-wise rate of 10⁻³ over that many wants a two-sided `z` of
+    /// 6.211; 6.5 leaves it at 1.5 × 10⁻⁴. The tables want far less. An earlier bound of 6.0 was
+    /// derived from 44 032 cells, which counted one hash and no bit-independence cell at all.
+    const Z_BOUND: f64 = 6.5;
 
     /// splitmix64, so the corpora and the probe sets are the same on every machine and every run.
     struct Rng(u64);
@@ -458,35 +463,58 @@ mod quality {
         worst
     }
 
+    /// How many input bits one (length, hash) pair contributes. A 640-bit key would otherwise
+    /// cost five times what a 128-bit one does for no extra statistical reach: the criterion is
+    /// about the *output* pairs, and every input bit tests all 2 016 of them. Sampling the input
+    /// bits with the battery's own fixed RNG keeps the cost flat in key length and the cell
+    /// count — which `Z_BOUND` is a function of — a constant.
+    const BIC_IN_BITS: usize = 128;
+
     /// Two output bits must flip independently of each other: the bit-independence criterion, as
-    /// a 2×2 table per (input bit, output pair) and a chi-square on it.
+    /// a 2×2 table per (input bit, output pair) and a chi-square on it — for **both** hashes over
+    /// four key lengths, the same surface avalanche covers.
     ///
     /// Returns `(worst |z|, where)`.
     fn bit_independence(trials: usize) -> (f64, String) {
         let mut rng = Rng(0xb1c0_0002);
-        let len = 16usize;
-        let keys: Vec<Vec<u8>> = (0..trials).map(|_| rng.bytes(len)).collect();
         let mut worst = (0.0f64, String::from("none"));
-        for bit in 0..len * 8 {
-            let mut joint = vec![[0u64; 4]; 64 * 64];
-            for key in &keys {
-                let mut other = key.clone();
-                other[bit / 8] ^= 1 << (bit % 8);
-                let x = hash_key_bytes(key) ^ hash_key_bytes(&other);
-                for i in 0..64 {
-                    let bi = ((x >> i) & 1) as usize;
-                    for j in i + 1..64 {
-                        let bj = ((x >> j) & 1) as usize;
-                        joint[i * 64 + j][bi * 2 + bj] += 1;
+        for len in [8usize, 16, 24, 80] {
+            let keys: Vec<Vec<u8>> = (0..trials).map(|_| rng.bytes(len)).collect();
+            let mut bits: Vec<usize> = (0..len * 8).collect();
+            // A deterministic partial shuffle, so which bits are tested is fixed across machines.
+            for i in 0..bits.len().min(BIC_IN_BITS) {
+                let j = i + rng.below(bits.len() - i);
+                bits.swap(i, j);
+            }
+            bits.truncate(BIC_IN_BITS);
+            for &bit in &bits {
+                let mut joint = [vec![[0u64; 4]; 64 * 64], vec![[0u64; 4]; 64 * 64]];
+                for key in &keys {
+                    let mut other = key.clone();
+                    other[bit / 8] ^= 1 << (bit % 8);
+                    let (a0, a1) = hash_pair_bytes(key);
+                    let (b0, b1) = hash_pair_bytes(&other);
+                    for (h, x) in [(0usize, a0 ^ b0), (1, a1 ^ b1)] {
+                        for i in 0..64 {
+                            let bi = ((x >> i) & 1) as usize;
+                            for j in i + 1..64 {
+                                let bj = ((x >> j) & 1) as usize;
+                                joint[h][i * 64 + j][bi * 2 + bj] += 1;
+                            }
+                        }
                     }
                 }
-            }
-            for i in 0..64 {
-                for j in i + 1..64 {
-                    let cell = joint[i * 64 + j];
-                    let z = chi2_z(&cell).abs();
-                    if z > worst.0 {
-                        worst = (z, format!("in-bit {bit} out-bits ({i},{j})"));
+                for (h, name) in [(0usize, "slot"), (1, "fingerprint")] {
+                    for i in 0..64 {
+                        for j in i + 1..64 {
+                            let z = chi2_z(&joint[h][i * 64 + j]).abs();
+                            if z > worst.0 {
+                                worst = (
+                                    z,
+                                    format!("{name} len {len} in-bit {bit} out-bits ({i},{j})"),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -554,7 +582,9 @@ mod quality {
         assert!(z < Z_BOUND, "avalanche: |z| {z:.2} at {where_}");
 
         let (z, where_) = bit_independence(2048);
-        println!("\nbit independence (2048 keys, 16-byte keys, slot hash)");
+        println!(
+            "\nbit independence (2048 keys, lengths 8/16/24/80, both hashes, \u{2264}{BIC_IN_BITS} input bits each)"
+        );
         println!("  worst |z| {z:6.2}   {where_}");
         assert!(z < Z_BOUND, "bit independence: |z| {z:.2} at {where_}");
 

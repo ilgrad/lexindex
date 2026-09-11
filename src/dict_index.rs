@@ -901,6 +901,12 @@ impl DictIndex {
         Ok(())
     }
 
+    /// The queries the fuzz shim puts to every blob. Short, so the pairwise range probes stay
+    /// cheap, and spread over the byte order so a prefix range is sometimes empty, sometimes the
+    /// whole index, and sometimes neither.
+    #[cfg(feature = "fuzzing")]
+    const FUZZ_PROBES: [&str; 6] = ["", "\u{0}", "a", "ab", "zzzzzzzzzzzzzzzzz", "\u{10FFFF}"];
+
     /// Whether `bytes` loads, and whether what loaded answers without panicking — by the checked
     /// path and by the mapping's, which takes the arrays as they are. Exists for the libFuzzer
     /// target in `fuzz/`; see the `lexindex::fuzzing` module.
@@ -914,14 +920,108 @@ impl DictIndex {
         );
         for idx in checked.iter().chain(&framed) {
             let n = idx.len() as u64;
-            for probe in ["", "a", "zzzzzzzzzzzzzzzzz", "\u{10FFFF}"] {
+            for probe in Self::FUZZ_PROBES {
                 assert!(idx.id(probe).is_none_or(|id| id < n), "{probe:?}");
                 assert!(idx.lower_bound(probe) <= n, "{probe:?}");
+                let r = idx.prefix_id_range(probe);
+                assert!(
+                    r.start <= r.end && r.end <= n,
+                    "prefix_id_range({probe:?}) = {r:?} over {n} keys"
+                );
+                assert_eq!(idx.prefix_count(probe), r.end - r.start, "{probe:?}");
+                assert!(
+                    idx.successor(probe).is_none_or(|(_, id)| id < n),
+                    "successor({probe:?}) past {n}"
+                );
+                assert!(
+                    idx.predecessor(probe).is_none_or(|(_, id)| id < n),
+                    "predecessor({probe:?}) past {n}"
+                );
+                for hi in Self::FUZZ_PROBES {
+                    assert!(
+                        idx.range_count(probe, hi) <= n,
+                        "range_count({probe:?}, {hi:?})"
+                    );
+                }
+                assert!(
+                    idx.prefix_iter(probe).take(64).all(|(_, id)| id < n),
+                    "prefix({probe:?}) past {n}"
+                );
+                assert!(
+                    idx.range_iter(probe, "zzzz").take(64).all(|(_, id)| id < n),
+                    "range({probe:?}, ..) past {n}"
+                );
+                assert!(
+                    idx.iter_after(probe).take(64).all(|(_, id)| id < n),
+                    "iter_after({probe:?}) past {n}"
+                );
             }
             for id in [0, 1, n / 2, n.saturating_sub(1), n, u64::MAX] {
                 assert!(id < n || idx.key(id).is_none(), "key({id}) past {n}");
             }
             assert!(idx.iter().take(64).count() as u64 <= n);
+        }
+        // On a blob that passed every check, the ordered surface must agree with a walk -- the
+        // property the unit tests assert on indexes this crate built, here over one a fuzzer did.
+        // Two guards keep it from reporting a difference that is not a bug: an index longer than
+        // the walk is left alone, and so is one whose block data decodes to something that is not
+        // UTF-8, since `iter` is lossy there and `key` refuses, which is a documented difference
+        // rather than a disagreement.
+        if let Some(idx) = &checked {
+            let all: Vec<(String, u64)> = idx.iter().take(257).collect();
+            for (i, (_, id)) in all.iter().enumerate() {
+                assert_eq!(*id, i as u64, "iter is not in rank order");
+            }
+            let whole = all.len() == idx.len() && all.len() <= 256;
+            let utf8 = all
+                .iter()
+                .all(|(k, id)| idx.key(*id).as_deref() == Some(k.as_str()));
+            if whole && utf8 {
+                for lo in Self::FUZZ_PROBES {
+                    let want: Vec<(String, u64)> = all
+                        .iter()
+                        .filter(|(k, _)| k.starts_with(lo))
+                        .cloned()
+                        .collect();
+                    assert_eq!(idx.prefix(lo), want, "prefix({lo:?})");
+                    assert_eq!(
+                        idx.prefix_count(lo) as usize,
+                        want.len(),
+                        "prefix_count({lo:?})"
+                    );
+                    assert_eq!(
+                        idx.successor(lo),
+                        all.iter().find(|(k, _)| k.as_str() >= lo).cloned(),
+                        "successor({lo:?})"
+                    );
+                    assert_eq!(
+                        idx.predecessor(lo),
+                        all.iter().rev().find(|(k, _)| k.as_str() <= lo).cloned(),
+                        "predecessor({lo:?})"
+                    );
+                    assert_eq!(
+                        idx.iter_after(lo).collect::<Vec<_>>(),
+                        all.iter()
+                            .filter(|(k, _)| k.as_str() > lo)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        "iter_after({lo:?})"
+                    );
+                    for hi in Self::FUZZ_PROBES {
+                        let want: Vec<(String, u64)> = all
+                            .iter()
+                            .filter(|(k, _)| k.as_str() >= lo && k.as_str() < hi)
+                            .cloned()
+                            .collect();
+                        assert_eq!(idx.range(lo, hi), want, "range({lo:?}, {hi:?})");
+                        assert_eq!(
+                            idx.range_count(lo, hi) as usize,
+                            want.len(),
+                            "range_count({lo:?}, {hi:?})"
+                        );
+                    }
+                }
+            }
         }
         checked.is_some()
     }
