@@ -310,24 +310,24 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 3.04 B/key against 2.85; id 272–284 ns against 298–302
+faster = DictIndex(words_list, block=64)    # 3.03 B/key against 2.84; id 272–284 ns against 298–302
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
 DictIndex.build_to_file((line.rstrip("\n") for line in open("words.txt")), "words.bdx")
 words = DictIndex.load("words.bdx")        # checked like the others
-words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, table and 8 B/block read
+words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, tables and 8 B/block read
 ```
 
 `id` finds the block by its head's first eight bytes, walks the block's restarts to one microblock
 and compares the stored suffixes there against the query without decoding them; `key` climbs the
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
-entries — 38 at the default, where a block of 256 keys holds 255. On the dictionary: 2.85 bytes
+entries — 38 at the default, where a block of 256 keys holds 255. On the dictionary: 2.84 bytes
 per key, `id` 298–302 ns and `key_into` 207, against 5.95 / 265–272 / 466–473 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
-At `block=512` the same index stores **2.82 bytes per key, well under `marisa-trie`'s 2.98 on this
+At `block=512` the same index stores **2.81 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
 it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 227–232 ns
 against 207 at the default, and `id` 316–322 against 298–302.
@@ -534,12 +534,16 @@ the same keys handed to `build` as a list; the streamed `StringIndex` build peak
 721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
 
-The streamed `DictIndex` build peaks at 12.7 MB against 32.1 over 479 823 real words, for the same
+The streamed `DictIndex` build peaks at 27.1 MB against 51.6 over 479 823 real words, for the same
 bytes on disk. What it still holds is the block heads, the per-block arrays and one start a
 microblock, about `(mean head length + 20) / block + 8 / micro` bytes per key — 0.36 at the
 default on the dictionary — so a larger block holds less as well as storing less; the block data,
-which is the bulk of the index, goes into the file as it is encoded. It reads the sorted keys three
-times, and pays about 19 % in build time for it.
+which is the bulk of the index, goes into the file as it is encoded. The rest is the symbol tables:
+one trains per shard of 65 536 keys and they train in parallel, so a build holds one trainer per
+training thread, about 2.9 MB each. That is bounded by the thread count and not by `n` — on one
+thread the same two builds peak at 15.3 MB and 31.2, against 12.7 and 32.1 when a single table
+covered the whole index. It reads the sorted keys three times, and pays about 26 % in build time
+for it.
 
 The streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
 for the same keys handed to `build` as a list (254 against 903 at 10 M), and **0.94 GB at 10⁹**,

@@ -465,9 +465,9 @@ class DictIndex:
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
     sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-    2.83 bytes per key on real words, 52 % below ``StringIndex``. Prefix and range are order
+    2.84 bytes per key on real words, 52 % below ``StringIndex``. Prefix and range are order
     lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
-    ``StringIndex``. ``block=512`` stores 2.80 bytes per key, well under ``marisa-trie``, for a
+    ``StringIndex``. ``block=512`` stores 2.81 bytes per key, well under ``marisa-trie``, for a
     slower reverse lookup.
     """
 
@@ -476,7 +476,7 @@ class DictIndex:
         are shared over; it is split into microblocks of 32 (one microblock below that), and a
         lookup scans one restart a microblock plus one microblock -- ``block / 32 + 30`` entries
         from 64 up, not ``block - 1``.
-        32 / 64 / 128 / 256 / 512 / 1024 gave 3.22 / 3.02 / 2.90 / 2.83 / 2.80 / 2.78 bytes per key
+        32 / 64 / 128 / 256 / 512 / 1024 gave 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79 bytes per key
         on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there."""
 
     @staticmethod

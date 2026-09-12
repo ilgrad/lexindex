@@ -94,7 +94,7 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 2.83 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 2.84 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the scan of
 /// one microblock, whose size follows the `block` given at build time.
@@ -543,7 +543,7 @@ impl DictIndex {
     /// head and its arrays are shared over, and it is split into microblocks of 32 — one microblock
     /// below that — of which a lookup scans one, after one restart a microblock: `block / 32 + 30`
     /// entries from 64 up, not `block − 1`. On
-    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.22 / 3.02 / 2.90 / 2.83 / 2.80 / 2.78
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79
     /// bytes per key, `id` at 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
     /// `key_into` at 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272. At 256 the index is
     /// under `marisa-trie`'s 2.955 floor on that corpus.

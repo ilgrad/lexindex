@@ -26,8 +26,8 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.76** | 95 |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.26** | **92** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.26** | 97 |
-| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.82** | 348 |
-| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.85** | 342 |
+| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.81** | 348 |
+| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.84** | 342 |
 | `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 496 |
 | `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 472 |
 | `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 461 |
@@ -81,7 +81,7 @@ rather than for its own structure.
 keys at all: one hash, one probe, at most a fingerprint to compare. What they cannot do is tell a
 stranger from a member with certainty, or give a key back for an id. Among the structures that do
 keep their keys, `DictIndex` is **both smaller and faster than every `marisa-trie` setting measured
-at either block** — 2.82 B/key and 348 ns at 512, 2.85 and 342 at the default 256, against
+at either block** — 2.81 B/key and 348 ns at 512, 2.84 and 342 at the default 256, against
 2.96–3.07 and 461–496.
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
@@ -113,11 +113,11 @@ words, one process:
 
 | Rust structure | bytes/key | vs C++ marisa | `id` member | build |
 |---|---:|---:|---:|---:|
-| **lexindex `DictIndex`** (512 per block) | **2.819** | 0.95× | 272 ns | 26 ms |
-| **lexindex `DictIndex`** (256 per block, default) | **2.852** | 0.96× | 253 ns | 26 ms |
+| **lexindex `DictIndex`** (512 per block) | **2.806** | 0.94× | 272 ns | 26 ms |
+| **lexindex `DictIndex`** (256 per block, default) | **2.838** | 0.95× | 253 ns | 26 ms |
 | `marisa-trie` (C++ reference, default) | 2.978 | 1.00× | — | — |
 | `rsmarisa` (4 tries, tiny cache — its smallest) | 3.003 | 1.01× | 322 ns | 137 ms |
-| **lexindex `DictIndex`** (64 per block) | 3.041 | 1.02× | **227 ns** | **26 ms** |
+| **lexindex `DictIndex`** (64 per block) | 3.029 | 1.02× | **227 ns** | **26 ms** |
 | `rsmarisa` 0.4.2 (default) | 3.168 | 1.06× | 301 ns | 148 ms |
 | `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.63× | — | — |
 | **lexindex `StringIndex`** (ordered + fuzzy + reverse) | 5.95 | 2.00× | — | — |
@@ -130,13 +130,17 @@ words, one process:
 — one process, every key probed as a member and with a digit appended as a miss, shuffled with a
 fixed seed, seven rounds alternating in both directions, minimum of the last five. The other rows
 are the older sweep with `crawdad` 0.4, `yada` 0.5, `fst` 0.4; size is serialised bytes ÷ keys
-throughout, and `rsmarisa`'s `io_size()` is asserted equal to the file it saves. None of them is a
+throughout, and `rsmarisa`'s `io_size()` is asserted equal to the file it saves. The three
+`DictIndex` sizes are `68f5336`'s, where the symbol table went one per shard of 65 536 keys — a size
+is exact — and the same tree's A-B leaves the `id` column where it was
+([`dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt));
+the build column predates it and the change costs 17–23 % of it. None of them is a
 lexindex dependency — the harness is a throwaway crate.</sub>
 
 So the statement is a crown after all, with the frontier behind it. **`DictIndex` at its default
-block dominates `rsmarisa` at its most compact setting outright** — 2.852 against 3.003 B/key, 253
+block dominates `rsmarisa` at its most compact setting outright** — 2.838 against 3.003 B/key, 253
 against 322 ns, 5.3× faster to build — and at 64 per block it is the fastest structure here at 227
-ns for 3.041, still under `rsmarisa`'s default; every `rsmarisa` setting has a `DictIndex` block
+ns for 3.029, still under `rsmarisa`'s default; every `rsmarisa` setting has a `DictIndex` block
 that is both smaller and faster. The block size picks the axis.
 
 Two further things the table settles. The Rust port is *larger* than the C++ original on this corpus
@@ -152,19 +156,22 @@ Every size above is one corpus at one `n`, and the ranking is stable across neit
 structural: a trie's size depends on how much the keys share, and a fingerprint index's does not.
 The same structures over three corpora built from the same word list, one process per cell
 (`local/positioning.py`, 2026-09-12 at `386b2e6`,
-[`positioning-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/positioning-2026-09-12-arz-386b2e6.txt)):
+[`positioning-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/positioning-2026-09-12-arz-386b2e6.txt);
+the `DictIndex` row re-measured at `68f5336`, where the symbol table went one per shard of 65 536
+keys, in
+[`dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)):
 
 | bytes/key | 479 823 single words | 1 M `word.word` pairs, drawn at random | 1 M `word.word`, 1 000 × 1 000 grid |
 |---|---:|---:|---:|
 | the bare MPHF (no keys, no membership, no reverse) | 0.26 | 0.26 | 0.26 |
 | **lexindex `CompactHashIndex`** (fp = 1 byte) | **1.26** | **1.26** | **1.26** |
-| **lexindex `DictIndex`** (256 per block) | **2.85** | 7.58 | 2.47 |
+| **lexindex `DictIndex`** (256 per block) | **2.84** | 7.59 | 2.50 |
 | `marisa-trie` | 2.98 | 6.21 | 2.12 |
 | **lexindex `StringIndex`** | 5.95 | 15.19 | 0.68 |
 | lexindex `PerfectHashIndex` | 10.90 | 21.93 | 12.52 |
 
 The `DictIndex` row swaps places with the `marisa-trie` one inside a single table — under it on
-single words, 1.22× over it on random pairs and 1.17× on the grid — which is the whole argument of
+single words, 1.22× over it on random pairs and 1.18× on the grid — which is the whole argument of
 this page in three columns: the two are different shapes, and which is smaller is a property of the
 keys. At 10 M the trie numbers move again — `marisa` 4.14 on random pairs against 2.36 on the grid,
 `StringIndex` 12.44 against 2.00 — while `CompactHashIndex` stays at 1.26 and the bare MPHF at 0.26,
@@ -247,37 +254,37 @@ turns out to be the only row a reader can carry to their own corpus without meas
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.81 | 7.70 | 7.62 | 17.74 | 7.52 | 7.56 | 7.71 |
-| `domains` | 13.8 | 0.26 | 1.26 | 5.08 | 5.01 | 4.95 | 10.50 | 4.81 | 4.87 | 4.99 |
-| `idents` | 17.3 | 0.26 | 1.26 | 7.34 | 7.27 | 7.21 | 10.55 | 5.45 | 5.62 | 5.74 |
-| `numeric` | 5.9 | 0.26 | 1.26 | 2.18 | 2.12 | 2.08 | 0.00 | 1.62 | 1.64 | 1.72 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.87 | 13.82 | 13.78 | 21.44 | 18.23 | 18.82 | 19.04 |
-| `paths` | 125.0 | 0.26 | 1.26 | 16.34 | 15.92 | 15.60 | 17.48 | 9.26 | 9.47 | 9.60 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 9.63 | 9.54 | 9.48 | 17.28 | 7.79 | 8.19 | 8.37 |
-| `titles-ru` | 35.8 | 0.26 | 1.26 | 12.28 | 12.11 | 11.94 | 31.75 | 8.07 | 8.61 | 8.77 |
-| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.80 | 8.75 | 8.69 | 17.52 | 6.33 | 6.54 | 6.70 |
-| `urls` | 52.4 | 0.26 | 1.26 | 11.56 | 11.37 | 11.22 | 16.88 | 7.95 | 8.39 | 8.58 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.56 | 20.45 | 20.38 | 37.11 | 32.93 | 34.58 | 34.80 |
+| `dna` | 24.0 | 0.26 | 1.26 | 7.80 | 7.70 | 7.62 | 17.74 | 7.52 | 7.56 | 7.71 |
+| `domains` | 13.8 | 0.26 | 1.26 | 5.14 | 5.07 | 5.01 | 10.50 | 4.81 | 4.87 | 4.99 |
+| `idents` | 17.3 | 0.26 | 1.26 | 6.73 | 6.66 | 6.60 | 10.55 | 5.45 | 5.62 | 5.74 |
+| `numeric` | 5.9 | 0.26 | 1.26 | 2.18 | 2.13 | 2.08 | 0.00 | 1.62 | 1.64 | 1.72 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.85 | 13.80 | 13.76 | 21.44 | 18.23 | 18.82 | 19.04 |
+| `paths` | 125.0 | 0.26 | 1.26 | 15.11 | 14.67 | 14.34 | 17.48 | 9.26 | 9.47 | 9.60 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 9.46 | 9.37 | 9.31 | 17.28 | 7.79 | 8.19 | 8.37 |
+| `titles-ru` | 35.8 | 0.26 | 1.26 | 11.50 | 11.36 | 11.27 | 31.75 | 8.07 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.35 | 8.28 | 8.23 | 17.52 | 6.33 | 6.54 | 6.70 |
+| `urls` | 52.4 | 0.26 | 1.26 | 11.46 | 11.25 | 11.11 | 16.88 | 7.95 | 8.39 | 8.58 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.55 | 20.45 | 20.37 | 37.11 | 32.93 | 34.58 | 34.80 |
 
 <sub>`words` and `pypi` have no million-key file; their 100 000 grid, every build time, and the
 100 000 rows for the rest are in
 [`bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json)
 (the tree is the commit; what was uncommitted is the pages being re-measured and the result files
-this run wrote). The three `DictIndex` columns were measured again at `40ca73d`, when the symbol
-table's training changed ([`bench/results/dict-train-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-train-2026-09-12-arz-40ca73d.txt)); every other column is the sweep's, and a size is exact, so the
-two agree cell for cell wherever the builder did not move.</sub>
+this run wrote). The three `DictIndex` columns were measured again at `68f5336`, where the symbol
+table is one per shard of 65 536 keys ([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)); every other column is the sweep's, and a
+size is exact, so the two agree cell for cell wherever the builder did not move.</sub>
 
 **Where `marisa-trie` wins, it wins on shared structure.** It is the smallest key-storing structure
-on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.72× on
-`paths`, where a million paths run through a few thousand directories, 1.49× on `titles-ru`, 1.43×
-on `urls`, 1.33× on `idents` — and within 4 % on `dna` and `domains` (1.01× and 1.04×). That is
+on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.58× on
+`paths`, where a million paths run through a few thousand directories, 1.41× on `titles-ru`, 1.42×
+on `urls`, 1.22× on `idents` — and within 5 % on `dna` and `domains` (1.02× and 1.05×). That is
 what a LOUDS trie is for, and front coding in fixed blocks does not answer it.
 
 **Where lexindex wins, it wins on entropy.** `DictIndex` is the smaller of the two on `opaque`
-(13.78 against 18.23, 1.32×) and on `uuid` (20.38 against 32.93, 1.62×) — keys with nothing to
+(13.76 against 18.23, 1.32×) and on `uuid` (20.37 against 32.93, 1.62×) — keys with nothing to
 share, where a trie pays for a node per character and front coding pays for a prefix that is not
 there. On `words`, the corpus every table above is measured on, `DictIndex` at its default block is
-3.49 against marisa's 3.70 at 100 000 keys, and 2.85 against 2.96 on the full 479 823. That is a
+3.48 against marisa's 3.70 at 100 000 keys, and 2.84 against 2.96 on the full 479 823. That is a
 real result on a real corpus, and it is not the general case: it is the favourable end of a
 distribution whose other end is `paths`.
 
@@ -315,18 +322,18 @@ because dense ids are a corpus somebody really has.
 eleventh is `numeric`, where marisa's fastest is 10 % ahead of the default block (341 ns against
 379) and 9 % behind a block of 128 (314): a million dense decimal ids are the corpus where a trie
 has the least to walk. `DictIndex` also builds 2.3–4.3× faster everywhere except `numeric`, where
-the two are level. So the size table above is not the whole trade: on `paths`, marisa is 1.72×
+the two are level. So the size table above is not the whole trade: on `paths`, marisa is 1.58×
 smaller and 2.9× slower to answer and 4.3× slower to build.
 
 **The block is a smaller knob than it was.** A lookup scans one restart a microblock and then one
 microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −6 % (`dna`) to +16 %
-(`numeric`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.09–0.74 bytes a key
+(`numeric`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.09–0.77 bytes a key
 over 128, every corpus in the same direction. It did not use to be: `paths` at 1024 keys a block
 stored *more* than at 256 (16.13 against 15.89), and the cause was the symbol table rather than the
 layout, whose per-block arrays only shrink as the block grows. The table trained on whole blocks, so
 a larger block bought fewer neighbourhoods — 19 at 1024 against 157 at 128 — and a table trained on
-19 of them is a lottery. A training run is now a constant 256 keys whatever the block, and `paths`
-at 1024 reads 15.60. 256 is the default the README quotes.
+19 of them is a lottery. A training run is now a constant 256 keys whatever the block, trained per
+shard of 65 536 keys, and `paths` at 1024 reads 14.34. 256 is the default the README quotes.
 
 <sub>Lookups are one run of three rounds of 20 000 probes a cell, so a column is comparable within
 itself and a cell carries a few per cent: a second run of the same build read the same bytes to the
@@ -336,30 +343,31 @@ last digit and lookups 1–15 % higher on every structure, controls included.</s
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.14 | 7.03 | 6.95 | 15.98 | 6.69 | 6.75 | 6.99 |
-| `numeric` | 6.9 | 0.26 | 1.26 | 2.20 | 2.14 | 2.09 | 0.00 | 1.63 | 1.66 | 1.77 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.44 | 13.38 | 13.35 | 21.47 | 15.19 | 18.33 | 18.68 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 7.98 | 7.89 | 7.82 | 13.25 | 5.57 | 5.71 | 5.87 |
-| `urls` | 52.4 | 0.26 | 1.26 | 9.78 | 9.58 | 9.42 | 13.10 | 5.66 | 5.83 | 5.99 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.97 | 19.88 | 36.07 | 29.97 | 33.21 | 33.56 |
+| `dna` | 24.0 | 0.26 | 1.26 | 7.13 | 7.02 | 6.94 | 15.98 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.26 | 1.26 | 2.19 | 2.13 | 2.08 | 0.00 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.42 | 13.37 | 13.33 | 21.47 | 15.19 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 7.74 | 7.65 | 7.59 | 13.25 | 5.57 | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.26 | 1.26 | 9.59 | 9.38 | 9.23 | 13.10 | 5.66 | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.98 | 19.90 | 36.07 | 29.97 | 33.21 | 33.56 |
 
 Ten times the keys moves every trie and neither hash: at its smallest setting `marisa` goes
 7.79 → 5.57 on `titles-en` and 7.95 → 5.66 on `urls` as the sharing deepens, `DictIndex` at its
-default block 9.54 → 7.89 and 11.37 → 9.58, and the two keyless rows do not move at all. The
+default block 9.37 → 7.65 and 11.25 → 9.38, and the two keyless rows do not move at all. The
 ranking is the same one the million-key table gives, so the answer to "which is smallest" is
 decided by the corpus and not by the scale.
 
 **The block buys less here.** 128 → 1024 keys a block is 0.09–0.36 bytes a key over these six,
-against 0.09–0.74 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
+against 0.09–0.77 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
 a bigger block saves were already a smaller share of the index; what is left is the coded suffixes,
 and those are the symbol table's business, not the block's — which is why the table is trained on
-runs of a constant length, and why `titles-en` at 1024 reads 7.82 where whole-block training left it
-at 7.93, above its own 256.
+runs of a constant length and per shard, and why `titles-en` at 1024 reads 7.59 where whole-block
+training over one table left it at 7.93, above its own 256.
 
 <sub>Measured 2026-09-12
 ([`bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json)),
 `marisa-trie` 1.4.1. Two builds per cell, three rounds of 20 000 lookups. The three `DictIndex`
-columns were measured again at `40ca73d`, when the symbol table's training changed ([`bench/results/dict-train-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-train-2026-09-12-arz-40ca73d.txt)).</sub>
+columns were measured again at `68f5336`, where the symbol table is one per shard of 65 536 keys
+([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)).</sub>
 
 ### A cold mapping, and what is actually resident
 
@@ -373,34 +381,34 @@ Ten million English Wikipedia titles, bytes per key except the latencies:
 
 | structure | file | mapped | after 1 k | after 1 M | cold ns | warm ns |
 |---|---:|---:|---:|---:|---:|---:|
-| `DictIndex` 32 | 8.43 | 0.26 | 5.19 | 8.43 | 44 621 | 778 |
-| `DictIndex` 32, `MADV_RANDOM` | 8.43 | 0.26 | **1.81** | 8.43 | 91 361 | 1 944 |
-| `DictIndex` 256 | 7.89 | 0.05 | 4.64 | 7.89 | 46 688 | 700 |
-| `DictIndex` 256, `MADV_RANDOM` | 7.89 | 0.05 | **0.84** | 7.89 | 97 924 | 1 970 |
-| `DictIndex` 1024 | 7.82 | 0.02 | 4.62 | 7.82 | 47 663 | 672 |
-| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 358** | **73** |
-| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 50 162 | 179 |
-| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 93 002 | 1 074 |
-| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 338 490 | 3 160 |
+| `DictIndex` 32 | 8.21 | 0.28 | 5.22 | 8.21 | 47 129 | 815 |
+| `DictIndex` 32, `MADV_RANDOM` | 8.21 | 0.28 | **1.81** | 8.21 | 89 971 | 1 975 |
+| `DictIndex` 256 | 7.65 | 0.06 | 4.57 | 7.65 | 45 477 | 719 |
+| `DictIndex` 256, `MADV_RANDOM` | 7.65 | 0.06 | **0.83** | 7.65 | 96 360 | 1 997 |
+| `DictIndex` 1024 | 7.59 | 0.03 | 4.60 | 7.59 | 46 612 | 695 |
+| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 799** | **75** |
+| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 51 651 | 177 |
+| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 94 367 | 1 039 |
+| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 335 430 | 3 067 |
 
 **`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.26 bytes a key
 resident before the first query, which is the header and the little the loader validates. Nothing
 else is read until something asks for it.
 
 **The first thousand queries cost far more pages than they need.** `DictIndex` at 256 ends them with
-4.64 of its 7.89 bytes a key resident — 59 % of an index nobody has finished reading — while the
-same thousand queries under `MADV_RANDOM` leave **0.84**, which is what they actually touch: about
+4.57 of its 7.65 bytes a key resident — 60 % of an index nobody has finished reading — while the
+same thousand queries under `MADV_RANDOM` leave **0.83**, which is what they actually touch: about
 two pages a lookup, the sample array and the block. The 5.5× between those two numbers is the
 kernel's readahead, and it is buying latency with memory: turning it off costs 2.1× on the cold
 lookups and **2.8× on the warm ones**, because the advice outlives the warm-up. The warm column is
-also where the microblock shows on ten million keys: 1024 a block answers in 672 ns where the
+also where the microblock shows on ten million keys: 1024 a block answers in 695 ns where the
 one-level format took 2 108, in a session that read 30 % faster than this one. Readahead is the
 right default here; `MADV_RANDOM` is for the case where a container limit, and not a latency budget,
 is what binds.
 
 **Cold start is where the smallest structure wins outright, and the mechanism is pages.**
-`CompactHashIndex` answers its first thousand queries at **6.4 µs** against `DictIndex`'s 46.7 and
-`StringIndex`'s 93.0 — 7× and 15× — because its whole file is 12.6 MB and a fault brings in a
+`CompactHashIndex` answers its first thousand queries at **6.8 µs** against `DictIndex`'s 45.5 and
+`StringIndex`'s 94.4 — 7× and 14× — because its whole file is 12.6 MB and a fault brings in a
 useful fraction of it. On `uuid`, where its 1.26 bytes a key sit against `DictIndex`'s 20.06 and
 `StringIndex`'s 36.07, the gap is 21× and 39× (5.9 µs against 125.3 and 231.0). A structure that
 stores no keys has no keys to fault in.
@@ -412,9 +420,11 @@ is the steady-state RSS.
 
 <sub>Measured 2026-09-12 on a clean tree, NVMe under LUKS on btrfs, 38 GB RAM — so "cold" means
 this file's page cache was dropped and not that the machine was short of memory
-([`bench/results/coldmmap-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-40ca73d.txt),
-which re-measured the table after the symbol table's training changed and reads about 30 % slower
-than the run before it on both controls, so its latency column is read within itself;
+([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt),
+which re-measured the table after the symbol table went one per shard and reads within 2 % of the
+[run before it](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-40ca73d.txt)
+on both controls, and about 30 % slower than the one before that, so its latency column is read
+within itself;
 the million-key run and the `uuid` one are in the earlier
 [`coldmmap-2026-09-12-arz-bb1473c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-bb1473c.txt),
 on the one-level format). `MADV_RANDOM` is applied by the harness
@@ -471,16 +481,16 @@ three cache levels against three `DictIndex` block sizes, 64, 256 and 512, on ev
 | corpus | rsmarisa smallest | `DictIndex` 512 | rsmarisa build | `DictIndex` build | rsmarisa fastest | `DictIndex` fastest (block) |
 |---|---:|---:|---:|---:|---:|---:|
 | `dna` | 7.61 | 7.65 | 1 308 ms | 64 ms | 608 ns | 238 ns (512) |
-| `domains` | 4.87 | 5.00 | 680 ms | 57 ms | 466 ns | 267 ns (64) |
-| `idents` | 5.50 | 7.31 | 652 ms | 61 ms | 609 ns | 342 ns (256) |
-| `numeric` | 1.64 | 2.09 | 98 ms | 46 ms | 161 ns | 190 ns (64) |
-| `opaque` | 18.27 | 13.80 | 1 177 ms | 82 ms | 1 047 ns | 299 ns (512) |
-| `paths` | 10.09 | 15.89 | 5 642 ms | 95 ms | 1 710 ns | 664 ns (512) |
-| `titles-en` | 7.85 | 9.52 | 975 ms | 68 ms | 827 ns | 348 ns (256) |
-| `titles-ru` | 8.22 | 12.08 | 1 489 ms | 68 ms | 1 102 ns | 447 ns (256) |
-| `titles-zh` | 6.40 | 8.67 | 759 ms | 71 ms | 683 ns | 344 ns (256) |
-| `urls` | 8.38 | 11.33 | 2 011 ms | 73 ms | 855 ns | 542 ns (512) |
-| `uuid` | 33.01 | 20.39 | 1 508 ms | 115 ms | 1 155 ns | 391 ns (512) |
+| `domains` | 4.87 | 5.03 | 680 ms | 57 ms | 466 ns | 267 ns (64) |
+| `idents` | 5.50 | 6.62 | 652 ms | 61 ms | 609 ns | 342 ns (256) |
+| `numeric` | 1.64 | 2.10 | 98 ms | 46 ms | 161 ns | 190 ns (64) |
+| `opaque` | 18.27 | 13.77 | 1 177 ms | 82 ms | 1 047 ns | 299 ns (512) |
+| `paths` | 10.09 | 14.46 | 5 642 ms | 95 ms | 1 710 ns | 664 ns (512) |
+| `titles-en` | 7.85 | 9.33 | 975 ms | 68 ms | 827 ns | 348 ns (256) |
+| `titles-ru` | 8.22 | 11.30 | 1 489 ms | 68 ms | 1 102 ns | 447 ns (256) |
+| `titles-zh` | 6.40 | 8.25 | 759 ms | 71 ms | 683 ns | 344 ns (256) |
+| `urls` | 8.38 | 11.15 | 2 011 ms | 73 ms | 855 ns | 542 ns (512) |
+| `uuid` | 33.01 | 20.40 | 1 508 ms | 115 ms | 1 155 ns | 391 ns (512) |
 
 The shape is the one the C++ library gives: `rsmarisa` is smaller on the corpora whose keys share
 structure and larger on the ones whose keys do not, while `DictIndex` builds **11–59× faster** and
@@ -496,7 +506,11 @@ words evidently do not mean quite the same thing, and each library's own curve i
 
 <sub>Measured 2026-09-12 on a clean tree
 ([`bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt)),
-`rsmarisa` 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. It is
+`rsmarisa` 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. The
+`DictIndex` size column is `68f5336`'s, where the symbol table went one per shard of 65 536 keys;
+its build column predates that and the change costs 17–23 % of it, while the same tree's A-B leaves
+the lookups where they were
+([`dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)). It is
 a throwaway crate under `local/`: `rsmarisa` is not a lexindex dependency and is not proposed as
 one. The Rust build times are not comparable with the Python ones above — that harness copies every
 key across the language boundary and this one does not.</sub>
@@ -586,7 +600,7 @@ column, and read a shift under ~15 % between tables as the session: against this
 | `std::HashMap<String, u32>` | ~222 ms | ~295 ns | in-RAM, not serialisable |
 | lexindex `PerfectHashIndex::id` (verified) | ~283 ms | ~301 ns | one extra cache line + full key compare |
 | lexindex `StringIndex` (FST) | ~243 ms | ~390 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~150 ms | ~539 ns | ordered, exact reverse; 2.47 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.85 against 5.95, 298–302 ns against 265–272) |
+| lexindex `DictIndex` (256 per block) | ~150 ms | ~539 ns | ordered, exact reverse; 2.47 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.84 against 5.95, 298–302 ns against 265–272) |
 | `std::BTreeMap<String, u32>` | ~220 ms | ~774 ns | in-RAM |
 
 <sub>**The 2.0.0 session was the outlier, not this one.** The two rows whose code has not moved since
@@ -751,11 +765,11 @@ within each round, the minimum per cell; `StringIndex` is the control.
 
 | | `StringIndex` | `DictIndex` 32 | `DictIndex` 64 | `DictIndex` 128 | `DictIndex` **256** | `DictIndex` 512 | `DictIndex` 1024 |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| bytes per key | 5.95 | 3.24 | 3.04 | 2.92 | **2.85** | 2.82 | 2.80 |
+| bytes per key | 5.95 | 3.23 | 3.03 | 2.90 | **2.84** | 2.81 | 2.79 |
 | of which per-block arrays | — | 0.348 | 0.231 | 0.144 | 0.100 | 0.077 | 0.066 |
 | microblocks a block | — | 1 | 2 | 4 | 8 | 16 | 32 |
 | entries a lookup scans | — | 31 | 32 | 34 | **38** | 46 | 62 |
-| build | 105–106 ms | 17–22 | 16–20 | 16–17 | 16 | 16–18 | 17–23 |
+| build | 129–135 ms | 23–30 | 25–26 | 24–25 | 24 | 23–27 | 29–36 |
 | `id`, member | 265–283 ns | 252–254 | 272–284 | 285–288 | **298–302** | 316–322 | 344–347 |
 | `id`, stranger | 215–219 ns | 204 | 223–224 | 234–238 | 255–257 | 267–275 | 292–302 |
 | `key_into` (no allocation) | — | 154–155 | 169–172 | 184–188 | **207** | 227–232 | 263–272 |
@@ -766,7 +780,7 @@ within each round, the minimum per cell; `StringIndex` is the control.
 Two runs of the same ladder in opposite orders; where they differ the table gives both. At the
 default 256, `DictIndex` answers `id` within 10 % of `StringIndex` and `key_into` at less than half
 its `key` while storing **52 % less**; at 64 per block it is level with `StringIndex` on `id` at
-3.04 B/key, and at 32 it is 6 % ahead. The sequential lane does not move with the block at all.
+3.03 B/key, and at 32 it is 6 % ahead. The sequential lane does not move with the block at all.
 
 **A lookup scans a microblock, not a block.** A block is cut into microblocks of 32, and the first
 key of each is a restart front-coded against the restart before it, so a lookup walks the restarts
@@ -799,18 +813,24 @@ holds the before and after), and it costs no bytes and no format change.
 [`build_with_block`](https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.build_with_block)
 is the knob. The size falls because a larger block spreads one stored head, one sample and two
 offsets over more keys — the arrays go from 0.348 bytes a key at 32 to 0.066 at 1024 — while the
-front-coded data moves the other way and less, 2.60 to 2.73, a restart every 32 keys being coded
+front-coded data moves the other way and less, 2.57 to 2.70, a restart every 32 keys being coded
 against a key that far away. What the block costs is now `block / 32 + 30` entries scanned rather
-than `block − 1`: 1024 scans 62 where 32 scans 31. At 512 the index is **2.82 bytes
+than `block − 1`: 1024 scans 62 where 32 scans 31. At 512 the index is **2.81 bytes
 per key, well under the 2.98 marisa stores on this corpus** — and unlike marisa it answers `key(id)`
 and `lower_bound` at all, since a marisa id is not the lexicographic rank (7 051 of 19 999
 consecutive sorted pairs come back with a decreasing id). Pick 32 or 64 if the lookups are hot,
 512 or 1024 if the bytes are.
 
-<sub>Measured 2026-09-12 at `386b2e6`
+<sub>The latency rows are 2026-09-12 at `386b2e6`
 ([`bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt)),
-two runs of the ladder in opposite orders, the table giving both where they differ; the per-block
-arrays from `local/dictsize` on the same tree.</sub>
+two runs of the ladder in opposite orders, the table giving both where they differ. The bytes and
+the per-block arrays are exact and come from `68f5336`, where the symbol table went one per shard of
+65 536 keys, and so does the build row
+([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)) —
+that session reads about 25 % above the latency rows', its `StringIndex` control building in
+129–135 ms where theirs took 105–106, and the same artifact's A-B puts the change's own share of
+the build at 17–23 %. That A-B moves `id` by +0.5 / −2.0 / −2.4 % on three corpora against a control
+moving −0.7 / −2.5 / −0.4 %, which is why the latency rows are the earlier session's and stand.</sub>
 
 ## Prefix queries against the tries
 
@@ -821,8 +841,8 @@ prefixes drawn from random words, so the average prefix carries 763 keys.
 
 | | bytes/key | `prefix_count` | first 10 | every match + ids | keys only |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `DictIndex` 256** (default) | **2.85** | **375 ns** | 2 015 ns | 102 081 ns | 72 541 ns |
-| **lexindex `DictIndex` 512** | **2.82** | 396 | 2 159 | 102 532 | 73 384 |
+| **lexindex `DictIndex` 256** (default) | **2.84** | **375 ns** | 2 015 ns | 102 081 ns | 72 541 ns |
+| **lexindex `DictIndex` 512** | **2.81** | 396 | 2 159 | 102 532 | 73 384 |
 | lexindex `StringIndex` | 5.95 | 556 | 4 465 | 162 897 | 330 497 |
 | `marisa-trie` | 2.98 | 123 444 | 2 571 | 94 218 | 94 065 |
 | `dawg2` | 23.96 | 68 251 | **1 449** | **48 544** | **48 503** |
@@ -877,8 +897,8 @@ them, so the timings compare the same work.
 | **lexindex `StringIndex`** | 5.95 | 666 | 367 |
 | `dawg2` | 23.96 | 695 | 617 |
 | `marisa-trie` | 2.98 | 1 138 | 877 |
-| **lexindex `DictIndex` 256** (default) | **2.85** | 2 502 | 984 |
-| **lexindex `DictIndex` 512** | **2.82** | 2 642 | 1 042 |
+| **lexindex `DictIndex` 256** (default) | **2.84** | 2 502 | 984 |
+| **lexindex `DictIndex` 512** | **2.81** | 2 642 | 1 042 |
 
 **This is the query a transducer is shaped for, and the numbers say so.** The query *is* the path:
 one walk down the FST, every final state on it a match, `O(query bytes)` whatever the index holds.
@@ -956,8 +976,8 @@ rest and nothing at all sits below the hardware.
 | `CompactHashIndex` fp=1 | 1.26 | 27.0 | 27.2 | 27.0 | 28.9 | 27.1 – 27.3 |
 | `PerfectHashIndex` | 10.90 | 88.4 | 90.4 | 88.6 | 102.0 | 89.8 – 92.0 |
 | `StringIndex` | 5.95 | 232.4 | 234.0 | 232.5 | 249.4 | 233.5 – 235.5 |
-| `DictIndex` 256 | 2.85 | 263.8 | 265.6 | 264.1 | 276.7 | 265.4 – 265.9 |
-| `DictIndex` 512 | 2.82 | 283.9 | 286.0 | 284.1 | 296.0 | 285.7 – 286.6 |
+| `DictIndex` 256 | 2.84 | 263.8 | 265.6 | 264.1 | 276.7 | 265.4 – 265.9 |
+| `DictIndex` 512 | 2.81 | 283.9 | 286.0 | 284.1 | 296.0 | 285.7 – 286.6 |
 
 **The minimum is within 3 % of the median everywhere**, and the p5–p95 band is 4–16 % of it, so
 quoting the minimum costs nothing — same probe set, same binary, thirty consecutive passes. An

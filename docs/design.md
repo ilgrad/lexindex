@@ -174,7 +174,12 @@ entry's own suffix — with the suffix
 under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB 2020): up to 255 symbols of one
 to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
 parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
-kilobyte. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
+kilobyte. **One table covers a shard of 65 536 keys**, not the whole index: a shard is a whole
+number of blocks, each table is trained on 10 000 pieces sampled inside its own shard, the tables
+train in parallel, and a lookup divides the block number by the shard to pick one. The suffixes of
+a million paths under `/usr/share` and of a million under `/home` are different languages, and one
+table over both is a compromise — a table a shard is worth 1.25 bytes a key on a path list, 0.23 on
+ten million article titles and 0.01 on the dictionary, against 0.015 for the tables themselves. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
 so a `BDX2` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other.
@@ -227,8 +232,8 @@ entry whose prefix is at least a later entry's writes nothing that survives, so 
 over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
 a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
 decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
-**2.85 B/key** (`StringIndex` 5.95), `id` 298–302 ns against 265–272, `key_into` 207 against
-`key`'s 278; 128 and 512 give 2.92 and 2.82 B/key at 285–288 and 316–322 ns, and 1024 gives 2.80
+**2.84 B/key** (`StringIndex` 5.95), `id` 298–302 ns against 265–272, `key_into` 207 against
+`key`'s 278; 128 and 512 give 2.90 and 2.81 B/key at 285–288 and 316–322 ns, and 1024 gives 2.79
 at 344–347. Against one level at the same size the reverse lookup halves and `id` does not move:
 244–246 ns and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for
 460–464 and 393. The one-level format still reaches further down — 2.701 at 1024 keys a block —
@@ -372,7 +377,7 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
 and reads only the small MPH structure into memory. `DictIndex` is the same shape: the keys, the block
 data and the two offset arrays are read where they lie, an array entry decoded where it is read, and
-what the load reads is the header, the symbol table and the per-block samples — eight bytes a block,
+what the load reads is the header, the symbol tables and the per-block samples — eight bytes a block,
 one byte per four keys at the default block. The samples are read rather than borrowed because two
 binary searches over them open every lookup, and the only form of that search that keeps its steps
 out of the branch predictor is the standard library's, which selects with `hint::select_unpredictable`

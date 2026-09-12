@@ -28,7 +28,7 @@ but stands on its own.
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
 | zero-copy `load_mmap` | ✅ | ✅ | ✅ | — | ✅ |
-| **bytes/key**, 480 k English words | 5.95 | **2.85** | **1.26** · 0.76 at 4 bits | **0.26** | 10.90 |
+| **bytes/key**, 480 k English words | 5.95 | **2.84** | **1.26** · 0.76 at 4 bits | **0.26** | 10.90 |
 | `id`, 1 M word bigrams | 390 ns | 539 ns | 133 ns | the bare perfect hash | 301 ns · `id_unchecked` 72 |
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
 
@@ -42,11 +42,11 @@ but stands on its own.
   ways, `lower_bound`, `prefix`, `common_prefix`, `range`, in-order iteration — no automata, so no
   fuzzy. The sorted
   keys front-coded in blocks of 256, each cut into microblocks of 32, the suffixes under a symbol
-  table trained on the index itself:
-  **2.85 bytes/key**, 52 % below `StringIndex`, `id` 298–302 ns against its 265–272, `key_into`
+  table trained on the 65 536 keys around them:
+  **2.84 bytes/key**, 52 % below `StringIndex`, `id` 298–302 ns against its 265–272, `key_into`
   207 against its `key` at 466–473. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **375 ns where `marisa-trie` must enumerate every match to
-  count it (123 444)**. Blocks of 512 store **2.82 bytes/key, under `marisa-trie` at every setting it
+  count it (123 444)**. Blocks of 512 store **2.81 bytes/key, under `marisa-trie` at every setting it
   has** *on this corpus* — over the thirteen-corpus set the ranking goes both ways, marisa smaller
   wherever the keys share deep structure and `DictIndex` smaller where they do not, while
   `DictIndex` answers faster on all but `numeric`, 1.8–2.9× at a million keys. Exact queries,
@@ -244,8 +244,8 @@ better; the capability columns are why you would still pick a larger one.
 | **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | probabilistic | ✅ | **0.76** | 95 |
 | **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | probabilistic | ✅ | **1.26** | **92** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | probabilistic | ✅ | **2.26** | 97 |
-| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.82** | 348 |
-| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.85** | 342 |
+| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.81** | 348 |
+| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.84** | 342 |
 | `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 496 |
 | `marisa-trie` (default) | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 472 |
 | `marisa-trie` (huge cache) | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 461 |
@@ -330,7 +330,7 @@ between tables as the session.
 | `std::HashMap<String, u32>` | ~222 ms | ~295 ns | in-RAM, not serialisable |
 | lexindex `PerfectHashIndex::id` (verified) | ~283 ms | ~301 ns | one extra cache line + full key compare |
 | lexindex `StringIndex` (FST) | ~243 ms | ~390 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~150 ms | ~539 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 2.47 here; on the dictionary 2.85 against 5.95, 298–302 ns against 265–272) |
+| lexindex `DictIndex` (256 per block) | ~150 ms | ~539 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 2.47 here; on the dictionary 2.84 against 5.95, 298–302 ns against 265–272) |
 | `std::BTreeMap<String, u32>` | ~220 ms | ~774 ns | in-RAM |
 
 **Reading it:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the fastest
