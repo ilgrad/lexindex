@@ -1,0 +1,30 @@
+lexindex 2.1.0+ at 386b2e6, clean tree, 2026-09-12 — local/cpbench.py: common_prefix and longest_prefix through Python, three runs, the docs quote the minimum
+Linux 7.2.4-200.fc44.x86_64 x86_64, 8 cores / 16 hardware threads, AMD Ryzen 7 5800HS (Zen 3), 38 GB, rustc 1.98.1
+
+# run 1, load 0.51 0.87 0.86
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2502             984 
+DictIndex 512             2642            1042 
+StringIndex                666             367 
+marisa-trie               1138             877 
+dawg2                      695             617 
+datrie                     563             270 
+# run 2, load 0.55 0.88 0.86
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2559            1014 
+DictIndex 512             2739            1068 
+StringIndex                681             379 
+marisa-trie               1167             903 
+dawg2                      695             632 
+datrie                     549             247 
+# run 3, load 0.59 0.88 0.86
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2564            1016 
+DictIndex 512             2722            1069 
+StringIndex                669             378 
+marisa-trie               1147             907 
+dawg2                      711             634 
+datrie                     583             292 

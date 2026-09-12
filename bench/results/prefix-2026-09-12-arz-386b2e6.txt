@@ -1,0 +1,30 @@
+lexindex 2.1.0+ at 386b2e6, clean tree, 2026-09-12 — local/prefixbench.py: prefix queries through Python, three runs, the docs quote the minimum
+Linux 7.2.4-200.fc44.x86_64 x86_64, 8 cores / 16 hardware threads, AMD Ryzen 7 5800HS (Zen 3), 38 GB, rustc 1.98.1
+
+# run 1, load 0.51 0.70 0.42
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 256      2.85        383        2117      104322       74544 
+DictIndex 512      2.82        400        2197      105917       77093 
+StringIndex        5.95        569        4622      168253      338436 
+marisa-trie        2.98     123444        2596       94218       94065 
+datrie            30.69     731859      729729      730827      729616 
+dawg2             23.96      68814        1462       49397       49269 
+# run 2, load 1.00 0.94 0.65
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 256      2.85        375        2015      102081       73005 
+DictIndex 512      2.82        396        2159      102532       73384 
+StringIndex        5.95        560        4465      162897      330497 
+marisa-trie        2.98     123664        2571       97099       97678 
+datrie            30.69     736327      732217      724271      725551 
+dawg2             23.96      68251        1449       48544       48503 
+# run 3, load 1.00 1.00 0.81
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 256      2.85        377        2134      108804       72541 
+DictIndex 512      2.82        412        2194      108503       75239 
+StringIndex        5.95        556        4568      170701      347700 
+marisa-trie        2.98     126557        2682       98571       97316 
+datrie            30.69     741500      729873      735221      744242 
+dawg2             23.96      71946        1510       50885       50880 

@@ -1,0 +1,44 @@
+# cargo run --release --example bench, twice in a row -- 1 M dictionary-word bigrams
+# lexindex 2.1.0 at 386b2e6, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, tree differing from the commit in documentation only
+# load 0.56 0.83 0.92 at the start; each lookup cell is the minimum of five timed passes after a warm-up pass
+
+# run 1
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    265.4 ms   lookup  426.3 ns/op   (checksum 499999500000)
+lexindex DictIndex (k=256) build    149.6 ms   lookup  539.2 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    289.0 ms   lookup  301.1 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    287.1 ms   lookup   72.1 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     49.8 ms   lookup  132.9 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    221.5 ms   lookup  295.0 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    181.7 ms   lookup  172.5 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    220.9 ms   lookup  774.4 ns/op   (checksum 499999500000)
+
+serialised size (bytes/key):
+  lexindex CompactHashIndex     1.26
+  lexindex StringIndex blob     0.68
+  lexindex DictIndex (k=256)    2.47
+  lexindex PerfectHashIndex    12.52
+  raw key bytes (no index)   10.94
+
+StringIndex extras: fuzzy("&c.-sided", 1) hit 2 match(es), prefix("&c.-") hit 560, in 0.31 ms
+# run 2
+lexindex bench — n = 1000000 dictionary-word bigrams (mean len 10.9)
+
+lexindex StringIndex (FST) build    243.2 ms   lookup  389.5 ns/op   (checksum 499999500000)
+lexindex DictIndex (k=256) build    150.5 ms   lookup  551.1 ns/op   (checksum 499999500000)
+lexindex PerfectHashIndex  build    283.4 ms   lookup  300.8 ns/op   (checksum 499999500000)
+lexindex PHIndex unchecked build    292.9 ms   lookup   72.4 ns/op   (checksum 499999500000)
+lexindex CompactHash (fp=1) build     51.4 ms   lookup  134.7 ns/op   (checksum 499999500000)
+std HashMap<String,u32>    build    223.1 ms   lookup  296.8 ns/op   (checksum 499999500000)
+HashMap<String,u32> FxHash build    183.9 ms   lookup  174.6 ns/op   (checksum 499999500000)
+std BTreeMap<String,u32>   build    220.1 ms   lookup  778.6 ns/op   (checksum 499999500000)
+
+serialised size (bytes/key):
+  lexindex CompactHashIndex     1.26
+  lexindex StringIndex blob     0.68
+  lexindex DictIndex (k=256)    2.47
+  lexindex PerfectHashIndex    12.52
+  raw key bytes (no index)   10.94
+
+StringIndex extras: fuzzy("&c.-sided", 1) hit 2 match(es), prefix("&c.-") hit 560, in 0.31 ms

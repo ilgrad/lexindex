@@ -1,0 +1,16 @@
+lexindex 2.1.0+ at 386b2e6, clean tree, 2026-09-12 — local/coldmmap: resident set after 1 000 and 1 000 000 random lookups on a cold mapping, ten million English Wikipedia titles; NVMe under LUKS on btrfs; page cache dropped with POSIX_FADV_DONTNEED
+Linux 7.2.4-200.fc44.x86_64 x86_64, 8 cores / 16 hardware threads, AMD Ryzen 7 5800HS (Zen 3), 38 GB, rustc 1.98.1
+
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   8.44      0.26      5.28      8.44   42636.0    530.2     yes
+DictIndex 32 (random)          8.44      0.26      1.82      8.44   97073.7   1788.1     yes
+DictIndex 256                  7.92      0.05      4.62      7.92   46284.8    553.2     yes
+DictIndex 256 (random)         7.92      0.05      0.86      7.92  111287.4   1957.9     yes
+DictIndex 1024                 7.93      0.02      4.66      7.93   43994.5    538.2     yes
+DictIndex 1024 (random)        7.93      0.02      0.98      7.93  147483.8   1884.5     yes
+CompactHashIndex               1.26      0.26      1.25      1.26    6293.9     47.2     yes
+CompactHashIndex (random)      1.26      0.26      0.70      1.26   55040.0    158.9     yes
+StringIndex                   13.25      0.01     10.10     13.25   87117.0    849.0     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  368457.3   3068.4     yes

@@ -10,28 +10,33 @@ All notable changes to this project are documented here. The format follows
 
 - **`DictIndex` splits every block into microblocks, and the default block is 256.** A block was
   both the unit a head and its arrays are shared over *and* the unit a lookup scans, so the only way
-  to store less was to scan more: 2.83 bytes a key cost 482 ns of `key_into`, and 2.75 cost 889. A
+  to store less was to scan more: 2.83 bytes a key cost 460 ns of `key_into`, 2.75 cost 853 and the
+  format's floor of 2.70 cost 3 190. A
   block is now split into microblocks of 32 keys — a block of 32 or fewer is one microblock — and
   the first key of each microblock past the block's own head is a **restart**, front-coded against
   the restart before it. A block's data is its restart
   run followed by each microblock's run, and a lookup walks the restarts to the one microblock that
   can hold the probe: `block / micro + micro − 2` entries scanned, 38 at the default where a block
-  of 256 scanned 255. **At the same size `key_into` halves and `id` does not move** — 2.82 B/key at
-  512 a block answers `key_into` in 246 ns and `id` in 399, against 2.83 B/key at 128 in 482 and 394
-  — and the size floor moves with it: 2.80 at 1024 a block costs 291 ns where 2.75 cost 889. The
-  ladder over 32 / 64 / 128 / 256 / 512 / 1024 keys a block is now 3.53 / 3.27 / 3.00 / 2.93 / 2.82
-  / 2.80 bytes a key, `id` 312–315 / 315–328 / 336–342 / 360–365 / 392–395 / 421–427 ns and
-  `key_into` 120–121 / 136–139 / 165–167 / 195–196 / 248–249 / 290–292. Measured A-B-A-B against a
-  build of the previous format in a worktree, with a `StringIndex` control neither change can touch.
+  of 256 scanned 255. **At the same size `key_into` halves and `id` does not move** — 2.819 B/key at
+  512 a block answers `key_into` in 244–246 ns and `id` in 392–399, against the one-level format's
+  2.827 at 128 in 460–464 and 393 — and the floor moves with it: 2.804 at 1024 a block costs
+  287–289 ns of `key_into` where one level's 2.752 at 256 cost 853–859. Measured A-B-A-B against a
+  build of the previous format in a worktree, `StringIndex` the control at 340–353 ns throughout
+  (`bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt`) — that session reads about 25 %
+  above the ladder below, control included, so the two are compared each within itself. The
+  ladder over 32 / 64 / 128 / 256 / 512 / 1024 keys a block is now 3.25 / 3.05 / 2.92 / 2.85 / 2.82
+  / 2.80 bytes a key, `id` 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
+  `key_into` 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272 (two runs in opposite order,
+  `bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt`).
   **The default block moves 32 → 256**, in Rust and in Python, which takes the default index from
-  3.24 to **2.93 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
-  this corpus** — for `id` 360–365 ns against 307–311 and `key_into` 195–196 against 168.
+  3.25 to **2.85 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
+  this corpus** — for `id` 298–302 ns against 252–254 and `key_into` 207 against 154–155.
   **The format is `BDX2`**: the header carries the microblock size and a fourth offset width, the
   blob gains a packed start per microblock where a block has more than one, and a `BDX1` blob is
   refused by name with a message that
   says the fix is to rebuild. A streamed build now holds
   `(mean head length + 20) / block + 8 / micro` bytes a key rather than
-  `(mean head length + 20) / block`, which at the new default is 0.61 against the old default's 1.0.
+  `(mean head length + 20) / block`, which at the new default is 0.36 against the old default's 0.9.
 
 - **`DictIndex` packs its per-block offsets, and the index is 8 % smaller at the default block.**
   Where each block's head ends and where its entries start were a `u32` and a `u64` a block — 12 of
@@ -132,18 +137,20 @@ All notable changes to this project are documented here. The format follows
   word list — three `DictIndex` block sizes against three `marisa-trie` configurations, plus the
   keyless indexes and `StringIndex`, on every corpus at every size, and the same question in Rust
   against `rsmarisa`'s three cache levels. What it shows is a frontier and not a crown.
-  `marisa-trie` is the smallest key-storing structure on eight of the eleven million-key corpora,
-  and the margin follows how much the keys share: 1.70× on filesystem paths, 1.48× on Russian
-  Wikipedia titles, and level on DNA k-mers and domains. `DictIndex` is smaller where the keys share
-  nothing — 1.33× on opaque base64url ids, 1.63× on UUIDs — which is the same reason it is smaller
-  on English words, a corpus at the favourable end of that distribution rather than a typical one.
+  `marisa-trie` is the smallest key-storing structure on nine of the eleven million-key corpora,
+  and the margin follows how much the keys share: 1.72× on filesystem paths, 1.49× on Russian
+  Wikipedia titles, and within 4 % on DNA k-mers and domains. `DictIndex` is smaller where the keys
+  share nothing — 1.32× on opaque base64url ids, 1.62× on UUIDs — which is the same reason it is
+  smaller on English words, a corpus at the favourable end of that distribution rather than a
+  typical one.
   Both facts are now in `docs/benchmarks.md` with the README's claim scoped to the corpus it was
   measured on.
 
-  The trade is not only size. `DictIndex` answers **1.9–3.1× faster than marisa's fastest
-  configuration on ten of the eleven corpora** (1.1× on dense decimal ids) and builds 2.3–4.4×
-  faster, so where marisa is 1.70× smaller on paths it is also 3.1× slower to answer and 4.4× slower
-  to build. The two keyless indexes are flat at 0.26 and 1.26 bytes a key on all thirteen corpora at
+  The trade is not only size. `DictIndex` answers **1.8–2.9× faster than marisa's fastest
+  configuration on ten of the eleven corpora** — the eleventh is dense decimal ids, where marisa is
+  10 % ahead of the default block and 9 % behind a block of 128 — and builds 2.3–4.3× faster, so
+  where marisa is 1.72× smaller on paths it is also 2.9× slower to answer and 4.3× slower to
+  build. The two keyless indexes are flat at 0.26 and 1.26 bytes a key on all thirteen corpora at
   all three sizes, which makes them the only rows a reader can carry to their own keys without
   measuring. And `StringIndex` compiles ten million dense decimal ids into an FST of **356 bytes** —
   a real number, and the ceiling of what shared structure can buy rather than a size claim.

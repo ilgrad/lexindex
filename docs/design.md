@@ -227,10 +227,13 @@ entry whose prefix is at least a later entry's writes nothing that survives, so 
 over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
 a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
 decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
-**2.93 B/key** (`StringIndex` 5.95), `id` 360–365 ns against 344–356, `key_into` 195–196 against
-`key`'s 281–285; 128 and 512 give 3.00 and 2.82 B/key at 336–342 and 392–395 ns, and 1024 gives 2.80
-at 421–427. Against one level at the same size the reverse lookup halves — 246 ns for 2.82 B/key
-where 2.83 cost 482, 291 for 2.80 where 2.75 cost 889 — and `id` does not move.
+**2.85 B/key** (`StringIndex` 5.95), `id` 298–302 ns against 265–272, `key_into` 207 against
+`key`'s 278; 128 and 512 give 2.92 and 2.82 B/key at 285–288 and 316–322 ns, and 1024 gives 2.80
+at 344–347. Against one level at the same size the reverse lookup halves and `id` does not move:
+244–246 ns and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for
+460–464 and 393. The one-level format still reaches further down — 2.701 at 1024 keys a block —
+but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
+removes.
 
 The serialised blob is `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
 [offset widths][micro][check]`, then the table, the heads, the packed head ends, the samples, the

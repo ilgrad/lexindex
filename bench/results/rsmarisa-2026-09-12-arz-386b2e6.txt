@@ -1,0 +1,123 @@
+lexindex 2.1.0+ at 386b2e6, clean tree, 2026-09-12 — local/rsmarisacmp: rsmarisa 0.4.2 (three cache levels) against DictIndex at blocks 64/256/512, one process per corpus, rsmarisa not a dependency
+Linux 7.2.4-200.fc44.x86_64 x86_64, 8 cores / 16 hardware threads, AMD Ryzen 7 5800HS (Zen 3), 38 GB, rustc 1.98.1
+
+== words ==
+
+words-full: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        137        322
+rsmarisa (3 tries, Normal = default)       3.168        148        301
+rsmarisa (3 tries, Huge = fastest)         3.823        172        284
+lexindex DictIndex block 64                3.045         26        227
+lexindex DictIndex block 256               2.852         26        253
+lexindex DictIndex block 512               2.819         26        272
+
+== the corpus set at one million keys, and pypi in full ==
+
+dna-1000000: 1000000 keys, raw 24.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        7.612       1312        608
+rsmarisa (3 tries, Normal = default)       7.909       1318        651
+rsmarisa (3 tries, Huge = fastest)         9.097       1308        712
+lexindex DictIndex block 64                8.017         61        264
+lexindex DictIndex block 256               7.706         63        240
+lexindex DictIndex block 512               7.654         64        238
+
+domains-1000000: 1000000 keys, raw 13.78 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        4.874        685        482
+rsmarisa (3 tries, Normal = default)       5.136        680        466
+rsmarisa (3 tries, Huge = fastest)         6.039        715        485
+lexindex DictIndex block 64                5.259         57        267
+lexindex DictIndex block 256               5.027         57        278
+lexindex DictIndex block 512               5.002         57        289
+
+idents-1000000: 1000000 keys, raw 17.28 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        5.504        655        652
+rsmarisa (3 tries, Normal = default)       5.830        652        609
+rsmarisa (3 tries, Huge = fastest)         6.604        653        633
+lexindex DictIndex block 64                7.456         64        353
+lexindex DictIndex block 256               7.285         61        342
+lexindex DictIndex block 512               7.307         61        362
+
+numeric-1000000: 1000000 keys, raw 5.89 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        1.642         98        189
+rsmarisa (3 tries, Normal = default)       1.716         98        170
+rsmarisa (3 tries, Huge = fastest)         2.011         98        161
+lexindex DictIndex block 64                2.288         45        190
+lexindex DictIndex block 256               2.116         46        199
+lexindex DictIndex block 512               2.087         46        206
+
+opaque-1000000: 1000000 keys, raw 16.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       18.271       1590       1098
+rsmarisa (3 tries, Normal = default)      18.945       1183       1047
+rsmarisa (3 tries, Huge = fastest)        19.535       1177       1065
+lexindex DictIndex block 64               13.967         80        357
+lexindex DictIndex block 256              13.818         84        317
+lexindex DictIndex block 512              13.795         82        299
+
+paths-1000000: 1000000 keys, raw 125.02 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       10.087       5642       1908
+rsmarisa (3 tries, Normal = default)      12.711       5651       1752
+rsmarisa (3 tries, Huge = fastest)        22.516       5738       1710
+lexindex DictIndex block 64               17.083         95        725
+lexindex DictIndex block 256              15.987         96        704
+lexindex DictIndex block 512              15.889         95        664
+
+titles-en-1000000: 1000000 keys, raw 20.98 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        7.854        993        827
+rsmarisa (3 tries, Normal = default)       8.445        976        827
+rsmarisa (3 tries, Huge = fastest)         9.403        975        872
+lexindex DictIndex block 64                9.794         69        376
+lexindex DictIndex block 256               9.578         70        348
+lexindex DictIndex block 512               9.515         68        355
+
+titles-ru-1000000: 1000000 keys, raw 35.82 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        8.223       1513       1107
+rsmarisa (3 tries, Normal = default)       9.192       1489       1144
+rsmarisa (3 tries, Huge = fastest)        11.109       1494       1102
+lexindex DictIndex block 64               12.546         68        472
+lexindex DictIndex block 256              12.057         68        447
+lexindex DictIndex block 512              12.082         68        449
+
+titles-zh-1000000: 1000000 keys, raw 16.87 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        6.398        794        692
+rsmarisa (3 tries, Normal = default)       6.789        759        683
+rsmarisa (3 tries, Huge = fastest)         7.711        762        715
+lexindex DictIndex block 64                8.951         69        355
+lexindex DictIndex block 256               8.786         70        344
+lexindex DictIndex block 512               8.674         71        353
+
+urls-1000000: 1000000 keys, raw 52.36 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        8.381       2033        855
+rsmarisa (3 tries, Normal = default)      10.128       2011        905
+rsmarisa (3 tries, Huge = fastest)        15.510       2058        958
+lexindex DictIndex block 64               12.015         71        614
+lexindex DictIndex block 256              11.414         72        558
+lexindex DictIndex block 512              11.330         73        542
+
+uuid-1000000: 1000000 keys, raw 36.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       33.006       1982       1345
+rsmarisa (3 tries, Normal = default)      34.796       1516       1155
+rsmarisa (3 tries, Huge = fastest)        35.681       1508       1176
+lexindex DictIndex block 64               20.765        111        468
+lexindex DictIndex block 256              20.460        116        440
+lexindex DictIndex block 512              20.386        115        391
+
+pypi-full: 889864 keys, raw 13.34 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        4.477        459        493
+rsmarisa (3 tries, Normal = default)       4.752        459        464
+rsmarisa (3 tries, Huge = fastest)         5.602        465        461
+lexindex DictIndex block 64                5.214         53        289
+lexindex DictIndex block 256               4.991         53        299
+lexindex DictIndex block 512               4.964         53        315

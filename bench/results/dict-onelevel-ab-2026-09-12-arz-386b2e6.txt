@@ -1,0 +1,119 @@
+# local/dictbench -- the one-level format against microblocks of 32, alternated by process
+# base: lexindex at 6c80aa6, the commit before microblocks (one level, packed offsets), built in a
+#       git worktree; new: 2.1.0 at 386b2e6, microblocks of 32. Same corpus, same probe order, the
+#       same harness source both sides; `StringIndex` is the control neither format can touch.
+# arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, 2026-09-12, tree differing from 386b2e6 in documentation only.
+#
+# Matched by bytes: two levels at 512 (2.819 B/key) against one level at 128 (2.827) --
+# key_into 244-246 ns against 460-464, id 392-399 against 393.
+
+    Finished `release` profile [optimized] target(s) in 0.01s
+# round 1 base (one level), load 0.94 0.89 0.74
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 126 ms
+DictIndex k=128      2.827 B/key  build 24 ms
+  id member   dict  393.4  string  340.8
+  id stranger dict  297.4  string  234.8
+  key_into    dict  463.8  key dict  528.4  string  506.7
+  lower_bound dict  298.0
+  prefix      dict    30082
+DictIndex k=256      2.752 B/key  build 21 ms
+  id member   dict  492.1  string  353.4
+  id stranger dict  395.5  string  241.2
+  key_into    dict  858.9  key dict  926.7  string  517.6
+  lower_bound dict  396.1
+  prefix      dict    30861
+DictIndex k=512      2.716 B/key  build 19 ms
+  id member   dict  663.0  string  344.9
+  id stranger dict  570.7  string  241.1
+  key_into    dict 1644.1  key dict 1711.0  string  509.3
+  lower_bound dict  567.6
+  prefix      dict    32095
+DictIndex k=1024     2.701 B/key  build 20 ms
+  id member   dict  984.0  string  344.9
+  id stranger dict  884.9  string  240.3
+  key_into    dict 3202.9  key dict 3283.0  string  508.9
+  lower_bound dict  888.2
+  prefix      dict    35556
+# round 1 new (micro 32), load 1.32 1.02 0.79
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 124 ms
+DictIndex k=128      2.919 B/key  build 23 ms
+  id member   dict  354.1  string  341.2
+  id stranger dict  256.3  string  238.2
+  key_into    dict  201.0  key dict  273.1  string  507.1
+  lower_bound dict  258.9
+  prefix      dict    31733
+DictIndex k=256      2.852 B/key  build 20 ms
+  id member   dict  374.2  string  347.2
+  id stranger dict  276.8  string  244.4
+  key_into    dict  225.2  key dict  298.7  string  519.7
+  lower_bound dict  281.8
+  prefix      dict    30913
+DictIndex k=512      2.819 B/key  build 19 ms
+  id member   dict  398.8  string  346.3
+  id stranger dict  295.2  string  239.2
+  key_into    dict  243.5  key dict  321.7  string  507.0
+  lower_bound dict  294.6
+  prefix      dict    30964
+DictIndex k=1024     2.804 B/key  build 20 ms
+  id member   dict  425.9  string  345.8
+  id stranger dict  324.1  string  239.6
+  key_into    dict  287.1  key dict  372.7  string  505.0
+  lower_bound dict  323.0
+  prefix      dict    31116
+# round 2 base (one level), load 0.86 0.98 0.81
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 130 ms
+DictIndex k=128      2.827 B/key  build 24 ms
+  id member   dict  393.0  string  340.9
+  id stranger dict  294.4  string  235.4
+  key_into    dict  459.9  key dict  524.5  string  502.0
+  lower_bound dict  295.6
+  prefix      dict    31305
+DictIndex k=256      2.752 B/key  build 20 ms
+  id member   dict  494.4  string  346.4
+  id stranger dict  393.3  string  239.9
+  key_into    dict  853.3  key dict  922.0  string  506.4
+  lower_bound dict  394.3
+  prefix      dict    32700
+DictIndex k=512      2.716 B/key  build 19 ms
+  id member   dict  663.4  string  344.6
+  id stranger dict  562.8  string  240.4
+  key_into    dict 1629.5  key dict 1698.0  string  502.9
+  lower_bound dict  561.5
+  prefix      dict    33675
+DictIndex k=1024     2.701 B/key  build 21 ms
+  id member   dict  984.2  string  349.8
+  id stranger dict  880.3  string  238.2
+  key_into    dict 3190.4  key dict 3264.7  string  511.3
+  lower_bound dict  881.7
+  prefix      dict    36920
+# round 2 new (micro 32), load 1.46 1.11 0.86
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 127 ms
+DictIndex k=128      2.919 B/key  build 24 ms
+  id member   dict  356.8  string  345.4
+  id stranger dict  256.5  string  240.2
+  key_into    dict  202.5  key dict  277.1  string  513.8
+  lower_bound dict  258.0
+  prefix      dict    31505
+DictIndex k=256      2.852 B/key  build 21 ms
+  id member   dict  370.9  string  346.3
+  id stranger dict  275.0  string  240.1
+  key_into    dict  222.2  key dict  297.9  string  511.9
+  lower_bound dict  275.2
+  prefix      dict    31654
+DictIndex k=512      2.819 B/key  build 18 ms
+  id member   dict  391.5  string  343.3
+  id stranger dict  293.7  string  239.7
+  key_into    dict  246.1  key dict  323.4  string  515.3
+  lower_bound dict  295.1
+  prefix      dict    31703
+DictIndex k=1024     2.804 B/key  build 19 ms
+  id member   dict  420.2  string  344.2
+  id stranger dict  323.1  string  239.3
+  key_into    dict  289.2  key dict  370.4  string  512.9
+  lower_bound dict  325.3
+  prefix      dict    31703
+AB DONE

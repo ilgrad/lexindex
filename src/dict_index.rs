@@ -69,7 +69,7 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 2.93 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 2.85 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the scan of
 /// one microblock, whose size follows the `block` given at build time.
@@ -446,9 +446,9 @@ impl DictIndex {
     /// head and its arrays are shared over, and it is split into microblocks of 32 — one microblock
     /// below that — of which a lookup scans one, after one restart a microblock: `block / 32 + 30`
     /// entries from 64 up, not `block − 1`. On
-    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80
-    /// bytes per key, `id` at 312–315 / 315–328 / 336–342 / 360–365 / 392–395 / 421–427 ns and
-    /// `key_into` at 120–121 / 136–139 / 165–167 / 195–196 / 248–249 / 290–292. At 256 the index is
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.25 / 3.05 / 2.92 / 2.85 / 2.82 / 2.80
+    /// bytes per key, `id` at 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
+    /// `key_into` at 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272. At 256 the index is
     /// under `marisa-trie`'s 2.955 floor on that corpus.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
@@ -555,8 +555,8 @@ impl DictIndex {
     ///
     /// **What is still held.** Not the corpus, and not the block data, which is the bulk of the
     /// index. The block heads, the per-block arrays and one start a microblock are, at roughly
-    /// `(mean head length + 20) / block + 8 / micro` bytes per key — 0.61 at the default on English
-    /// words, half that at 512 keys a block. An index whose heads alone pass 4 GiB is refused with
+    /// `(mean head length + 20) / block + 8 / micro` bytes per key — 0.36 at the default on English
+    /// words, 0.31 at 512 keys a block. An index whose heads alone pass 4 GiB is refused with
     /// an error naming the larger block that would fit it.
     ///
     /// **Transient disk**: one run file per `RUN_BYTES` of keys, in a directory beside the output,
@@ -1438,8 +1438,8 @@ impl DictIndex {
     /// do contribute form a strictly increasing staircase of `lcp`, and a monotonic stack over the
     /// headers finds it in the one pass the walk already makes. Every header is still read — the
     /// lengths before an entry are what place its suffix — but a handful of suffixes are decoded
-    /// rather than one per entry, and the decode is the expensive half: 207 → 146 ns at the
-    /// default block on the dictionary, 751 → 454 at 128 per block, 464 → 265 on a path list.
+    /// rather than one per entry, and the decode is the expensive half: 207 → 146 ns at 32 keys
+    /// a block on the dictionary, 751 → 454 at 128, 464 → 265 on a path list.
     ///
     /// A staircase deeper than the stack falls back to decoding every entry, which is correct at
     /// any depth.

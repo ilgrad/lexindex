@@ -1,0 +1,31 @@
+# local/positioning.py -- what each structure costs per key on three corpora built from one word list
+# lexindex 2.1.0 at 386b2e6, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, marisa-trie 1.4.1,
+# tree differing from the commit in documentation only. One process per cell; blob B/key is the
+# serialised index, peak MB the process high-water mark, build adds B/key what the build costs
+# above the keys themselves. `dict` is the built-in and has no serialised form.
+
+# corpus words, load 0.63 0.84 0.59
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+    479823  dict                         —      52.3      98.4               96.2
+    479823  marisa                    2.98      52.4     100.3               99.7
+    479823  StringIndex               5.95      52.3      85.3               68.8
+    479823  PerfectHashIndex         10.90      52.2      89.4               77.5
+    479823  CompactHashIndex          1.26      52.4      71.3               39.5
+    479823  DictIndex                 2.85      52.1      84.2               66.8
+# corpus random, load 0.63 0.84 0.59
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+   1000000  dict                         —     146.4     217.1               70.8
+   1000000  marisa                    6.21     146.2     268.6              122.4
+   1000000  StringIndex              15.19     146.5     198.9               52.4
+   1000000  PerfectHashIndex         21.93     146.4     226.8               80.4
+   1000000  CompactHashIndex          1.26     146.5     160.6               14.1
+   1000000  DictIndex                 7.58     146.1     188.6               42.4
+# corpus grid, load 0.62 0.81 0.66
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+   1000000  dict                         —     119.7     213.2               93.5
+   1000000  marisa                    2.12     119.5     199.8               80.3
+   1000000  StringIndex               0.68     119.5     162.6               43.1
+   1000000  PerfectHashIndex         12.52     119.6     191.4               71.8
+   1000000  CompactHashIndex          1.26     119.5     152.1               32.6
+   1000000  DictIndex                 2.47     119.5     176.1               56.6
+POS DONE
