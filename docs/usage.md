@@ -301,8 +301,11 @@ words.prefix("ap")                 # [("apple", 0), ("apricot", 1)] -- a range, 
 words.common_prefix("bananas")     # [("banana", 2)] -- the keys that are prefixes OF the query
 words.longest_prefix("bananas")    # ("banana", 2) -- what a longest-match tokeniser takes
 words.prefix("ap", limit=1)        # [("apple", 0)] -- stops there, walks no further
-words.prefix_id_range("ap")        # (0, 2) -- two order lookups, whatever the number of matches
+lo, hi = words.prefix_id_range("ap")   # (0, 2) -- two order lookups, whatever the match count
 words.prefix_count("ap")           # 2, without decoding a key
+words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and the fastest
+                                   # way to them: no id is decoded, and one walk stays open
+                                   # across a block. 1.5x `prefix` on a 763-match prefix.
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily

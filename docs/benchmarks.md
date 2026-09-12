@@ -776,7 +776,9 @@ which decodes an id for every match as well. `keys_of` used to re-enter the bloc
 was the *slower* of the two by 2.1×; it now keeps one walk open across the ids that ascend through a
 block, which is exactly the shape an id range hands it. The inversion is `DictIndex`-only:
 `StringIndex` has no block to stay inside, its `keys_of` walks the transducer once per id, and
-`prefix` is still the API for this query there (165 623 against 338 080).
+`prefix` is still the API for this query there (165 623 against 338 080). It is also why there is no
+`prefix_keys` method: it would be these two calls, and the table says what a third one would buy —
+32 %, which two existing calls already have.
 
 **The last two columns are this benchmark's error bar as well as a result.** A trie has no ids to
 return, so for `marisa-trie`, `dawg2` and `datrie` they are one call measured twice — and they come
