@@ -14,9 +14,11 @@ runs after a discarded warm-up, so no library is charged for its own first impor
 imported at the top of this file; the others import inside their build callable). **Lookup
 latency is measured next to the size**, because bytes per key on their own invite the reading that
 the smallest structure is the best one: it is the minimum over five passes of a shuffled probe set
-that is half members and half plausible strangers. Every row pays the same Python call boundary, so
-the floor a builtin `dict` reaches is printed above the table rather than left as an excuse;
-`cargo run --release --example bench` measures the same call without that floor, in Rust.
+that is half members and half plausible strangers. Every row pays the same Python call boundary,
+so what the loop and the call cost on their own is printed above the table rather than left as the
+reason not to measure; the builtin `dict` is a row in the table, not that floor -- at this key count
+it is a memory-bound lookup like any other and several rows come in under it.
+`cargo run --release --example bench` measures the same call without the boundary, in Rust.
 
 Every number printed here is also written to `bench/results/compare-<date>-<host>-<commit>.json`
 with the machine that produced it; the README table cites that file.
@@ -331,10 +333,12 @@ CANDIDATES = [
 
 
 def main() -> None:
-    floor = min(_lookup_ns(dict(zip(KEYS, range(N), strict=True)).get))
+    floor = min(_lookup_ns(lambda _probe: None))
+    dict_ns = min(_lookup_ns(dict(zip(KEYS, range(N), strict=True)).get))
     print(
-        f"\nPython call boundary: {floor:.0f} ns a lookup through a builtin dict. Every row below "
-        f"pays it; the differences between rows do not."
+        f"\nPython call boundary: {floor:.0f} ns for the loop and the call alone -- every row "
+        f"below pays it, the differences between rows do not.\nA builtin dict answers the same "
+        f"probes in {dict_ns:.0f} ns, which is a lookup and not a floor."
     )
     rows: list[Row] = []
     cells = []
@@ -371,8 +375,8 @@ def main() -> None:
     false_positives = _measure_false_positive_rate()
     _plot_size(rows)
     _plot_build(rows)
-    _plot_lookup(rows, floor)
-    _capability_table(rows, floor)
+    _plot_lookup(rows, floor, dict_ns)
+    _capability_table(rows, dict_ns)
     path = _results.write(
         "compare",
         cells,
@@ -383,6 +387,7 @@ def main() -> None:
         },
         false_positive_rate=false_positives,
         python_call_floor_ns=floor,
+        builtin_dict_ns=dict_ns,
         competitors=_results.versions("marisa-trie", "dawg2", "datrie"),
     )
     print(f"\nplots → {OUT}/  (raw keys = {RAW:.1f} bytes/key, n = {N:,})")
@@ -457,19 +462,29 @@ def _plot_build(rows) -> None:
     plt.close(fig)
 
 
-def _plot_lookup(rows, floor: float) -> None:
+def _plot_lookup(rows, floor: float, dict_ns: float) -> None:
     """The counterweight to the size plot: what one lookup costs in the structure that small."""
     labelled = [(r.name, r.lookup_ns) for r in rows if r.lookup_ns is not None]
     labelled.sort(key=lambda t: t[1])
     fig, ax = plt.subplots(figsize=(9.5, 4.6))
-    names = [n for n, _ in labelled] + ["builtin `dict`\n(call boundary)"]
-    vals = [ns for _, ns in labelled] + [floor]
+    names = [n for n, _ in labelled] + ["builtin dict\n(in-RAM only)"]
+    vals = [ns for _, ns in labelled] + [dict_ns]
     colors = [
         "#00897b" if "CompactHash" in n else "#3949ab" if "lexindex" in n else "#9aa0a6"
         for n, _ in labelled
     ] + ["#cfcfcf"]
     bars = ax.bar(names, vals, color=colors, width=0.66)
     ax.bar_label(bars, fmt="%.0f", padding=3, fontsize=9)
+    ax.axhline(floor, color="#c62828", linewidth=1, linestyle="--")
+    ax.text(
+        len(names) - 0.5,
+        floor,
+        f" {floor:.0f} ns: the Python call itself",
+        color="#c62828",
+        fontsize=8,
+        va="bottom",
+        ha="right",
+    )
     ax.set_ylabel("ns / lookup (through Python)")
     ax.set_title(
         f"Lookup latency on real English words (n = {N:,}, {PROBES:,} probes, half of them misses)"
@@ -482,7 +497,7 @@ def _plot_lookup(rows, floor: float) -> None:
     plt.close(fig)
 
 
-def _capability_table(rows, floor: float) -> None:
+def _capability_table(rows, dict_ns: float) -> None:
     cols = [
         ("prefix", "prefix"),
         ("rangeq", "range"),
@@ -506,7 +521,7 @@ def _capability_table(rows, floor: float) -> None:
             + ("—" if row.lookup_ns is None else f"{row.lookup_ns:.0f}")
             + " |"
         )
-    print(f"| builtin `dict` | — | — | — | — | ✅ | — (in-RAM only) | — | — | {floor:.0f} |")
+    print(f"| builtin `dict` | — | — | — | — | ✅ | — (in-RAM only) | — | — | {dict_ns:.0f} |")
 
 
 if __name__ == "__main__":
