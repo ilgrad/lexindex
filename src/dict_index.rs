@@ -1119,6 +1119,62 @@ impl DictIndex {
         }
     }
 
+    /// Batched [`key`](Self::key): one answer per id, aligned with `ids`, `None` where an id is
+    /// past the last key or a corrupted blob decodes to something that is not UTF-8.
+    ///
+    /// **Ids that ascend within one block are answered by a single walk of it.** A block is a
+    /// chain — every entry is coded against the one before it — so re-entering it per id re-reads
+    /// the same headers, while walking it once decodes each entry once. That is exactly the shape
+    /// [`prefix_id_range`](Self::prefix_id_range) hands over, and it is why going through that
+    /// range used to be slower than [`prefix`](Self::prefix).
+    ///
+    /// Ids in no particular order cost what they always did: the per-id staircase, which reads the
+    /// headers below the id but decodes only the few entries that contribute a byte. A walk is
+    /// started only when the *next* id is in the same block and above this one, so a scattered
+    /// batch never pays for entries it does not want.
+    pub fn keys_of(&self, ids: &[u64]) -> Vec<Option<String>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut buf: Vec<u8> = Vec::new();
+        let mut at: &[u8] = &[];
+        // The block a walk is open on and how many of its entries it has consumed; `usize::MAX`
+        // for none.
+        let (mut open, mut consumed) = (usize::MAX, 0usize);
+        for (i, &id) in ids.iter().enumerate() {
+            if id >= self.n as u64 {
+                out.push(None);
+                continue;
+            }
+            let b = (id / self.block as u64) as usize;
+            let j = (id % self.block as u64) as usize;
+            if open != b || j < consumed {
+                let more = ids.get(i + 1).is_some_and(|&next| {
+                    next > id && next < self.n as u64 && (next / self.block as u64) as usize == b
+                });
+                if !more {
+                    out.push(self.key(id));
+                    open = usize::MAX;
+                    continue;
+                }
+                buf.clear();
+                buf.extend_from_slice(self.head(b));
+                at = self.block_data(b);
+                (open, consumed) = (b, 0);
+            }
+            let mut ok = true;
+            while consumed < j && ok {
+                ok = self.advance(&mut at, &mut buf);
+                consumed += 1;
+            }
+            if !ok {
+                out.push(None);
+                open = usize::MAX;
+                continue;
+            }
+            out.push(std::str::from_utf8(&buf).ok().map(str::to_owned));
+        }
+        out
+    }
+
     /// Every key with its id, in key order.
     pub fn iter(&self) -> impl Iterator<Item = (String, u64)> + '_ {
         self.iter_from(0)
@@ -2064,6 +2120,29 @@ mod tests {
             assert!(err.to_string().contains("block must be"), "{err}");
             let err = DictIndex::build_sorted_with_block(["a"], block).unwrap_err();
             assert!(err.to_string().contains("block must be"), "{err}");
+        }
+    }
+
+    #[test]
+    fn keys_of_answers_what_key_answers_in_any_order() {
+        let keys = corpus();
+        let n = keys.len() as u64;
+        for block in [1usize, 3, 32, MAX_BLOCK] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            // Ascending and contiguous (the walk), every third (a sparse ascending run),
+            // descending (no walk), scattered, and out of range.
+            let orders: [Vec<u64>; 5] = [
+                (0..n).collect(),
+                (0..n).step_by(3).collect(),
+                (0..n).rev().collect(),
+                (0..n).map(|i| (i * 7919) % n).collect(),
+                vec![n, n + 1, u64::MAX, 0, n - 1],
+            ];
+            for ids in &orders {
+                let want: Vec<Option<String>> = ids.iter().map(|&i| idx.key(i)).collect();
+                assert_eq!(&idx.keys_of(ids), &want, "block {block}");
+            }
+            assert!(idx.keys_of(&[]).is_empty());
         }
     }
 

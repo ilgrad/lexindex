@@ -1903,14 +1903,10 @@ impl PyDictIndex {
     }
 
     /// Batched [`key`](Self::key): a list aligned with `ids`, `None` where an id is out of
-    /// range. One decode buffer serves the whole batch.
+    /// range. Ids that ascend within one block are answered by a single walk of it, so the range
+    /// `prefix_id_range` returns costs one pass rather than one per id.
     fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
-        py.detach(|| {
-            let mut buf = String::new();
-            ids.iter()
-                .map(|&i| self.inner.key_into(i, &mut buf).then(|| buf.clone()))
-                .collect()
-        })
+        py.detach(|| self.inner.keys_of(&ids))
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`, `None` where a
