@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A pinned corpus set, `bench/corpora.py`.** Every size this project has published is measured on
+  one corpus, the Fedora word list, while bytes per key is a property of the keys at least as much as
+  of the structure: `StringIndex` measures 0.68 on one corpus and 16.57 on another, and `marisa-trie`
+  moves between 2.12 and 6.21 over the same span. Thirteen corpora now exist at 100 000 / 1 000 000 /
+  10 000 000 keys wherever the source has them — Wikipedia titles in three scripts, the URLs those
+  titles form, Tranco domains, PyPI package names, this filesystem's paths, vendored Rust
+  identifiers, the word list, and seeded UUIDs, dense decimal ids, opaque base64url ids and DNA
+  24-mers. The sizes are nested, so a difference between two of them is scale and not composition;
+  the downloads are pinned to a dated dump or a permanent list id rather than to `latest`; and the
+  SHA-256 of every download and every derived file is in `bench/corpora.json`, which
+  `python bench/corpora.py verify` checks. The corpora are gitignored — 4.6 GB — and the manifest is
+  what makes them checkable anyway. No benchmark is on the set yet.
+
 - **`common_prefix` and `longest_prefix` on both ordered indexes**, in Rust and Python: every key
   that is a prefix *of* the query, shortest first, and the longest of them. This is the reverse of
   `prefix` and the query a longest-match tokeniser runs — a vocabulary and a position in a sentence

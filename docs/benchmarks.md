@@ -172,6 +172,46 @@ So, in decision order:
   amortises better), and it has to be rebuilt from the keys on every process start; every structure
   here is mapped from a file instead.
 
+## The corpus set
+
+Everything above is one corpus at one `n`, which is why the section before it exists. The set that
+can settle the question is built by `bench/corpora.py`: thirteen corpora at 100 000, 1 000 000 and
+10 000 000 keys wherever the source has them, nested so that the small file is a prefix of the large
+one and a difference between two sizes is scale and never composition.
+
+| corpus | keys available | B/key | what it is |
+|---|---:|---:|---|
+| `words` | 479 823 | 9.3 | the Fedora word list — every table above is this one |
+| `titles-en` | 19 217 770 | 21.0 | English Wikipedia article titles |
+| `titles-ru` | 4 988 075 | 35.8 | Russian titles: Cyrillic, two bytes a character |
+| `titles-zh` | 2 997 733 | 16.9 | Chinese titles: three bytes a character, and short |
+| `urls` | 19 217 771 | 52.4 | those titles as `https://en.wikipedia.org/wiki/…` |
+| `domains` | 1 000 000 | 13.8 | registered domains, the Tranco ranking |
+| `pypi` | 889 864 | 13.3 | PyPI package names |
+| `paths` | 7 311 150 | 125.1 | this machine's filesystem |
+| `idents` | 1 047 267 | 17.3 | identifiers in the vendored Rust sources |
+| `uuid` | generated | 36.0 | UUIDv4, hyphenated |
+| `numeric` | generated | 4.9–6.9 | dense decimal ids, `0` to `n-1` |
+| `opaque` | generated | 16.0 | 16-symbol base64url ids |
+| `dna` | generated | 24.0 | 24-mers over ACGT |
+
+The four generated corpora are seeded rather than random: the same file comes out of the same
+version of the script, on any machine. The fetched ones are pinned — a *dated* Wikipedia dump and
+not `latest`, a Tranco list by its permanent id — and both the download and every file derived from
+it carry a SHA-256 in
+[`bench/corpora.json`](https://github.com/ilgrad/lexindex/blob/main/bench/corpora.json).
+`python bench/corpora.py verify` re-hashes what is on disk and says which files have moved. The
+corpora themselves are gitignored: 4.6 GB of keys has no place in a git history, and the manifest is
+what makes them checkable without it.
+
+Two of them are honest about their limits. `paths` is this machine's `/usr` and `$HOME`, so it is
+reproducible nowhere else — the manifest records the host. `idents` is whatever crates this machine
+has vendored, which is a sample of Rust, not of source code.
+
+Nothing on this page is measured on the set yet; every table here is still `words`. Moving them over
+is the next benchmark task, and the first thing it should settle is the claim no single corpus can
+support: which structure is smallest, and *where*.
+
 ## Lookup speed from Python, against `dict` and `marisa-trie`
 
 `local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup

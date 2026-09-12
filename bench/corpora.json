@@ -1,0 +1,417 @@
+{
+  "corpora": {
+    "dna": {
+      "what": "DNA 24-mers over ACGT, from a seeded generator",
+      "nested": false,
+      "pool_keys": 10000000,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "dna-100000.txt",
+          "keys": 100000,
+          "bytes": 2500000,
+          "mean_key_bytes": 24.0,
+          "sha256": "0b5abebfe699f66fe906d6c34c285660a494c6896a82b5665fdbcf901f466969"
+        },
+        {
+          "file": "dna-1000000.txt",
+          "keys": 1000000,
+          "bytes": 25000000,
+          "mean_key_bytes": 24.0,
+          "sha256": "1c2d604e3d1f39197f26e4072d697c46ba2137c3894de223133c46993da3e2a8"
+        },
+        {
+          "file": "dna-10000000.txt",
+          "keys": 10000000,
+          "bytes": 250000000,
+          "mean_key_bytes": 24.0,
+          "sha256": "c6e0223a36b20a53aa6aa9b549005957d6c1bce5850fecdcbe9d9c07a1d7cef7"
+        }
+      ],
+      "note": "four symbols and a fixed length: the densest trie and the flattest hash in the set"
+    },
+    "domains": {
+      "what": "registered domains — the Tranco ranking, permanent list 38KVL",
+      "nested": true,
+      "pool_keys": 1000000,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "domains-100000.txt",
+          "keys": 100000,
+          "bytes": 1477305,
+          "mean_key_bytes": 13.77,
+          "sha256": "e38efc3f439ea8521312e0229b53a864a410e0ad74d284854fdc2d27cc957a94"
+        },
+        {
+          "file": "domains-1000000.txt",
+          "keys": 1000000,
+          "bytes": 14782044,
+          "mean_key_bytes": 13.78,
+          "sha256": "473b7f076864fd41a1da6c030269bc0a90f399b9e2db8d2a5696b0154b5b527a"
+        }
+      ]
+    },
+    "idents": {
+      "what": "source-code identifiers — every `[A-Za-z_][A-Za-z0-9_]{2,}` in the vendored Rust sources",
+      "nested": true,
+      "pool_keys": 1047267,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "idents-100000.txt",
+          "keys": 100000,
+          "bytes": 1830746,
+          "mean_key_bytes": 17.31,
+          "sha256": "a1260c02a0f1bf5311a793fc93856f4c236d1a895b189b865bb9f6fddfa5fbff"
+        },
+        {
+          "file": "idents-1000000.txt",
+          "keys": 1000000,
+          "bytes": 18283976,
+          "mean_key_bytes": 17.28,
+          "sha256": "14bb9d0e447bf99aaeab56ac99b71f87be27d1bfe4940891098bc145389d7d53"
+        },
+        {
+          "file": "idents-full.txt",
+          "keys": 1047267,
+          "bytes": 19148394,
+          "mean_key_bytes": 17.28,
+          "sha256": "44c9a218e11e81be572be99e2aa9eb15f00ae3745fc21a9c682c78696ad62321"
+        }
+      ]
+    },
+    "numeric": {
+      "what": "dense decimal ids, `0` to `n-1`",
+      "nested": false,
+      "pool_keys": 10000000,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "numeric-100000.txt",
+          "keys": 100000,
+          "bytes": 588890,
+          "mean_key_bytes": 4.89,
+          "sha256": "8657fe5dd733eda6b114905312373f890e550c95445c59a8de76731033fca6c0"
+        },
+        {
+          "file": "numeric-1000000.txt",
+          "keys": 1000000,
+          "bytes": 6888890,
+          "mean_key_bytes": 5.89,
+          "sha256": "2418335116789387fc71485b4fa1a60b2340fbfa71211602a9f43f7e79663c01"
+        },
+        {
+          "file": "numeric-10000000.txt",
+          "keys": 10000000,
+          "bytes": 78888890,
+          "mean_key_bytes": 6.89,
+          "sha256": "6781d330bf233349972198ed90fc189738ca66ff3bd380cdcf5cb317ec4deb8f"
+        }
+      ],
+      "note": "not nested, and could not be: a random subset of a larger range is not a dense one"
+    },
+    "opaque": {
+      "what": "opaque 16-symbol base64url ids, from a seeded generator",
+      "nested": false,
+      "pool_keys": 10000000,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "opaque-100000.txt",
+          "keys": 100000,
+          "bytes": 1700000,
+          "mean_key_bytes": 16.0,
+          "sha256": "4510df1397b1692964abf46db10416aab1a29bba54cbb987be8d58e0d9810891"
+        },
+        {
+          "file": "opaque-1000000.txt",
+          "keys": 1000000,
+          "bytes": 17000000,
+          "mean_key_bytes": 16.0,
+          "sha256": "9a25670b24fe72f8bc618c6b2e045e0e379d37a49160830adde88fea41c7abf6"
+        },
+        {
+          "file": "opaque-10000000.txt",
+          "keys": 10000000,
+          "bytes": 170000000,
+          "mean_key_bytes": 16.0,
+          "sha256": "1c3d53d3b3d50e3201dee8df48a05494faa684fe91df8179578018d1268afc1c"
+        }
+      ]
+    },
+    "paths": {
+      "what": "filesystem paths — `find /usr -xdev` and `find $HOME -xdev` on the benchmark machine",
+      "nested": true,
+      "pool_keys": 7311150,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "paths-100000.txt",
+          "keys": 100000,
+          "bytes": 12633262,
+          "mean_key_bytes": 125.33,
+          "sha256": "4a310122fc3bdcb032f814d2e7e9197520ec7b94dbd4f96e96f71f5c7d0e35c1"
+        },
+        {
+          "file": "paths-1000000.txt",
+          "keys": 1000000,
+          "bytes": 126111783,
+          "mean_key_bytes": 125.11,
+          "sha256": "4558c532686a0986b0419d5cf4d17e2ae01867d13ba31c77b0912a130d445b86"
+        },
+        {
+          "file": "paths-full.txt",
+          "keys": 7311150,
+          "bytes": 921747125,
+          "mean_key_bytes": 125.07,
+          "sha256": "ac0c3ba62e86f80bce481459a05ac80c6677384912319fb4d77c1814e72aaed8"
+        }
+      ],
+      "note": "machine-specific by nature; the manifest records the host that produced it"
+    },
+    "pypi": {
+      "what": "PyPI package names — the simple index",
+      "nested": true,
+      "pool_keys": 889864,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "pypi-100000.txt",
+          "keys": 100000,
+          "bytes": 1434169,
+          "mean_key_bytes": 13.34,
+          "sha256": "4bd5d529dddaedfc863e38dcc88e5ba9ea26967803c1ae6dd01eb0cd6d2c4c5f"
+        },
+        {
+          "file": "pypi-full.txt",
+          "keys": 889864,
+          "bytes": 12756399,
+          "mean_key_bytes": 13.34,
+          "sha256": "980aab52c4e3839948b91bf5d14dc48e87f319a8eee27c80decf37a6701837d4"
+        }
+      ],
+      "note": "a real catalogue of short, human-chosen identifiers"
+    },
+    "titles-en": {
+      "what": "English Wikipedia article titles — enwiki-20260801-all-titles-in-ns0",
+      "nested": true,
+      "pool_keys": 19217770,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "titles-en-100000.txt",
+          "keys": 100000,
+          "bytes": 2200620,
+          "mean_key_bytes": 21.01,
+          "sha256": "0bfe7428ecfd6e356b2f98fc8c69f60c6655795943504ba2f9447ef8578cf774"
+        },
+        {
+          "file": "titles-en-1000000.txt",
+          "keys": 1000000,
+          "bytes": 21984647,
+          "mean_key_bytes": 20.98,
+          "sha256": "f83123abcccb1469b1c5e62497e3d81352f31386887e4566ea9d7f61391fbe28"
+        },
+        {
+          "file": "titles-en-10000000.txt",
+          "keys": 10000000,
+          "bytes": 219718589,
+          "mean_key_bytes": 20.97,
+          "sha256": "c35e98b5610d2393c34c0c76960b1c14860a1e943d8a9b2bf49b7598fe07f2a4"
+        },
+        {
+          "file": "titles-en-full.txt",
+          "keys": 19217770,
+          "bytes": 422258029,
+          "mean_key_bytes": 20.97,
+          "sha256": "838ca35699733226f287e8a1bed8560547cef8ea3259786588df6699b7706c7b"
+        }
+      ]
+    },
+    "titles-ru": {
+      "what": "Russian Wikipedia article titles — ruwiki-20260801-all-titles-in-ns0",
+      "nested": true,
+      "pool_keys": 4988075,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "titles-ru-100000.txt",
+          "keys": 100000,
+          "bytes": 3687743,
+          "mean_key_bytes": 35.88,
+          "sha256": "2307956c0f887101bfcb074869794c8d57b5c330cd3f3334a659c88b460e237e"
+        },
+        {
+          "file": "titles-ru-1000000.txt",
+          "keys": 1000000,
+          "bytes": 36819661,
+          "mean_key_bytes": 35.82,
+          "sha256": "588cb1a01e9d8e3dbce5fe6907ac81a00c83269af32c980207bb91b29fc199d0"
+        },
+        {
+          "file": "titles-ru-full.txt",
+          "keys": 4988075,
+          "bytes": 183516305,
+          "mean_key_bytes": 35.79,
+          "sha256": "7d393626179672722e8b405b60563495d5269fd5834517fe479775341f035a13"
+        }
+      ],
+      "note": "Cyrillic: two bytes a character in UTF-8, so a byte-oriented index sees longer keys"
+    },
+    "titles-zh": {
+      "what": "Chinese Wikipedia article titles — zhwiki-20260801-all-titles-in-ns0",
+      "nested": true,
+      "pool_keys": 2997733,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "titles-zh-100000.txt",
+          "keys": 100000,
+          "bytes": 1785445,
+          "mean_key_bytes": 16.85,
+          "sha256": "02bab01fef95e70e4e9f789b153c56923b72efb26e4994840bfac2ce7b554657"
+        },
+        {
+          "file": "titles-zh-1000000.txt",
+          "keys": 1000000,
+          "bytes": 17871822,
+          "mean_key_bytes": 16.87,
+          "sha256": "45af8baaa8179d51231d285eb3d2f72b46f36ca4f397afeb52879662e5093434"
+        },
+        {
+          "file": "titles-zh-full.txt",
+          "keys": 2997733,
+          "bytes": 53550951,
+          "mean_key_bytes": 16.86,
+          "sha256": "00f9adc36f5cdb0657e01a29112cbe27cea3c03fad46423e8c890220de453a97"
+        }
+      ],
+      "note": "CJK: three bytes a character, and short keys — the hardest case for front coding"
+    },
+    "urls": {
+      "what": "English Wikipedia article URLs — the titles under `/wiki/`, percent-escaped",
+      "nested": true,
+      "pool_keys": 19217771,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "urls-100000.txt",
+          "keys": 100000,
+          "bytes": 5335889,
+          "mean_key_bytes": 52.36,
+          "sha256": "8890451c839543f30864023cfe35749dc5d7fda11caef4f1088a812ef69c6c10"
+        },
+        {
+          "file": "urls-1000000.txt",
+          "keys": 1000000,
+          "bytes": 53361181,
+          "mean_key_bytes": 52.36,
+          "sha256": "02f15be6525d5412f6d51ca2c11d4fdafe9a6593b3126468d2d6bff6622ffdbe"
+        },
+        {
+          "file": "urls-10000000.txt",
+          "keys": 10000000,
+          "bytes": 533677969,
+          "mean_key_bytes": 52.37,
+          "sha256": "40e923e6e900b8a2eb9a4576cecb075c3f2c9fef8fb086ced05cdb681a35b90f"
+        },
+        {
+          "file": "urls-full.txt",
+          "keys": 19217771,
+          "bytes": 1025524444,
+          "mean_key_bytes": 52.36,
+          "sha256": "72dd343a021e455b4fa8dc4424af42ee741f9399ca700449521968ace80441df"
+        }
+      ],
+      "note": "a 30-byte prefix every key shares: what front coding is for and what hashing ignores"
+    },
+    "uuid": {
+      "what": "UUIDv4 in the canonical hyphenated form, from a seeded generator",
+      "nested": false,
+      "pool_keys": 10000000,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "uuid-100000.txt",
+          "keys": 100000,
+          "bytes": 3700000,
+          "mean_key_bytes": 36.0,
+          "sha256": "624cabf1907f4d5331c111e0c1f415b59f7298095dd606b97e9509502da2c4d3"
+        },
+        {
+          "file": "uuid-1000000.txt",
+          "keys": 1000000,
+          "bytes": 37000000,
+          "mean_key_bytes": 36.0,
+          "sha256": "08fbcbe4352b7f526d9246199f6f098357d3c7bdb9e59ceaa7a0b33ca7a60837"
+        },
+        {
+          "file": "uuid-10000000.txt",
+          "keys": 10000000,
+          "bytes": 370000000,
+          "mean_key_bytes": 36.0,
+          "sha256": "f36053c111b0ed0713bcd73a1dfb19a356aea24ca383996bc9c148a4f416e110"
+        }
+      ],
+      "note": "36 bytes of which 32 are hex: no shared structure at all past the hyphens"
+    },
+    "words": {
+      "what": "English words — /usr/share/dict/words, Fedora's `words` package",
+      "nested": true,
+      "pool_keys": 479823,
+      "built": "2026-09-12",
+      "files": [
+        {
+          "file": "words-100000.txt",
+          "keys": 100000,
+          "bytes": 1034610,
+          "mean_key_bytes": 9.35,
+          "sha256": "bcdfb673417aac952c51f1deeddf731745b5e044f9a597468e4f03a3a1191985"
+        },
+        {
+          "file": "words-full.txt",
+          "keys": 479823,
+          "bytes": 4953557,
+          "mean_key_bytes": 9.32,
+          "sha256": "cee5da174ade14c9bc146b2f67495a745b0c952b03c7ed91e9a6142a74d31bd4"
+        }
+      ],
+      "note": "the corpus every table in the README is measured on"
+    }
+  },
+  "host": "arz",
+  "kernel": "Linux 7.2.4-200.fc44.x86_64",
+  "grid": [
+    100000,
+    1000000,
+    10000000
+  ],
+  "downloads": {
+    "enwiki-20260801-all-titles-in-ns0.gz": {
+      "url": "https://dumps.wikimedia.org/enwiki/20260801/enwiki-20260801-all-titles-in-ns0.gz",
+      "bytes": 109015770,
+      "sha256": "88a6b0aeb072c476d5e3d071fe03802b6d68d84297055834a6abe4cdf3487006"
+    },
+    "pypi-simple.json": {
+      "url": "https://pypi.org/simple/",
+      "bytes": 43667204,
+      "sha256": "d096bf31e14336e94862cebf631d75e8d9690865b58a1aa84f759adef55c0f76"
+    },
+    "ruwiki-20260801-all-titles-in-ns0.gz": {
+      "url": "https://dumps.wikimedia.org/ruwiki/20260801/ruwiki-20260801-all-titles-in-ns0.gz",
+      "bytes": 34047402,
+      "sha256": "7d3dbb57f97dbda41adea3516c983e578a7d8cd028c4628e6f2ce43741be5e03"
+    },
+    "tranco-38KVL.csv": {
+      "url": "https://tranco-list.eu/download/38KVL/1000000",
+      "bytes": 22670940,
+      "sha256": "46351b5c8f08630f25fac596d866a45d23caaab1a229db01db4da5bdab162a1e"
+    },
+    "zhwiki-20260801-all-titles-in-ns0.gz": {
+      "url": "https://dumps.wikimedia.org/zhwiki/20260801/zhwiki-20260801-all-titles-in-ns0.gz",
+      "bytes": 17832449,
+      "sha256": "815f7e96a9167ffbe6dee978acf70a03be0daac63cec2a14a431934d046a1248"
+    }
+  }
+}
