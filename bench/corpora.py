@@ -29,6 +29,7 @@ ten-million-key corpus does not belong in a git history.
 Run:
   uv run --no-sync python bench/corpora.py status
   uv run --no-sync python bench/corpora.py build words uuid dna
+  uv run --no-sync python bench/corpora.py build --force paths
   uv run --no-sync python bench/corpora.py verify
 """
 
@@ -337,12 +338,36 @@ def _write(path: Path, keys: list[str]) -> dict[str, object]:
     }
 
 
-def build(names: list[str]) -> None:
+def _built(manifest: dict, name: str) -> bool:
+    """True when the manifest's files for this corpus are all on disk with the hashes it recorded,
+    and the grid has not moved since. A corpus read off this machine is a *sample* of a live
+    filesystem, so rebuilding one draws a new sample: `paths` moved 7 332 978 → 7 343 721 keys
+    between two sweeps in the same week, because the walk includes this repo's own `target/`.
+    Keeping what is on disk is the same rule the fetched corpora already follow."""
+    entry = manifest["corpora"].get(name)
+    if entry is None:
+        return False
+    corpus, pool = BY_NAME[name], entry["pool_keys"]
+    want = {f"{name}-{size}.txt" for size in corpus.sizes if size <= pool}
+    if corpus.full and pool not in corpus.sizes:
+        want.add(f"{name}-full.txt")
+    if want != {one["file"] for one in entry["files"]}:
+        return False
+    return all(
+        (ROOT / one["file"]).exists() and _sha256(ROOT / one["file"]) == one["sha256"]
+        for one in entry["files"]
+    )
+
+
+def build(names: list[str], force: bool = False) -> None:
     manifest = _load()
     for name in names:
         corpus = BY_NAME[name]
         want = max(corpus.sizes)
         print(f"{name}: {corpus.what}")
+        if not force and _built(manifest, name):
+            print("  on disk and matching the manifest, kept (--force to draw a new sample)")
+            continue
         keys = _pool(corpus, want)
         print(f"  {len(keys):,} unique keys")
         files = []
@@ -448,6 +473,9 @@ def main() -> int:
     sub.add_parser("sources")
     made = sub.add_parser("build")
     made.add_argument("names", nargs="*", default=[], help="default: every corpus")
+    made.add_argument(
+        "--force", action="store_true", help="rebuild even when the files match the manifest"
+    )
     args = parser.parse_args()
     if args.command == "verify":
         return verify()
@@ -461,7 +489,7 @@ def main() -> int:
     unknown = [n for n in names if n not in BY_NAME]
     if unknown:
         parser.error(f"unknown corpus: {', '.join(unknown)}")
-    build(names)
+    build(names, args.force)
     return 0
 
 

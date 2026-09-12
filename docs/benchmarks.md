@@ -226,7 +226,10 @@ what makes them checkable without it.
 
 Two of them are honest about their limits. `paths` is this machine's `/usr` and `$HOME`, so it is
 reproducible nowhere else — the manifest records the host. `idents` is whatever crates this machine
-has vendored, which is a sample of Rust, not of source code.
+has vendored, which is a sample of Rust, not of source code. Both are *samples* of a filesystem that
+keeps moving, this repository's own build directory included, so `build` keeps what is on disk when
+it matches the manifest and only `build --force` draws a new one: two sweeps a week apart otherwise
+compare different `paths` corpora and report the difference as a change in the index.
 
 Nothing on this page is measured on the set yet; every table here is still `words`. Moving them over
 is the next benchmark task, and the first thing it should settle is the claim no single corpus can
