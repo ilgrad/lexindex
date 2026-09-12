@@ -24,13 +24,21 @@ All notable changes to this project are documented here. The format follows
   build of the previous format in a worktree, `StringIndex` the control at 340–353 ns throughout
   (`bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt`) — that session reads about 25 %
   above the ladder below, control included, so the two are compared each within itself. The
-  ladder over 32 / 64 / 128 / 256 / 512 / 1024 keys a block is now 3.25 / 3.05 / 2.92 / 2.85 / 2.82
+  ladder over 32 / 64 / 128 / 256 / 512 / 1024 keys a block is now 3.24 / 3.04 / 2.92 / 2.85 / 2.82
   / 2.80 bytes a key, `id` 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
   `key_into` 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272 (two runs in opposite order,
   `bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt`).
   **The default block moves 32 → 256**, in Rust and in Python, which takes the default index from
-  3.25 to **2.85 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
+  3.24 to **2.85 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
   this corpus** — for `id` 298–302 ns against 252–254 and `key_into` 207 against 154–155.
+  The symbol table now trains on **runs of a constant length rather than whole blocks**: the
+  20 000-piece budget was spent block by block, so a larger block bought fewer neighbourhoods — 157
+  at 128 keys a block, 19 at 1024 — and a table trained on 19 of them is a lottery, which is how
+  `paths` at 1024 keys a block came to store 0.52 bytes a key more than it needed to, more than the
+  same corpus at 256. A run is 256 consecutive keys, the default block, whatever block the caller
+  picked. Over twelve corpora at three block sizes 28 of the 36 sizes fall and the worst rises 0.05;
+  the dictionary at the default block is sampled identically either way, so its numbers do not move.
+  Building costs 6 % more, from the walk over the keys the old rule skipped.
   **The format is `BDX2`**: the header carries the microblock size and a fourth offset width, the
   blob gains a packed start per microblock where a block has more than one, and a `BDX1` blob is
   refused by name with a message that

@@ -476,7 +476,7 @@ class DictIndex:
         are shared over; it is split into microblocks of 32 (one microblock below that), and a
         lookup scans one restart a microblock plus one microblock -- ``block / 32 + 30`` entries
         from 64 up, not ``block - 1``.
-        32 / 64 / 128 / 256 / 512 / 1024 gave 3.25 / 3.05 / 2.92 / 2.85 / 2.82 / 2.80 bytes per key
+        32 / 64 / 128 / 256 / 512 / 1024 gave 3.24 / 3.04 / 2.92 / 2.85 / 2.82 / 2.80 bytes per key
         on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there."""
 
     @staticmethod

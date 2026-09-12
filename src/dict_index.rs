@@ -55,9 +55,17 @@ const MAX_BLOCK: usize = 1024;
 /// and a path list 18, so the bound is slack; a block holding a chain like `a`, `aa`, `aaa` is what
 /// reaches it, which is legal input and merely slow, not wrong.
 const STAIRS: usize = 32;
-/// About how many suffixes the symbol table is trained on: every block's worth, from blocks spread
-/// evenly over the index.
+/// About how many suffixes the symbol table is trained on, from runs of keys spread evenly over
+/// the index.
 const TRAIN_PIECES: usize = 20_000;
+/// How many consecutive keys one of those runs holds. A constant rather than `block`, so the sample
+/// keeps its shape whatever block the caller picked: spending the budget on whole blocks meant 157
+/// neighbourhoods at 128 keys a block and 19 at 1024, and a table trained on 19 of them is a
+/// lottery — `paths` at 1024 came out 0.52 B/key larger than it needed to be, larger than the same
+/// corpus at 256. Measured over twelve corpora at three block sizes: 28 of the 36 sizes fall, the
+/// worst rises 0.05 B/key, and the dictionary at the default block is sampled identically either
+/// way.
+const TRAIN_RUN: usize = 256;
 /// Samples serialised at a time, so writing does not copy the array whole.
 const CHUNK: usize = 4096;
 /// Blocks a thread must be given before the encoding is worth splitting across threads at all.
@@ -450,7 +458,7 @@ impl DictIndex {
     /// head and its arrays are shared over, and it is split into microblocks of 32 — one microblock
     /// below that — of which a lookup scans one, after one restart a microblock: `block / 32 + 30`
     /// entries from 64 up, not `block − 1`. On
-    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.25 / 3.05 / 2.92 / 2.85 / 2.82 / 2.80
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.24 / 3.04 / 2.92 / 2.85 / 2.82 / 2.80
     /// bytes per key, `id` at 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
     /// `key_into` at 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272. At 256 the index is
     /// under `marisa-trie`'s 2.955 floor on that corpus.
@@ -688,10 +696,10 @@ impl DictIndex {
         })?;
         let nb = n.div_ceil(block);
         let micro = micro_for(block);
-        let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
+        let step = (n / TRAIN_PIECES).max(1);
 
-        // Pass two: the training sample, in the order `from_sorted` collects it -- blocks in order,
-        // keys within a block in order, each coded against the key the encoding will code it
+        // Pass two: the training sample, in the order `from_sorted` collects it -- runs in order,
+        // keys within a run in order, each coded against the key the encoding will code it
         // against -- so the table it trains is the same table.
         let mut arena: Vec<u8> = Vec::new();
         let mut spans: Vec<(usize, usize)> = Vec::new();
@@ -702,14 +710,14 @@ impl DictIndex {
             let bytes = key.as_bytes();
             let off = i % block;
             if off == 0 || off % micro == 0 {
-                if off != 0 && (i / block) % step == 0 {
+                if off != 0 && (i / TRAIN_RUN) % step == 0 {
                     let at = arena.len();
                     arena.extend_from_slice(&bytes[lcp(&restart, bytes)..]);
                     spans.push((at, arena.len()));
                 }
                 restart.clear();
                 restart.extend_from_slice(bytes);
-            } else if (i / block) % step == 0 {
+            } else if (i / TRAIN_RUN) % step == 0 {
                 let at = arena.len();
                 arena.extend_from_slice(&bytes[lcp(&prev, bytes)..]);
                 spans.push((at, arena.len()));
@@ -880,26 +888,29 @@ impl DictIndex {
     ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
-        // Train on the suffixes a spread of blocks would store, in key order: a restart is coded
+        // Train on the suffixes a spread of runs would store, in key order: a restart is coded
         // against the restart before it, every other key against its predecessor.
-        let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
+        let step = (n / TRAIN_PIECES).max(1);
         let mut pieces: Vec<&[u8]> = Vec::new();
-        for (b, chunk) in keys.chunks(block).enumerate() {
-            if b % step != 0 {
+        let mut restart: &[u8] = keys.first().map_or(&[][..], |k| k.as_ref().as_bytes());
+        let mut prev: &[u8] = restart;
+        for (i, key) in keys.iter().enumerate().skip(1) {
+            let key = key.as_ref().as_bytes();
+            let off = i % block;
+            if off == 0 {
+                restart = key;
+                prev = key;
                 continue;
             }
-            let mut restart = chunk[0].as_ref().as_bytes();
-            let mut prev = restart;
-            for (i, key) in chunk.iter().enumerate().skip(1) {
-                let key = key.as_ref().as_bytes();
-                let starts = i % micro == 0;
+            let starts = off % micro == 0;
+            if (i / TRAIN_RUN) % step == 0 {
                 let against = if starts { restart } else { prev };
                 pieces.push(&key[lcp(against, key)..]);
-                if starts {
-                    restart = key;
-                }
-                prev = key;
             }
+            if starts {
+                restart = key;
+            }
+            prev = key;
         }
         let table = Table::train(&pieces);
         drop(pieces);
