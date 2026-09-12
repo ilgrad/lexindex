@@ -1,0 +1,60 @@
+# Plan item 36: which cache lines does one `id` touch, and what would a free block search buy?
+# lexindex 2.1.0 at e8533ff in a worktree, instrumented (`local/linecount`, `local/ceiling`),
+# arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, 2026-09-12. 20 000 shuffled member probes.
+#
+# Distinct 64-byte lines a lookup touches, by region. The recorder is a thread-local set, so
+# these runs are ~4x slower than the shipped build and their timings are not quoted.
+
+/usr/share/dict/words: 479823 keys, 20000 probes, lines a lookup by region
+ block    sampleshead_ends    heads   blocks   micros     data    table    other
+    32      10.85     2.11     1.14     2.07     0.00     2.21     0.00     0.00   total 18.37
+   128       8.84     2.11     1.13     2.10     2.12     3.15     0.00     0.00   total 19.46
+   256       7.84     2.11     1.14     2.09     2.18     3.53     0.00     0.00   total 18.88
+   512       6.85     2.11     1.12     2.11     2.27     4.13     0.00     0.00   total 18.59
+  1024       5.86     2.11     1.13     2.11     2.46     5.22     0.00     0.00   total 18.90
+
+local/corpora/titles-en-10000000.txt: 10000000 keys, 20000 probes, lines a lookup by region
+ block    sampleshead_ends    heads   blocks   micros     data    table    other
+   128      13.62     2.22     1.90     2.11     2.14     5.76     0.00     0.00   total 27.75
+   256      12.48     2.20     1.73     2.11     2.21     6.56     0.00     0.00   total 27.29
+  1024      10.32     2.14     1.53     2.11     2.58    10.69     0.00     0.00   total 29.37
+
+# Where the block search goes, measured without the recorder: `id`, `id` handed the block it
+# must search, and the sample search on its own. The residual is the head boundary -- the second
+# half of the block search, which reads `head_ends` and compares the block heads. Five
+# alternated rounds, minimum.
+
+/usr/share/dict/words: 479823 keys, 20000 probes; id against id with the block known
+  block    32: id 226.1 ns, with the block known 154.1 -- the block search is 72.0 ns (32% of id), of which the sample search 35.7 and the head boundary 36.3
+  block   128: id 258.2 ns, with the block known 198.5 -- the block search is 59.7 ns (23% of id), of which the sample search 28.8 and the head boundary 30.9
+  block   256: id 288.9 ns, with the block known 229.6 -- the block search is 59.3 ns (21% of id), of which the sample search 26.9 and the head boundary 32.4
+  block  1024: id 335.1 ns, with the block known 319.4 -- the block search is 15.7 ns (5% of id), of which the sample search 47.9 and the head boundary -32.2
+
+local/corpora/titles-en-10000000.txt: 10000000 keys, 20000 probes; id against id with the block known
+  block   128: id 835.4 ns, with the block known 552.7 -- the block search is 282.7 ns (34% of id), of which the sample search 156.7 and the head boundary 126.0
+  block   256: id 834.5 ns, with the block known 576.2 -- the block search is 258.3 ns (31% of id), of which the sample search 151.7 and the head boundary 106.6
+  block  1024: id 858.9 ns, with the block known 662.2 -- the block search is 196.8 ns (23% of id), of which the sample search 135.9 and the head boundary 60.8
+
+# At block 1024 on `words` the residual goes negative: the in-block scan then dominates both
+# lanes and their difference is smaller than the sample search alone, i.e. inside the noise.
+# Read the 10 M rows, where the three lanes are far apart.
+
+# Plan item 60: a two-level sample search -- one stride-64 summary over the samples, then a
+# binary search inside the 64-entry window -- against the plain `partition_point`. Two rounds,
+# processes alternated base/new, `StringIndex` the control neither build can touch, 2 M probes
+# at 10 M keys and one probe per key below that. Mean of the two rounds, ns per probe.
+
+corpus                       block   id base   id new     d%  key_into base     new     d%  control d%
+titles-en-1000000.txt          256     544.9    546.3   +0.3          365.1   369.2   +1.1        -0.7
+titles-en-10000000.txt         128     888.9    863.5   -2.9          557.5   561.0   +0.6        -2.6
+titles-en-10000000.txt         256     860.3    840.1   -2.3          556.9   564.8   +1.4        -1.9
+titles-en-10000000.txt        1024     821.6    847.8   +3.2          615.7   618.2   +0.4        -2.1
+words                          256     366.0    375.8   +2.7          224.3   218.2   -2.8        +1.3
+
+# Rejected. Every `id` gain at 10 M is the size of the control's own drift in the same cell, and
+# `key_into` -- which pays the sample search without the in-block data fetch, so it should show
+# the effect most clearly -- is slower on the new side in four cells of five. The mechanism the
+# line counts predict: 12.5 lines of samples at 10 M is 312 KB, an L2 resident, so a summary
+# level removes no cold miss; it only adds accesses, two searches where there was one. Halving
+# the samples touched needs a layout that reads a whole cache line per level, not two binary
+# searches over the same array.

@@ -235,6 +235,17 @@ at 344–347. Against one level at the same size the reverse lookup halves and `
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
 removes.
 
+Where the lookup spends that time was measured directly, by timing `id` against an `id` handed the
+block it must search
+([`bench/results/dict-lines-2026-09-12-arz-e8533ff.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-lines-2026-09-12-arz-e8533ff.txt)):
+on the dictionary at `block = 256` finding the block is 59 ns of 289, and on ten million titles it
+is 258 of 835 — a third of the lookup, of which 152 ns is the binary search over the samples and
+107 the head boundary. That is the other half of the block ladder: a larger block spends less on
+the search and more on the scan, one for one, so past a million keys `id` barely moves across the
+ladder while on the dictionary it rises steadily. The search is not collected by a summary array
+over the samples — 12.5 lines of them is 312 KB, L2-resident, so the levels a summary removes are
+hits and not misses, and an A-B of exactly that landed inside the control's own drift.
+
 The serialised blob is `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
 [offset widths][micro][check]`, then the table, the heads, the packed head ends, the samples, the
 data, the packed block starts and the packed microblock starts; the loader checks every length, both
