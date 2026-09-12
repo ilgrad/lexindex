@@ -46,7 +46,10 @@ but stands on its own.
   173–176 against its `key` at 504–521. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **338 ns where `marisa-trie` must enumerate every match to
   count it (122 247)**. Blocks of 128 store **2.89 bytes/key, under `marisa-trie` at every setting it
-  has**, for a slower reverse lookup. Exact queries, every id back to its key, small.
+  has** *on this corpus* — over the thirteen-corpus set the ranking goes both ways, marisa smaller
+  wherever the keys share deep structure and `DictIndex` smaller where they do not, while
+  `DictIndex` answers 1.9–3.1× faster on all of them. Exact queries, every id back to its key,
+  small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
   hash plus a fingerprint per key, *no keys stored*. **1.26 bytes/key** on real words — **2.4× below
   `marisa-trie`** — and **0.76** at a 4-bit fingerprint (6.25 % false positives), for
@@ -262,7 +265,9 @@ block trades reverse-lookup latency for the bytes. `marisa-trie` appears three t
 own documentation says the right setting depends on the data, so the table carries its compact end,
 its default and its fast end rather than one point somebody could fairly call untuned.
 [The benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md) table the
-whole block-size curve, the `rsmarisa` head-to-head, and the prefix queries.</sub>
+whole block-size curve, the prefix queries, and the same nine structures over a pinned set of
+thirteen corpora at three scales — where the ranking between `DictIndex` and `marisa-trie` reverses
+with how much the keys share, which one word list cannot show.</sub>
 
 Two claims, scoped to libraries a Python or Rust project can install — research-grade C++ tries
 (CoCo-trie, C², XCDAT, PDT, SuRF) are the published frontier and are cited, not claimed against,

@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Nine structures over the whole corpus set, `bench/sweep.py`.** The first measurement this
+  project has that can answer *where* each structure is smallest rather than how big it is on one
+  word list — three `DictIndex` block sizes against three `marisa-trie` configurations, plus the
+  keyless indexes and `StringIndex`, on every corpus at every size, and the same question in Rust
+  against `rsmarisa`'s three cache levels. What it shows is a frontier and not a crown.
+  `marisa-trie` is the smallest key-storing structure on eight of the eleven million-key corpora,
+  and the margin follows how much the keys share: 1.70× on filesystem paths, 1.48× on Russian
+  Wikipedia titles, and level on DNA k-mers and domains. `DictIndex` is smaller where the keys share
+  nothing — 1.33× on opaque base64url ids, 1.63× on UUIDs — which is the same reason it is smaller
+  on English words, a corpus at the favourable end of that distribution rather than a typical one.
+  Both facts are now in `docs/benchmarks.md` with the README's claim scoped to the corpus it was
+  measured on.
+
+  The trade is not only size. `DictIndex` answers **1.9–3.1× faster than marisa's fastest
+  configuration on ten of the eleven corpora** (1.1× on dense decimal ids) and builds 2.3–4.4×
+  faster, so where marisa is 1.70× smaller on paths it is also 3.1× slower to answer and 4.4× slower
+  to build. The two keyless indexes are flat at 0.26 and 1.26 bytes a key on all thirteen corpora at
+  all three sizes, which makes them the only rows a reader can carry to their own keys without
+  measuring. And `StringIndex` compiles ten million dense decimal ids into an FST of **356 bytes** —
+  a real number, and the ceiling of what shared structure can buy rather than a size claim.
+
 - **A pinned corpus set, `bench/corpora.py`.** Every size this project has published is measured on
   one corpus, the Fedora word list, while bytes per key is a property of the keys at least as much as
   of the structure: `StringIndex` measures 0.68 on one corpus and 16.57 on another, and `marisa-trie`

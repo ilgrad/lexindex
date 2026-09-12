@@ -212,6 +212,143 @@ Nothing on this page is measured on the set yet; every table here is still `word
 is the next benchmark task, and the first thing it should settle is the claim no single corpus can
 support: which structure is smallest, and *where*.
 
+## Every structure over the whole set
+
+`bench/sweep.py` builds nine structures on each corpus and measures serialised bytes per key, build
+time and one lookup: three `DictIndex` block sizes against three `marisa-trie` configurations,
+because both are curves and a single point of either invites the objection that the other was left
+untuned. The two keyless indexes are there to show what a structure that stores no keys costs, which
+turns out to be the only row a reader can carry to their own corpus without measuring it.
+
+### Bytes per key at one million keys
+
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 32 | `Dict` 128 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 0.26 | 1.26 | 8.64 | 7.79 | 7.54 | 17.74 | 7.52 | 7.56 | 7.71 |
+| `domains` | 13.8 | 0.26 | 1.26 | 5.75 | 5.07 | 4.91 | 10.50 | 4.81 | 4.87 | 4.99 |
+| `idents` | 17.3 | 0.26 | 1.26 | 7.92 | 7.27 | 7.07 | 10.55 | 5.45 | 5.62 | 5.74 |
+| `numeric` | 5.9 | 0.26 | 1.26 | 2.75 | 2.19 | 2.02 | 0.00 | 1.62 | 1.64 | 1.72 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 14.37 | 13.85 | 13.70 | 21.44 | 18.23 | 18.82 | 19.04 |
+| `paths` | 125.1 | 0.26 | 1.26 | 19.08 | 16.01 | 15.72 | 17.47 | 9.26 | 9.47 | 9.60 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 10.30 | 9.57 | 9.34 | 17.28 | 7.79 | 8.19 | 8.37 |
+| `titles-ru` | 35.8 | 0.26 | 1.26 | 13.17 | 12.21 | 11.91 | 31.75 | 8.07 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.26 | 1.26 | 9.37 | 8.74 | 8.61 | 17.52 | 6.33 | 6.54 | 6.70 |
+| `urls` | 52.4 | 0.26 | 1.26 | 12.98 | 11.55 | 11.21 | 16.88 | 7.95 | 8.39 | 8.58 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 21.35 | 20.54 | 20.25 | 37.11 | 32.93 | 34.58 | 34.80 |
+
+<sub>`words` and `pypi` have no million-key file; their 100 000 grid, every build time, and the
+100 000 rows for the rest are in
+[`bench/results/sweep-2026-09-12-arz-4762dc4.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-12-arz-4762dc4.json).</sub>
+
+**Where `marisa-trie` wins, it wins on shared structure.** It is the smallest key-storing structure
+on eight of these eleven corpora, and the margin tracks how much the keys have in common: 1.70× on
+`paths`, where a million paths run through a few thousand directories, 1.48× on `titles-ru`, 1.41×
+on `urls`, 1.30× on `idents` — and level on `dna` and `domains` (1.00× and 1.02×). That is what a
+LOUDS trie is for, and front coding in fixed blocks does not answer it.
+
+**Where lexindex wins, it wins on entropy.** `DictIndex` is the smaller of the two on `opaque`
+(13.70 against 18.23, 1.33×) and on `uuid` (20.25 against 32.93, 1.63×) — keys with nothing to
+share, where a trie pays for a node per character and front coding pays for a prefix that is not
+there. On `words`, the corpus every table above is measured on, `DictIndex` at 128 per block is 3.52
+against marisa's 3.70 at 100 000 keys, and 2.89 against 2.96 on the full 479 823. That is a real
+result on a real corpus, and it is not the general case: it is the favourable end of a distribution
+whose other end is `paths`.
+
+**The two keyless rows are flat and every other row is not.** `ClosedHashIndex` is 0.26 bytes a key
+and `CompactHashIndex` 1.26 on all eleven corpora at all three sizes, because their size is a
+function of `n` and the fingerprint width and of nothing about the keys. Against the best trie that
+is a 7.3× margin on `paths` and 1.3× on `numeric` — the same two structures, neither of them
+changed, and the whole spread between those two numbers belongs to the corpus.
+
+**`StringIndex` on `numeric` reads 0.00 bytes a key, and it is not a bug.** Ten million dense
+decimal ids compile to an FST of **356 bytes**: the automaton is very nearly regular, one path per
+digit, and the keys are recovered from the transitions. Read it as the ceiling of what shared
+structure can buy an FST and never as a size claim — it is exactly the ~0 B/key that
+`bench/compare.py` refuses to report for synthetic `entity-{i}` keys, and it is in this table only
+because dense ids are a corpus somebody really has.
+
+### Lookups at one million keys
+
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 32 | `Dict` 128 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 83 | 126 | 339 | 395 | 1216 | 672 | 957 | 937 | 921 |
+| `domains` | 13.8 | 80 | 130 | 344 | 433 | 1406 | 485 | 745 | 718 | 694 |
+| `idents` | 17.3 | 89 | 138 | 439 | 550 | 2017 | 524 | 973 | 906 | 873 |
+| `numeric` | 5.9 | 66 | 100 | 239 | 312 | 1166 | 170 | 291 | 287 | 264 |
+| `opaque` | 16.0 | 103 | 131 | 367 | 518 | 1490 | 489 | 1556 | 1194 | 1134 |
+| `paths` | 125.1 | 142 | 170 | 747 | 922 | 2808 | 1449 | 3097 | 2566 | 2284 |
+| `titles-en` | 21.0 | 104 | 134 | 415 | 585 | 2006 | 690 | 1213 | 1155 | 1108 |
+| `titles-ru` | 35.8 | 139 | 166 | 514 | 708 | 2654 | 942 | 1681 | 1553 | 1491 |
+| `titles-zh` | 16.9 | 115 | 146 | 413 | 579 | 1972 | 618 | 1071 | 1034 | 985 |
+| `urls` | 52.4 | 104 | 141 | 617 | 779 | 2436 | 866 | 1308 | 1220 | 1187 |
+| `uuid` | 36.0 | 117 | 133 | 438 | 633 | 2247 | 665 | 1769 | 1333 | 1276 |
+
+**`DictIndex` answers faster than every `marisa-trie` setting on every corpus in the set** — 1.1×
+on `numeric` and 1.9–3.1× on the other ten, against marisa's *fastest* configuration and not its
+smallest. It also builds 2.3–4.4× faster everywhere except `numeric`, where the two are level. So
+the size table above is not the whole trade: on `paths`, marisa is 1.70× smaller and 3.1× slower to
+answer and 4.4× slower to build.
+
+**The block size is the knob that buys the bytes.** On `paths`, 32 → 1024 per block takes the index
+from 19.08 to 15.72 bytes a key (18 % smaller) and a lookup from 747 to 2808 ns (3.8× slower),
+because a block is walked from its head and a longer block is a longer walk. 128 is the middle the
+README quotes; 1024 is the end of the curve, not a recommendation.
+
+### Ten million keys
+
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 32 | `Dict` 128 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 0.26 | 1.26 | 7.99 | 7.11 | 6.86 | 15.98 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.26 | 1.26 | 2.78 | 2.19 | 2.02 | 0.00 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.95 | 13.42 | 13.26 | 21.47 | 15.19 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 8.69 | 7.88 | 7.79 | 13.25 | 5.57 | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.26 | 1.26 | 11.20 | 9.80 | 9.35 | 13.10 | 5.66 | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.88 | 20.06 | 19.78 | 36.07 | 29.97 | 33.21 | 33.56 |
+
+Ten times the keys moves every trie and neither hash: at its smallest setting `marisa` goes
+7.79 → 5.57 on `titles-en` and 7.95 → 5.66 on `urls` as the sharing deepens, `DictIndex` 9.57 → 7.88 and 11.55 → 9.80, and the two
+keyless rows do not move at all. The ranking is the same one the million-key table gives, so the
+answer to "which is smallest" is decided by the corpus and not by the scale.
+
+<sub>Measured 2026-09-12 on a clean tree, load 0.4–1.2
+([`bench/results/sweep10m-2026-09-12-arz-4762dc4.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-4762dc4.json)),
+`marisa-trie` 1.3. One build per cell at this size, five rounds of lookups.</sub>
+
+### `rsmarisa`, the pure-Rust port
+
+The same question in Rust, where `marisa-trie` is a C++ library with no binding a Rust project would
+take. `rsmarisa` 0.4.2 is a pure-Rust port of it, BSD-2-Clause, and `local/rsmarisacmp` puts its
+three cache levels against the same three block sizes on every corpus:
+
+| corpus | rsmarisa smallest | `DictIndex` 1024 | rsmarisa build | `DictIndex` build | rsmarisa fastest | `DictIndex` 32 |
+|---|---:|---:|---:|---:|---:|---:|
+| `dna` | 7.61 | 7.54 | 1 349 ms | 60 ms | 748 ns | 291 ns |
+| `domains` | 4.87 | 4.91 | 704 ms | 55 ms | 502 ns | 289 ns |
+| `idents` | 5.50 | 7.07 | 663 ms | 60 ms | 637 ns | 346 ns |
+| `numeric` | 1.64 | 2.02 | 99 ms | 46 ms | 164 ns | 181 ns |
+| `opaque` | 18.27 | 13.70 | 1 501 ms | 76 ms | 1 075 ns | 317 ns |
+| `paths` | 10.07 | 15.72 | 5 824 ms | 97 ms | 1 747 ns | 680 ns |
+| `titles-en` | 7.85 | 9.34 | 976 ms | 68 ms | 887 ns | 357 ns |
+| `titles-ru` | 8.22 | 11.91 | 1 510 ms | 68 ms | 1 122 ns | 434 ns |
+| `titles-zh` | 6.40 | 8.61 | 740 ms | 66 ms | 734 ns | 337 ns |
+| `urls` | 8.38 | 11.21 | 2 055 ms | 72 ms | 970 ns | 558 ns |
+| `uuid` | 33.01 | 20.25 | 2 010 ms | 110 ms | 1 204 ns | 404 ns |
+
+The shape is the one the C++ library gives: `rsmarisa` is smaller on the corpora whose keys share
+structure and larger on the ones whose keys do not, while `DictIndex` builds **11–60× faster** and
+answers **1.7–3.4× faster** on ten of the eleven. `numeric` is the exception on every axis:
+`rsmarisa` is smaller there, marginally quicker to answer, and only 2.2× slower to build. At
+nominally the same configuration `rsmarisa` is larger than the C++ marisa measured above — on
+`words`, 0.2 % at the smallest setting, 3.1 % at the default and 12 % at the fastest — so the flag
+words evidently do not mean quite the same thing, and each library's own curve is what to read.
+
+<sub>Measured 2026-09-12 on a clean tree
+([`bench/results/rsmarisa-2026-09-12-arz-4762dc4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-4762dc4.txt)),
+`rsmarisa` 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. It is
+a throwaway crate under `local/`: `rsmarisa` is not a lexindex dependency and is not proposed as
+one. The Rust build times are not comparable with the Python ones above — that harness copies every
+key across the language boundary and this one does not.</sub>
+
 ## Lookup speed from Python, against `dict` and `marisa-trie`
 
 `local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
