@@ -127,7 +127,7 @@ fn main() {
         |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
     );
     bench(
-        "lexindex DictIndex (k=32)",
+        "lexindex DictIndex (k=256)",
         n,
         || DictIndex::build(&keys).unwrap(),
         |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
@@ -232,7 +232,7 @@ fn main() {
         si.to_bytes().len() as f64 / n as f64
     );
     println!(
-        "  lexindex DictIndex (k=32)   {:6.2}",
+        "  lexindex DictIndex (k=256)  {:6.2}",
         di.serialized_len() as f64 / n as f64
     );
     println!(

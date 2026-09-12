@@ -1716,8 +1716,9 @@ pub struct PyDictIndex {
 impl PyDictIndex {
     /// Build from an iterable of strings, in any order; duplicates are removed and the ids are
     /// the ranks of the distinct keys in byte order. `block` keys share one stored head,
-    /// `1..=1024`; the block is split into microblocks of about its square root and a lookup scans
-    /// one of those, so smaller blocks are faster and larger ones smaller -- 32 / 64 / 128 / 256 /
+    /// `1..=1024`; the block is split into microblocks of 32 (one microblock below that) and a
+    /// lookup scans one restart a microblock plus one microblock, so smaller blocks are faster and
+    /// larger ones smaller -- 32 / 64 / 128 / 256 /
     /// 512 / 1024 gave 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80 bytes per key on the dictionary, and
     /// 256 is under `marisa-trie`'s 2.955 floor.
     #[new]

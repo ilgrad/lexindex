@@ -33,11 +33,16 @@ use std::cmp::Ordering;
 /// (`u64`), the block data, the block starts packed and the microblock starts packed. The two
 /// start arrays come last because their width is only known once the data is encoded, which is
 /// what lets a streamed build write every section once, in order.
-const MAGIC: &[u8; 4] = b"BDX3";
-/// `BDX1` and `BDX2` held the same keys and about the same bytes per entry, but neither split a
-/// block into microblocks, so every lookup scanned the block whole. Nothing in this version can
-/// read one, so both are refused by name.
-const LEGACY_MAGIC: [&[u8; 4]; 2] = [b"BDX1", b"BDX2"];
+const MAGIC: &[u8; 4] = b"BDX2";
+/// The formats this one replaces, with what a loader says about each: neither split a block into
+/// microblocks, so every lookup scanned the block whole, and nothing in this version can read one.
+/// A refusal names what wrote the blob, because a bare "bad magic" sends someone hunting for disk
+/// corruption when the file is intact and merely old.
+const LEGACY_MAGIC: [(&[u8; 4], &str); 1] = [(
+    b"BDX1",
+    "dict: blob written by lexindex 2.0 or 2.1, whose blocks interleaved an entry's header \
+         with its suffix; rebuild the index from its keys",
+)];
 /// The header byte that says an entry's shared-prefix and suffix lengths did not fit a nibble
 /// each, and are varints at the start of its suffix instead.
 const WIDE: u8 = 0xFF;
@@ -76,7 +81,7 @@ const LANES: usize = 32;
 /// file and reads only the per-block samples.
 pub struct DictIndex {
     block: usize,
-    /// Keys per microblock, a divisor of `block` near its square root. A block stores the first key
+    /// Keys per microblock, a divisor of `block` at or below 32. A block stores the first key
     /// of every microblock past its own as a *restart*, front-coded against the restart before it,
     /// and a lookup walks those restarts to the one microblock it must scan.
     micro: usize,
@@ -118,19 +123,20 @@ fn sample_of(key: &[u8]) -> u64 {
     fsst::word_at(key, 0).swap_bytes()
 }
 
-/// Keys per microblock for a block of `block`: the smallest divisor of `block` at or above its
-/// square root.
+/// Keys per microblock for a block of `block`: its largest divisor at or below 32, or the block
+/// itself when it has none above 1.
 ///
 /// A lookup scans one restart an earlier microblock plus one entry of its own, `block / micro +
-/// micro − 2` in all, which the square root minimises; where two microblock sizes tie on that —
-/// 16 and 32 at 512 — the larger one stores fewer restarts, so the search runs upwards. A divisor
-/// keeps every microblock of a block full but the last, which is what makes a restart's rank
-/// `j * micro` rather than a running sum. A prime block has none below itself, and then a block is
-/// one microblock and the layout is what it was before microblocks existed.
+/// micro − 2` in all, and the square root of the block minimises that count — but a restart entry
+/// costs about four ordinary ones, its suffix being coded against a key a microblock away rather
+/// than its neighbour, so the count is the wrong thing to minimise. Measured over block ∈ {128,
+/// 256, 512} × micro ∈ {8, 16, 32, 64} on real words (`local/dictbench`, 2026-09-12): 32 stores
+/// 0.08 B/key less than 16 at every block for 0–7 ns on `id`, and 64 saves 0.05 more for 35–50 ns.
+/// A divisor keeps every microblock of a block full but the last, which is what makes a restart's
+/// rank `j * micro` rather than a running sum. A block of 32 or fewer, or a prime one, is a single
+/// microblock, the layout of one level.
 fn micro_for(block: usize) -> usize {
-    let root = block.isqrt();
-    let want = root + usize::from(root * root != block);
-    (want..=block).find(|d| block % d == 0).unwrap_or(block)
+    (2..=32).rev().find(|d| block % d == 0).unwrap_or(block)
 }
 
 /// Bytes the per-block arrays take: one sample a block, the two packed block arrays and the packed
@@ -437,8 +443,9 @@ impl DictIndex {
     }
 
     /// [`build`](Self::build) with `block` keys per block, `1..=1024`. The block is what a stored
-    /// head and its arrays are shared over, and it is split into microblocks of about its square
-    /// root, which is what a lookup scans: `block / micro + micro − 2` entries, not `block − 1`. On
+    /// head and its arrays are shared over, and it is split into microblocks of 32 — one microblock
+    /// below that — of which a lookup scans one, after one restart a microblock: `block / 32 + 30`
+    /// entries from 64 up, not `block − 1`. On
     /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80
     /// bytes per key, `id` at 312–315 / 315–328 / 336–342 / 360–365 / 392–395 / 421–427 ns and
     /// `key_into` at 120–121 / 136–139 / 165–167 / 195–196 / 248–249 / 290–292. At 256 the index is
@@ -457,7 +464,7 @@ impl DictIndex {
         let mut keys: Vec<S> = items.into_iter().collect();
         keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        Self::from_sorted(&keys, block)
+        Self::from_sorted(&keys, block, micro_for(block))
     }
 
     /// Build from keys that are **already in ascending byte order** — a sorted file, a database
@@ -511,7 +518,29 @@ impl DictIndex {
             ));
         }
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        Self::from_sorted(&keys, block)
+        Self::from_sorted(&keys, block, micro_for(block))
+    }
+
+    /// [`build_with_block`](Self::build_with_block) with the microblock size chosen by the caller
+    /// instead of by `micro_for`: `1..=block`, dividing it. For the harnesses that measure the
+    /// (block, micro) grid; the shipped builders take the largest divisor at or below 32.
+    #[cfg(feature = "fuzzing")]
+    #[doc(hidden)]
+    pub fn build_with_layout<I, S>(items: I, block: usize, micro: usize) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if !(1..=MAX_BLOCK).contains(&block) {
+            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+        }
+        if micro == 0 || block % micro != 0 {
+            return Err(IndexError::Format("dict: micro must divide block"));
+        }
+        let mut keys: Vec<S> = items.into_iter().collect();
+        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
+        Self::from_sorted(&keys, block, micro)
     }
 
     /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
@@ -778,8 +807,14 @@ impl DictIndex {
             // known: their widths fall out of the encoding that has just finished.
             let block_width = offsets::width_of(&blocks, offsets::SHIFT);
             let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
-            let micro_width = offsets::width_of(&micros, offsets::SHIFT);
-            let (micro_bases, micro_deltas) = offsets::pack(&micros, offsets::SHIFT, micro_width);
+            // A block that is one microblock starts its only microblock where the block starts.
+            let micros: &[u64] = if block.div_ceil(micro) == 1 {
+                &[]
+            } else {
+                &micros
+            };
+            let micro_width = offsets::width_of(micros, offsets::SHIFT);
+            let (micro_bases, micro_deltas) = offsets::pack(micros, offsets::SHIFT, micro_width);
             w.write_all(&block_bases)?;
             w.write_all(&block_deltas)?;
             w.write_all(&micro_bases)?;
@@ -820,11 +855,15 @@ impl DictIndex {
         Ok(n)
     }
 
-    fn from_sorted<S: AsRef<str>>(keys: &[S], block: usize) -> Result<Self, IndexError> {
+    fn from_sorted<S: AsRef<str>>(
+        keys: &[S],
+        block: usize,
+        micro: usize,
+    ) -> Result<Self, IndexError> {
         let threads = (keys.len().div_ceil(block) / PARALLEL_BLOCKS)
             .min(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
             .max(1);
-        Self::from_sorted_on(keys, block, threads)
+        Self::from_sorted_on(keys, block, micro, threads)
     }
 
     /// [`from_sorted`](Self::from_sorted) with the thread count fixed, so a test can hold the
@@ -832,11 +871,11 @@ impl DictIndex {
     fn from_sorted_on<S: AsRef<str>>(
         keys: &[S],
         block: usize,
+        micro: usize,
         threads: usize,
     ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
-        let micro = micro_for(block);
         // Train on the suffixes a spread of blocks would store, in key order: a restart is coded
         // against the restart before it, every other key against its predecessor.
         let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
@@ -912,7 +951,11 @@ impl DictIndex {
             head_ends: packed_offsets(&head_ends),
             samples,
             blocks: packed_offsets(&blocks),
-            micros: packed_offsets(&micros),
+            micros: packed_offsets(if block.div_ceil(micro) == 1 {
+                &[]
+            } else {
+                &micros
+            }),
             data: SharedBytes::from_owned(data),
             table,
         })
@@ -987,6 +1030,18 @@ impl DictIndex {
         (id / self.block) * self.per + (id % self.block) / self.micro
     }
 
+    /// Where microblock `j` of block `b` starts in `data`. A block that is one microblock has no
+    /// restart run, so its only microblock starts where the block does and the blob stores no
+    /// array for it.
+    #[inline(always)]
+    fn micro_start(&self, b: usize, j: usize) -> u64 {
+        if self.per == 1 {
+            self.blocks.at(b)
+        } else {
+            self.micros.at(b * self.per + j)
+        }
+    }
+
     /// Where block `b`'s data ends in `data`.
     #[inline(always)]
     fn block_end(&self, b: usize) -> usize {
@@ -1004,7 +1059,7 @@ impl DictIndex {
     fn restart_data(&self, b: usize) -> &[u8] {
         let data: &[u8] = &self.data;
         let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
-        let (start, end) = (at(self.blocks.at(b)), at(self.micros.at(b * self.per)));
+        let (start, end) = (at(self.blocks.at(b)), at(self.micro_start(b, 0)));
         data.get(start..end).unwrap_or_default()
     }
 
@@ -1014,12 +1069,11 @@ impl DictIndex {
     fn micro_data(&self, b: usize, j: usize) -> &[u8] {
         let data: &[u8] = &self.data;
         let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
-        let m = b * self.per + j;
         let (start, end) = if j + 1 < self.micros_in(b) {
-            let (start, end) = self.micros.pair(m);
+            let (start, end) = self.micros.pair(b * self.per + j);
             (at(start), at(end))
         } else {
-            (at(self.micros.at(m)), self.block_end(b))
+            (at(self.micro_start(b, j)), self.block_end(b))
         };
         data.get(start..end).unwrap_or_default()
     }
@@ -1741,7 +1795,7 @@ impl DictIndex {
         h
     }
 
-    /// Serialise to `[magic "BDX3"][n][block][head bytes][data bytes][table bytes][payload]
+    /// Serialise to `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
     /// [offset widths][micro][check]`, then the symbol table, the head keys, the per-block arrays,
     /// the block data and the two start arrays. `check` is a hash of the preceding header bytes and
     /// `payload` a hash of everything after it, both verified on load.
@@ -1785,11 +1839,8 @@ impl DictIndex {
     /// bound what the arrays say, so a mapping loads without touching its pages.
     fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes: &[u8] = &blob;
-        if LEGACY_MAGIC.iter().any(|m| bytes.starts_with(*m)) {
-            return Err(IndexError::Format(
-                "dict: blob written by an older lexindex, whose blocks were not split into \
-                 microblocks; rebuild the index from its keys",
-            ));
+        if let Some((_, why)) = LEGACY_MAGIC.iter().find(|(m, _)| bytes.starts_with(*m)) {
+            return Err(IndexError::Format(why));
         }
         if bytes.len() < HEADER || &bytes[..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
@@ -1840,6 +1891,7 @@ impl DictIndex {
         let per = block.div_ceil(micro);
         let nm = match nb {
             0 => 0,
+            _ if per == 1 => 0,
             nb => (nb - 1) * per + (n - (nb - 1) * block).min(block).div_ceil(micro),
         };
         let arrays = arrays_len(nb, nm, head_width, block_width, micro_width, shift)
@@ -1932,7 +1984,6 @@ impl DictIndex {
         // in order, and the last of them closes where the next block opens. One sweep over both
         // says every span is forward and the last one ends the data.
         let out_of_order = IndexError::Format("dict: block table out of order");
-        let per = self.per;
         let mut prev = 0;
         for b in 0..nb {
             let start = self.block_start(b);
@@ -1941,7 +1992,7 @@ impl DictIndex {
             }
             prev = start;
             for j in 0..self.micros_in(b) {
-                let at = self.micros.at(b * per + j);
+                let at = self.micro_start(b, j);
                 if at < prev {
                     return Err(out_of_order);
                 }
@@ -2299,7 +2350,7 @@ mod tests {
             check(&idx, &keys);
             let blob = idx.to_bytes();
             assert_eq!(blob.len(), idx.serialized_len(), "block {block}");
-            assert_eq!(&blob[..4], b"BDX3");
+            assert_eq!(&blob[..4], b"BDX2");
             let back = DictIndex::from_bytes(&blob).unwrap();
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
@@ -2655,11 +2706,12 @@ mod tests {
     fn the_encoding_does_not_depend_on_how_many_threads_ran() {
         let keys = corpus();
         for block in [1usize, 3, 32] {
-            let want = DictIndex::from_sorted_on(&keys, block, 1)
+            let want = DictIndex::from_sorted_on(&keys, block, micro_for(block), 1)
                 .unwrap()
                 .to_bytes();
             for threads in [2usize, 3, 5, 8, 64] {
-                let got = DictIndex::from_sorted_on(&keys, block, threads).unwrap();
+                let got =
+                    DictIndex::from_sorted_on(&keys, block, micro_for(block), threads).unwrap();
                 assert_eq!(got.to_bytes(), want, "block {block}, {threads} threads");
                 check(&got, &keys);
             }
@@ -2810,6 +2862,7 @@ mod tests {
         assert!(head_width > 0 && block_width > 0, "a corpus with no spread");
         let nm = match nb {
             0 => 0,
+            _ if micro >= block => 0,
             nb => (nb - 1) * block.div_ceil(micro) + (n - (nb - 1) * block).div_ceil(micro),
         };
         let head_bases = HEADER + table_len + u64_at(16);
@@ -2965,6 +3018,26 @@ mod tests {
             &|b| set_delta(b, l.block_deltas, l.block_width, 1, u64::MAX),
             "block table out of order",
         );
+        edited(&|b| b.push(0), "add up");
+        // A block of two is one microblock, so this blob stores no microblock starts; the two
+        // edits to that array need a block that has one.
+        assert_eq!(
+            l.micro_bases,
+            blob.len(),
+            "no microblock starts at one microblock a block"
+        );
+        let blob = DictIndex::build_with_block(&keys, 64).unwrap().to_bytes();
+        let l = layout(&blob, 64);
+        assert!(
+            l.micro_bases < blob.len(),
+            "two microblocks a block store their starts"
+        );
+        let edited = |edit: &dyn Fn(&mut Vec<u8>), what: &str| {
+            let mut b = blob.clone();
+            edit(&mut b);
+            reframe(&mut b);
+            refused(&b, what);
+        };
         edited(
             &|b| set_base(b, l.micro_bases, 0, u64::MAX),
             "block table out of order",
@@ -2973,7 +3046,6 @@ mod tests {
             &|b| set_delta(b, l.micro_deltas, l.micro_width, 1, u64::MAX),
             "block table out of order",
         );
-        edited(&|b| b.push(0), "add up");
 
         let empty = DictIndex::build(Vec::<String>::new()).unwrap().to_bytes();
         let mut b = empty.clone();
@@ -2988,9 +3060,16 @@ mod tests {
     #[test]
     fn corrupted_block_data_never_panics() {
         let keys = corpus();
-        let blob = DictIndex::build_with_block(&keys, 8).unwrap().to_bytes();
+        let (block, micro) = (64, micro_for(64));
+        assert!(
+            micro < block && keys.len() > micro,
+            "two microblocks in the first block"
+        );
+        let blob = DictIndex::build_with_block(&keys, block)
+            .unwrap()
+            .to_bytes();
         let data_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
-        let data_at = layout(&blob, 8).data;
+        let data_at = layout(&blob, block).data;
         for fill in [0x00u8, 0x0F, 0xF0, 0xFE, 0xFF] {
             let mut b = blob.clone();
             b[data_at..data_at + data_len].fill(fill);
@@ -3014,8 +3093,8 @@ mod tests {
         let idx = DictIndex::from_bytes(&b).unwrap();
         assert_eq!(idx.key(0).as_deref(), Some(keys[0].as_str()));
         let _ = idx.key(1);
-        assert_eq!(idx.iter().count(), micro_for(8));
-        assert_eq!(idx.key(micro_for(8) as u64), None);
+        assert_eq!(idx.iter().count(), micro);
+        assert_eq!(idx.key(micro as u64), None);
     }
 
     /// The mapping's loader takes the per-block arrays as they are, so every access bounds them:

@@ -285,13 +285,14 @@ Reach for it as a token → id map on a hot path where the caller controls the q
 tokenizer over its own vocabulary, a join on a key column the index was built from — and for
 `CompactHashIndex` the moment a stranger can ask.
 
-## `DictIndex` — ordered, every key stored, 45 % below `StringIndex`
+## `DictIndex` — ordered, every key stored, 51 % below `StringIndex`
 
 ```python
 from lexindex import DictIndex
 
-# Exact string <-> rank both ways, about 3.2 B/key: the sorted keys front-coded in blocks of 32
-# with the suffixes under a symbol table trained on the index itself. Ordered, so ranges of keys
+# Exact string <-> rank both ways, about 2.9 B/key: the sorted keys front-coded in blocks of 256,
+# each cut into microblocks of 32, with the suffixes under a symbol table trained on the index
+# itself. Ordered, so ranges of keys
 # are ranges of ids, and prefix and range fall out of that -- only fuzzy needs an automaton and
 # stays with StringIndex.
 words = DictIndex(["apple", "apricot", "banana", "cherry"])
@@ -309,7 +310,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-smaller = DictIndex(words_list, block=64)   # 3.1 B/key against 3.5; a lookup scans up to block - 1 entries
+faster = DictIndex(words_list, block=64)    # 3.27 B/key against 2.93; a lookup scans 14 entries, not 30
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
@@ -318,16 +319,18 @@ words = DictIndex.load("words.bdx")        # checked like the others
 words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, table and 8 B/block read
 ```
 
-`id` finds the block by its head's first eight bytes and then compares the stored suffixes against
-the query without decoding them; `key` decodes only the entries whose shared-prefix length
-strictly increases up to the id, a handful rather than `block - 1`. On the dictionary: 3.24 bytes
-per key, `id` 307–311 ns and `key_into` 168, against 5.95 / 333–353 / 493–515 for
+`id` finds the block by its head's first eight bytes, walks the block's restarts to one microblock
+and compares the stored suffixes there against the query without decoding them; `key` climbs the
+same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
+id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
+entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.93 bytes
+per key, `id` 360–365 ns and `key_into` 195–196, against 5.95 / 344–356 / 515–525 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
-At `block=128` the same index stores **2.83 bytes per key, under `marisa-trie`'s 2.98 on this
+At `block=512` the same index stores **2.82 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is the reverse lookup: `key_into` 467 ns
-against 168 at `block=32`, and `id` 387 against 307–311.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 248–249 ns
+against 195–196 at the default, and `id` 392–395 against 360–365.
 
 ## `Overlay` — edits without a rebuild
 

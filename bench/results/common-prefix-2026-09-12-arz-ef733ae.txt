@@ -1,0 +1,41 @@
+# local/cpbench.py -- common-prefix queries head to head
+# lexindex 2.1.0 at ef733ae, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# Supersedes common-prefix-2026-09-12-arz-4fc92ac.txt: a block is now cut into microblocks, the
+# default block is 256, and the second `DictIndex` row moves from 128 to 512.
+#
+# Protocol: one process, structures built once, 20 000 queries shuffled with a fixed seed, the
+# variants alternated within each of five rounds, minimum per cell. Every structure is first held
+# to marisa's answer on 2 000 of the queries, so the timings compare the same work. Queries are a
+# real word plus one to three more letters, except every fourth, which is random letters; nearly
+# all still match, because single letters are words. Nanoseconds per query, through Python -- the
+# call overhead is in every row, and marisa-trie, dawg2 and datrie are C extensions too. Three
+# runs; the page quotes the minimum of the three.
+#
+# run 1, load 0.72 1.30 1.38
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2657            1064 
+DictIndex 512             2875            1147 
+StringIndex                730             426 
+marisa-trie               1273             967 
+dawg2                      803             814 
+datrie                     711             490 
+# run 2, load 0.65 1.25 1.34
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2638            1062 
+DictIndex 512             2911            1163 
+StringIndex                729             424 
+marisa-trie               1232             975 
+dawg2                      769             796 
+datrie                     705             480 
+# run 3, load 0.68 1.24 1.33
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2674            1065 
+DictIndex 512             2859            1155 
+StringIndex                723             423 
+marisa-trie               1270             975 
+dawg2                      793             817 
+datrie                     725             490 

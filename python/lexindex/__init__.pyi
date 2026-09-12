@@ -473,8 +473,9 @@ class DictIndex:
 
     def __new__(cls, items: Iterable[str], block: int = 256) -> DictIndex:
         """``block`` keys per block, ``1..=1024``. The block is what a stored head and its arrays
-        are shared over; it is split into microblocks of about its square root, and a lookup scans
-        one of those -- ``block / micro + micro - 2`` entries, not ``block - 1``.
+        are shared over; it is split into microblocks of 32 (one microblock below that), and a
+        lookup scans one restart a microblock plus one microblock -- ``block / 32 + 30`` entries
+        from 64 up, not ``block - 1``.
         32 / 64 / 128 / 256 / 512 / 1024 gave 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80 bytes per key
         on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there."""
 

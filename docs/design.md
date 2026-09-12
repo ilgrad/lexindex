@@ -167,7 +167,7 @@ which every loader reads into memory whichever way it is opened, so there is not
 ## `DictIndex`
 
 The sorted keys front-coded in blocks, so that an id is a rank and a rank is a place. A block of
-`block` keys (32 by default, `1..=1024`) stores its first key whole and every other as the length
+`block` keys (256 by default, `1..=1024`) stores its first key whole and every other as the length
 of the prefix it shares with its predecessor and the suffix after it — one header byte
 `lcp << 4 | len` when both are below fifteen, else a marker and two varints at the head of that
 entry's own suffix — with the suffix
@@ -177,42 +177,68 @@ parse-and-count over a sample of the index's own suffixes and stored in the blob
 kilobyte. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
 so a `BDX2` neither reads nor writes a reference FSST table — and the training is deterministic, so a
-blob is a function of its keys like every other. Beside the blocks sit three flat arrays with one
-entry per block: an eight-byte sample of the head in byte order (`u64`), and two arrays that are
-not one word an entry — where its head ends, and where its entries start. Both only ever grow by a
-block's worth at a time, so each keeps one `u64` base every 64 blocks and a delta of the width the
-corpus asks for, ten and thirteen bits on the dictionary at the default block. That is 20 bytes a
-block down to 11.1, and it is also why neither array has a four-gigabyte ceiling: the base is a
-full word. A head or a block's data is read as the span between two entries, and neighbours share
-a base and the word their deltas are cut from, so the pair costs what one entry costs.
+blob is a function of its keys like every other.
 
-**Inside a block the headers come first and the suffixes after**, rather than each header before
+**A block is not what a lookup scans.** It is cut into microblocks of `micro` keys — the largest
+divisor of `block` at or below 32, so 32 at the default and at every power of two from 64 up — and
+the first key of every microblock after the block's own head is a **restart**: front-coded against
+the restart before it, not against the key before it. A block's data is its restart run, one header byte a restart and then
+their suffixes, followed by each microblock's run in the same shape. A lookup walks the restarts to
+the one microblock that can hold the probe and scans only that — `block / micro + micro − 2`
+entries, 38 at the default where one level scanned 255. The square root of the block would minimise
+that count, and 16 was the first rule; but a restart entry costs about four ordinary ones, its suffix
+being coded against a key a microblock away, so 32 measured level with 16 on `id` at every block and
+0.08 B/key smaller, and 64 cost 35–50 ns for 0.05 more. What the block sets is how many keys share a stored head, a sample and two offsets, which is the per-key
+metadata; it is now free to grow without the scan growing with it, and that is the whole point,
+because the two were one number before. A divisor keeps every microblock of a block full but the
+last, which is what makes a restart's rank `j · micro` rather than a running sum. A block of 32 or
+fewer, or a prime one, is a single microblock — the layout of one level, and such a blob stores no
+microblock starts, since the one microblock starts where the block does.
+
+Beside the blocks sit four flat arrays: an eight-byte sample of each head in byte order (`u64`),
+where each head ends, where each block's restart run starts, and where each microblock's entries
+start. The last three are not one word an entry. Each only ever grows, so each keeps one `u64` base
+every 64 entries and a delta of the width the corpus asks for — ten, sixteen and twelve bits on the
+dictionary at the default block. That is 11.5 bytes a block and 1.6 a microblock, **0.147 bytes a
+key and 5 % of the blob**, where the block the default used to be spent 0.348 and 11 %; and it is
+also why none of the three has a four-gigabyte ceiling: the base is a full word. A head, a restart run or a microblock is read as the span between two
+entries, and neighbours share a base and the word their deltas are cut from, so the pair costs what
+one entry costs.
+
+**Inside a run the headers come first and the suffixes after**, rather than each header before
 its own suffix. The headers are one byte an entry, so the entry count says where they end and the
 split costs nothing to store: the same bytes in a different order, and a blob of exactly the same
 size. It is worth the reordering because a scan rules most entries out by the shared-prefix length
 alone, which lives in the header — 127 headers are two cache lines here and were spread over the
-seven of a 128-key block before. Measured on the dictionary, `id` fell 9 % at 128 keys a block and
-15 % at 256, with `key_into` unchanged and the file byte for byte the same length.
+seven of a 128-key block before. Measured on the dictionary when the split landed, `id` fell 9 % at
+128 keys a block and 15 % at 256, with `key_into` unchanged and the file byte for byte the same
+length.
 
 `id` is a binary search over the samples — a flat array, eight bytes a block — then over the
-heads of the few blocks whose sample equals the probe's, then one block scanned without decoding
-anything: an entry's stored suffix is compared against the probe symbol by symbol, eight bytes at
-a time, and the shared-prefix length alone decides most entries — shorter than what the probe has
-matched so far means the entry is past the probe, longer means it is still below with nothing new
-matched. `key(id)` is the head of block `id / block` plus the entries between it and the id whose
-shared-prefix length strictly increases: an entry whose prefix is at least a later entry's writes
-nothing that survives, so a monotonic stack over the block's headers finds the few that do — 2.5
-deep on average, 12 at the deepest measured — and only those are decoded, one eight-byte store per
-code, into a string the caller can keep (`key_into`). Past a staircase 32 deep the walk stops
-tracking it and decodes every entry, which is slower and not wrong. On the dictionary at
-`block = 32`: **3.24 B/key** (`StringIndex` 5.95), `id` 307–311 ns against 333–353, `key_into`
-168 against `key`'s 493–515; 16 and 64 per block give 3.79 and 2.97 B/key at 291–297 and
-332–333 ns, and 128 gives 2.83 at 387–388. The serialised blob is
-`[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload][offset widths][check]`,
-then the table, the heads, the packed head ends, the samples, the data and the packed block
-starts; the loader checks every length, both checksums, the
-table and the arrays' order before anything is trusted, and the block data — bounded on every
-read rather than validated up front — is what the fuzz target queries after loading. `load_mmap` borrows
+heads of the few blocks whose sample equals the probe's, then the block's restarts and one of its
+microblocks, neither decoding anything: an entry's stored suffix is compared against the probe
+symbol by symbol, eight bytes at a time, and the shared-prefix length alone decides most entries —
+shorter than what the probe has matched so far means the entry is past the probe, longer means it is
+still below with nothing new matched. A restart run and a microblock are the same walk under the
+same rule, which is why one function scans both. `key(id)` is two climbs from the head of block
+`id / block`: over the restarts to the microblock the rank falls in, then over that microblock's
+entries to the rank. A climb takes the entries whose shared-prefix length strictly increases — an
+entry whose prefix is at least a later entry's writes nothing that survives, so a monotonic stack
+over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
+a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
+decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
+**2.93 B/key** (`StringIndex` 5.95), `id` 360–365 ns against 344–356, `key_into` 195–196 against
+`key`'s 281–285; 128 and 512 give 3.00 and 2.82 B/key at 336–342 and 392–395 ns, and 1024 gives 2.80
+at 421–427. Against one level at the same size the reverse lookup halves — 246 ns for 2.82 B/key
+where 2.83 cost 482, 291 for 2.80 where 2.75 cost 889 — and `id` does not move.
+
+The serialised blob is `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
+[offset widths][micro][check]`, then the table, the heads, the packed head ends, the samples, the
+data, the packed block starts and the packed microblock starts; the loader checks every length, both
+checksums, the table and the arrays' order before anything is trusted, and the block data — bounded
+on every read rather than validated up front — is what the fuzz target queries after loading. The
+two start arrays come last because their widths are known only once the data is encoded, which is
+what lets a streamed build write every section once and in order. `load_mmap` borrows
 every section but the per-block samples, which two binary searches read on every lookup (below);
 there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them
@@ -419,7 +445,7 @@ or — never — read it wrong.
 | `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
 | `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
 | `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
-| `BDX2` | 2.2 | `DictIndex` | `BDX1` (2.0) **refused by name** — same bytes, interleaved |
+| `BDX2` | 2.2 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 

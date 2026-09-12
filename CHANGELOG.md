@@ -11,11 +11,11 @@ All notable changes to this project are documented here. The format follows
 - **`DictIndex` splits every block into microblocks, and the default block is 256.** A block was
   both the unit a head and its arrays are shared over *and* the unit a lookup scans, so the only way
   to store less was to scan more: 2.83 bytes a key cost 482 ns of `key_into`, and 2.75 cost 889. A
-  block is now split into microblocks of `micro` keys — the smallest divisor of `block` at or above
-  its square root, 16 at the default — and the first key of each microblock past the block's own
-  head is a **restart**, front-coded against the restart before it. A block's data is its restart
+  block is now split into microblocks of 32 keys — a block of 32 or fewer is one microblock — and
+  the first key of each microblock past the block's own head is a **restart**, front-coded against
+  the restart before it. A block's data is its restart
   run followed by each microblock's run, and a lookup walks the restarts to the one microblock that
-  can hold the probe: `block / micro + micro − 2` entries scanned, 30 at the default where a block
+  can hold the probe: `block / micro + micro − 2` entries scanned, 38 at the default where a block
   of 256 scanned 255. **At the same size `key_into` halves and `id` does not move** — 2.82 B/key at
   512 a block answers `key_into` in 246 ns and `id` in 399, against 2.83 B/key at 128 in 482 and 394
   — and the size floor moves with it: 2.80 at 1024 a block costs 291 ns where 2.75 cost 889. The
@@ -26,9 +26,10 @@ All notable changes to this project are documented here. The format follows
   **The default block moves 32 → 256**, in Rust and in Python, which takes the default index from
   3.24 to **2.93 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
   this corpus** — for `id` 360–365 ns against 307–311 and `key_into` 195–196 against 168.
-  **The format is `BDX3`**: the header carries the microblock size and a fourth offset width, the
-  blob gains a packed start per microblock, and `BDX1` and `BDX2` blobs are both refused by name
-  with a message that says the fix is to rebuild. A streamed build now holds
+  **The format is `BDX2`**: the header carries the microblock size and a fourth offset width, the
+  blob gains a packed start per microblock where a block has more than one, and a `BDX1` blob is
+  refused by name with a message that
+  says the fix is to rebuild. A streamed build now holds
   `(mean head length + 20) / block + 8 / micro` bytes a key rather than
   `(mean head length + 20) / block`, which at the new default is 0.61 against the old default's 1.0.
 
