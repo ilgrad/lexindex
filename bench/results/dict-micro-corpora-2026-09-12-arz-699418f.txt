@@ -1,0 +1,244 @@
+# local/dictbench -- does the best microblock move with the corpus? (plan item 35)
+# lexindex 2.1.0 at 699418f (clean tree), arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, 2026-09-12.
+# Block 256 throughout, micro in {8, 16, 32, 64}, four corpora from 9.3 to 52.4 bytes a key.
+# Each corpus runs the ladder twice in opposite orders in one process; `StringIndex` is the
+# control. The `urls` pass drops the prefix lane: every key there shares a scheme, so even a
+# 24-byte prefix enumerates a large part of the index (76 ms a query) and measures the corpus.
+
+# words-full [256/8 256/16 256/32 256/64], load 0.83 1.69 1.38
+local/corpora/words-full.txt: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 187 ms
+DictIndex k=256/8    3.068 B/key  build 38 ms
+  id member   dict  363.8  string  343.3
+  id stranger dict  265.9  string  236.3
+  key_into    dict  213.6  key dict  295.9  string  493.9
+  lower_bound dict  267.8
+  prefix      dict    32757
+DictIndex k=256/16   2.935 B/key  build 31 ms
+  id member   dict  354.3  string  343.9
+  id stranger dict  259.3  string  240.5
+  key_into    dict  191.6  key dict  276.7  string  499.5
+  lower_bound dict  261.3
+  prefix      dict    31384
+DictIndex k=256/32   2.852 B/key  build 32 ms
+  id member   dict  369.5  string  344.7
+  id stranger dict  270.0  string  237.0
+  key_into    dict  217.1  key dict  299.0  string  492.1
+  lower_bound dict  269.6
+  prefix      dict    30527
+DictIndex k=256/64   2.804 B/key  build 28 ms
+  id member   dict  390.2  string  342.6
+  id stranger dict  295.0  string  238.6
+  key_into    dict  302.0  key dict  380.0  string  496.6
+  lower_bound dict  293.9
+  prefix      dict    30269
+# words-full [256/64 256/32 256/16 256/8], load 0.95 1.58 1.37
+local/corpora/words-full.txt: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   5.95 B/key  build 188 ms
+DictIndex k=256/64   2.804 B/key  build 35 ms
+  id member   dict  395.3  string  347.6
+  id stranger dict  297.6  string  242.2
+  key_into    dict  308.2  key dict  386.5  string  509.0
+  lower_bound dict  297.8
+  prefix      dict    30317
+DictIndex k=256/32   2.852 B/key  build 37 ms
+  id member   dict  305.6  string  271.4
+  id stranger dict  250.1  string  216.9
+  key_into    dict  202.2  key dict  280.4  string  455.7
+  lower_bound dict  248.7
+  prefix      dict    28625
+DictIndex k=256/16   2.935 B/key  build 27 ms
+  id member   dict  282.7  string  267.0
+  id stranger dict  240.0  string  216.8
+  key_into    dict  177.2  key dict  258.5  string  458.5
+  lower_bound dict  243.4
+  prefix      dict    30604
+DictIndex k=256/8    3.068 B/key  build 27 ms
+  id member   dict  292.1  string  270.1
+  id stranger dict  257.2  string  220.5
+  key_into    dict  203.9  key dict  287.4  string  465.8
+  lower_bound dict  257.1
+  prefix      dict    32234
+# titles-en-1000000 [256/8 256/16 256/32 256/64], load 0.74 1.45 1.33
+local/corpora/titles-en-1000000.txt: 1000000 keys, mean 21.0 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   17.28 B/key  build 1036 ms
+DictIndex k=256/8    9.890 B/key  build 75 ms
+  id member   dict  444.8  string  532.2
+  id stranger dict  344.4  string  416.4
+  key_into    dict  295.3  key dict  389.5  string  904.3
+  lower_bound dict  358.4
+  prefix      dict   113850
+DictIndex k=256/16   9.696 B/key  build 73 ms
+  id member   dict  452.2  string  589.8
+  id stranger dict  359.9  string  453.6
+  key_into    dict  289.4  key dict  403.7  string  998.8
+  lower_bound dict  359.0
+  prefix      dict   115713
+DictIndex k=256/32   9.578 B/key  build 80 ms
+  id member   dict  545.8  string  713.3
+  id stranger dict  411.9  string  577.2
+  key_into    dict  362.8  key dict  480.9  string 1149.9
+  lower_bound dict  410.4
+  prefix      dict   118289
+DictIndex k=256/64   9.508 B/key  build 82 ms
+  id member   dict  583.9  string  704.7
+  id stranger dict  444.0  string  574.5
+  key_into    dict  455.9  key dict  581.1  string 1150.5
+  lower_bound dict  447.3
+  prefix      dict   114865
+# titles-en-1000000 [256/64 256/32 256/16 256/8], load 0.93 1.35 1.32
+local/corpora/titles-en-1000000.txt: 1000000 keys, mean 21.0 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   17.28 B/key  build 1108 ms
+DictIndex k=256/64   9.508 B/key  build 85 ms
+  id member   dict  574.9  string  697.9
+  id stranger dict  452.3  string  576.4
+  key_into    dict  461.5  key dict  578.5  string 1149.1
+  lower_bound dict  455.1
+  prefix      dict   117008
+DictIndex k=256/32   9.578 B/key  build 80 ms
+  id member   dict  533.6  string  699.1
+  id stranger dict  411.5  string  568.1
+  key_into    dict  359.5  key dict  480.9  string 1144.9
+  lower_bound dict  412.8
+  prefix      dict   117454
+DictIndex k=256/16   9.696 B/key  build 80 ms
+  id member   dict  533.3  string  708.3
+  id stranger dict  408.6  string  578.6
+  key_into    dict  340.6  key dict  463.4  string 1151.1
+  lower_bound dict  406.5
+  prefix      dict   117662
+DictIndex k=256/8    9.890 B/key  build 79 ms
+  id member   dict  543.4  string  716.2
+  id stranger dict  421.6  string  570.6
+  key_into    dict  365.4  key dict  487.9  string 1165.0
+  lower_bound dict  420.1
+  prefix      dict   121276
+# uuid-1000000 [256/8 256/16 256/32 256/64], load 0.91 1.31 1.32
+local/corpora/uuid-1000000.txt: 1000000 keys, mean 36.0 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   37.11 B/key  build 2707 ms
+DictIndex k=256/8    20.662 B/key  build 166 ms
+  id member   dict  587.0  string  724.8
+  id stranger dict  452.7  string  595.5
+  key_into    dict  392.8  key dict  513.6  string 1365.7
+  lower_bound dict  458.9
+  prefix      dict    16674
+DictIndex k=256/16   20.548 B/key  build 156 ms
+  id member   dict  545.3  string  720.6
+  id stranger dict  424.8  string  604.0
+  key_into    dict  349.3  key dict  475.4  string 1359.0
+  lower_bound dict  426.5
+  prefix      dict    15792
+DictIndex k=256/32   20.460 B/key  build 150 ms
+  id member   dict  583.5  string  726.3
+  id stranger dict  463.3  string  605.9
+  key_into    dict  398.4  key dict  512.9  string 1371.8
+  lower_bound dict  460.4
+  prefix      dict    15710
+DictIndex k=256/64   20.418 B/key  build 157 ms
+  id member   dict  670.4  string  721.0
+  id stranger dict  535.4  string  603.7
+  key_into    dict  525.7  key dict  652.3  string 1370.5
+  lower_bound dict  537.5
+  prefix      dict    16117
+# uuid-1000000 [256/64 256/32 256/16 256/8], load 0.94 1.26 1.31
+local/corpora/uuid-1000000.txt: 1000000 keys, mean 36.0 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   37.11 B/key  build 2670 ms
+DictIndex k=256/64   20.418 B/key  build 179 ms
+  id member   dict  673.0  string  705.1
+  id stranger dict  533.4  string  581.7
+  key_into    dict  526.1  key dict  659.7  string 1344.8
+  lower_bound dict  534.1
+  prefix      dict    16513
+DictIndex k=256/32   20.460 B/key  build 158 ms
+  id member   dict  586.4  string  700.6
+  id stranger dict  453.2  string  579.0
+  key_into    dict  401.3  key dict  517.4  string 1339.0
+  lower_bound dict  457.1
+  prefix      dict    15993
+DictIndex k=256/16   20.548 B/key  build 152 ms
+  id member   dict  552.7  string  705.6
+  id stranger dict  433.8  string  585.2
+  key_into    dict  348.7  key dict  462.2  string 1337.7
+  lower_bound dict  429.4
+  prefix      dict    15943
+DictIndex k=256/8    20.662 B/key  build 161 ms
+  id member   dict  567.9  string  706.9
+  id stranger dict  450.8  string  581.0
+  key_into    dict  378.6  key dict  489.5  string 1326.9
+  lower_bound dict  451.9
+  prefix      dict    16665
+# urls-1000000 [256/8 256/16 256/32 256/64], load 0.97 1.28 1.32
+local/corpora/urls-1000000.txt: 1000000 keys, mean 52.4 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 three-byte prefixes
+StringIndex   16.88 B/key  build 1299 ms
+DictIndex k=256/8    11.744 B/key  build 104 ms
+
+# urls-1000000 [256/8 256/16 256/32 256/64], load 0.92 1.41 1.46
+local/corpora/urls-1000000.txt: 1000000 keys, mean 52.4 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 0 prefixes of 24 bytes
+StringIndex   16.88 B/key  build 1256 ms
+DictIndex k=256/8    11.744 B/key  build 99 ms
+  id member   dict  780.1  string  868.9
+  id stranger dict  654.5  string  750.3
+  key_into    dict  400.1  key dict  515.4  string 1863.3
+  lower_bound dict  650.0
+  prefix      dict      121
+DictIndex k=256/16   11.515 B/key  build 86 ms
+  id member   dict  735.0  string  860.0
+  id stranger dict  613.7  string  726.0
+  key_into    dict  370.8  key dict  485.4  string 1867.6
+  lower_bound dict  618.3
+  prefix      dict      140
+DictIndex k=256/32   11.414 B/key  build 85 ms
+  id member   dict  779.2  string  886.3
+  id stranger dict  654.4  string  769.9
+  key_into    dict  405.4  key dict  531.1  string 1869.6
+  lower_bound dict  654.4
+  prefix      dict      110
+DictIndex k=256/64   11.346 B/key  build 89 ms
+  id member   dict  834.7  string  857.9
+  id stranger dict  717.5  string  732.0
+  key_into    dict  525.1  key dict  653.2  string 1871.7
+  lower_bound dict  714.6
+  prefix      dict      130
+# urls-1000000 [256/64 256/32 256/16 256/8], load 0.88 1.32 1.43
+local/corpora/urls-1000000.txt: 1000000 keys, mean 52.4 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 0 prefixes of 24 bytes
+StringIndex   16.88 B/key  build 1264 ms
+DictIndex k=256/64   11.346 B/key  build 94 ms
+  id member   dict  833.1  string  847.5
+  id stranger dict  706.7  string  737.8
+  key_into    dict  545.9  key dict  645.5  string 1887.1
+  lower_bound dict  709.5
+  prefix      dict      120
+DictIndex k=256/32   11.414 B/key  build 86 ms
+  id member   dict  758.4  string  870.9
+  id stranger dict  656.3  string  751.6
+  key_into    dict  423.4  key dict  547.1  string 1882.6
+  lower_bound dict  656.1
+  prefix      dict      110
+DictIndex k=256/16   11.515 B/key  build 90 ms
+  id member   dict  738.7  string  860.8
+  id stranger dict  637.6  string  750.1
+  key_into    dict  386.9  key dict  500.0  string 1883.6
+  lower_bound dict  632.6
+  prefix      dict      140
+DictIndex k=256/8    11.744 B/key  build 89 ms
+  id member   dict  757.4  string  861.8
+  id stranger dict  651.2  string  731.0
+  key_into    dict  413.4  key dict  539.2  string 1883.1
+  lower_bound dict  651.6
+  prefix      dict      110
+MICRO35URLS DONE 18:55
+
+# bytes bought per nanosecond paid, deltas taken inside a round (local/micro35b.py):
+# corpus          key B          step   ΔB/key   Δid ns   Δki ns  mB/ns id  mB/ns id+ki
+# words-full        9.3  256/8→256/16    0.133     -9.5    -24.4       inf          inf
+# words-full        9.3 256/16→256/32    0.083     19.1     25.2       4.4          1.9
+# words-full        9.3 256/32→256/64    0.048     55.2     95.5       0.9          0.3
+# titles-en-1000000   21.0  256/8→256/16    0.194     -1.4    -15.3       inf          inf
+# titles-en-1000000   21.0 256/16→256/32    0.118     47.0     46.2       2.5          1.3
+# titles-en-1000000   21.0 256/32→256/64    0.070     39.7     97.5       1.8          0.5
+# uuid-1000000     36.0  256/8→256/16    0.114    -28.4    -36.7       inf          inf
+# uuid-1000000     36.0 256/16→256/32    0.088     35.9     50.8       2.4          1.0
+# uuid-1000000     36.0 256/32→256/64    0.042     86.8    126.1       0.5          0.2
+# urls-1000000     52.4  256/8→256/16    0.229    -31.9    -27.9       inf          inf
+# urls-1000000     52.4 256/16→256/32    0.101     31.9     35.5       3.2          1.5
+# urls-1000000     52.4 256/32→256/64    0.068     65.1    121.1       1.0          0.4

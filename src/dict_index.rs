@@ -132,6 +132,10 @@ fn sample_of(key: &[u8]) -> u64 {
 /// than its neighbour, so the count is the wrong thing to minimise. Measured over block ∈ {128,
 /// 256, 512} × micro ∈ {8, 16, 32, 64} on real words (`local/dictbench`, 2026-09-12): 32 stores
 /// 0.08 B/key less than 16 at every block for 0–7 ns on `id`, and 64 saves 0.05 more for 35–50 ns.
+/// Confirmed over four corpora from 9 to 52 bytes a key: 8 is smaller *and* slower than 16
+/// nowhere — it is dominated everywhere — 16 → 32 buys bytes at 1.0–1.9 mB/ns against `id` and
+/// `key_into` together, the rate at which the default block itself was chosen, and 32 → 64 at
+/// 0.2–0.5, which is why the cap is 32 and not a function of the keys.
 /// A divisor keeps every microblock of a block full but the last, which is what makes a restart's
 /// rank `j * micro` rather than a running sum. A block of 32 or fewer, or a prime one, is a single
 /// microblock, the layout of one level.
