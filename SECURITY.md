@@ -88,7 +88,7 @@ map (`ClosedHashIndex` is the perfect hash and nothing else), plus `load_mmap_un
 bounds-checked before it runs. `unsafe_op_in_unsafe_fn` is denied, so every one names its own
 justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
 target, and libFuzzer over the six parsers a target can hold to a return value: `BCH7`, `BMP7`,
-`BCL1`, `BDX1` — loaded and then queried, since its block data is bounds-checked on the read
+`BCL1`, `BDX2` — loaded and then queried, since its block data is bounds-checked on the read
 rather than at load — `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run
 starting from the
 corpus the last one left. `inspect` has a target of its own, since it reads a header of *any*

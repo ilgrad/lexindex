@@ -321,13 +321,13 @@ words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; heade
 `id` finds the block by its head's first eight bytes and then compares the stored suffixes against
 the query without decoding them; `key` decodes only the entries whose shared-prefix length
 strictly increases up to the id, a handful rather than `block - 1`. On the dictionary: 3.52 bytes
-per key, `id` 314–337 ns and `key_into` 173–176, against 5.95 / 346–363 / 504–521 for
+per key, `id` 307–310 ns and `key_into` 165–167, against 5.95 / 336–343 / 496–508 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
 At `block=128` the same index stores **2.89 bytes per key, under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is the reverse lookup: `key_into` 462 ns
-against 175 at `block=32`, and `id` 437 against 314–337.
+it has no `lower_bound` to build a range on. The price is the reverse lookup: `key_into` 442 ns
+against 165 at `block=32`, and `id` 384 against 307–310.
 
 ## `Overlay` — edits without a rebuild
 

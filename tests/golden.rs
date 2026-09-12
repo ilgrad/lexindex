@@ -397,11 +397,15 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::parse_perfect_frame(&closed, true));
 
     // The dictionary blob, through its own target -- loaded and queried -- and refused by the
-    // framing parsers, as their blobs are by it.
-    let dict = std::fs::read(data("golden-2.0.0-dict.bdx")).unwrap();
+    // framing parsers, as their blobs are by it. The `BDX1` file stays a seed as well: it is
+    // refused at the magic now, which is a path a mutation can still reach.
+    let dict = std::fs::read(data("golden-2.2.0-dict.bdx")).unwrap();
     assert!(lexindex::fuzzing::load_dict(&dict));
     assert!(!lexindex::fuzzing::load_dict(&closed));
     assert!(!lexindex::fuzzing::parse_closed_frame(&dict));
+    assert!(!lexindex::fuzzing::load_dict(
+        &std::fs::read(data("golden-2.0.0-dict.bdx")).unwrap()
+    ));
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -597,6 +601,24 @@ fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
 /// trained deterministically and the layout has no seed, so a fresh build over the golden keys
 /// is the file. It loads, answers every key with its rank and every stranger with `None`, and
 /// gives every key back in order.
+/// `BDX1` held the same bytes in a different order inside each block: an entry's header sat
+/// immediately before its suffix, where `BDX2` puts every header first. Nothing can read one, and
+/// the refusal has to say which release drew the line and that the fix is to rebuild -- the same
+/// promise the hash blobs are held to above.
+#[test]
+fn a_bdx1_dictionary_blob_is_refused_by_name() {
+    let path = data("golden-2.0.0-dict.bdx");
+    let stored = std::fs::read(&path).unwrap();
+    assert_eq!(&stored[..4], b"BDX1", "the refused fixture was regenerated");
+    let err = match lexindex::DictIndex::load(&path) {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("a BDX1 blob was accepted"),
+    };
+    assert!(err.contains("lexindex < 2.2"), "{err}");
+    assert!(err.contains("rebuild"), "{err}");
+    assert!(lexindex::DictIndex::from_bytes(&stored).is_err());
+}
+
 #[test]
 fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     let keys = keys();
@@ -604,12 +626,12 @@ fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     sorted.sort();
     sorted.dedup();
     let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
-    let path = data("golden-2.0.0-dict.bdx");
+    let path = data("golden-2.2.0-dict.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(&fresh[..4], b"BDX1");
+    assert_eq!(&fresh[..4], b"BDX2");
     assert!(
         stored == fresh,
-        "golden-2.0.0-dict.bdx changed; regenerate {}",
+        "golden-2.2.0-dict.bdx changed; regenerate {}",
         path.display()
     );
     let idx = lexindex::DictIndex::load(&path).unwrap();

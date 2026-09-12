@@ -197,9 +197,10 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
 - **`StringIndex` is the FST alone.** `id → key` is a rank-walk over the automaton, so the blob is
   `[magic "BIX4"][fst]` and there is no reverse map to store or keep in sync.
 - **`DictIndex` is front coding under a symbol table.** Blocks of 32 sorted keys, the first whole and
-  the rest as (shared-prefix length, suffix), the suffixes under a 255-symbol FSST-style table (its
-  own format) trained on the index's own suffixes; `id` compares the stored suffixes against the
-  probe without decoding them.
+  the rest as (shared-prefix length, suffix) — one byte a header, all of them before the block's
+  suffixes — the suffixes under a 255-symbol FSST-style table (its own format) trained on the
+  index's own suffixes; `id` rules most entries out by the header alone and compares the rest
+  against the probe without decoding them.
 - **`CompactHashIndex` stores no keys.** A minimal perfect hash plus one `fingerprint_bits`-wide
   fingerprint per slot from a second, uncorrelated hash — a design rate of about `2^-bits`, not a
   defence against chosen queries. Its build streams 16 bytes per key, never the strings: 302 MB peak

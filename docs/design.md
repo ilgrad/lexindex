@@ -169,16 +169,25 @@ which every loader reads into memory whichever way it is opened, so there is not
 The sorted keys front-coded in blocks, so that an id is a rank and a rank is a place. A block of
 `block` keys (32 by default, `1..=1024`) stores its first key whole and every other as the length
 of the prefix it shares with its predecessor and the suffix after it — one header byte
-`lcp << 4 | len` when both are below fifteen, else a marker and two varints — with the suffix
+`lcp << 4 | len` when both are below fifteen, else a marker and two varints at the head of that
+entry's own suffix — with the suffix
 under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB 2020): up to 255 symbols of one
 to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
 parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
 kilobyte. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
-so a `BDX1` neither reads nor writes a reference FSST table — and the training is deterministic, so a
+so a `BDX2` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other. Beside the blocks sit three flat arrays with one
 entry per block: where its head ends (`u32`), an eight-byte sample of the head in byte order
 (`u64`), and where its entries start (`u64`, so the block data may pass 4 GiB).
+
+**Inside a block the headers come first and the suffixes after**, rather than each header before
+its own suffix. The headers are one byte an entry, so the entry count says where they end and the
+split costs nothing to store: the same bytes in a different order, and a blob of exactly the same
+size. It is worth the reordering because a scan rules most entries out by the shared-prefix length
+alone, which lives in the header — 127 headers are two cache lines here and were spread over the
+seven of a 128-key block before. Measured on the dictionary, `id` fell 9 % at 128 keys a block and
+15 % at 256, with `key_into` unchanged and the file byte for byte the same length.
 
 `id` is a binary search over the samples — a flat array, eight bytes a block — then over the
 heads of the few blocks whose sample equals the probe's, then one block scanned without decoding
@@ -191,10 +200,10 @@ nothing that survives, so a monotonic stack over the block's headers finds the f
 deep on average, 12 at the deepest measured — and only those are decoded, one eight-byte store per
 code, into a string the caller can keep (`key_into`). Past a staircase 32 deep the walk stops
 tracking it and decodes every entry, which is slower and not wrong. On the dictionary at
-`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 314–337 ns against 346–363, `key_into`
-173–176 against `key`'s 504–521; 16 and 64 per block give 4.35 and 3.10 B/key at 302–311 and
-354–358 ns, and 128 gives 2.89 at 437–441. The serialised blob is
-`[magic "BDX1"][n][block][head bytes][data bytes][table bytes][payload][check]`, then the table,
+`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 307–310 ns against 336–343, `key_into`
+165–167 against `key`'s 496–508; 16 and 64 per block give 4.35 and 3.10 B/key at 287–288 and
+330–337 ns, and 128 gives 2.89 at 384–386. The serialised blob is
+`[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload][check]`, then the table,
 the heads, the three arrays and the data; the loader checks every length, both checksums, the
 table and the arrays' order before anything is trusted, and the block data — bounded on every
 read rather than validated up front — is what the fuzz target queries after loading. `load_mmap` borrows
@@ -404,7 +413,7 @@ or — never — read it wrong.
 | `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
 | `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
 | `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
-| `BDX1` | 2.0 | `DictIndex` | new in 2.0 |
+| `BDX2` | 2.2 | `DictIndex` | `BDX1` (2.0) **refused by name** — same bytes, interleaved |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 

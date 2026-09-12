@@ -4,8 +4,11 @@
 //! The sorted keys are cut into blocks of `block` keys (32 by default). A block stores its first
 //! key whole and every other as the length of the prefix it shares with its predecessor and the
 //! suffix after it, the suffix under a static symbol table ([`fsst`]) trained on the index's own
-//! suffixes. Beside the blocks sit three flat arrays with one entry per block: where its head key
-//! ends, an eight-byte sample of that head, and where its entries start.
+//! suffixes. Those two live apart inside the block: one header byte an entry first, then every
+//! suffix end to end. A scan rules most entries out by the header alone, and reading 127 of them
+//! is two cache lines where the interleaved form spread the same bytes over seven. Beside the
+//! blocks sit three flat arrays with one entry per block: where its head key ends, an eight-byte
+//! sample of that head, and where its entries start.
 //!
 //! `id` is a binary search over the samples, then over the heads of the few blocks whose sample
 //! equals the probe's, then one block scanned without decoding anything: an entry's stored suffix
@@ -24,8 +27,15 @@ use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][check u32]`, then
 /// the symbol table, the head keys end to end, the head ends (`u32` each), the head samples
-/// (`u64`), the block starts (`u64`), and the block data.
-const MAGIC: &[u8; 4] = b"BDX1";
+/// (`u64`), the block starts (`u64`), and the block data — each block one byte a header, then
+/// that block's suffixes.
+const MAGIC: &[u8; 4] = b"BDX2";
+/// `BDX1` held the same sections and the same bytes per entry, but wrote each entry's header
+/// immediately before its suffix. Nothing in this version can read one, so it is refused by name.
+const LEGACY_MAGIC: &[u8; 4] = b"BDX1";
+/// The header byte that says an entry's shared-prefix and suffix lengths did not fit a nibble
+/// each, and are varints at the start of its suffix instead.
+const WIDE: u8 = 0xFF;
 const HEADER: usize = 48;
 const CHECKED: usize = 44; // header bytes the trailing check covers
 const PER_BLOCK: usize = 4 + 8 + 8; // bytes the three arrays hold per block
@@ -160,28 +170,83 @@ fn get_varint(mut data: &[u8]) -> Option<(usize, &[u8])> {
     }
 }
 
-/// An entry's header: one byte `lcp << 4 | len` when both are below 15, else `0xFF` and the two
-/// as varints.
-fn put_header(out: &mut Vec<u8>, lcp: usize, len: usize) {
+/// The varint at `*at` in `data`, advancing `*at` past it.
+#[inline(always)]
+fn varint_at(data: &[u8], at: &mut usize) -> Option<usize> {
+    let (v, rest) = get_varint(data.get(*at..)?)?;
+    *at = data.len() - rest.len();
+    Some(v)
+}
+
+/// An entry's header: one byte `lcp << 4 | len` in the header stream when both are below 15, else
+/// [`WIDE`] there and the two as varints at the start of the entry's own suffix. The same bytes
+/// either way — the wide pair only moves — and a header stream of exactly one byte an entry is
+/// what lets a block carry two streams without storing where they meet.
+fn put_header(hdrs: &mut Vec<u8>, sfx: &mut Vec<u8>, lcp: usize, len: usize) {
     if lcp < 15 && len < 15 {
-        out.push(((lcp << 4) | len) as u8);
+        hdrs.push(((lcp << 4) | len) as u8);
     } else {
-        out.push(0xFF);
-        put_varint(out, lcp);
-        put_varint(out, len);
+        hdrs.push(WIDE);
+        put_varint(sfx, lcp);
+        put_varint(sfx, len);
     }
 }
 
-/// The header at the start of `data` as (lcp, len, the bytes after it); `None` if it is cut short.
-#[inline(always)]
-fn get_header(data: &[u8]) -> Option<(usize, usize, &[u8])> {
-    let (&b, rest) = data.split_first()?;
-    if b != 0xFF {
-        return Some(((b >> 4) as usize, (b & 0xF) as usize, rest));
+/// One block's two streams, read in order. The headers are one byte an entry, so the entry count
+/// says where they end and the suffixes begin: the split is derived, not stored.
+///
+/// Splitting them is what makes a scan cheap. A scan rules most entries out by their shared-prefix
+/// length alone, which lives in the header — interleaved, those 127 bytes were spread over the
+/// seven cache lines of a 128-key block, and here they are two.
+struct Entries<'a> {
+    hdrs: &'a [u8],
+    sfx: &'a [u8],
+    at: usize,
+    off: usize,
+}
+
+impl<'a> Entries<'a> {
+    #[inline]
+    fn of(data: &'a [u8], count: usize) -> Self {
+        let (hdrs, sfx) = data.split_at(count.saturating_sub(1).min(data.len()));
+        Self {
+            hdrs,
+            sfx,
+            at: 0,
+            off: 0,
+        }
     }
-    let (lcp, rest) = get_varint(rest)?;
-    let (len, rest) = get_varint(rest)?;
-    Some((lcp, len, rest))
+
+    /// The next entry's shared-prefix length and suffix length, leaving the suffix itself for
+    /// [`piece`](Self::piece) or [`skip`](Self::skip); `None` past the last header.
+    #[inline(always)]
+    fn head(&mut self) -> Option<(usize, usize)> {
+        let b = *self.hdrs.get(self.at)?;
+        self.at += 1;
+        if b != WIDE {
+            return Some(((b >> 4) as usize, (b & 0xF) as usize));
+        }
+        let lcp = varint_at(self.sfx, &mut self.off)?;
+        let len = varint_at(self.sfx, &mut self.off)?;
+        Some((lcp, len))
+    }
+
+    /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
+    /// gives a short piece rather than a panic.
+    #[inline(always)]
+    fn piece(&mut self, len: usize) -> &'a [u8] {
+        let end = self.off.saturating_add(len).min(self.sfx.len());
+        let piece = &self.sfx[self.off..end];
+        self.off = end;
+        piece
+    }
+
+    /// Past that suffix without reading it — what a scan does for every entry its header rules
+    /// out, and the reason the two streams are apart.
+    #[inline(always)]
+    fn skip(&mut self, len: usize) {
+        self.off = self.off.saturating_add(len).min(self.sfx.len());
+    }
 }
 
 /// What one thread produces for its contiguous range of blocks: the sections it would have
@@ -207,20 +272,26 @@ fn encode_range<S: AsRef<str>>(keys: &[S], block: usize, encoder: &fsst::Encoder
         data: Vec::new(),
     };
     let mut packed = Vec::with_capacity(64);
+    let mut hdrs = Vec::with_capacity(block);
+    let mut sfx = Vec::with_capacity(block * 8);
     for chunk in keys.chunks(block) {
         let head = chunk[0].as_ref().as_bytes();
         part.heads.extend_from_slice(head);
         part.head_ends.push(part.heads.len() as u64);
         part.samples.push(sample_of(head));
         part.blocks.push(part.data.len() as u64);
+        hdrs.clear();
+        sfx.clear();
         for w in chunk.windows(2) {
             let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
             let l = lcp(a, b);
             packed.clear();
             encoder.encode_into(&b[l..], &mut packed);
-            put_header(&mut part.data, l, packed.len());
-            part.data.extend_from_slice(&packed);
+            put_header(&mut hdrs, &mut sfx, l, packed.len());
+            sfx.extend_from_slice(&packed);
         }
+        part.data.extend_from_slice(&hdrs);
+        part.data.extend_from_slice(&sfx);
     }
     part
 }
@@ -237,12 +308,12 @@ impl DictIndex {
     }
 
     /// [`build`](Self::build) with `block` keys per block, `1..=1024`. A lookup scans up to
-    /// `block − 1` entries, and a reverse lookup reads that many headers but decodes only the
-    /// staircase among them — so smaller blocks are faster and larger ones share more and store
-    /// less. On real words 16 / 32 / 64 / 128 / 256 give 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes
-    /// per key, `id` at 302–311 / 314–337 / 354–358 / 437–441 / 599–602 ns and `key_into` at
-    /// 124–125 / 173–176 / 269–272 / 462–463 / 848–853. At 128 the index is under `marisa-trie`'s
-    /// 2.98 on that corpus.
+    /// `block − 1` headers, and a reverse lookup reads that many but decodes only the staircase
+    /// among them — so smaller blocks are faster and larger ones share more and store less. On
+    /// real words 16 / 32 / 64 / 128 / 256 give 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes per key,
+    /// `id` at 287–288 / 307–310 / 330–337 / 384–386 / 487–493 ns and `key_into` at 118 / 165–167
+    /// / 256–258 / 442–444 / 812–815. At 128 the index is under `marisa-trie`'s 2.98 on that
+    /// corpus.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -509,28 +580,37 @@ impl DictIndex {
             // reserved rather than written.
             let mut data_len = 0u64;
             let mut packed = Vec::with_capacity(64);
-            let mut entry = Vec::with_capacity(80);
+            // A block's headers only reach the file once its suffixes are known, so one block at a
+            // time is buffered — at most 1024 entries, and the price of the two streams being
+            // apart in the blob `from_sorted` writes in one pass.
+            let mut hdrs: Vec<u8> = Vec::with_capacity(block);
+            let mut sfx: Vec<u8> = Vec::with_capacity(block * 8);
             let mut prev: Vec<u8> = Vec::new();
             let mut i = 0usize;
             src.each(&mut |key| {
                 let bytes = key.as_bytes();
                 if i % block == 0 {
+                    w.write_all(&hdrs)?;
+                    w.write_all(&sfx)?;
+                    data_len += (hdrs.len() + sfx.len()) as u64;
+                    hdrs.clear();
+                    sfx.clear();
                     blocks.extend_from_slice(&data_len.to_le_bytes());
                 } else {
                     let l = lcp(&prev, bytes);
                     packed.clear();
                     encoder.encode_into(&bytes[l..], &mut packed);
-                    entry.clear();
-                    put_header(&mut entry, l, packed.len());
-                    entry.extend_from_slice(&packed);
-                    w.write_all(&entry)?;
-                    data_len += entry.len() as u64;
+                    put_header(&mut hdrs, &mut sfx, l, packed.len());
+                    sfx.extend_from_slice(&packed);
                 }
                 prev.clear();
                 prev.extend_from_slice(bytes);
                 i += 1;
                 Ok(())
             })?;
+            w.write_all(&hdrs)?;
+            w.write_all(&sfx)?;
+            data_len += (hdrs.len() + sfx.len()) as u64;
             if i != n {
                 return Err(IndexError::Format(
                     "dict: the key stream changed between passes",
@@ -697,6 +777,19 @@ impl DictIndex {
         head_of(&self.heads, &self.head_ends, b)
     }
 
+    /// Keys in block `b` — the last one holds the remainder. It is also where its header stream
+    /// ends, one byte an entry, so every reader needs it before it can find the suffixes.
+    #[inline(always)]
+    fn count_in(&self, b: usize) -> usize {
+        (self.n - b * self.block).min(self.block)
+    }
+
+    /// Block `b`'s two streams, ready to walk.
+    #[inline(always)]
+    fn entries(&self, b: usize) -> Entries<'_> {
+        Entries::of(self.block_data(b), self.count_in(b))
+    }
+
     /// Block `b`'s entries, bounded the way [`head`](Self::head) is.
     #[inline(always)]
     fn block_data(&self, b: usize) -> &[u8] {
@@ -794,26 +887,26 @@ impl DictIndex {
         if head == probe {
             return (base, true);
         }
-        let count = (self.n - b * self.block).min(self.block);
+        let count = self.count_in(b);
         // The probe is above the previous entry and shares `matched` bytes with it.
         let mut matched = lcp(head, probe);
-        let mut at = self.block_data(b);
+        let mut entries = self.entries(b);
         for j in 1..count as u64 {
-            let Some((l, len, rest)) = get_header(at) else {
+            let Some((l, len)) = entries.head() else {
                 return (base + j, false);
             };
-            let (piece, tail) = rest.split_at(len.min(rest.len()));
-            at = tail;
             // This entry differs from the previous one at `l`. Below `matched` the probe agreed
             // with the previous entry, so a shorter shared prefix puts this entry past the probe;
-            // a longer one keeps it below, with nothing new matched.
+            // a longer one keeps it below, with nothing new matched. Both answers come off the
+            // header alone, so the suffix of a ruled-out entry is never read.
             if l < matched {
                 return (base + j, false);
             }
             if l > matched {
+                entries.skip(len);
                 continue;
             }
-            let (c, ord) = self.compare_piece(piece, &probe[matched..]);
+            let (c, ord) = self.compare_piece(entries.piece(len), &probe[matched..]);
             match ord {
                 Ordering::Equal => return (base + j, true),
                 Ordering::Greater => return (base + j, false),
@@ -1021,16 +1114,15 @@ impl DictIndex {
     /// Decode the next entry of a block onto `cur`, which holds the previous one, moving `at`
     /// past it; `false` on data this crate did not write.
     #[inline]
-    fn advance(&self, at: &mut &[u8], cur: &mut Vec<u8>) -> bool {
-        let Some((l, len, rest)) = get_header(at) else {
+    fn advance(&self, entries: &mut Entries<'_>, cur: &mut Vec<u8>) -> bool {
+        let Some((l, len)) = entries.head() else {
             return false;
         };
-        if l > cur.len() || len > rest.len() {
+        let piece = entries.piece(len);
+        if l > cur.len() || piece.len() != len {
             return false;
         }
         cur.truncate(l);
-        let (piece, tail) = rest.split_at(len);
-        *at = tail;
         self.table.decode_into(piece, cur)
     }
 
@@ -1039,8 +1131,8 @@ impl DictIndex {
     fn walk_to(&self, b: usize, steps: usize, out: &mut Vec<u8>) -> bool {
         out.clear();
         out.extend_from_slice(self.head(b));
-        let mut at = self.block_data(b);
-        (0..steps).all(|_| self.advance(&mut at, out))
+        let mut entries = self.entries(b);
+        (0..steps).all(|_| self.advance(&mut entries, out))
     }
 
     /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
@@ -1049,10 +1141,10 @@ impl DictIndex {
     /// An entry stores what it shares with its predecessor, so an entry whose `lcp` is at least a
     /// later entry's contributes nothing that survives to the key being asked for. The entries that
     /// do contribute form a strictly increasing staircase of `lcp`, and a monotonic stack over the
-    /// headers finds it in the one pass the walk already makes. Every header is still read — a
-    /// header is what says where the next one begins — but a handful of suffixes are decoded rather
-    /// than one per entry, and the decode is the expensive half: 207 → 146 ns at the default block
-    /// on the dictionary, 751 → 454 at 128 per block, 464 → 265 on a path list.
+    /// headers finds it in the one pass the walk already makes. Every header is still read — the
+    /// lengths before an entry are what place its suffix — but a handful of suffixes are decoded
+    /// rather than one per entry, and the decode is the expensive half: 207 → 146 ns at the
+    /// default block on the dictionary, 751 → 454 at 128 per block, 464 → 265 on a path list.
     fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
         out.clear();
         let Ok(id) = usize::try_from(id) else {
@@ -1064,29 +1156,32 @@ impl DictIndex {
         let b = id / self.block;
         let steps = id % self.block;
         let data = self.block_data(b);
-        let mut at = data;
-        let mut stair = [(0usize, &data[..0]); STAIRS];
+        let mut entries = Entries::of(data, self.count_in(b));
+        // Where each stair's suffix sits, not the suffix itself: most entries are popped again,
+        // and a span is two words to record where a slice is two words to build and bound.
+        let mut stair = [(0usize, 0usize, 0usize); STAIRS];
         let mut depth = 0usize;
         for _ in 0..steps {
-            let Some((l, len, rest)) = get_header(at) else {
+            let Some((l, len)) = entries.head() else {
                 return false;
             };
-            if len > rest.len() {
+            let at = entries.off;
+            entries.skip(len);
+            if entries.off - at != len {
                 return false;
             }
-            let (piece, tail) = rest.split_at(len);
-            at = tail;
             while depth > 0 && stair[depth - 1].0 >= l {
                 depth -= 1;
             }
             if depth == STAIRS {
                 return self.walk_to(b, steps, out);
             }
-            stair[depth] = (l, piece);
+            stair[depth] = (l, at, len);
             depth += 1;
         }
         out.extend_from_slice(self.head(b));
-        for &(l, piece) in &stair[..depth] {
+        for &(l, at, len) in &stair[..depth] {
+            let piece = &entries.sfx[at..at + len];
             if l > out.len() {
                 return false;
             }
@@ -1135,7 +1230,7 @@ impl DictIndex {
     pub fn keys_of(&self, ids: &[u64]) -> Vec<Option<String>> {
         let mut out = Vec::with_capacity(ids.len());
         let mut buf: Vec<u8> = Vec::new();
-        let mut at: &[u8] = &[];
+        let mut entries = Entries::of(&[], 0);
         // The block a walk is open on and how many of its entries it has consumed; `usize::MAX`
         // for none.
         let (mut open, mut consumed) = (usize::MAX, 0usize);
@@ -1157,12 +1252,12 @@ impl DictIndex {
                 }
                 buf.clear();
                 buf.extend_from_slice(self.head(b));
-                at = self.block_data(b);
+                entries = self.entries(b);
                 (open, consumed) = (b, 0);
             }
             let mut ok = true;
             while consumed < j && ok {
-                ok = self.advance(&mut at, &mut buf);
+                ok = self.advance(&mut entries, &mut buf);
                 consumed += 1;
             }
             if !ok {
@@ -1286,7 +1381,7 @@ impl DictIndex {
     pub(crate) fn iter_from(&self, start: u64) -> impl Iterator<Item = (String, u64)> + '_ {
         let mut id = usize::try_from(start).unwrap_or(usize::MAX);
         let mut cur: Vec<u8> = Vec::new();
-        let mut at: &[u8] = &[];
+        let mut entries = Entries::of(&[], 0);
         let mut primed = false;
         std::iter::from_fn(move || {
             if id >= self.n {
@@ -1296,12 +1391,12 @@ impl DictIndex {
             let ok = if !primed || j == 0 {
                 cur.clear();
                 cur.extend_from_slice(self.head(b));
-                at = self.block_data(b);
+                entries = self.entries(b);
                 let skip = if primed { 0 } else { j };
                 primed = true;
-                (0..skip).all(|_| self.advance(&mut at, &mut cur))
+                (0..skip).all(|_| self.advance(&mut entries, &mut cur))
             } else {
-                self.advance(&mut at, &mut cur)
+                self.advance(&mut entries, &mut cur)
             };
             if !ok {
                 id = self.n; // a stream this crate did not write ends the walk
@@ -1360,7 +1455,7 @@ impl DictIndex {
         h
     }
 
-    /// Serialise to `[magic "BDX1"][n][block][head bytes][data bytes][table bytes][payload]
+    /// Serialise to `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
     /// [check]`, then the symbol table, the head keys, the three per-block arrays and the block
     /// data. `check` is a hash of the preceding header bytes and `payload` a hash of everything
     /// after it, both verified on load.
@@ -1401,6 +1496,12 @@ impl DictIndex {
     /// bound what the arrays say, so a mapping loads without touching its pages.
     fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes: &[u8] = &blob;
+        if bytes.starts_with(LEGACY_MAGIC) {
+            return Err(IndexError::Format(
+                "dict: blob written by lexindex < 2.2, whose blocks interleaved an entry's header \
+                 with its suffix; rebuild the index from its keys",
+            ));
+        }
         if bytes.len() < HEADER || &bytes[..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -1849,7 +1950,7 @@ mod tests {
             check(&idx, &keys);
             let blob = idx.to_bytes();
             assert_eq!(blob.len(), idx.serialized_len(), "block {block}");
-            assert_eq!(&blob[..4], b"BDX1");
+            assert_eq!(&blob[..4], b"BDX2");
             let back = DictIndex::from_bytes(&blob).unwrap();
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
@@ -2284,16 +2385,33 @@ mod tests {
         assert_eq!(get_varint(&[]), None);
         assert_eq!(get_varint(&[0x80]), None);
         assert_eq!(get_varint(&[0x80; 12]), None);
-        let mut out = Vec::new();
-        put_header(&mut out, 14, 14);
-        assert_eq!(out, [0xEE]);
-        assert_eq!(get_header(&out), Some((14, 14, &[][..])));
-        out.clear();
-        put_header(&mut out, 15, 3);
-        assert_eq!(out, [0xFF, 15, 3]);
-        assert_eq!(get_header(&out), Some((15, 3, &[][..])));
-        assert_eq!(get_header(&[]), None);
-        assert_eq!(get_header(&[0xFF, 15]), None);
+        // Two entries, the second wide: the header stream holds a byte each, and the wide pair's
+        // varints sit at the head of its own suffix rather than between the headers.
+        let (mut hdrs, mut sfx) = (Vec::new(), Vec::new());
+        put_header(&mut hdrs, &mut sfx, 14, 14);
+        sfx.extend_from_slice(&[b'a'; 14]);
+        put_header(&mut hdrs, &mut sfx, 15, 3);
+        sfx.extend_from_slice(b"bcd");
+        assert_eq!(hdrs, [0xEE, 0xFF]);
+        assert_eq!(&sfx[14..], &[15, 3, b'b', b'c', b'd']);
+        let mut data = hdrs.clone();
+        data.extend_from_slice(&sfx);
+        let mut entries = Entries::of(&data, 3);
+        assert_eq!(entries.head(), Some((14, 14)));
+        assert_eq!(entries.piece(14), &[b'a'; 14]);
+        assert_eq!(entries.head(), Some((15, 3)));
+        assert_eq!(entries.piece(3), b"bcd");
+        assert_eq!(entries.head(), None);
+        // A stream that stops mid-entry gives short answers, never a panic.
+        assert_eq!(Entries::of(&[], 1).head(), None);
+        assert_eq!(Entries::of(&[0xFF, 15], 2).head(), None);
+        let mut cut = Entries::of(&[0x0A, b'x'], 2);
+        assert_eq!(cut.head(), Some((0, 10)));
+        assert_eq!(cut.piece(10), b"x");
+        let mut past = Entries::of(&[0x0A, b'x'], 2);
+        assert_eq!(past.head(), Some((0, 10)));
+        past.skip(10);
+        assert_eq!(past.piece(1), b"");
     }
 
     #[test]

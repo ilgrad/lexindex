@@ -224,8 +224,10 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
-        b"BDX1" => {
+        b"BDX1" | b"BDX2" => {
             // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][check u32]`
+            // -- the same in both, since `BDX2` changed the inside of a block and nothing around
+            // it. A blob this version refuses to load still says what it is here.
             w.bytes(0, 48)?;
             let (n, block) = (w.u64(4)?, u64::from(w.u32(12)?));
             let (heads, data, table) = (w.u64(16)?, w.u64(24)?, u64::from(w.u32(32)?));
@@ -510,7 +512,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.bytes),
-            (BlobKind::DictIndex, "BDX1", Some(300), blob.len() as u64)
+            (BlobKind::DictIndex, "BDX2", Some(300), blob.len() as u64)
         );
         assert_eq!(
             (i.mph_bytes, i.side_entries, i.fingerprint_bits),
