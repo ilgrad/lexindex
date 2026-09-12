@@ -12,27 +12,63 @@ vocabulary, never a synthetic `entity-{i}` sequence** — sequential keys collap
 near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
 better; the capability columns are why you would still pick a larger one.
 
-| library | prefix | common prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.76** |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.26** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.26** |
-| **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** |
-| `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 |
-| `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 |
-| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 |
-| **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** |
-| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 |
-| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.90 |
-| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 |
-| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.92 |
+| library | prefix | common prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** | **ns/lookup** |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|---:|
+| **lexindex `ClosedHashIndex`** | — | — | — | — | — | none (closed vocabulary) | — | **0.26** | 100 |
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.76** | 98 |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.26** | **92** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.26** | 100 |
+| **lexindex `DictIndex` (128 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.89** | 389 |
+| `marisa-trie` (4 tries, tiny cache — its smallest) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 490 |
+| `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 472 |
+| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 449 |
+| **lexindex `DictIndex` (32 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **3.52** | 285 |
+| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 | 317 |
+| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.90 | 216 |
+| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 | 246 |
+| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.91 | 590 |
+| builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 260 |
 
 <sub>Raw numbers and the machine that produced them:
-[`bench/results/compare-2026-09-12-arz-d82e296.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-12-arz-d82e296.json)
-— every cell's build samples, the false-positive measurement, the CPU, kernel, rustc, Python and the
-load average at both ends of the run. `marisa-trie` appears three times because it is a curve: its
-own documentation says the right configuration depends on the data, so the table carries its
-compact end, its default and its fast end rather than one point somebody could call untuned.</sub>
+[`bench/results/compare-2026-09-12-arz-bf5c1b9.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-12-arz-bf5c1b9.json)
+— every cell's build and lookup samples, the false-positive measurement, the CPU, kernel, rustc,
+Python and the load average at both ends of the run. `marisa-trie` appears three times because it is
+a curve: its own documentation says the right configuration depends on the data, so the table carries
+its compact end, its default and its fast end rather than one point somebody could call untuned.</sub>
+
+**What `ns/lookup` measures.** One exact lookup through Python — `id` on a lexindex index, `get` on
+the tries and on the dict — over 100 000 probes, half members and half strangers made by swapping a
+member's last character for another the corpus uses. Shuffled with a fixed seed, because a strided
+walk through keys laid out in insertion order is learned by the L2 prefetcher and has reversed a
+ranking on this machine before. The strangers stay inside every trie's alphabet on purpose: a miss
+spelled with a character no key contains is rejected at the first node by a trie and still hashed in
+full by a hash index, which is not a comparison.
+
+Every structure takes one pass per round, five rounds, minimum per cell, with all the others resident
+while it runs — a harder memory environment than holding one at a time, and the same one for every
+row. Running each candidate to completion in turn is not the same measurement and is what this
+benchmark did first: every library was then timed immediately after its own six builds, and
+`CompactHashIndex` at a 2-byte fingerprint came out 88 ns in one run and 136 ns in the next. Two
+consecutive runs of the interleaved form agree within 1.9 % on ten of the thirteen rows; the other
+three differ by 10.7 %, 5.5 % and 3.7 %, and are the cells nearest the call boundary, where a few
+nanoseconds is a few per cent.
+
+Two costs are named rather than assumed. The Python call boundary — the same loop calling a function
+that does nothing — is **49 ns**, which every row pays and no *difference* between rows contains.
+And `.get` on a miss is each library's own miss path, not `try: t[key] except KeyError: default`:
+timed apart, a miss costs *less* than a hit everywhere (0.85–0.91×), while that wrapper written out
+by hand over marisa's `__getitem__` costs 1.61× a hit
+([`bench/results/lookup-fairness-2026-09-12-arz-bf5c1b9.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/lookup-fairness-2026-09-12-arz-bf5c1b9.txt)).
+Half the probes are misses, so a library that paid for exceptions would have been charged for CPython
+rather than for its own structure.
+
+**The smallest rows are also the fastest, which is not a paradox.** `ClosedHashIndex` and the three
+`CompactHashIndex` widths answer in 92–100 ns against a builtin `dict`'s 260, because they store no
+keys at all: one hash, one probe, at most a fingerprint to compare. What they cannot do is tell a
+stranger from a member with certainty, or give a key back for an id. Among the structures that do
+keep their keys, `DictIndex` at 128 per block is **both smaller and faster than every `marisa-trie`
+setting measured** — 2.89 B/key and 389 ns against 2.96–3.07 and 449–490 — and at 32 per block it
+answers in 285 ns for 3.52 bytes.
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
 actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and

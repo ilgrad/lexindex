@@ -1,0 +1,17 @@
+# local/lookupfair.py -- is `.get` on a miss the library's miss path, or CPython's?
+# lexindex 2.1.0 at bf5c1b9, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# Half the probes in bench/compare.py are strangers. A library whose `get` is `try: self[key]
+# except KeyError: default` would be charged a raised exception for every one of them, and the
+# lookup column would be measuring CPython rather than the structure. Hits and misses are timed
+# apart here, the lanes alternating within each of five rounds, minimum per cell, ns per lookup.
+# The third lane is that wrapper written out by hand over marisa's `__getitem__`, as the control.
+#
+# load 0.60 0.70 0.90
+479823 keys, 50000 hits and 49995 misses, ns per lookup
+                           hit      miss  miss/hit
+DictIndex.id               435       388      0.89
+marisa.get                 641       585      0.91
+marisa[] + except          630      1017      1.61
+dawg2.get                  468       415      0.89
+datrie.get                 929       791      0.85

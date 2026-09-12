@@ -88,6 +88,18 @@ All notable changes to this project are documented here. The format follows
   moved in, the allocation was never doubled (`Vec::into_iter().map(…).collect()` reuses the buffer
   in place and frees each source key as it copies) and the time goes 47.6 → 39.8 ms.
 
+- **The comparison table carries a lookup-latency column.** Bytes per key on their own read as
+  though the smallest structure were the best one. `bench/compare.py` now times one exact lookup per
+  library over 100 000 probes, half of them plausible strangers, shuffled — every structure taking
+  one pass per round so that none is measured with the caches still warm from its own build, and all
+  of them resident while each one runs. Two costs are named instead of assumed: the Python call
+  boundary is **49 ns**, and `.get` on a miss is each library's own miss path rather than a
+  `try/except` around `__getitem__` — timed apart, a miss costs 0.85–0.91× a hit everywhere, while
+  that wrapper written out by hand costs 1.61×, which matters because half the probes are misses. On
+  this corpus the four keyless rows answer in **92–100 ns against a builtin `dict`'s 260**, and
+  `DictIndex` at 128 per block is smaller *and* faster than every `marisa-trie` setting measured
+  (2.89 B/key and 389 ns against 2.96–3.07 and 449–490).
+
 - **`marisa-trie` is benchmarked as a curve, not a point, and `rsmarisa` joins the table.** Every
   marisa number this project published came from the default configuration, while marisa's own
   documentation says the right setting depends on the data — an open invitation to the objection
