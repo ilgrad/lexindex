@@ -819,7 +819,9 @@ than `block − 1`: 1024 scans 62 where 32 scans 31. At 512 the index is **2.81 
 per key, well under the 2.98 marisa stores on this corpus** — and unlike marisa it answers `key(id)`
 and `lower_bound` at all, since a marisa id is not the lexicographic rank (7 051 of 19 999
 consecutive sorted pairs come back with a decreasing id). Pick 32 or 64 if the lookups are hot,
-512 or 1024 if the bytes are.
+512 or 1024 if the bytes are — or name the point instead of the number: `DictProfile::Fast`,
+`Balanced` and `Compact` in Rust, `block="fast" | "balanced" | "compact"` in Python, are 32,
+256 and 1024.
 
 <sub>The latency rows are 2026-09-12 at `386b2e6`
 ([`bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt)),

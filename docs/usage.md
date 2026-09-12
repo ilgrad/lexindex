@@ -311,6 +311,8 @@ words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
 faster = DictIndex(words_list, block=64)    # 3.03 B/key against 2.84; id 272–284 ns against 298–302
+smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
+                                                  # 32 keys a block, "balanced" 256, "compact" 1024
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
@@ -482,7 +484,7 @@ assert!(small.contains("POST"));
 let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.26 B/key
 assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
-let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~3.2 B/key
+let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.84 B/key
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match

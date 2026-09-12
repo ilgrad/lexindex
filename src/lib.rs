@@ -75,7 +75,7 @@ mod overlay;
 mod string_index;
 mod subsequence;
 
-pub use dict_index::DictIndex;
+pub use dict_index::{DictIndex, DictProfile};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;

@@ -400,6 +400,24 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     assert walked == [(w, i) for i, w in enumerate(words[:1500])]
 
 
+def test_dict_index_block_takes_a_profile_name(tmp_path):
+    words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
+    sizes = []
+    for name, block in (("fast", 32), ("balanced", 256), ("compact", 1024)):
+        di = lexindex.DictIndex(words, block=name)
+        assert di.block == block
+        assert di.to_bytes() == lexindex.DictIndex(words, block).to_bytes()
+        p = tmp_path / f"{name}.bdx"
+        assert lexindex.DictIndex.build_to_file(words, p, block=name) == len(words)
+        assert p.read_bytes() == di.to_bytes()
+        sizes.append(di.serialized_len())
+    assert sizes[0] > sizes[1] > sizes[2]  # the names are ordered the way they read
+    with pytest.raises(ValueError, match="'fast', 'balanced', 'compact'"):
+        lexindex.DictIndex(words, block="tiny")
+    with pytest.raises(TypeError):
+        lexindex.DictIndex(words, block=2.5)
+
+
 def test_common_prefix_and_longest_prefix_on_both_ordered_indexes():
     keys = sorted({"", "a", "ap", "app", "apple", "apples", "b", "é", "éc", "école"})
     for idx in (lexindex.StringIndex(keys), lexindex.DictIndex(keys, block=3)):

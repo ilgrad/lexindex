@@ -111,7 +111,7 @@ c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])   # the perfect hash alone, ~0.26 B/key
 z.id("POST")                 # a member's id; any other string gets *some* id in [0, n)
 
-w = DictIndex(["GET", "POST", "PUT", "DELETE"])         # ordered, keys stored, ~3.2 B/key
+w = DictIndex(["GET", "POST", "PUT", "DELETE"])         # ordered, keys stored, ~2.84 B/key
 w.id("POST")                 # 2  (sorted rank); w.key(2) == "POST"; w.lower_bound("P") == 2
 
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])  # verified membership and id → key

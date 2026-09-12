@@ -528,6 +528,42 @@ fn encode_range<S: AsRef<str>>(
     part
 }
 
+/// A block size named for what an index is wanted for, for a caller who would rather not pick the
+/// number. Each name keeps its meaning while the block it stands for follows the measurements, and
+/// anything between them is still a number: [`DictIndex::build_with_block`] takes `1..=1024`.
+///
+/// On real words the three store **3.23 / 2.84 / 2.79** bytes a key, answer `id` in 252–254 /
+/// 298–302 / 344–347 ns and `key_into` in 154–155 / 207 / 263–272; the last two are under
+/// `marisa-trie`'s 2.955 floor on that corpus.
+///
+/// ```
+/// use lexindex::{DictIndex, DictProfile};
+/// let index = DictIndex::build_with_block(["fig", "kiwi"], DictProfile::Compact.block())?;
+/// assert_eq!(index.block(), 1024);
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DictProfile {
+    /// A block is one microblock, so a lookup scans it whole and no restart is stored to reach
+    /// one: the fast end of the published curve.
+    Fast,
+    /// What [`DictIndex::build`] uses.
+    Balanced,
+    /// The largest block a blob can name.
+    Compact,
+}
+
+impl DictProfile {
+    /// Keys a block holds under this profile, for the builders that take a block.
+    pub const fn block(self) -> usize {
+        match self {
+            Self::Fast => 32,
+            Self::Balanced => DEFAULT_BLOCK,
+            Self::Compact => MAX_BLOCK,
+        }
+    }
+}
+
 impl DictIndex {
     /// Build from a collection of strings, in any order; duplicates are removed and the ids are
     /// the ranks of the distinct keys in byte order. Blocks of 256 keys.
@@ -546,7 +582,8 @@ impl DictIndex {
     /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79
     /// bytes per key, `id` at 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
     /// `key_into` at 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272. At 256 the index is
-    /// under `marisa-trie`'s 2.955 floor on that corpus.
+    /// under `marisa-trie`'s 2.955 floor on that corpus. [`DictProfile`] names three points of
+    /// that curve for a caller who does not want to pick one.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -2536,6 +2573,25 @@ mod tests {
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
         }
+    }
+
+    #[test]
+    fn the_profiles_name_three_points_of_the_block_curve() {
+        let keys = corpus();
+        let mut sizes = Vec::new();
+        for profile in [
+            DictProfile::Fast,
+            DictProfile::Balanced,
+            DictProfile::Compact,
+        ] {
+            let idx = DictIndex::build_with_block(&keys, profile.block()).unwrap();
+            assert_eq!(idx.block(), profile.block(), "{profile:?}");
+            check(&idx, &keys);
+            sizes.push(idx.serialized_len());
+        }
+        assert!(sizes[0] > sizes[1] && sizes[1] > sizes[2], "{sizes:?}");
+        assert_eq!(DictProfile::Balanced.block(), DEFAULT_BLOCK);
+        assert_eq!(DictIndex::build(&keys).unwrap().block(), DEFAULT_BLOCK);
     }
 
     #[test]

@@ -471,16 +471,25 @@ class DictIndex:
     slower reverse lookup.
     """
 
-    def __new__(cls, items: Iterable[str], block: int = 256) -> DictIndex:
+    def __new__(
+        cls,
+        items: Iterable[str],
+        block: int | Literal["fast", "balanced", "compact"] = 256,
+    ) -> DictIndex:
         """``block`` keys per block, ``1..=1024``. The block is what a stored head and its arrays
         are shared over; it is split into microblocks of 32 (one microblock below that), and a
         lookup scans one restart a microblock plus one microblock -- ``block / 32 + 30`` entries
         from 64 up, not ``block - 1``.
         32 / 64 / 128 / 256 / 512 / 1024 gave 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79 bytes per key
-        on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there."""
+        on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there. A name stands for
+        a point on that curve: ``"fast"`` is 32, ``"balanced"`` 256 and ``"compact"`` 1024."""
 
     @staticmethod
-    def build_to_file(items: Iterable[str], path: str | os.PathLike[str], block: int = 256) -> int:
+    def build_to_file(
+        items: Iterable[str],
+        path: str | os.PathLike[str],
+        block: int | Literal["fast", "balanced", "compact"] = 256,
+    ) -> int:
         """The constructor for a corpus that does not fit in memory, written straight to `path`.
 
         The keys are taken in one pass, in any order: every 256 MiB of them is sorted in memory and

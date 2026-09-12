@@ -35,7 +35,7 @@
 //! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
 //! released with the GIL held.
 
-use crate::{DictIndex, IndexError, Overlay, StringIndex};
+use crate::{DictIndex, DictProfile, IndexError, Overlay, StringIndex};
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -1706,7 +1706,36 @@ impl PyClosedHashIndex {
     }
 }
 
-/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, about 3.5 B/key.
+/// The `block` argument of the `DictIndex` constructors: keys a block holds, or the name of a
+/// [`DictProfile`] that stands for one. One argument rather than two that can contradict each
+/// other, so there is no pair of settings a caller has to be told the precedence of.
+#[derive(FromPyObject)]
+enum BlockArg {
+    #[pyo3(annotation = "int")]
+    Size(usize),
+    #[pyo3(annotation = "str")]
+    Name(String),
+}
+
+impl BlockArg {
+    fn block(self) -> PyResult<usize> {
+        match self {
+            Self::Size(n) => Ok(n),
+            Self::Name(name) => match name.as_str() {
+                "fast" => Ok(DictProfile::Fast.block()),
+                "balanced" => Ok(DictProfile::Balanced.block()),
+                "compact" => Ok(DictProfile::Compact.block()),
+                _ => Err(PyValueError::new_err(format!(
+                    "dict: block must be an int in 1..=1024 or one of 'fast', 'balanced', \
+                     'compact', not {name:?}"
+                ))),
+            },
+        }
+    }
+}
+
+/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, 2.84 B/key on real
+/// words.
 #[pyclass(name = "DictIndex", module = "lexindex._core", frozen)]
 pub struct PyDictIndex {
     inner: Arc<DictIndex>,
@@ -1720,10 +1749,16 @@ impl PyDictIndex {
     /// lookup scans one restart a microblock plus one microblock, so smaller blocks are faster and
     /// larger ones smaller -- 32 / 64 / 128 / 256 /
     /// 512 / 1024 gave 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79 bytes per key on the dictionary, and
-    /// 256 is under `marisa-trie`'s 2.955 floor.
+    /// 256 is under `marisa-trie`'s 2.955 floor. `block` also takes the name of a point on that
+    /// curve instead of a number: `"fast"` (32), `"balanced"` (256, the default) or `"compact"`
+    /// (1024).
     #[new]
-    #[pyo3(signature = (items, block=256))]
-    fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: usize) -> PyResult<Self> {
+    #[pyo3(
+        signature = (items, block = BlockArg::Size(DictProfile::Balanced.block())),
+        text_signature = "(items, block=256)"
+    )]
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: BlockArg) -> PyResult<Self> {
+        let block = block.block()?;
         let keys = collect_strs(items)?;
         let inner = py
             .detach(|| DictIndex::build_with_block(&keys, block))
@@ -1740,11 +1775,16 @@ impl PyDictIndex {
     ///
     /// What is still held is the block heads, the per-block arrays and one start a microblock,
     /// about `(mean head length + 20) / block + 8 / micro` bytes per key -- so a bigger `block` is
-    /// what a corpus whose heads crowd memory wants. If the iterable raises, the build is abandoned with `path`
+    /// what a corpus whose heads crowd memory wants. `block` takes a number or a name, as the
+    /// constructor's does. If the iterable raises, the build is abandoned with `path`
     /// untouched.
     #[staticmethod]
-    #[pyo3(signature = (items, path, block=256))]
-    fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf, block: usize) -> PyResult<usize> {
+    #[pyo3(
+        signature = (items, path, block = BlockArg::Size(DictProfile::Balanced.block())),
+        text_signature = "(items, path, block=256)"
+    )]
+    fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf, block: BlockArg) -> PyResult<usize> {
+        let block = block.block()?;
         let err = Rc::new(RefCell::new(None));
         let seen = Rc::clone(&err);
         let written = DictIndex::build_to_file_checked(

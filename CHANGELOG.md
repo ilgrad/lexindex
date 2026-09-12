@@ -103,6 +103,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A block size can be named instead of measured out.** `DictProfile::Fast`, `Balanced` and
+  `Compact` — `block="fast" | "balanced" | "compact"` from Python, in the same argument as the
+  number, so there is no second setting to contradict the first — stand for 32, 256 and 1024 keys a
+  block: **3.23 / 2.84 / 2.79 bytes a key**, `id` in 252–254 / 298–302 / 344–347 ns and `key_into`
+  in 154–155 / 207 / 263–272. The names are what the curve is picked over, so a later release can
+  move a name to a better point on it; `block=` still takes any number in `1..=1024`.
+
 - **An Arrow slice no longer copies the whole column.** A sliced Arrow array shares its parent's
   buffers, and `ids_of_arrow` copied them whole: 1 000 keys taken out of a 480 000-key column cost
   **9.4×** the same keys in an array of their own, nearly all of it a 6.4 MB `memcpy` to read 13 KB.
