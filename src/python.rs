@@ -41,7 +41,7 @@ use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValu
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyDict, PyIterator, PyMemoryView, PyString, PyType};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyMemoryView, PySlice, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -2579,20 +2579,26 @@ impl PyOverlay {
 /// array exposes — validity, offsets, data — so a lookup can run with the GIL released over
 /// memory it owns. The copy is the price of the buffer protocol over the C Data Interface, and it
 /// is a `memcpy` against a hash and a cache miss per key; no per-key Python object exists at all.
+///
+/// Only the bytes this chunk reads are copied. A sliced Arrow array shares its parent's buffers
+/// whole, so copying them whole charged a slice for the entire column: 1 000 keys taken out of
+/// 480 000 cost 9.4× the same keys in an array of their own, nearly all of it a 6.4 MB `memcpy`.
 struct Utf8Chunk {
     len: usize,
-    /// The array's `offset`: the index of its first element in `offsets` and `validity`.
-    first: usize,
     /// `large_utf8`: eight-byte offsets.
     wide: bool,
+    /// This chunk's first element within `validity`, which is copied by whole bytes.
+    valid_first: usize,
+    /// Offset zero's value: `data` starts there rather than at the parent buffer's start.
+    data_base: i64,
     validity: Option<Vec<u8>>,
+    /// Exactly the `len + 1` offsets this chunk reads.
     offsets: Vec<u8>,
     data: Vec<u8>,
 }
 
 impl Utf8Chunk {
     fn of(array: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let py = array.py();
         let kind = array.getattr("type")?.str()?.to_string_lossy().into_owned();
         let wide = match kind.as_str() {
             "string" => false,
@@ -2606,8 +2612,9 @@ impl Utf8Chunk {
         let len = array.len()?;
         let empty = Self {
             len: 0,
-            first: 0,
             wide,
+            valid_first: 0,
+            data_base: 0,
             validity: None,
             offsets: Vec::new(),
             data: Vec::new(),
@@ -2620,31 +2627,50 @@ impl Utf8Chunk {
         let buffers: Vec<Option<Bound<'_, PyAny>>> = array.call_method0("buffers")?.extract()?;
         let [validity, offsets, data] = <[_; 3]>::try_from(buffers)
             .map_err(|_| PyTypeError::new_err("an Arrow utf8 column has three buffers"))?;
-        let copy = |b: &Bound<'_, PyAny>| -> PyResult<Vec<u8>> {
-            let view = PyMemoryView::from(b)?.call_method1("cast", ("B",))?;
-            PyBuffer::<u8>::get(&view)?.to_vec(py)
+        let width = if wide { 8 } else { 4 };
+        let offsets = match offsets {
+            Some(o) => copy_range(
+                &o,
+                first * width,
+                (len + 1) * width,
+                "the column's offsets buffer is shorter than the column",
+            )?,
+            None => return Err(PyValueError::new_err("the column has no offsets buffer")),
         };
+        let data_base = raw_offset_at(&offsets, 0, wide);
+        let last = raw_offset_at(&offsets, len, wide);
+        let ascending = "the column's offsets do not ascend within its data buffer";
+        if data_base < 0 || last < data_base {
+            return Err(PyValueError::new_err(ascending));
+        }
+        let span = (last - data_base) as usize;
+        let data = match data {
+            Some(d) => copy_range(&d, data_base as usize, span, ascending)?,
+            None if span == 0 => Vec::new(),
+            None => return Err(PyValueError::new_err(ascending)),
+        };
+        // The validity bitmap is indexed in bits, so it is trimmed by whole bytes and the
+        // remaining bits of the first one are carried in `valid_first`.
+        let skip = first / 8;
         let validity = match (null_count, validity) {
             (0, _) => None,
-            (_, Some(v)) => Some(copy(&v)?),
+            (_, Some(v)) => Some(copy_range(
+                &v,
+                skip,
+                (first + len).div_ceil(8) - skip,
+                "the column's validity buffer is shorter than the column",
+            )?),
             (_, None) => {
                 return Err(PyValueError::new_err(
                     "the column reports nulls but has no validity buffer",
                 ));
             }
         };
-        let offsets = match offsets {
-            Some(o) => copy(&o)?,
-            None => return Err(PyValueError::new_err("the column has no offsets buffer")),
-        };
-        let data = match data {
-            Some(d) => copy(&d)?,
-            None => Vec::new(),
-        };
         let chunk = Self {
             len,
-            first,
             wide,
+            valid_first: first - skip * 8,
+            data_base,
             validity,
             offsets,
             data,
@@ -2653,42 +2679,29 @@ impl Utf8Chunk {
         Ok(chunk)
     }
 
-    fn width(&self) -> usize {
-        if self.wide { 8 } else { 4 }
-    }
-
     /// Offset number `i` as the buffer holds it, sign and all.
     fn raw_offset(&self, i: usize) -> i64 {
-        let at = i * self.width();
-        if self.wide {
-            i64::from_ne_bytes(self.offsets[at..at + 8].try_into().expect("8 bytes"))
-        } else {
-            i64::from(i32::from_ne_bytes(
-                self.offsets[at..at + 4].try_into().expect("4 bytes"),
-            ))
-        }
+        raw_offset_at(&self.offsets, i, self.wide)
     }
 
-    /// Every offset this chunk will read exists, is non-negative, ascends, and stays inside the
-    /// data — checked once here so that `key` can slice without a fallible path per element.
+    /// Every offset this chunk will read is non-negative, ascends, and stays inside the data —
+    /// checked once here so that `key` can slice without a fallible path per element.
     fn check(&self) -> PyResult<()> {
-        let end = self.first + self.len;
-        if self.offsets.len() < (end + 1) * self.width() {
-            return Err(PyValueError::new_err(
-                "the column's offsets buffer is shorter than the column",
-            ));
-        }
-        let mut prev = 0i64;
-        for i in self.first..=end {
+        let mut prev = self.data_base;
+        for i in 0..=self.len {
             let o = self.raw_offset(i);
-            if o < prev || o > self.data.len() as i64 {
+            if o < prev || o - self.data_base > self.data.len() as i64 {
                 return Err(PyValueError::new_err(
                     "the column's offsets do not ascend within its data buffer",
                 ));
             }
             prev = o;
         }
-        if self.validity.as_ref().is_some_and(|v| v.len() * 8 < end) {
+        if self
+            .validity
+            .as_ref()
+            .is_some_and(|v| v.len() * 8 < self.valid_first + self.len)
+        {
             return Err(PyValueError::new_err(
                 "the column's validity buffer is shorter than the column",
             ));
@@ -2697,13 +2710,13 @@ impl Utf8Chunk {
     }
 
     fn key(&self, i: usize) -> &[u8] {
-        let a = self.raw_offset(self.first + i) as usize;
-        let b = self.raw_offset(self.first + i + 1) as usize;
+        let a = (self.raw_offset(i) - self.data_base) as usize;
+        let b = (self.raw_offset(i + 1) - self.data_base) as usize;
         &self.data[a..b]
     }
 
     fn valid(&self, i: usize) -> bool {
-        let at = self.first + i;
+        let at = self.valid_first + i;
         self.validity
             .as_ref()
             .is_none_or(|v| v[at / 8] >> (at % 8) & 1 == 1)
@@ -2712,6 +2725,40 @@ impl Utf8Chunk {
     fn has_nulls(&self) -> bool {
         (0..self.len).any(|i| !self.valid(i))
     }
+}
+
+/// Offset number `i` of `offsets`, as the buffer holds it, sign and all.
+fn raw_offset_at(offsets: &[u8], i: usize, wide: bool) -> i64 {
+    if wide {
+        let at = i * 8;
+        i64::from_ne_bytes(offsets[at..at + 8].try_into().expect("8 bytes"))
+    } else {
+        let at = i * 4;
+        i64::from(i32::from_ne_bytes(
+            offsets[at..at + 4].try_into().expect("4 bytes"),
+        ))
+    }
+}
+
+/// `count` bytes of a Python buffer from `at`, copied through a sliced `memoryview` so that it is
+/// still one `memcpy` and not a byte at a time. `short` is the error for a buffer that ends first.
+fn copy_range(
+    buffer: &Bound<'_, PyAny>,
+    at: usize,
+    count: usize,
+    short: &str,
+) -> PyResult<Vec<u8>> {
+    let py = buffer.py();
+    let view = PyMemoryView::from(buffer)?.call_method1("cast", ("B",))?;
+    let whole = view.len()?;
+    if whole < at + count {
+        return Err(PyValueError::new_err(short.to_owned()));
+    }
+    if at == 0 && count == whole {
+        return PyBuffer::<u8>::get(&view)?.to_vec(py);
+    }
+    let part = view.get_item(PySlice::new(py, at as isize, (at + count) as isize, 1))?;
+    PyBuffer::<u8>::get(&part)?.to_vec(py)
 }
 
 /// The chunks of whatever holds an Arrow string column: a pyarrow `Array` (one) or `ChunkedArray`

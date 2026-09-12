@@ -1526,6 +1526,10 @@ def test_ids_of_arrow_reads_the_column_buffers(cls):
         _Utf8Column(probes, large=True),
         _Utf8Column(probes, lead=3),
         _Utf8Column(probes, large=True, lead=5),
+        # Past a whole validity byte: the buffers are trimmed to the window this column names,
+        # and only a lead of eight or more moves where that trimming starts.
+        _Utf8Column(probes, lead=11),
+        _Utf8Column(probes, large=True, lead=16),
     ):
         assert _unpack(idx, idx.ids_of_arrow(col)) == expected
         out = array.array(code, [7] * (len(probes) + 2))
@@ -1561,13 +1565,16 @@ def test_ids_of_arrow_nulls_are_missing():
     keys = ["a", "b", "c"]
     for cls in _ARROW_CLASSES[:3]:
         idx = cls(keys)
-        col = _Utf8Column(["a", "b", "c", "zz"], nulls={1, 3}, lead=2)
-        assert _unpack(idx, idx.ids_of_arrow(col)) == [
-            idx.id("a"),
-            idx.MISSING_ID,
-            idx.id("c"),
-            idx.MISSING_ID,
-        ]
+        # `lead=13` puts the first visible key five bits into the second validity byte, which is
+        # where the trimmed bitmap and the whole one have to agree.
+        for lead in (2, 13):
+            col = _Utf8Column(["a", "b", "c", "zz"], nulls={1, 3}, lead=lead)
+            assert _unpack(idx, idx.ids_of_arrow(col)) == [
+                idx.id("a"),
+                idx.MISSING_ID,
+                idx.id("c"),
+                idx.MISSING_ID,
+            ]
     closed = lexindex.ClosedHashIndex(keys)
     with pytest.raises(ValueError, match="null"):
         closed.ids_of_arrow(_Utf8Column(["a", "b"], nulls={0}))

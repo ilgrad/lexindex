@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **An Arrow slice no longer copies the whole column.** A sliced Arrow array shares its parent's
+  buffers, and `ids_of_arrow` copied them whole: 1 000 keys taken out of a 480 000-key column cost
+  **9.4×** the same keys in an array of their own, nearly all of it a 6.4 MB `memcpy` to read 13 KB.
+  Only the offsets and the bytes a chunk names are copied now, and the validity bitmap is trimmed by
+  whole bytes — the slice costs 1.2×, and the unsliced path is unchanged, still handing the buffer
+  over whole in one `memcpy`. This also settles the Arrow C Data Interface question the 2.0 review
+  left open: the copy is 0.6 % of `ids_of_arrow` on `DictIndex` and 5.8 % on `CompactHashIndex`, the
+  fastest index there is, so a zero-copy PyCapsule path would buy that much for ~200 lines of Arrow
+  FFI or a new dependency. It is not being built.
+
 - **`bench/reproduce.sh`**, one command from a checkout to the tables the README cites. It refuses
   a dirty tree, because a number attributed to a commit whose code was not the one measured is not
   a number; pins the three competitor versions; verifies all 38 corpus files against their hashes;
