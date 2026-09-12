@@ -1719,7 +1719,7 @@ impl PyDictIndex {
     /// `1..=1024`; the block is split into microblocks of 32 (one microblock below that) and a
     /// lookup scans one restart a microblock plus one microblock, so smaller blocks are faster and
     /// larger ones smaller -- 32 / 64 / 128 / 256 /
-    /// 512 / 1024 gave 3.24 / 3.04 / 2.92 / 2.85 / 2.82 / 2.80 bytes per key on the dictionary, and
+    /// 512 / 1024 gave 3.22 / 3.02 / 2.90 / 2.83 / 2.80 / 2.78 bytes per key on the dictionary, and
     /// 256 is under `marisa-trie`'s 2.955 floor.
     #[new]
     #[pyo3(signature = (items, block=256))]

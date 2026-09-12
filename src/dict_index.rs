@@ -1,12 +1,13 @@
 //! An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways, in
 //! 45 % less than [`StringIndex`](crate::StringIndex) takes.
 //!
-//! The sorted keys are cut into blocks of `block` keys (32 by default). A block stores its first
+//! The sorted keys are cut into blocks of `block` keys (256 by default). A block stores its first
 //! key whole and every other as the length of the prefix it shares with its predecessor and the
-//! suffix after it, the suffix under a static symbol table ([`fsst`]) trained on the index's own
-//! suffixes. Those two live apart inside the block: one header byte an entry first, then every
-//! suffix end to end. A scan rules most entries out by the header alone, and reading 127 of them
-//! is two cache lines where the interleaved form spread the same bytes over seven. Beside the
+//! suffix after it, the suffix under a static symbol table ([`fsst`]) trained on the suffixes of
+//! the 131 072 keys around it. Those two live apart inside the block: one header byte an entry
+//! first, then every suffix end to end. A scan rules most entries out by the header alone, and
+//! reading 127 of them is two cache lines where the interleaved form spread the same bytes over
+//! seven. Beside the
 //! blocks sit an eight-byte sample of each block's head and two arrays that are narrower than a
 //! word an entry ([`offsets`](crate::offsets)): where a block's head ends, and where its entries
 //! start.
@@ -27,9 +28,11 @@ use crate::fsst::{self, ESCAPE, Table};
 use crate::offsets::{self, Offsets};
 use std::cmp::Ordering;
 
-/// `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][head width u8]
-/// [block width u8][superblock shift u8][micro width u8][micro u16][0 u16][check u32]`, then the
-/// symbol table, the head keys end to end, the head ends packed ([`offsets`]), the head samples
+/// `[magic 4][n u64][block u32][heads u64][data u64][tables u32][payload u64][head width u8]
+/// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][check u32]`, then
+/// the symbol tables — one per `shard` blocks, each behind its own `u32` length, so a reader that
+/// knows how many there are walks them without a directory — the head keys end to end, the head
+/// ends packed ([`offsets`]), the head samples
 /// (`u64`), the block data, the block starts packed and the microblock starts packed. The two
 /// start arrays come last because their width is only known once the data is encoded, which is
 /// what lets a streamed build write every section once, in order.
@@ -55,9 +58,20 @@ const MAX_BLOCK: usize = 1024;
 /// and a path list 18, so the bound is slack; a block holding a chain like `a`, `aa`, `aaa` is what
 /// reaches it, which is legal input and merely slow, not wrong.
 const STAIRS: usize = 32;
-/// About how many suffixes the symbol table is trained on, from runs of keys spread evenly over
-/// the index.
+/// About how many suffixes a symbol table is trained on, from runs of keys spread evenly over the
+/// shard it covers — so an index of `n` keys trains a sample this size `n / SHARD_KEYS` times, and
+/// that product is what a shard costs to build. Halving this and the shard together costs the same
+/// build and trades: 0.2 bytes a key better on a path list, 0.01 worse where the keys are short
+/// enough for the tables themselves to show.
 const TRAIN_PIECES: usize = 20_000;
+/// Keys one symbol table is trained on and covers. A table serialises to about 900 bytes, so a
+/// shard this size costs 0.007 bytes a key, and what it buys is locality: against one table over
+/// the whole index, 0.02 bytes a key on the dictionary, 0.10 on a million URLs, 0.21 on ten
+/// million article titles, 0.67 on Russian ones and **1.03 on a path list**, where a million paths
+/// run through a few thousand directories — more than one table can hold at once. The one thing it
+/// costs is the tables: a word-bigram cross product, 2.48 bytes a key, comes out 0.01 larger.
+/// Shards are contiguous and aligned to blocks, so the table for block `b` is `b / shard`.
+const SHARD_KEYS: usize = 131_072;
 /// How many consecutive keys one of those runs holds. A constant rather than `block`, so the sample
 /// keeps its shape whatever block the caller picked: spending the budget on whole blocks meant 157
 /// neighbourhoods at 128 keys a block and 19 at 1024, and a table trained on 19 of them is a
@@ -77,7 +91,7 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 2.85 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 2.83 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the scan of
 /// one microblock, whose size follows the `block` given at build time.
@@ -122,7 +136,11 @@ pub struct DictIndex {
     /// entry per microblock, which at the default block is one per sixteen keys.
     micros: Offsets,
     data: SharedBytes,
-    table: Table,
+    /// One symbol table per shard of `shard` blocks; the table for block `b` is `tables[b /
+    /// shard]`, and `tables` is never empty.
+    tables: Vec<Table>,
+    /// Blocks one symbol table covers. At least one, and at most what the header's `u16` holds.
+    shard: usize,
 }
 
 /// The sample the search runs on: a key's first eight bytes, zero-padded, in byte order.
@@ -149,6 +167,58 @@ fn sample_of(key: &[u8]) -> u64 {
 /// microblock, the layout of one level.
 fn micro_for(block: usize) -> usize {
     (2..=32).rev().find(|d| block % d == 0).unwrap_or(block)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Blocks a shard covers while a test is running; zero is the real rule. A second table exists
+    /// only past 131 072 keys, which is more than a unit test should have to build.
+    static SHARD_OVERRIDE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Blocks one symbol table covers, for a given block size: [`SHARD_KEYS`] keys' worth, at least one
+/// block and never more than the header's `u16` can name. Read once, on the thread that builds.
+fn shard_blocks_for(block: usize) -> usize {
+    #[cfg(test)]
+    {
+        let over = SHARD_OVERRIDE.with(std::cell::Cell::get);
+        if over != 0 {
+            return over;
+        }
+    }
+    (SHARD_KEYS / block).clamp(1, u16::MAX as usize)
+}
+
+/// Bytes the whole table section takes: every table behind its own length, so a reader that knows
+/// how many there are can walk them without a directory.
+fn tables_len(tables: &[Table]) -> usize {
+    tables.iter().map(|t| 4 + t.serialized_len()).sum()
+}
+
+fn write_tables(tables: &[Table], out: &mut Vec<u8>) {
+    for t in tables {
+        out.extend_from_slice(&(t.serialized_len() as u32).to_le_bytes());
+        t.write_to(out);
+    }
+}
+
+/// One symbol table a shard, trained in parallel: the shards are independent, and training is
+/// linear in the sample, so a table a shard costs the whole budget again on every one of them.
+fn train_shards(samples: &[Vec<&[u8]>], threads: usize) -> Vec<Table> {
+    if threads == 1 || samples.len() == 1 {
+        return samples.iter().map(|s| Table::train(s)).collect();
+    }
+    let span = samples.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let running: Vec<_> = samples
+            .chunks(span)
+            .map(|c| scope.spawn(move || c.iter().map(|s| Table::train(s)).collect::<Vec<_>>()))
+            .collect();
+        running
+            .into_iter()
+            .flat_map(|h| h.join().expect("training a symbol table cannot panic"))
+            .collect()
+    })
 }
 
 /// Bytes the per-block arrays take: one sample a block, the two packed block arrays and the packed
@@ -394,7 +464,9 @@ fn encode_range<S: AsRef<str>>(
     keys: &[S],
     block: usize,
     micro: usize,
-    encoder: &fsst::Encoder,
+    tables: &[Table],
+    shard: usize,
+    first_block: usize,
 ) -> Part {
     let nb = keys.len().div_ceil(block);
     let mut part = Part {
@@ -409,7 +481,17 @@ fn encode_range<S: AsRef<str>>(
     let (mut restarts, mut entries) = (Streams::default(), Streams::default());
     let mut body: Vec<u8> = Vec::with_capacity(block * 8);
     let mut starts: Vec<u64> = Vec::with_capacity(block.div_ceil(micro));
-    for chunk in keys.chunks(block) {
+    // A range walks its shards in order, so one encoder is live at a time rather than one per
+    // shard: an encoder is 150 KB of lookup tables and a table is 2 KB.
+    let mut at_shard = (first_block / shard).min(tables.len() - 1);
+    let mut encoder = tables[at_shard].encoder();
+    for (b, chunk) in keys.chunks(block).enumerate() {
+        let s = ((first_block + b) / shard).min(tables.len() - 1);
+        if s != at_shard {
+            encoder = tables[s].encoder();
+            at_shard = s;
+        }
+        let encoder = &encoder;
         let head = chunk[0].as_ref().as_bytes();
         part.heads.extend_from_slice(head);
         part.head_ends.push(part.heads.len() as u64);
@@ -458,7 +540,7 @@ impl DictIndex {
     /// head and its arrays are shared over, and it is split into microblocks of 32 — one microblock
     /// below that — of which a lookup scans one, after one restart a microblock: `block / 32 + 30`
     /// entries from 64 up, not `block − 1`. On
-    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.24 / 3.04 / 2.92 / 2.85 / 2.82 / 2.80
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.22 / 3.02 / 2.90 / 2.83 / 2.80 / 2.78
     /// bytes per key, `id` at 252–254 / 272–284 / 285–288 / 298–302 / 316–322 / 344–347 ns and
     /// `key_into` at 154–155 / 169–172 / 184–188 / 207 / 227–232 / 263–272. At 256 the index is
     /// under `marisa-trie`'s 2.955 floor on that corpus.
@@ -696,47 +778,59 @@ impl DictIndex {
         })?;
         let nb = n.div_ceil(block);
         let micro = micro_for(block);
-        let step = (n / TRAIN_PIECES).max(1);
+        let shard = shard_blocks_for(block);
+        let span = shard * block;
+        let shards = nb.div_ceil(shard).max(1);
+        let mut step = (span.min(n) / TRAIN_PIECES).max(1);
 
         // Pass two: the training sample, in the order `from_sorted` collects it -- runs in order,
         // keys within a run in order, each coded against the key the encoding will code it
-        // against -- so the table it trains is the same table.
+        // against -- so the table it trains is the same table. One sample a shard.
         let mut arena: Vec<u8> = Vec::new();
-        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut spans: Vec<Vec<(usize, usize)>> = vec![Vec::new(); shards];
         let mut prev: Vec<u8> = Vec::new();
         let mut restart: Vec<u8> = Vec::new();
         let mut i = 0usize;
         src.each(&mut |key| {
             let bytes = key.as_bytes();
             let off = i % block;
+            if off == 0 && i % span == 0 {
+                step = ((n - i).min(span) / TRAIN_PIECES).max(1);
+            }
+            let take = (i % span / TRAIN_RUN) % step == 0;
             if off == 0 || off % micro == 0 {
-                if off != 0 && (i / TRAIN_RUN) % step == 0 {
+                if off != 0 && take {
                     let at = arena.len();
                     arena.extend_from_slice(&bytes[lcp(&restart, bytes)..]);
-                    spans.push((at, arena.len()));
+                    spans[i / span].push((at, arena.len()));
                 }
                 restart.clear();
                 restart.extend_from_slice(bytes);
-            } else if (i / TRAIN_RUN) % step == 0 {
+            } else if take {
                 let at = arena.len();
                 arena.extend_from_slice(&bytes[lcp(&prev, bytes)..]);
-                spans.push((at, arena.len()));
+                spans[i / span].push((at, arena.len()));
             }
             prev.clear();
             prev.extend_from_slice(bytes);
             i += 1;
             Ok(())
         })?;
-        let table = {
-            let pieces: Vec<&[u8]> = spans.iter().map(|&(a, b)| &arena[a..b]).collect();
-            Table::train(&pieces)
+        let tables = {
+            let samples: Vec<Vec<&[u8]>> = spans
+                .iter()
+                .map(|s| s.iter().map(|&(a, b)| &arena[a..b]).collect())
+                .collect();
+            let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+            train_shards(&samples, threads.min(shards))
         };
         drop(arena);
         drop(spans);
 
-        let mut table_bytes = Vec::with_capacity(table.serialized_len());
-        table.write_to(&mut table_bytes);
-        let encoder = table.encoder();
+        let mut table_bytes = Vec::with_capacity(tables_len(&tables));
+        write_tables(&tables, &mut table_bytes);
+        let mut at_shard = 0usize;
+        let mut encoder = tables[0].encoder();
         let head_width = offsets::width_of(&head_ends, offsets::SHIFT);
         let (head_bases, head_deltas) = offsets::pack(&head_ends, offsets::SHIFT, head_width);
         drop(head_ends);
@@ -770,6 +864,11 @@ impl DictIndex {
                 let bytes = key.as_bytes();
                 let off = i % block;
                 if off == 0 {
+                    let s = i / span;
+                    if s != at_shard {
+                        encoder = tables[s].encoder();
+                        at_shard = s;
+                    }
                     flush_block(
                         w,
                         &restarts,
@@ -858,6 +957,7 @@ impl DictIndex {
             h[46] = offsets::SHIFT as u8;
             h[47] = micro_width as u8;
             h[48..50].copy_from_slice(&(micro as u16).to_le_bytes());
+            h[50..52].copy_from_slice(&(shard as u16).to_le_bytes());
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -888,33 +988,38 @@ impl DictIndex {
     ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
+        let shard = shard_blocks_for(block);
+        let span = shard * block;
         // Train on the suffixes a spread of runs would store, in key order: a restart is coded
-        // against the restart before it, every other key against its predecessor.
-        let step = (n / TRAIN_PIECES).max(1);
-        let mut pieces: Vec<&[u8]> = Vec::new();
+        // against the restart before it, every other key against its predecessor. Each shard is
+        // sampled inside itself, by the rule that samples the whole index when there is one shard.
+        let mut pieces: Vec<Vec<&[u8]>> = vec![Vec::new(); nb.div_ceil(shard).max(1)];
         let mut restart: &[u8] = keys.first().map_or(&[][..], |k| k.as_ref().as_bytes());
         let mut prev: &[u8] = restart;
+        let mut step = (span.min(n) / TRAIN_PIECES).max(1);
         for (i, key) in keys.iter().enumerate().skip(1) {
             let key = key.as_ref().as_bytes();
             let off = i % block;
             if off == 0 {
+                if i % span == 0 {
+                    step = ((n - i).min(span) / TRAIN_PIECES).max(1);
+                }
                 restart = key;
                 prev = key;
                 continue;
             }
             let starts = off % micro == 0;
-            if (i / TRAIN_RUN) % step == 0 {
+            if (i % span / TRAIN_RUN) % step == 0 {
                 let against = if starts { restart } else { prev };
-                pieces.push(&key[lcp(against, key)..]);
+                pieces[i / span].push(&key[lcp(against, key)..]);
             }
             if starts {
                 restart = key;
             }
             prev = key;
         }
-        let table = Table::train(&pieces);
+        let tables = train_shards(&pieces, threads);
         drop(pieces);
-        let encoder = table.encoder();
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
         // of blocks encode on their own threads and the parts are concatenated in order — the bytes
@@ -922,17 +1027,26 @@ impl DictIndex {
         // caller's `&[S]`, which would need `S: Sync` on a signature that has not asked for it; the
         // view costs sixteen bytes a key for the length of the encoding and is only built when
         // there is enough work to split.
-        let span = (block * nb.div_ceil(threads)).max(1);
+        let run = (block * nb.div_ceil(threads)).max(1);
         let parts: Vec<Part> = if threads == 1 {
-            keys.chunks(span)
-                .map(|range| encode_range(range, block, micro, &encoder))
+            keys.chunks(run)
+                .enumerate()
+                .map(|(c, range)| {
+                    encode_range(range, block, micro, &tables, shard, c * run / block)
+                })
                 .collect()
         } else {
             let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
             std::thread::scope(|scope| {
                 let running: Vec<_> = view
-                    .chunks(span)
-                    .map(|range| scope.spawn(|| encode_range(range, block, micro, &encoder)))
+                    .chunks(run)
+                    .enumerate()
+                    .map(|(c, range)| {
+                        let tables = &tables;
+                        scope.spawn(move || {
+                            encode_range(range, block, micro, tables, shard, c * run / block)
+                        })
+                    })
                     .collect();
                 running
                     .into_iter()
@@ -972,7 +1086,8 @@ impl DictIndex {
                 &micros
             }),
             data: SharedBytes::from_owned(data),
-            table,
+            tables,
+            shard,
         })
     }
 
@@ -994,6 +1109,13 @@ impl DictIndex {
     #[inline(always)]
     fn blocks_len(&self) -> usize {
         self.samples.len()
+    }
+
+    /// The symbol table block `b` was encoded under.
+    #[inline(always)]
+    fn table_of(&self, b: usize) -> &Table {
+        let s = b / self.shard;
+        &self.tables[if s < self.tables.len() { s } else { 0 }]
     }
 
     #[inline(always)]
@@ -1097,7 +1219,7 @@ impl DictIndex {
     /// orders against it — read off the codes, nothing decoded. A stream this crate did not write
     /// ends the suffix where it stops making sense.
     #[inline]
-    fn compare_piece(&self, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
+    fn compare_piece(&self, table: &Table, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
         let mut c = 0;
         let mut i = 0;
         while i < packed.len() {
@@ -1108,7 +1230,7 @@ impl DictIndex {
                 i += 2;
                 (u64::from(b), 1)
             } else {
-                let Some(sym) = self.table.symbol(packed[i]) else {
+                let Some(sym) = table.symbol(packed[i]) else {
                     break;
                 };
                 i += 1;
@@ -1177,6 +1299,7 @@ impl DictIndex {
     #[inline]
     fn scan_run(
         &self,
+        table: &Table,
         entries: &mut Entries<'_>,
         count: usize,
         probe: &[u8],
@@ -1193,7 +1316,7 @@ impl DictIndex {
                 entries.skip(len);
                 continue;
             }
-            let (c, ord) = self.compare_piece(entries.piece(len), &probe[matched..]);
+            let (c, ord) = self.compare_piece(table, entries.piece(len), &probe[matched..]);
             match ord {
                 Ordering::Equal => return (j, matched + c, true),
                 Ordering::Greater => return (j - 1, matched, false),
@@ -1212,6 +1335,7 @@ impl DictIndex {
         }
         let b = l - 1;
         let base = b * self.block;
+        let table = self.table_of(b);
         let head = self.head(b);
         if head == probe {
             return (base as u64, true);
@@ -1221,7 +1345,7 @@ impl DictIndex {
         let r = self.micros_in(b);
         let (j, matched) = if r > 1 {
             let mut restarts = Entries::of(self.restart_data(b), r);
-            let (j, matched, hit) = self.scan_run(&mut restarts, r, probe, matched);
+            let (j, matched, hit) = self.scan_run(table, &mut restarts, r, probe, matched);
             if hit {
                 return ((base + j * self.micro) as u64, true);
             }
@@ -1231,7 +1355,7 @@ impl DictIndex {
         };
         let count = self.micro_count(b, j);
         let mut entries = Entries::of(self.micro_data(b, j), count);
-        let (k, _, hit) = self.scan_run(&mut entries, count, probe, matched);
+        let (k, _, hit) = self.scan_run(table, &mut entries, count, probe, matched);
         let rank = base + j * self.micro + k + usize::from(!hit);
         (rank as u64, hit)
     }
@@ -1434,7 +1558,7 @@ impl DictIndex {
     /// Decode the next entry of a block onto `cur`, which holds the previous one, moving `at`
     /// past it; `false` on data this crate did not write.
     #[inline]
-    fn advance(&self, entries: &mut Entries<'_>, cur: &mut Vec<u8>) -> bool {
+    fn advance(&self, table: &Table, entries: &mut Entries<'_>, cur: &mut Vec<u8>) -> bool {
         let Some((l, len)) = entries.head() else {
             return false;
         };
@@ -1443,7 +1567,7 @@ impl DictIndex {
             return false;
         }
         cur.truncate(l);
-        self.table.decode_into(piece, cur)
+        table.decode_into(piece, cur)
     }
 
     /// Take `out`, which holds a front-coded run's first key, `steps` entries along that run.
@@ -1458,7 +1582,14 @@ impl DictIndex {
     ///
     /// A staircase deeper than the stack falls back to decoding every entry, which is correct at
     /// any depth.
-    fn climb(&self, data: &[u8], count: usize, steps: usize, out: &mut Vec<u8>) -> bool {
+    fn climb(
+        &self,
+        table: &Table,
+        data: &[u8],
+        count: usize,
+        steps: usize,
+        out: &mut Vec<u8>,
+    ) -> bool {
         let mut entries = Entries::of(data, count);
         // Where each stair's suffix sits, not the suffix itself: most entries are popped again,
         // and a span is two words to record where a slice is two words to build and bound.
@@ -1479,7 +1610,7 @@ impl DictIndex {
             if depth == STAIRS {
                 // Nothing has been written yet, so `out` still holds the run's first key.
                 let mut entries = Entries::of(data, count);
-                return (0..steps).all(|_| self.advance(&mut entries, out));
+                return (0..steps).all(|_| self.advance(table, &mut entries, out));
             }
             stair[depth] = (l, at, len);
             depth += 1;
@@ -1490,7 +1621,7 @@ impl DictIndex {
                 return false;
             }
             out.truncate(l);
-            if !self.table.decode_into(piece, out) {
+            if !table.decode_into(piece, out) {
                 return false;
             }
         }
@@ -1515,10 +1646,17 @@ impl DictIndex {
         let off = id % self.block;
         let (j, steps) = (off / self.micro, off % self.micro);
         out.extend_from_slice(self.head(b));
-        if j > 0 && !self.climb(self.restart_data(b), self.micros_in(b), j, out) {
+        let table = self.table_of(b);
+        if j > 0 && !self.climb(table, self.restart_data(b), self.micros_in(b), j, out) {
             return false;
         }
-        self.climb(self.micro_data(b, j), self.micro_count(b, j), steps, out)
+        self.climb(
+            table,
+            self.micro_data(b, j),
+            self.micro_count(b, j),
+            steps,
+            out,
+        )
     }
 
     /// The key at rank `id`; `None` at or past `len()`.
@@ -1587,7 +1725,7 @@ impl DictIndex {
             }
             let mut ok = true;
             while consumed < j && ok {
-                ok = self.advance(&mut entries, &mut buf);
+                ok = self.advance(self.table_of(at / self.block), &mut entries, &mut buf);
                 consumed += 1;
             }
             if !ok {
@@ -1728,20 +1866,21 @@ impl DictIndex {
                 restart.extend_from_slice(self.head(b));
                 restarts = Entries::of(self.restart_data(b), self.micros_in(b));
                 primed = true;
-                let ok = (0..j).all(|_| self.advance(&mut restarts, &mut restart));
+                let ok =
+                    (0..j).all(|_| self.advance(self.table_of(b), &mut restarts, &mut restart));
                 cur.clear();
                 cur.extend_from_slice(&restart);
                 entries = Entries::of(self.micro_data(b, j), self.micro_count(b, j));
-                ok && (0..k).all(|_| self.advance(&mut entries, &mut cur))
+                ok && (0..k).all(|_| self.advance(self.table_of(b), &mut entries, &mut cur))
             } else if k == 0 {
                 // The next microblock opens on the next restart, not on the key just returned.
-                let ok = self.advance(&mut restarts, &mut restart);
+                let ok = self.advance(self.table_of(b), &mut restarts, &mut restart);
                 cur.clear();
                 cur.extend_from_slice(&restart);
                 entries = Entries::of(self.micro_data(b, j), self.micro_count(b, j));
                 ok
             } else {
-                self.advance(&mut entries, &mut cur)
+                self.advance(self.table_of(b), &mut entries, &mut cur)
             };
             if !ok {
                 id = self.n; // a stream this crate did not write ends the walk
@@ -1760,9 +1899,9 @@ impl DictIndex {
         &self,
         mut f: impl FnMut(&[u8]) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
-        let mut table = Vec::with_capacity(self.table.serialized_len());
-        self.table.write_to(&mut table);
-        f(&table)?;
+        let mut tables = Vec::with_capacity(tables_len(&self.tables));
+        write_tables(&self.tables, &mut tables);
+        f(&tables)?;
         f(&self.heads)?;
         for section in self.head_ends.sections() {
             f(section)?;
@@ -1798,20 +1937,22 @@ impl DictIndex {
         h[12..16].copy_from_slice(&(self.block as u32).to_le_bytes());
         h[16..24].copy_from_slice(&(self.heads.len() as u64).to_le_bytes());
         h[24..32].copy_from_slice(&(self.data.len() as u64).to_le_bytes());
-        h[32..36].copy_from_slice(&(self.table.serialized_len() as u32).to_le_bytes());
+        h[32..36].copy_from_slice(&(tables_len(&self.tables) as u32).to_le_bytes());
         h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
         h[44] = self.head_ends.width() as u8;
         h[45] = self.blocks.width() as u8;
         h[46] = self.head_ends.shift() as u8;
         h[47] = self.micros.width() as u8;
         h[48..50].copy_from_slice(&(self.micro as u16).to_le_bytes());
+        h[50..52].copy_from_slice(&(self.shard as u16).to_le_bytes());
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
     }
 
     /// Serialise to `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
-    /// [offset widths][micro][check]`, then the symbol table, the head keys, the per-block arrays,
+    /// [offset widths][micro][shard][check]`, then the symbol tables, the head keys, the per-block
+    /// arrays,
     /// the block data and the two start arrays. `check` is a hash of the preceding header bytes and
     /// `payload` a hash of everything after it, both verified on load.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -1828,7 +1969,7 @@ impl DictIndex {
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.
     pub fn serialized_len(&self) -> usize {
         HEADER
-            + self.table.serialized_len()
+            + tables_len(&self.tables)
             + self.heads.len()
             + self.blocks_len() * 8
             + self.head_ends.len()
@@ -1900,6 +2041,10 @@ impl DictIndex {
         if !(1..=block).contains(&micro) {
             return Err(IndexError::Format("dict: microblock size out of range"));
         }
+        let shard = u16::from_le_bytes(bytes[50..52].try_into().unwrap()) as usize;
+        if shard == 0 {
+            return Err(IndexError::Format("dict: symbol-table shard out of range"));
+        }
         let nb = n.div_ceil(block);
         // Every microblock holds at least one key, so the count is bounded by the key count and
         // the product below cannot overflow.
@@ -1927,8 +2072,25 @@ impl DictIndex {
             blob.subslice(at - len, at)
                 .expect("the sections add up to the blob")
         };
-        let table = Table::from_bytes(&take(table_len))
-            .ok_or(IndexError::Format("dict: bad symbol table"))?;
+        let tables = {
+            let section = take(table_len);
+            let bad = || IndexError::Format("dict: bad symbol table");
+            let mut tables = Vec::new();
+            let mut at = 0usize;
+            for _ in 0..nb.div_ceil(shard).max(1) {
+                let len = section
+                    .get(at..at + 4)
+                    .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
+                    .ok_or_else(bad)?;
+                let raw = section.get(at + 4..at + 4 + len).ok_or_else(bad)?;
+                tables.push(Table::from_bytes(raw).ok_or_else(bad)?);
+                at += 4 + len;
+            }
+            if at != section.len() {
+                return Err(bad());
+            }
+            tables
+        };
         let heads = take(heads_len);
         let head_ends = Offsets::new(
             take(offsets::bases_len(nb, shift)),
@@ -1964,7 +2126,8 @@ impl DictIndex {
             blocks,
             micros,
             data,
-            table,
+            tables,
+            shard,
         };
         if verify {
             idx.check_layout()?;
@@ -2717,18 +2880,82 @@ mod tests {
         }
     }
 
+    /// Holds the shard size for as long as it is alive, and puts the real rule back after.
+    struct Shards;
+
+    impl Shards {
+        fn of(blocks: usize) -> Self {
+            SHARD_OVERRIDE.with(|c| c.set(blocks));
+            Shards
+        }
+    }
+
+    impl Drop for Shards {
+        fn drop(&mut self) {
+            SHARD_OVERRIDE.with(|c| c.set(0));
+        }
+    }
+
+    #[test]
+    fn a_table_a_shard_answers_every_key_and_survives_the_blob() {
+        let keys = corpus();
+        for block in [1usize, 3, 32, 256] {
+            for shard in [1usize, 2, 7] {
+                let _held = Shards::of(shard);
+                let idx = DictIndex::build_with_block(&keys, block).unwrap();
+                let want = keys.len().div_ceil(block).div_ceil(shard).max(1);
+                assert_eq!(idx.tables.len(), want, "block {block}, shard {shard}");
+                assert_eq!(idx.shard, shard);
+                check(&idx, &keys);
+                let back = DictIndex::from_bytes(&idx.to_bytes()).unwrap();
+                assert_eq!(back.tables.len(), want);
+                check(&back, &keys);
+            }
+        }
+    }
+
+    #[test]
+    fn a_streamed_build_shards_its_tables_the_way_the_sorting_one_does() {
+        let keys = corpus();
+        let dir = scratch("dictshards");
+        let path = dir.join("idx.bdx");
+        let feed: Vec<&str> = keys.iter().map(String::as_str).collect();
+        for (block, shard) in [(1usize, 3usize), (3, 2), (32, 2), (256, 1)] {
+            let _held = Shards::of(shard);
+            let want = DictIndex::build_with_block(&keys, block)
+                .unwrap()
+                .to_bytes();
+            DictIndex::build_to_file_runs(&feed, &path, block, || Ok(()), 64).unwrap();
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                want,
+                "block {block}, shard {shard}"
+            );
+            check(&DictIndex::load(&path).unwrap(), &keys);
+        }
+    }
+
     #[test]
     fn the_encoding_does_not_depend_on_how_many_threads_ran() {
         let keys = corpus();
         for block in [1usize, 3, 32] {
-            let want = DictIndex::from_sorted_on(&keys, block, micro_for(block), 1)
-                .unwrap()
-                .to_bytes();
-            for threads in [2usize, 3, 5, 8, 64] {
-                let got =
-                    DictIndex::from_sorted_on(&keys, block, micro_for(block), threads).unwrap();
-                assert_eq!(got.to_bytes(), want, "block {block}, {threads} threads");
-                check(&got, &keys);
+            // A thread's range starts inside a shard as often as on one, and the encoder it picks
+            // is the one the block's number names, so the split must not move a single byte.
+            for shard in [0usize, 2] {
+                let _held = Shards::of(shard);
+                let want = DictIndex::from_sorted_on(&keys, block, micro_for(block), 1)
+                    .unwrap()
+                    .to_bytes();
+                for threads in [2usize, 5, 64] {
+                    let got =
+                        DictIndex::from_sorted_on(&keys, block, micro_for(block), threads).unwrap();
+                    assert_eq!(
+                        got.to_bytes(),
+                        want,
+                        "block {block}, shard {shard}, {threads} threads"
+                    );
+                    check(&got, &keys);
+                }
             }
         }
     }
@@ -3009,6 +3236,10 @@ mod tests {
         edited(
             &|b| b[48..50].copy_from_slice(&3u16.to_le_bytes()),
             "microblock size out of range",
+        );
+        edited(
+            &|b| b[50..52].copy_from_slice(&0u16.to_le_bytes()),
+            "symbol-table shard out of range",
         );
         edited(&|b| b[HEADER] = 255, "bad symbol table");
         edited(&|b| b[HEADER + 1] = 0, "bad symbol table");

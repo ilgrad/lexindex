@@ -23,7 +23,7 @@
 //! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
 //!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
 //!   automata, so no fuzzy queries. The sorted keys are front-coded in blocks with the suffixes
-//!   under a static symbol table: 2.85 B/key on real words, 52 % below `StringIndex`. Use it
+//!   under a static symbol table: 2.83 B/key on real words, 52 % below `StringIndex`. Use it
 //!   where the queries are exact and the index has to be small.
 //!
 //! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable

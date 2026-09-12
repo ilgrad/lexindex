@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` trains a symbol table per shard of 131 072 keys.** One table for the whole index is
+  a compromise between neighbourhoods that share nothing — the suffixes of a million paths under
+  `/usr/share` and of a million under `/home` are different languages, and 20 000 sampled pieces
+  had to cover both. A shard is a whole number of blocks, each shard's table is trained on 20 000
+  pieces from that shard alone, the tables are trained in parallel, and the blob carries them in
+  order after the header, which names the shard in blocks. A lookup picks the table from the block
+  number it already has: one division, and no memory access the lookup did not already make. `paths` at a
+  million keys goes **15.923 → 14.896 bytes a key**, `titles-ru` 12.110 → 11.443, `idents`
+  7.27 → 6.71, `titles-en` at ten million 7.89 → 7.68 and the dictionary 2.852 → 2.832; the two
+  that rise are `domains` (5.01 → 5.05) and the `word.word` grid (2.47 → 2.49), corpora whose
+  shards are all the same language and now pay for a table each. The ladder over
+  32 / 64 / 128 / 256 / 512 / 1024 keys a block becomes 3.22 / 3.02 / 2.90 / 2.83 / 2.80 / 2.78
+  bytes a key. **Lookups do not move**: A-B-A-B in one process on three corpora gives `id`
+  +0.1 / −4.2 / −1.8 % against a control moving −0.6 / −6.2 / +1.3 %. Building costs **24–29 %
+  more**, which is a table trained per 131 072 keys rather than per index.
+
 - **`DictIndex` splits every block into microblocks, and the default block is 256.** A block was
   both the unit a head and its arrays are shared over *and* the unit a lookup scans, so the only way
   to store less was to scan more: 2.83 bytes a key cost 460 ns of `key_into`, 2.75 cost 853 and the
