@@ -117,7 +117,7 @@ words, one process:
 | **lexindex `DictIndex`** (256 per block, default) | **2.852** | 0.96× | 253 ns | 26 ms |
 | `marisa-trie` (C++ reference, default) | 2.978 | 1.00× | — | — |
 | `rsmarisa` (4 tries, tiny cache — its smallest) | 3.003 | 1.01× | 322 ns | 137 ms |
-| **lexindex `DictIndex`** (64 per block) | 3.045 | 1.02× | **227 ns** | **26 ms** |
+| **lexindex `DictIndex`** (64 per block) | 3.041 | 1.02× | **227 ns** | **26 ms** |
 | `rsmarisa` 0.4.2 (default) | 3.168 | 1.06× | 301 ns | 148 ms |
 | `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.63× | — | — |
 | **lexindex `StringIndex`** (ordered + fuzzy + reverse) | 5.95 | 2.00× | — | — |
@@ -136,7 +136,7 @@ lexindex dependency — the harness is a throwaway crate.</sub>
 So the statement is a crown after all, with the frontier behind it. **`DictIndex` at its default
 block dominates `rsmarisa` at its most compact setting outright** — 2.852 against 3.003 B/key, 253
 against 322 ns, 5.3× faster to build — and at 64 per block it is the fastest structure here at 227
-ns for 3.045, still under `rsmarisa`'s default; every `rsmarisa` setting has a `DictIndex` block
+ns for 3.041, still under `rsmarisa`'s default; every `rsmarisa` setting has a `DictIndex` block
 that is both smaller and faster. The block size picks the axis.
 
 Two further things the table settles. The Rust port is *larger* than the C++ original on this corpus
@@ -751,7 +751,7 @@ within each round, the minimum per cell; `StringIndex` is the control.
 
 | | `StringIndex` | `DictIndex` 32 | `DictIndex` 64 | `DictIndex` 128 | `DictIndex` **256** | `DictIndex` 512 | `DictIndex` 1024 |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| bytes per key | 5.95 | 3.25 | 3.05 | 2.92 | **2.85** | 2.82 | 2.80 |
+| bytes per key | 5.95 | 3.24 | 3.04 | 2.92 | **2.85** | 2.82 | 2.80 |
 | of which per-block arrays | — | 0.348 | 0.231 | 0.144 | 0.100 | 0.077 | 0.066 |
 | microblocks a block | — | 1 | 2 | 4 | 8 | 16 | 32 |
 | entries a lookup scans | — | 31 | 32 | 34 | **38** | 46 | 62 |
@@ -766,7 +766,7 @@ within each round, the minimum per cell; `StringIndex` is the control.
 Two runs of the same ladder in opposite orders; where they differ the table gives both. At the
 default 256, `DictIndex` answers `id` within 10 % of `StringIndex` and `key_into` at less than half
 its `key` while storing **52 % less**; at 64 per block it is level with `StringIndex` on `id` at
-3.05 B/key, and at 32 it is 6 % ahead. The sequential lane does not move with the block at all.
+3.04 B/key, and at 32 it is 6 % ahead. The sequential lane does not move with the block at all.
 
 **A lookup scans a microblock, not a block.** A block is cut into microblocks of 32, and the first
 key of each is a restart front-coded against the restart before it, so a lookup walks the restarts
@@ -776,7 +776,7 @@ one-level format at the same size the reverse lookup halves and `id` does not mo
 and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for 460–464 and
 393**. The one-level format reaches 0.10 B/key further down, and that is what it costs: its floor
 of 2.701 at 1024 keys a block answers `key_into` in 3 190 ns and `id` in 984, against 287–289 and
-420–426 for 2.804 here. Both ladders ran alternated by process in one session, the base built from
+420–426 for 2.80 here. Both ladders ran alternated by process in one session, the base built from
 the commit before microblocks in a worktree, with `StringIndex` at 340–353 ns as the control
 ([`dict-onelevel-ab-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt)).
 That session sits about 25 % above the table at the top of this section — its control says so, at

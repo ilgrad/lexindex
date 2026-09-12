@@ -310,7 +310,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 3.05 B/key against 2.85; id 272–284 ns against 298–302
+faster = DictIndex(words_list, block=64)    # 3.04 B/key against 2.85; id 272–284 ns against 298–302
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.

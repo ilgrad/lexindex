@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format follows
   can hold the probe: `block / micro + micro − 2` entries scanned, 38 at the default where a block
   of 256 scanned 255. **At the same size `key_into` halves and `id` does not move** — 2.819 B/key at
   512 a block answers `key_into` in 244–246 ns and `id` in 392–399, against the one-level format's
-  2.827 at 128 in 460–464 and 393 — and the floor moves with it: 2.804 at 1024 a block costs
+  2.827 at 128 in 460–464 and 393 — and the floor moves with it: 2.80 at 1024 a block costs
   287–289 ns of `key_into` where one level's 2.752 at 256 cost 853–859. Measured A-B-A-B against a
   build of the previous format in a worktree, `StringIndex` the control at 340–353 ns throughout
   (`bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt`) — that session reads about 25 %
