@@ -70,6 +70,7 @@ mod dict_index;
 mod extsort;
 mod fsst;
 mod inspect;
+mod offsets;
 mod overlay;
 mod string_index;
 mod subsequence;

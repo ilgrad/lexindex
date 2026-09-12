@@ -23,12 +23,15 @@ use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::extsort::{RUN_BYTES, Run, Runs};
 use crate::fsst::{self, ESCAPE, Table};
+use crate::offsets::{self, Offsets};
 use std::cmp::Ordering;
 
-/// `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][check u32]`, then
-/// the symbol table, the head keys end to end, the head ends (`u32` each), the head samples
-/// (`u64`), the block starts (`u64`), and the block data — each block one byte a header, then
-/// that block's suffixes.
+/// `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][head width u8]
+/// [block width u8][superblock shift u8][0][check u32]`, then the symbol table, the head keys end
+/// to end, the head ends packed ([`offsets`]), the head samples (`u64`), the block data — each
+/// block one byte a header, then that block's suffixes — and the block starts packed. The block
+/// starts come last because their width is only known once the data is encoded, which is what
+/// lets a streamed build write every section once, in order.
 const MAGIC: &[u8; 4] = b"BDX2";
 /// `BDX1` held the same sections and the same bytes per entry, but wrote each entry's header
 /// immediately before its suffix. Nothing in this version can read one, so it is refused by name.
@@ -36,9 +39,8 @@ const LEGACY_MAGIC: &[u8; 4] = b"BDX1";
 /// The header byte that says an entry's shared-prefix and suffix lengths did not fit a nibble
 /// each, and are varints at the start of its suffix instead.
 const WIDE: u8 = 0xFF;
-const HEADER: usize = 48;
-const CHECKED: usize = 44; // header bytes the trailing check covers
-const PER_BLOCK: usize = 4 + 8 + 8; // bytes the three arrays hold per block
+const HEADER: usize = 52;
+const CHECKED: usize = 48; // header bytes the trailing check covers
 const DEFAULT_BLOCK: usize = 32;
 const MAX_BLOCK: usize = 1024;
 /// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
@@ -76,8 +78,8 @@ pub struct DictIndex {
     /// The sections as they are serialised, owned or mapped. Every block's first key, whole, end
     /// to end; `head_ends[b]` closes block `b`'s.
     heads: SharedBytes,
-    /// A `u32` per block, little-endian, decoded where it is read — the two arrays below too.
-    head_ends: SharedBytes,
+    /// Where each block's head ends, packed against one base per superblock.
+    head_ends: Offsets,
     /// The first eight bytes of each head as a big-endian word, so a search compares heads only
     /// inside the run of blocks that share the probe's.
     ///
@@ -90,8 +92,8 @@ pub struct DictIndex {
     /// the same back in instructions. Eight bytes a block, so a mapped index holds one byte per
     /// four keys at the default block, and borrows everything else.
     samples: Vec<u64>,
-    /// Where block `b`'s `block − 1` front-coded entries start in `data`, a `u64` per block.
-    blocks: SharedBytes,
+    /// Where block `b`'s `block − 1` front-coded entries start in `data`, packed the same way.
+    blocks: Offsets,
     data: SharedBytes,
     table: Table,
 }
@@ -102,26 +104,42 @@ fn sample_of(key: &[u8]) -> u64 {
     fsst::word_at(key, 0).swap_bytes()
 }
 
-/// Entry `i` of a little-endian `u32` array.
-#[inline(always)]
-fn u32_at(array: &[u8], i: usize) -> usize {
-    u32::from_le_bytes(array[4 * i..4 * i + 4].try_into().expect("4 bytes")) as usize
+/// Bytes the per-block arrays take: one sample a block, and the two packed offset arrays. `None`
+/// where a header names more blocks than a blob on this platform could hold.
+fn arrays_len(nb: usize, head_width: u32, block_width: u32, shift: u32) -> Option<usize> {
+    let packed = offsets::section_len(nb, head_width, shift)?.checked_add(offsets::section_len(
+        nb,
+        block_width,
+        shift,
+    )?)?;
+    nb.checked_mul(8)?.checked_add(packed)
 }
 
-/// Entry `i` of a little-endian `u64` array.
-#[inline(always)]
-fn u64_at(array: &[u8], i: usize) -> u64 {
-    u64::from_le_bytes(array[8 * i..8 * i + 8].try_into().expect("8 bytes"))
+/// A monotone array of block offsets as the two sections a blob stores, under the width the
+/// values themselves ask for.
+fn packed_offsets(values: &[u64]) -> Offsets {
+    let width = offsets::width_of(values, offsets::SHIFT);
+    let (bases, deltas) = offsets::pack(values, offsets::SHIFT, width);
+    Offsets::new(
+        SharedBytes::from_owned(bases),
+        SharedBytes::from_owned(deltas),
+        width,
+        offsets::SHIFT,
+    )
 }
 
 /// Block `b`'s head out of its sections. The arrays are trusted only as far as their sections
 /// reach: a mapping is loaded without the walk over them, so an end past the heads, or before
 /// the previous one, gives a short head rather than a panic.
 #[inline(always)]
-fn head_of<'a>(heads: &'a [u8], ends: &[u8], b: usize) -> &'a [u8] {
-    let end = u32_at(ends, b);
-    let start = if b == 0 { 0 } else { u32_at(ends, b - 1) };
-    heads.get(start..end).unwrap_or_default()
+fn head_of<'a>(heads: &'a [u8], ends: &Offsets, b: usize) -> &'a [u8] {
+    let (start, end) = if b == 0 {
+        (0, ends.at(0))
+    } else {
+        ends.pair(b - 1)
+    };
+    let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
+    heads.get(at(start)..at(end)).unwrap_or_default()
 }
 
 /// How many leading bytes `a` and `b` share.
@@ -513,15 +531,12 @@ impl DictIndex {
         // depends on the symbol table, and the count is what fixes the training stride below.
         let mut n = 0usize;
         let mut heads: Vec<u8> = Vec::new();
-        let mut head_ends: Vec<u8> = Vec::new();
+        let mut head_ends: Vec<u64> = Vec::new();
         let mut samples: Vec<u8> = Vec::new();
         src.each(&mut |key| {
             if n % block == 0 {
                 heads.extend_from_slice(key.as_bytes());
-                let end = u32::try_from(heads.len()).map_err(|_| {
-                    IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
-                })?;
-                head_ends.extend_from_slice(&end.to_le_bytes());
+                head_ends.push(heads.len() as u64);
                 samples.extend_from_slice(&sample_of(key.as_bytes()).to_le_bytes());
             }
             n += 1;
@@ -558,23 +573,19 @@ impl DictIndex {
         let mut table_bytes = Vec::with_capacity(table.serialized_len());
         table.write_to(&mut table_bytes);
         let encoder = table.encoder();
-        let blocks_at = HEADER + table_bytes.len() + heads.len() + head_ends.len() + samples.len();
-        let mut blocks = Vec::with_capacity(nb * 8);
+        let head_width = offsets::width_of(&head_ends, offsets::SHIFT);
+        let (head_bases, head_deltas) = offsets::pack(&head_ends, offsets::SHIFT, head_width);
+        drop(head_ends);
+        let mut blocks = Vec::with_capacity(nb);
         crate::blob::write_atomically_with(path, |w| {
             // The header is written last: it carries the block data's length and a hash over every
             // section, and neither is known until the encoding is done.
             w.write_all(&[0u8; HEADER])?;
             w.write_all(&table_bytes)?;
             w.write_all(&heads)?;
-            w.write_all(&head_ends)?;
+            w.write_all(&head_bases)?;
+            w.write_all(&head_deltas)?;
             w.write_all(&samples)?;
-            let zeros = [0u8; 4096];
-            let mut left = nb * 8;
-            while left > 0 {
-                let take = left.min(zeros.len());
-                w.write_all(&zeros[..take])?;
-                left -= take;
-            }
 
             // Pass three: encode. The block starts fall out of it, which is why their section was
             // reserved rather than written.
@@ -595,7 +606,7 @@ impl DictIndex {
                     data_len += (hdrs.len() + sfx.len()) as u64;
                     hdrs.clear();
                     sfx.clear();
-                    blocks.extend_from_slice(&data_len.to_le_bytes());
+                    blocks.push(data_len);
                 } else {
                     let l = lcp(&prev, bytes);
                     packed.clear();
@@ -617,13 +628,16 @@ impl DictIndex {
                 ));
             }
 
+            // The block starts are the last section precisely because this is where they are
+            // known: their width falls out of the encoding that has just finished.
+            let block_width = offsets::width_of(&blocks, offsets::SHIFT);
+            let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
+            w.write_all(&block_bases)?;
+            w.write_all(&block_deltas)?;
             w.flush()?;
+            // The payload hash runs over the sections in blob order, so it is taken from the file
+            // rather than from the stream: one sequential read of what was just written.
             let file = w.get_mut();
-            file.seek(SeekFrom::Start(blocks_at as u64))?;
-            file.write_all(&blocks)?;
-            // The payload hash runs over the sections in blob order, and the block starts are only
-            // known once the data is encoded -- so it is taken from the file rather than from the
-            // stream, one sequential read of what was just written.
             file.seek(SeekFrom::Start(HEADER as u64))?;
             let mut hasher = crate::blob::BlockHasher::new();
             let mut buf = vec![0u8; 1 << 20];
@@ -642,6 +656,9 @@ impl DictIndex {
             h[24..32].copy_from_slice(&data_len.to_le_bytes());
             h[32..36].copy_from_slice(&(table_bytes.len() as u32).to_le_bytes());
             h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
+            h[44] = head_width as u8;
+            h[45] = block_width as u8;
+            h[46] = offsets::SHIFT as u8;
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -709,22 +726,15 @@ impl DictIndex {
         };
 
         let mut heads = Vec::with_capacity(parts.iter().map(|p| p.heads.len()).sum());
-        let mut head_ends = Vec::with_capacity(nb * 4);
+        let mut head_ends = Vec::with_capacity(nb);
         let mut samples = Vec::with_capacity(nb);
-        let mut blocks = Vec::with_capacity(nb * 8);
+        let mut blocks = Vec::with_capacity(nb);
         let mut data = Vec::with_capacity(parts.iter().map(|p| p.data.len()).sum());
         // Each part is dropped as it is appended, so the two copies never coexist whole.
         for part in parts {
             let (at_head, at_data) = (heads.len() as u64, data.len() as u64);
-            for end in &part.head_ends {
-                let end = u32::try_from(at_head + end).map_err(|_| {
-                    IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")
-                })?;
-                head_ends.extend_from_slice(&end.to_le_bytes());
-            }
-            for start in &part.blocks {
-                blocks.extend_from_slice(&(at_data + start).to_le_bytes());
-            }
+            head_ends.extend(part.head_ends.iter().map(|end| at_head + end));
+            blocks.extend(part.blocks.iter().map(|start| at_data + start));
             heads.extend_from_slice(&part.heads);
             samples.extend_from_slice(&part.samples);
             data.extend_from_slice(&part.data);
@@ -733,9 +743,9 @@ impl DictIndex {
             block,
             n,
             heads: SharedBytes::from_owned(heads),
-            head_ends: SharedBytes::from_owned(head_ends),
+            head_ends: packed_offsets(&head_ends),
             samples,
-            blocks: SharedBytes::from_owned(blocks),
+            blocks: packed_offsets(&blocks),
             data: SharedBytes::from_owned(data),
             table,
         })
@@ -763,13 +773,13 @@ impl DictIndex {
 
     #[inline(always)]
     fn head_end(&self, b: usize) -> usize {
-        u32_at(&self.head_ends, b)
+        usize::try_from(self.head_ends.at(b)).unwrap_or(usize::MAX)
     }
 
     /// Where block `b`'s entries start, as stored — past `data` on a blob nothing walked.
     #[inline(always)]
     fn block_start(&self, b: usize) -> u64 {
-        u64_at(&self.blocks, b)
+        self.blocks.at(b)
     }
 
     #[inline(always)]
@@ -793,14 +803,15 @@ impl DictIndex {
     /// Block `b`'s entries, bounded the way [`head`](Self::head) is.
     #[inline(always)]
     fn block_data(&self, b: usize) -> &[u8] {
-        let (data, blocks): (&[u8], &[u8]) = (&self.data, &self.blocks);
-        let at = |b: usize| usize::try_from(u64_at(blocks, b)).unwrap_or(usize::MAX);
-        let end = if b + 1 < self.blocks_len() {
-            at(b + 1)
+        let data: &[u8] = &self.data;
+        let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
+        let (start, end) = if b + 1 < self.blocks_len() {
+            let (start, end) = self.blocks.pair(b);
+            (at(start), at(end))
         } else {
-            data.len()
+            (at(self.blocks.at(b)), data.len())
         };
-        data.get(at(b)..end).unwrap_or_default()
+        data.get(start..end).unwrap_or_default()
     }
 
     /// How many leading bytes an entry's stored suffix shares with `rest`, and how the suffix
@@ -863,7 +874,7 @@ impl DictIndex {
     /// narrowed that to the blocks whose heads can share the probe's first eight bytes.
     #[inline]
     fn head_boundary(&self, probe: &[u8], mut l: usize, mut r: usize) -> usize {
-        let (heads, ends): (&[u8], &[u8]) = (&self.heads, &self.head_ends);
+        let (heads, ends): (&[u8], &Offsets) = (&self.heads, &self.head_ends);
         while l < r {
             let m = l + (r - l) / 2;
             if head_of(heads, ends, m) <= probe {
@@ -1083,7 +1094,7 @@ impl DictIndex {
             // two passes rather than one: the second cannot be issued until the first has landed.
             for &b in bound.iter().take(m) {
                 if b > 0 {
-                    crate::blob::prefetch_byte(&self.blocks, (b - 1) * 8);
+                    self.blocks.prefetch(b - 1);
                 }
             }
             // A block's entries are contiguous, so the whole run is pulled in, not just its first
@@ -1418,7 +1429,8 @@ impl DictIndex {
         let mut table = Vec::with_capacity(self.table.serialized_len());
         self.table.write_to(&mut table);
         f(&table)?;
-        for section in [&self.heads, &self.head_ends] {
+        f(&self.heads)?;
+        for section in self.head_ends.sections() {
             f(section)?;
         }
         let mut buf = Vec::with_capacity(8 * CHUNK);
@@ -1429,7 +1441,8 @@ impl DictIndex {
                 .for_each(|w| buf.extend_from_slice(&w.to_le_bytes()));
             f(&buf)?;
         }
-        for section in [&self.blocks, &self.data] {
+        f(&self.data)?;
+        for section in self.blocks.sections() {
             f(section)?;
         }
         Ok(())
@@ -1450,15 +1463,18 @@ impl DictIndex {
         h[24..32].copy_from_slice(&(self.data.len() as u64).to_le_bytes());
         h[32..36].copy_from_slice(&(self.table.serialized_len() as u32).to_le_bytes());
         h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
+        h[44] = self.head_ends.width() as u8;
+        h[45] = self.blocks.width() as u8;
+        h[46] = self.head_ends.shift() as u8;
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
     }
 
     /// Serialise to `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
-    /// [check]`, then the symbol table, the head keys, the three per-block arrays and the block
-    /// data. `check` is a hash of the preceding header bytes and `payload` a hash of everything
-    /// after it, both verified on load.
+    /// [offset widths][check]`, then the symbol table, the head keys, the per-block arrays and the
+    /// block data. `check` is a hash of the preceding header bytes and `payload` a hash of
+    /// everything after it, both verified on load.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
         out.extend_from_slice(&self.header());
@@ -1475,7 +1491,9 @@ impl DictIndex {
         HEADER
             + self.table.serialized_len()
             + self.heads.len()
-            + self.blocks_len() * PER_BLOCK
+            + self.blocks_len() * 8
+            + self.head_ends.len()
+            + self.blocks.len()
             + self.data.len()
     }
 
@@ -1528,9 +1546,16 @@ impl DictIndex {
         let data_len = usize::try_from(u64_at(24))
             .map_err(|_| IndexError::Format("dict: block data out of range"))?;
         let table_len = u32_at(32) as usize;
+        let (head_width, block_width, shift) = (
+            u32::from(bytes[44]),
+            u32::from(bytes[45]),
+            u32::from(bytes[46]),
+        );
+        if head_width > offsets::MAX_WIDTH || block_width > offsets::MAX_WIDTH || shift >= 32 {
+            return Err(IndexError::Format("dict: offset widths out of range"));
+        }
         let nb = n.div_ceil(block);
-        let arrays = nb
-            .checked_mul(PER_BLOCK)
+        let arrays = arrays_len(nb, head_width, block_width, shift)
             .ok_or(IndexError::Format("dict: block count out of range"))?;
         let total = HEADER
             .checked_add(table_len)
@@ -1551,13 +1576,23 @@ impl DictIndex {
         let table = Table::from_bytes(&take(table_len))
             .ok_or(IndexError::Format("dict: bad symbol table"))?;
         let heads = take(heads_len);
-        let head_ends = take(nb * 4);
+        let head_ends = Offsets::new(
+            take(offsets::bases_len(nb, shift)),
+            take(offsets::deltas_len(nb, head_width)),
+            head_width,
+            shift,
+        );
         let samples = take(nb * 8)
             .chunks_exact(8)
             .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
             .collect();
-        let blocks = take(nb * 8);
         let data = take(data_len);
+        let blocks = Offsets::new(
+            take(offsets::bases_len(nb, shift)),
+            take(offsets::deltas_len(nb, block_width)),
+            block_width,
+            shift,
+        );
         let idx = Self {
             block,
             n,
@@ -2429,6 +2464,73 @@ mod tests {
         assert!(DictIndex::load(&path).is_err());
     }
 
+    /// Where every section of a blob starts, read out of its own header.
+    struct Layout {
+        head_bases: usize,
+        head_deltas: usize,
+        samples: usize,
+        data: usize,
+        block_bases: usize,
+        block_deltas: usize,
+        head_width: u32,
+        block_width: u32,
+        nb: usize,
+    }
+
+    fn layout(blob: &[u8], block: usize) -> Layout {
+        let u64_at = |i: usize| u64::from_le_bytes(blob[i..i + 8].try_into().unwrap()) as usize;
+        let nb = u64_at(4).div_ceil(block);
+        let table_len = u32::from_le_bytes(blob[32..36].try_into().unwrap()) as usize;
+        let (head_width, block_width, shift) = (
+            u32::from(blob[44]),
+            u32::from(blob[45]),
+            u32::from(blob[46]),
+        );
+        assert_eq!(shift, offsets::SHIFT);
+        assert!(head_width > 0 && block_width > 0, "a corpus with no spread");
+        let head_bases = HEADER + table_len + u64_at(16);
+        let head_deltas = head_bases + offsets::bases_len(nb, shift);
+        let samples = head_deltas + offsets::deltas_len(nb, head_width);
+        let data = samples + nb * 8;
+        let block_bases = data + u64_at(24);
+        let block_deltas = block_bases + offsets::bases_len(nb, shift);
+        assert_eq!(
+            block_deltas + offsets::deltas_len(nb, block_width),
+            blob.len()
+        );
+        Layout {
+            head_bases,
+            head_deltas,
+            samples,
+            data,
+            block_bases,
+            block_deltas,
+            head_width,
+            block_width,
+            nb,
+        }
+    }
+
+    /// The base entry `i` is measured from, as it stands and as it is set.
+    fn base_of(blob: &[u8], at: usize, i: usize) -> u64 {
+        let at = at + (i >> offsets::SHIFT) * 8;
+        u64::from_le_bytes(blob[at..at + 8].try_into().unwrap())
+    }
+
+    fn set_base(blob: &mut [u8], at: usize, i: usize, v: u64) {
+        let at = at + (i >> offsets::SHIFT) * 8;
+        blob[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// Entry `i`'s delta, in place, so an edit names one entry rather than a run of bytes.
+    fn set_delta(blob: &mut [u8], at: usize, width: u32, i: usize, v: u64) {
+        let bit = i * width as usize;
+        let (at, off) = (at + bit / 8, bit % 8);
+        let mask = ((1u64 << width) - 1) << off;
+        let word = u64::from_le_bytes(blob[at..at + 8].try_into().unwrap());
+        blob[at..at + 8].copy_from_slice(&(((word & !mask) | ((v << off) & mask)).to_le_bytes()));
+    }
+
     /// Recompute both checksums after a deliberate edit, so the structural checks are reached.
     fn reframe(blob: &mut [u8]) {
         let payload = crate::blob::hash_block(&blob[HEADER..]);
@@ -2459,15 +2561,9 @@ mod tests {
     fn every_length_and_table_in_a_blob_is_checked() {
         let keys = corpus();
         let blob = DictIndex::build_with_block(&keys, 2).unwrap().to_bytes();
-        let u64_at = |i: usize| u64::from_le_bytes(blob[i..i + 8].try_into().unwrap()) as usize;
-        let table_len = u32::from_le_bytes(blob[32..36].try_into().unwrap()) as usize;
-        let (heads_len, nb) = (u64_at(16), keys.len().div_ceil(2));
-        let heads_at = HEADER + table_len;
-        let ends_at = heads_at + heads_len;
-        let samples_at = ends_at + nb * 4;
-        let blocks_at = samples_at + nb * 8;
-        let data_at = blocks_at + nb * 8;
-        assert_eq!(data_at + u64_at(24), blob.len());
+        let heads_len = u64::from_le_bytes(blob[16..24].try_into().unwrap()) as usize;
+        let l = layout(&blob, 2);
+        let nb = l.nb;
 
         refused(&blob[..HEADER - 1], "truncated");
         let mut b = blob.clone();
@@ -2477,7 +2573,7 @@ mod tests {
         b[4] ^= 1;
         refused(&b, "header checksum");
         let mut b = blob.clone();
-        b[data_at] ^= 1;
+        b[l.data] ^= 1;
         refused(&b, "payload checksum");
 
         let edited = |edit: &dyn Fn(&mut Vec<u8>), what: &str| {
@@ -2506,23 +2602,29 @@ mod tests {
             &|b| b[4..12].copy_from_slice(&u64::MAX.to_le_bytes()),
             "out of range",
         );
+        edited(&|b| b[44] = 57, "offset widths out of range");
+        edited(&|b| b[46] = 32, "offset widths out of range");
         edited(&|b| b[HEADER] = 255, "bad symbol table");
         edited(&|b| b[HEADER + 1] = 0, "bad symbol table");
         edited(
-            &|b| b[ends_at..ends_at + 4].copy_from_slice(&u32::MAX.to_le_bytes()),
+            &|b| set_base(b, l.head_bases, 0, u64::MAX),
             "head table out of order",
         );
         edited(
             &|b| {
-                let last = ends_at + (nb - 1) * 4;
-                b[last..last + 4].copy_from_slice(&(heads_len as u32 - 1).to_le_bytes());
+                // The last superblock a byte lower: still in order, one byte short of the heads.
+                let base = base_of(b, l.head_bases, nb - 1);
+                set_base(b, l.head_bases, nb - 1, base - 1);
             },
             "does not cover",
         );
-        edited(&|b| b[samples_at] ^= 1, "head samples");
-        edited(&|b| b[blocks_at] = 1, "block table out of order");
+        edited(&|b| b[l.samples] ^= 1, "head samples");
         edited(
-            &|b| b[blocks_at + 8..blocks_at + 16].copy_from_slice(&u64::MAX.to_le_bytes()),
+            &|b| set_base(b, l.block_bases, 0, 1),
+            "block table out of order",
+        );
+        edited(
+            &|b| set_delta(b, l.block_deltas, l.block_width, 1, u64::MAX),
             "block table out of order",
         );
         edited(&|b| b.push(0), "add up");
@@ -2542,10 +2644,10 @@ mod tests {
         let keys = corpus();
         let blob = DictIndex::build_with_block(&keys, 8).unwrap().to_bytes();
         let data_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
-        let data_at = blob.len() - data_len;
+        let data_at = layout(&blob, 8).data;
         for fill in [0x00u8, 0x0F, 0xF0, 0xFE, 0xFF] {
             let mut b = blob.clone();
-            b[data_at..].fill(fill);
+            b[data_at..data_at + data_len].fill(fill);
             reframe(&mut b);
             let idx = DictIndex::from_bytes(&b).unwrap();
             for p in keys.iter().chain(probes(&keys).iter()) {
@@ -2575,28 +2677,21 @@ mod tests {
     fn a_load_without_the_walk_bounds_what_the_arrays_say() {
         let keys = corpus();
         let blob = DictIndex::build_with_block(&keys, 4).unwrap().to_bytes();
-        let table_len = u32::from_le_bytes(blob[32..36].try_into().unwrap()) as usize;
-        let heads_len = u64::from_le_bytes(blob[16..24].try_into().unwrap()) as usize;
-        let nb = keys.len().div_ceil(4);
-        let ends_at = HEADER + table_len + heads_len;
-        let samples_at = ends_at + nb * 4;
-        let blocks_at = samples_at + nb * 8;
+        let l = layout(&blob, 4);
+        let nb = l.nb;
         type Edit<'a> = &'a dyn Fn(&mut Vec<u8>);
         let edits: [Edit; 8] = [
-            &|b| b[ends_at..ends_at + 4].copy_from_slice(&u32::MAX.to_le_bytes()),
-            &|b| b[ends_at + 4 * (nb - 1)..][..4].copy_from_slice(&0u32.to_le_bytes()),
+            &|b| set_base(b, l.head_bases, 0, u64::MAX),
             &|b| {
-                let past = heads_len as u32 + 7;
-                b[ends_at + 4 * (nb / 2)..][..4].copy_from_slice(&past.to_le_bytes());
+                let base = base_of(b, l.head_bases, nb - 1);
+                set_base(b, l.head_bases, nb - 1, base - 1);
             },
-            &|b| b[samples_at..samples_at + 8].fill(0xFF),
-            &|b| b[blocks_at..blocks_at + 8].copy_from_slice(&u64::MAX.to_le_bytes()),
-            &|b| b[blocks_at + 8 * (nb / 2)..][..8].copy_from_slice(&u64::MAX.to_le_bytes()),
-            &|b| b[blocks_at + 8 * (nb - 1)..][..8].copy_from_slice(&1u64.to_le_bytes()),
-            &|b| {
-                let past = blob.len() as u64 - (blocks_at + 8 * nb) as u64 + 1;
-                b[blocks_at + 8 * (nb - 1)..][..8].copy_from_slice(&past.to_le_bytes());
-            },
+            &|b| set_delta(b, l.head_deltas, l.head_width, nb / 2, u64::MAX),
+            &|b| b[l.samples..l.samples + 8].fill(0xFF),
+            &|b| set_base(b, l.block_bases, 0, u64::MAX),
+            &|b| set_delta(b, l.block_deltas, l.block_width, nb / 2, u64::MAX),
+            &|b| set_base(b, l.block_bases, nb - 1, 0),
+            &|b| set_delta(b, l.block_deltas, l.block_width, nb - 1, u64::MAX),
         ];
         for (i, edit) in edits.iter().enumerate() {
             let mut b = blob.clone();

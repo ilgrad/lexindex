@@ -225,20 +225,48 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             Ok(i)
         }
         b"BDX1" | b"BDX2" => {
-            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][check u32]`
-            // -- the same in both, since `BDX2` changed the inside of a block and nothing around
-            // it. A blob this version refuses to load still says what it is here.
-            w.bytes(0, 48)?;
+            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in both,
+            // then `BDX2`'s three offset-width bytes before the check. A blob this version
+            // refuses to load still says what it is here.
+            let two = &magic == b"BDX2";
+            let header: u64 = if two { 52 } else { 48 };
+            w.bytes(0, header as usize)?;
             let (n, block) = (w.u64(4)?, u64::from(w.u32(12)?));
             let (heads, data, table) = (w.u64(16)?, w.u64(24)?, u64::from(w.u32(32)?));
             let mut i = info(BlobKind::DictIndex, format, bytes, n);
             let keyed = heads.checked_add(data).ok_or(TRUNCATED)?;
             i.arena_bytes = Some(keyed);
-            // Three arrays of 20 bytes per block follow the keys; a block size of zero is not
-            // a blob this crate wrote, and reads as no blocks rather than a division by it.
+            // The per-block arrays follow the keys; a block size of zero is not a blob this crate
+            // wrote, and reads as no blocks rather than a division by it.
             let blocks = if block == 0 { 0 } else { n.div_ceil(block) };
-            let arrays = blocks.checked_mul(20).ok_or(TRUNCATED)?;
-            rest(bytes, [48 + table, keyed, arrays])?;
+            let arrays = if two {
+                // A sample a block, and two offset arrays: one base a superblock, one delta a
+                // block, at the widths the header names.
+                let widths = w.bytes(44, 3)?;
+                let (shift, packed) = (u32::from(widths[2]), |width: u8| {
+                    blocks
+                        .checked_mul(u64::from(width))
+                        .and_then(|bits| bits.div_ceil(8).checked_add(8))
+                });
+                if shift >= 32 {
+                    return Err(TRUNCATED);
+                }
+                let bases = blocks
+                    .div_ceil(1 << shift)
+                    .checked_mul(8)
+                    .ok_or(TRUNCATED)?;
+                let deltas = packed(widths[0])
+                    .and_then(|h| packed(widths[1]).map(|b| h + b))
+                    .ok_or(TRUNCATED)?;
+                blocks
+                    .checked_mul(8)
+                    .and_then(|s| s.checked_add(2 * bases))
+                    .and_then(|s| s.checked_add(if blocks == 0 { 0 } else { deltas }))
+                    .ok_or(TRUNCATED)?
+            } else {
+                blocks.checked_mul(20).ok_or(TRUNCATED)?
+            };
+            rest(bytes, [header + table, keyed, arrays])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" => {
@@ -519,10 +547,10 @@ mod tests {
             (None, None, None)
         );
         // The keys and their block data, without the header, the symbol table and the ten
-        // blocks' three arrays.
+        // blocks' arrays.
         let arena = i.arena_bytes.unwrap();
         assert!(
-            arena > 0 && arena + 48 + 10 * 20 < i.bytes,
+            arena > 0 && arena + 52 + 10 * 8 < i.bytes,
             "{arena} of {}",
             i.bytes
         );
