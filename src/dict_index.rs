@@ -4,7 +4,7 @@
 //! The sorted keys are cut into blocks of `block` keys (256 by default). A block stores its first
 //! key whole and every other as the length of the prefix it shares with its predecessor and the
 //! suffix after it, the suffix under a static symbol table ([`fsst`]) trained on the suffixes of
-//! the 131 072 keys around it. Those two live apart inside the block: one header byte an entry
+//! the 65 536 keys around it. Those two live apart inside the block: one header byte an entry
 //! first, then every suffix end to end. A scan rules most entries out by the header alone, and
 //! reading 127 of them is two cache lines where the interleaved form spread the same bytes over
 //! seven. Beside the
@@ -60,18 +60,21 @@ const MAX_BLOCK: usize = 1024;
 const STAIRS: usize = 32;
 /// About how many suffixes a symbol table is trained on, from runs of keys spread evenly over the
 /// shard it covers — so an index of `n` keys trains a sample this size `n / SHARD_KEYS` times, and
-/// that product is what a shard costs to build. Halving this and the shard together costs the same
-/// build and trades: 0.2 bytes a key better on a path list, 0.01 worse where the keys are short
-/// enough for the tables themselves to show.
-const TRAIN_PIECES: usize = 20_000;
+/// that product is what a shard costs to build. The pair sits at the flat bottom of that trade:
+/// holding the product fixed, shards of 262 144 / 131 072 / 65 536 / 32 768 / 16 384 keys come out
+/// 1.5 / 0.8 / 0.4 / 0.4 / 0.9 % above the smallest size each of eight corpora reaches, and the two
+/// ends are worse for opposite reasons — one table over neighbourhoods that share nothing, and
+/// 900 bytes of table for every shard.
+const TRAIN_PIECES: usize = 10_000;
 /// Keys one symbol table is trained on and covers. A table serialises to about 900 bytes, so a
-/// shard this size costs 0.007 bytes a key, and what it buys is locality: against one table over
-/// the whole index, 0.02 bytes a key on the dictionary, 0.10 on a million URLs, 0.21 on ten
-/// million article titles, 0.67 on Russian ones and **1.03 on a path list**, where a million paths
+/// shard this size costs 0.015 bytes a key, and what it buys is locality: against one table over
+/// the whole index, 0.01 bytes a key on the dictionary, 0.12 on a million URLs, 0.23 on ten
+/// million article titles, 0.75 on Russian ones and **1.25 on a path list**, where a million paths
 /// run through a few thousand directories — more than one table can hold at once. The one thing it
-/// costs is the tables: a word-bigram cross product, 2.48 bytes a key, comes out 0.01 larger.
+/// costs is the tables: `domains`, a million short names that end alike wherever they are cut,
+/// comes out 0.06 larger.
 /// Shards are contiguous and aligned to blocks, so the table for block `b` is `b / shard`.
-const SHARD_KEYS: usize = 131_072;
+const SHARD_KEYS: usize = 65_536;
 /// How many consecutive keys one of those runs holds. A constant rather than `block`, so the sample
 /// keeps its shape whatever block the caller picked: spending the budget on whole blocks meant 157
 /// neighbourhoods at 128 keys a block and 19 at 1024, and a table trained on 19 of them is a
@@ -172,7 +175,7 @@ fn micro_for(block: usize) -> usize {
 #[cfg(test)]
 thread_local! {
     /// Blocks a shard covers while a test is running; zero is the real rule. A second table exists
-    /// only past 131 072 keys, which is more than a unit test should have to build.
+    /// only past 65 536 keys, which is more than a unit test should have to build.
     static SHARD_OVERRIDE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
