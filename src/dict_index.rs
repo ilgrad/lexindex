@@ -43,6 +43,8 @@ const TRAIN_PIECES: usize = 20_000;
 const CHUNK: usize = 4096;
 /// Blocks a thread must be given before the encoding is worth splitting across threads at all.
 const PARALLEL_BLOCKS: usize = 64;
+/// Lookups a batched [`DictIndex::ids_of`] keeps in flight at once.
+const LANES: usize = 32;
 
 /// An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways.
 ///
@@ -758,11 +760,17 @@ impl DictIndex {
         // The blocks whose heads share the probe's first eight bytes, and the one before them:
         // the probe can only be in one of these.
         let s = sample_of(probe);
-        let (heads, ends): (&[u8], &[u8]) = (&self.heads, &self.head_ends);
         let lo = self.samples.partition_point(|&x| x < s);
         let hi = self.samples.partition_point(|&x| x <= s);
-        // The last block in [from, hi) whose head is not past the probe.
-        let (mut l, mut r) = (lo.saturating_sub(1), hi);
+        let l = self.head_boundary(probe, lo.saturating_sub(1), hi);
+        self.locate_in(l, probe)
+    }
+
+    /// The first block index in `[l, r)` whose head is past `probe` — the samples have already
+    /// narrowed that to the blocks whose heads can share the probe's first eight bytes.
+    #[inline]
+    fn head_boundary(&self, probe: &[u8], mut l: usize, mut r: usize) -> usize {
+        let (heads, ends): (&[u8], &[u8]) = (&self.heads, &self.head_ends);
         while l < r {
             let m = l + (r - l) / 2;
             if head_of(heads, ends, m) <= probe {
@@ -771,12 +779,18 @@ impl DictIndex {
                 r = m;
             }
         }
+        l
+    }
+
+    /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
+    /// is the only one that can hold `probe`, and this scans it.
+    fn locate_in(&self, l: usize, probe: &[u8]) -> (u64, bool) {
         if l == 0 {
             return (0, false);
         }
         let b = l - 1;
         let base = (b * self.block) as u64;
-        let head = head_of(heads, ends, b);
+        let head = self.head(b);
         if head == probe {
             return (base, true);
         }
@@ -898,12 +912,110 @@ impl DictIndex {
         self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
     }
 
+    /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
+    /// are not `str`s — a lookup reading an Arrow buffer.
+    ///
+    /// A batch is not a loop here. A single lookup is a chain of dependent loads — the binary
+    /// search over the block samples, then the block's head, then its data — and each one waits on
+    /// the last, so a lookup into an index past the last-level cache spends most of its time
+    /// stalled. Doing `LANES` of them in lockstep puts that many loads in flight at once: the
+    /// binary searches advance one step for every lane before any lane takes its second, and the
+    /// blocks the lanes landed on are prefetched whole before any lane is scanned.
+    ///
+    /// What that is worth is what is left stalled, so it grows with the index and shrinks with the
+    /// block — a larger block leaves fewer samples to search and more bytes to scan, and only the
+    /// search is fully hidden. Real word bigrams, half of the probes members, shuffled, a loop of
+    /// [`id`](Self::id) as the control in the same process:
+    ///
+    /// | keys | block | index | `id` in a loop | `ids_of` |
+    /// |---:|---:|---:|---:|---:|
+    /// | 10 M | 32 | 39 MB | 861 ns | **535** |
+    /// | 10 M | 128 | 32 MB | 771 | 645 |
+    /// | 1 M | 32 | 3.2 MB | 377 | 306 |
+    /// | 200 k | 32 | 0.6 MB | 277 | 281 |
+    ///
+    /// The last row is the point: an index that fits in cache has nothing to hide, and the batch
+    /// is then the same work in a less obvious order.
     pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
         &self,
         n: usize,
         key: F,
     ) -> Vec<Option<u64>> {
-        (0..n).map(|i| self.id_bytes(key(i))).collect()
+        let mut out = Vec::with_capacity(n);
+        if self.n == 0 {
+            out.resize(n, None);
+            return out;
+        }
+        let nb = self.blocks_len();
+        // Enough rounds for the widest search: each one at least halves the remaining span.
+        let rounds = usize::BITS as usize - nb.leading_zeros() as usize + 1;
+        let mut s = [0u64; LANES];
+        let (mut lo_at, mut lo_len) = ([0usize; LANES], [0usize; LANES]);
+        let (mut hi_at, mut hi_len) = ([0usize; LANES], [0usize; LANES]);
+        let mut bound = [0usize; LANES];
+        for base in (0..n).step_by(LANES) {
+            let m = LANES.min(n - base);
+            for j in 0..m {
+                s[j] = sample_of(key(base + j));
+                (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, nb, 0, nb);
+            }
+            // `lo` is the first sample not below the probe's, `hi` the first above it — the two
+            // `partition_point`s `locate` makes, run for every lane at once.
+            for _ in 0..rounds {
+                for j in 0..m {
+                    if lo_len[j] > 0 {
+                        let half = lo_len[j] >> 1;
+                        if self.samples[lo_at[j] + half] < s[j] {
+                            lo_at[j] += half + 1;
+                            lo_len[j] -= half + 1;
+                        } else {
+                            lo_len[j] = half;
+                        }
+                    }
+                    if hi_len[j] > 0 {
+                        let half = hi_len[j] >> 1;
+                        if self.samples[hi_at[j] + half] <= s[j] {
+                            hi_at[j] += half + 1;
+                            hi_len[j] -= half + 1;
+                        } else {
+                            hi_len[j] = half;
+                        }
+                    }
+                }
+            }
+            for j in 0..m {
+                bound[j] = self.head_boundary(key(base + j), lo_at[j].saturating_sub(1), hi_at[j]);
+            }
+            // The block start is one load and the data it names another, so they are pulled in as
+            // two passes rather than one: the second cannot be issued until the first has landed.
+            for &b in bound.iter().take(m) {
+                if b > 0 {
+                    crate::blob::prefetch_byte(&self.blocks, (b - 1) * 8);
+                }
+            }
+            // A block's entries are contiguous, so the whole run is pulled in, not just its first
+            // line: at 128 keys a block is several lines and the scan walks all of them.
+            for &b in bound.iter().take(m) {
+                if b > 0 {
+                    let at = self.block_start(b - 1) as usize;
+                    let end = if b < nb {
+                        self.block_start(b) as usize
+                    } else {
+                        self.data.len()
+                    };
+                    for line in (at..end.min(at + 8 * 64)).step_by(64) {
+                        crate::blob::prefetch_byte(&self.data, line);
+                    }
+                }
+            }
+            for (j, &b) in bound.iter().enumerate().take(m) {
+                out.push(match self.locate_in(b, key(base + j)) {
+                    (rank, true) => Some(rank),
+                    _ => None,
+                });
+            }
+        }
+        out
     }
 
     /// Decode the next entry of a block onto `cur`, which holds the previous one, moving `at`
@@ -1953,6 +2065,36 @@ mod tests {
             let err = DictIndex::build_sorted_with_block(["a"], block).unwrap_err();
             assert!(err.to_string().contains("block must be"), "{err}");
         }
+    }
+
+    #[test]
+    fn a_batch_answers_exactly_what_the_keys_answer_one_by_one() {
+        let keys = corpus();
+        let mut queries = keys.clone();
+        queries.extend(probes(&keys));
+        assert!(
+            queries.len() > LANES * 2,
+            "the lane loop must run more than once"
+        );
+        for block in [1usize, 3, 32, MAX_BLOCK] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            let want: Vec<Option<u64>> = queries.iter().map(|q| idx.id(q)).collect();
+            assert_eq!(idx.ids_of(&queries), want, "block {block}");
+            // The ragged last lane, at every width that can end one.
+            for take in [0usize, 1, LANES - 1, LANES, LANES + 1] {
+                assert_eq!(
+                    idx.ids_of(&queries[..take]),
+                    want[..take].to_vec(),
+                    "block {block} take {take}"
+                );
+            }
+        }
+        let empty = DictIndex::build(Vec::<&str>::new()).unwrap();
+        assert_eq!(
+            empty.ids_of(&queries[..LANES + 1]),
+            vec![None; LANES + 1],
+            "an empty index still answers once per key"
+        );
     }
 
     #[test]

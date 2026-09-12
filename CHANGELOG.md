@@ -42,6 +42,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **A batched `DictIndex` lookup is no longer a loop.** `ids_of` — and with it `ids_of_bytes` and
+  `ids_of_arrow`, the Python and Arrow batch paths — ran `id` once per key, and a single `id` is a
+  chain of dependent loads: the binary search over the block samples, then the block's head, then
+  its data. Past the last-level cache each one waits on the last. Thirty-two lookups now advance in
+  lockstep — every lane takes one step of its binary search before any lane takes its second, and
+  the blocks they land on are prefetched whole before any lane is scanned. On real word bigrams,
+  half the probes members, shuffled, against a loop of `id` in the same process: **861 → 535 ns a
+  key at 10 M keys and 32 per block** (1.61×), 771 → 645 at 128 per block, 377 → 306 at 1 M, and
+  277 → 281 at 200 k — where the index is 0.6 MB, nothing stalls, and there is nothing to hide.
+  Prefetching the *heads* as well was tried and measured 7 % slower; it is not in the code.
+
 - **A `DictIndex` encodes its blocks on every core.** Once the symbol table is fixed a block depends
   on nothing outside itself, so contiguous ranges of blocks go to their own threads
   (`std::thread::scope`, no new dependency) and the parts are concatenated in order. The bytes do

@@ -104,7 +104,6 @@ impl std::fmt::Debug for SharedBytes {
 
 /// Best-effort prefetch of the cache line holding `data[i]`; no-op off x86_64 or out of range.
 #[inline(always)]
-#[cfg(feature = "mph")]
 pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     #[cfg(target_arch = "x86_64")]
     if i < data.len() {
