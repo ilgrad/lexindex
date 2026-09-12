@@ -8,6 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` packs its per-block offsets, and the index is 8 % smaller at the default block.**
+  Where each block's head ends and where its entries start were a `u32` and a `u64` a block — 12 of
+  the 20 bytes a block cost — while both only ever grow by one block's worth at a time. Each is now
+  one `u64` base every 64 blocks and a delta of the width the corpus asks for: 10 and 13 bits on the
+  dictionary at the default block. Per-block metadata falls **0.625 → 0.348 bytes a key at block 32
+  and 0.156 → 0.089 at 128**, so the index goes **3.52 → 3.24** and **2.89 → 2.83**, and 4.35 → 3.79
+  at 16 keys a block. A head and a block's data are both read as the span between two entries, and
+  neighbours share a base and the word their deltas are cut from, so the pair costs what one entry
+  costs: **`id` does not move at any block size**, and `key_into` pays 1.7 % at block 32, 5.5 % at
+  128 and 6.3 % at 256 — two instructions an entry walked, with branch misses and cache misses flat.
+  Measured against the same ladder on the tree before it
+  (`bench/results/dict-offsets-2026-09-12-arz-6c699c0.txt`); the corpus tables in
+  `docs/benchmarks.md` are re-measured too.
+  **The 4 GiB ceiling on the block heads is gone with it** — the base is a full word, so
+  `IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")` can no longer
+  happen. The `BDX2` header grows three bytes for the two widths and the superblock shift, and the
+  block starts move behind the block data: their width is only known once the encoding is done,
+  which is what lets a streamed build write every section once and in order. `BDX2` has not shipped,
+  so nothing outside this tree has written the layout this replaces.
+
 - **`DictIndex` blocks put their headers first, and the format is `BDX2`.** A block held each
   entry's header immediately before its own suffix; it now holds every header, one byte each, and
   then every suffix. The same bytes in a different order — a blob is the same length to the byte —

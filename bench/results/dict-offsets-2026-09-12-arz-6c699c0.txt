@@ -1,0 +1,153 @@
+DictIndex per-block offsets: packed against a superblock base — 2026-09-12, arz (Ryzen 7 5800HS, 8 cores, 38 GB, Fedora 44)
+
+Harness: local/dictbench (release), the same source on both trees, so this is a before/after on the same binary
+shape: /usr/share/dict/words sorted and deduplicated (479 823 keys), probes = all words shuffled with a fixed
+seed, every id for the reverse lookups, five rounds per block size, variants alternated within a round, min per
+variant, ns per probe. StringIndex is the control: no edit here can reach it.
+
+Before is 4c85dca, the BDX2 header/suffix split, with `head_ends` a u32 a block and `blocks` a u64 a block.
+After is 6c699c0: both arrays are one u64 base every 64 blocks plus a delta of the width the corpus asks for
+(10 bits for the head ends, 13 for the block starts at block 32), and a head or a block's data is read as one
+`pair` — the two entries share a base and the word their deltas are cut from.
+
+The two runs of each tree take the block sizes in opposite orders, minutes apart on the same machine and load.
+
+Summary, min over the two runs:
+
+                        k=16     k=32     k=64    k=128    k=256
+  bytes/key   before    4.352    3.522    3.103    2.894    2.785
+              after     3.790    3.245    2.966    2.827    2.752
+              delta   -12.9 %   -7.9 %   -4.4 %   -2.3 %   -1.2 %
+  per-block   before    1.250    0.625    0.313    0.156    0.078
+  metadata    after     0.688    0.348    0.176    0.089    0.045
+
+  id, member  before    287.6    309.3    330.8    387.7    487.9
+              after     290.8    307.3    332.3    386.9    485.8
+  key_into    before    117.1    164.7    256.1    442.3    813.4
+              after     116.5    167.5    266.1    466.7    865.0
+              delta     -0.5 %   +1.7 %   +3.9 %   +5.5 %   +6.3 %
+
+`id` does not move: the search reads a pair where it read two adjacent words, and the arrays it walks are
+smaller. `key_into` pays 2 instructions an entry walked — measured with perf as +2.2 % instructions at block
+256 for +2.9 % cycles, with branch misses and L1 misses flat, so it is code the compiler lays out differently
+around the block walk rather than a stall. Marking `pair` `#[inline(never)]` moved 1.5 % of it back onto `id`
+(850 against 865 ns at 256, id 490 against 487) and was not taken: `id` is the more common call. Hoisting the
+head read above the walk was worse than both (872-874 ns).
+
+=== before: 4c85dca
+--- before, run A: 16 32 64 128 256
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 128 ms
+DictIndex k=16   4.35 B/key  build 26 ms
+  id member   dict  287.6  string  337.4
+  id stranger dict  189.8  string  235.6
+  key_into    dict  117.1  key dict  160.0  string  492.5
+  lower_bound dict  191.1
+DictIndex k=32   3.52 B/key  build 21 ms
+  id member   dict  309.7  string  342.7
+  id stranger dict  208.5  string  234.3
+  key_into    dict  164.7  key dict  215.9  string  494.1
+  lower_bound dict  208.9
+DictIndex k=64   3.10 B/key  build 20 ms
+  id member   dict  331.6  string  342.9
+  id stranger dict  235.7  string  235.7
+  key_into    dict  256.1  key dict  311.7  string  496.4
+  lower_bound dict  235.9
+DictIndex k=128  2.89 B/key  build 20 ms
+  id member   dict  387.7  string  344.3
+  id stranger dict  291.8  string  238.3
+  key_into    dict  442.3  key dict  504.5  string  498.6
+  lower_bound dict  291.8
+DictIndex k=256  2.78 B/key  build 20 ms
+  id member   dict  487.9  string  343.4
+  id stranger dict  390.6  string  239.1
+  key_into    dict  813.4  key dict  875.1  string  501.1
+  lower_bound dict  391.0
+
+--- before, run B: 256 128 64 32 16
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 132 ms
+DictIndex k=256  2.78 B/key  build 25 ms
+  id member   dict  489.9  string  351.8
+  id stranger dict  389.8  string  241.6
+  key_into    dict  816.1  key dict  901.9  string  514.3
+  lower_bound dict  389.7
+DictIndex k=128  2.89 B/key  build 23 ms
+  id member   dict  388.0  string  344.3
+  id stranger dict  291.0  string  236.9
+  key_into    dict  445.3  key dict  509.5  string  505.1
+  lower_bound dict  290.5
+DictIndex k=64   3.10 B/key  build 20 ms
+  id member   dict  330.8  string  340.2
+  id stranger dict  235.5  string  237.6
+  key_into    dict  261.7  key dict  321.0  string  508.2
+  lower_bound dict  237.8
+DictIndex k=32   3.52 B/key  build 20 ms
+  id member   dict  309.3  string  341.6
+  id stranger dict  209.4  string  236.7
+  key_into    dict  168.7  key dict  220.7  string  505.5
+  lower_bound dict  211.1
+DictIndex k=16   4.35 B/key  build 21 ms
+  id member   dict  290.8  string  339.7
+  id stranger dict  193.3  string  238.0
+  key_into    dict  121.8  key dict  166.4  string  507.0
+  lower_bound dict  192.2
+
+=== after: 6c699c0
+--- run A: 16 32 64 128 256
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 139 ms
+DictIndex k=16   3.79 B/key  build 28 ms
+  id member   dict  297.0  string  341.6
+  id stranger dict  196.8  string  238.4
+  key_into    dict  116.9  key dict  163.3  string  512.5
+  lower_bound dict  196.7
+DictIndex k=32   3.24 B/key  build 23 ms
+  id member   dict  311.4  string  340.6
+  id stranger dict  213.5  string  238.1
+  key_into    dict  168.1  key dict  223.6  string  509.0
+  lower_bound dict  214.1
+DictIndex k=64   2.97 B/key  build 21 ms
+  id member   dict  332.3  string  342.5
+  id stranger dict  239.5  string  238.5
+  key_into    dict  267.4  key dict  329.5  string  509.3
+  lower_bound dict  238.8
+DictIndex k=128  2.83 B/key  build 20 ms
+  id member   dict  386.9  string  345.5
+  id stranger dict  293.9  string  245.5
+  key_into    dict  468.5  key dict  533.1  string  515.1
+  lower_bound dict  295.0
+DictIndex k=256  2.75 B/key  build 21 ms
+  id member   dict  485.8  string  340.4
+  id stranger dict  391.7  string  238.9
+  key_into    dict  865.0  key dict  933.1  string  509.5
+  lower_bound dict  393.6
+
+--- run B: 256 128 64 32 16
+479823 keys, probes shuffled, min of 5 alternated rounds, ns per probe
+StringIndex   5.95 B/key  build 127 ms
+DictIndex k=256  2.75 B/key  build 25 ms
+  id member   dict  488.6  string  352.6
+  id stranger dict  391.1  string  237.9
+  key_into    dict  865.9  key dict  937.3  string  502.7
+  lower_bound dict  394.7
+DictIndex k=128  2.83 B/key  build 22 ms
+  id member   dict  388.1  string  344.0
+  id stranger dict  294.6  string  238.0
+  key_into    dict  466.7  key dict  536.7  string  500.2
+  lower_bound dict  295.9
+DictIndex k=64   2.97 B/key  build 19 ms
+  id member   dict  333.4  string  338.0
+  id stranger dict  238.0  string  237.6
+  key_into    dict  266.1  key dict  330.8  string  501.1
+  lower_bound dict  238.7
+DictIndex k=32   3.24 B/key  build 20 ms
+  id member   dict  307.3  string  333.3
+  id stranger dict  208.6  string  236.1
+  key_into    dict  167.5  key dict  224.2  string  493.1
+  lower_bound dict  209.6
+DictIndex k=16   3.79 B/key  build 21 ms
+  id member   dict  290.8  string  342.3
+  id stranger dict  193.4  string  237.7
+  key_into    dict  116.5  key dict  169.1  string  505.7
+  lower_bound dict  200.2

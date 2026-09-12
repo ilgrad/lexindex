@@ -143,29 +143,29 @@
     "paths": {
       "what": "filesystem paths — `find /usr -xdev` and `find $HOME -xdev` on the benchmark machine",
       "nested": true,
-      "pool_keys": 7311150,
+      "pool_keys": 7332978,
       "built": "2026-09-12",
       "files": [
         {
           "file": "paths-100000.txt",
           "keys": 100000,
-          "bytes": 12633262,
-          "mean_key_bytes": 125.33,
-          "sha256": "4a310122fc3bdcb032f814d2e7e9197520ec7b94dbd4f96e96f71f5c7d0e35c1"
+          "bytes": 12616056,
+          "mean_key_bytes": 125.16,
+          "sha256": "b872f7738ecf800306ef3e64bd166f89f44f7c5edac28c00ce2f81ded149bba5"
         },
         {
           "file": "paths-1000000.txt",
           "keys": 1000000,
-          "bytes": 126111783,
-          "mean_key_bytes": 125.11,
-          "sha256": "4558c532686a0986b0419d5cf4d17e2ae01867d13ba31c77b0912a130d445b86"
+          "bytes": 126024619,
+          "mean_key_bytes": 125.02,
+          "sha256": "12cbaabe330dd492171f9ce87703e21e23dc71c1c2fc07686fc59bdcc302ee4a"
         },
         {
           "file": "paths-full.txt",
-          "keys": 7311150,
-          "bytes": 921747125,
-          "mean_key_bytes": 125.07,
-          "sha256": "ac0c3ba62e86f80bce481459a05ac80c6677384912319fb4d77c1814e72aaed8"
+          "keys": 7332978,
+          "bytes": 924247279,
+          "mean_key_bytes": 125.04,
+          "sha256": "c1812935b21870ca557f71f3ef673755e9ccd850b8b741879c3c2cf418a73404"
         }
       ],
       "note": "machine-specific by nature; the manifest records the host that produced it"

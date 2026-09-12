@@ -178,8 +178,13 @@ kilobyte. The codec is the crate's own — 300 lines, the reference's encoder sh
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
 so a `BDX2` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other. Beside the blocks sit three flat arrays with one
-entry per block: where its head ends (`u32`), an eight-byte sample of the head in byte order
-(`u64`), and where its entries start (`u64`, so the block data may pass 4 GiB).
+entry per block: an eight-byte sample of the head in byte order (`u64`), and two arrays that are
+not one word an entry — where its head ends, and where its entries start. Both only ever grow by a
+block's worth at a time, so each keeps one `u64` base every 64 blocks and a delta of the width the
+corpus asks for, ten and thirteen bits on the dictionary at the default block. That is 20 bytes a
+block down to 11.1, and it is also why neither array has a four-gigabyte ceiling: the base is a
+full word. A head or a block's data is read as the span between two entries, and neighbours share
+a base and the word their deltas are cut from, so the pair costs what one entry costs.
 
 **Inside a block the headers come first and the suffixes after**, rather than each header before
 its own suffix. The headers are one byte an entry, so the entry count says where they end and the
@@ -200,11 +205,12 @@ nothing that survives, so a monotonic stack over the block's headers finds the f
 deep on average, 12 at the deepest measured — and only those are decoded, one eight-byte store per
 code, into a string the caller can keep (`key_into`). Past a staircase 32 deep the walk stops
 tracking it and decodes every entry, which is slower and not wrong. On the dictionary at
-`block = 32`: **3.52 B/key** (`StringIndex` 5.95), `id` 307–310 ns against 336–343, `key_into`
-165–167 against `key`'s 496–508; 16 and 64 per block give 4.35 and 3.10 B/key at 287–288 and
-330–337 ns, and 128 gives 2.89 at 384–386. The serialised blob is
-`[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload][check]`, then the table,
-the heads, the three arrays and the data; the loader checks every length, both checksums, the
+`block = 32`: **3.24 B/key** (`StringIndex` 5.95), `id` 307–311 ns against 333–353, `key_into`
+168 against `key`'s 493–515; 16 and 64 per block give 3.79 and 2.97 B/key at 291–297 and
+332–333 ns, and 128 gives 2.83 at 387–388. The serialised blob is
+`[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload][offset widths][check]`,
+then the table, the heads, the packed head ends, the samples, the data and the packed block
+starts; the loader checks every length, both checksums, the
 table and the arrays' order before anything is trusted, and the block data — bounded on every
 read rather than validated up front — is what the fuzz target queries after loading. `load_mmap` borrows
 every section but the per-block samples, which two binary searches read on every lookup (below);

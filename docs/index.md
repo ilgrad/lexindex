@@ -37,7 +37,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
   both ways, `lower_bound`, `prefix`, `range`, in-order iteration, no automata so no fuzzy. The
   sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-  3.52 bytes/key, 41 % below `StringIndex`. Use it where the queries are exact and every id has
+  3.24 bytes/key, 45 % below `StringIndex`. Use it where the queries are exact and every id has
   to map back to its key.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map (a minimal perfect hash plus a
   fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no

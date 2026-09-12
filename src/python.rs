@@ -1718,7 +1718,7 @@ impl PyDictIndex {
     /// the ranks of the distinct keys in byte order. `block` keys share one stored head,
     /// `1..=1024`: a lookup scans up to `block - 1` entries, and a reverse lookup reads that many
     /// headers but decodes only the few that contribute a byte, so smaller blocks are faster and
-    /// larger ones smaller -- 16 / 32 / 64 / 128 / 256 gave 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes
+    /// larger ones smaller -- 16 / 32 / 64 / 128 / 256 gave 3.79 / 3.24 / 2.97 / 2.83 / 2.75 bytes
     /// per key on the dictionary, and 128 is under `marisa-trie`'s 2.98.
     #[new]
     #[pyo3(signature = (items, block=32))]

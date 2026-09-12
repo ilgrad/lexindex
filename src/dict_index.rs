@@ -1,5 +1,5 @@
 //! An ordered dictionary with the key stored for every id: exact `string ↔ rank` both ways, in
-//! 41 % less than [`StringIndex`](crate::StringIndex) takes.
+//! 45 % less than [`StringIndex`](crate::StringIndex) takes.
 //!
 //! The sorted keys are cut into blocks of `block` keys (32 by default). A block stores its first
 //! key whole and every other as the length of the prefix it shares with its predecessor and the
@@ -7,8 +7,9 @@
 //! suffixes. Those two live apart inside the block: one header byte an entry first, then every
 //! suffix end to end. A scan rules most entries out by the header alone, and reading 127 of them
 //! is two cache lines where the interleaved form spread the same bytes over seven. Beside the
-//! blocks sit three flat arrays with one entry per block: where its head key ends, an eight-byte
-//! sample of that head, and where its entries start.
+//! blocks sit an eight-byte sample of each block's head and two arrays that are narrower than a
+//! word an entry ([`offsets`](crate::offsets)): where a block's head ends, and where its entries
+//! start.
 //!
 //! `id` is a binary search over the samples, then over the heads of the few blocks whose sample
 //! equals the probe's, then one block scanned without decoding anything: an entry's stored suffix
@@ -62,7 +63,7 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 3.52 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 3.24 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the block
 /// scan, which the `block` given at build time sets — smaller blocks are faster and larger.
@@ -328,9 +329,9 @@ impl DictIndex {
     /// [`build`](Self::build) with `block` keys per block, `1..=1024`. A lookup scans up to
     /// `block − 1` headers, and a reverse lookup reads that many but decodes only the staircase
     /// among them — so smaller blocks are faster and larger ones share more and store less. On
-    /// real words 16 / 32 / 64 / 128 / 256 give 4.35 / 3.52 / 3.10 / 2.89 / 2.78 bytes per key,
-    /// `id` at 287–288 / 307–310 / 330–337 / 384–386 / 487–493 ns and `key_into` at 118 / 165–167
-    /// / 256–258 / 442–444 / 812–815. At 128 the index is under `marisa-trie`'s 2.98 on that
+    /// real words 16 / 32 / 64 / 128 / 256 give 3.79 / 3.24 / 2.97 / 2.83 / 2.75 bytes per key,
+    /// `id` at 291–297 / 307–311 / 332–333 / 387–388 / 486–489 ns and `key_into` at 117 / 168 /
+    /// 266–267 / 467–469 / 865–866. At 128 the index is under `marisa-trie`'s 2.98 on that
     /// corpus.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where

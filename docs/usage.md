@@ -285,12 +285,12 @@ Reach for it as a token → id map on a hot path where the caller controls the q
 tokenizer over its own vocabulary, a join on a key column the index was built from — and for
 `CompactHashIndex` the moment a stranger can ask.
 
-## `DictIndex` — ordered, every key stored, 41 % below `StringIndex`
+## `DictIndex` — ordered, every key stored, 45 % below `StringIndex`
 
 ```python
 from lexindex import DictIndex
 
-# Exact string <-> rank both ways, about 3.5 B/key: the sorted keys front-coded in blocks of 32
+# Exact string <-> rank both ways, about 3.2 B/key: the sorted keys front-coded in blocks of 32
 # with the suffixes under a symbol table trained on the index itself. Ordered, so ranges of keys
 # are ranges of ids, and prefix and range fall out of that -- only fuzzy needs an automaton and
 # stays with StringIndex.
@@ -320,14 +320,14 @@ words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; heade
 
 `id` finds the block by its head's first eight bytes and then compares the stored suffixes against
 the query without decoding them; `key` decodes only the entries whose shared-prefix length
-strictly increases up to the id, a handful rather than `block - 1`. On the dictionary: 3.52 bytes
-per key, `id` 307–310 ns and `key_into` 165–167, against 5.95 / 336–343 / 496–508 for
+strictly increases up to the id, a handful rather than `block - 1`. On the dictionary: 3.24 bytes
+per key, `id` 307–311 ns and `key_into` 168, against 5.95 / 333–353 / 493–515 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
-At `block=128` the same index stores **2.89 bytes per key, under `marisa-trie`'s 2.98 on this
+At `block=128` the same index stores **2.83 bytes per key, under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is the reverse lookup: `key_into` 442 ns
-against 165 at `block=32`, and `id` 384 against 307–310.
+it has no `lower_bound` to build a range on. The price is the reverse lookup: `key_into` 467 ns
+against 168 at `block=32`, and `id` 387 against 307–311.
 
 ## `Overlay` — edits without a rebuild
 
@@ -479,7 +479,7 @@ assert!(small.contains("POST"));
 let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.26 B/key
 assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
-let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~3.5 B/key
+let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~3.2 B/key
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
