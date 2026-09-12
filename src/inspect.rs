@@ -224,12 +224,18 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
-        b"BDX1" | b"BDX2" => {
-            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in both,
-            // then `BDX2`'s three offset-width bytes before the check. A blob this version
-            // refuses to load still says what it is here.
-            let two = &magic == b"BDX2";
-            let header: u64 = if two { 52 } else { 48 };
+        b"BDX1" | b"BDX2" | b"BDX3" => {
+            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in all
+            // three, then the offset widths `BDX2` added and the microblock size `BDX3` did. A
+            // blob this version refuses to load still says what it is here.
+            let one = &magic == b"BDX1";
+            let header: u64 = if one {
+                48
+            } else if &magic == b"BDX2" {
+                52
+            } else {
+                56
+            };
             w.bytes(0, header as usize)?;
             let (n, block) = (w.u64(4)?, u64::from(w.u32(12)?));
             let (heads, data, table) = (w.u64(16)?, w.u64(24)?, u64::from(w.u32(32)?));
@@ -239,32 +245,47 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             // The per-block arrays follow the keys; a block size of zero is not a blob this crate
             // wrote, and reads as no blocks rather than a division by it.
             let blocks = if block == 0 { 0 } else { n.div_ceil(block) };
-            let arrays = if two {
-                // A sample a block, and two offset arrays: one base a superblock, one delta a
-                // block, at the widths the header names.
-                let widths = w.bytes(44, 3)?;
-                let (shift, packed) = (u32::from(widths[2]), |width: u8| {
-                    blocks
-                        .checked_mul(u64::from(width))
-                        .and_then(|bits| bits.div_ceil(8).checked_add(8))
-                });
+            let arrays = if one {
+                blocks.checked_mul(20).ok_or(TRUNCATED)?
+            } else {
+                // A sample a block, and an offset array per level: one base a superblock, one
+                // delta an entry, at the widths the header names.
+                let widths = w.bytes(44, 4)?;
+                let shift = u32::from(widths[2]);
                 if shift >= 32 {
                     return Err(TRUNCATED);
                 }
-                let bases = blocks
-                    .div_ceil(1 << shift)
-                    .checked_mul(8)
-                    .ok_or(TRUNCATED)?;
-                let deltas = packed(widths[0])
-                    .and_then(|h| packed(widths[1]).map(|b| h + b))
-                    .ok_or(TRUNCATED)?;
+                let packed = |count: u64, width: u8| -> Option<u64> {
+                    let bases = count.div_ceil(1 << shift).checked_mul(8)?;
+                    let deltas = match count {
+                        0 => 0,
+                        count => count
+                            .checked_mul(u64::from(width))?
+                            .div_ceil(8)
+                            .checked_add(8)?,
+                    };
+                    bases.checked_add(deltas)
+                };
+                let micros = match w.bytes(48, 2) {
+                    Ok(m) if &magic == b"BDX3" => {
+                        let micro = u64::from(u16::from_le_bytes([m[0], m[1]]));
+                        if blocks == 0 || micro == 0 || micro > block {
+                            0
+                        } else {
+                            let full = blocks - 1;
+                            full.checked_mul(block.div_ceil(micro))
+                                .and_then(|m| m.checked_add((n - full * block).div_ceil(micro)))
+                                .ok_or(TRUNCATED)?
+                        }
+                    }
+                    _ => 0,
+                };
                 blocks
                     .checked_mul(8)
-                    .and_then(|s| s.checked_add(2 * bases))
-                    .and_then(|s| s.checked_add(if blocks == 0 { 0 } else { deltas }))
+                    .and_then(|s| s.checked_add(packed(blocks, widths[0])?))
+                    .and_then(|s| s.checked_add(packed(blocks, widths[1])?))
+                    .and_then(|s| s.checked_add(packed(micros, widths[3])?))
                     .ok_or(TRUNCATED)?
-            } else {
-                blocks.checked_mul(20).ok_or(TRUNCATED)?
             };
             rest(bytes, [header + table, keyed, arrays])?;
             Ok(i)
@@ -540,7 +561,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.bytes),
-            (BlobKind::DictIndex, "BDX2", Some(300), blob.len() as u64)
+            (BlobKind::DictIndex, "BDX3", Some(300), blob.len() as u64)
         );
         assert_eq!(
             (i.mph_bytes, i.side_entries, i.fingerprint_bits),

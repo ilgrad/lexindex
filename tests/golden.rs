@@ -601,12 +601,12 @@ fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
 /// trained deterministically and the layout has no seed, so a fresh build over the golden keys
 /// is the file. It loads, answers every key with its rank and every stranger with `None`, and
 /// gives every key back in order.
-/// `BDX1` held the same bytes in a different order inside each block: an entry's header sat
-/// immediately before its suffix, where `BDX2` puts every header first. Nothing can read one, and
-/// the refusal has to say which release drew the line and that the fix is to rebuild -- the same
-/// promise the hash blobs are held to above.
+/// `BDX1` and `BDX2` held the same keys in a shape this version cannot read: `BDX1` put an entry's
+/// header immediately before its suffix, and neither split a block into microblocks. The refusal
+/// has to say so and that the fix is to rebuild -- the same promise the hash blobs are held to
+/// above.
 #[test]
-fn a_bdx1_dictionary_blob_is_refused_by_name() {
+fn an_older_dictionary_blob_is_refused_by_name() {
     let path = data("golden-2.0.0-dict.bdx");
     let stored = std::fs::read(&path).unwrap();
     assert_eq!(&stored[..4], b"BDX1", "the refused fixture was regenerated");
@@ -614,9 +614,17 @@ fn a_bdx1_dictionary_blob_is_refused_by_name() {
         Err(e) => e.to_string(),
         Ok(_) => panic!("a BDX1 blob was accepted"),
     };
-    assert!(err.contains("lexindex < 2.2"), "{err}");
+    assert!(err.contains("older lexindex"), "{err}");
     assert!(err.contains("rebuild"), "{err}");
     assert!(lexindex::DictIndex::from_bytes(&stored).is_err());
+    // `BDX2` never left a release, so there is no fixture for it; the magic is refused all the
+    // same, which is what a blob from a development checkout meets.
+    let mut two = std::fs::read(data("golden-2.2.0-dict.bdx")).unwrap();
+    two[..4].copy_from_slice(b"BDX2");
+    let err = lexindex::DictIndex::from_bytes(&two)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("older lexindex"), "{err}");
 }
 
 #[test]
@@ -628,7 +636,7 @@ fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
     let path = data("golden-2.2.0-dict.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    assert_eq!(&fresh[..4], b"BDX2");
+    assert_eq!(&fresh[..4], b"BDX3");
     assert!(
         stored == fresh,
         "golden-2.2.0-dict.bdx changed; regenerate {}",

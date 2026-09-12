@@ -43,8 +43,8 @@ def _structures():
     return [
         ("ClosedHashIndex", lexindex.ClosedHashIndex, False),
         ("CompactHashIndex fp=1", lambda keys: lexindex.CompactHashIndex(keys, 1), False),
-        ("DictIndex 32", lambda keys: lexindex.DictIndex(keys, block=32), True),
         ("DictIndex 128", lambda keys: lexindex.DictIndex(keys, block=128), True),
+        ("DictIndex 256", lambda keys: lexindex.DictIndex(keys, block=256), True),
         ("DictIndex 1024", lambda keys: lexindex.DictIndex(keys, block=1024), True),
         ("StringIndex", lexindex.StringIndex, True),
         (

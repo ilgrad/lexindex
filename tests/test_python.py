@@ -326,7 +326,7 @@ def test_closed_hash_ids_of_bytes_and_ids_into():
 
 def test_dict_index_core():
     di = lexindex.DictIndex(["banana", "apple", "apricot", "cherry", "apple"])
-    assert len(di) == 4 and not di.is_empty() and di.block == 32
+    assert len(di) == 4 and not di.is_empty() and di.block == 256
     assert di.id("apple") == 0 and di.id("banana") == 2  # sorted rank
     assert di.id("missing") is None and di.get("missing") is None
     assert di.get("missing", -1) == -1 and di.get("cherry") == 3
@@ -384,7 +384,7 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
         lexindex.DictIndex(words, 1025)
     di = lexindex.DictIndex(words)
     blob = di.to_bytes()
-    assert blob[:4] == b"BDX2" and len(blob) == di.serialized_len() < 4.5 * len(words)
+    assert blob[:4] == b"BDX3" and len(blob) == di.serialized_len() < 4.5 * len(words)
     back = lexindex.DictIndex.from_bytes(blob)
     assert back.ids_of(words[:100]) == list(range(100)) and back.to_bytes() == blob
     p = tmp_path / "words.bdx"  # a pathlib.Path, not a str
@@ -1372,7 +1372,7 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
         (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP7"),
         (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH7"),
         (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL1"),
-        (lexindex.DictIndex(keys), "DictIndex", "BDX2"),
+        (lexindex.DictIndex(keys), "DictIndex", "BDX3"),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)

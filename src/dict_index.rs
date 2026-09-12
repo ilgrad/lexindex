@@ -28,21 +28,22 @@ use crate::offsets::{self, Offsets};
 use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64][head width u8]
-/// [block width u8][superblock shift u8][0][check u32]`, then the symbol table, the head keys end
-/// to end, the head ends packed ([`offsets`]), the head samples (`u64`), the block data — each
-/// block one byte a header, then that block's suffixes — and the block starts packed. The block
-/// starts come last because their width is only known once the data is encoded, which is what
-/// lets a streamed build write every section once, in order.
-const MAGIC: &[u8; 4] = b"BDX2";
-/// `BDX1` held the same sections and the same bytes per entry, but wrote each entry's header
-/// immediately before its suffix. Nothing in this version can read one, so it is refused by name.
-const LEGACY_MAGIC: &[u8; 4] = b"BDX1";
+/// [block width u8][superblock shift u8][micro width u8][micro u16][0 u16][check u32]`, then the
+/// symbol table, the head keys end to end, the head ends packed ([`offsets`]), the head samples
+/// (`u64`), the block data, the block starts packed and the microblock starts packed. The two
+/// start arrays come last because their width is only known once the data is encoded, which is
+/// what lets a streamed build write every section once, in order.
+const MAGIC: &[u8; 4] = b"BDX3";
+/// `BDX1` and `BDX2` held the same keys and about the same bytes per entry, but neither split a
+/// block into microblocks, so every lookup scanned the block whole. Nothing in this version can
+/// read one, so both are refused by name.
+const LEGACY_MAGIC: [&[u8; 4]; 2] = [b"BDX1", b"BDX2"];
 /// The header byte that says an entry's shared-prefix and suffix lengths did not fit a nibble
 /// each, and are varints at the start of its suffix instead.
 const WIDE: u8 = 0xFF;
-const HEADER: usize = 52;
-const CHECKED: usize = 48; // header bytes the trailing check covers
-const DEFAULT_BLOCK: usize = 32;
+const HEADER: usize = 56;
+const CHECKED: usize = 52; // header bytes the trailing check covers
+const DEFAULT_BLOCK: usize = 256;
 const MAX_BLOCK: usize = 1024;
 /// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
 /// up tracking it and decodes every entry instead. The dictionary reaches 12 at the largest block
@@ -63,10 +64,10 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 3.24 bytes per key on real words, against 5.95 for the transducer of
+/// range of ids. 2.93 bytes per key on real words, against 5.95 for the transducer of
 /// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
-/// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the block
-/// scan, which the `block` given at build time sets — smaller blocks are faster and larger.
+/// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the scan of
+/// one microblock, whose size follows the `block` given at build time.
 ///
 /// Immutable once built, and built in memory: the keys are sorted and deduplicated, then encoded
 /// block by block. Persisted with [`to_bytes`](Self::to_bytes) / [`save`](Self::save) and read
@@ -75,6 +76,14 @@ const LANES: usize = 32;
 /// file and reads only the per-block samples.
 pub struct DictIndex {
     block: usize,
+    /// Keys per microblock, a divisor of `block` near its square root. A block stores the first key
+    /// of every microblock past its own as a *restart*, front-coded against the restart before it,
+    /// and a lookup walks those restarts to the one microblock it must scan.
+    micro: usize,
+    /// Microblocks a full block holds, `block / micro` rounded up. Kept rather than derived: every
+    /// step of a lookup would otherwise divide by it, and a division by a runtime value is twenty
+    /// cycles where the rest of the step is a handful.
+    per: usize,
     n: usize,
     /// The sections as they are serialised, owned or mapped. Every block's first key, whole, end
     /// to end; `head_ends[b]` closes block `b`'s.
@@ -93,8 +102,12 @@ pub struct DictIndex {
     /// the same back in instructions. Eight bytes a block, so a mapped index holds one byte per
     /// four keys at the default block, and borrows everything else.
     samples: Vec<u64>,
-    /// Where block `b`'s `block − 1` front-coded entries start in `data`, packed the same way.
+    /// Where block `b`'s restart stream starts in `data`, packed the same way; its microblocks
+    /// follow it.
     blocks: Offsets,
+    /// Where each microblock's own front-coded entries start in `data`, packed the same way. One
+    /// entry per microblock, which at the default block is one per sixteen keys.
+    micros: Offsets,
     data: SharedBytes,
     table: Table,
 }
@@ -105,14 +118,35 @@ fn sample_of(key: &[u8]) -> u64 {
     fsst::word_at(key, 0).swap_bytes()
 }
 
-/// Bytes the per-block arrays take: one sample a block, and the two packed offset arrays. `None`
-/// where a header names more blocks than a blob on this platform could hold.
-fn arrays_len(nb: usize, head_width: u32, block_width: u32, shift: u32) -> Option<usize> {
-    let packed = offsets::section_len(nb, head_width, shift)?.checked_add(offsets::section_len(
-        nb,
-        block_width,
-        shift,
-    )?)?;
+/// Keys per microblock for a block of `block`: the smallest divisor of `block` at or above its
+/// square root.
+///
+/// A lookup scans one restart an earlier microblock plus one entry of its own, `block / micro +
+/// micro − 2` in all, which the square root minimises; where two microblock sizes tie on that —
+/// 16 and 32 at 512 — the larger one stores fewer restarts, so the search runs upwards. A divisor
+/// keeps every microblock of a block full but the last, which is what makes a restart's rank
+/// `j * micro` rather than a running sum. A prime block has none below itself, and then a block is
+/// one microblock and the layout is what it was before microblocks existed.
+fn micro_for(block: usize) -> usize {
+    let root = block.isqrt();
+    let want = root + usize::from(root * root != block);
+    (want..=block).find(|d| block % d == 0).unwrap_or(block)
+}
+
+/// Bytes the per-block arrays take: one sample a block, the two packed block arrays and the packed
+/// microblock starts. `None` where a header names more blocks than a blob on this platform could
+/// hold.
+fn arrays_len(
+    nb: usize,
+    nm: usize,
+    head_width: u32,
+    block_width: u32,
+    micro_width: u32,
+    shift: u32,
+) -> Option<usize> {
+    let packed = offsets::section_len(nb, head_width, shift)?
+        .checked_add(offsets::section_len(nb, block_width, shift)?)?
+        .checked_add(offsets::section_len(nm, micro_width, shift)?)?;
     nb.checked_mul(8)?.checked_add(packed)
 }
 
@@ -276,48 +310,124 @@ struct Part {
     head_ends: Vec<u64>,
     samples: Vec<u64>,
     blocks: Vec<u64>,
+    micros: Vec<u64>,
     data: Vec<u8>,
+}
+
+/// The two streams a run of front-coded keys becomes: one header byte an entry, then the suffixes.
+/// A block builds three of these — its restarts and, inside `body`, each of its microblocks.
+#[derive(Default)]
+struct Streams {
+    hdrs: Vec<u8>,
+    sfx: Vec<u8>,
+}
+
+impl Streams {
+    fn clear(&mut self) {
+        self.hdrs.clear();
+        self.sfx.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.hdrs.len() + self.sfx.len()
+    }
+
+    /// Append `key` coded against `prev`, through `encoder` and `packed` as scratch.
+    fn push(&mut self, prev: &[u8], key: &[u8], encoder: &fsst::Encoder, packed: &mut Vec<u8>) {
+        let l = lcp(prev, key);
+        packed.clear();
+        encoder.encode_into(&key[l..], packed);
+        put_header(&mut self.hdrs, &mut self.sfx, l, packed.len());
+        self.sfx.extend_from_slice(packed);
+    }
+
+    fn write_to(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.hdrs);
+        out.extend_from_slice(&self.sfx);
+    }
+}
+
+/// Write the block held in `restarts` and `body` — whose last microblock is still in `entries` —
+/// and rebase the microblock starts it fixes onto `micros`.
+fn flush_block(
+    w: &mut impl std::io::Write,
+    restarts: &Streams,
+    entries: &mut Streams,
+    body: &mut Vec<u8>,
+    starts: &[u64],
+    data_len: &mut u64,
+    micros: &mut Vec<u64>,
+) -> std::io::Result<()> {
+    entries.write_to(body);
+    entries.clear();
+    w.write_all(&restarts.hdrs)?;
+    w.write_all(&restarts.sfx)?;
+    w.write_all(body)?;
+    let at = *data_len + restarts.len() as u64;
+    micros.extend(starts.iter().map(|s| at + s));
+    *data_len += (restarts.len() + body.len()) as u64;
+    body.clear();
+    Ok(())
 }
 
 /// Encode a range of whole blocks. `keys` must start on a block boundary, which is what makes the
 /// parts concatenate into the blob a single pass would have written.
-fn encode_range<S: AsRef<str>>(keys: &[S], block: usize, encoder: &fsst::Encoder) -> Part {
+fn encode_range<S: AsRef<str>>(
+    keys: &[S],
+    block: usize,
+    micro: usize,
+    encoder: &fsst::Encoder,
+) -> Part {
     let nb = keys.len().div_ceil(block);
     let mut part = Part {
         heads: Vec::new(),
         head_ends: Vec::with_capacity(nb),
         samples: Vec::with_capacity(nb),
         blocks: Vec::with_capacity(nb),
+        micros: Vec::with_capacity(nb * block.div_ceil(micro)),
         data: Vec::new(),
     };
     let mut packed = Vec::with_capacity(64);
-    let mut hdrs = Vec::with_capacity(block);
-    let mut sfx = Vec::with_capacity(block * 8);
+    let (mut restarts, mut entries) = (Streams::default(), Streams::default());
+    let mut body: Vec<u8> = Vec::with_capacity(block * 8);
+    let mut starts: Vec<u64> = Vec::with_capacity(block.div_ceil(micro));
     for chunk in keys.chunks(block) {
         let head = chunk[0].as_ref().as_bytes();
         part.heads.extend_from_slice(head);
         part.head_ends.push(part.heads.len() as u64);
         part.samples.push(sample_of(head));
         part.blocks.push(part.data.len() as u64);
-        hdrs.clear();
-        sfx.clear();
-        for w in chunk.windows(2) {
-            let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
-            let l = lcp(a, b);
-            packed.clear();
-            encoder.encode_into(&b[l..], &mut packed);
-            put_header(&mut hdrs, &mut sfx, l, packed.len());
-            sfx.extend_from_slice(&packed);
+        restarts.clear();
+        body.clear();
+        starts.clear();
+        let mut prev_restart = head;
+        for (j, keys) in chunk.chunks(micro).enumerate() {
+            let first = keys[0].as_ref().as_bytes();
+            if j > 0 {
+                restarts.push(prev_restart, first, encoder, &mut packed);
+                prev_restart = first;
+            }
+            starts.push(body.len() as u64);
+            entries.clear();
+            for w in keys.windows(2) {
+                let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
+                entries.push(a, b, encoder, &mut packed);
+            }
+            entries.write_to(&mut body);
         }
-        part.data.extend_from_slice(&hdrs);
-        part.data.extend_from_slice(&sfx);
+        // The restarts close only once the block does, so a microblock's start is known relative
+        // to the body and rebased here.
+        let at = part.data.len() as u64 + restarts.len() as u64;
+        part.micros.extend(starts.iter().map(|s| at + s));
+        restarts.write_to(&mut part.data);
+        part.data.extend_from_slice(&body);
     }
     part
 }
 
 impl DictIndex {
     /// Build from a collection of strings, in any order; duplicates are removed and the ids are
-    /// the ranks of the distinct keys in byte order. Blocks of 32 keys.
+    /// the ranks of the distinct keys in byte order. Blocks of 256 keys.
     pub fn build<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -326,13 +436,13 @@ impl DictIndex {
         Self::build_with_block(items, DEFAULT_BLOCK)
     }
 
-    /// [`build`](Self::build) with `block` keys per block, `1..=1024`. A lookup scans up to
-    /// `block − 1` headers, and a reverse lookup reads that many but decodes only the staircase
-    /// among them — so smaller blocks are faster and larger ones share more and store less. On
-    /// real words 16 / 32 / 64 / 128 / 256 give 3.79 / 3.24 / 2.97 / 2.83 / 2.75 bytes per key,
-    /// `id` at 291–297 / 307–311 / 332–333 / 387–388 / 486–489 ns and `key_into` at 117 / 168 /
-    /// 266–267 / 467–469 / 865–866. At 128 the index is under `marisa-trie`'s 2.98 on that
-    /// corpus.
+    /// [`build`](Self::build) with `block` keys per block, `1..=1024`. The block is what a stored
+    /// head and its arrays are shared over, and it is split into microblocks of about its square
+    /// root, which is what a lookup scans: `block / micro + micro − 2` entries, not `block − 1`. On
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80
+    /// bytes per key, `id` at 312–315 / 315–328 / 336–342 / 360–365 / 392–395 / 421–427 ns and
+    /// `key_into` at 120–121 / 136–139 / 165–167 / 195–196 / 248–249 / 290–292. At 256 the index is
+    /// under `marisa-trie`'s 2.955 floor on that corpus.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -353,7 +463,7 @@ impl DictIndex {
     /// Build from keys that are **already in ascending byte order** — a sorted file, a database
     /// cursor, the output of an external sort. Adjacent duplicates are dropped exactly as
     /// [`build`](Self::build) drops them after sorting, so for the same key set the two produce
-    /// **byte-identical** blobs. Blocks of 32 keys.
+    /// **byte-identical** blobs. Blocks of 256 keys.
     ///
     /// It is not the faster of the two and does not claim to be: `build`'s sort is
     /// pattern-defeating, so it recognises an ascending run and returns almost at once — over
@@ -408,17 +518,17 @@ impl DictIndex {
     /// keys, in any order, are sorted in runs that spill beside the output and merged back, and the
     /// block data is encoded into the file as it is produced. Returns the number of distinct keys
     /// written, since a caller streaming keys it does not retain has no other way to learn how many
-    /// were distinct. Blocks of 32 keys.
+    /// were distinct. Blocks of 256 keys.
     ///
     /// The bytes are exactly what [`build`](Self::build) would produce for the same key set, through
     /// the same atomic replace [`save`](Self::save) uses — a crash leaves either the previous file
     /// or nothing, never a half-written index.
     ///
     /// **What is still held.** Not the corpus, and not the block data, which is the bulk of the
-    /// index. The block heads and the three per-block arrays are, at roughly
-    /// `(mean head length + 20) / block` bytes per key — under 1 at 32 keys per block on English
-    /// words, a quarter of that at 128. An index whose heads alone pass 4 GiB is refused with an
-    /// error naming the larger block that would fit it.
+    /// index. The block heads, the per-block arrays and one start a microblock are, at roughly
+    /// `(mean head length + 20) / block + 8 / micro` bytes per key — 0.61 at the default on English
+    /// words, half that at 512 keys a block. An index whose heads alone pass 4 GiB is refused with
+    /// an error naming the larger block that would fit it.
     ///
     /// **Transient disk**: one run file per `RUN_BYTES` of keys, in a directory beside the output,
     /// removed however the build ends. **Three passes** over the sorted keys: the symbol table is
@@ -544,17 +654,29 @@ impl DictIndex {
             Ok(())
         })?;
         let nb = n.div_ceil(block);
+        let micro = micro_for(block);
         let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
 
         // Pass two: the training sample, in the order `from_sorted` collects it -- blocks in order,
-        // entries within a block in order -- so the table it trains is the same table.
+        // keys within a block in order, each coded against the key the encoding will code it
+        // against -- so the table it trains is the same table.
         let mut arena: Vec<u8> = Vec::new();
         let mut spans: Vec<(usize, usize)> = Vec::new();
         let mut prev: Vec<u8> = Vec::new();
+        let mut restart: Vec<u8> = Vec::new();
         let mut i = 0usize;
         src.each(&mut |key| {
             let bytes = key.as_bytes();
-            if i % block != 0 && (i / block) % step == 0 {
+            let off = i % block;
+            if off == 0 || off % micro == 0 {
+                if off != 0 && (i / block) % step == 0 {
+                    let at = arena.len();
+                    arena.extend_from_slice(&bytes[lcp(&restart, bytes)..]);
+                    spans.push((at, arena.len()));
+                }
+                restart.clear();
+                restart.extend_from_slice(bytes);
+            } else if (i / block) % step == 0 {
                 let at = arena.len();
                 arena.extend_from_slice(&bytes[lcp(&prev, bytes)..]);
                 spans.push((at, arena.len()));
@@ -578,6 +700,7 @@ impl DictIndex {
         let (head_bases, head_deltas) = offsets::pack(&head_ends, offsets::SHIFT, head_width);
         drop(head_ends);
         let mut blocks = Vec::with_capacity(nb);
+        let mut micros = Vec::with_capacity(nb * block.div_ceil(micro));
         crate::blob::write_atomically_with(path, |w| {
             // The header is written last: it carries the block data's length and a hash over every
             // section, and neither is known until the encoding is done.
@@ -588,53 +711,79 @@ impl DictIndex {
             w.write_all(&head_deltas)?;
             w.write_all(&samples)?;
 
-            // Pass three: encode. The block starts fall out of it, which is why their section was
-            // reserved rather than written.
+            // Pass three: encode. The block and microblock starts fall out of it, which is why
+            // their sections were left to the end.
             let mut data_len = 0u64;
             let mut packed = Vec::with_capacity(64);
-            // A block's headers only reach the file once its suffixes are known, so one block at a
-            // time is buffered — at most 1024 entries, and the price of the two streams being
-            // apart in the blob `from_sorted` writes in one pass.
-            let mut hdrs: Vec<u8> = Vec::with_capacity(block);
-            let mut sfx: Vec<u8> = Vec::with_capacity(block * 8);
+            // A block's headers only reach the file once its suffixes are known, and its restarts
+            // only once the block does, so one block at a time is buffered — at most 1024 entries,
+            // and the price of the streams being apart in the blob `from_sorted` writes in one
+            // pass.
+            let (mut restarts, mut entries) = (Streams::default(), Streams::default());
+            let mut body: Vec<u8> = Vec::with_capacity(block * 8);
+            let mut starts: Vec<u64> = Vec::with_capacity(block.div_ceil(micro));
             let mut prev: Vec<u8> = Vec::new();
+            let mut restart: Vec<u8> = Vec::new();
             let mut i = 0usize;
             src.each(&mut |key| {
                 let bytes = key.as_bytes();
-                if i % block == 0 {
-                    w.write_all(&hdrs)?;
-                    w.write_all(&sfx)?;
-                    data_len += (hdrs.len() + sfx.len()) as u64;
-                    hdrs.clear();
-                    sfx.clear();
+                let off = i % block;
+                if off == 0 {
+                    flush_block(
+                        w,
+                        &restarts,
+                        &mut entries,
+                        &mut body,
+                        &starts,
+                        &mut data_len,
+                        &mut micros,
+                    )?;
+                    restarts.clear();
+                    starts.clear();
+                    starts.push(0);
                     blocks.push(data_len);
+                } else if off % micro == 0 {
+                    entries.write_to(&mut body);
+                    entries.clear();
+                    starts.push(body.len() as u64);
+                    restarts.push(&restart, bytes, &encoder, &mut packed);
                 } else {
-                    let l = lcp(&prev, bytes);
-                    packed.clear();
-                    encoder.encode_into(&bytes[l..], &mut packed);
-                    put_header(&mut hdrs, &mut sfx, l, packed.len());
-                    sfx.extend_from_slice(&packed);
+                    entries.push(&prev, bytes, &encoder, &mut packed);
+                }
+                if off % micro == 0 {
+                    restart.clear();
+                    restart.extend_from_slice(bytes);
                 }
                 prev.clear();
                 prev.extend_from_slice(bytes);
                 i += 1;
                 Ok(())
             })?;
-            w.write_all(&hdrs)?;
-            w.write_all(&sfx)?;
-            data_len += (hdrs.len() + sfx.len()) as u64;
+            flush_block(
+                w,
+                &restarts,
+                &mut entries,
+                &mut body,
+                &starts,
+                &mut data_len,
+                &mut micros,
+            )?;
             if i != n {
                 return Err(IndexError::Format(
                     "dict: the key stream changed between passes",
                 ));
             }
 
-            // The block starts are the last section precisely because this is where they are
-            // known: their width falls out of the encoding that has just finished.
+            // The two start arrays are the last sections precisely because this is where they are
+            // known: their widths fall out of the encoding that has just finished.
             let block_width = offsets::width_of(&blocks, offsets::SHIFT);
             let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
+            let micro_width = offsets::width_of(&micros, offsets::SHIFT);
+            let (micro_bases, micro_deltas) = offsets::pack(&micros, offsets::SHIFT, micro_width);
             w.write_all(&block_bases)?;
             w.write_all(&block_deltas)?;
+            w.write_all(&micro_bases)?;
+            w.write_all(&micro_deltas)?;
             w.flush()?;
             // The payload hash runs over the sections in blob order, so it is taken from the file
             // rather than from the stream: one sequential read of what was just written.
@@ -660,6 +809,8 @@ impl DictIndex {
             h[44] = head_width as u8;
             h[45] = block_width as u8;
             h[46] = offsets::SHIFT as u8;
+            h[47] = micro_width as u8;
+            h[48..50].copy_from_slice(&(micro as u16).to_le_bytes());
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -685,16 +836,26 @@ impl DictIndex {
     ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
-        // Train on the suffixes a spread of blocks would store.
+        let micro = micro_for(block);
+        // Train on the suffixes a spread of blocks would store, in key order: a restart is coded
+        // against the restart before it, every other key against its predecessor.
         let step = (nb * (block - 1) / TRAIN_PIECES).max(1);
         let mut pieces: Vec<&[u8]> = Vec::new();
         for (b, chunk) in keys.chunks(block).enumerate() {
             if b % step != 0 {
                 continue;
             }
-            for w in chunk.windows(2) {
-                let (a, b) = (w[0].as_ref().as_bytes(), w[1].as_ref().as_bytes());
-                pieces.push(&b[lcp(a, b)..]);
+            let mut restart = chunk[0].as_ref().as_bytes();
+            let mut prev = restart;
+            for (i, key) in chunk.iter().enumerate().skip(1) {
+                let key = key.as_ref().as_bytes();
+                let starts = i % micro == 0;
+                let against = if starts { restart } else { prev };
+                pieces.push(&key[lcp(against, key)..]);
+                if starts {
+                    restart = key;
+                }
+                prev = key;
             }
         }
         let table = Table::train(&pieces);
@@ -710,14 +871,14 @@ impl DictIndex {
         let span = (block * nb.div_ceil(threads)).max(1);
         let parts: Vec<Part> = if threads == 1 {
             keys.chunks(span)
-                .map(|range| encode_range(range, block, &encoder))
+                .map(|range| encode_range(range, block, micro, &encoder))
                 .collect()
         } else {
             let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
             std::thread::scope(|scope| {
                 let running: Vec<_> = view
                     .chunks(span)
-                    .map(|range| scope.spawn(|| encode_range(range, block, &encoder)))
+                    .map(|range| scope.spawn(|| encode_range(range, block, micro, &encoder)))
                     .collect();
                 running
                     .into_iter()
@@ -730,23 +891,28 @@ impl DictIndex {
         let mut head_ends = Vec::with_capacity(nb);
         let mut samples = Vec::with_capacity(nb);
         let mut blocks = Vec::with_capacity(nb);
+        let mut micros = Vec::with_capacity(parts.iter().map(|p| p.micros.len()).sum());
         let mut data = Vec::with_capacity(parts.iter().map(|p| p.data.len()).sum());
         // Each part is dropped as it is appended, so the two copies never coexist whole.
         for part in parts {
             let (at_head, at_data) = (heads.len() as u64, data.len() as u64);
             head_ends.extend(part.head_ends.iter().map(|end| at_head + end));
             blocks.extend(part.blocks.iter().map(|start| at_data + start));
+            micros.extend(part.micros.iter().map(|start| at_data + start));
             heads.extend_from_slice(&part.heads);
             samples.extend_from_slice(&part.samples);
             data.extend_from_slice(&part.data);
         }
         Ok(Self {
             block,
+            micro,
+            per: block.div_ceil(micro),
             n,
             heads: SharedBytes::from_owned(heads),
             head_ends: packed_offsets(&head_ends),
             samples,
             blocks: packed_offsets(&blocks),
+            micros: packed_offsets(&micros),
             data: SharedBytes::from_owned(data),
             table,
         })
@@ -795,22 +961,65 @@ impl DictIndex {
         (self.n - b * self.block).min(self.block)
     }
 
-    /// Block `b`'s two streams, ready to walk.
+    /// Microblocks in block `b`, which is also the length of its restart run counting the head.
+    /// Only the last block can hold fewer than a full block's.
     #[inline(always)]
-    fn entries(&self, b: usize) -> Entries<'_> {
-        Entries::of(self.block_data(b), self.count_in(b))
+    fn micros_in(&self, b: usize) -> usize {
+        if b + 1 < self.blocks_len() {
+            self.per
+        } else {
+            self.count_in(b).div_ceil(self.micro)
+        }
     }
 
-    /// Block `b`'s entries, bounded the way [`head`](Self::head) is.
+    /// Keys in microblock `j` of block `b`, the same way [`count_in`](Self::count_in) counts a
+    /// block's.
     #[inline(always)]
-    fn block_data(&self, b: usize) -> &[u8] {
+    fn micro_count(&self, b: usize, j: usize) -> usize {
+        self.count_in(b)
+            .saturating_sub(j * self.micro)
+            .min(self.micro)
+    }
+
+    /// The microblock the key at rank `id` sits in.
+    #[inline(always)]
+    fn micro_of(&self, id: usize) -> usize {
+        (id / self.block) * self.per + (id % self.block) / self.micro
+    }
+
+    /// Where block `b`'s data ends in `data`.
+    #[inline(always)]
+    fn block_end(&self, b: usize) -> usize {
+        let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
+        if b + 1 < self.blocks_len() {
+            at(self.blocks.at(b + 1))
+        } else {
+            self.data.len()
+        }
+    }
+
+    /// Block `b`'s restart run: the first key of each of its microblocks past the head, each coded
+    /// against the one before it. Bounded the way [`head`](Self::head) is.
+    #[inline(always)]
+    fn restart_data(&self, b: usize) -> &[u8] {
         let data: &[u8] = &self.data;
         let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
-        let (start, end) = if b + 1 < self.blocks_len() {
-            let (start, end) = self.blocks.pair(b);
+        let (start, end) = (at(self.blocks.at(b)), at(self.micros.at(b * self.per)));
+        data.get(start..end).unwrap_or_default()
+    }
+
+    /// Microblock `j` of block `b`, bounded the same way. The last microblock of a block ends where
+    /// the block does, not where the next block's restarts start.
+    #[inline(always)]
+    fn micro_data(&self, b: usize, j: usize) -> &[u8] {
+        let data: &[u8] = &self.data;
+        let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
+        let m = b * self.per + j;
+        let (start, end) = if j + 1 < self.micros_in(b) {
+            let (start, end) = self.micros.pair(m);
             (at(start), at(end))
         } else {
-            (at(self.blocks.at(b)), data.len())
+            (at(self.micros.at(m)), self.block_end(b))
         };
         data.get(start..end).unwrap_or_default()
     }
@@ -887,32 +1096,29 @@ impl DictIndex {
         l
     }
 
-    /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
-    /// is the only one that can hold `probe`, and this scans it.
-    fn locate_in(&self, l: usize, probe: &[u8]) -> (u64, bool) {
-        if l == 0 {
-            return (0, false);
-        }
-        let b = l - 1;
-        let base = (b * self.block) as u64;
-        let head = self.head(b);
-        if head == probe {
-            return (base, true);
-        }
-        let count = self.count_in(b);
-        // The probe is above the previous entry and shares `matched` bytes with it.
-        let mut matched = lcp(head, probe);
-        let mut entries = self.entries(b);
-        for j in 1..count as u64 {
+    /// Walk a front-coded run of `count` keys against `probe`, whose first key is below it and
+    /// shares `matched` bytes with it. Answers with the last key of the run not above the probe,
+    /// how many bytes that one shares with it, and whether it *is* the probe — so the first key not
+    /// below the probe is the one after it, in this run or wherever the run ends.
+    ///
+    /// Every entry but one is ruled out by its header alone. An entry stores what it shares with
+    /// the key before it, and below `matched` the probe agreed with that key, so a shorter shared
+    /// prefix puts the entry past the probe and a longer one keeps it below with nothing new
+    /// matched. The suffix of a ruled-out entry is never read.
+    #[inline]
+    fn scan_run(
+        &self,
+        entries: &mut Entries<'_>,
+        count: usize,
+        probe: &[u8],
+        mut matched: usize,
+    ) -> (usize, usize, bool) {
+        for j in 1..count {
             let Some((l, len)) = entries.head() else {
-                return (base + j, false);
+                return (j - 1, matched, false);
             };
-            // This entry differs from the previous one at `l`. Below `matched` the probe agreed
-            // with the previous entry, so a shorter shared prefix puts this entry past the probe;
-            // a longer one keeps it below, with nothing new matched. Both answers come off the
-            // header alone, so the suffix of a ruled-out entry is never read.
             if l < matched {
-                return (base + j, false);
+                return (j - 1, matched, false);
             }
             if l > matched {
                 entries.skip(len);
@@ -920,12 +1126,45 @@ impl DictIndex {
             }
             let (c, ord) = self.compare_piece(entries.piece(len), &probe[matched..]);
             match ord {
-                Ordering::Equal => return (base + j, true),
-                Ordering::Greater => return (base + j, false),
+                Ordering::Equal => return (j, matched + c, true),
+                Ordering::Greater => return (j - 1, matched, false),
                 Ordering::Less => matched += c,
             }
         }
-        (base + count as u64, false)
+        (count.saturating_sub(1), matched, false)
+    }
+
+    /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
+    /// is the only one that can hold `probe`. Its restart run says which of its microblocks can,
+    /// and that one microblock is scanned — the block itself never is.
+    fn locate_in(&self, l: usize, probe: &[u8]) -> (u64, bool) {
+        if l == 0 {
+            return (0, false);
+        }
+        let b = l - 1;
+        let base = b * self.block;
+        let head = self.head(b);
+        if head == probe {
+            return (base as u64, true);
+        }
+        // The probe is above the run's first key and shares `matched` bytes with it.
+        let matched = lcp(head, probe);
+        let r = self.micros_in(b);
+        let (j, matched) = if r > 1 {
+            let mut restarts = Entries::of(self.restart_data(b), r);
+            let (j, matched, hit) = self.scan_run(&mut restarts, r, probe, matched);
+            if hit {
+                return ((base + j * self.micro) as u64, true);
+            }
+            (j, matched)
+        } else {
+            (0, matched)
+        };
+        let count = self.micro_count(b, j);
+        let mut entries = Entries::of(self.micro_data(b, j), count);
+        let (k, _, hit) = self.scan_run(&mut entries, count, probe, matched);
+        let rank = base + j * self.micro + k + usize::from(!hit);
+        (rank as u64, hit)
     }
 
     /// Rank of `key` if it is a member.
@@ -1138,17 +1377,7 @@ impl DictIndex {
         self.table.decode_into(piece, cur)
     }
 
-    /// The block walk that decodes every entry. Correct at any staircase depth, and what
-    /// [`key_bytes_into`](Self::key_bytes_into) falls back to when one does not fit.
-    fn walk_to(&self, b: usize, steps: usize, out: &mut Vec<u8>) -> bool {
-        out.clear();
-        out.extend_from_slice(self.head(b));
-        let mut entries = self.entries(b);
-        (0..steps).all(|_| self.advance(&mut entries, out))
-    }
-
-    /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
-    /// key.
+    /// Take `out`, which holds a front-coded run's first key, `steps` entries along that run.
     ///
     /// An entry stores what it shares with its predecessor, so an entry whose `lcp` is at least a
     /// later entry's contributes nothing that survives to the key being asked for. The entries that
@@ -1157,18 +1386,11 @@ impl DictIndex {
     /// lengths before an entry are what place its suffix — but a handful of suffixes are decoded
     /// rather than one per entry, and the decode is the expensive half: 207 → 146 ns at the
     /// default block on the dictionary, 751 → 454 at 128 per block, 464 → 265 on a path list.
-    fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
-        out.clear();
-        let Ok(id) = usize::try_from(id) else {
-            return false;
-        };
-        if id >= self.n {
-            return false;
-        }
-        let b = id / self.block;
-        let steps = id % self.block;
-        let data = self.block_data(b);
-        let mut entries = Entries::of(data, self.count_in(b));
+    ///
+    /// A staircase deeper than the stack falls back to decoding every entry, which is correct at
+    /// any depth.
+    fn climb(&self, data: &[u8], count: usize, steps: usize, out: &mut Vec<u8>) -> bool {
+        let mut entries = Entries::of(data, count);
         // Where each stair's suffix sits, not the suffix itself: most entries are popped again,
         // and a span is two words to record where a slice is two words to build and bound.
         let mut stair = [(0usize, 0usize, 0usize); STAIRS];
@@ -1186,12 +1408,13 @@ impl DictIndex {
                 depth -= 1;
             }
             if depth == STAIRS {
-                return self.walk_to(b, steps, out);
+                // Nothing has been written yet, so `out` still holds the run's first key.
+                let mut entries = Entries::of(data, count);
+                return (0..steps).all(|_| self.advance(&mut entries, out));
             }
             stair[depth] = (l, at, len);
             depth += 1;
         }
-        out.extend_from_slice(self.head(b));
         for &(l, at, len) in &stair[..depth] {
             let piece = &entries.sfx[at..at + len];
             if l > out.len() {
@@ -1203,6 +1426,30 @@ impl DictIndex {
             }
         }
         true
+    }
+
+    /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
+    /// key.
+    ///
+    /// Two climbs, not one: the block's restart run up to the microblock the rank falls in, then
+    /// that microblock up to the rank. Together they read `block / micro + micro − 2` headers
+    /// where one level read `block − 1`.
+    fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
+        out.clear();
+        let Ok(id) = usize::try_from(id) else {
+            return false;
+        };
+        if id >= self.n {
+            return false;
+        }
+        let b = id / self.block;
+        let off = id % self.block;
+        let (j, steps) = (off / self.micro, off % self.micro);
+        out.extend_from_slice(self.head(b));
+        if j > 0 && !self.climb(self.restart_data(b), self.micros_in(b), j, out) {
+            return false;
+        }
+        self.climb(self.micro_data(b, j), self.micro_count(b, j), steps, out)
     }
 
     /// The key at rank `id`; `None` at or past `len()`.
@@ -1243,29 +1490,31 @@ impl DictIndex {
         let mut out = Vec::with_capacity(ids.len());
         let mut buf: Vec<u8> = Vec::new();
         let mut entries = Entries::of(&[], 0);
-        // The block a walk is open on and how many of its entries it has consumed; `usize::MAX`
-        // for none.
+        // The microblock a walk is open on and how many of its entries it has consumed;
+        // `usize::MAX` for none.
         let (mut open, mut consumed) = (usize::MAX, 0usize);
         for (i, &id) in ids.iter().enumerate() {
             if id >= self.n as u64 {
                 out.push(None);
                 continue;
             }
-            let b = (id / self.block as u64) as usize;
-            let j = (id % self.block as u64) as usize;
-            if open != b || j < consumed {
+            let at = id as usize;
+            let m = self.micro_of(at);
+            let j = at % self.block % self.micro;
+            if open != m || j < consumed {
                 let more = ids.get(i + 1).is_some_and(|&next| {
-                    next > id && next < self.n as u64 && (next / self.block as u64) as usize == b
+                    next > id && next < self.n as u64 && self.micro_of(next as usize) == m
                 });
-                if !more {
+                // Opening a walk costs the climb to the microblock's first key, so it only pays
+                // when another id of the same microblock follows.
+                if !more || !self.key_bytes_into((at - j) as u64, &mut buf) {
                     out.push(self.key(id));
                     open = usize::MAX;
                     continue;
                 }
-                buf.clear();
-                buf.extend_from_slice(self.head(b));
-                entries = self.entries(b);
-                (open, consumed) = (b, 0);
+                let (b, j) = (at / self.block, at % self.block / self.micro);
+                entries = Entries::of(self.micro_data(b, j), self.micro_count(b, j));
+                (open, consumed) = (m, 0);
             }
             let mut ok = true;
             while consumed < j && ok {
@@ -1393,20 +1642,35 @@ impl DictIndex {
     pub(crate) fn iter_from(&self, start: u64) -> impl Iterator<Item = (String, u64)> + '_ {
         let mut id = usize::try_from(start).unwrap_or(usize::MAX);
         let mut cur: Vec<u8> = Vec::new();
+        let mut restart: Vec<u8> = Vec::new();
         let mut entries = Entries::of(&[], 0);
+        let mut restarts = Entries::of(&[], 0);
         let mut primed = false;
         std::iter::from_fn(move || {
             if id >= self.n {
                 return None;
             }
-            let (b, j) = (id / self.block, id % self.block);
-            let ok = if !primed || j == 0 {
-                cur.clear();
-                cur.extend_from_slice(self.head(b));
-                entries = self.entries(b);
-                let skip = if primed { 0 } else { j };
+            let (b, off) = (id / self.block, id % self.block);
+            let (j, k) = (off / self.micro, off % self.micro);
+            let ok = if !primed || off == 0 {
+                // A block opens on its head; a resume point inside one is reached by walking the
+                // restart run to its microblock and that microblock to the key.
+                restart.clear();
+                restart.extend_from_slice(self.head(b));
+                restarts = Entries::of(self.restart_data(b), self.micros_in(b));
                 primed = true;
-                (0..skip).all(|_| self.advance(&mut entries, &mut cur))
+                let ok = (0..j).all(|_| self.advance(&mut restarts, &mut restart));
+                cur.clear();
+                cur.extend_from_slice(&restart);
+                entries = Entries::of(self.micro_data(b, j), self.micro_count(b, j));
+                ok && (0..k).all(|_| self.advance(&mut entries, &mut cur))
+            } else if k == 0 {
+                // The next microblock opens on the next restart, not on the key just returned.
+                let ok = self.advance(&mut restarts, &mut restart);
+                cur.clear();
+                cur.extend_from_slice(&restart);
+                entries = Entries::of(self.micro_data(b, j), self.micro_count(b, j));
+                ok
             } else {
                 self.advance(&mut entries, &mut cur)
             };
@@ -1446,6 +1710,9 @@ impl DictIndex {
         for section in self.blocks.sections() {
             f(section)?;
         }
+        for section in self.micros.sections() {
+            f(section)?;
+        }
         Ok(())
     }
 
@@ -1467,15 +1734,17 @@ impl DictIndex {
         h[44] = self.head_ends.width() as u8;
         h[45] = self.blocks.width() as u8;
         h[46] = self.head_ends.shift() as u8;
+        h[47] = self.micros.width() as u8;
+        h[48..50].copy_from_slice(&(self.micro as u16).to_le_bytes());
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
     }
 
-    /// Serialise to `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
-    /// [offset widths][check]`, then the symbol table, the head keys, the per-block arrays and the
-    /// block data. `check` is a hash of the preceding header bytes and `payload` a hash of
-    /// everything after it, both verified on load.
+    /// Serialise to `[magic "BDX3"][n][block][head bytes][data bytes][table bytes][payload]
+    /// [offset widths][micro][check]`, then the symbol table, the head keys, the per-block arrays,
+    /// the block data and the two start arrays. `check` is a hash of the preceding header bytes and
+    /// `payload` a hash of everything after it, both verified on load.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
         out.extend_from_slice(&self.header());
@@ -1495,13 +1764,14 @@ impl DictIndex {
             + self.blocks_len() * 8
             + self.head_ends.len()
             + self.blocks.len()
+            + self.micros.len()
             + self.data.len()
     }
 
     /// Reconstruct from [`DictIndex::to_bytes`] output.
     ///
     /// Safe on arbitrary bytes: the magic, both checksums, every section length, the symbol
-    /// table and the three per-block arrays are checked before anything is trusted, so a
+    /// table and the four per-block arrays are checked before anything is trusted, so a
     /// crafted blob is at worst *wrong* — a key that is not the one built, a shorter walk —
     /// never out of bounds. The block data itself is read with every access bounded.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
@@ -1515,10 +1785,10 @@ impl DictIndex {
     /// bound what the arrays say, so a mapping loads without touching its pages.
     fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes: &[u8] = &blob;
-        if bytes.starts_with(LEGACY_MAGIC) {
+        if LEGACY_MAGIC.iter().any(|m| bytes.starts_with(*m)) {
             return Err(IndexError::Format(
-                "dict: blob written by lexindex < 2.2, whose blocks interleaved an entry's header \
-                 with its suffix; rebuild the index from its keys",
+                "dict: blob written by an older lexindex, whose blocks were not split into \
+                 microblocks; rebuild the index from its keys",
             ));
         }
         if bytes.len() < HEADER || &bytes[..4] != MAGIC {
@@ -1547,16 +1817,32 @@ impl DictIndex {
         let data_len = usize::try_from(u64_at(24))
             .map_err(|_| IndexError::Format("dict: block data out of range"))?;
         let table_len = u32_at(32) as usize;
-        let (head_width, block_width, shift) = (
+        let (head_width, block_width, shift, micro_width) = (
             u32::from(bytes[44]),
             u32::from(bytes[45]),
             u32::from(bytes[46]),
+            u32::from(bytes[47]),
         );
-        if head_width > offsets::MAX_WIDTH || block_width > offsets::MAX_WIDTH || shift >= 32 {
+        if head_width > offsets::MAX_WIDTH
+            || block_width > offsets::MAX_WIDTH
+            || micro_width > offsets::MAX_WIDTH
+            || shift >= 32
+        {
             return Err(IndexError::Format("dict: offset widths out of range"));
         }
+        let micro = u16::from_le_bytes(bytes[48..50].try_into().unwrap()) as usize;
+        if !(1..=block).contains(&micro) {
+            return Err(IndexError::Format("dict: microblock size out of range"));
+        }
         let nb = n.div_ceil(block);
-        let arrays = arrays_len(nb, head_width, block_width, shift)
+        // Every microblock holds at least one key, so the count is bounded by the key count and
+        // the product below cannot overflow.
+        let per = block.div_ceil(micro);
+        let nm = match nb {
+            0 => 0,
+            nb => (nb - 1) * per + (n - (nb - 1) * block).min(block).div_ceil(micro),
+        };
+        let arrays = arrays_len(nb, nm, head_width, block_width, micro_width, shift)
             .ok_or(IndexError::Format("dict: block count out of range"))?;
         let total = HEADER
             .checked_add(table_len)
@@ -1594,13 +1880,22 @@ impl DictIndex {
             block_width,
             shift,
         );
+        let micros = Offsets::new(
+            take(offsets::bases_len(nm, shift)),
+            take(offsets::deltas_len(nm, micro_width)),
+            micro_width,
+            shift,
+        );
         let idx = Self {
             block,
+            micro,
+            per,
             n,
             heads,
             head_ends,
             samples,
             blocks,
+            micros,
             data,
             table,
         };
@@ -1633,15 +1928,33 @@ impl DictIndex {
                 "dict: head table does not cover the head bytes",
             ));
         }
+        // The two start arrays interleave: a block opens on its restart run, then its microblocks
+        // in order, and the last of them closes where the next block opens. One sweep over both
+        // says every span is forward and the last one ends the data.
+        let out_of_order = IndexError::Format("dict: block table out of order");
+        let per = self.per;
         let mut prev = 0;
-        for start in (0..nb).map(|b| self.block_start(b)) {
-            if start < prev || start > self.data.len() as u64 {
-                return Err(IndexError::Format("dict: block table out of order"));
+        for b in 0..nb {
+            let start = self.block_start(b);
+            if start < prev {
+                return Err(out_of_order);
             }
             prev = start;
+            for j in 0..self.micros_in(b) {
+                let at = self.micros.at(b * per + j);
+                if at < prev {
+                    return Err(out_of_order);
+                }
+                prev = at;
+            }
+            let end = self.block_end(b) as u64;
+            if end < prev {
+                return Err(out_of_order);
+            }
+            prev = end;
         }
-        if self.block_start(0) != 0 {
-            return Err(IndexError::Format("dict: block table out of order"));
+        if self.block_start(0) != 0 || prev != self.data.len() as u64 {
+            return Err(out_of_order);
         }
         if (0..nb).any(|b| self.samples[b] != sample_of(self.head(b))) {
             return Err(IndexError::Format(
@@ -1986,7 +2299,7 @@ mod tests {
             check(&idx, &keys);
             let blob = idx.to_bytes();
             assert_eq!(blob.len(), idx.serialized_len(), "block {block}");
-            assert_eq!(&blob[..4], b"BDX2");
+            assert_eq!(&blob[..4], b"BDX3");
             let back = DictIndex::from_bytes(&blob).unwrap();
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
@@ -2473,30 +2786,42 @@ mod tests {
         data: usize,
         block_bases: usize,
         block_deltas: usize,
+        micro_bases: usize,
+        micro_deltas: usize,
         head_width: u32,
         block_width: u32,
+        micro_width: u32,
         nb: usize,
     }
 
     fn layout(blob: &[u8], block: usize) -> Layout {
         let u64_at = |i: usize| u64::from_le_bytes(blob[i..i + 8].try_into().unwrap()) as usize;
-        let nb = u64_at(4).div_ceil(block);
+        let (n, nb) = (u64_at(4), u64_at(4).div_ceil(block));
         let table_len = u32::from_le_bytes(blob[32..36].try_into().unwrap()) as usize;
-        let (head_width, block_width, shift) = (
+        let (head_width, block_width, shift, micro_width) = (
             u32::from(blob[44]),
             u32::from(blob[45]),
             u32::from(blob[46]),
+            u32::from(blob[47]),
         );
+        let micro = u16::from_le_bytes(blob[48..50].try_into().unwrap()) as usize;
         assert_eq!(shift, offsets::SHIFT);
+        assert_eq!(micro, micro_for(block));
         assert!(head_width > 0 && block_width > 0, "a corpus with no spread");
+        let nm = match nb {
+            0 => 0,
+            nb => (nb - 1) * block.div_ceil(micro) + (n - (nb - 1) * block).div_ceil(micro),
+        };
         let head_bases = HEADER + table_len + u64_at(16);
         let head_deltas = head_bases + offsets::bases_len(nb, shift);
         let samples = head_deltas + offsets::deltas_len(nb, head_width);
         let data = samples + nb * 8;
         let block_bases = data + u64_at(24);
         let block_deltas = block_bases + offsets::bases_len(nb, shift);
+        let micro_bases = block_deltas + offsets::deltas_len(nb, block_width);
+        let micro_deltas = micro_bases + offsets::bases_len(nm, shift);
         assert_eq!(
-            block_deltas + offsets::deltas_len(nb, block_width),
+            micro_deltas + offsets::deltas_len(nm, micro_width),
             blob.len()
         );
         Layout {
@@ -2506,8 +2831,11 @@ mod tests {
             data,
             block_bases,
             block_deltas,
+            micro_bases,
+            micro_deltas,
             head_width,
             block_width,
+            micro_width,
             nb,
         }
     }
@@ -2605,6 +2933,15 @@ mod tests {
         );
         edited(&|b| b[44] = 57, "offset widths out of range");
         edited(&|b| b[46] = 32, "offset widths out of range");
+        edited(&|b| b[47] = 57, "offset widths out of range");
+        edited(
+            &|b| b[48..50].copy_from_slice(&0u16.to_le_bytes()),
+            "microblock size out of range",
+        );
+        edited(
+            &|b| b[48..50].copy_from_slice(&3u16.to_le_bytes()),
+            "microblock size out of range",
+        );
         edited(&|b| b[HEADER] = 255, "bad symbol table");
         edited(&|b| b[HEADER + 1] = 0, "bad symbol table");
         edited(
@@ -2626,6 +2963,14 @@ mod tests {
         );
         edited(
             &|b| set_delta(b, l.block_deltas, l.block_width, 1, u64::MAX),
+            "block table out of order",
+        );
+        edited(
+            &|b| set_base(b, l.micro_bases, 0, u64::MAX),
+            "block table out of order",
+        );
+        edited(
+            &|b| set_delta(b, l.micro_deltas, l.micro_width, 1, u64::MAX),
             "block table out of order",
         );
         edited(&|b| b.push(0), "add up");
@@ -2660,14 +3005,17 @@ mod tests {
             }
             assert!(idx.iter().count() <= keys.len());
         }
-        // A header whose lcp exceeds the key so far, with the rest of the block intact.
+        // A header whose lcp exceeds the key so far, with the rest of the block intact. A block
+        // opens on its restarts, so this one breaks the walk at the second microblock and the
+        // first still answers.
         let mut b = blob.clone();
         b[data_at] = 0xF0 | (b[data_at] & 0x0F);
         reframe(&mut b);
         let idx = DictIndex::from_bytes(&b).unwrap();
         assert_eq!(idx.key(0).as_deref(), Some(keys[0].as_str()));
         let _ = idx.key(1);
-        assert_eq!(idx.iter().count(), 1);
+        assert_eq!(idx.iter().count(), micro_for(8));
+        assert_eq!(idx.key(micro_for(8) as u64), None);
     }
 
     /// The mapping's loader takes the per-block arrays as they are, so every access bounds them:

@@ -465,27 +465,28 @@ class DictIndex:
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
     sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-    3.24 bytes per key on real words, 45 % below ``StringIndex``. Prefix and range are order
+    2.93 bytes per key on real words, 51 % below ``StringIndex``. Prefix and range are order
     lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
-    ``StringIndex``. ``block=128`` stores 2.83 bytes per key, under ``marisa-trie``, for a slower
-    reverse lookup.
+    ``StringIndex``. ``block=512`` stores 2.82 bytes per key, well under ``marisa-trie``, for a
+    slower reverse lookup.
     """
 
-    def __new__(cls, items: Iterable[str], block: int = 32) -> DictIndex:
-        """``block`` keys per block, ``1..=1024``: a lookup scans up to ``block - 1`` entries, and
-        a reverse lookup reads that many headers but decodes only the few that contribute a byte,
-        so smaller blocks are faster and larger ones smaller. 16 / 32 / 64 / 128 / 256 gave
-        3.79 / 3.24 / 2.97 / 2.83 / 2.75 bytes per key on the dictionary, and 128 is under
-        ``marisa-trie``'s 2.98 there."""
+    def __new__(cls, items: Iterable[str], block: int = 256) -> DictIndex:
+        """``block`` keys per block, ``1..=1024``. The block is what a stored head and its arrays
+        are shared over; it is split into microblocks of about its square root, and a lookup scans
+        one of those -- ``block / micro + micro - 2`` entries, not ``block - 1``.
+        32 / 64 / 128 / 256 / 512 / 1024 gave 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80 bytes per key
+        on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there."""
 
     @staticmethod
-    def build_to_file(items: Iterable[str], path: str | os.PathLike[str], block: int = 32) -> int:
+    def build_to_file(items: Iterable[str], path: str | os.PathLike[str], block: int = 256) -> int:
         """The constructor for a corpus that does not fit in memory, written straight to `path`.
 
         The keys are taken in one pass, in any order: every 256 MiB of them is sorted in memory and
         spilled as a run to a temporary directory beside `path`, and the runs are merged back. The
-        block data goes into the file as it is encoded, so what is still held is the block heads and
-        the three per-block arrays -- roughly ``(mean head length + 20) / block`` bytes per key. The
+        block data goes into the file as it is encoded, so what is still held is the block heads,
+        the per-block arrays and one start a microblock -- roughly
+        ``(mean head length + 20) / block + 8 / micro`` bytes per key. The
         file is exactly what the constructor followed by ``save`` would have written. Returns the
         number of distinct keys. If the iterable raises, the build is abandoned with `path`
         untouched.

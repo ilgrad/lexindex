@@ -23,7 +23,7 @@
 //! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
 //!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
 //!   automata, so no fuzzy queries. The sorted keys are front-coded in blocks with the suffixes
-//!   under a static symbol table: 3.24 B/key on real words, 45 % below `StringIndex`. Use it
+//!   under a static symbol table: 2.93 B/key on real words, 51 % below `StringIndex`. Use it
 //!   where the queries are exact and the index has to be small.
 //!
 //! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable
@@ -142,7 +142,7 @@ pub mod fuzzing {
     }
 
     /// Load a `DictIndex` blob both ways and query what loaded; `true` if the checked way did.
-    /// `from_bytes` walks the three per-block arrays and the mapping's loader takes them as they
+    /// `from_bytes` walks the four per-block arrays and the mapping's loader takes them as they
     /// are, and the front-coded block data is read as the queries reach it either way, each
     /// access bounded — so this target queries: ids inside `[0, n)`, `lower_bound` at most `n`,
     /// `key` `None` past the end, a walk that ends.

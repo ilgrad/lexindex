@@ -8,6 +8,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` splits every block into microblocks, and the default block is 256.** A block was
+  both the unit a head and its arrays are shared over *and* the unit a lookup scans, so the only way
+  to store less was to scan more: 2.83 bytes a key cost 482 ns of `key_into`, and 2.75 cost 889. A
+  block is now split into microblocks of `micro` keys — the smallest divisor of `block` at or above
+  its square root, 16 at the default — and the first key of each microblock past the block's own
+  head is a **restart**, front-coded against the restart before it. A block's data is its restart
+  run followed by each microblock's run, and a lookup walks the restarts to the one microblock that
+  can hold the probe: `block / micro + micro − 2` entries scanned, 30 at the default where a block
+  of 256 scanned 255. **At the same size `key_into` halves and `id` does not move** — 2.82 B/key at
+  512 a block answers `key_into` in 246 ns and `id` in 399, against 2.83 B/key at 128 in 482 and 394
+  — and the size floor moves with it: 2.80 at 1024 a block costs 291 ns where 2.75 cost 889. The
+  ladder over 32 / 64 / 128 / 256 / 512 / 1024 keys a block is now 3.53 / 3.27 / 3.00 / 2.93 / 2.82
+  / 2.80 bytes a key, `id` 312–315 / 315–328 / 336–342 / 360–365 / 392–395 / 421–427 ns and
+  `key_into` 120–121 / 136–139 / 165–167 / 195–196 / 248–249 / 290–292. Measured A-B-A-B against a
+  build of the previous format in a worktree, with a `StringIndex` control neither change can touch.
+  **The default block moves 32 → 256**, in Rust and in Python, which takes the default index from
+  3.24 to **2.93 bytes a key — under the 2.955 `marisa-trie` stores at its most compact setting on
+  this corpus** — for `id` 360–365 ns against 307–311 and `key_into` 195–196 against 168.
+  **The format is `BDX3`**: the header carries the microblock size and a fourth offset width, the
+  blob gains a packed start per microblock, and `BDX1` and `BDX2` blobs are both refused by name
+  with a message that says the fix is to rebuild. A streamed build now holds
+  `(mean head length + 20) / block + 8 / micro` bytes a key rather than
+  `(mean head length + 20) / block`, which at the new default is 0.61 against the old default's 1.0.
+
 - **`DictIndex` packs its per-block offsets, and the index is 8 % smaller at the default block.**
   Where each block's head ends and where its entries start were a `u32` and a `u64` a block — 12 of
   the 20 bytes a block cost — while both only ever grow by one block's worth at a time. Each is now
@@ -36,8 +60,8 @@ All notable changes to this project are documented here. The format follows
   block. On the dictionary `id` fell **9 % at 128 keys a block and 15 % at 256** (384 against 437
   ns, 487 against 593), 2–4 % at 32 and 64, with `key_into` unchanged and every size identical.
   Measured A-B-A against a `StringIndex` control that this change cannot touch.
-  **A `BDX1` blob is refused by name** — the message says which release drew the line and that the
-  fix is to rebuild — so this is a format break, and an index on disk has to be built again. The
+  **A `BDX1` blob is refused by name** — the message says that the fix is to rebuild — so this is a
+  format break, and an index on disk has to be built again. The
   Python comparison table has not been re-run for it; see the note on that table's reproducibility
   in `docs/benchmarks.md`.
 

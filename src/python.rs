@@ -1716,12 +1716,12 @@ pub struct PyDictIndex {
 impl PyDictIndex {
     /// Build from an iterable of strings, in any order; duplicates are removed and the ids are
     /// the ranks of the distinct keys in byte order. `block` keys share one stored head,
-    /// `1..=1024`: a lookup scans up to `block - 1` entries, and a reverse lookup reads that many
-    /// headers but decodes only the few that contribute a byte, so smaller blocks are faster and
-    /// larger ones smaller -- 16 / 32 / 64 / 128 / 256 gave 3.79 / 3.24 / 2.97 / 2.83 / 2.75 bytes
-    /// per key on the dictionary, and 128 is under `marisa-trie`'s 2.98.
+    /// `1..=1024`; the block is split into microblocks of about its square root and a lookup scans
+    /// one of those, so smaller blocks are faster and larger ones smaller -- 32 / 64 / 128 / 256 /
+    /// 512 / 1024 gave 3.53 / 3.27 / 3.00 / 2.93 / 2.82 / 2.80 bytes per key on the dictionary, and
+    /// 256 is under `marisa-trie`'s 2.955 floor.
     #[new]
-    #[pyo3(signature = (items, block=32))]
+    #[pyo3(signature = (items, block=256))]
     fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: usize) -> PyResult<Self> {
         let keys = collect_strs(items)?;
         let inner = py
@@ -1737,12 +1737,12 @@ impl PyDictIndex {
     /// block data goes into the file as it is encoded. The bytes are exactly what the constructor
     /// followed by `save` would have written. Returns the number of distinct keys.
     ///
-    /// What is still held is the block heads and the three per-block arrays, about
-    /// `(mean head length + 20) / block` bytes per key -- so a bigger `block` is what a corpus
-    /// whose heads crowd memory wants. If the iterable raises, the build is abandoned with `path`
+    /// What is still held is the block heads, the per-block arrays and one start a microblock,
+    /// about `(mean head length + 20) / block + 8 / micro` bytes per key -- so a bigger `block` is
+    /// what a corpus whose heads crowd memory wants. If the iterable raises, the build is abandoned with `path`
     /// untouched.
     #[staticmethod]
-    #[pyo3(signature = (items, path, block=32))]
+    #[pyo3(signature = (items, path, block=256))]
     fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf, block: usize) -> PyResult<usize> {
         let err = Rc::new(RefCell::new(None));
         let seen = Rc::clone(&err);
