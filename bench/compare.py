@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+import _probes
 import _results
 import lexindex
 import matplotlib.pyplot as plt
@@ -113,33 +114,7 @@ def _serialised_size(obj) -> int | None:
 PROBES = 100_000
 
 
-def _probe_set() -> tuple[list[str], str]:
-    """Half members, half strangers, shuffled with a fixed seed.
-
-    Shuffled and not strided: a probe order that walks the keys at any fixed step is learned by the
-    L2 stride prefetcher, and that has reversed a ranking in this repository before. The strangers
-    are a member with its last character swapped for another the corpus uses, which keeps them
-    inside every trie's alphabet -- a miss spelled with a character no key contains is rejected at
-    the first node by a trie and still hashed in full by a hash index, which is not a comparison."""
-    member = set(KEYS)
-    alphabet = sorted({k[-1] for k in KEYS})
-    rng = random.Random(0x5EED)
-    probes: list[str] = []
-    strangers: list[str] = []
-    while len(probes) < PROBES:
-        k = KEYS[rng.randrange(N)]
-        probes.append(k)
-        for _ in range(8):
-            stranger = k[:-1] + rng.choice(alphabet)
-            if stranger not in member:
-                probes.append(stranger)
-                strangers.append(stranger)
-                break
-    rng.shuffle(probes)
-    return probes, strangers[0]
-
-
-LOOKUPS, A_MISS = _probe_set()
+LOOKUPS, A_MISS = _probes.probe_set(KEYS, PROBES)
 
 
 def _lookup_fn(obj, exact: bool):

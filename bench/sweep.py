@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import statistics
 import sys
 import time
 from pathlib import Path
 
+import _probes
 import _results
 import corpora
 import lexindex
@@ -68,26 +68,6 @@ def _size(obj) -> int:
     raise TypeError(f"{type(obj).__name__} has no serialised form")
 
 
-def _probes(keys: list[str]) -> tuple[list[str], str]:
-    """Half members, half strangers inside the corpus's own alphabet, shuffled with a fixed seed."""
-    member = set(keys)
-    alphabet = sorted({k[-1] for k in keys})
-    rng = random.Random(0x5EED)
-    probes: list[str] = []
-    strangers: list[str] = []
-    while len(probes) < PROBES:
-        k = keys[rng.randrange(len(keys))]
-        probes.append(k)
-        for _ in range(8):
-            stranger = k[:-1] + rng.choice(alphabet)
-            if stranger not in member:
-                probes.append(stranger)
-                strangers.append(stranger)
-                break
-    rng.shuffle(probes)
-    return probes, strangers[0]
-
-
 def _lookup(obj, a_miss: str, sample: str, exact: bool):
     """`id` on a lexindex index, `get` on marisa; checked on a member and a stranger first, so a
     `KeyError` path is never timed as if it were the structure's own."""
@@ -126,7 +106,7 @@ def _one(path: Path, corpus: str, size: int, repeats: int) -> list[dict]:
     keys = path.read_text(encoding="utf-8").splitlines()
     raw = sum(len(k.encode()) for k in keys) / len(keys)
     print(f"\n{corpus} {len(keys):,} keys, raw {raw:.2f} B/key  ({path.name})")
-    probes, a_miss = _probes(keys)
+    probes, a_miss = _probes.probe_set(keys, PROBES)
     cells, lanes, alive = [], [], []
     for name, build, keeps in _structures():
         times = []
