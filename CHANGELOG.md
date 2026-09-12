@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`bench/reproduce.sh`**, one command from a checkout to the tables the README cites. It refuses
+  a dirty tree, because a number attributed to a commit whose code was not the one measured is not
+  a number; pins the three competitor versions; verifies all 38 corpus files against their hashes;
+  prints the machine; and ends by comparing the run's Python call floor against the published one,
+  which is the only row in that table nothing in this library can move. Running it found two things
+  it was written to find: the probe set was drawn from a `set` of words, whose iteration order
+  changes every process, so no two runs of `bench/compare.py` had ever measured the same probes
+  (now sorted before the seeded shuffle, as `bench/corpora.py` already did); and the same commit on
+  the same machine six hours apart puts that floor at 49 ns and at 110 ns, which is the warning
+  the last step now prints instead of letting the difference land silently in every row.
+
 - **Error bars for the lookup tables, and the counters behind them.** Every timed number this
   project publishes is the minimum of a few alternated passes, which is the right estimator for a
   laptop and carries no width — so a frontier claim rested on an ordering nobody had bounded. Thirty

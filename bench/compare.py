@@ -59,9 +59,13 @@ def _load_words() -> tuple[list[str], str]:
     for path in candidates:
         if path and Path(path).exists():
             with open(path, encoding="utf-8", errors="ignore") as f:
-                words = list({line.strip() for line in f if line.strip()})
-            # Build-order independence is part of what is measured: the ordered index sorts anyway,
-            # and a hash index must not be handed the sorted list a dictionary file happens to be.
+                words = sorted({line.strip() for line in f if line.strip()})
+            # Sorted before the shuffle so the order is the seed's and not the interpreter's: a
+            # set iterates strings in an order that changes every process, and the probe set drawn
+            # from these keys changed with it -- two runs of this file were not measuring the same
+            # probes. The shuffle stays, because build-order independence is part of what is
+            # measured: the ordered index sorts anyway, and a hash index must not be handed the
+            # sorted list a dictionary file happens to be.
             random.Random(0).shuffle(words)
             if words:
                 print(f"keys: {len(words):,} real words from {path}")

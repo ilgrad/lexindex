@@ -7,6 +7,12 @@ page holds the rest and the protocol behind every number — read the ratios, no
 and [what the error bars are](#error-bars-and-where-a-lookup-number-comes-from) before reading
 a lookup time closely.
 
+`bench/reproduce.sh` is the other half of that promise: it refuses a tree whose code does not match
+the commit the artifact will be named after, pins the competitor versions, verifies every corpus
+against its hash, records the machine, and finishes by putting the run's Python call floor beside
+the published one — the number no change to this library can move, and therefore the one that says
+whether your machine is comparable to the one in the tables at all.
+
 ## Serialised size on real English words
 
 `python bench/compare.py` on `/usr/share/dict/words` (479 823 words, 9.3 B/key raw). **Keys are a real
