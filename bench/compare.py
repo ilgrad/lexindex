@@ -11,9 +11,12 @@ Among installable libraries this measures the axes that matter — build time an
 size** — and records which *capabilities* each one offers (ordered queries, reverse lookup, and
 crucially whether membership is **exact** or **probabilistic**). Build time is the median of five
 runs after a discarded warm-up, so no library is charged for its own first import (lexindex is
-imported at the top of this file; the others import inside their build callable). Lookup latency
-is deliberately *not* measured here — at the Python level it is dominated by the call boundary;
-`cargo run --release --example bench` measures it in Rust.
+imported at the top of this file; the others import inside their build callable). **Lookup
+latency is measured next to the size**, because bytes per key on their own invite the reading that
+the smallest structure is the best one: it is the minimum over five passes of a shuffled probe set
+that is half members and half plausible strangers. Every row pays the same Python call boundary, so
+the floor a builtin `dict` reaches is printed above the table rather than left as an excuse;
+`cargo run --release --example bench` measures the same call without that floor, in Rust.
 
 Every number printed here is also written to `bench/results/compare-<date>-<host>-<commit>.json`
 with the machine that produced it; the README table cites that file.
@@ -32,6 +35,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import _results
 import lexindex
@@ -103,6 +107,80 @@ def _serialised_size(obj) -> int | None:
     return None
 
 
+PROBES = 100_000
+
+
+def _probe_set() -> tuple[list[str], str]:
+    """Half members, half strangers, shuffled with a fixed seed.
+
+    Shuffled and not strided: a probe order that walks the keys at any fixed step is learned by the
+    L2 stride prefetcher, and that has reversed a ranking in this repository before. The strangers
+    are a member with its last character swapped for another the corpus uses, which keeps them
+    inside every trie's alphabet -- a miss spelled with a character no key contains is rejected at
+    the first node by a trie and still hashed in full by a hash index, which is not a comparison."""
+    member = set(KEYS)
+    alphabet = sorted({k[-1] for k in KEYS})
+    rng = random.Random(0x5EED)
+    probes: list[str] = []
+    strangers: list[str] = []
+    while len(probes) < PROBES:
+        k = KEYS[rng.randrange(N)]
+        probes.append(k)
+        for _ in range(8):
+            stranger = k[:-1] + rng.choice(alphabet)
+            if stranger not in member:
+                probes.append(stranger)
+                strangers.append(stranger)
+                break
+    rng.shuffle(probes)
+    return probes, strangers[0]
+
+
+LOOKUPS, A_MISS = _probe_set()
+
+
+def _lookup_fn(obj, exact: bool):
+    """The exact-lookup call for whichever library built `obj`: `id` on a lexindex index, `get` on
+    marisa-trie, dawg2 and datrie. It has to be *total* -- a `KeyError` on a stranger would time
+    Python's exception machinery instead of the library's miss path -- so the resolved callable is
+    tried on one member and one stranger before it is timed, and a library whose lookup cannot be
+    resolved that way gets an empty cell rather than a number measured from something else."""
+    for attr in ("id", "get"):
+        fn = getattr(obj, attr, None)
+        if not callable(fn):
+            continue
+        try:
+            if fn(KEYS[0]) is None:
+                return None
+            missed = fn(A_MISS)
+        except Exception:
+            return None
+        # A probabilistic index answers a stranger with an id by design; an exact one must not.
+        return None if exact and missed is not None else fn
+    return None
+
+
+def _lookup_ns(fn) -> list[float]:
+    """`REPS` passes over the whole probe set after a discarded one, nanoseconds per lookup."""
+    for probe in LOOKUPS:
+        fn(probe)
+    times = []
+    for _ in range(REPS):
+        t = time.perf_counter_ns()
+        for probe in LOOKUPS:
+            fn(probe)
+        times.append((time.perf_counter_ns() - t) / len(LOOKUPS))
+    return times
+
+
+class Row(NamedTuple):
+    name: str
+    build_ms: float
+    bytes_per_key: float | None
+    lookup_ns: float | None
+    caps: dict[str, int]
+
+
 # (name, build-callable -> object, capabilities dict). Each build is wrapped so a missing/renamed
 # dependency degrades to "skipped" instead of crashing the whole comparison.
 def build_lexindex_string():
@@ -146,10 +224,10 @@ def build_marisa():
 
 
 # marisa is a curve, not a point, and every lexindex table until 2.1.1 quoted only the middle of it.
-# Its own documentation says the right configuration depends on the data, so a single row invites the
-# fair objection that the baseline was left untuned. Measured over the whole space on this corpus:
-# `num_tries` 1/2/3/4/5/8/16/32 gives 3.380/2.997/2.978/2.977/2.977/2.980/2.986/2.998 -- flat from
-# three and worse past eight, not the monotone shrink the docs suggest -- `cache_size`
+# Its own documentation says the right configuration depends on the data, so a single row invites
+# the fair objection that the baseline was left untuned. Measured over the whole space on these
+# words: `num_tries` 1/2/3/4/5/8/16/32 gives 3.380/2.997/2.978/2.977/2.977/2.980/2.986/2.998 --
+# flat from three and worse past eight, not the monotone shrink the docs suggest -- `cache_size`
 # TINY/SMALL/NORMAL/LARGE/HUGE gives 2.957/2.964/2.978/3.008/3.066, and `order` and `binary` do
 # nothing at all. So the knobs worth a row are cache size, and the joint best is `num_tries=4` with
 # `TINY_CACHE` at 2.955.
@@ -253,7 +331,13 @@ CANDIDATES = [
 
 
 def main() -> None:
-    rows, cells = [], []
+    floor = min(_lookup_ns(dict(zip(KEYS, range(N), strict=True)).get))
+    print(
+        f"\nPython call boundary: {floor:.0f} ns a lookup through a builtin dict. Every row below "
+        f"pays it; the differences between rows do not."
+    )
+    rows: list[Row] = []
+    cells = []
     for name, build, caps in CANDIDATES:
         try:
             obj, samples = _time(build)
@@ -264,25 +348,31 @@ def main() -> None:
         build_ms = statistics.median(samples)
         size = _serialised_size(obj)
         bpk = size / N if size else None
-        rows.append((name, build_ms, bpk, caps))
+        fn = _lookup_fn(obj, exact=bool(caps["exact"]))
+        lookups = _lookup_ns(fn) if fn is not None else None
+        ns = min(lookups) if lookups else None
+        rows.append(Row(name, build_ms, bpk, ns, caps))
         cells.append(
             {
                 "library": name.replace(chr(10), " "),
                 "build_ms": _results.summary(samples),
                 "serialised_bytes": size,
                 "bytes_per_key": bpk,
+                "lookup_ns": _results.summary(lookups) if lookups else None,
                 "capabilities": caps,
             }
         )
+        shown = "—" if ns is None else f"{ns:5.0f} ns"
         print(
             f"{name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms (median of {REPS})   "
-            f"size {bpk if bpk is None else round(bpk, 2)} bytes/key"
+            f"size {bpk if bpk is None else round(bpk, 2)} bytes/key   lookup {shown}"
         )
 
     false_positives = _measure_false_positive_rate()
     _plot_size(rows)
     _plot_build(rows)
-    _capability_table(rows)
+    _plot_lookup(rows, floor)
+    _capability_table(rows, floor)
     path = _results.write(
         "compare",
         cells,
@@ -292,6 +382,7 @@ def main() -> None:
             "raw_bytes_per_key": RAW,
         },
         false_positive_rate=false_positives,
+        python_call_floor_ns=floor,
         competitors=_results.versions("marisa-trie", "dawg2", "datrie"),
     )
     print(f"\nplots → {OUT}/  (raw keys = {RAW:.1f} bytes/key, n = {N:,})")
@@ -329,7 +420,7 @@ def _measure_false_positive_rate() -> list[dict]:
 
 
 def _plot_size(rows) -> None:
-    labelled = [(n, b) for n, _, b, _ in rows if b is not None]
+    labelled = [(r.name, r.bytes_per_key) for r in rows if r.bytes_per_key is not None]
     labelled.sort(key=lambda t: t[1])  # ascending: smallest index first
     fig, ax = plt.subplots(figsize=(9.5, 4.6))
     names = [n for n, _ in labelled] + ["raw keys\n(no index)"]
@@ -352,8 +443,8 @@ def _plot_size(rows) -> None:
 
 def _plot_build(rows) -> None:
     fig, ax = plt.subplots(figsize=(9.5, 4.6))
-    names = [n for n, _, _, _ in rows]
-    vals = [ms for _, ms, _, _ in rows]
+    names = [r.name for r in rows]
+    vals = [r.build_ms for r in rows]
     bars = ax.bar(names, vals, color="#5e35b1", width=0.66)
     ax.bar_label(bars, fmt="%.0f ms", padding=3, fontsize=9)
     ax.set_ylabel("build time (ms)")
@@ -366,7 +457,32 @@ def _plot_build(rows) -> None:
     plt.close(fig)
 
 
-def _capability_table(rows) -> None:
+def _plot_lookup(rows, floor: float) -> None:
+    """The counterweight to the size plot: what one lookup costs in the structure that small."""
+    labelled = [(r.name, r.lookup_ns) for r in rows if r.lookup_ns is not None]
+    labelled.sort(key=lambda t: t[1])
+    fig, ax = plt.subplots(figsize=(9.5, 4.6))
+    names = [n for n, _ in labelled] + ["builtin `dict`\n(call boundary)"]
+    vals = [ns for _, ns in labelled] + [floor]
+    colors = [
+        "#00897b" if "CompactHash" in n else "#3949ab" if "lexindex" in n else "#9aa0a6"
+        for n, _ in labelled
+    ] + ["#cfcfcf"]
+    bars = ax.bar(names, vals, color=colors, width=0.66)
+    ax.bar_label(bars, fmt="%.0f", padding=3, fontsize=9)
+    ax.set_ylabel("ns / lookup (through Python)")
+    ax.set_title(
+        f"Lookup latency on real English words (n = {N:,}, {PROBES:,} probes, half of them misses)"
+    )
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.margins(y=0.16)
+    ax.tick_params(axis="x", labelsize=8)
+    fig.tight_layout()
+    fig.savefig(OUT / "compare_lookup.png", dpi=140)
+    plt.close(fig)
+
+
+def _capability_table(rows, floor: float) -> None:
     cols = [
         ("prefix", "prefix"),
         ("rangeq", "range"),
@@ -377,18 +493,20 @@ def _capability_table(rows) -> None:
         ("mmap", "zero-copy mmap"),
     ]
     yes, no = "✅", "—"
-    print("\n| library | " + " | ".join(c[1] for c in cols) + " | bytes/key |")
-    print("|" + "---|" * (len(cols) + 2))
-    for name, _, bpk, caps in rows:
-        cells = [yes if caps[k] else no for k, _ in cols]
+    print("\n| library | " + " | ".join(c[1] for c in cols) + " | bytes/key | ns/lookup |")
+    print("|" + "---|" * (len(cols) + 3))
+    for row in rows:
+        cells = [yes if row.caps[k] else no for k, _ in cols]
         print(
-            f"| {name.replace(chr(10), ' ')} | "
+            f"| {row.name.replace(chr(10), ' ')} | "
             + " | ".join(cells)
             + " | "
-            + (f"**{bpk:.2f}**" if bpk else "—")
+            + (f"**{row.bytes_per_key:.2f}**" if row.bytes_per_key else "—")
+            + " | "
+            + ("—" if row.lookup_ns is None else f"{row.lookup_ns:.0f}")
             + " |"
         )
-    print("| builtin `dict` | — | — | — | — | ✅ | — (in-RAM only) | — | — |")
+    print(f"| builtin `dict` | — | — | — | — | ✅ | — (in-RAM only) | — | — | {floor:.0f} |")
 
 
 if __name__ == "__main__":
