@@ -314,6 +314,59 @@ answer to "which is smallest" is decided by the corpus and not by the scale.
 ([`bench/results/sweep10m-2026-09-12-arz-4762dc4.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-4762dc4.json)),
 `marisa-trie` 1.3. One build per cell at this size, five rounds of lookups.</sub>
 
+### A cold mapping, and what is actually resident
+
+Every size in this page is the blob. A process that maps one and answers a thousand queries never
+reads most of it, and what decides whether an index fits inside a container limit is the resident
+set. `local/coldmmap` drops each file's page cache with `posix_fadvise(POSIX_FADV_DONTNEED)` — no
+root needed, and the resident set straight after `load_mmap` is the control that the drop worked —
+then reads `/proc/self/smaps` after 1 000 random lookups and after a further million.
+
+Ten million English Wikipedia titles, bytes per key except the latencies:
+
+| structure | file | mapped | after 1 k | after 1 M | cold ns | warm ns |
+|---|---:|---:|---:|---:|---:|---:|
+| `DictIndex` 32 | 8.69 | 0.26 | 5.53 | 8.69 | 50 442 | 501 |
+| `DictIndex` 32, `MADV_RANDOM` | 8.69 | 0.26 | **1.92** | 8.69 | 94 363 | 1 837 |
+| `DictIndex` 128 | 7.88 | 0.08 | 4.69 | 7.88 | 51 519 | 642 |
+| `DictIndex` 128, `MADV_RANDOM` | 7.88 | 0.08 | **0.82** | 7.88 | 89 071 | 2 072 |
+| `DictIndex` 1024 | 7.79 | 0.02 | 4.61 | 7.79 | 52 720 | 2 108 |
+| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 290** | **49** |
+| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 77 906 | 164 |
+| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 89 262 | 866 |
+| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 374 698 | 3 105 |
+
+**`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.26 bytes a key
+resident before the first query, which is the header and the little the loader validates. Nothing
+else is read until something asks for it.
+
+**The first thousand queries cost far more pages than they need.** `DictIndex` at 128 ends them with
+4.69 of its 7.88 bytes a key resident — 60 % of an index nobody has finished reading — while the
+same thousand queries under `MADV_RANDOM` leave **0.82**, which is what they actually touch: about
+two pages a lookup, the sample array and the block. The 5.7× between those two numbers is the
+kernel's readahead, and it is buying latency with memory: turning it off costs 1.7× on the cold
+lookups and **3.2× on the warm ones**, because the advice outlives the warm-up. Readahead is the
+right default here; `MADV_RANDOM` is for the case where a container limit, and not a latency budget,
+is what binds.
+
+**Cold start is where the smallest structure wins outright, and the mechanism is pages.**
+`CompactHashIndex` answers its first thousand queries at **6.3 µs** against `DictIndex`'s 51.5 and
+`StringIndex`'s 89.3 — 8× and 14× — because its whole file is 12.6 MB and a fault brings in a
+useful fraction of it. On `uuid`, where its 1.26 bytes a key sit against `DictIndex`'s 20.06 and
+`StringIndex`'s 36.07, the gap is 21× and 39× (5.9 µs against 125.3 and 231.0). A structure that
+stores no keys has no keys to fault in.
+
+**After a million queries every structure is fully resident**, to the last hundredth of a byte. The
+distinctive answer to "how much memory does this index need" only exists during warm-up: past it,
+against a workload that touches every key, the resident set *is* the file, and the size table above
+is the steady-state RSS.
+
+<sub>Measured 2026-09-12 on a clean tree, NVMe under LUKS on btrfs, 38 GB RAM — so "cold" means
+this file's page cache was dropped and not that the machine was short of memory
+([`bench/results/coldmmap-2026-09-12-arz-bb1473c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-bb1473c.txt),
+which also carries the million-key run and the `uuid` one). `MADV_RANDOM` is applied by the harness
+through `/proc/self/maps`; `load_mmap` does not set it, and on this evidence should not.</sub>
+
 ### `rsmarisa`, the pure-Rust port
 
 The same question in Rust, where `marisa-trie` is a C++ library with no binding a Rust project would

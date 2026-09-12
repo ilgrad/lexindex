@@ -1,0 +1,64 @@
+# local/coldmmap -- what a cold mapping costs in pages, not in bytes on disk
+# lexindex 2.1.0 at bb1473c, 2026-09-12, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# Storage: NVMe (HFM001TD3JX013N) under LUKS, btrfs. 38 GB RAM, so "cold" here means this file's
+# page cache was dropped, not that the machine was short of memory.
+#
+# Every size table in this repository measures the blob. A process that maps one and answers a
+# thousand queries never reads most of it, and what decides whether an index fits a container is
+# the resident set, not the file. Columns, all bytes per key except the two latencies:
+#   file      the blob on disk
+#   mapped    resident straight after `load_mmap`, before a single query -- the control for the
+#             page-cache drop, which is `posix_fadvise(POSIX_FADV_DONTNEED)` and needs no root
+#   after 1k  resident after 1 000 random member lookups
+#   after 1M  resident after a further 1 000 000
+#   cold ns   the mean over those first 1 000 lookups, page faults included
+#   warm ns   the mean over the next 1 000 000
+#
+# Each structure is measured twice. The `(random)` rows call `madvise(MADV_RANDOM)` on the mapping
+# -- which `load_mmap` does not do -- so a fault brings in its own page instead of a readahead
+# window. The difference between the two is the kernel's readahead, and reading it as a knob is
+# the point of the row.
+#
+# load 0.55 0.67 0.82
+
+titles-en-1000000: 1000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                  10.30      0.39     10.31     10.31    7623.4    362.2     yes
+DictIndex 32 (random)         10.30      0.39      6.54     10.31   43441.4    353.2     yes
+DictIndex 128                  9.57      0.20      9.57      9.57    6317.9    450.3     yes
+DictIndex 128 (random)         9.57      0.20      6.48      9.57   45572.3    514.5     yes
+DictIndex 1024                 9.34      0.07      9.34      9.34    5992.3   1845.3     yes
+DictIndex 1024 (random)        9.34      0.07      7.38      9.34   65805.6   1898.6     yes
+CompactHashIndex               1.26      0.27      1.27      1.27     168.3     28.4     yes
+CompactHashIndex (random)      1.26      0.27      1.27      1.27     144.9     28.3     yes
+StringIndex                   17.28      0.11     17.28     17.29    9416.9    444.3     yes
+StringIndex (random)          17.28      0.11     12.58     17.29  128670.3    536.0     yes
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   8.69      0.26      5.53      8.69   50442.0    501.2     yes
+DictIndex 32 (random)          8.69      0.26      1.92      8.69   94362.8   1836.7     yes
+DictIndex 128                  7.88      0.08      4.69      7.88   51518.9    641.7     yes
+DictIndex 128 (random)         7.88      0.08      0.82      7.88   89071.1   2071.6     yes
+DictIndex 1024                 7.79      0.02      4.61      7.79   52719.5   2108.3     yes
+DictIndex 1024 (random)        7.79      0.02      0.99      7.79  152067.0   3466.3     yes
+CompactHashIndex               1.26      0.26      1.25      1.26    6290.3     49.4     yes
+CompactHashIndex (random)      1.26      0.26      0.70      1.26   77905.5    163.6     yes
+StringIndex                   13.25      0.01     10.10     13.25   89261.6    866.0     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  374697.9   3104.6     yes
+
+uuid-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                  20.88      0.26      7.16     20.88  125491.9    537.1     yes
+DictIndex 32 (random)         20.88      0.26      2.29     20.88  140043.3   4235.9     yes
+DictIndex 128                 20.06      0.08      6.03     20.06  125253.3    672.9     yes
+DictIndex 128 (random)        20.06      0.08      1.08     20.06  100668.0   4449.7     yes
+DictIndex 1024                19.78      0.03      6.38     19.78  134917.5   2137.5     yes
+DictIndex 1024 (random)       19.78      0.03      1.55     19.78  327782.4   6222.3     yes
+CompactHashIndex               1.26      0.26      1.26      1.26    5941.9     55.9     yes
+CompactHashIndex (random)      1.26      0.26      0.71      1.26   55298.3    158.8     yes
+StringIndex                   36.07      0.01     15.16     36.07  230982.4    800.8     yes
+StringIndex (random)          36.07      0.01      9.98     36.07 1186900.0   4459.7     yes
+
+# load after 1.59 0.99 0.92

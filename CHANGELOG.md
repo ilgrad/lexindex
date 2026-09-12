@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **What a cold mapping costs, measured for the first time.** Every size this project publishes is
+  the blob on disk, and the number that decides whether an index fits a container limit is the
+  resident set. `local/coldmmap` drops a file's page cache with `posix_fadvise`, maps it, and reads
+  `/proc/self/smaps` after 1 000 random lookups and after a further million. Three findings, on ten
+  million Wikipedia titles. `load_mmap` is lazy as documented — 0.01 to 0.26 bytes a key resident
+  before the first query. The first thousand queries then leave 4.69 of `DictIndex`'s 7.88 bytes a
+  key resident while touching only **0.82**, the 5.7× being the kernel's readahead, which is buying
+  latency with memory and is the right default: `MADV_RANDOM` cuts the resident set to what is
+  touched and costs 1.7× on the cold lookups and 3.2× on the warm ones, so `load_mmap` does not set
+  it. And cold start is where the smallest structure wins outright — `CompactHashIndex` answers its
+  first thousand queries at 6.3 µs against `DictIndex`'s 51.5 and `StringIndex`'s 89.3, and on UUID
+  keys at 5.9 µs against 125.3 and 231.0. Past the warm-up every structure is fully resident, so the
+  size table is also the steady-state RSS and only the warm-up distinguishes them.
+
 - **Nine structures over the whole corpus set, `bench/sweep.py`.** The first measurement this
   project has that can answer *where* each structure is smallest rather than how big it is on one
   word list — three `DictIndex` block sizes against three `marisa-trie` configurations, plus the
