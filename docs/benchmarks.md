@@ -3,7 +3,9 @@
 Every number here is a claim about one machine on one day, and every timed table cites the file under
 [`bench/results/`](https://github.com/ilgrad/lexindex/tree/main/bench/results) that holds its raw
 samples and the environment that produced them. The README carries the two headline tables; this
-page holds the rest and the protocol behind every number — read the ratios, not the absolutes.
+page holds the rest and the protocol behind every number — read the ratios, not the absolutes,
+and [what the error bars are](#error-bars-and-where-a-lookup-number-comes-from) before reading
+a lookup time closely.
 
 ## Serialised size on real English words
 
@@ -858,6 +860,87 @@ numeric tail (`key_000000001`), plain decimal integers, UUIDs, Cyrillic, DNA, an
 [`bench/results/hash-quality-2026-09-12-arz-d82e296.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-12-arz-d82e296.txt).
 The two hashes are deterministic and unseeded, so none of this is a statement about an adversary
 who picks the queries — see `SECURITY.md`.</sub>
+
+## Error bars, and where a lookup number comes from
+
+Every timed number on this page is the minimum of a few alternated passes. A minimum is the right
+estimator for a laptop — it is the sample least contaminated by whatever else the machine was doing
+— but it carries no width, and a claim about a frontier is a claim about an *ordering*, which needs
+one. `local/statbench` runs 30 independent passes a structure with the six lanes round-robin, so
+drift lands on all of them equally, and reports the median with p5/p95 and a bootstrap interval
+around the median. The interval is a percentile interval over 10 000 resamples rather than
+mean ± t·s: the samples are not normal, since a pass that met a scheduler tick sits far above the
+rest and nothing at all sits below the hardware.
+
+479 823 English words, 200 000 probes a pass, half of them members, ns a lookup:
+
+| structure | B/key | min | median | p5 | p95 | 95 % CI of the median |
+|---|---:|---:|---:|---:|---:|---:|
+| `ClosedHashIndex` | 0.26 | 24.1 | 32.0 | 24.7 | 39.0 | 31.3 – 33.3 |
+| `CompactHashIndex` fp=1 | 1.26 | 31.3 | 44.1 | 36.4 | 56.8 | 42.1 – 45.5 |
+| `PerfectHashIndex` | 10.90 | 151.8 | 157.2 | 152.0 | 166.9 | 154.3 – 162.3 |
+| `DictIndex` 32 | 3.52 | 305.3 | 311.8 | 305.8 | 322.5 | 310.1 – 314.3 |
+| `StringIndex` | 5.95 | 328.6 | 333.0 | 328.9 | 345.9 | 332.0 – 335.9 |
+| `DictIndex` 128 | 2.89 | 428.0 | 433.1 | 429.0 | 439.5 | 432.0 – 434.2 |
+
+**A slow structure is a quiet one.** Past 150 ns the p5–p95 band is 2.4–9.5 % of the median and the
+minimum sits 1–4 % under it, so quoting the minimum costs nothing. Under 50 ns the band is 45 % and
+the minimum is 25–29 % under the median — same probe set, same binary, thirty consecutive passes.
+
+**The probe set is part of the working set.** Only the number of probes a pass changes here:
+
+| probes a pass | `Closed` | `Compact` fp=1 | `Perfect` | `Dict` 32 | `String` | `Dict` 128 |
+|---|---:|---:|---:|---:|---:|---:|
+| 100 000 | 21.0 | 31.4 | 137.1 | 285.8 | 317.5 | 417.9 |
+| 200 000 | 32.0 | 44.1 | 157.2 | 311.8 | 333.0 | 433.1 |
+| 400 000 | 40.7 | 68.1 | 165.8 | 329.4 | 342.3 | 446.4 |
+
+`ClosedHashIndex` doubles; `DictIndex` 128 moves 7 %. The probe array is a second structure the loop
+walks: 100 000 `String` headers are 2.4 MB, 400 000 are 9.6 MB before the bytes they point at, and
+past some point between the two the probe stops being in cache and starts being fetched at the same
+cost as the lookup it pays for. The smaller the index, the larger the share of the total that is.
+The counters say it in one line — **the instruction count does not move and the cycle count does**:
+
+| structure | instr | cycles at 100 k | at 400 k | branch misses | L1 fills | LLC misses |
+|---|---:|---:|---:|---:|---:|---:|
+| `ClosedHashIndex` | 108 | 38.6 | 153.3 | 0.96 | 2.50 | 1.2–1.4 |
+| `CompactHashIndex` fp=1 | 211 | 108.5 | 267.0 | 0.85 | 3.74 | 2.3–2.5 |
+| `PerfectHashIndex` | 365 | 445.4 | 653.4 | 3.14 | 5.67 | 4.4–4.7 |
+| `DictIndex` 32 | 1671 | 1178.2 | 1347.4 | 12.55 | 13.16 | 6.1–6.3 |
+| `StringIndex` | 2237 | 1234.8 | 1382.5 | 13.26 | 15.17 | 7.7–8.1 |
+| `DictIndex` 128 | 3226 | 1714.0 | 1791.1 | 18.63 | 15.86 | 6.6–7.0 |
+
+Three things fall out of that table that no nanosecond showed:
+
+- **`DictIndex` 128 is slower than `DictIndex` 32 in the ALU, not in the cache.** 3226 instructions
+  against 1671 — a block scan is linear in the block, and 128 keys a block is twice the scanning of
+  32 — while its LLC misses are the *same* 6–7. The 2.89 B/key that 128 buys is paid for in
+  instructions, which is why the gap hardly moves with the probe set and why a bigger cache will not
+  close it.
+- **`PerfectHashIndex` is pure latency.** 365 instructions, 4.4 LLC misses, IPC 0.56–0.82: it does
+  almost no work and waits for all of it.
+- **`StringIndex` misses the most, 7.7–8.1 a lookup.** That is the same fact as its thread scaling
+  above: dependent misses are what a transducer walk is made of, and they are also what another core
+  can overlap.
+
+A second mechanism arrives between 200 000 and 400 000 probes. Data-TLB misses a lookup go from
+0.002 to 0.393 for `ClosedHashIndex` and from 0.008 to 0.544 for `DictIndex` 128: the probe array
+has outgrown a 2048-entry L2 TLB, and every structure now pays for a page walk it did not pay for
+before. `PerfectHashIndex` is the one that misses at every size (0.185 at 100 000), its 5.2 MB arena
+being spread over more pages than the TLB holds to begin with.
+
+What survives all of it is the ordering. At all three probe counts the six bootstrap intervals are
+disjoint and in the same order, which is what a frontier table claims and all it claims. The
+absolute nanoseconds belong as much to the harness as to the structure: `bench/compare.py` draws
+100 000 probes, so that is the column its published numbers sit in, and a lookup time quoted without
+its probe set is half a number.
+
+<sub>Measured 2026-09-12 on a clean tree
+([`bench/results/stats-2026-09-12-arz-e979999.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/stats-2026-09-12-arz-e979999.txt),
+which carries all thirty samples of every row), Ryzen 7 5800HS. Counters are `perf stat -r 3` over
+20 passes minus a build-only control, so the build's own cycles and faults stay out of the lookup's;
+in those runs every structure is built but only one is probed, which is the *kinder* case — the
+table above has six rotating through the cache.</sub>
 
 ## Scaling to millions of keys
 

@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Error bars for the lookup tables, and the counters behind them.** Every timed number this
+  project publishes is the minimum of a few alternated passes, which is the right estimator for a
+  laptop and carries no width — so a frontier claim rested on an ordering nobody had bounded. Thirty
+  independent passes a structure with a bootstrap interval around the median now say it: past 150 ns
+  the p5–p95 band is 2.4–9.5 % and the minimum is within 1–4 % of the median, but under 50 ns the
+  band is 45 % and the minimum sits 25–29 % low. The probe set turns out to be part of the working
+  set — `ClosedHashIndex` doubles between 100 000 and 400 000 probes a pass while `DictIndex` 128
+  moves 7 % — and `perf` names the cause: the instruction count a lookup does not change, the cycle
+  count does, and the data TLB starts missing past 200 000 probes. The ordering survives all three
+  probe counts with disjoint intervals, which is what the tables claim; the absolute nanoseconds
+  belong to the harness as much as to the structure. `DictIndex` 128's cost against 32 is now
+  attributed too: 3226 instructions a lookup against 1671, with the same LLC misses — a block scan
+  is linear in the block, so a bigger cache will not close it.
+
 - **Read scaling across threads, measured.** Every index is immutable once built, so one
   `load_mmap` is shared by reference and answers from every core with no lock, no copy and no
   per-thread instance — an unclaimed property until now, because nobody had run the ladder. On ten
