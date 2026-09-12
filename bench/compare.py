@@ -11,13 +11,14 @@ Among installable libraries this measures the axes that matter — build time an
 size** — and records which *capabilities* each one offers (ordered queries, reverse lookup, and
 crucially whether membership is **exact** or **probabilistic**). Build time is the median of five
 runs after a discarded warm-up, so no library is charged for its own first import (lexindex is
-imported at the top of this file; the others import inside their build callable). **Lookup
-latency is measured next to the size**, because bytes per key on their own invite the reading that
-the smallest structure is the best one: it is the minimum over five passes of a shuffled probe set
-that is half members and half plausible strangers. Every row pays the same Python call boundary,
-so what the loop and the call cost on their own is printed above the table rather than left as the
-reason not to measure; the builtin `dict` is a row in the table, not that floor -- at this key count
-it is a memory-bound lookup like any other and several rows come in under it.
+imported at the top of this file; the others import inside their build callable). **Lookup latency
+is measured next to the size**, because bytes per key on their own invite the reading that the
+smallest structure is the best one: it is the minimum over five rounds of a shuffled probe set that
+is half members and half plausible strangers, every structure taking one pass per round so that none
+of them is timed with the caches still warm from its own build. Every row pays the same Python call
+boundary, so what the loop and the call cost alone is printed above the table rather than left as
+the reason not to measure at all; the builtin `dict` is a row in that table and not its floor -- at
+this key count a dict is a memory-bound lookup like any other, and several rows come in under it.
 `cargo run --release --example bench` measures the same call without the boundary, in Rust.
 
 Every number printed here is also written to `bench/results/compare-<date>-<host>-<commit>.json`
@@ -162,17 +163,40 @@ def _lookup_fn(obj, exact: bool):
     return None
 
 
-def _lookup_ns(fn) -> list[float]:
-    """`REPS` passes over the whole probe set after a discarded one, nanoseconds per lookup."""
+def _one_pass(fn) -> float:
+    """One pass over the whole probe set, nanoseconds per lookup."""
+    t = time.perf_counter_ns()
     for probe in LOOKUPS:
         fn(probe)
-    times = []
+    return (time.perf_counter_ns() - t) / len(LOOKUPS)
+
+
+def _lookup_latency(lanes: list[tuple[str, object]]) -> dict[str, list[float]]:
+    """`REPS` rounds in which every lane takes one pass, after one discarded round.
+
+    Alternating the lanes is the point. Run one library's five passes back to back and it is timed
+    with the allocator and the caches still holding what its own build left there, while the next
+    one starts cold -- the failure this repository has already been caught by twice on A/B work.
+    Every structure is also alive while every other one is measured, which is a harder memory
+    environment than holding one at a time and, unlike that, the same for every row."""
+    for _, fn in lanes:
+        _one_pass(fn)
+    samples: dict[str, list[float]] = {name: [] for name, _ in lanes}
     for _ in range(REPS):
-        t = time.perf_counter_ns()
-        for probe in LOOKUPS:
-            fn(probe)
-        times.append((time.perf_counter_ns() - t) / len(LOOKUPS))
-    return times
+        for name, fn in lanes:
+            samples[name].append(_one_pass(fn))
+    return samples
+
+
+CALL, DICT = "(the call alone)", "builtin dict"
+
+
+class Built(NamedTuple):
+    name: str
+    obj: object | None
+    caps: dict[str, int]
+    build_ms: list[float] | None
+    skipped: str | None
 
 
 class Row(NamedTuple):
@@ -333,42 +357,59 @@ CANDIDATES = [
 
 
 def main() -> None:
-    floor = min(_lookup_ns(lambda _probe: None))
-    dict_ns = min(_lookup_ns(dict(zip(KEYS, range(N), strict=True)).get))
-    print(
-        f"\nPython call boundary: {floor:.0f} ns for the loop and the call alone -- every row "
-        f"below pays it, the differences between rows do not.\nA builtin dict answers the same "
-        f"probes in {dict_ns:.0f} ns, which is a lookup and not a floor."
-    )
-    rows: list[Row] = []
-    cells = []
+    built: list[Built] = []
     for name, build, caps in CANDIDATES:
         try:
             obj, samples = _time(build)
         except Exception as e:  # missing dep or an API drift → skip, note it
             print(f"skip {name.replace(chr(10), ' ')}: {type(e).__name__}: {e}")
-            cells.append({"library": name.replace(chr(10), " "), "skipped": f"{type(e).__name__}"})
+            built.append(Built(name, None, caps, None, type(e).__name__))
             continue
-        build_ms = statistics.median(samples)
-        size = _serialised_size(obj)
+        built.append(Built(name, obj, caps, samples, None))
+
+    lanes: list[tuple[str, object]] = [
+        (CALL, lambda _probe: None),
+        (DICT, dict(zip(KEYS, range(N), strict=True)).get),
+    ]
+    for one in built:
+        if one.obj is None:
+            continue
+        fn = _lookup_fn(one.obj, exact=bool(one.caps["exact"]))
+        if fn is not None:
+            lanes.append((one.name, fn))
+    latency = _lookup_latency(lanes)
+    floor, dict_ns = min(latency[CALL]), min(latency[DICT])
+    print(
+        f"\nPython call boundary: {floor:.0f} ns for the loop and the call alone -- every row "
+        f"below pays it, the differences between rows do not.\nA builtin dict answers the same "
+        f"probes in {dict_ns:.0f} ns, which is a lookup and not a floor."
+    )
+
+    rows: list[Row] = []
+    cells = []
+    for one in built:
+        if one.obj is None or one.build_ms is None:
+            cells.append({"library": one.name.replace(chr(10), " "), "skipped": one.skipped})
+            continue
+        build_ms = statistics.median(one.build_ms)
+        size = _serialised_size(one.obj)
         bpk = size / N if size else None
-        fn = _lookup_fn(obj, exact=bool(caps["exact"]))
-        lookups = _lookup_ns(fn) if fn is not None else None
-        ns = min(lookups) if lookups else None
-        rows.append(Row(name, build_ms, bpk, ns, caps))
+        passes = latency.get(one.name)
+        ns = min(passes) if passes else None
+        rows.append(Row(one.name, build_ms, bpk, ns, one.caps))
         cells.append(
             {
-                "library": name.replace(chr(10), " "),
-                "build_ms": _results.summary(samples),
+                "library": one.name.replace(chr(10), " "),
+                "build_ms": _results.summary(one.build_ms),
                 "serialised_bytes": size,
                 "bytes_per_key": bpk,
-                "lookup_ns": _results.summary(lookups) if lookups else None,
-                "capabilities": caps,
+                "lookup_ns": _results.summary(passes) if passes else None,
+                "capabilities": one.caps,
             }
         )
         shown = "—" if ns is None else f"{ns:5.0f} ns"
         print(
-            f"{name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms (median of {REPS})   "
+            f"{one.name.replace(chr(10), ' '):32} build {build_ms:7.0f} ms (median of {REPS})   "
             f"size {bpk if bpk is None else round(bpk, 2)} bytes/key   lookup {shown}"
         )
 
@@ -386,8 +427,8 @@ def main() -> None:
             "raw_bytes_per_key": RAW,
         },
         false_positive_rate=false_positives,
-        python_call_floor_ns=floor,
-        builtin_dict_ns=dict_ns,
+        python_call_floor_ns=_results.summary(latency[CALL]),
+        builtin_dict_ns=_results.summary(latency[DICT]),
         competitors=_results.versions("marisa-trie", "dawg2", "datrie"),
     )
     print(f"\nplots → {OUT}/  (raw keys = {RAW:.1f} bytes/key, n = {N:,})")
