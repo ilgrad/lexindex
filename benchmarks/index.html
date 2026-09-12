@@ -1,0 +1,3715 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Compact, immutable string↔id indexes for huge catalogs — a Rust core with Python bindings">
+      
+      
+      
+        <link rel="canonical" href="https://ilgrad.github.io/lexindex/benchmarks/">
+      
+      
+        <link rel="prev" href="../design/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Benchmarks - lexindex</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#benchmarks" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="lexindex" class="md-header__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            lexindex
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Benchmarks
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="lexindex" class="md-nav__button md-logo" aria-label="lexindex" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    lexindex
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ilgrad/lexindex" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ilgrad/lexindex
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#serialised-size-on-real-english-words" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serialised size on real English words
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#against-other-rust-string-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Against other Rust string indexes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-one-to-pick-and-how-much-the-corpus-decides-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which one to pick, and how much the corpus decides it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-corpus-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The corpus set
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#every-structure-over-the-whole-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every structure over the whole set
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Every structure over the whole set">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bytes-per-key-at-one-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes per key at one million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookups-at-one-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookups at one million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ten-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ten million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-cold-mapping-and-what-is-actually-resident" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A cold mapping, and what is actually resident
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-mapping-many-readers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One mapping, many readers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rsmarisa-the-pure-rust-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rsmarisa, the pure-Rust port
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lookup-speed-from-python-against-dict-and-marisa-trie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup speed from Python, against dict and marisa-trie
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#point-lookup-latency-vs-the-standard-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Point-lookup latency vs the standard library
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-perfect-hash-against-ptrhash-and-phast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The perfect hash against PtrHash and PHast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-fingerprinted-perfecthashindex-on-mostly-absent-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A fingerprinted PerfectHashIndex on mostly-absent keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#closedhashindex-the-perfect-hash-alone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClosedHashIndex: the perfect hash alone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dictindex-the-ordered-dictionary-against-stringindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DictIndex: the ordered dictionary against StringIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prefix-queries-against-the-tries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prefix queries against the tries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-prefix-queries-the-other-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common-prefix queries — the other direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hash-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hash quality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-bars-and-where-a-lookup-number-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error bars, and where a lookup number comes from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scaling-to-millions-of-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling to millions of keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#serialised-size-on-real-english-words" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serialised size on real English words
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#against-other-rust-string-indexes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Against other Rust string indexes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-one-to-pick-and-how-much-the-corpus-decides-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which one to pick, and how much the corpus decides it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-corpus-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The corpus set
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#every-structure-over-the-whole-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every structure over the whole set
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Every structure over the whole set">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bytes-per-key-at-one-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes per key at one million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookups-at-one-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookups at one million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ten-million-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ten million keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-cold-mapping-and-what-is-actually-resident" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A cold mapping, and what is actually resident
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-mapping-many-readers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One mapping, many readers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rsmarisa-the-pure-rust-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rsmarisa, the pure-Rust port
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lookup-speed-from-python-against-dict-and-marisa-trie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup speed from Python, against dict and marisa-trie
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#point-lookup-latency-vs-the-standard-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Point-lookup latency vs the standard library
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-perfect-hash-against-ptrhash-and-phast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The perfect hash against PtrHash and PHast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-fingerprinted-perfecthashindex-on-mostly-absent-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A fingerprinted PerfectHashIndex on mostly-absent keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#closedhashindex-the-perfect-hash-alone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClosedHashIndex: the perfect hash alone
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dictindex-the-ordered-dictionary-against-stringindex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DictIndex: the ordered dictionary against StringIndex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prefix-queries-against-the-tries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prefix queries against the tries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-prefix-queries-the-other-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common-prefix queries — the other direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hash-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hash quality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-bars-and-where-a-lookup-number-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error bars, and where a lookup number comes from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scaling-to-millions-of-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling to millions of keys
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h1>
+<p>Every number here is a claim about one machine on one day, and every timed table cites the file under
+<a href="https://github.com/ilgrad/lexindex/tree/main/bench/results"><code>bench/results/</code></a> that holds its raw
+samples and the environment that produced them. The README carries the two headline tables; this
+page holds the rest and the protocol behind every number — read the ratios, not the absolutes,
+and <a href="#error-bars-and-where-a-lookup-number-comes-from">what the error bars are</a> before reading
+a lookup time closely.</p>
+<p><code>bench/reproduce.sh</code> is the other half of that promise: it refuses a tree whose code does not match
+the commit the artifact will be named after, pins the competitor versions, verifies every corpus
+against its hash, records the machine, and finishes by putting the run's Python call floor beside
+the published one — the number no change to this library can move, and therefore the one that says
+whether your machine is comparable to the one in the tables at all.</p>
+<h2 id="serialised-size-on-real-english-words">Serialised size on real English words<a class="headerlink" href="#serialised-size-on-real-english-words" title="Permanent link">&para;</a></h2>
+<p><code>python bench/compare.py</code> on <code>/usr/share/dict/words</code> (479 823 words, 9.3 B/key raw). <strong>Keys are a real
+vocabulary, never a synthetic <code>entity-{i}</code> sequence</strong> — sequential keys collapse the FST to a
+near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
+better; the capability columns are why you would still pick a larger one.</p>
+<table>
+<thead>
+<tr>
+<th>library</th>
+<th style="text-align: center;">prefix</th>
+<th style="text-align: center;">common prefix</th>
+<th style="text-align: center;">range</th>
+<th style="text-align: center;">fuzzy</th>
+<th style="text-align: center;">reverse id→str</th>
+<th style="text-align: center;">exact membership</th>
+<th style="text-align: center;">zero-copy mmap</th>
+<th style="text-align: right;"><strong>bytes/key</strong></th>
+<th style="text-align: right;"><strong>ns/lookup</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>lexindex <code>ClosedHashIndex</code></strong></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">none (closed vocabulary)</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: right;"><strong>0.26</strong></td>
+<td style="text-align: right;">98</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>CompactHashIndex</code> (fp=4 bits)</strong></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">probabilistic</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;"><strong>0.76</strong></td>
+<td style="text-align: right;">95</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>CompactHashIndex</code> (fp=1)</strong></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">probabilistic</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;"><strong>1.26</strong></td>
+<td style="text-align: right;"><strong>92</strong></td>
+</tr>
+<tr>
+<td><strong>lexindex <code>CompactHashIndex</code> (fp=2)</strong></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">probabilistic</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;"><strong>2.26</strong></td>
+<td style="text-align: right;">97</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> (512 per block)</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;"><strong>2.81</strong></td>
+<td style="text-align: right;">348</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> (256 per block, default)</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;"><strong>2.84</strong></td>
+<td style="text-align: right;">342</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code> (4 tries, tiny cache — its smallest)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;">2.96</td>
+<td style="text-align: right;">496</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code> (default)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;">2.98</td>
+<td style="text-align: right;">472</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code> (huge cache)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;">3.07</td>
+<td style="text-align: right;">461</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>StringIndex</code></strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">323</td>
+</tr>
+<tr>
+<td>lexindex <code>PerfectHashIndex</code></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: right;">10.90</td>
+<td style="text-align: right;">216</td>
+</tr>
+<tr>
+<td>DAWG (<code>dawg2</code>)</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: right;">23.96</td>
+<td style="text-align: right;">242</td>
+</tr>
+<tr>
+<td><code>datrie</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: right;">30.91</td>
+<td style="text-align: right;">592</td>
+</tr>
+<tr>
+<td>builtin <code>dict</code></td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: right;">— (in RAM only)</td>
+<td style="text-align: right;">255</td>
+</tr>
+</tbody>
+</table>
+<p><sub>Every cell above is one run at <code>386b2e6</code>, the tree where a block is cut into microblocks of 32
+and the default block is 256
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-12-arz-386b2e6.json"><code>bench/results/compare-2026-09-12-arz-386b2e6.json</code></a>)
+— every cell's build and lookup samples, the false-positive measurement, the CPU, kernel, rustc,
+Python and the load average at both ends of the run. <strong>Its Python call floor is 48 ns against the
+49 of the table published through 2.1.0</strong>, so the two columns are comparable; a run earlier the same
+day measured a floor of 100 and every row fifty nanoseconds higher, two hours apart and within 2 ns
+of each other, which is the reproducibility problem this page documents further down and the reason
+<code>bench/reproduce.sh</code> prints the floor beside the published one. <code>marisa-trie</code> appears three times
+because it is a curve: its own documentation says the right configuration depends on the data, so the table carries
+its compact end, its default and its fast end rather than one point somebody could call untuned.</sub></p>
+<p><strong>What <code>ns/lookup</code> measures.</strong> One exact lookup through Python — <code>id</code> on a lexindex index, <code>get</code> on
+the tries and on the dict — over 100 000 probes, half members and half strangers made by swapping a
+member's last character for another the corpus uses. Shuffled with a fixed seed, because a strided
+walk through keys laid out in insertion order is learned by the L2 prefetcher and has reversed a
+ranking on this machine before. The strangers stay inside every trie's alphabet on purpose: a miss
+spelled with a character no key contains is rejected at the first node by a trie and still hashed in
+full by a hash index, which is not a comparison.</p>
+<p>Every structure takes one pass per round, five rounds, minimum per cell, with all the others resident
+while it runs — a harder memory environment than holding one at a time, and the same one for every
+row. Running each candidate to completion in turn is not the same measurement and is what this
+benchmark did first: every library was then timed immediately after its own six builds, and
+<code>CompactHashIndex</code> at a 2-byte fingerprint came out 88 ns in one run and 136 ns in the next. Two
+consecutive runs of the interleaved form agree within 1.9 % on ten of the thirteen rows; the other
+three differ by 10.7 %, 5.5 % and 3.7 %, and are the cells nearest the call boundary, where a few
+nanoseconds is a few per cent.</p>
+<p>Two costs are named rather than assumed. The Python call boundary — the same loop calling a function
+that does nothing — is <strong>48 ns</strong> in this run, which every row pays and no <em>difference</em> between
+rows contains.
+And <code>.get</code> on a miss is each library's own miss path, not <code>try: t[key] except KeyError: default</code>:
+timed apart, a miss costs <em>less</em> than a hit everywhere (0.85–0.91×), while that wrapper written out
+by hand over marisa's <code>__getitem__</code> costs 1.61× a hit
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/lookup-fairness-2026-09-12-arz-bf5c1b9.txt"><code>bench/results/lookup-fairness-2026-09-12-arz-bf5c1b9.txt</code></a>).
+Half the probes are misses, so a library that paid for exceptions would have been charged for CPython
+rather than for its own structure.</p>
+<p><strong>The smallest rows are also the fastest, which is not a paradox.</strong> <code>ClosedHashIndex</code> and the three
+<code>CompactHashIndex</code> widths answer in 92–98 ns against a builtin <code>dict</code>'s 255, because they store no
+keys at all: one hash, one probe, at most a fingerprint to compare. What they cannot do is tell a
+stranger from a member with certainty, or give a key back for an id. Among the structures that do
+keep their keys, <code>DictIndex</code> is <strong>both smaller and faster than every <code>marisa-trie</code> setting measured
+at either block</strong> — 2.81 B/key and 348 ns at 512, 2.84 and 342 at the default 256, against
+2.96–3.07 and 461–496.</p>
+<p>Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
+actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
+is not claimed against. <strong><code>CompactHashIndex</code> is the smallest <code>string → dense id</code> map here — 2.4×
+below <code>marisa-trie</code> at the default 8-bit fingerprint, 3.9× at 4 bits</strong> — when you can accept a bounded
+false-positive rate (about <code>2^-fingerprint_bits</code> by design — the fingerprint comes from a second hash,
+uncorrelated with the slot hash for well-distributed keys — measured <strong>6.2530 %</strong> at 4 bits and <strong>1.5553 %</strong> at 6 over 2 M non-member probes,
+z = +0.18 / −0.83 against theory; <strong>≈0.4 %</strong> at 8 bits, <strong>≈0.0015 %</strong> at 16) and don't need
+<code>id → key</code>. It is not a security primitive: both hashes are deterministic and unseeded, so an
+adversary who chooses the queries can find false positives at will. It stays below
+marisa's 2.98 B/key at every width up to 21 bits — the <a href="../usage/">width guide</a> tables the
+trade-off. <strong><code>StringIndex</code> is the only structure here that answers <em>fuzzy</em> and subsequence
+queries</strong>, at 4× below a plain DAWG; an ordered range is a range of ids on <code>DictIndex</code>, which
+needs no automaton for it. On this corpus <code>DictIndex</code> at its default block is smaller than
+<code>marisa-trie</code> and answers everything marisa does plus <code>key(id)</code>, <code>lower_bound</code> and <code>range</code> — a
+result about these words at these settings, not a general ranking: a trie's size swings 3×
+across corpora and marisa carries tuning parameters of its own.</p>
+<h2 id="against-other-rust-string-indexes">Against other Rust string indexes<a class="headerlink" href="#against-other-rust-string-indexes" title="Permanent link">&para;</a></h2>
+<p><code>marisa-trie</code> is C++, but since 2026-01 it has a pure-Rust port: <a href="https://crates.io/crates/rsmarisa"><code>rsmarisa</code></a>,
+BSD-2-Clause, with the same operations — exact lookup, reverse lookup, common-prefix and predictive
+search, mmap, and binary compatibility with the C++ format. <strong>This page used to say no succinct
+LOUDS trie existed in Rust to depend on, and rested a "smallest pure-Rust ordered index" claim on
+it. Both were wrong</strong>, and the second was wrong about this crate too: <code>DictIndex</code> shipped at
+3.52 B/key in 2.0 and was never added to the table below. Measured rather than argued, same real
+words, one process:</p>
+<table>
+<thead>
+<tr>
+<th>Rust structure</th>
+<th style="text-align: right;">bytes/key</th>
+<th style="text-align: right;">vs C++ marisa</th>
+<th style="text-align: right;"><code>id</code> member</th>
+<th style="text-align: right;">build</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>lexindex <code>DictIndex</code></strong> (512 per block)</td>
+<td style="text-align: right;"><strong>2.806</strong></td>
+<td style="text-align: right;">0.94×</td>
+<td style="text-align: right;">272 ns</td>
+<td style="text-align: right;">26 ms</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code></strong> (256 per block, default)</td>
+<td style="text-align: right;"><strong>2.838</strong></td>
+<td style="text-align: right;">0.95×</td>
+<td style="text-align: right;">253 ns</td>
+<td style="text-align: right;">26 ms</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code> (C++ reference, default)</td>
+<td style="text-align: right;">2.978</td>
+<td style="text-align: right;">1.00×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td><code>rsmarisa</code> (4 tries, tiny cache — its smallest)</td>
+<td style="text-align: right;">3.003</td>
+<td style="text-align: right;">1.01×</td>
+<td style="text-align: right;">322 ns</td>
+<td style="text-align: right;">137 ms</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code></strong> (64 per block)</td>
+<td style="text-align: right;">3.029</td>
+<td style="text-align: right;">1.02×</td>
+<td style="text-align: right;"><strong>227 ns</strong></td>
+<td style="text-align: right;"><strong>26 ms</strong></td>
+</tr>
+<tr>
+<td><code>rsmarisa</code> 0.4.2 (default)</td>
+<td style="text-align: right;">3.168</td>
+<td style="text-align: right;">1.06×</td>
+<td style="text-align: right;">301 ns</td>
+<td style="text-align: right;">148 ms</td>
+</tr>
+<tr>
+<td><code>fst::Set</code> (membership only — no ids, no reverse)</td>
+<td style="text-align: right;">4.85</td>
+<td style="text-align: right;">1.63×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>StringIndex</code></strong> (ordered + fuzzy + reverse)</td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">2.00×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td><code>yada</code> (double-array)</td>
+<td style="text-align: right;">15.98</td>
+<td style="text-align: right;">5.4×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td><code>crawdad::MpTrie</code> (minimal-prefix)</td>
+<td style="text-align: right;">19.63</td>
+<td style="text-align: right;">6.6×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td><code>crawdad::Trie</code> (double-array)</td>
+<td style="text-align: right;">26.22</td>
+<td style="text-align: right;">8.8×</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table>
+<p><sub><code>rsmarisa</code> and <code>DictIndex</code> from
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt"><code>bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt</code></a>
+— one process, every key probed as a member and with a digit appended as a miss, shuffled with a
+fixed seed, seven rounds alternating in both directions, minimum of the last five. The other rows
+are the older sweep with <code>crawdad</code> 0.4, <code>yada</code> 0.5, <code>fst</code> 0.4; size is serialised bytes ÷ keys
+throughout, and <code>rsmarisa</code>'s <code>io_size()</code> is asserted equal to the file it saves. The three
+<code>DictIndex</code> sizes are <code>68f5336</code>'s, where the symbol table went one per shard of 65 536 keys — a size
+is exact — and the same tree's A-B leaves the <code>id</code> column where it was
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>dict-shard-2026-09-12-arz-68f5336.txt</code></a>);
+the build column predates it and the change costs 17–23 % of it. None of them is a
+lexindex dependency — the harness is a throwaway crate.</sub></p>
+<p>So the statement is a crown after all, with the frontier behind it. <strong><code>DictIndex</code> at its default
+block dominates <code>rsmarisa</code> at its most compact setting outright</strong> — 2.838 against 3.003 B/key, 253
+against 322 ns, 5.3× faster to build — and at 64 per block it is the fastest structure here at 227
+ns for 3.029, still under <code>rsmarisa</code>'s default; every <code>rsmarisa</code> setting has a <code>DictIndex</code> block
+that is both smaller and faster. The block size picks the axis.</p>
+<p>Two further things the table settles. The Rust port is <em>larger</em> than the C++ original on this corpus
+(+6.4 % at the default, +1.6 % at its smallest), so a pure-Rust project pays for the port. And
+reaching <code>marisa</code>'s 2.98 <em>as a trie</em> remains closed to the <code>fst</code> route: the byte-oriented automaton
+is ~1.6× away by construction, and even a bare <code>fst::Set</code> storing no ids at all is 4.85. <code>DictIndex</code>
+gets under marisa by not being a trie — front-coded blocks under one FSST table — and
+<code>CompactHashIndex</code> takes the size crown the third way, by dropping the keys entirely.</p>
+<h2 id="which-one-to-pick-and-how-much-the-corpus-decides-it">Which one to pick, and how much the corpus decides it<a class="headerlink" href="#which-one-to-pick-and-how-much-the-corpus-decides-it" title="Permanent link">&para;</a></h2>
+<p>Every size above is one corpus at one <code>n</code>, and the ranking is stable across neither. The reason is
+structural: a trie's size depends on how much the keys share, and a fingerprint index's does not.
+The same structures over three corpora built from the same word list, one process per cell
+(<code>local/positioning.py</code>, 2026-09-12 at <code>386b2e6</code>,
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/positioning-2026-09-12-arz-386b2e6.txt"><code>positioning-2026-09-12-arz-386b2e6.txt</code></a>;
+the <code>DictIndex</code> row re-measured at <code>68f5336</code>, where the symbol table went one per shard of 65 536
+keys, in
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>dict-shard-2026-09-12-arz-68f5336.txt</code></a>):</p>
+<table>
+<thead>
+<tr>
+<th>bytes/key</th>
+<th style="text-align: right;">479 823 single words</th>
+<th style="text-align: right;">1 M <code>word.word</code> pairs, drawn at random</th>
+<th style="text-align: right;">1 M <code>word.word</code>, 1 000 × 1 000 grid</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the bare MPHF (no keys, no membership, no reverse)</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">0.26</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>CompactHashIndex</code></strong> (fp = 1 byte)</td>
+<td style="text-align: right;"><strong>1.26</strong></td>
+<td style="text-align: right;"><strong>1.26</strong></td>
+<td style="text-align: right;"><strong>1.26</strong></td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code></strong> (256 per block)</td>
+<td style="text-align: right;"><strong>2.84</strong></td>
+<td style="text-align: right;">7.59</td>
+<td style="text-align: right;">2.50</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code></td>
+<td style="text-align: right;">2.98</td>
+<td style="text-align: right;">6.21</td>
+<td style="text-align: right;">2.12</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>StringIndex</code></strong></td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">15.19</td>
+<td style="text-align: right;">0.68</td>
+</tr>
+<tr>
+<td>lexindex <code>PerfectHashIndex</code></td>
+<td style="text-align: right;">10.90</td>
+<td style="text-align: right;">21.93</td>
+<td style="text-align: right;">12.52</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>DictIndex</code> row swaps places with the <code>marisa-trie</code> one inside a single table — under it on
+single words, 1.22× over it on random pairs and 1.18× on the grid — which is the whole argument of
+this page in three columns: the two are different shapes, and which is smaller is a property of the
+keys. At 10 M the trie numbers move again — <code>marisa</code> 4.14 on random pairs against 2.36 on the grid,
+<code>StringIndex</code> 12.44 against 2.00 — while <code>CompactHashIndex</code> stays at 1.26 and the bare MPHF at 0.26,
+because their size is a function of <code>n</code> and the fingerprint width alone. The grid is a full cross
+product and is the <em>most</em> favourable set a trie can be handed; it is what the scale table below uses,
+and on it <code>StringIndex</code> at 0.68 B/key undercuts even a keyless perfect hash. Treat that as the
+ceiling of what shared structure can buy, not as a headline.</p>
+<p>So, in decision order:</p>
+<ul>
+<li><strong>Do the keys need to come back out, or be scanned in order?</strong> If yes, the fingerprint indexes are
+  out; <code>StringIndex</code> (ordered, prefix / range / fuzzy / subsequence), <code>DictIndex</code> (ordered,
+  <code>id → key</code>, <code>lower_bound</code>, <code>prefix</code>, <code>range</code>, no automata so no fuzzy — the smallest of the
+  three on single words) or
+  <code>PerfectHashIndex</code> (exact membership, <code>id → key</code>, no ordering) are the candidates, and all three
+  pay for the keys they store.</li>
+<li><strong>Is a bounded false-positive rate acceptable?</strong> If yes, <code>CompactHashIndex</code> is 2.4× smaller than
+  <code>marisa-trie</code> on single words, 4.9× on random pairs and 3.3× at 10 M — and one byte per key
+  <em>larger</em> than a bare MPHF (1.26 against 0.26), which is exactly the fingerprint that buys the
+  membership check.</li>
+<li><strong>Do the keys share a lot of structure</strong> (a path namespace, a versioned catalogue, a cross product)?
+  Then measure before choosing: that is the regime where an FST can beat a keyless hash outright.</li>
+<li><strong>A <code>dict</code> / <code>HashMap</code> is not in the table</strong> because it has no serialised form to measure. It cost
+  71–95 bytes per key above the key list itself across these corpora (58–60 at 10 M, where the table
+  amortises better), and it has to be rebuilt from the keys on every process start; every structure
+  here is mapped from a file instead.</li>
+</ul>
+<h2 id="the-corpus-set">The corpus set<a class="headerlink" href="#the-corpus-set" title="Permanent link">&para;</a></h2>
+<p>Everything above is one corpus at one <code>n</code>, which is why the section before it exists. The set that
+can settle the question is built by <code>bench/corpora.py</code>: thirteen corpora at 100 000, 1 000 000 and
+10 000 000 keys wherever the source has them, nested so that the small file is a prefix of the large
+one and a difference between two sizes is scale and never composition.</p>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th style="text-align: right;">keys available</th>
+<th style="text-align: right;">B/key</th>
+<th>what it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>words</code></td>
+<td style="text-align: right;">479 823</td>
+<td style="text-align: right;">9.3</td>
+<td>the Fedora word list — every table above is this one</td>
+</tr>
+<tr>
+<td><code>titles-en</code></td>
+<td style="text-align: right;">19 217 770</td>
+<td style="text-align: right;">21.0</td>
+<td>English Wikipedia article titles</td>
+</tr>
+<tr>
+<td><code>titles-ru</code></td>
+<td style="text-align: right;">4 988 075</td>
+<td style="text-align: right;">35.8</td>
+<td>Russian titles: Cyrillic, two bytes a character</td>
+</tr>
+<tr>
+<td><code>titles-zh</code></td>
+<td style="text-align: right;">2 997 733</td>
+<td style="text-align: right;">16.9</td>
+<td>Chinese titles: three bytes a character, and short</td>
+</tr>
+<tr>
+<td><code>urls</code></td>
+<td style="text-align: right;">19 217 771</td>
+<td style="text-align: right;">52.4</td>
+<td>those titles as <code>https://en.wikipedia.org/wiki/…</code></td>
+</tr>
+<tr>
+<td><code>domains</code></td>
+<td style="text-align: right;">1 000 000</td>
+<td style="text-align: right;">13.8</td>
+<td>registered domains, the Tranco ranking</td>
+</tr>
+<tr>
+<td><code>pypi</code></td>
+<td style="text-align: right;">889 864</td>
+<td style="text-align: right;">13.3</td>
+<td>PyPI package names</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td style="text-align: right;">7 311 150</td>
+<td style="text-align: right;">125.1</td>
+<td>this machine's filesystem</td>
+</tr>
+<tr>
+<td><code>idents</code></td>
+<td style="text-align: right;">1 047 267</td>
+<td style="text-align: right;">17.3</td>
+<td>identifiers in the vendored Rust sources</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td style="text-align: right;">generated</td>
+<td style="text-align: right;">36.0</td>
+<td>UUIDv4, hyphenated</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td style="text-align: right;">generated</td>
+<td style="text-align: right;">4.9–6.9</td>
+<td>dense decimal ids, <code>0</code> to <code>n-1</code></td>
+</tr>
+<tr>
+<td><code>opaque</code></td>
+<td style="text-align: right;">generated</td>
+<td style="text-align: right;">16.0</td>
+<td>16-symbol base64url ids</td>
+</tr>
+<tr>
+<td><code>dna</code></td>
+<td style="text-align: right;">generated</td>
+<td style="text-align: right;">24.0</td>
+<td>24-mers over ACGT</td>
+</tr>
+</tbody>
+</table>
+<p>The four generated corpora are seeded rather than random: the same file comes out of the same
+version of the script, on any machine. The fetched ones are pinned — a <em>dated</em> Wikipedia dump and
+not <code>latest</code>, a Tranco list by its permanent id — and both the download and every file derived from
+it carry a SHA-256 in
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/corpora.json"><code>bench/corpora.json</code></a>.
+<code>python bench/corpora.py verify</code> re-hashes what is on disk and says which files have moved. The
+corpora themselves are gitignored: 4.6 GB of keys has no place in a git history, and the manifest is
+what makes them checkable without it.</p>
+<p>Two of them are honest about their limits. <code>paths</code> is this machine's <code>/usr</code> and <code>$HOME</code>, so it is
+reproducible nowhere else — the manifest records the host. <code>idents</code> is whatever crates this machine
+has vendored, which is a sample of Rust, not of source code. Both are <em>samples</em> of a filesystem that
+keeps moving, this repository's own build directory included, so <code>build</code> keeps what is on disk when
+it matches the manifest and only <code>build --force</code> draws a new one: two sweeps a week apart otherwise
+compare different <code>paths</code> corpora and report the difference as a change in the index.</p>
+<p>Nothing on this page is measured on the set yet; every table here is still <code>words</code>. Moving them over
+is the next benchmark task, and the first thing it should settle is the claim no single corpus can
+support: which structure is smallest, and <em>where</em>.</p>
+<h2 id="every-structure-over-the-whole-set">Every structure over the whole set<a class="headerlink" href="#every-structure-over-the-whole-set" title="Permanent link">&para;</a></h2>
+<p><code>bench/sweep.py</code> builds nine structures on each corpus and measures serialised bytes per key, build
+time and one lookup: three <code>DictIndex</code> block sizes against three <code>marisa-trie</code> configurations,
+because both are curves and a single point of either invites the objection that the other was left
+untuned. The two keyless indexes are there to show what a structure that stores no keys costs, which
+turns out to be the only row a reader can carry to their own corpus without measuring it.</p>
+<h3 id="bytes-per-key-at-one-million-keys">Bytes per key at one million keys<a class="headerlink" href="#bytes-per-key-at-one-million-keys" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th style="text-align: right;">raw</th>
+<th style="text-align: right;"><code>ClosedHash</code></th>
+<th style="text-align: right;"><code>CompactHash</code></th>
+<th style="text-align: right;"><code>Dict</code> 128</th>
+<th style="text-align: right;"><code>Dict</code> 256</th>
+<th style="text-align: right;"><code>Dict</code> 1024</th>
+<th style="text-align: right;"><code>String</code></th>
+<th style="text-align: right;">marisa small</th>
+<th style="text-align: right;">marisa def.</th>
+<th style="text-align: right;">marisa fast</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dna</code></td>
+<td style="text-align: right;">24.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">7.80</td>
+<td style="text-align: right;">7.70</td>
+<td style="text-align: right;">7.62</td>
+<td style="text-align: right;">17.74</td>
+<td style="text-align: right;">7.52</td>
+<td style="text-align: right;">7.56</td>
+<td style="text-align: right;">7.71</td>
+</tr>
+<tr>
+<td><code>domains</code></td>
+<td style="text-align: right;">13.8</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">5.14</td>
+<td style="text-align: right;">5.07</td>
+<td style="text-align: right;">5.01</td>
+<td style="text-align: right;">10.50</td>
+<td style="text-align: right;">4.81</td>
+<td style="text-align: right;">4.87</td>
+<td style="text-align: right;">4.99</td>
+</tr>
+<tr>
+<td><code>idents</code></td>
+<td style="text-align: right;">17.3</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">6.73</td>
+<td style="text-align: right;">6.66</td>
+<td style="text-align: right;">6.60</td>
+<td style="text-align: right;">10.55</td>
+<td style="text-align: right;">5.45</td>
+<td style="text-align: right;">5.62</td>
+<td style="text-align: right;">5.74</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td style="text-align: right;">5.9</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">2.18</td>
+<td style="text-align: right;">2.13</td>
+<td style="text-align: right;">2.08</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">1.62</td>
+<td style="text-align: right;">1.64</td>
+<td style="text-align: right;">1.72</td>
+</tr>
+<tr>
+<td><code>opaque</code></td>
+<td style="text-align: right;">16.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">13.85</td>
+<td style="text-align: right;">13.80</td>
+<td style="text-align: right;">13.76</td>
+<td style="text-align: right;">21.44</td>
+<td style="text-align: right;">18.23</td>
+<td style="text-align: right;">18.82</td>
+<td style="text-align: right;">19.04</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td style="text-align: right;">125.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">15.11</td>
+<td style="text-align: right;">14.67</td>
+<td style="text-align: right;">14.34</td>
+<td style="text-align: right;">17.48</td>
+<td style="text-align: right;">9.26</td>
+<td style="text-align: right;">9.47</td>
+<td style="text-align: right;">9.60</td>
+</tr>
+<tr>
+<td><code>titles-en</code></td>
+<td style="text-align: right;">21.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">9.46</td>
+<td style="text-align: right;">9.37</td>
+<td style="text-align: right;">9.31</td>
+<td style="text-align: right;">17.28</td>
+<td style="text-align: right;">7.79</td>
+<td style="text-align: right;">8.19</td>
+<td style="text-align: right;">8.37</td>
+</tr>
+<tr>
+<td><code>titles-ru</code></td>
+<td style="text-align: right;">35.8</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">11.50</td>
+<td style="text-align: right;">11.36</td>
+<td style="text-align: right;">11.27</td>
+<td style="text-align: right;">31.75</td>
+<td style="text-align: right;">8.07</td>
+<td style="text-align: right;">8.61</td>
+<td style="text-align: right;">8.77</td>
+</tr>
+<tr>
+<td><code>titles-zh</code></td>
+<td style="text-align: right;">16.9</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">8.35</td>
+<td style="text-align: right;">8.28</td>
+<td style="text-align: right;">8.23</td>
+<td style="text-align: right;">17.52</td>
+<td style="text-align: right;">6.33</td>
+<td style="text-align: right;">6.54</td>
+<td style="text-align: right;">6.70</td>
+</tr>
+<tr>
+<td><code>urls</code></td>
+<td style="text-align: right;">52.4</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">11.46</td>
+<td style="text-align: right;">11.25</td>
+<td style="text-align: right;">11.11</td>
+<td style="text-align: right;">16.88</td>
+<td style="text-align: right;">7.95</td>
+<td style="text-align: right;">8.39</td>
+<td style="text-align: right;">8.58</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td style="text-align: right;">36.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">20.55</td>
+<td style="text-align: right;">20.45</td>
+<td style="text-align: right;">20.37</td>
+<td style="text-align: right;">37.11</td>
+<td style="text-align: right;">32.93</td>
+<td style="text-align: right;">34.58</td>
+<td style="text-align: right;">34.80</td>
+</tr>
+</tbody>
+</table>
+<p><sub><code>words</code> and <code>pypi</code> have no million-key file; their 100 000 grid, every build time, and the
+100 000 rows for the rest are in
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json"><code>bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json</code></a>
+(the tree is the commit; what was uncommitted is the pages being re-measured and the result files
+this run wrote). The three <code>DictIndex</code> columns were measured again at <code>68f5336</code>, where the symbol
+table is one per shard of 65 536 keys (<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>bench/results/dict-shard-2026-09-12-arz-68f5336.txt</code></a>); every other column is the sweep's, and a
+size is exact, so the two agree cell for cell wherever the builder did not move.</sub></p>
+<p><strong>Where <code>marisa-trie</code> wins, it wins on shared structure.</strong> It is the smallest key-storing structure
+on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.58× on
+<code>paths</code>, where a million paths run through a few thousand directories, 1.41× on <code>titles-ru</code>, 1.42×
+on <code>urls</code>, 1.22× on <code>idents</code> — and within 5 % on <code>dna</code> and <code>domains</code> (1.02× and 1.05×). That is
+what a LOUDS trie is for, and front coding in fixed blocks does not answer it.</p>
+<p><strong>Where lexindex wins, it wins on entropy.</strong> <code>DictIndex</code> is the smaller of the two on <code>opaque</code>
+(13.76 against 18.23, 1.32×) and on <code>uuid</code> (20.37 against 32.93, 1.62×) — keys with nothing to
+share, where a trie pays for a node per character and front coding pays for a prefix that is not
+there. On <code>words</code>, the corpus every table above is measured on, <code>DictIndex</code> at its default block is
+3.48 against marisa's 3.70 at 100 000 keys, and 2.84 against 2.96 on the full 479 823. That is a
+real result on a real corpus, and it is not the general case: it is the favourable end of a
+distribution whose other end is <code>paths</code>.</p>
+<p><strong>The two keyless rows are flat and every other row is not.</strong> <code>ClosedHashIndex</code> is 0.26 bytes a key
+and <code>CompactHashIndex</code> 1.26 on all eleven corpora at all three sizes, because their size is a
+function of <code>n</code> and the fingerprint width and of nothing about the keys. Against the best trie that
+is a 7.3× margin on <code>paths</code> and 1.3× on <code>numeric</code> — the same two structures, neither of them
+changed, and the whole spread between those two numbers belongs to the corpus.</p>
+<p><strong><code>StringIndex</code> on <code>numeric</code> reads 0.00 bytes a key, and it is not a bug.</strong> Ten million dense
+decimal ids compile to an FST of <strong>356 bytes</strong>: the automaton is very nearly regular, one path per
+digit, and the keys are recovered from the transitions. Read it as the ceiling of what shared
+structure can buy an FST and never as a size claim — it is exactly the ~0 B/key that
+<code>bench/compare.py</code> refuses to report for synthetic <code>entity-{i}</code> keys, and it is in this table only
+because dense ids are a corpus somebody really has.</p>
+<h3 id="lookups-at-one-million-keys">Lookups at one million keys<a class="headerlink" href="#lookups-at-one-million-keys" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th style="text-align: right;">raw</th>
+<th style="text-align: right;"><code>ClosedHash</code></th>
+<th style="text-align: right;"><code>CompactHash</code></th>
+<th style="text-align: right;"><code>Dict</code> 128</th>
+<th style="text-align: right;"><code>Dict</code> 256</th>
+<th style="text-align: right;"><code>Dict</code> 1024</th>
+<th style="text-align: right;"><code>String</code></th>
+<th style="text-align: right;">marisa small</th>
+<th style="text-align: right;">marisa def.</th>
+<th style="text-align: right;">marisa fast</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dna</code></td>
+<td style="text-align: right;">24.0</td>
+<td style="text-align: right;">108</td>
+<td style="text-align: right;">150</td>
+<td style="text-align: right;">424</td>
+<td style="text-align: right;">410</td>
+<td style="text-align: right;">399</td>
+<td style="text-align: right;">702</td>
+<td style="text-align: right;">1090</td>
+<td style="text-align: right;">1091</td>
+<td style="text-align: right;">1049</td>
+</tr>
+<tr>
+<td><code>domains</code></td>
+<td style="text-align: right;">13.8</td>
+<td style="text-align: right;">120</td>
+<td style="text-align: right;">156</td>
+<td style="text-align: right;">430</td>
+<td style="text-align: right;">424</td>
+<td style="text-align: right;">421</td>
+<td style="text-align: right;">485</td>
+<td style="text-align: right;">796</td>
+<td style="text-align: right;">799</td>
+<td style="text-align: right;">756</td>
+</tr>
+<tr>
+<td><code>idents</code></td>
+<td style="text-align: right;">17.3</td>
+<td style="text-align: right;">91</td>
+<td style="text-align: right;">148</td>
+<td style="text-align: right;">467</td>
+<td style="text-align: right;">487</td>
+<td style="text-align: right;">531</td>
+<td style="text-align: right;">509</td>
+<td style="text-align: right;">999</td>
+<td style="text-align: right;">924</td>
+<td style="text-align: right;">961</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td style="text-align: right;">5.9</td>
+<td style="text-align: right;">110</td>
+<td style="text-align: right;">143</td>
+<td style="text-align: right;">314</td>
+<td style="text-align: right;">379</td>
+<td style="text-align: right;">366</td>
+<td style="text-align: right;">223</td>
+<td style="text-align: right;">354</td>
+<td style="text-align: right;">388</td>
+<td style="text-align: right;">341</td>
+</tr>
+<tr>
+<td><code>opaque</code></td>
+<td style="text-align: right;">16.0</td>
+<td style="text-align: right;">144</td>
+<td style="text-align: right;">177</td>
+<td style="text-align: right;">510</td>
+<td style="text-align: right;">542</td>
+<td style="text-align: right;">558</td>
+<td style="text-align: right;">558</td>
+<td style="text-align: right;">2232</td>
+<td style="text-align: right;">1617</td>
+<td style="text-align: right;">1592</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td style="text-align: right;">125.0</td>
+<td style="text-align: right;">209</td>
+<td style="text-align: right;">204</td>
+<td style="text-align: right;">978</td>
+<td style="text-align: right;">966</td>
+<td style="text-align: right;">1025</td>
+<td style="text-align: right;">1641</td>
+<td style="text-align: right;">3791</td>
+<td style="text-align: right;">3080</td>
+<td style="text-align: right;">2781</td>
+</tr>
+<tr>
+<td><code>titles-en</code></td>
+<td style="text-align: right;">21.0</td>
+<td style="text-align: right;">195</td>
+<td style="text-align: right;">165</td>
+<td style="text-align: right;">632</td>
+<td style="text-align: right;">633</td>
+<td style="text-align: right;">665</td>
+<td style="text-align: right;">831</td>
+<td style="text-align: right;">1578</td>
+<td style="text-align: right;">1471</td>
+<td style="text-align: right;">1440</td>
+</tr>
+<tr>
+<td><code>titles-ru</code></td>
+<td style="text-align: right;">35.8</td>
+<td style="text-align: right;">239</td>
+<td style="text-align: right;">281</td>
+<td style="text-align: right;">749</td>
+<td style="text-align: right;">764</td>
+<td style="text-align: right;">796</td>
+<td style="text-align: right;">1147</td>
+<td style="text-align: right;">2127</td>
+<td style="text-align: right;">1973</td>
+<td style="text-align: right;">1916</td>
+</tr>
+<tr>
+<td><code>titles-zh</code></td>
+<td style="text-align: right;">16.9</td>
+<td style="text-align: right;">214</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">661</td>
+<td style="text-align: right;">678</td>
+<td style="text-align: right;">721</td>
+<td style="text-align: right;">794</td>
+<td style="text-align: right;">1471</td>
+<td style="text-align: right;">1412</td>
+<td style="text-align: right;">1346</td>
+</tr>
+<tr>
+<td><code>urls</code></td>
+<td style="text-align: right;">52.4</td>
+<td style="text-align: right;">101</td>
+<td style="text-align: right;">150</td>
+<td style="text-align: right;">694</td>
+<td style="text-align: right;">668</td>
+<td style="text-align: right;">689</td>
+<td style="text-align: right;">800</td>
+<td style="text-align: right;">1335</td>
+<td style="text-align: right;">1279</td>
+<td style="text-align: right;">1220</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td style="text-align: right;">36.0</td>
+<td style="text-align: right;">156</td>
+<td style="text-align: right;">181</td>
+<td style="text-align: right;">683</td>
+<td style="text-align: right;">653</td>
+<td style="text-align: right;">709</td>
+<td style="text-align: right;">809</td>
+<td style="text-align: right;">2544</td>
+<td style="text-align: right;">1859</td>
+<td style="text-align: right;">1776</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>DictIndex</code> answers faster than every <code>marisa-trie</code> setting on ten of the eleven corpora</strong> —
+1.8–2.9× at its default block, against marisa's <em>fastest</em> configuration and not its smallest. The
+eleventh is <code>numeric</code>, where marisa's fastest is 10 % ahead of the default block (341 ns against
+379) and 9 % behind a block of 128 (314): a million dense decimal ids are the corpus where a trie
+has the least to walk. <code>DictIndex</code> also builds 2.3–4.3× faster everywhere except <code>numeric</code>, where
+the two are level. So the size table above is not the whole trade: on <code>paths</code>, marisa is 1.58×
+smaller and 2.9× slower to answer and 4.3× slower to build.</p>
+<p><strong>The block is a smaller knob than it was.</strong> A lookup scans one restart a microblock and then one
+microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −6 % (<code>dna</code>) to +16 %
+(<code>numeric</code>), where the one-level format paid 3.8× from 32 to 1024, and buys 0.09–0.77 bytes a key
+over 128, every corpus in the same direction. It did not use to be: <code>paths</code> at 1024 keys a block
+stored <em>more</em> than at 256 (16.13 against 15.89), and the cause was the symbol table rather than the
+layout, whose per-block arrays only shrink as the block grows. The table trained on whole blocks, so
+a larger block bought fewer neighbourhoods — 19 at 1024 against 157 at 128 — and a table trained on
+19 of them is a lottery. A training run is now a constant 256 keys whatever the block, trained per
+shard of 65 536 keys, and <code>paths</code> at 1024 reads 14.34. 256 is the default the README quotes.</p>
+<p><sub>Lookups are one run of three rounds of 20 000 probes a cell, so a column is comparable within
+itself and a cell carries a few per cent: a second run of the same build read the same bytes to the
+last digit and lookups 1–15 % higher on every structure, controls included.</sub></p>
+<h3 id="ten-million-keys">Ten million keys<a class="headerlink" href="#ten-million-keys" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th style="text-align: right;">raw</th>
+<th style="text-align: right;"><code>ClosedHash</code></th>
+<th style="text-align: right;"><code>CompactHash</code></th>
+<th style="text-align: right;"><code>Dict</code> 128</th>
+<th style="text-align: right;"><code>Dict</code> 256</th>
+<th style="text-align: right;"><code>Dict</code> 1024</th>
+<th style="text-align: right;"><code>String</code></th>
+<th style="text-align: right;">marisa small</th>
+<th style="text-align: right;">marisa def.</th>
+<th style="text-align: right;">marisa fast</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dna</code></td>
+<td style="text-align: right;">24.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">7.13</td>
+<td style="text-align: right;">7.02</td>
+<td style="text-align: right;">6.94</td>
+<td style="text-align: right;">15.98</td>
+<td style="text-align: right;">6.69</td>
+<td style="text-align: right;">6.75</td>
+<td style="text-align: right;">6.99</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td style="text-align: right;">6.9</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">2.19</td>
+<td style="text-align: right;">2.13</td>
+<td style="text-align: right;">2.08</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">1.63</td>
+<td style="text-align: right;">1.66</td>
+<td style="text-align: right;">1.77</td>
+</tr>
+<tr>
+<td><code>opaque</code></td>
+<td style="text-align: right;">16.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">13.42</td>
+<td style="text-align: right;">13.37</td>
+<td style="text-align: right;">13.33</td>
+<td style="text-align: right;">21.47</td>
+<td style="text-align: right;">15.19</td>
+<td style="text-align: right;">18.33</td>
+<td style="text-align: right;">18.68</td>
+</tr>
+<tr>
+<td><code>titles-en</code></td>
+<td style="text-align: right;">21.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">7.74</td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">7.59</td>
+<td style="text-align: right;">13.25</td>
+<td style="text-align: right;">5.57</td>
+<td style="text-align: right;">5.71</td>
+<td style="text-align: right;">5.87</td>
+</tr>
+<tr>
+<td><code>urls</code></td>
+<td style="text-align: right;">52.4</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">9.59</td>
+<td style="text-align: right;">9.38</td>
+<td style="text-align: right;">9.23</td>
+<td style="text-align: right;">13.10</td>
+<td style="text-align: right;">5.66</td>
+<td style="text-align: right;">5.83</td>
+<td style="text-align: right;">5.99</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td style="text-align: right;">36.0</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">20.08</td>
+<td style="text-align: right;">19.98</td>
+<td style="text-align: right;">19.90</td>
+<td style="text-align: right;">36.07</td>
+<td style="text-align: right;">29.97</td>
+<td style="text-align: right;">33.21</td>
+<td style="text-align: right;">33.56</td>
+</tr>
+</tbody>
+</table>
+<p>Ten times the keys moves every trie and neither hash: at its smallest setting <code>marisa</code> goes
+7.79 → 5.57 on <code>titles-en</code> and 7.95 → 5.66 on <code>urls</code> as the sharing deepens, <code>DictIndex</code> at its
+default block 9.37 → 7.65 and 11.25 → 9.38, and the two keyless rows do not move at all. The
+ranking is the same one the million-key table gives, so the answer to "which is smallest" is
+decided by the corpus and not by the scale.</p>
+<p><strong>The block buys less here.</strong> 128 → 1024 keys a block is 0.09–0.36 bytes a key over these six,
+against 0.09–0.77 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
+a bigger block saves were already a smaller share of the index; what is left is the coded suffixes,
+and those are the symbol table's business, not the block's — which is why the table is trained on
+runs of a constant length and per shard, and why <code>titles-en</code> at 1024 reads 7.59 where whole-block
+training over one table left it at 7.93, above its own 256.</p>
+<p><sub>Measured 2026-09-12
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json"><code>bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json</code></a>),
+<code>marisa-trie</code> 1.4.1. Two builds per cell, three rounds of 20 000 lookups. The three <code>DictIndex</code>
+columns were measured again at <code>68f5336</code>, where the symbol table is one per shard of 65 536 keys
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>bench/results/dict-shard-2026-09-12-arz-68f5336.txt</code></a>).</sub></p>
+<h3 id="a-cold-mapping-and-what-is-actually-resident">A cold mapping, and what is actually resident<a class="headerlink" href="#a-cold-mapping-and-what-is-actually-resident" title="Permanent link">&para;</a></h3>
+<p>Every size in this page is the blob. A process that maps one and answers a thousand queries never
+reads most of it, and what decides whether an index fits inside a container limit is the resident
+set. <code>local/coldmmap</code> drops each file's page cache with <code>posix_fadvise(POSIX_FADV_DONTNEED)</code> — no
+root needed, and the resident set straight after <code>load_mmap</code> is the control that the drop worked —
+then reads <code>/proc/self/smaps</code> after 1 000 random lookups and after a further million.</p>
+<p>Ten million English Wikipedia titles, bytes per key except the latencies:</p>
+<table>
+<thead>
+<tr>
+<th>structure</th>
+<th style="text-align: right;">file</th>
+<th style="text-align: right;">mapped</th>
+<th style="text-align: right;">after 1 k</th>
+<th style="text-align: right;">after 1 M</th>
+<th style="text-align: right;">cold ns</th>
+<th style="text-align: right;">warm ns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DictIndex</code> 32</td>
+<td style="text-align: right;">8.21</td>
+<td style="text-align: right;">0.28</td>
+<td style="text-align: right;">5.22</td>
+<td style="text-align: right;">8.21</td>
+<td style="text-align: right;">47 129</td>
+<td style="text-align: right;">815</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 32, <code>MADV_RANDOM</code></td>
+<td style="text-align: right;">8.21</td>
+<td style="text-align: right;">0.28</td>
+<td style="text-align: right;"><strong>1.81</strong></td>
+<td style="text-align: right;">8.21</td>
+<td style="text-align: right;">89 971</td>
+<td style="text-align: right;">1 975</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 256</td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">0.06</td>
+<td style="text-align: right;">4.57</td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">45 477</td>
+<td style="text-align: right;">719</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 256, <code>MADV_RANDOM</code></td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">0.06</td>
+<td style="text-align: right;"><strong>0.83</strong></td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">96 360</td>
+<td style="text-align: right;">1 997</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 1024</td>
+<td style="text-align: right;">7.59</td>
+<td style="text-align: right;">0.03</td>
+<td style="text-align: right;">4.60</td>
+<td style="text-align: right;">7.59</td>
+<td style="text-align: right;">46 612</td>
+<td style="text-align: right;">695</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code></td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">1.25</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;"><strong>6 799</strong></td>
+<td style="text-align: right;"><strong>75</strong></td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code>, <code>MADV_RANDOM</code></td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">0.70</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">51 651</td>
+<td style="text-align: right;">177</td>
+</tr>
+<tr>
+<td><code>StringIndex</code></td>
+<td style="text-align: right;">13.25</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">10.10</td>
+<td style="text-align: right;">13.25</td>
+<td style="text-align: right;">94 367</td>
+<td style="text-align: right;">1 039</td>
+</tr>
+<tr>
+<td><code>StringIndex</code>, <code>MADV_RANDOM</code></td>
+<td style="text-align: right;">13.25</td>
+<td style="text-align: right;">0.01</td>
+<td style="text-align: right;">2.27</td>
+<td style="text-align: right;">13.25</td>
+<td style="text-align: right;">335 430</td>
+<td style="text-align: right;">3 067</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>load_mmap</code> really is lazy</strong>, which the <code>mapped</code> column exists to prove: 0.01 to 0.26 bytes a key
+resident before the first query, which is the header and the little the loader validates. Nothing
+else is read until something asks for it.</p>
+<p><strong>The first thousand queries cost far more pages than they need.</strong> <code>DictIndex</code> at 256 ends them with
+4.57 of its 7.65 bytes a key resident — 60 % of an index nobody has finished reading — while the
+same thousand queries under <code>MADV_RANDOM</code> leave <strong>0.83</strong>, which is what they actually touch: about
+two pages a lookup, the sample array and the block. The 5.5× between those two numbers is the
+kernel's readahead, and it is buying latency with memory: turning it off costs 2.1× on the cold
+lookups and <strong>2.8× on the warm ones</strong>, because the advice outlives the warm-up. The warm column is
+also where the microblock shows on ten million keys: 1024 a block answers in 695 ns where the
+one-level format took 2 108, in a session that read 30 % faster than this one. Readahead is the
+right default here; <code>MADV_RANDOM</code> is for the case where a container limit, and not a latency budget,
+is what binds.</p>
+<p><strong>Cold start is where the smallest structure wins outright, and the mechanism is pages.</strong>
+<code>CompactHashIndex</code> answers its first thousand queries at <strong>6.8 µs</strong> against <code>DictIndex</code>'s 45.5 and
+<code>StringIndex</code>'s 94.4 — 7× and 14× — because its whole file is 12.6 MB and a fault brings in a
+useful fraction of it. On <code>uuid</code>, where its 1.26 bytes a key sit against <code>DictIndex</code>'s 20.06 and
+<code>StringIndex</code>'s 36.07, the gap is 21× and 39× (5.9 µs against 125.3 and 231.0). A structure that
+stores no keys has no keys to fault in.</p>
+<p><strong>After a million queries every structure is fully resident</strong>, to the last hundredth of a byte. The
+distinctive answer to "how much memory does this index need" only exists during warm-up: past it,
+against a workload that touches every key, the resident set <em>is</em> the file, and the size table above
+is the steady-state RSS.</p>
+<p><sub>Measured 2026-09-12 on a clean tree, NVMe under LUKS on btrfs, 38 GB RAM — so "cold" means
+this file's page cache was dropped and not that the machine was short of memory
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>bench/results/dict-shard-2026-09-12-arz-68f5336.txt</code></a>,
+which re-measured the table after the symbol table went one per shard and reads within 2 % of the
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-40ca73d.txt">run before it</a>
+on both controls, and about 30 % slower than the one before that, so its latency column is read
+within itself;
+the million-key run and the <code>uuid</code> one are in the earlier
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-bb1473c.txt"><code>coldmmap-2026-09-12-arz-bb1473c.txt</code></a>,
+on the one-level format). <code>MADV_RANDOM</code> is applied by the harness
+through <code>/proc/self/maps</code>; <code>load_mmap</code> does not set it, and on this evidence should not.</sub></p>
+<h3 id="one-mapping-many-readers">One mapping, many readers<a class="headerlink" href="#one-mapping-many-readers" title="Permanent link">&para;</a></h3>
+<p>Every index here is immutable once built. A reader needs no lock, no copy and no per-thread
+instance: one <code>load_mmap</code> is shared by reference and answers from as many threads as there are
+cores. <code>local/readscale</code> is whether that is near-linear — 8 Mi random member probes split evenly,
+the mapping warmed first so this measures the structure and not page faults, the ladder run three
+times and the best kept per thread count.</p>
+<p>Ten million English Wikipedia titles, nanoseconds a lookup with the speedup over one thread:</p>
+<table>
+<thead>
+<tr>
+<th>threads</th>
+<th style="text-align: right;"><code>DictIndex</code> 128</th>
+<th style="text-align: right;"><code>CompactHashIndex</code></th>
+<th style="text-align: right;"><code>StringIndex</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td style="text-align: right;">589</td>
+<td style="text-align: right;">35.3</td>
+<td style="text-align: right;">855</td>
+</tr>
+<tr>
+<td>2</td>
+<td style="text-align: right;">299 (1.97×)</td>
+<td style="text-align: right;">19.0 (1.86×)</td>
+<td style="text-align: right;">419 (2.04×)</td>
+</tr>
+<tr>
+<td>4</td>
+<td style="text-align: right;">149 (3.96×)</td>
+<td style="text-align: right;">9.7 (3.65×)</td>
+<td style="text-align: right;">206 (4.14×)</td>
+</tr>
+<tr>
+<td>8</td>
+<td style="text-align: right;">76 (7.75×)</td>
+<td style="text-align: right;">5.2 (6.74×)</td>
+<td style="text-align: right;">106 (8.10×)</td>
+</tr>
+<tr>
+<td>16</td>
+<td style="text-align: right;">48 (12.18×)</td>
+<td style="text-align: right;">3.7 (9.43×)</td>
+<td style="text-align: right;">63 (13.50×)</td>
+</tr>
+<tr>
+<td><strong>M lookups/s at 16</strong></td>
+<td style="text-align: right;"><strong>20.7</strong></td>
+<td style="text-align: right;"><strong>267.5</strong></td>
+<td style="text-align: right;"><strong>15.8</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Eight cores give 6.7–8.1×</strong>, 84–101 % of them, on a mobile part whose clock falls as cores light
+up — the number already carries that, so a machine with a flatter boost curve can only do better.</p>
+<p><strong>The sixteen-thread row is SMT and it is worth having.</strong> 9.4–13.5× over one thread, well past the
+eight physical cores, because a point lookup is a chain of dependent loads and a core spends most of
+it waiting. A second thread on the same core fills those stalls with someone else's work.</p>
+<p><strong><code>StringIndex</code> scales best because it stalls most</strong> — 2.04× on two threads and 13.50× on sixteen.
+One core can only keep a handful of cache misses in flight; two cores have twice the
+memory-level parallelism, and a transducer walk is nothing but dependent misses. At a million keys,
+where a 17 MB transducer is nearly cache-resident, the same effect is weaker (1.91× and 10.59×).</p>
+<p><strong><code>CompactHashIndex</code> saturates first</strong>, at 9.43×, and it is the one structure that has run out of
+something other than cores: 268 M lookups a second over a 12.6 MB index that fits this machine's
+16 MB L3, at 3.7 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
+this one does not.</p>
+<p><sub>Measured 2026-09-12 at <code>386b2e6</code>, the tree differing from it in documentation only
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-09-12-arz-386b2e6.txt"><code>bench/results/readscale-2026-09-12-arz-386b2e6.txt</code></a>,
+which carries the million-key ladder as well), Ryzen 7 5800HS, 8 cores and 16 hardware threads.
+Shared by <code>&amp;index</code> across <code>std::thread::scope</code>; no index is cloned and none is rebuilt per
+thread.</sub></p>
+<h3 id="rsmarisa-the-pure-rust-port"><code>rsmarisa</code>, the pure-Rust port<a class="headerlink" href="#rsmarisa-the-pure-rust-port" title="Permanent link">&para;</a></h3>
+<p>The same question in Rust, where <code>marisa-trie</code> is a C++ library with no binding a Rust project would
+take. <code>rsmarisa</code> 0.4.2 is a pure-Rust port of it, BSD-2-Clause, and <code>local/rsmarisacmp</code> puts its
+three cache levels against three <code>DictIndex</code> block sizes, 64, 256 and 512, on every corpus:</p>
+<table>
+<thead>
+<tr>
+<th>corpus</th>
+<th style="text-align: right;">rsmarisa smallest</th>
+<th style="text-align: right;"><code>DictIndex</code> 512</th>
+<th style="text-align: right;">rsmarisa build</th>
+<th style="text-align: right;"><code>DictIndex</code> build</th>
+<th style="text-align: right;">rsmarisa fastest</th>
+<th style="text-align: right;"><code>DictIndex</code> fastest (block)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dna</code></td>
+<td style="text-align: right;">7.61</td>
+<td style="text-align: right;">7.65</td>
+<td style="text-align: right;">1 308 ms</td>
+<td style="text-align: right;">64 ms</td>
+<td style="text-align: right;">608 ns</td>
+<td style="text-align: right;">238 ns (512)</td>
+</tr>
+<tr>
+<td><code>domains</code></td>
+<td style="text-align: right;">4.87</td>
+<td style="text-align: right;">5.03</td>
+<td style="text-align: right;">680 ms</td>
+<td style="text-align: right;">57 ms</td>
+<td style="text-align: right;">466 ns</td>
+<td style="text-align: right;">267 ns (64)</td>
+</tr>
+<tr>
+<td><code>idents</code></td>
+<td style="text-align: right;">5.50</td>
+<td style="text-align: right;">6.62</td>
+<td style="text-align: right;">652 ms</td>
+<td style="text-align: right;">61 ms</td>
+<td style="text-align: right;">609 ns</td>
+<td style="text-align: right;">342 ns (256)</td>
+</tr>
+<tr>
+<td><code>numeric</code></td>
+<td style="text-align: right;">1.64</td>
+<td style="text-align: right;">2.10</td>
+<td style="text-align: right;">98 ms</td>
+<td style="text-align: right;">46 ms</td>
+<td style="text-align: right;">161 ns</td>
+<td style="text-align: right;">190 ns (64)</td>
+</tr>
+<tr>
+<td><code>opaque</code></td>
+<td style="text-align: right;">18.27</td>
+<td style="text-align: right;">13.77</td>
+<td style="text-align: right;">1 177 ms</td>
+<td style="text-align: right;">82 ms</td>
+<td style="text-align: right;">1 047 ns</td>
+<td style="text-align: right;">299 ns (512)</td>
+</tr>
+<tr>
+<td><code>paths</code></td>
+<td style="text-align: right;">10.09</td>
+<td style="text-align: right;">14.46</td>
+<td style="text-align: right;">5 642 ms</td>
+<td style="text-align: right;">95 ms</td>
+<td style="text-align: right;">1 710 ns</td>
+<td style="text-align: right;">664 ns (512)</td>
+</tr>
+<tr>
+<td><code>titles-en</code></td>
+<td style="text-align: right;">7.85</td>
+<td style="text-align: right;">9.33</td>
+<td style="text-align: right;">975 ms</td>
+<td style="text-align: right;">68 ms</td>
+<td style="text-align: right;">827 ns</td>
+<td style="text-align: right;">348 ns (256)</td>
+</tr>
+<tr>
+<td><code>titles-ru</code></td>
+<td style="text-align: right;">8.22</td>
+<td style="text-align: right;">11.30</td>
+<td style="text-align: right;">1 489 ms</td>
+<td style="text-align: right;">68 ms</td>
+<td style="text-align: right;">1 102 ns</td>
+<td style="text-align: right;">447 ns (256)</td>
+</tr>
+<tr>
+<td><code>titles-zh</code></td>
+<td style="text-align: right;">6.40</td>
+<td style="text-align: right;">8.25</td>
+<td style="text-align: right;">759 ms</td>
+<td style="text-align: right;">71 ms</td>
+<td style="text-align: right;">683 ns</td>
+<td style="text-align: right;">344 ns (256)</td>
+</tr>
+<tr>
+<td><code>urls</code></td>
+<td style="text-align: right;">8.38</td>
+<td style="text-align: right;">11.15</td>
+<td style="text-align: right;">2 011 ms</td>
+<td style="text-align: right;">73 ms</td>
+<td style="text-align: right;">855 ns</td>
+<td style="text-align: right;">542 ns (512)</td>
+</tr>
+<tr>
+<td><code>uuid</code></td>
+<td style="text-align: right;">33.01</td>
+<td style="text-align: right;">20.40</td>
+<td style="text-align: right;">1 508 ms</td>
+<td style="text-align: right;">115 ms</td>
+<td style="text-align: right;">1 155 ns</td>
+<td style="text-align: right;">391 ns (512)</td>
+</tr>
+</tbody>
+</table>
+<p>The shape is the one the C++ library gives: <code>rsmarisa</code> is smaller on the corpora whose keys share
+structure and larger on the ones whose keys do not, while <code>DictIndex</code> builds <strong>11–59× faster</strong> and
+answers <strong>1.6–3.5× faster</strong> on ten of the eleven. <code>numeric</code> is the exception on every axis:
+<code>rsmarisa</code> is smaller there, quicker to answer, and only 2.1× slower to build. One thing the
+right-hand column shows that the word list cannot: on the corpora whose keys are long — <code>dna</code>,
+<code>opaque</code>, <code>paths</code>, <code>urls</code>, <code>uuid</code> — the <em>largest</em> block is the fastest, because there the
+eight-byte samples stop settling the binary search over the block heads and every step of it reads
+a head, so fewer blocks are fewer dependent misses, and that outweighs a scan ten entries longer. At
+nominally the same configuration <code>rsmarisa</code> is larger than the C++ marisa measured above — on
+<code>words</code>, 0.2 % at the smallest setting, 3.1 % at the default and 12 % at the fastest — so the flag
+words evidently do not mean quite the same thing, and each library's own curve is what to read.</p>
+<p><sub>Measured 2026-09-12 on a clean tree
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt"><code>bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt</code></a>),
+<code>rsmarisa</code> 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. The
+<code>DictIndex</code> size column is <code>68f5336</code>'s, where the symbol table went one per shard of 65 536 keys;
+its build column predates that and the change costs 17–23 % of it, while the same tree's A-B leaves
+the lookups where they were
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>dict-shard-2026-09-12-arz-68f5336.txt</code></a>). It is
+a throwaway crate under <code>local/</code>: <code>rsmarisa</code> is not a lexindex dependency and is not proposed as
+one. The Rust build times are not comparable with the Python ones above — that harness copies every
+key across the language boundary and this one does not.</sub></p>
+<h2 id="lookup-speed-from-python-against-dict-and-marisa-trie">Lookup speed from Python, against <code>dict</code> and <code>marisa-trie</code><a class="headerlink" href="#lookup-speed-from-python-against-dict-and-marisa-trie" title="Permanent link">&para;</a></h2>
+<p><code>local/latency_py.py</code> — one process per corpus, every structure built up front, the seven lookup
+forms rotated inside each round so none keeps the position that pays to warm the probe list.
+<strong>Measured on 1.1</strong>, from the minimum over two agreeing 15-round passes per corpus. Ratios are
+<strong>quotients of the minima against <code>dict</code> on the same probe set</strong>, and the gate is on <em>those</em>: worst
+7.5 % / median 1.7 % (<code>words</code>), 4.7 % / 1.6 % (<code>random</code>), 6.8 % / 2.1 % (<code>grid</code>), against a bar of
+10 %. It used to sit on the absolute minima and refused all three tables whose ratios agreed to
+1–8 %, with <code>dict</code> the worst offender in every one — the minima carry the machine's thermal state,
+which is exactly what the ratio divides out. <code>grid</code> needed a third pass: its second moved every
+<code>marisa-trie</code> cell by 16 % while no other column moved 2 %, and passes 1 and 3 agree.</p>
+<p><strong>Nothing about a lexindex <em>version</em> can be read out of this table</strong>, and that is a measured claim,
+not a disclaimer. Same session, alternating <strong>A-B-B-A</strong> (the order matters: A-B-A-B gives A both
+early slots and this machine drifts), the released 1.0.0 wheel against this working tree — on
+<code>random</code> every cell landed within 1.01–1.04×, on <code>words</code> within 0.98–1.09×, and the widest gaps in
+both belong to <code>dict</code> and <code>marisa-trie</code>, code that is byte-identical in the two runs. Two readings
+the cross-session numbers seemed to support die there: <code>PerfectHashIndex.id</code> did <strong>not</strong> gain 9 %
+against <code>dict</code> between 1.0 and 1.1, and <code>CompactHashIndex.ids_of</code> did <strong>not</strong> lose 37 % on absent
+pair-corpus probes — today's 1.0.0 wheel measures that cell at 62.0 ns against the 44.8 the 1.0
+table published for it. The blocked arena's Rust-level win on <code>id</code> (216 → 182 ns) is real and
+measured by <code>cargo run --release --example bench</code>; it does not survive the binding, because ~180 ns
+of per-call overhead sits on top of every Python lookup.</p>
+<table>
+<thead>
+<tr>
+<th>probe set</th>
+<th>structure</th>
+<th style="text-align: right;">479 823 words</th>
+<th style="text-align: right;">1 M random pairs</th>
+<th style="text-align: right;">1 M grid pairs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>members</td>
+<td><code>dict</code> absolute, for scale</td>
+<td style="text-align: right;">267.8 ns</td>
+<td style="text-align: right;">270.6 ns</td>
+<td style="text-align: right;">227.3 ns</td>
+</tr>
+<tr>
+<td></td>
+<td><code>marisa-trie</code></td>
+<td style="text-align: right;">2.16×</td>
+<td style="text-align: right;">4.20×</td>
+<td style="text-align: right;">2.79×</td>
+</tr>
+<tr>
+<td></td>
+<td><code>StringIndex.id</code></td>
+<td style="text-align: right;">1.56×</td>
+<td style="text-align: right;">2.64×</td>
+<td style="text-align: right;">1.54×</td>
+</tr>
+<tr>
+<td></td>
+<td><code>PerfectHashIndex.id</code></td>
+<td style="text-align: right;">1.00×</td>
+<td style="text-align: right;">1.20×</td>
+<td style="text-align: right;">1.19×</td>
+</tr>
+<tr>
+<td></td>
+<td><strong><code>CompactHashIndex.id</code></strong></td>
+<td style="text-align: right;"><strong>0.70×</strong></td>
+<td style="text-align: right;"><strong>0.72×</strong></td>
+<td style="text-align: right;"><strong>0.61×</strong></td>
+</tr>
+<tr>
+<td></td>
+<td><code>PerfectHashIndex.ids_of</code></td>
+<td style="text-align: right;">0.49×</td>
+<td style="text-align: right;">0.52×</td>
+<td style="text-align: right;">0.66×</td>
+</tr>
+<tr>
+<td></td>
+<td><strong><code>CompactHashIndex.ids_of</code></strong></td>
+<td style="text-align: right;"><strong>0.34×</strong></td>
+<td style="text-align: right;"><strong>0.34×</strong></td>
+<td style="text-align: right;"><strong>0.47×</strong></td>
+</tr>
+<tr>
+<td>absent</td>
+<td><code>dict</code> absolute, for scale</td>
+<td style="text-align: right;">180.0 ns</td>
+<td style="text-align: right;">242.6 ns</td>
+<td style="text-align: right;">252.0 ns</td>
+</tr>
+<tr>
+<td></td>
+<td><code>marisa-trie</code></td>
+<td style="text-align: right;">2.72×</td>
+<td style="text-align: right;">4.38×</td>
+<td style="text-align: right;">2.35×</td>
+</tr>
+<tr>
+<td></td>
+<td><code>StringIndex.id</code></td>
+<td style="text-align: right;">1.66×</td>
+<td style="text-align: right;">2.28×</td>
+<td style="text-align: right;">1.15×</td>
+</tr>
+<tr>
+<td></td>
+<td><code>PerfectHashIndex.id</code></td>
+<td style="text-align: right;">0.70×</td>
+<td style="text-align: right;">0.79×</td>
+<td style="text-align: right;">0.81×</td>
+</tr>
+<tr>
+<td></td>
+<td><strong><code>CompactHashIndex.id</code></strong></td>
+<td style="text-align: right;"><strong>0.39×</strong></td>
+<td style="text-align: right;"><strong>0.31×</strong></td>
+<td style="text-align: right;"><strong>0.29×</strong></td>
+</tr>
+<tr>
+<td></td>
+<td><strong><code>CompactHashIndex.ids_of</code></strong></td>
+<td style="text-align: right;"><strong>0.31×</strong></td>
+<td style="text-align: right;"><strong>0.26×</strong></td>
+<td style="text-align: right;"><strong>0.24×</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Below 1.00× is faster than <code>dict</code>. So: a <code>CompactHashIndex</code> answers a <strong>present</strong> key in 0.61–0.72×
+the time of a <code>dict</code> and a <strong>missing</strong> one in well under half, batched <code>ids_of</code> in a quarter to just
+under half — while occupying 1.26 bytes per key on disk against the <code>dict</code>'s 71–95 bytes per key in
+RAM. <code>PerfectHashIndex</code> trades level with <code>dict</code> on single words, costs a fifth more on the pair
+corpora, and wins on misses everywhere; <code>marisa-trie</code> costs 2.2–4.4× and <code>StringIndex</code> 1.2–2.6×, and
+both swing with the corpus exactly as their sizes do.</p>
+<p><sub>Read the ratios, not the absolutes. This machine drifts 6–17 % over fifteen rounds <strong>while
+idle</strong> — measured with a cache-resident integer loop that touches no memory — so absolute
+nanoseconds here are a statement about one laptop's thermal envelope. (One <code>random</code> pass drifted
+176 % when a neighbouring job woke up; its minima still agreed with the quiet pass to 3 %, which is
+the case for taking the minimum rather than the mean.) The ratios divide that out <em>within</em> a session. Two caveats in <code>dict</code>'s favour,
+both deliberate: CPython caches a string's hash inside the object, so a repeated probe over the same
+<code>str</code> skips rehashing where lexindex hashes the bytes every call (~23 ns of the gap at 1 M); and
+every column pays the same per-call binding overhead, which flatters the slower ones. <strong>The
+denominator's instability across sessions is a standing, unexplained property of this machine</strong>, and
+it has now been seen four times: <code>grid</code>'s <code>dict</code> read 251 ns, then 194–196 the next day, then 216,
+and 227.3 here; <code>words</code>' read 327.9, then 258.5, then 267.8. Ruled out on the day it was first chased: the extension (the
+released wheel measured the same as the working tree), the interpreter (one virtualenv throughout),
+the corpus generator (unchanged) and background load (raising it did not restore the old figures).
+The mechanism is still not identified. What follows for the protocol is that a <em>cross-session</em> delta
+in this table means nothing on its own — not even as a shape across columns, which the A-B-B-A run
+above tested directly and found empty. A version claim needs both builds in one session.</sub></p>
+<h2 id="point-lookup-latency-vs-the-standard-library">Point-lookup latency vs the standard library<a class="headerlink" href="#point-lookup-latency-vs-the-standard-library" title="Permanent link">&para;</a></h2>
+<p><code>cargo run --release --example bench</code> — 1 M <strong>real dictionary-word bigrams</strong> (<code>word_i.word_j</code>, the
+same key generator as <code>bench/scale.py</code>; mean key 10.9 bytes). Keys are never synthetic
+<code>entity-000…N</code> sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
+Measured 2026-09-12 at <code>386b2e6</code> (the better of two runs of the example back to back, load 0.6–0.8;
+each lookup cell is the minimum of five timed passes after a warm-up pass;
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-12-arz-386b2e6.txt"><code>bench/results/latency-rs-2026-09-12-arz-386b2e6.txt</code></a>).
+Absolute numbers are machine-dependent — the <code>std::HashMap</code> control reads 295 ns here against the
+289 of the 2.0.0 table and the 245 of the 1.1.0 one — so compare the <strong>ratios</strong>, only within a
+column, and read a shift under ~15 % between tables as the session: against this <code>HashMap</code>,
+<code>CompactHashIndex::id</code> is 0.45×, <code>id_unchecked</code> 0.24×, <code>PerfectHashIndex::id</code> 1.02×, <code>StringIndex</code>
+1.32×, <code>DictIndex</code> 1.83×, <code>BTreeMap</code> 2.63×.</p>
+<table>
+<thead>
+<tr>
+<th>structure</th>
+<th>build</th>
+<th>lookup</th>
+<th>note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>lexindex <code>CompactHashIndex::id</code> (fp=1)</td>
+<td><strong>~50 ms</strong></td>
+<td>~133 ns</td>
+<td>fingerprint-verified, <code>2^-8</code> false-positive rate</td>
+</tr>
+<tr>
+<td>lexindex <code>PerfectHashIndex::id_unchecked</code></td>
+<td>~287 ms</td>
+<td><strong>~72 ns</strong></td>
+<td>closed vocabulary, no membership check</td>
+</tr>
+<tr>
+<td><code>std::HashMap&lt;String, u32&gt;</code></td>
+<td>~222 ms</td>
+<td>~295 ns</td>
+<td>in-RAM, not serialisable</td>
+</tr>
+<tr>
+<td>lexindex <code>PerfectHashIndex::id</code> (verified)</td>
+<td>~283 ms</td>
+<td>~301 ns</td>
+<td>one extra cache line + full key compare</td>
+</tr>
+<tr>
+<td>lexindex <code>StringIndex</code> (FST)</td>
+<td>~243 ms</td>
+<td>~390 ns</td>
+<td><em>and</em> prefix / range / fuzzy</td>
+</tr>
+<tr>
+<td>lexindex <code>DictIndex</code> (256 per block)</td>
+<td>~150 ms</td>
+<td>~539 ns</td>
+<td>ordered, exact reverse; 2.47 B/key here against the FST's 0.68 — a <code>word.word</code> cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.84 against 5.95, 298–302 ns against 265–272)</td>
+</tr>
+<tr>
+<td><code>std::BTreeMap&lt;String, u32&gt;</code></td>
+<td>~220 ms</td>
+<td>~774 ns</td>
+<td>in-RAM</td>
+</tr>
+</tbody>
+</table>
+<p><sub><strong>The 2.0.0 session was the outlier, not this one.</strong> The two rows whose code has not moved since
+0.5.1 come back to where the 1.1.0 table had them: <code>StringIndex</code> 1.30× → 1.47× → <strong>1.32×</strong> of
+<code>HashMap</code> and <code>BTreeMap</code> 3.19× → 3.34× → <strong>2.63×</strong>, the FxHash map steady at 0.586× → 0.60× →
+0.58×. Both of the rows that moved are the memory-bound ones, and they moved together and in the
+same direction as each other in both sessions — which is the signature of the machine, not of a
+release. The rows 2.0's key hash reaches stayed put across all three: <code>PerfectHashIndex::id</code> 0.95×
+→ 1.04× → 1.02×, <code>id_unchecked</code> 0.269× → 0.26× → 0.24×, <code>CompactHashIndex::id</code> 0.435× → 0.45× →
+0.45×. <code>DictIndex</code> is the one row that moved for a reason other than the session: at the default of
+256 keys a block it reads <strong>539 ns for 2.47 B/key</strong> where 2.0.0's 32 a block read 507 for 3.19 —
+the packed offsets and the microblocks together, 23 % of the bytes for 6 % of the lookup.
+<code>CompactHashIndex</code> builds in 50 ms against 69 on 1.1.0, the one build that outran the session. This corpus is its worst case by
+construction: the 1 M keys are 1 000 words crossed with 1 000, which the transducer stores once per
+factor (0.68 B/key) and a block of front-coded keys stores once per key. Real keys move lookups in
+lexindex's favour versus synthetic ones, while every <code>build</code> reads higher than a synthetic sequence
+would, because real input is not pre-sorted and sorting is part of the build.</sub></p>
+<p><strong><code>HashMap</code> here is the <code>std</code> one, which hashes with SipHash</strong> — hardened against hash-flooding and
+correspondingly slow on short keys. That is the map most Rust code actually uses, so it is the right
+default comparison, but it is not the fastest map available: the same <code>HashMap</code> with a
+non-cryptographic hasher is much quicker, and <code>cargo run --release --example bench</code> prints that row
+too (FxHash, written out in the example rather than added as a dependency). In the same session
+as the table above, <code>HashMap</code> + FxHash reads <strong>~173 ns</strong> and <code>PerfectHashIndex::id_unchecked</code>
+<strong>~72 ns</strong> — so on a closed vocabulary the perfect hash is about <strong>2.4× faster than a
+fast-hashed map</strong>, not merely level with it. That reverses what this README said through 0.12, where
+two 12-run sessions on a <em>shared</em> machine put FxHash at 196/200 ns against <code>id_unchecked</code>'s 216/216
+and concluded the latency advantage was gone. What changed is not the measurement conditions but the
+code: 1.0's own perfect hash and its 8-byte-at-a-time key hash. <code>CompactHashIndex::id</code> (~133 ns) is
+23 % <em>faster</em> than the FxHash map and still carries the membership check and the 1.26 B/key
+blob.</p>
+<p><strong>Two things the table above cannot show, both measured on 0.11 with an independent harness
+(<code>local/latency/</code>, one process, all forms alternated per round, min of 12):</strong></p>
+<ul>
+<li><strong>Roughly 90 ns of every number in it is reaching the probe key, not looking it up.</strong> The bench
+  probes <code>keys[i * STEP % n]</code> — the original allocations in strided order, which is what a
+  long-lived key list looks like. Hand the same index a probe list allocated in probe order and
+  <code>PerfectHashIndex::id_unchecked</code> falls from 109 to <strong>18 ns/op</strong> at 1 M, <code>CompactHashIndex::id</code>
+  from 126 to 33, while <code>PerfectHashIndex::id</code> barely moves (262 → 192; it fetches a stored key
+  either way). The batched <code>ids_of</code> is layout-insensitive by construction — 39.5 scattered against
+  38.2 contiguous — because its software prefetch does for scattered keys what the hardware does for
+  contiguous ones. So read any sub-100 ns lookup figure, here or anywhere, as a statement about the
+  caller's key layout as much as about the index.</li>
+<li><strong>On a miss-heavy workload <code>std::HashMap</code> wins, until its table outgrows the cache.</strong> An absent key
+  costs the SipHash map 32 ns at 1 M against <code>CompactHashIndex::id</code>'s 41 — it fails on an empty
+  bucket after one cache line, while a fingerprint index runs the whole perfect hash and reads a
+  fingerprint before it can say no. At 10 M the map's table no longer fits and the order reverses
+  (105 ns against 56 for <code>ids_of</code>). lexindex's lookup advantage is on <strong>members</strong>, and at scale.</li>
+</ul>
+<p><strong>Honest reading:</strong> for a <strong>fixed / closed vocabulary</strong>, <code>PerfectHashIndex::id_unchecked</code> is the
+<strong>fastest of the structures in the table above</strong> — 4.1× as quick as the SipHash <code>HashMap</code> and 2.4×
+the FxHash one (no probing, no membership comparison) <em>and</em> compact + serialisable.
+<code>CompactHashIndex::id</code> keeps a probabilistic membership check and <em>still</em> beats the SipHash
+<code>HashMap</code> on lookup (2.2× here), and builds in a fifth of its time. Full verification (<code>id</code>) pays one extra
+cache line + a key comparison; <code>StringIndex</code> trades more latency for <strong>ordered / prefix / range /
+fuzzy</strong> queries the hash maps cannot answer at all. So: <code>CompactHashIndex</code> when footprint dominates
+and a rare false positive is fine; <code>PerfectHashIndex::id</code> for exact membership + reverse;
+<code>StringIndex</code> when order or fuzzy/prefix matters; <code>HashMap</code> when you just need a general in-RAM map
+with nothing persisted.</p>
+<h2 id="the-perfect-hash-against-ptrhash-and-phast">The perfect hash against PtrHash and PHast<a class="headerlink" href="#the-perfect-hash-against-ptrhash-and-phast" title="Permanent link">&para;</a></h2>
+<p><code>bench/mphf_vs</code> is its own crate, outside the workspace, so that neither competitor becomes a
+dependency of lexindex: <code>cd bench/mphf_vs &amp;&amp; cargo run --release -- 10000000 3 &lt;threads&gt;</code>. One
+process builds every function over the <strong>same 10 M distinct splitmix64 keys</strong> in turn, three rounds
+A-B-A-B (builds: the minimum), and looks every key up in <strong>one shuffled probe order</strong> (the minimum
+of three passes). <code>ph</code> 0.11.0 is the PHast authors' crate: <code>Function2</code> with <code>ShiftOnlyWrapped</code> is
+PHast+ with wrapping, the design this crate's <code>MPH2</code> follows; <code>Function</code> with <code>SeedOnly</code> is regular
+PHast. Both at 8-bit seeds and bucket size 4.5, as here. <code>ptr_hash</code> 2.1.1 is PtrHash's three
+parameter sets.</p>
+<table>
+<thead>
+<tr>
+<th>function</th>
+<th style="text-align: right;">bits/key</th>
+<th style="text-align: right;">build, 1 thread</th>
+<th style="text-align: right;">build, 8 threads</th>
+<th style="text-align: right;">lookup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>lexindex <code>MPH2</code></strong></td>
+<td style="text-align: right;"><strong>2.088</strong></td>
+<td style="text-align: right;"><strong>44.8 ns/key</strong></td>
+<td style="text-align: right;"><strong>7.6 ns/key</strong></td>
+<td style="text-align: right;"><strong>29 ns</strong></td>
+</tr>
+<tr>
+<td><code>ph</code> PHast+ (<code>ShiftOnlyWrapped</code>)</td>
+<td style="text-align: right;">2.148</td>
+<td style="text-align: right;">82.2</td>
+<td style="text-align: right;">18.1</td>
+<td style="text-align: right;">74</td>
+</tr>
+<tr>
+<td><code>ph</code> PHast (<code>SeedOnly</code>)</td>
+<td style="text-align: right;">1.922</td>
+<td style="text-align: right;">640.1</td>
+<td style="text-align: right;">102.4</td>
+<td style="text-align: right;">70</td>
+</tr>
+<tr>
+<td><code>ptr_hash</code> compact</td>
+<td style="text-align: right;">2.143</td>
+<td style="text-align: right;">186.7</td>
+<td style="text-align: right;">48.0</td>
+<td style="text-align: right;">46</td>
+</tr>
+<tr>
+<td><code>ptr_hash</code> balanced</td>
+<td style="text-align: right;">2.378</td>
+<td style="text-align: right;">120.0</td>
+<td style="text-align: right;">29.6</td>
+<td style="text-align: right;">47</td>
+</tr>
+<tr>
+<td><code>ptr_hash</code> fast</td>
+<td style="text-align: right;">2.990</td>
+<td style="text-align: right;">174.3</td>
+<td style="text-align: right;">160.2</td>
+<td style="text-align: right;">26</td>
+</tr>
+</tbody>
+</table>
+<p>In this harness, at the size this crate chose, about 2.1 bits, <code>MPH2</code> builds 1.8× faster than the
+PHast+ it is modelled on and 4.2× faster than PtrHash's compact set, and its lookup is the fastest
+of the three — with the asymmetry below inside those ratios;
+regular PHast is the smallest function here, 1.92 bits, at 14× the build; PtrHash's fast set has
+the fastest lookup, 26 ns, at 3 bits. One asymmetry is in the numbers and should be read out of
+them: lexindex takes the keys as 64-bit hashes (its indexes hash the string once, before), while
+<code>ph</code> hashes each key with wyhash on build and on every lookup level and <code>ptr_hash</code> with one
+multiply — a few nanoseconds of the gap on the <code>ph</code> rows is that. PTHash and ConsensusRecSplit are
+C++ and are not in the harness.</p>
+<p><sub>Measured 2026-09-10 on the tree that removes the seed-family decode from the lookup
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-10-arz-5ba9f36.txt"><code>bench/results/mphf-vs-2026-09-10-arz-5ba9f36.txt</code></a>),
+Ryzen 7 5800HS, load 1.0–1.3 with an editor open; lexindex's rows match its idle measurements from
+<code>src/mphf.rs</code>'s sweep (46.3 / 27.5 ns). Against the 2026-09-09 file
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-09-arz-1e24d81.txt"><code>mphf-vs-2026-09-09-arz-1e24d81.txt</code></a>)
+the competitors' builds repeat within 2 % and their lookups read 1–7 % slower, while lexindex's
+lookup went from 33 to 29 ns: the change, not the machine.</sub></p>
+<h2 id="a-fingerprinted-perfecthashindex-on-mostly-absent-keys">A fingerprinted <code>PerfectHashIndex</code> on mostly-absent keys<a class="headerlink" href="#a-fingerprinted-perfecthashindex-on-mostly-absent-keys" title="Permanent link">&para;</a></h2>
+<p><code>local/negfp</code>, a throwaway harness beside the crate, builds the dictionary twice — plain and with
+<code>build_with_fingerprints</code> — and a <code>CompactHashIndex</code> as the control, then probes the 480 k words as
+members and, with a digit appended (no dictionary word ends in one, so the length distribution is
+the members'), as absent keys, in a shuffled order. The headline rows are taken <strong>one index per
+process</strong>, so the two arenas never compete for the cache: six alternations of the five modes in
+both orders, ten passes each, the minimum — after three warm-up pairs, because the part is a
+mobile one and runs a third faster for the first minute after an idle spell. The in-process
+A-B-A-B (all three indexes resident, seven rounds) gives the batched rows and the 50/50 mix.</p>
+<table>
+<thead>
+<tr>
+<th>probe</th>
+<th style="text-align: right;">plain</th>
+<th style="text-align: right;">with fingerprints</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code>, member</td>
+<td style="text-align: right;">163 ns</td>
+<td style="text-align: right;">171 ns</td>
+<td>one index per process</td>
+</tr>
+<tr>
+<td><code>id</code>, absent</td>
+<td style="text-align: right;">166 ns</td>
+<td style="text-align: right;"><strong>74 ns</strong></td>
+<td>one index per process</td>
+</tr>
+<tr>
+<td><code>id</code>, 50 % absent</td>
+<td style="text-align: right;">166 ns</td>
+<td style="text-align: right;">135 ns</td>
+<td>in-process</td>
+</tr>
+<tr>
+<td><code>ids_of</code>, member</td>
+<td style="text-align: right;">72 ns</td>
+<td style="text-align: right;">76 ns</td>
+<td>in-process</td>
+</tr>
+<tr>
+<td><code>ids_of</code>, absent</td>
+<td style="text-align: right;">70 ns</td>
+<td style="text-align: right;"><strong>47 ns</strong></td>
+<td>in-process</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex::id_unchecked</code> (control)</td>
+<td style="text-align: right;">41 ns</td>
+<td style="text-align: right;">41 ns</td>
+<td></td>
+</tr>
+<tr>
+<td>bytes per key</td>
+<td style="text-align: right;">10.90</td>
+<td style="text-align: right;">11.90</td>
+<td>exactly +1</td>
+</tr>
+</tbody>
+</table>
+<p>An absent probe stops at the block: the offset line says no key with that fingerprint is in the
+slot, and the key — the second cache miss — is never read. A member pays the second hash and one
+compare, a few nanoseconds. The fingerprint bytes follow the block's offsets; interleaving them
+with the offsets was measured first and cost a member 6 ns instead of 3, because the offset pair
+moved up to 36 bytes from the base and split cache lines more often. And the fingerprint is
+compared before the slot's offsets are read: an absent probe is then about 255 instructions long,
+the width of the reorder buffer, which is what lets its one cache miss overlap the next probe's.
+A three-instruction marker check added for the overflow blocks pushed the path past that and
+cost 11 ns with no change in cache or branch misses; moving the fingerprint first shortened it by
+the whole span computation and took the absent probe from 91 to 74.</p>
+<p><sub>Measured 2026-09-10 on the tree that adds the overflow blocks and the fingerprint-first check
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-679a8c6.txt"><code>bench/results/negfp-2026-09-10-arz-679a8c6.txt</code></a>),
+Ryzen 7 5800HS, load 1.0–1.1 with an editor open; the fingerprint layout itself was chosen on
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/negfp-2026-09-10-arz-8f136d3.txt"><code>negfp-2026-09-10-arz-8f136d3.txt</code></a>.</sub></p>
+<h2 id="closedhashindex-the-perfect-hash-alone"><code>ClosedHashIndex</code>: the perfect hash alone<a class="headerlink" href="#closedhashindex-the-perfect-hash-alone" title="Permanent link">&para;</a></h2>
+<p><code>local/closedbench</code> builds the dictionary as a <code>ClosedHashIndex</code> and as a <code>CompactHashIndex</code> at the
+default width, checks that every word gets the same id from both, then probes the 480 k words in a
+shuffled order: nine rounds in one process, the order of the modes reversed on every other round,
+the minimum per row. The two <code>id_unchecked</code>-style lookups are the same perfect-hash probe and
+measure the same; the fingerprint compare on top of it is what <code>CompactHashIndex::id</code> pays, and
+the batched <code>ids_of</code> loses the fingerprint line's prefetch and compare.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align: right;"><code>ClosedHashIndex</code></th>
+<th style="text-align: right;"><code>CompactHashIndex</code> (fp=1)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code>, member</td>
+<td style="text-align: right;"><strong>40 ns</strong></td>
+<td style="text-align: right;">68 ns (<code>id</code>), 40 ns (<code>id_unchecked</code>)</td>
+</tr>
+<tr>
+<td><code>ids_of</code>, member</td>
+<td style="text-align: right;"><strong>14 ns</strong></td>
+<td style="text-align: right;">28 ns</td>
+</tr>
+<tr>
+<td>bytes per key</td>
+<td style="text-align: right;"><strong>0.263</strong></td>
+<td style="text-align: right;">1.263</td>
+</tr>
+</tbody>
+</table>
+<p><sub>Measured 2026-09-10 on the tree that adds the type
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/closed-2026-09-10-arz-50f240c.txt"><code>bench/results/closed-2026-09-10-arz-50f240c.txt</code></a>),
+Ryzen 7 5800HS, load about 0.9 with an editor open.</sub></p>
+<h2 id="dictindex-the-ordered-dictionary-against-stringindex"><code>DictIndex</code>: the ordered dictionary against <code>StringIndex</code><a class="headerlink" href="#dictindex-the-ordered-dictionary-against-stringindex" title="Permanent link">&para;</a></h2>
+<p><code>local/dictbench</code> builds the dictionary as a <code>StringIndex</code> and as a <code>DictIndex</code> at six block sizes,
+then probes all 479 823 words in a shuffled order — members, strangers (each word with a byte
+appended), and every id for the reverse lookup — five rounds in one process, the variants alternated
+within each round, the minimum per cell; <code>StringIndex</code> is the control.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align: right;"><code>StringIndex</code></th>
+<th style="text-align: right;"><code>DictIndex</code> 32</th>
+<th style="text-align: right;"><code>DictIndex</code> 64</th>
+<th style="text-align: right;"><code>DictIndex</code> 128</th>
+<th style="text-align: right;"><code>DictIndex</code> <strong>256</strong></th>
+<th style="text-align: right;"><code>DictIndex</code> 512</th>
+<th style="text-align: right;"><code>DictIndex</code> 1024</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bytes per key</td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">3.23</td>
+<td style="text-align: right;">3.03</td>
+<td style="text-align: right;">2.90</td>
+<td style="text-align: right;"><strong>2.84</strong></td>
+<td style="text-align: right;">2.81</td>
+<td style="text-align: right;">2.79</td>
+</tr>
+<tr>
+<td>of which per-block arrays</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">0.348</td>
+<td style="text-align: right;">0.231</td>
+<td style="text-align: right;">0.144</td>
+<td style="text-align: right;">0.100</td>
+<td style="text-align: right;">0.077</td>
+<td style="text-align: right;">0.066</td>
+</tr>
+<tr>
+<td>microblocks a block</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">32</td>
+</tr>
+<tr>
+<td>entries a lookup scans</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">31</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">34</td>
+<td style="text-align: right;"><strong>38</strong></td>
+<td style="text-align: right;">46</td>
+<td style="text-align: right;">62</td>
+</tr>
+<tr>
+<td>build</td>
+<td style="text-align: right;">129–135 ms</td>
+<td style="text-align: right;">23–30</td>
+<td style="text-align: right;">25–26</td>
+<td style="text-align: right;">24–25</td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">23–27</td>
+<td style="text-align: right;">29–36</td>
+</tr>
+<tr>
+<td><code>id</code>, member</td>
+<td style="text-align: right;">265–283 ns</td>
+<td style="text-align: right;">252–254</td>
+<td style="text-align: right;">272–284</td>
+<td style="text-align: right;">285–288</td>
+<td style="text-align: right;"><strong>298–302</strong></td>
+<td style="text-align: right;">316–322</td>
+<td style="text-align: right;">344–347</td>
+</tr>
+<tr>
+<td><code>id</code>, stranger</td>
+<td style="text-align: right;">215–219 ns</td>
+<td style="text-align: right;">204</td>
+<td style="text-align: right;">223–224</td>
+<td style="text-align: right;">234–238</td>
+<td style="text-align: right;">255–257</td>
+<td style="text-align: right;">267–275</td>
+<td style="text-align: right;">292–302</td>
+</tr>
+<tr>
+<td><code>key_into</code> (no allocation)</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">154–155</td>
+<td style="text-align: right;">169–172</td>
+<td style="text-align: right;">184–188</td>
+<td style="text-align: right;"><strong>207</strong></td>
+<td style="text-align: right;">227–232</td>
+<td style="text-align: right;">263–272</td>
+</tr>
+<tr>
+<td><code>key</code> (owned string)</td>
+<td style="text-align: right;">456–474 ns</td>
+<td style="text-align: right;">205–212</td>
+<td style="text-align: right;">232–234</td>
+<td style="text-align: right;">249–258</td>
+<td style="text-align: right;">278</td>
+<td style="text-align: right;">293–307</td>
+<td style="text-align: right;">340–348</td>
+</tr>
+<tr>
+<td><code>lower_bound</code>, stranger</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">203–206</td>
+<td style="text-align: right;">222–224</td>
+<td style="text-align: right;">234–239</td>
+<td style="text-align: right;">255–257</td>
+<td style="text-align: right;">264–274</td>
+<td style="text-align: right;">290–303</td>
+</tr>
+<tr>
+<td><code>prefix</code>, 2 000 three-byte prefixes of ~760 keys</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">29.1–29.6 µs</td>
+<td style="text-align: right;">28.7–30.1</td>
+<td style="text-align: right;">28.6–30.2</td>
+<td style="text-align: right;">30.2–30.3</td>
+<td style="text-align: right;">29.1–30.2</td>
+<td style="text-align: right;">29.1–30.3</td>
+</tr>
+</tbody>
+</table>
+<p>Two runs of the same ladder in opposite orders; where they differ the table gives both. At the
+default 256, <code>DictIndex</code> answers <code>id</code> within 10 % of <code>StringIndex</code> and <code>key_into</code> at less than half
+its <code>key</code> while storing <strong>52 % less</strong>; at 64 per block it is level with <code>StringIndex</code> on <code>id</code> at
+3.03 B/key, and at 32 it is 6 % ahead. The sequential lane does not move with the block at all.</p>
+<p><strong>A lookup scans a microblock, not a block.</strong> A block is cut into microblocks of 32, and the first
+key of each is a restart front-coded against the restart before it, so a lookup walks the restarts
+to one microblock and scans that: <code>block / micro + micro − 2</code> entries, which is 38 at the default
+where the block holds 255. That is what unties the size from the latency. Against the
+one-level format at the same size the reverse lookup halves and <code>id</code> does not move: <strong>244–246 ns
+and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for 460–464 and
+393</strong>. The one-level format reaches 0.10 B/key further down, and that is what it costs: its floor
+of 2.701 at 1024 keys a block answers <code>key_into</code> in 3 190 ns and <code>id</code> in 984, against 287–289 and
+420–426 for 2.80 here. Both ladders ran alternated by process in one session, the base built from
+the commit before microblocks in a worktree, with <code>StringIndex</code> at 340–353 ns as the control
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt"><code>dict-onelevel-ab-2026-09-12-arz-386b2e6.txt</code></a>).
+That session sits about 25 % above the table at the top of this section — its control says so, at
+340–353 ns where the table's reads 265–283 — so read each comparison inside its own session and
+neither against the other.</p>
+<p><strong>The reverse lookup does not decode the whole run.</strong> An entry stores what it shares with its
+predecessor, so an entry whose shared-prefix length is at least a later entry's contributes nothing
+that survives to the key being asked for. The ones that do contribute form a strictly increasing
+staircase of that length, and a monotonic stack over the run's headers finds it in the pass the
+walk already makes: every header is still read — a header is what says where the next one begins —
+but only the staircase is decoded. Measured over the dictionary and a path list when it landed, the
+staircase is 2.5 entries deep on average and 12 at the deepest with a block of 32, 18 with a block
+of 1024; past 32 the walk stops tracking it and decodes each entry, which is slower and not wrong.
+That was worth <strong>−16 % on <code>key_into</code> at 32 keys a block, −33 % at 128 and −37 % at 256</strong>
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-stair-2026-09-11-arz.txt"><code>dict-stair-2026-09-11-arz.txt</code></a>
+holds the before and after), and it costs no bytes and no format change.</p>
+<p><strong>256 is a middle of the curve, not a limit</strong>, and
+<a href="https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.build_with_block"><code>build_with_block</code></a>
+is the knob. The size falls because a larger block spreads one stored head, one sample and two
+offsets over more keys — the arrays go from 0.348 bytes a key at 32 to 0.066 at 1024 — while the
+front-coded data moves the other way and less, 2.57 to 2.70, a restart every 32 keys being coded
+against a key that far away. What the block costs is now <code>block / 32 + 30</code> entries scanned rather
+than <code>block − 1</code>: 1024 scans 62 where 32 scans 31. At 512 the index is <strong>2.81 bytes
+per key, well under the 2.98 marisa stores on this corpus</strong> — and unlike marisa it answers <code>key(id)</code>
+and <code>lower_bound</code> at all, since a marisa id is not the lexicographic rank (7 051 of 19 999
+consecutive sorted pairs come back with a decreasing id). Pick 32 or 64 if the lookups are hot,
+512 or 1024 if the bytes are — or name the point instead of the number: <code>DictProfile::Fast</code>,
+<code>Balanced</code> and <code>Compact</code> in Rust, <code>block="fast" | "balanced" | "compact"</code> in Python, are 32,
+256 and 1024.</p>
+<p><sub>The latency rows are 2026-09-12 at <code>386b2e6</code>
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt"><code>bench/results/dict-micro32-2026-09-12-arz-386b2e6.txt</code></a>),
+two runs of the ladder in opposite orders, the table giving both where they differ. The bytes and
+the per-block arrays are exact and come from <code>68f5336</code>, where the symbol table went one per shard of
+65 536 keys, and so does the build row
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt"><code>bench/results/dict-shard-2026-09-12-arz-68f5336.txt</code></a>) —
+that session reads about 25 % above the latency rows', its <code>StringIndex</code> control building in
+129–135 ms where theirs took 105–106, and the same artifact's A-B puts the change's own share of
+the build at 17–23 %. That A-B moves <code>id</code> by +0.5 / −2.0 / −2.4 % on three corpora against a control
+moving −0.7 / −2.5 / −0.4 %, which is why the latency rows are the earlier session's and stand.</sub></p>
+<h2 id="prefix-queries-against-the-tries">Prefix queries against the tries<a class="headerlink" href="#prefix-queries-against-the-tries" title="Permanent link">&para;</a></h2>
+<p>A prefix is a range of a sorted dictionary, so <code>DictIndex</code> answers one without an automaton:
+<code>prefix_id_range</code> is two <code>lower_bound</code>s and <code>prefix</code> walks the run they name. <code>local/prefixbench.py</code>
+puts that against the tries a Python project can install, on the same words — 20 000 three-byte
+prefixes drawn from random words, so the average prefix carries 763 keys.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align: right;">bytes/key</th>
+<th style="text-align: right;"><code>prefix_count</code></th>
+<th style="text-align: right;">first 10</th>
+<th style="text-align: right;">every match + ids</th>
+<th style="text-align: right;">keys only</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> 256</strong> (default)</td>
+<td style="text-align: right;"><strong>2.84</strong></td>
+<td style="text-align: right;"><strong>375 ns</strong></td>
+<td style="text-align: right;">2 015 ns</td>
+<td style="text-align: right;">102 081 ns</td>
+<td style="text-align: right;">72 541 ns</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> 512</strong></td>
+<td style="text-align: right;"><strong>2.81</strong></td>
+<td style="text-align: right;">396</td>
+<td style="text-align: right;">2 159</td>
+<td style="text-align: right;">102 532</td>
+<td style="text-align: right;">73 384</td>
+</tr>
+<tr>
+<td>lexindex <code>StringIndex</code></td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">556</td>
+<td style="text-align: right;">4 465</td>
+<td style="text-align: right;">162 897</td>
+<td style="text-align: right;">330 497</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code></td>
+<td style="text-align: right;">2.98</td>
+<td style="text-align: right;">123 444</td>
+<td style="text-align: right;">2 571</td>
+<td style="text-align: right;">94 218</td>
+<td style="text-align: right;">94 065</td>
+</tr>
+<tr>
+<td><code>dawg2</code></td>
+<td style="text-align: right;">23.96</td>
+<td style="text-align: right;">68 251</td>
+<td style="text-align: right;"><strong>1 449</strong></td>
+<td style="text-align: right;"><strong>48 544</strong></td>
+<td style="text-align: right;"><strong>48 503</strong></td>
+</tr>
+<tr>
+<td><code>datrie</code></td>
+<td style="text-align: right;">30.69</td>
+<td style="text-align: right;">731 859</td>
+<td style="text-align: right;">729 729</td>
+<td style="text-align: right;">724 271</td>
+<td style="text-align: right;">725 551</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Counting is where the structures differ in kind rather than by a constant.</strong> <code>prefix_count</code> costs
+two order lookups whatever the prefix carries, so it runs 312× faster than marisa's at 512 per block
+and 329× at the default — marisa has to enumerate all 763 matches to count them, its ids not being
+lexicographic ranks, so there is no arithmetic to do instead. At every block that goes under marisa
+on <em>size</em> — which since microblocks is the default too — <code>DictIndex</code> is also ahead on autocomplete
+(2 015–2 159 ns against 2 571) and on handing back a prefix's keys (72 541–73 384 against 94 065) —
+with a rank for each, which marisa has none to give.</p>
+<p><strong>Those keys come fastest through the id range, which inverts what this page said until 2026-09-12.</strong>
+<code>prefix_id_range</code> and then <code>keys_of</code> costs 72 541 ns at the default block, against 102 081 for <code>prefix</code>,
+which decodes an id for every match as well. <code>keys_of</code> used to re-enter the block for every id and
+was the <em>slower</em> of the two by 2.1×; it now keeps one walk open across the ids that ascend through a
+block, which is exactly the shape an id range hands it. The inversion is <code>DictIndex</code>-only:
+<code>StringIndex</code> has no block to stay inside, its <code>keys_of</code> walks the transducer once per id, and
+<code>prefix</code> is still the API for this query there (162 897 against 330 497). It is also why there is no
+<code>prefix_keys</code> method: it would be these two calls, and the table says what a third one would buy —
+27 %, which two existing calls already have.</p>
+<p><strong>The last two columns are this benchmark's error bar as well as a result.</strong> A trie has no ids to
+return, so for <code>marisa-trie</code>, <code>dawg2</code> and <code>datrie</code> they are one call measured twice — and within a
+run they come out 0.3 %, 0.4 % and 3.3 % apart. Nothing narrower than that is a finding here:
+<code>DictIndex</code> at 256 against 512 on full enumeration (102 081 against 102 532) is one such
+non-difference, while the 1.30× over marisa on keys alone is well outside it.</p>
+<p><code>dawg2</code> enumerates about 1.4× faster at 8.3× the bytes, with no reverse lookup and no mmap: a
+different point on the curve, not a smaller one. <code>datrie</code> is a double-array built for point lookups;
+prefix walking is not what it is for.</p>
+<p><sub>Measured 2026-09-12, the minimum over three clean-tree runs
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-2026-09-12-arz-386b2e6.txt"><code>bench/results/prefix-2026-09-12-arz-386b2e6.txt</code></a>),
+<code>marisa-trie</code> 1.4.1, <code>dawg2</code> 0.13.3, <code>datrie</code> 0.8.3 over the same word list, Ryzen 7 5800HS,
+load 0.5–1.0 at the three starts. None
+of the three is a lexindex dependency — reproduce in a throwaway environment.</sub></p>
+<h2 id="common-prefix-queries-the-other-direction">Common-prefix queries — the other direction<a class="headerlink" href="#common-prefix-queries-the-other-direction" title="Permanent link">&para;</a></h2>
+<p><code>prefix</code> returns the keys a query starts. The reverse question — which <em>keys</em> are prefixes of the
+query — is what a longest-match tokeniser asks of a vocabulary, and it was the one operation
+<code>marisa-trie</code>, <code>dawg2</code> and <code>datrie</code> all answered and lexindex did not. <code>local/cpbench.py</code> measures
+it on the same words: 20 000 queries, each a real word with one to three more letters on it except
+every fourth, which is random letters. Every structure is first held to marisa's answer on 2 000 of
+them, so the timings compare the same work.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align: right;">bytes/key</th>
+<th style="text-align: right;"><code>common_prefix</code></th>
+<th style="text-align: right;"><code>longest_prefix</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>datrie</code></td>
+<td style="text-align: right;">30.69</td>
+<td style="text-align: right;"><strong>549 ns</strong></td>
+<td style="text-align: right;"><strong>247 ns</strong></td>
+</tr>
+<tr>
+<td><strong>lexindex <code>StringIndex</code></strong></td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">666</td>
+<td style="text-align: right;">367</td>
+</tr>
+<tr>
+<td><code>dawg2</code></td>
+<td style="text-align: right;">23.96</td>
+<td style="text-align: right;">695</td>
+<td style="text-align: right;">617</td>
+</tr>
+<tr>
+<td><code>marisa-trie</code></td>
+<td style="text-align: right;">2.98</td>
+<td style="text-align: right;">1 138</td>
+<td style="text-align: right;">877</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> 256</strong> (default)</td>
+<td style="text-align: right;"><strong>2.84</strong></td>
+<td style="text-align: right;">2 502</td>
+<td style="text-align: right;">984</td>
+</tr>
+<tr>
+<td><strong>lexindex <code>DictIndex</code> 512</strong></td>
+<td style="text-align: right;"><strong>2.81</strong></td>
+<td style="text-align: right;">2 642</td>
+<td style="text-align: right;">1 042</td>
+</tr>
+</tbody>
+</table>
+<p><strong>This is the query a transducer is shaped for, and the numbers say so.</strong> The query <em>is</em> the path:
+one walk down the FST, every final state on it a match, <code>O(query bytes)</code> whatever the index holds.
+<code>StringIndex</code> is second only to <code>datrie</code> on both columns — at <strong>a fifth of <code>datrie</code>'s bytes and a
+quarter of <code>dawg2</code>'s</strong>, ahead of <code>dawg2</code> on both and of <code>marisa-trie</code> by 1.7× and 2.4× at twice
+marisa's size. It is the <em>largest</em> of the ordered indexes in
+this crate, and on this one query that is where the bytes went.</p>
+<p><strong><code>DictIndex</code> has no walk to make and the table shows what that costs.</strong> One order lookup per
+character boundary, so a ten-character query is ten binary searches where the trie made one
+descent: 2.2× marisa's time at the default block, 2.3× at 512. <code>longest_prefix</code> is the exception —
+it starts at the query and stops at the first hit, so it never pays for the boundaries under the
+match, and both blocks land within 12–19 % of marisa (984 and 1 042 ns against 877) while storing
+fewer bytes than it. A caller who
+asks this question often should hold a <code>StringIndex</code>; one who asks it occasionally, alongside the
+ranks and ranges only <code>DictIndex</code> gives, can have it for a binary search per character.</p>
+<p><sub>Measured 2026-09-12
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-12-arz-386b2e6.txt"><code>bench/results/common-prefix-2026-09-12-arz-386b2e6.txt</code></a>),
+the minimum of three runs that agree within 6 %, each the minimum of five alternated rounds,
+<code>marisa-trie</code> 1.4.1, <code>dawg2</code> 0.13.3, <code>datrie</code> 0.8.3, Ryzen 7 5800HS, load 0.5–0.6 at the three
+starts. Nanoseconds per query through Python; the call overhead
+is in every row, and the three tries are C extensions too. None of them is a lexindex
+dependency — reproduce in a throwaway environment.</sub></p>
+<h2 id="hash-quality">Hash quality<a class="headerlink" href="#hash-quality" title="Permanent link">&para;</a></h2>
+<p>Size and speed both rest on the key hash being indistinguishable from random on <em>real</em> keys, so the
+claim is measured rather than argued. The battery lives with the hash it tests (<code>src/hash.rs</code>,
+behind <code>bench-mphf</code>) and runs as one test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--release<span class="w"> </span>--features<span class="w"> </span>bench-mphf<span class="w"> </span>--<span class="w"> </span>--ignored<span class="w"> </span>--nocapture<span class="w"> </span>hash_quality
+</code></pre></div>
+<p>Every statistic is reported as a standard-normal <code>z</code>, so one bound reads across the whole battery.
+A chi-square goes through the Wilson–Hilferty transform rather than the textbook
+<code>(x − k) / sqrt(2k)</code>, which is wrong exactly where a threshold sits: at 255 degrees of freedom and
+a true <code>z</code> of 6.00 the two read 5.99 and 7.07 (checked against <code>incgam</code> in PARI/GP). The bound is
+<code>|z| &lt; 6</code>, a 10⁻⁹ tail per cell; since the battery runs about 44 000 avalanche cells and forty
+tables, the largest <code>|z|</code> it <em>should</em> produce is near <code>sqrt(2 ln N) ≈ 4.6</code>.</p>
+<table>
+<thead>
+<tr>
+<th>test</th>
+<th>what it would catch</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>strict avalanche, both hashes, key lengths 4–33</td>
+<td>an input bit that does not reach every output bit</td>
+<td>worst 4.49 over 44 032 cells</td>
+</tr>
+<tr>
+<td>bit independence, 2 016 output pairs per input bit</td>
+<td>two output bits that flip together</td>
+<td>worst 4.23 over 258 048 cells</td>
+</tr>
+<tr>
+<td>two-byte differential, every position pair and bit pair</td>
+<td>the pre-2.0 collision family: keys differing at bytes <code>8i+7</code> and <code>8i+11</code> collided in <strong>both</strong> hashes 13–100 % of the time through 1.1</td>
+<td><strong>0</strong> double collisions over 17 664 combinations</td>
+</tr>
+<tr>
+<td>per-corpus distribution — slot-hash collisions, top 12 bits, low 12 bits, the 8-bit fingerprint, and the joint (slot, fingerprint) table</td>
+<td>a family of keys the hash folds together, and any correlation between the two hashes</td>
+<td>ten corpora, no collisions, every value under 2.4</td>
+</tr>
+</tbody>
+</table>
+<p>The ten corpora are the shapes that break hashes in practice: dictionary words, word bigrams, a
+shared prefix (<code>https://example.com/a/b/…</code>), a shared suffix (<code>…@mail.example.com</code>), a dense
+numeric tail (<code>key_000000001</code>), plain decimal integers, UUIDs, Cyrillic, DNA, and filesystem paths.</p>
+<p><sub>Committed output:
+<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-12-arz-d82e296.txt"><code>bench/results/hash-quality-2026-09-12-arz-d82e296.txt</code></a>.
+The two hashes are deterministic and unseeded, so none of this is a statement about an adversary
+who picks the queries — see <code>SECURITY.md</code>.</sub></p>
+<h2 id="error-bars-and-where-a-lookup-number-comes-from">Error bars, and where a lookup number comes from<a class="headerlink" href="#error-bars-and-where-a-lookup-number-comes-from" title="Permanent link">&para;</a></h2>
+<p>Every timed number on this page is the minimum of a few alternated passes. A minimum is the right
+estimator for a laptop — it is the sample least contaminated by whatever else the machine was doing
+— but it carries no width, and a claim about a frontier is a claim about an <em>ordering</em>, which needs
+one. <code>local/statbench</code> runs 30 independent passes a structure with the six lanes round-robin, so
+drift lands on all of them equally, and reports the median with p5/p95 and a bootstrap interval
+around the median. The interval is a percentile interval over 10 000 resamples rather than
+mean ± t·s: the samples are not normal, since a pass that met a scheduler tick sits far above the
+rest and nothing at all sits below the hardware.</p>
+<p>479 823 English words, 200 000 probes a pass, half of them members, ns a lookup:</p>
+<table>
+<thead>
+<tr>
+<th>structure</th>
+<th style="text-align: right;">B/key</th>
+<th style="text-align: right;">min</th>
+<th style="text-align: right;">median</th>
+<th style="text-align: right;">p5</th>
+<th style="text-align: right;">p95</th>
+<th style="text-align: right;">95 % CI of the median</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ClosedHashIndex</code></td>
+<td style="text-align: right;">0.26</td>
+<td style="text-align: right;">14.8</td>
+<td style="text-align: right;">15.2</td>
+<td style="text-align: right;">14.8</td>
+<td style="text-align: right;">17.2</td>
+<td style="text-align: right;">15.1 – 15.6</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> fp=1</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">27.0</td>
+<td style="text-align: right;">27.2</td>
+<td style="text-align: right;">27.0</td>
+<td style="text-align: right;">28.9</td>
+<td style="text-align: right;">27.1 – 27.3</td>
+</tr>
+<tr>
+<td><code>PerfectHashIndex</code></td>
+<td style="text-align: right;">10.90</td>
+<td style="text-align: right;">88.4</td>
+<td style="text-align: right;">90.4</td>
+<td style="text-align: right;">88.6</td>
+<td style="text-align: right;">102.0</td>
+<td style="text-align: right;">89.8 – 92.0</td>
+</tr>
+<tr>
+<td><code>StringIndex</code></td>
+<td style="text-align: right;">5.95</td>
+<td style="text-align: right;">232.4</td>
+<td style="text-align: right;">234.0</td>
+<td style="text-align: right;">232.5</td>
+<td style="text-align: right;">249.4</td>
+<td style="text-align: right;">233.5 – 235.5</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 256</td>
+<td style="text-align: right;">2.84</td>
+<td style="text-align: right;">263.8</td>
+<td style="text-align: right;">265.6</td>
+<td style="text-align: right;">264.1</td>
+<td style="text-align: right;">276.7</td>
+<td style="text-align: right;">265.4 – 265.9</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 512</td>
+<td style="text-align: right;">2.81</td>
+<td style="text-align: right;">283.9</td>
+<td style="text-align: right;">286.0</td>
+<td style="text-align: right;">284.1</td>
+<td style="text-align: right;">296.0</td>
+<td style="text-align: right;">285.7 – 286.6</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The minimum is within 3 % of the median everywhere</strong>, and the p5–p95 band is 4–16 % of it, so
+quoting the minimum costs nothing — same probe set, same binary, thirty consecutive passes. An
+earlier session of the same harness put the band under 50 ns at 45 % and the minimum 25–29 % under
+the median while the slow lanes kept their 2–10 %: a fast lane's width is the machine's that day,
+not the structure's, and the interval column is what says which day it was.</p>
+<p><strong>The probe set is part of the working set.</strong> Only the number of probes a pass changes here:</p>
+<table>
+<thead>
+<tr>
+<th>probes a pass</th>
+<th style="text-align: right;"><code>Closed</code></th>
+<th style="text-align: right;"><code>Compact</code> fp=1</th>
+<th style="text-align: right;"><code>Perfect</code></th>
+<th style="text-align: right;"><code>String</code></th>
+<th style="text-align: right;"><code>Dict</code> 256</th>
+<th style="text-align: right;"><code>Dict</code> 512</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100 000</td>
+<td style="text-align: right;">13.3</td>
+<td style="text-align: right;">28.3</td>
+<td style="text-align: right;">88.0</td>
+<td style="text-align: right;">230.9</td>
+<td style="text-align: right;">265.5</td>
+<td style="text-align: right;">284.1</td>
+</tr>
+<tr>
+<td>200 000</td>
+<td style="text-align: right;">15.2</td>
+<td style="text-align: right;">27.2</td>
+<td style="text-align: right;">90.4</td>
+<td style="text-align: right;">234.0</td>
+<td style="text-align: right;">265.6</td>
+<td style="text-align: right;">286.0</td>
+</tr>
+<tr>
+<td>400 000</td>
+<td style="text-align: right;">25.5</td>
+<td style="text-align: right;">36.1</td>
+<td style="text-align: right;">114.3</td>
+<td style="text-align: right;">260.7</td>
+<td style="text-align: right;">285.4</td>
+<td style="text-align: right;">305.1</td>
+</tr>
+</tbody>
+</table>
+<p><code>ClosedHashIndex</code> nearly doubles; <code>DictIndex</code> 256 moves 7 %. The probe array is a second structure the loop
+walks: 100 000 <code>String</code> headers are 2.4 MB, 400 000 are 9.6 MB before the bytes they point at, and
+past some point between the two the probe stops being in cache and starts being fetched at the same
+cost as the lookup it pays for. The smaller the index, the larger the share of the total that is.
+The counters say it in one line — <strong>the instruction count does not move and the cycle count does</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>structure</th>
+<th style="text-align: right;">instr</th>
+<th style="text-align: right;">cycles at 100 k</th>
+<th style="text-align: right;">at 400 k</th>
+<th style="text-align: right;">branch misses</th>
+<th style="text-align: right;">L1 fills</th>
+<th style="text-align: right;">LLC misses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ClosedHashIndex</code></td>
+<td style="text-align: right;">108</td>
+<td style="text-align: right;">55.6</td>
+<td style="text-align: right;">86.6</td>
+<td style="text-align: right;">0.90</td>
+<td style="text-align: right;">2.46</td>
+<td style="text-align: right;">1.15–1.30</td>
+</tr>
+<tr>
+<td><code>CompactHashIndex</code> fp=1</td>
+<td style="text-align: right;">212</td>
+<td style="text-align: right;">109.1</td>
+<td style="text-align: right;">155.3</td>
+<td style="text-align: right;">0.90</td>
+<td style="text-align: right;">3.68</td>
+<td style="text-align: right;">2.17–2.36</td>
+</tr>
+<tr>
+<td><code>PerfectHashIndex</code></td>
+<td style="text-align: right;">364</td>
+<td style="text-align: right;">292.0</td>
+<td style="text-align: right;">460.2</td>
+<td style="text-align: right;">3.14</td>
+<td style="text-align: right;">5.56</td>
+<td style="text-align: right;">4.41–4.64</td>
+</tr>
+<tr>
+<td><code>StringIndex</code></td>
+<td style="text-align: right;">2236</td>
+<td style="text-align: right;">960.9</td>
+<td style="text-align: right;">1132.5</td>
+<td style="text-align: right;">13.18</td>
+<td style="text-align: right;">14.81</td>
+<td style="text-align: right;">7.45–7.95</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 256</td>
+<td style="text-align: right;">2708</td>
+<td style="text-align: right;">1118.1</td>
+<td style="text-align: right;">1232.8</td>
+<td style="text-align: right;">17.61</td>
+<td style="text-align: right;">12.04</td>
+<td style="text-align: right;">4.16–4.51</td>
+</tr>
+<tr>
+<td><code>DictIndex</code> 512</td>
+<td style="text-align: right;">2973</td>
+<td style="text-align: right;">1191.5</td>
+<td style="text-align: right;">1310.4</td>
+<td style="text-align: right;">19.46</td>
+<td style="text-align: right;">10.49</td>
+<td style="text-align: right;">3.85–4.21</td>
+</tr>
+</tbody>
+</table>
+<p>Three things fall out of that table that no nanosecond showed:</p>
+<ul>
+<li><strong><code>DictIndex</code> does the most work and misses the least of the structures that keep their keys,
+  and neither is what it waits for.</strong> 2 708 instructions at 256 against <code>StringIndex</code>'s 2 236, and
+  4.2 LLC misses against 7.5. The one-level format at 128 keys a block spent 3 226 instructions and
+  missed 6.6 a lookup; the microblock cut both by a fifth and a third, and at equal size the
+  latency did not move — because what a lookup waits for is a chain of dependent misses, the sample
+  search then the restart run then the microblock, which is the same length whatever the scan, and
+  the instructions and the streamed misses of the scan overlap under it. IPC 2.2–2.5 says the core
+  is busy; the chain says with what. It is also why a block of 32 keys and one of 512 sit 12 % apart
+  on <code>id</code> and not 16× apart on the entries they scan.</li>
+<li><strong><code>PerfectHashIndex</code> is pure latency.</strong> 364 instructions, 4.4 LLC misses, IPC 0.8–1.2: it does
+  almost no work and waits for all of it.</li>
+<li><strong><code>StringIndex</code> misses the most, 7.5–8.0 a lookup.</strong> That is the same fact as its thread scaling
+  above: dependent misses are what a transducer walk is made of, and they are also what another core
+  can overlap.</li>
+</ul>
+<p>A second mechanism arrives between 200 000 and 400 000 probes. Data-TLB misses a lookup go from
+0.001 to 0.393 for <code>ClosedHashIndex</code> and from 0.004 to 0.523 for <code>DictIndex</code> 256: the probe array
+has outgrown a 2048-entry L2 TLB, and every structure now pays for a page walk it did not pay for
+before. <code>PerfectHashIndex</code> is the one that misses at every size (0.195 at 100 000), its 5.2 MB arena
+being spread over more pages than the TLB holds to begin with.</p>
+<p><strong>The Python table is worse than any of this, and it is worth saying where.</strong> <code>bench/compare.py</code>
+was run twice from clean trees of the same commit on this machine, hours and a reboot apart, with
+the same word list and byte-identical probes. Every lane moved: 1.27× on the slow rows, 2.2× on the
+fast ones, and the empty Python call that no library can influence went 49 → 86 ns. Both runs are
+internally tight — five passes within 2 % of each other in each — and the Rust ladders above
+reproduced across the same span to within a few per cent, so it is neither noise nor the machine
+but something in one process's heap that the next one does not repeat. The ordering held: of
+fourteen rows, only two adjacent pairs swapped, and both pairs were inside each other's spread
+already. Read that table as a ranking with sizes attached, not as a stopwatch reading —
+<code>bench/reproduce.sh</code> prints the call floor beside the published one for exactly this reason.</p>
+<p>What survives all of it is the ordering. At all three probe counts the six bootstrap intervals are
+disjoint and in the same order, which is what a frontier table claims and all it claims. The
+absolute nanoseconds belong as much to the harness as to the structure: <code>bench/compare.py</code> draws
+100 000 probes, so that is the column its published numbers sit in, and a lookup time quoted without
+its probe set is half a number.</p>
+<p><sub>Measured 2026-09-12 on a clean tree
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/stats-2026-09-12-arz-386b2e6.txt"><code>bench/results/stats-2026-09-12-arz-386b2e6.txt</code></a>,
+which carries all thirty samples of every row), Ryzen 7 5800HS. Counters are <code>perf stat -r 3</code> over
+100 passes minus a build-only control, so the build's own cycles and faults stay out of the lookup's
+— at 20 passes a 30 ns lane's difference sat inside the build's own run-to-run noise;
+in those runs every structure is built but only one is probed, which is the <em>kinder</em> case — the
+table above has six rotating through the cache.</sub></p>
+<h2 id="scaling-to-millions-of-keys">Scaling to millions of keys<a class="headerlink" href="#scaling-to-millions-of-keys" title="Permanent link">&para;</a></h2>
+<p><code>python bench/scale.py</code> on real high-entropy keys (dictionary-word bigrams). Build time and memory grow
+linearly, lookups stay sub-microsecond, and <code>CompactHashIndex</code>'s <strong>1.26 bytes/key holds constant</strong> as
+<code>n</code> grows. Each row is measured twice: handing the constructor a <strong>list</strong> of keys, and handing it a
+<strong>generator</strong>. The second is what <code>CompactHashIndex</code>'s streaming build exists for — it keeps a
+16-byte pair per key and drops the string — and it is the only way to see the index's own footprint
+rather than the corpus's:</p>
+<table>
+<thead>
+<tr>
+<th>n</th>
+<th>structure</th>
+<th>keys</th>
+<th style="text-align: right;">build</th>
+<th style="text-align: right;">bytes/key</th>
+<th style="text-align: right;">peak RSS</th>
+<th style="text-align: right;">lookup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 M</td>
+<td><code>StringIndex</code></td>
+<td>list</td>
+<td style="text-align: right;">0.33 s</td>
+<td style="text-align: right;">0.68*</td>
+<td style="text-align: right;">155 MB</td>
+<td style="text-align: right;">188 ns</td>
+</tr>
+<tr>
+<td>1 M</td>
+<td><code>StringIndex</code></td>
+<td>generator</td>
+<td style="text-align: right;">0.48 s</td>
+<td style="text-align: right;">0.68*</td>
+<td style="text-align: right;">147 MB</td>
+<td style="text-align: right;">187 ns</td>
+</tr>
+<tr>
+<td>1 M</td>
+<td><code>CompactHashIndex</code></td>
+<td>list</td>
+<td style="text-align: right;">0.09 s</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">145 MB</td>
+<td style="text-align: right;">78 ns</td>
+</tr>
+<tr>
+<td>1 M</td>
+<td><code>CompactHashIndex</code></td>
+<td><strong>generator</strong></td>
+<td style="text-align: right;">0.20 s</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;"><strong>78 MB</strong></td>
+<td style="text-align: right;">79 ns</td>
+</tr>
+<tr>
+<td>10 M</td>
+<td><code>StringIndex</code></td>
+<td>list</td>
+<td style="text-align: right;">4.4 s</td>
+<td style="text-align: right;">2.00*</td>
+<td style="text-align: right;">1108 MB</td>
+<td style="text-align: right;">703 ns</td>
+</tr>
+<tr>
+<td>10 M</td>
+<td><code>StringIndex</code></td>
+<td>generator</td>
+<td style="text-align: right;">6.0 s</td>
+<td style="text-align: right;">2.00*</td>
+<td style="text-align: right;">1032 MB</td>
+<td style="text-align: right;">637 ns</td>
+</tr>
+<tr>
+<td>10 M</td>
+<td><code>CompactHashIndex</code></td>
+<td>list</td>
+<td style="text-align: right;">0.66 s</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;">952 MB</td>
+<td style="text-align: right;">242 ns</td>
+</tr>
+<tr>
+<td>10 M</td>
+<td><code>CompactHashIndex</code></td>
+<td><strong>generator</strong></td>
+<td style="text-align: right;">1.9 s</td>
+<td style="text-align: right;">1.26</td>
+<td style="text-align: right;"><strong>264 MB</strong></td>
+<td style="text-align: right;">244 ns</td>
+</tr>
+</tbody>
+</table>
+<p><sub>Measured on 2.0.0
+(<a href="https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-09-10-arz-16c7abe-dirty.json"><code>bench/results/scale-2026-09-10-arz-16c7abe-dirty.json</code></a>
+— the tree of 16c7abe plus the release's own edits, none of them in a measured path), one process
+per cell and the <strong>minimum of five</strong> per cell, on a machine idle throughout (load 0.4–1.0 at both
+ends). <code>StringIndex</code>, whose build and lookup code has not changed since 0.5.1 and is therefore
+the control, reads the 1.1.0 table back within its noise: 0.34 → 0.33 s and 0.47 → 0.48 at 1 M,
+4.4 and 6.0 s at 10 M unchanged, lookups 195 → 188 and 655 → 703 ns. Against that flat control,
+<code>CompactHashIndex</code>'s builds fell — 0.11 → 0.09 s and 0.22 → 0.20 at 1 M, <strong>0.91 → 0.66 s</strong> and
+2.1 → 1.9 at 10 M — and the generator build's peak at 10 M fell 297 → 264 MB: the slots computed on
+every thread, a fingerprint written as one store, and the spill in slabs, which are 2.0's build
+changes. Its blob stays 1.26 B/key at both sizes, and its lookups hold (75 → 78 and 271 → 242 ns,
+inside what a per-call Python loop resolves).</sub></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      MIT-licensed · a Rust core (FST + minimal perfect hash) with Python bindings
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
