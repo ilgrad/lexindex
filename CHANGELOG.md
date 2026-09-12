@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Read scaling across threads, measured.** Every index is immutable once built, so one
+  `load_mmap` is shared by reference and answers from every core with no lock, no copy and no
+  per-thread instance — an unclaimed property until now, because nobody had run the ladder. On ten
+  million Wikipedia titles, eight cores give **6.7–7.9×** and sixteen hardware threads 8.7–13.2×,
+  the SMT row being worth having because a point lookup is a chain of dependent loads and a second
+  thread fills the stalls. `StringIndex` scales best (13.2×) for the same reason it is slowest on
+  one thread: a transducer walk is nothing but dependent misses, and two cores have twice the
+  memory-level parallelism one has. `CompactHashIndex` saturates first, at 8.7×, having run out of
+  something other than cores — 268 M lookups a second over an index that fits in L3.
+
 - **What a cold mapping costs, measured for the first time.** Every size this project publishes is
   the blob on disk, and the number that decides whether an index fits a container limit is the
   resident set. `local/coldmmap` drops a file's page cache with `posix_fadvise`, maps it, and reads

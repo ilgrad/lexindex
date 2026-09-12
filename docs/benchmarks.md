@@ -367,6 +367,49 @@ this file's page cache was dropped and not that the machine was short of memory
 which also carries the million-key run and the `uuid` one). `MADV_RANDOM` is applied by the harness
 through `/proc/self/maps`; `load_mmap` does not set it, and on this evidence should not.</sub>
 
+### One mapping, many readers
+
+Every index here is immutable once built. A reader needs no lock, no copy and no per-thread
+instance: one `load_mmap` is shared by reference and answers from as many threads as there are
+cores. `local/readscale` is whether that is near-linear — 8 Mi random member probes split evenly,
+the mapping warmed first so this measures the structure and not page faults, the ladder run three
+times and the best kept per thread count.
+
+Ten million English Wikipedia titles, nanoseconds a lookup with the speedup over one thread:
+
+| threads | `DictIndex` 128 | `CompactHashIndex` | `StringIndex` |
+|---|---:|---:|---:|
+| 1 | 630 | 32.6 | 813 |
+| 2 | 323 (1.95×) | 17.8 (1.83×) | 401 (2.03×) |
+| 4 | 163 (3.87×) | 9.3 (3.51×) | 199 (4.08×) |
+| 8 | 84 (7.48×) | 4.9 (6.71×) | 103 (7.93×) |
+| 16 | 56 (11.36×) | 3.7 (8.72×) | 61 (13.23×) |
+| **M lookups/s at 16** | **18.0** | **267.9** | **16.3** |
+
+**Eight cores give 6.7–7.9×**, which is 84–99 % of them, and this is a mobile part whose clock falls
+as cores light up — the number already carries that, so a machine with a flatter boost curve can
+only do better.
+
+**The sixteen-thread row is SMT and it is worth having.** 8.7–13.2× over one thread, well past the
+eight physical cores, because a point lookup is a chain of dependent loads and a core spends most of
+it waiting. A second thread on the same core fills those stalls with someone else's work.
+
+**`StringIndex` scales best because it stalls most** — 2.03× on two threads and 13.23× on sixteen.
+One core can only keep a handful of cache misses in flight; two cores have twice the
+memory-level parallelism, and a transducer walk is nothing but dependent misses. The same effect at
+100 000 keys is stronger still (2.27× and 12.99×).
+
+**`CompactHashIndex` saturates first**, at 8.72×, and it is the one structure that has run out of
+something other than cores: 268 M lookups a second over a 12.6 MB index that fits this machine's
+16 MB L3, at 3.7 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
+this one does not.
+
+<sub>Measured 2026-09-12 on a clean tree
+([`bench/results/readscale-2026-09-12-arz-694ee95.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-09-12-arz-694ee95.txt),
+which carries the million-key ladder as well), Ryzen 7 5800HS, 8 cores and 16 hardware threads.
+Shared by `&index` across `std::thread::scope`; no index is cloned and none is rebuilt per
+thread.</sub>
+
 ### `rsmarisa`, the pure-Rust port
 
 The same question in Rust, where `marisa-trie` is a C++ library with no binding a Rust project would
