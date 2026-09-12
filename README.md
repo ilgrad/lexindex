@@ -44,8 +44,8 @@ but stands on its own.
   keys front-coded in blocks of 32, the suffixes under a symbol table trained on the index itself:
   **3.52 bytes/key**, 41 % below `StringIndex`, `id` 314–337 ns against its 346–363, `key_into`
   173–176 against its `key` at 504–521. A prefix is a range here, not an automaton walk, so
-  `prefix_count` is two order lookups — **351 ns where `marisa-trie` must enumerate every match to
-  count it (127 657)**. Blocks of 128 store **2.89 bytes/key, under `marisa-trie` at every setting it
+  `prefix_count` is two order lookups — **338 ns where `marisa-trie` must enumerate every match to
+  count it (122 247)**. Blocks of 128 store **2.89 bytes/key, under `marisa-trie` at every setting it
   has**, for a slower reverse lookup. Exact queries, every id back to its key, small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
   hash plus a fingerprint per key, *no keys stored*. **1.26 bytes/key** on real words — **2.4× below

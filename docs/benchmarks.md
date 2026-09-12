@@ -437,33 +437,43 @@ A prefix is a range of a sorted dictionary, so `DictIndex` answers one without a
 puts that against the tries a Python project can install, on the same words — 20 000 three-byte
 prefixes drawn from random words, so the average prefix carries 763 keys.
 
-| | bytes/key | `prefix_count` | first 10 | every match |
-|---|---:|---:|---:|---:|
-| **lexindex `DictIndex` 32** | 3.52 | **351 ns** | **1 864 ns** | 102 397 ns |
-| **lexindex `DictIndex` 128** | **2.89** | 529 | 2 435 | 101 673 |
-| lexindex `StringIndex` | 5.95 | 580 | 4 712 | 179 540 |
-| `marisa-trie` | 2.98 | 127 657 | 2 773 | 100 990 |
-| `dawg2` | 23.96 | 74 989 | 1 659 | 54 070 |
-| `datrie` | 30.69 | 781 966 | 779 331 | 765 096 |
+| | bytes/key | `prefix_count` | first 10 | every match + ids | keys only |
+|---|---:|---:|---:|---:|---:|
+| **lexindex `DictIndex` 32** | 3.52 | **338 ns** | 1 759 ns | 103 089 ns | 71 915 ns |
+| **lexindex `DictIndex` 128** | **2.89** | 511 | 2 348 | 103 716 | 70 566 |
+| lexindex `StringIndex` | 5.95 | 579 | 4 608 | 165 623 | 338 080 |
+| `marisa-trie` | 2.98 | 122 247 | 2 632 | 97 821 | 93 355 |
+| `dawg2` | 23.96 | 67 832 | **1 538** | **49 276** | **49 335** |
+| `datrie` | 30.69 | 723 692 | 731 251 | 735 884 | 729 880 |
 
 **Counting is where the structures differ in kind rather than by a constant.** `prefix_count` costs
-two order lookups whatever the prefix carries, so it runs 242× faster than marisa's at block 128 and
-364× at the default — marisa has to enumerate all 763 matches to count them, its ids not being
+two order lookups whatever the prefix carries, so it runs 239× faster than marisa's at block 128 and
+362× at the default — marisa has to enumerate all 763 matches to count them, its ids not being
 lexicographic ranks, so there is no arithmetic to do instead. At the block size that goes under
-marisa on *size*, `DictIndex` is also ahead on autocomplete (2 435 ns against 2 773) and level on
-full enumeration — while handing back each match's rank, which marisa has none to give.
+marisa on *size*, `DictIndex` is also ahead on autocomplete (2 348 ns against 2 632) and on handing
+back a prefix's keys (70 566 against 93 355) — with a rank for each, which marisa has none to give.
 
-`dawg2` enumerates about twice as fast at 8.3× the bytes, with no reverse lookup and no mmap: a
+**Those keys come fastest through the id range, which inverts what this page said until 2026-09-12.**
+`prefix_id_range` and then `keys_of` costs 70 566 ns at 128 per block, against 103 716 for `prefix`,
+which decodes an id for every match as well. `keys_of` used to re-enter the block for every id and
+was the *slower* of the two by 2.1×; it now keeps one walk open across the ids that ascend through a
+block, which is exactly the shape an id range hands it. The inversion is `DictIndex`-only:
+`StringIndex` has no block to stay inside, its `keys_of` walks the transducer once per id, and
+`prefix` is still the API for this query there (165 623 against 338 080).
+
+**The last two columns are this benchmark's error bar as well as a result.** A trie has no ids to
+return, so for `marisa-trie`, `dawg2` and `datrie` they are one call measured twice — and they come
+out 4.8 %, 0.1 % and 0.8 % apart. Nothing narrower than that is a finding here: `DictIndex` at 32
+against 128 on full enumeration (103 089 against 103 716) is one such non-difference, while the 1.32×
+over marisa on keys alone is well outside it.
+
+`dawg2` enumerates about 1.4× faster at 8.3× the bytes, with no reverse lookup and no mmap: a
 different point on the curve, not a smaller one. `datrie` is a double-array built for point lookups;
 prefix walking is not what it is for.
 
-One finding rather than a result: going through `prefix_id_range` and then `keys_of` is *slower*
-than `prefix` (135 595 ns at block 32, 218 542 at 128), because `keys_of` re-enters the block for
-every id while `prefix` walks the run once. `prefix` is the API for this shape of query.
-
-<sub>Measured 2026-09-11
-([`bench/results/prefix-2026-09-11-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-2026-09-11-arz.txt)),
-`marisa-trie` 1.3, `dawg2`, `datrie` over the same word list, Ryzen 7 5800HS, load about 1.3. None
+<sub>Measured 2026-09-12, the minimum over three clean-tree runs
+([`bench/results/prefix-2026-09-12-arz-91af71d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-2026-09-12-arz-91af71d.txt)),
+`marisa-trie` 1.3, `dawg2`, `datrie` over the same word list, Ryzen 7 5800HS, load 1.2–2.1. None
 of the three is a lexindex dependency — reproduce in a throwaway environment.</sub>
 
 ## Common-prefix queries — the other direction

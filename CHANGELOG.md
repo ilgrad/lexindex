@@ -53,6 +53,20 @@ All notable changes to this project are documented here. The format follows
   277 → 281 at 200 k — where the index is 0.6 MB, nothing stalls, and there is nothing to hide.
   Prefetching the *heads* as well was tried and measured 7 % slower; it is not in the code.
 
+- **`DictIndex::keys_of` walks a block once for the ids that ascend through it.** It called `key`
+  per id, and `key` re-enters the block at its head and decodes forward to the entry, so a run of ids
+  inside one block decoded the same prefix chain again for every one of them. A cursor now stays open
+  while the next id is in the same block and above the current one — which is exactly the shape
+  `prefix_id_range` hands it — and falls back to `key` for anything else, so an arbitrary order is
+  answered as before and a test pins both against `key` over shuffled, reversed and repeated ids.
+  Measured over 20 000 three-byte prefixes on 479 823 words, 763 matches each: a prefix's keys through
+  `prefix_id_range` + `keys_of` go **135 595 → 71 915 ns** at 32 per block and **218 542 → 70 566** at
+  128. That makes the id range the fastest way to enumerate a prefix here, ahead of `prefix` itself
+  (103 716 ns, and it decodes an id for every match) and of `marisa-trie` (93 355) — the reverse of
+  what `docs/benchmarks.md` recorded, which is corrected with the new artifact behind it. The columns
+  the change cannot touch moved by up to 8 % between the two runs, the extension having been rebuilt
+  in between, so the 1.9× and 3.1× are not that.
+
 - **A `DictIndex` encodes its blocks on every core.** Once the symbol table is fixed a block depends
   on nothing outside itself, so contiguous ranges of blocks go to their own threads
   (`std::thread::scope`, no new dependency) and the parts are concatenated in order. The bytes do
