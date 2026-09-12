@@ -247,23 +247,25 @@ turns out to be the only row a reader can carry to their own corpus without meas
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.81 | 7.71 | 7.62 | 17.74 | 7.52 | 7.56 | 7.71 |
-| `domains` | 13.8 | 0.26 | 1.26 | 5.10 | 5.03 | 5.00 | 10.50 | 4.81 | 4.87 | 4.99 |
-| `idents` | 17.3 | 0.26 | 1.26 | 7.35 | 7.28 | 7.22 | 10.55 | 5.45 | 5.62 | 5.74 |
-| `numeric` | 5.9 | 0.26 | 1.26 | 2.17 | 2.12 | 2.07 | 0.00 | 1.62 | 1.64 | 1.72 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.87 | 13.82 | 13.79 | 21.44 | 18.23 | 18.82 | 19.04 |
-| `paths` | 125.0 | 0.26 | 1.26 | 16.35 | 15.89 | 16.13 | 17.48 | 9.26 | 9.47 | 9.60 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 9.63 | 9.58 | 9.43 | 17.28 | 7.79 | 8.19 | 8.37 |
-| `titles-ru` | 35.8 | 0.26 | 1.26 | 12.29 | 12.06 | 12.07 | 31.75 | 8.07 | 8.61 | 8.77 |
-| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.81 | 8.79 | 8.75 | 17.52 | 6.33 | 6.54 | 6.70 |
-| `urls` | 52.4 | 0.26 | 1.26 | 11.62 | 11.41 | 11.34 | 16.88 | 7.95 | 8.39 | 8.58 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.57 | 20.46 | 20.33 | 37.11 | 32.93 | 34.58 | 34.80 |
+| `dna` | 24.0 | 0.26 | 1.26 | 7.81 | 7.70 | 7.62 | 17.74 | 7.52 | 7.56 | 7.71 |
+| `domains` | 13.8 | 0.26 | 1.26 | 5.08 | 5.01 | 4.95 | 10.50 | 4.81 | 4.87 | 4.99 |
+| `idents` | 17.3 | 0.26 | 1.26 | 7.34 | 7.27 | 7.21 | 10.55 | 5.45 | 5.62 | 5.74 |
+| `numeric` | 5.9 | 0.26 | 1.26 | 2.18 | 2.12 | 2.08 | 0.00 | 1.62 | 1.64 | 1.72 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.87 | 13.82 | 13.78 | 21.44 | 18.23 | 18.82 | 19.04 |
+| `paths` | 125.0 | 0.26 | 1.26 | 16.34 | 15.92 | 15.60 | 17.48 | 9.26 | 9.47 | 9.60 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 9.63 | 9.54 | 9.48 | 17.28 | 7.79 | 8.19 | 8.37 |
+| `titles-ru` | 35.8 | 0.26 | 1.26 | 12.28 | 12.11 | 11.94 | 31.75 | 8.07 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.80 | 8.75 | 8.69 | 17.52 | 6.33 | 6.54 | 6.70 |
+| `urls` | 52.4 | 0.26 | 1.26 | 11.56 | 11.37 | 11.22 | 16.88 | 7.95 | 8.39 | 8.58 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.56 | 20.45 | 20.38 | 37.11 | 32.93 | 34.58 | 34.80 |
 
 <sub>`words` and `pypi` have no million-key file; their 100 000 grid, every build time, and the
 100 000 rows for the rest are in
 [`bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json)
 (the tree is the commit; what was uncommitted is the pages being re-measured and the result files
-this run wrote).</sub>
+this run wrote). The three `DictIndex` columns were measured again at `40ca73d`, when the symbol
+table's training changed ([`bench/results/dict-train-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-train-2026-09-12-arz-40ca73d.txt)); every other column is the sweep's, and a size is exact, so the
+two agree cell for cell wherever the builder did not move.</sub>
 
 **Where `marisa-trie` wins, it wins on shared structure.** It is the smallest key-storing structure
 on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.72× on
@@ -272,10 +274,10 @@ on `urls`, 1.33× on `idents` — and within 4 % on `dna` and `domains` (1.01× 
 what a LOUDS trie is for, and front coding in fixed blocks does not answer it.
 
 **Where lexindex wins, it wins on entropy.** `DictIndex` is the smaller of the two on `opaque`
-(13.79 against 18.23, 1.32×) and on `uuid` (20.33 against 32.93, 1.62×) — keys with nothing to
+(13.78 against 18.23, 1.32×) and on `uuid` (20.38 against 32.93, 1.62×) — keys with nothing to
 share, where a trie pays for a node per character and front coding pays for a prefix that is not
 there. On `words`, the corpus every table above is measured on, `DictIndex` at its default block is
-3.48 against marisa's 3.70 at 100 000 keys, and 2.85 against 2.96 on the full 479 823. That is a
+3.49 against marisa's 3.70 at 100 000 keys, and 2.85 against 2.96 on the full 479 823. That is a
 real result on a real corpus, and it is not the general case: it is the favourable end of a
 distribution whose other end is `paths`.
 
@@ -318,12 +320,13 @@ smaller and 2.9× slower to answer and 4.3× slower to build.
 
 **The block is a smaller knob than it was.** A lookup scans one restart a microblock and then one
 microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −6 % (`dna`) to +16 %
-(`numeric`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.06–0.28 bytes a key
-over 128 — but on `paths` 1024 stores *more* than 256 (16.13 against 15.89). That is not the
-layout, whose per-block arrays only shrink as the block grows; the suspect is the symbol table,
-which trains on whole blocks spread over the index and so on a quarter as many neighbourhoods at
-1024, and `paths` is the corpus whose neighbourhoods differ most. It is not yet measured, and the
-cell stays as it read. 256 is the default the README quotes.
+(`numeric`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.09–0.74 bytes a key
+over 128, every corpus in the same direction. It did not use to be: `paths` at 1024 keys a block
+stored *more* than at 256 (16.13 against 15.89), and the cause was the symbol table rather than the
+layout, whose per-block arrays only shrink as the block grows. The table trained on whole blocks, so
+a larger block bought fewer neighbourhoods — 19 at 1024 against 157 at 128 — and a table trained on
+19 of them is a lottery. A training run is now a constant 256 keys whatever the block, and `paths`
+at 1024 reads 15.60. 256 is the default the README quotes.
 
 <sub>Lookups are one run of three rounds of 20 000 probes a cell, so a column is comparable within
 itself and a cell carries a few per cent: a second run of the same build read the same bytes to the
@@ -333,28 +336,30 @@ last digit and lookups 1–15 % higher on every structure, controls included.</s
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.13 | 7.03 | 6.94 | 15.98 | 6.69 | 6.75 | 6.99 |
-| `numeric` | 6.9 | 0.26 | 1.26 | 2.18 | 2.12 | 2.07 | 0.00 | 1.63 | 1.66 | 1.77 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.44 | 13.39 | 13.35 | 21.47 | 15.19 | 18.33 | 18.68 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 7.95 | 7.92 | 7.93 | 13.25 | 5.57 | 5.71 | 5.87 |
-| `urls` | 52.4 | 0.26 | 1.26 | 9.89 | 9.58 | 9.52 | 13.10 | 5.66 | 5.83 | 5.99 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.97 | 19.86 | 36.07 | 29.97 | 33.21 | 33.56 |
+| `dna` | 24.0 | 0.26 | 1.26 | 7.14 | 7.03 | 6.95 | 15.98 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.26 | 1.26 | 2.20 | 2.14 | 2.09 | 0.00 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.44 | 13.38 | 13.35 | 21.47 | 15.19 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 7.98 | 7.89 | 7.82 | 13.25 | 5.57 | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.26 | 1.26 | 9.78 | 9.58 | 9.42 | 13.10 | 5.66 | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.97 | 19.88 | 36.07 | 29.97 | 33.21 | 33.56 |
 
 Ten times the keys moves every trie and neither hash: at its smallest setting `marisa` goes
 7.79 → 5.57 on `titles-en` and 7.95 → 5.66 on `urls` as the sharing deepens, `DictIndex` at its
-default block 9.58 → 7.92 and 11.41 → 9.58, and the two keyless rows do not move at all. The
+default block 9.54 → 7.89 and 11.37 → 9.58, and the two keyless rows do not move at all. The
 ranking is the same one the million-key table gives, so the answer to "which is smallest" is
 decided by the corpus and not by the scale.
 
-**The block buys almost nothing here.** 128 → 1024 keys a block is 0.02–0.37 bytes a key over these
-six, against 0.06–0.28 at a million, and on `titles-en` 1024 is level with 256 (7.93 against 7.92).
-Ten times the keys is ten times the blocks, so the per-block arrays a bigger block saves were
-already a smaller share of the index; what is left is the coded suffixes, and those are the symbol
-table's business, not the block's.
+**The block buys less here.** 128 → 1024 keys a block is 0.09–0.36 bytes a key over these six,
+against 0.09–0.74 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
+a bigger block saves were already a smaller share of the index; what is left is the coded suffixes,
+and those are the symbol table's business, not the block's — which is why the table is trained on
+runs of a constant length, and why `titles-en` at 1024 reads 7.82 where whole-block training left it
+at 7.93, above its own 256.
 
 <sub>Measured 2026-09-12
 ([`bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json)),
-`marisa-trie` 1.4.1. Two builds per cell, three rounds of 20 000 lookups.</sub>
+`marisa-trie` 1.4.1. Two builds per cell, three rounds of 20 000 lookups. The three `DictIndex`
+columns were measured again at `40ca73d`, when the symbol table's training changed ([`bench/results/dict-train-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-train-2026-09-12-arz-40ca73d.txt)).</sub>
 
 ### A cold mapping, and what is actually resident
 
@@ -368,34 +373,34 @@ Ten million English Wikipedia titles, bytes per key except the latencies:
 
 | structure | file | mapped | after 1 k | after 1 M | cold ns | warm ns |
 |---|---:|---:|---:|---:|---:|---:|
-| `DictIndex` 32 | 8.44 | 0.26 | 5.28 | 8.44 | 42 636 | 530 |
-| `DictIndex` 32, `MADV_RANDOM` | 8.44 | 0.26 | **1.82** | 8.44 | 97 074 | 1 788 |
-| `DictIndex` 256 | 7.92 | 0.05 | 4.62 | 7.92 | 46 285 | 553 |
-| `DictIndex` 256, `MADV_RANDOM` | 7.92 | 0.05 | **0.86** | 7.92 | 111 287 | 1 958 |
-| `DictIndex` 1024 | 7.93 | 0.02 | 4.66 | 7.93 | 43 995 | 538 |
-| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 294** | **47** |
-| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 55 040 | 159 |
-| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 87 117 | 849 |
-| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 368 457 | 3 068 |
+| `DictIndex` 32 | 8.43 | 0.26 | 5.19 | 8.43 | 44 621 | 778 |
+| `DictIndex` 32, `MADV_RANDOM` | 8.43 | 0.26 | **1.81** | 8.43 | 91 361 | 1 944 |
+| `DictIndex` 256 | 7.89 | 0.05 | 4.64 | 7.89 | 46 688 | 700 |
+| `DictIndex` 256, `MADV_RANDOM` | 7.89 | 0.05 | **0.84** | 7.89 | 97 924 | 1 970 |
+| `DictIndex` 1024 | 7.82 | 0.02 | 4.62 | 7.82 | 47 663 | 672 |
+| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 358** | **73** |
+| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 50 162 | 179 |
+| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 93 002 | 1 074 |
+| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 338 490 | 3 160 |
 
 **`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.26 bytes a key
 resident before the first query, which is the header and the little the loader validates. Nothing
 else is read until something asks for it.
 
 **The first thousand queries cost far more pages than they need.** `DictIndex` at 256 ends them with
-4.62 of its 7.92 bytes a key resident — 58 % of an index nobody has finished reading — while the
-same thousand queries under `MADV_RANDOM` leave **0.86**, which is what they actually touch: about
-two pages a lookup, the sample array and the block. The 5.4× between those two numbers is the
-kernel's readahead, and it is buying latency with memory: turning it off costs 2.4× on the cold
-lookups and **3.5× on the warm ones**, because the advice outlives the warm-up. The warm column is
-also where the microblock shows on ten million keys: 1024 a block answers in 538 ns where the
-one-level format took 2 108. Readahead is the
+4.64 of its 7.89 bytes a key resident — 59 % of an index nobody has finished reading — while the
+same thousand queries under `MADV_RANDOM` leave **0.84**, which is what they actually touch: about
+two pages a lookup, the sample array and the block. The 5.5× between those two numbers is the
+kernel's readahead, and it is buying latency with memory: turning it off costs 2.1× on the cold
+lookups and **2.8× on the warm ones**, because the advice outlives the warm-up. The warm column is
+also where the microblock shows on ten million keys: 1024 a block answers in 672 ns where the
+one-level format took 2 108, in a session that read 30 % faster than this one. Readahead is the
 right default here; `MADV_RANDOM` is for the case where a container limit, and not a latency budget,
 is what binds.
 
 **Cold start is where the smallest structure wins outright, and the mechanism is pages.**
-`CompactHashIndex` answers its first thousand queries at **6.3 µs** against `DictIndex`'s 46.3 and
-`StringIndex`'s 87.1 — 7× and 14× — because its whole file is 12.6 MB and a fault brings in a
+`CompactHashIndex` answers its first thousand queries at **6.4 µs** against `DictIndex`'s 46.7 and
+`StringIndex`'s 93.0 — 7× and 15× — because its whole file is 12.6 MB and a fault brings in a
 useful fraction of it. On `uuid`, where its 1.26 bytes a key sit against `DictIndex`'s 20.06 and
 `StringIndex`'s 36.07, the gap is 21× and 39× (5.9 µs against 125.3 and 231.0). A structure that
 stores no keys has no keys to fault in.
@@ -407,7 +412,9 @@ is the steady-state RSS.
 
 <sub>Measured 2026-09-12 on a clean tree, NVMe under LUKS on btrfs, 38 GB RAM — so "cold" means
 this file's page cache was dropped and not that the machine was short of memory
-([`bench/results/coldmmap-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-386b2e6.txt);
+([`bench/results/coldmmap-2026-09-12-arz-40ca73d.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-40ca73d.txt),
+which re-measured the table after the symbol table's training changed and reads about 30 % slower
+than the run before it on both controls, so its latency column is read within itself;
 the million-key run and the `uuid` one are in the earlier
 [`coldmmap-2026-09-12-arz-bb1473c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-bb1473c.txt),
 on the one-level format). `MADV_RANDOM` is applied by the harness

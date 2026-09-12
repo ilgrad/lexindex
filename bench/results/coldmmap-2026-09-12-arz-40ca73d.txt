@@ -1,0 +1,22 @@
+lexindex 2.2-unreleased at 40ca73d, clean tree, 2026-09-12 — local/coldmmap: resident set after 1 000 and 1 000 000 random lookups on a cold mapping, ten million English Wikipedia titles; NVMe under LUKS on btrfs; page cache dropped with POSIX_FADV_DONTNEED
+Linux 7.2.4-200.fc44.x86_64 x86_64, 8 cores / 16 hardware threads, AMD Ryzen 7 5800HS (Zen 3), 38 GB, rustc 1.98.1
+
+# The same table re-measured after the symbol table's training changed (plan item 58): the file
+# it described no longer exists byte for byte. One run. This session reads about 30 % slower than
+# the 386b2e6 one on both controls -- CompactHashIndex warm 73 ns against 47, StringIndex 1 074
+# against 849 -- so the latency columns are to be read within this table, and the sizes, which are
+# exact, against the size tables above.
+
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   8.43      0.26      5.19      8.43   44620.7    777.5     yes
+DictIndex 32 (random)          8.43      0.26      1.81      8.43   91361.2   1944.1     yes
+DictIndex 256                  7.89      0.05      4.64      7.89   46687.6    700.3     yes
+DictIndex 256 (random)         7.89      0.05      0.84      7.89   97923.7   1970.0     yes
+DictIndex 1024                 7.82      0.02      4.62      7.82   47663.3    672.1     yes
+DictIndex 1024 (random)        7.82      0.02      0.97      7.82  132906.9   1904.2     yes
+CompactHashIndex               1.26      0.26      1.25      1.26    6357.8     73.3     yes
+CompactHashIndex (random)      1.26      0.26      0.70      1.26   50162.2    179.0     yes
+StringIndex                   13.25      0.01     10.10     13.25   93001.5   1074.3     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  338489.7   3159.7     yes
