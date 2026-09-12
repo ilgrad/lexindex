@@ -937,6 +937,17 @@ has outgrown a 2048-entry L2 TLB, and every structure now pays for a page walk i
 before. `PerfectHashIndex` is the one that misses at every size (0.185 at 100 000), its 5.2 MB arena
 being spread over more pages than the TLB holds to begin with.
 
+**The Python table is worse than any of this, and it is worth saying where.** `bench/compare.py`
+was run twice from clean trees of the same commit on this machine, hours and a reboot apart, with
+the same word list and byte-identical probes. Every lane moved: 1.27× on the slow rows, 2.2× on the
+fast ones, and the empty Python call that no library can influence went 49 → 86 ns. Both runs are
+internally tight — five passes within 2 % of each other in each — and the Rust ladders above
+reproduced across the same span to within a few per cent, so it is neither noise nor the machine
+but something in one process's heap that the next one does not repeat. The ordering held: of
+fourteen rows, only two adjacent pairs swapped, and both pairs were inside each other's spread
+already. Read that table as a ranking with sizes attached, not as a stopwatch reading —
+`bench/reproduce.sh` prints the call floor beside the published one for exactly this reason.
+
 What survives all of it is the ordering. At all three probe counts the six bootstrap intervals are
 disjoint and in the same order, which is what a frontier table claims and all it claims. The
 absolute nanoseconds belong as much to the harness as to the structure: `bench/compare.py` draws
