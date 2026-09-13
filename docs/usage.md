@@ -330,7 +330,7 @@ tokenizer over its own vocabulary, a join on a key column the index was built fr
 ```python
 from lexindex import DictIndex
 
-# Exact string <-> rank both ways, about 2.9 B/key: the sorted keys front-coded in blocks of 256,
+# Exact string <-> rank both ways, about 2.84 B/key: the sorted keys front-coded in blocks of 256,
 # each cut into microblocks of 32, with the suffixes under a symbol table trained on the index
 # itself. Ordered, so ranges of keys
 # are ranges of ids, and prefix and range fall out of that -- only fuzzy needs an automaton and
@@ -750,7 +750,8 @@ Not in the ABI, each additive when someone asks: `Overlay`, the mmap loaders, th
 
 The crate ships a binary of the same name, so the choice between five indexes can be made without
 writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. It is a
-shell over `plan`, the builders and `inspect_file` and computes nothing of its own.
+shell over `plan`, the builders, `inspect_file` and the indexes' own key iterators, and computes
+nothing of its own.
 
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
@@ -770,7 +771,19 @@ format: BDX2
 bytes: 1361816
 keys: 479823
 arena_bytes: 1306718
+
+$ lexindex dump words.bin | head -3
+A
+A's
+AMD
 ```
+
+`dump` writes the keys a blob holds, one per line, in id order — sorted order for the two ordered
+indexes, construction order for `PerfectHashIndex`, and live keys only for an `Overlay`. It exists
+for one reason: **`lexindex dump old.blob | lexindex build - new.blob` is the migration path** off a
+format a later version stops reading, and it round-trips — rebuilding from a dump reproduces the
+blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
+an error that says so rather than an empty file.
 
 `plan` and `build` take the same five **needs**, which say what the index must be able to do and so
 narrow what may be picked — with none of them the only question asked is `id(key)`, and the two
@@ -805,7 +818,7 @@ built from lossy bytes would hold keys the file does not.
 
 The exit code is `0`, `2` for a command line that does not parse (the usage text follows the
 message), and `1` for work that fails -- a missing file, a blob that is not one, a build the library
-refuses. `lexindex --help` prints the whole surface; three of the five indexes need the `mph`
+refuses, a key with a line break in it that `dump` cannot write as a line. `lexindex --help` prints the whole surface; three of the five indexes need the `mph`
 feature, and a build without it says so rather than pretending.
 
 ## Benchmark

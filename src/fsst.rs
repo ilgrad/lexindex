@@ -3,9 +3,10 @@
 //! one to eight bytes, a one-byte
 //! code for each, and the code `255` followed by the byte itself for what no symbol covers.
 //!
-//! The table is trained once per index over a sample of the pieces it will store, by the encoder's
-//! own parse: five rounds of parse-and-count, each keeping the 255 candidates — the current symbols
-//! and every adjacent pair up to eight bytes — that cover the most bytes. A symbol of three bytes or
+//! The table is trained once per shard of blocks, over a sample of the pieces that shard will
+//! store, by the encoder's own parse: five rounds of parse-and-count, each keeping the 255
+//! candidates — the current symbols and every adjacent pair up to eight bytes — that cover the
+//! most bytes. A symbol of three bytes or
 //! more is accepted only if the encoder's slot for its first three bytes is still free, so every
 //! symbol in the table is one the encoder can reach and a round's counts mean what they say. The
 //! encoder has the reference's shape: per two-byte prefix the best symbol of one or two bytes, and

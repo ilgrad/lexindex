@@ -85,8 +85,9 @@ at either block** — 2.81 B/key and 348 ns at 512, 2.84 and 342 at the default 
 2.96–3.07 and 461–496.
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
-actually install. Research-grade C++ (CoCo-trie, XCDAT, PDT, SuRF) has no bindings to benchmark and
-is not claimed against. **`CompactHashIndex` is the smallest `string → dense id` map here — 2.4×
+actually install. The research-grade C++ frontier (MARISA aside, which is installable) has no
+binding to benchmark here and is not claimed against; it is listed with its papers and licences
+under [the research frontier, cited](#the-research-frontier-cited). **`CompactHashIndex` is the smallest `string → dense id` map here — 2.4×
 below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
 false-positive rate (about `2^-fingerprint_bits` by design — the fingerprint comes from a second hash,
 uncorrelated with the slot hash for well-distributed keys — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
@@ -1124,6 +1125,30 @@ which carries all thirty samples of every row), Ryzen 7 5800HS. Counters are `pe
 — at 20 passes a 30 ns lane's difference sat inside the build's own run-to-run noise;
 in those runs every structure is built but only one is probed, which is the *kinder* case — the
 table above has six rotating through the cache.</sub>
+
+## The research frontier, cited
+
+The tables above measure libraries a Python or Rust project can install. The academic state of the
+art in compressed string dictionaries is research-grade C++ with no such binding, and it is listed
+here rather than claimed against. Each entry says what it is, where the code is, and under what
+licence — the licence matters, because a benchmark harness that vendors GPL or non-commercial code
+is not something this repository can carry.
+
+| Structure | Paper | Code, licence | What it is |
+|---|---|---|---|
+| MARISA | Yata, 2011 (the reference implementation's own notes) | [`s-yata/marisa-trie`](https://github.com/s-yata/marisa-trie), BSD-2-Clause / LGPL-2.1 | recursive nested patricia tries with tail sharing; the one competitor above that *is* installable, as `marisa-trie` on PyPI |
+| PDT | Grossi, Ottaviano, *Fast compressed tries through path decompositions*, JEA 2014 | [`ot/path_decomposed_tries`](https://github.com/ot/path_decomposed_tries), MSR-LA — **non-commercial** | centroid path decomposition, labels vbyte- or csp-coded |
+| FST, SuRF | Zhang et al., *SuRF: Practical range query filtering with fast succinct tries*, SIGMOD 2018 | [`efficient/SuRF`](https://github.com/efficient/SuRF) and [`kampersanda/fast_succinct_trie`](https://github.com/kampersanda/fast_succinct_trie), Apache-2.0 | LOUDS-Dense over LOUDS-Sparse. SuRF is a **filter** with false positives, not a dictionary — it answers membership and range, never `id → key` |
+| XCDAT | Kanda, Morita, Fuketa, *Compressed double-array tries for string dictionaries supporting fast lookup*, KAIS 2017 | [`kampersanda/xcdat`](https://github.com/kampersanda/xcdat), MIT | xor-compressed double-array trie; the fast-lookup end of the space |
+| CoCo-trie | Boffa, Ferragina, Tosoni, Vinciguerra, SPIRE 2022 and *Information Systems* 2024 | [`aboffa/CoCo-trie`](https://github.com/aboffa/CoCo-trie), **GPLv3** | subtries collapsed by a bottom-up optimisation over a pool of integer codes |
+| C² | Zhang, Zhao, Xu, *Cache-conscious succinct tries with adaptive unary path compression*, arXiv:2606.16104, 2026 | [`alexztc/C2`](https://github.com/alexztc/C2), MIT | a cache-conscious layout and an FSST/Re-Pair tail container applied to FST, CoCo and MARISA; ships one harness that builds all of the above |
+| libCSD | Martínez-Prieto, Brisaboa, Cánovas, Claude, Navarro, *Practical compressed string dictionaries*, Information Systems 2016 | [`migumar2/libCSD`](https://github.com/migumar2/libCSD), LGPL-2.1 | front coding (PFC, HTFC), Re-Pair and FM-index dictionaries — **this is `DictIndex`'s lineage**: front coding in blocks with a restart every *k* keys is that paper's PFC |
+| IBiS | Brisaboa, Cerdeira-Pena, de Bernardo, Navarro, *Improved compressed string dictionaries*, CIKM 2019 | [gitlab.lbd.udc.es/gdebernardo/improved-csd](https://gitlab.lbd.udc.es/gdebernardo/improved-csd) | hierarchical front coding with Re-Pair and DACs; the direct descendant of the row above |
+
+Two structures in that list are what `DictIndex` is measured against in spirit: PFC/HTFC, which it
+descends from, and MARISA, which it is benchmarked against throughout this page because it is the
+one with a binding. A direct harness over the C++ implementations — same corpora, same protocol —
+is the next benchmark campaign rather than a claim made here.
 
 ## Scaling to millions of keys
 

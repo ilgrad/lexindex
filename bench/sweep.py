@@ -7,9 +7,10 @@ share, a fingerprint index's does not, and the gap between those two facts is th
 sits at 1.26 on both.
 
 Reads the corpora `bench/corpora.py` builds, at the sizes asked for, and measures each structure's
-serialised bytes per key, its build time, and one lookup. `marisa-trie` appears three times because
+serialised bytes per key, its build time, and one lookup. `marisa-trie` appears five times because
 it is a curve — its own documentation says the right configuration depends on the data, and this
-is the script that can show the data it depends on. `DictIndex` appears at three block sizes for the
+is the script that can show the data it depends on. Its floor is *not* four tries everywhere: on
+keys with long shared prefixes, and on random identifiers, eight and sixteen are smaller. `DictIndex` appears at three block sizes for the
 same reason: the block is a knob, not a constant.
 
 Run:
@@ -50,6 +51,19 @@ def _structures():
         (
             "marisa compact",
             lambda keys: marisa_trie.Trie(keys, num_tries=4, cache_size=marisa_trie.TINY_CACHE),
+            True,
+        ),
+        # Four tries is the smallest marisa on an English word list and was taken for its floor
+        # everywhere. It is not: on keys that share long prefixes the recursion keeps paying off,
+        # and on random identifiers it is worth a third of the blob.
+        (
+            "marisa 8 tries",
+            lambda keys: marisa_trie.Trie(keys, num_tries=8, cache_size=marisa_trie.TINY_CACHE),
+            True,
+        ),
+        (
+            "marisa 16 tries",
+            lambda keys: marisa_trie.Trie(keys, num_tries=16, cache_size=marisa_trie.TINY_CACHE),
             True,
         ),
         ("marisa default", marisa_trie.Trie, True),

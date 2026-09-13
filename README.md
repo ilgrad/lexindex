@@ -27,10 +27,14 @@ but stands on its own.
 | fuzzy · subsequence | ✅ | — | — | — | — |
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
-| zero-copy `load_mmap` | ✅ | ✅ | ✅ | — | ✅ |
+| zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ | — | ✅ |
 | **bytes/key**, 480 k English words | 5.95 | **2.84** | **1.26** · 0.76 at 4 bits | **0.26** | 10.90 |
 | `id`, 1 M word bigrams | 390 ns | 539 ns | 133 ns | the bare perfect hash | 301 ns · `id_unchecked` 72 |
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
+
+<sub>¹ `DictIndex` maps every section but the per-block samples — eight bytes a block, one byte per
+thirty-two keys at the default block — which two binary searches read on every lookup and which are
+therefore read into memory rather than borrowed.</sub>
 
 - **`StringIndex`** — an **ordered** index that is the finite-state transducer
   ([`fst`](https://crates.io/crates/fst)) alone: exact `string ↔ id`, **prefix**, **common prefix**
@@ -67,7 +71,8 @@ but stands on its own.
   token ↔ id map on a hot path.
 
 All five assign dense ids in `[0, n)`, **build deterministically** and **serialise to a flat blob**:
-`save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash to map.
+`save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash to map —
+`DictIndex` mapping everything but its per-block samples, eight bytes a block.
 They are immutable; **`Overlay`** adds and removes keys on `StringIndex`, `CompactHashIndex` and
 `PerfectHashIndex` without a rebuild, keeps every id stable, and folds the edits into a fresh base
 with `compact()`. The other two are absent by design rather than omission: an overlay issues a
@@ -182,7 +187,7 @@ assert_eq!(exact.id("PATCH"), None);
 exact.save("verbs.bmp")?;
 assert_eq!(PerfectHashIndex::load("verbs.bmp")?.id("POST"), Some(id));
 
-// Ordered, the key stored for every id, ~3.2 B/key; prefix and range, no fuzzy.
+// Ordered, the key stored for every id, ~2.84 B/key; prefix and range, no fuzzy.
 let dict = DictIndex::build(verbs)?;
 assert_eq!(dict.id("POST"), Some(2));                  // the sorted rank
 assert_eq!(dict.key(2).as_deref(), Some("POST"));
@@ -300,9 +305,11 @@ whole block-size curve, the prefix queries, and the same nine structures over a 
 thirteen corpora at three scales — where the ranking between `DictIndex` and `marisa-trie` reverses
 with how much the keys share, which one word list cannot show.</sub>
 
-Two claims, scoped to libraries a Python or Rust project can install — research-grade C++ tries
-(CoCo-trie, C², XCDAT, PDT, SuRF) are the published frontier and are cited, not claimed against,
-since none has a binding to benchmark here.
+Two claims, scoped to libraries a Python or Rust project can install. The research-grade C++
+frontier — PDT, SuRF/FST, XCDAT, CoCo-trie, C², and the front-coding line this index descends from
+(libCSD, IBiS) — is cited, not claimed against, since none of it has a binding to benchmark here:
+papers, code and licences are
+[tabled in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited).
 **`CompactHashIndex` is the smallest `string → dense id` map here, 2.4× below `marisa-trie` at the
 default 8-bit fingerprint and 3.9× at 4 bits**, when a bounded false-positive rate is acceptable:
 about `2^-fingerprint_bits` by design, measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over

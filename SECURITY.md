@@ -8,8 +8,9 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 2.1.x | yes |
-| 2.0.x | no — 2.1 is a drop-in upgrade: it reads every blob 2.0 wrote, `BDX1` included |
+| 3.0.x | yes |
+| 2.1.x | no, and the upgrade is not quite drop-in: 3.0 refuses the `BDX1` dictionary 2.1 wrote and says so by name, so that one blob has to be rebuilt; `BIX4`, `BMP7`, `BCH7`, `BCL1`, `OVL2` and `MPH2` load unchanged |
+| 2.0.x | no — the same as 2.1: only its `BDX1` dictionaries need rebuilding |
 | 1.x | no — 2.0 refuses the hash blobs 1.x wrote (the key hash changed), so the fix is to upgrade and rebuild them; `BIX4` loads as it is, and so does an `OVL2` over a `BIX4` base; an `OVL2` over a 1.x hash base is refused with that base |
 | 0.x | no — its blob formats are refused by 1.0 anyway, and the fix is to rebuild |
 

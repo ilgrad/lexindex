@@ -1,11 +1,16 @@
-//! `lexindex`, the command line: price the indexes on a corpus, build one, and say what a blob is.
+//! `lexindex`, the command line: price the indexes on a corpus, build one, say what a blob is, and
+//! read the keys back out of it.
 //!
-//! A shell over `lexindex::plan`, the builders and `lexindex::inspect_file`, which computes nothing
-//! of its own — the ladder `plan` prints is `Plan`'s own `Display`, and `--index auto` builds the
-//! index that ladder puts first. `main` is three lines over `run`, so the argument parsing, the
-//! three subcommands and every error path are reachable from a unit test.
+//! A shell over `lexindex::plan`, the builders, `lexindex::inspect_file` and the indexes' own key
+//! iterators, which computes nothing of its own — the ladder `plan` prints is `Plan`'s own
+//! `Display`, and `--index auto` builds the index that ladder puts first. `main` is three lines
+//! over `run`, so the argument parsing, the four subcommands and every error path are reachable
+//! from a unit test.
 
-use lexindex::{BlobInfo, DictIndex, DictProfile, IndexError, Kind, Needs, StringIndex, plan};
+use lexindex::{
+    BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Overlay, OverlayBase,
+    StringIndex, plan,
+};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -21,10 +26,13 @@ usage:
   lexindex plan    <keys-file> [needs]
   lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [needs]
   lexindex inspect <blob>
+  lexindex dump    <blob>
 
   plan     what every index that answers the needs would weigh, cheapest first
   build    build one index and save it; `--index auto` asks plan and builds the winner
   inspect  what a blob already on disk is, from its header alone
+  dump     the keys a blob holds, one per line, in id order — `dump | build` is the
+           migration path off a format a later version stops reading
 
 needs — what the index must be able to do. They narrow what `plan` ranks and what
 `--index auto` may pick; with none of them the only question asked is `id(key)`:
@@ -73,7 +81,7 @@ fn io_fail(e: std::io::Error) -> Fail {
 /// rather than a silent no-op.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Accepts {
-    /// `inspect`: the blob, and nothing else.
+    /// `inspect` and `dump`: the blob, and nothing else.
     Nothing,
     /// `plan`: the needs.
     Needs,
@@ -325,6 +333,99 @@ fn build_and_save(
     Ok(n)
 }
 
+/// One key and the newline that ends it. A key that contains a line break cannot be written as a
+/// line — a builder would read it back as two keys — so it is an error naming the id rather than a
+/// dump that does not round-trip.
+fn write_key(out: &mut dyn Write, key: &str, id: u64) -> Result<(), Fail> {
+    if key.contains(['\n', '\r']) {
+        return Err(Fail::Failed(format!(
+            "id {id} holds a line break, which one key per line cannot carry"
+        )));
+    }
+    writeln!(out, "{key}").map_err(io_fail)
+}
+
+/// The keys a blob holds, in id order, for the kinds that store them. The point is the round trip:
+/// `lexindex dump old.blob | lexindex build - new.blob` rebuilds an index whose format this version
+/// writes, which is the migration a refused format would otherwise need a special tool for.
+fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
+    let path = &cmd.positional[0];
+    let info = lexindex::inspect_file(path).map_err(|e| Fail::Failed(format!("{path}: {e}")))?;
+    let mut sink = std::io::BufWriter::new(out);
+    let keyless = |what: &str| {
+        Fail::Failed(format!(
+            "{path}: a {what} stores no keys, so there is nothing to dump — the key list it was \
+             built from is the only way back"
+        ))
+    };
+    match info.kind {
+        BlobKind::StringIndex => {
+            for (key, id) in StringIndex::load(path)?.iter() {
+                write_key(&mut sink, &key, id)?;
+            }
+        }
+        BlobKind::DictIndex => {
+            for (key, id) in DictIndex::load(path)?.iter() {
+                write_key(&mut sink, &key, id)?;
+            }
+        }
+        #[cfg(feature = "mph")]
+        BlobKind::PerfectHashIndex => {
+            let index = PerfectHashIndex::load(path)?;
+            for id in 0..index.len() as u32 {
+                let key = index
+                    .key(id)
+                    .ok_or_else(|| Fail::Failed(format!("{path}: id {id} has no key")))?;
+                write_key(&mut sink, key, u64::from(id))?;
+            }
+        }
+        BlobKind::Overlay => dump_overlay(path, &info, &mut sink)?,
+        BlobKind::CompactHashIndex => return Err(keyless("CompactHashIndex")),
+        BlobKind::ClosedHashIndex => return Err(keyless("ClosedHashIndex")),
+        BlobKind::Mphf => return Err(keyless("minimal perfect hash")),
+        #[cfg(not(feature = "mph"))]
+        other => {
+            return Err(Fail::Failed(format!(
+                "{path}: {other:?} needs the `mph` feature, which this build does not have"
+            )));
+        }
+        #[cfg(feature = "mph")]
+        other => return Err(Fail::Failed(format!("{path}: cannot dump a {other:?}"))),
+    }
+    sink.flush().map_err(io_fail)
+}
+
+/// An overlay's live keys, through the loader its base tag names. The base type is a compile-time
+/// parameter, so the tag in the header is what chooses the branch.
+fn dump_overlay(path: &str, info: &BlobInfo, out: &mut dyn Write) -> Result<(), Fail> {
+    let tag = info
+        .overlay
+        .as_ref()
+        .map(|o| o.base_tag)
+        .ok_or_else(|| Fail::Failed(format!("{path}: an overlay without a base tag")))?;
+    let keys = if tag == <StringIndex as OverlayBase>::BASE_TAG {
+        Overlay::<StringIndex>::load_with(path, StringIndex::from_bytes)?.keys()
+    } else {
+        #[cfg(feature = "mph")]
+        if tag == <PerfectHashIndex as OverlayBase>::BASE_TAG {
+            Overlay::<PerfectHashIndex>::load_with(path, PerfectHashIndex::from_bytes)?.keys()
+        } else {
+            return Err(Fail::Failed(format!(
+                "{path}: an overlay over a base tagged {tag} stores no keys of its own to dump"
+            )));
+        }
+        #[cfg(not(feature = "mph"))]
+        return Err(Fail::Failed(format!(
+            "{path}: an overlay over a base tagged {tag} needs the `mph` feature, which this \
+             build does not have"
+        )));
+    };
+    for (id, key) in keys.iter().enumerate() {
+        write_key(out, key, id as u64)?;
+    }
+    Ok(())
+}
+
 fn cmd_inspect(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     let path = &cmd.positional[0];
     let info = lexindex::inspect_file(path).map_err(|e| Fail::Failed(format!("{path}: {e}")))?;
@@ -394,6 +495,7 @@ fn dispatch(
             err,
         ),
         "inspect" => cmd_inspect(&parse(rest, Accepts::Nothing, 1, "inspect <blob>")?, out),
+        "dump" => cmd_dump(&parse(rest, Accepts::Nothing, 1, "dump <blob>")?, out),
         other => Err(Fail::Usage(format!("no such subcommand `{other}`"))),
     }
 }
@@ -694,6 +796,80 @@ mod tests {
         assert!(out.contains("overlay.retired: 1\n"), "{out}");
         assert!(out.contains("base.kind: StringIndex\n"), "{out}");
         assert!(out.contains("base.keys: 2\n"), "{out}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn dump_reads_back_the_keys_every_kind_that_stores_them_holds() {
+        let dir = tmpdir();
+        let text = corpus(300);
+        let keys = keys_file(&dir, &text);
+        let mut sorted: Vec<&str> = text.lines().collect();
+        sorted.sort_unstable();
+        for (index, _kind, block) in named_indexes() {
+            let blob = dir.join(format!("dump-{index}-{}.bin", block.len()));
+            let dest = blob.to_str().unwrap();
+            let mut args = vec!["build", keys.as_str(), dest, "--index", index];
+            args.extend(block.iter().copied());
+            assert_eq!(go(&args, "").0, 0, "{index}");
+            let (code, out, err) = go(&["dump", dest], "");
+            if matches!(index, "compact" | "closed") {
+                assert_eq!((code, out.as_str()), (1, ""), "{index}");
+                assert!(err.contains("stores no keys"), "{index}: {err}");
+                continue;
+            }
+            assert_eq!((code, err.as_str()), (0, ""), "{index}");
+            let dumped: Vec<&str> = out.lines().collect();
+            assert_eq!(dumped.len(), 300, "{index}");
+            // An ordered index dumps in sorted order; the perfect hash dumps in its own id order,
+            // and only the set is promised there.
+            if matches!(index, "dict" | "string") {
+                assert_eq!(dumped, sorted, "{index}");
+            } else {
+                let mut seen = dumped.clone();
+                seen.sort_unstable();
+                assert_eq!(seen, sorted, "{index}");
+            }
+            // The round trip is the point: rebuilding from the dump gives the same blob back.
+            let again = dir.join(format!("again-{index}-{}.bin", block.len()));
+            let back = again.to_str().unwrap();
+            let mut args = vec!["build", "-", back, "--index", index];
+            args.extend(block.iter().copied());
+            assert_eq!(go(&args, &out).0, 0, "{index}");
+            assert_eq!(
+                std::fs::read(&blob).unwrap(),
+                std::fs::read(&again).unwrap(),
+                "{index}: dump | build did not reproduce the blob"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn dump_walks_an_overlay_in_id_order_and_skips_what_was_retired() {
+        let dir = tmpdir();
+        let dest = dir.join("overlay.bin");
+        let mut overlay = lexindex::Overlay::new(StringIndex::build(["a", "b"]).unwrap());
+        overlay.add("c");
+        assert!(overlay.remove("a"));
+        overlay.save(&dest).unwrap();
+        let (code, out, err) = go(&["dump", dest.to_str().unwrap()], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out, "b\nc\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn dump_refuses_what_is_not_a_blob_and_takes_no_options() {
+        let dir = tmpdir();
+        let path = dir.join("junk.bin");
+        std::fs::write(&path, b"not a blob at all").unwrap();
+        let (code, out, err) = go(&["dump", path.to_str().unwrap()], "");
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert!(err.contains("junk.bin: format error"), "{err}");
+        let (code, _, err) = go(&["dump", path.to_str().unwrap(), "--exact"], "");
+        assert_eq!(code, 2);
+        assert!(err.contains("no such option `--exact`"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

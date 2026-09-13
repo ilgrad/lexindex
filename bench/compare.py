@@ -5,8 +5,9 @@ actually reach for (all `pip install`-able): marisa-trie, DAWG, datrie, and the 
 `entity-{i}` sequence. Sequential structured keys collapse the FST to a near-regular automaton and
 report a misleading ~0 bytes/key; only a natural, high-entropy vocabulary measures the real cost.
 
-The modern academic state of the art in *pure compression* (CoCo-trie, XCDAT, PDT, SuRF) is
-research-grade C++ with no Python bindings, so it is cited in the article, not benchmarked here.
+The modern academic state of the art in *pure compression* (PDT, SuRF/FST, XCDAT, CoCo-trie, C²,
+and the front-coding line of libCSD and IBiS) is research-grade C++ with no Python bindings, so it
+is cited in docs/benchmarks.md — with papers and licences — rather than benchmarked here.
 Among installable libraries this measures the axes that matter — build time and **serialised
 size** — and records which *capabilities* each one offers (ordered queries, reverse lookup, and
 crucially whether membership is **exact** or **probabilistic**). Build time is the median of five

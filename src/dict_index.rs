@@ -136,7 +136,7 @@ pub struct DictIndex {
     /// follow it.
     blocks: Offsets,
     /// Where each microblock's own front-coded entries start in `data`, packed the same way. One
-    /// entry per microblock, which at the default block is one per sixteen keys.
+    /// entry per microblock, which at the default block is one per thirty-two keys.
     micros: Offsets,
     data: SharedBytes,
     /// One symbol table per shard of `shard` blocks; the table for block `b` is `tables[b /
@@ -2409,10 +2409,10 @@ impl DictIndex {
         Self::from_shared(SharedBytes::from_owned(std::fs::read(path)?), true)
     }
 
-    /// Memory-map the file and borrow it: the heads, the block data and the two offset arrays
-    /// are read where they lie, and the load touches the header, the symbol table and the
-    /// per-block samples — eight bytes a block, a byte per four keys at the default block, read
-    /// into memory because the search over them opens every lookup (see the field). Skips the
+    /// Memory-map the file and borrow it: the heads, the block data and the three offset arrays
+    /// are read where they lie, and the load touches the header, the symbol tables and the
+    /// per-block samples — eight bytes a block, a byte per thirty-two keys at the default block,
+    /// read into memory because the search over them opens every lookup (see the field). Skips the
     /// payload checksum and the walk over the arrays [`load`](Self::load) makes — the mapped file
     /// is trusted intact, and every access bounds what the arrays say.
     ///

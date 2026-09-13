@@ -1,18 +1,19 @@
 //! A non-decreasing `u64` array as one base every `1 << SHIFT` entries and a narrow delta from it
 //! for each entry, so that reading entry `i` stays two loads and no branch.
 //!
-//! [`DictIndex`](crate::DictIndex) keeps two of these — where each block's head key ends, and
-//! where its entries start. Both grow by one block's worth at a time, so a superblock's entries
-//! sit within a few kilobytes of its base and the delta needs a dozen bits rather than sixty-four.
-//! On the dictionary at the default block that is 12 bytes a block down to 3, which is 0.28 bytes
-//! a key, and it is also why neither array has a four-gigabyte ceiling: the base is a full word.
+//! [`DictIndex`](crate::DictIndex) keeps three of these — where each block's head key ends, where
+//! its restart stream starts, and where each microblock's entries start. Each grows by one block's
+//! or one microblock's worth at a time, so a superblock's entries sit within a few kilobytes of its
+//! base and the delta needs a dozen bits rather than sixty-four. On the dictionary at the default
+//! block the three together are 0.068 bytes a key where one word an entry would be 0.31, and that
+//! is also why none of them has a four-gigabyte ceiling: the base is a full word.
 
 use crate::blob::SharedBytes;
 
 /// Entries under one base, as a shift. A base costs `128 >> SHIFT` bits a block across the two
-/// arrays and a wider superblock spans more bytes, so the delta widens by about a bit each time
-/// the shift goes up: on the dictionary at the default block, shifts 3/4/5/6/7/8 measured
-/// 33/27/25/25/26/27 bits a block for both arrays together. Five and six tie at the floor, and
+/// block-level arrays and a wider superblock spans more bytes, so the delta widens by about a bit
+/// each time the shift goes up: on the dictionary at the default block, shifts 3/4/5/6/7/8 measured
+/// 33/27/25/25/26/27 bits a block for those two together. Five and six tie at the floor, and
 /// six is the one whose bases array is half the size.
 pub(crate) const SHIFT: u32 = 6;
 /// The widest delta a blob may declare. A read is one eight-byte load at a byte offset, so the

@@ -215,9 +215,9 @@ microblock starts, since the one microblock starts where the block does.
 Beside the blocks sit four flat arrays: an eight-byte sample of each head in byte order (`u64`),
 where each head ends, where each block's restart run starts, and where each microblock's entries
 start. The last three are not one word an entry. Each only ever grows, so each keeps one `u64` base
-every 64 entries and a delta of the width the corpus asks for — ten, sixteen and twelve bits on the
-dictionary at the default block. That is 11.5 bytes a block and 1.6 a microblock, **0.147 bytes a
-key and 5 % of the blob**, where the block the default used to be spent 0.348 and 11 %; and it is
+every 64 entries and a delta of the width the corpus asks for — ten, sixteen and thirteen bits on
+the dictionary at the default block. That is 11.5 bytes a block and 1.8 a microblock, **0.100 bytes
+a key and 3.5 % of the blob**, where the block the default used to be spent 0.348 and 11 %; and it is
 also why none of the three has a four-gigabyte ceiling: the base is a full word. A head, a restart run or a microblock is read as the span between two
 entries, and neighbours share a base and the word their deltas are cut from, so the pair costs what
 one entry costs.
@@ -400,9 +400,9 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 (`u64::from_le_bytes`, varints), so there is no alignment requirement — for `PerfectHashIndex` and
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
 and reads only the small MPH structure into memory. `DictIndex` is the same shape: the keys, the block
-data and the two offset arrays are read where they lie, an array entry decoded where it is read, and
+data and the three offset arrays are read where they lie, an array entry decoded where it is read, and
 what the load reads is the header, the symbol tables and the per-block samples — eight bytes a block,
-one byte per four keys at the default block. The samples are read rather than borrowed because two
+one byte per thirty-two keys at the default block. The samples are read rather than borrowed because two
 binary searches over them open every lookup, and the only form of that search that keeps its steps
 out of the branch predictor is the standard library's, which selects with `hint::select_unpredictable`
 over a `u64` slice; a section of a blob is not aligned, and searching the bytes measured 110 ns against
@@ -508,6 +508,13 @@ runs in CI and passed clean across that release, because nothing in the API shra
 half of compatibility that lives in signatures, and the CHANGELOG's "Changed — breaking" section
 catches the half that lives in bytes.
 
+**A new format ships beside a reader for the old one.** 1.0 and 3.0 each refused what the previous
+major wrote, and each cost every user of that format a rebuild. The rule from 3.0 on: a writer
+change lands as a *minor* release whose loader still reads the format the previous one wrote, so
+upgrading never fails on a file; dropping a reader is reserved for a major, and only once
+`lexindex dump` can turn the old blob back into the key list that rebuilds it. `BDX2` is frozen
+under that rule — a `BDX3` would be written by a 3.x that still loads `BDX2`.
+
 The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
 release, not a patch.
@@ -535,7 +542,7 @@ or — never — read it wrong.
 | `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
 | `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
 | `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
-| `BDX2` | 2.2 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
+| `BDX2` | 3.0 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
 

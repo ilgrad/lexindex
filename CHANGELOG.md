@@ -23,8 +23,38 @@ All notable changes to this project are documented here. The format follows
   additive when asked: `Overlay`, the mmap loaders, the automata queries, the fingerprint and
   block knobs of `build`.
 
+- **`lexindex dump <blob>`**, the fourth subcommand: the keys a blob holds, one per line, in id
+  order — sorted order for `StringIndex` and `DictIndex`, construction order for
+  `PerfectHashIndex`, live keys only for an `Overlay`. `lexindex dump old.blob | lexindex build -
+  new.blob` is a migration off any format a later version stops reading, and it round-trips:
+  rebuilding from a dump reproduces the blob byte for byte. The two keyless indexes say so rather
+  than writing an empty file, and a key holding a line break is an error naming its id rather than
+  a line a builder would read back as two keys.
+
 ### Changed
 
+- **A new blob format now ships beside a reader for the old one.** 1.0 and 3.0 each refused what
+  the previous major wrote; from 3.0 on a writer change lands in a *minor* release whose loader
+  still reads the previous format, and dropping a reader is reserved for a major with `lexindex
+  dump` as the published way back. `BDX2` is frozen under that rule. `docs/design.md § Versioning`
+  carries it.
+- **`SECURITY.md` names the supported version.** Its table still said 2.1.x, and promised that 2.1
+  blobs load — 3.0 refuses the `BDX1` dictionary. Now: 3.0.x supported, and the 2.1/2.0 rows say
+  which blob needs a rebuild and which six formats load unchanged.
+- **Stale figures in the docs and the source comments, corrected to what the code does.** The
+  `DictIndex` example in the README quoted 3.2 B/key (the block-32 figure) and `docs/usage.md`
+  2.9, where the default block measures 2.84; `src/offsets.rs` described two packed arrays where
+  there are three, and priced them at the old block; `docs/design.md` gave the per-block
+  directory as 0.147 B/key and 5 % of the blob, the `micro = 16` figure, against 0.100 and 3.5 %
+  measured at 32; the microblock was documented as one per sixteen keys and the symbol table as
+  one per index rather than one per shard; `BDX2` was attributed to 2.2. The README's capability
+  table now carries what `load_mmap` does not borrow — the per-block samples, eight bytes a block.
+- **The research frontier is cited, not just named.** `docs/benchmarks.md` tables PDT, SuRF/FST,
+  XCDAT, CoCo-trie, C² and the front-coding line this index descends from (libCSD, IBiS) with
+  their papers, repositories and licences, and the README and `bench/compare.py` point at it.
+- **`bench/sweep.py` prices marisa at eight and sixteen tries as well.** Four tries is its floor on
+  an English word list and was taken for its floor everywhere; on keys with long shared prefixes,
+  and on random identifiers, the deeper recursion is smaller.
 - **`bench/mphf_vs` measures the function, not the caller's key array.** Its lookup pass read
   each probe key through `keys[order[i]]` — a random 8-byte fetch from an 80 MB array per query,
   one DRAM miss charged to every row alike — and the perfect hash's lookup was published as 29 ns
@@ -243,7 +273,9 @@ All notable changes to this project are documented here. The format follows
 - **Read scaling across threads, measured.** Every index is immutable once built, so one
   `load_mmap` is shared by reference and answers from every core with no lock, no copy and no
   per-thread instance — an unclaimed property until now, because nobody had run the ladder. On ten
-  million Wikipedia titles, eight cores give **6.7–7.9×** and sixteen hardware threads 8.7–13.2×,
+  million Wikipedia titles, eight cores give **6.7–7.9×** and sixteen hardware threads 8.7–13.2×
+  (the run this entry was written from; the ladder was measured again for the published table, which
+  reads 6.7–8.1× and 9.4–13.5× — `docs/benchmarks.md` names that artifact),
   the SMT row being worth having because a point lookup is a chain of dependent loads and a second
   thread fills the stalls. `StringIndex` scales best (13.2×) for the same reason it is slowest on
   one thread: a transducer walk is nothing but dependent misses, and two cores have twice the
