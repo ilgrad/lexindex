@@ -10,9 +10,10 @@
 //! gives is what the symbol table squeezes a suffix into, and that can only be read off a build —
 //! so one build of a 100 000-key sample supplies it, along with the bytes an fst spends per trie
 //! node and the bits the perfect hash spends per key. Scored against the built blob on 23 corpora
-//! of half a million to ten million keys, the [`DictIndex`] estimate lands within **1.4 % median,
-//! 4.5 % at the 90th percentile and 5.1 % at worst**. [`StringIndex`] is looser — 3.5 % median,
-//! 9.6 % at the 90th percentile, and 30 % on a corpus of file paths — because an fst merges equal
+//! of half a million to ten million keys, at each of the three priced blocks, the [`DictIndex`]
+//! estimate lands within **1.4 % median, 4.5 % at the 90th percentile and 5.4 % at worst**.
+//! [`StringIndex`] is looser — 3.4 % median, 9.8 % at the 90th percentile, and 30 % on a corpus of
+//! file paths — because an fst merges equal
 //! suffixes, and how much it merges is a property of the whole key set rather than of a sample of
 //! it. The one family past both is corpora whose mean suffix is about a byte, where the ratio read
 //! from a sample does not carry to full density, and [`Plan`] says so rather than quoting a number
@@ -29,6 +30,16 @@ use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
 
 /// Keys a sample holds. Below this the plan builds the real indexes instead of modelling them.
 const SAMPLE: usize = 100_000;
+
+/// The [`DictIndex`] blocks the plan prices. The block is a knob, not a constant — on an English
+/// word list the three named points of its curve span 2.79 to 3.23 bytes a key — so a ranking that
+/// offered one of them would be answering a question the caller did not ask. Ascending, so that
+/// candidates tying on bytes keep block order in the ladder.
+const DICT_BLOCKS: [usize; 3] = [
+    crate::DictProfile::Fast.block(),
+    crate::DictProfile::Balanced.block(),
+    crate::DictProfile::Compact.block(),
+];
 
 #[cfg(test)]
 thread_local! {
@@ -431,11 +442,24 @@ impl Plan {
         (self.mean_len, self.mean_lcp)
     }
 
-    /// Whether the two cheapest candidates are close enough that the ranking should not be
-    /// trusted over a real build.
+    /// Whether the two cheapest candidates *of different kinds* are close enough that the ranking
+    /// should not be trusted over a real build.
+    ///
+    /// Different kinds, because two `DictIndex` blocks are always within a few per cent of each
+    /// other and warning about that would be warning about every plan: they come off the same
+    /// model, the ladder names both, and picking between them is a speed decision rather than a
+    /// size one. By bytes whatever the [`Objective`] is, since what this doubts is the size
+    /// estimate.
     pub fn close(&self) -> bool {
-        self.estimates.len() > 1
-            && self.estimates[1].bytes as f64 <= self.estimates[0].bytes as f64 * CLOSE
+        let Some(first) = self.estimates.iter().min_by_key(|e| e.bytes) else {
+            return false;
+        };
+        self.estimates
+            .iter()
+            .filter(|e| e.kind != first.kind)
+            .map(|e| e.bytes)
+            .min()
+            .is_some_and(|bytes| bytes as f64 <= first.bytes as f64 * CLOSE)
     }
 
     /// Whether the corpus is one whose suffixes are too short for a sampled symbol-table ratio to
@@ -463,7 +487,12 @@ impl fmt::Display for Plan {
             }
         )?;
         for e in &self.estimates {
-            let mark = if e.kind == best.kind { '*' } else { ' ' };
+            // By block as well as kind: three of these rows are dictionaries.
+            let mark = if (e.kind, e.block) == (best.kind, best.block) {
+                '*'
+            } else {
+                ' '
+            };
             let block = match e.block {
                 Some(b) => format!(" at block {b}"),
                 None => String::new(),
@@ -559,14 +588,24 @@ impl Shape {
     }
 }
 
-/// What one build of the sample measures that no statistic gives.
-struct Sample {
+/// What one build of the sample at one [`DICT_BLOCKS`] entry measures. All three constants move
+/// with the block -- a block of 32 restarts eight times as often as one of 256 and carries eight
+/// times the per-block arrays -- so each priced block gets its own build rather than the default
+/// block's numbers stretched over it.
+struct DictFit {
+    block: usize,
     /// Compressed suffix bytes over raw suffix bytes, from a `DictIndex` of the sample.
     ratio: f64,
     /// The packed per-block arrays, per block.
     per_block: f64,
     /// One symbol table's serialised bytes.
     table: f64,
+}
+
+/// What one build of the sample measures that no statistic gives.
+struct Sample {
+    /// One fit per priced block.
+    dict: [DictFit; DICT_BLOCKS.len()],
     /// What an fst spends on a trie node at the sample's density.
     ///
     /// This is the coarsest number in the plan and it does not get better by fitting. How far an
@@ -587,15 +626,43 @@ struct Sample {
 impl Sample {
     fn of(keys: &[&str]) -> Result<Self, IndexError> {
         let shape = Shape::of(keys);
-        let dict = DictIndex::build_with_block(keys, dict_index::DEFAULT_BLOCK)?;
+        let fst_node =
+            StringIndex::build(keys)?.serialized_len() as f64 / shape.trie_nodes().max(1.0);
+        let mut dict = Vec::with_capacity(DICT_BLOCKS.len());
+        for block in DICT_BLOCKS {
+            dict.push(DictFit::of(keys, &shape, block)?);
+        }
+        Ok(Self {
+            dict: dict
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("one fit a priced block")),
+            fst_node,
+            #[cfg(feature = "mph")]
+            hash_fit: hash_fits(keys)?,
+        })
+    }
+
+    /// The fit for a block, or the nearest priced one. Nothing in the crate asks for a block
+    /// outside [`DICT_BLOCKS`]; the constants move smoothly with it, so the nearest is the best
+    /// answer available rather than an error.
+    fn dict_fit(&self, block: usize) -> &DictFit {
+        self.dict
+            .iter()
+            .min_by_key(|f| f.block.abs_diff(block))
+            .expect("DICT_BLOCKS is never empty")
+    }
+}
+
+impl DictFit {
+    fn of(keys: &[&str], shape: &Shape, block: usize) -> Result<Self, IndexError> {
+        let dict = DictIndex::build_with_block(keys, block)?;
         let [tables, _heads, arrays, data] = dict.section_lens();
         let blocks = keys.len().div_ceil(dict.block()) as f64;
         let entries = (keys.len() - blocks as usize) as f64;
         let restarts = blocks * (dict.block().div_ceil(dict.micro()) - 1) as f64;
-        let raw = suffix_bytes(&shape, entries, restarts);
-        let fst_node =
-            StringIndex::build(keys)?.serialized_len() as f64 / shape.trie_nodes().max(1.0);
+        let raw = suffix_bytes(shape, entries, restarts);
         Ok(Self {
+            block,
             ratio: if raw > 0.0 {
                 (data as f64 - entries) / raw
             } else {
@@ -603,9 +670,6 @@ impl Sample {
             },
             per_block: arrays as f64 / blocks,
             table: tables as f64 / shards_for(keys.len(), dict.block()) as f64,
-            fst_node,
-            #[cfg(feature = "mph")]
-            hash_fit: hash_fits(keys)?,
         })
     }
 }
@@ -694,23 +758,12 @@ pub fn plan_for<S: AsRef<str>>(
     sorted.sort_unstable();
     sorted.dedup();
     let shape = Shape::of(&sorted);
-    let kinds: Vec<Kind> = [
-        Kind::Compact,
-        Kind::Closed,
-        Kind::Perfect,
-        Kind::String,
-        Kind::Dict,
-    ]
-    .into_iter()
-    .filter(|k| k.answers(needs) && k.available())
-    .collect();
-
+    let candidates = candidates(needs);
     let mut estimates = if sorted.len() <= sample_size() {
-        weigh(&sorted, &kinds)?
+        weigh(&sorted, &candidates)?
     } else {
-        let step = sorted.len() / sample_size();
-        let sample: Vec<&str> = sorted.iter().step_by(step).copied().collect();
-        model(&shape, &Sample::of(&sample)?, &kinds)
+        let drawn = sample(&sorted, sample_size());
+        model(&shape, &Sample::of(&drawn)?, &candidates)
     };
     rank(&mut estimates, objective, sorted.len(), shape.mean_len());
     Ok(Plan {
@@ -747,18 +800,64 @@ fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len:
     }
 }
 
+/// Every index the needs allow, as the ladder's rows: one per kind, except [`Kind::Dict`], which
+/// is one per [`DICT_BLOCKS`] entry because its block is a choice and not a default.
+fn candidates(needs: Needs) -> Vec<(Kind, Option<usize>)> {
+    let mut out = Vec::with_capacity(4 + DICT_BLOCKS.len());
+    for kind in [
+        Kind::Compact,
+        Kind::Closed,
+        Kind::Perfect,
+        Kind::String,
+        Kind::Dict,
+    ] {
+        if !kind.answers(needs) || !kind.available() {
+            continue;
+        }
+        if kind == Kind::Dict {
+            out.extend(DICT_BLOCKS.map(|block| (kind, Some(block))));
+        } else {
+            out.push((kind, None));
+        }
+    }
+    out
+}
+
+/// `want` keys spread over the sorted corpus, in order, and exactly `want` of them.
+///
+/// A plain `step_by(n / want)` is a stride rather than a sample, and integer division makes it a
+/// poor one: a corpus of 150 001 keys gets a step of one, so "the sample" is the whole corpus and
+/// the constants are read off a build the size of the real index. The fractional stride
+/// `⌊(i·n + phase) / want⌋` takes `want` keys at any size, and the phase — derived from the corpus
+/// itself, so that a plan over the same keys is still reproducible — stops the draw from landing
+/// on the same offset of every prefix group.
+fn sample<'a>(sorted: &[&'a str], want: usize) -> Vec<&'a str> {
+    let n = sorted.len();
+    if n <= want || want == 0 {
+        return sorted.to_vec();
+    }
+    let ends = crate::blob::hash_bytes(sorted[0].as_bytes())
+        ^ crate::blob::hash_bytes(sorted[n - 1].as_bytes());
+    let phase = (ends ^ n as u64) % n as u64;
+    (0..want as u64)
+        .map(|i| sorted[((i * n as u64 + phase) / want as u64) as usize])
+        .collect()
+}
+
 /// Build every candidate and report what it weighs. What a corpus no larger than the sample gets,
 /// since the sample would be the corpus.
-fn weigh(keys: &[&str], kinds: &[Kind]) -> Result<Vec<Estimate>, IndexError> {
-    let mut out = Vec::with_capacity(kinds.len());
-    for &kind in kinds {
+fn weigh(keys: &[&str], candidates: &[(Kind, Option<usize>)]) -> Result<Vec<Estimate>, IndexError> {
+    let mut out = Vec::with_capacity(candidates.len());
+    for &(kind, at) in candidates {
         let (bytes, block) = match kind {
             Kind::String => (StringIndex::build(keys)?.serialized_len() as u64, None),
-            Kind::Dict => (
-                DictIndex::build_with_block(keys, dict_index::DEFAULT_BLOCK)?.serialized_len()
-                    as u64,
-                Some(dict_index::DEFAULT_BLOCK),
-            ),
+            Kind::Dict => {
+                let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                (
+                    DictIndex::build_with_block(keys, block)?.serialized_len() as u64,
+                    Some(block),
+                )
+            }
             #[cfg(feature = "mph")]
             Kind::Compact => (
                 CompactHashIndex::build(keys, 1)?.serialized_len()? as u64,
@@ -785,16 +884,19 @@ fn weigh(keys: &[&str], kinds: &[Kind]) -> Result<Vec<Estimate>, IndexError> {
 }
 
 /// Price every candidate at `n` from the exact shape and the sample's constants.
-fn model(shape: &Shape, sample: &Sample, kinds: &[Kind]) -> Vec<Estimate> {
-    kinds
+fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -> Vec<Estimate> {
+    candidates
         .iter()
-        .map(|&kind| {
+        .map(|&(kind, at)| {
             let (bytes, block) = match kind {
                 Kind::String => (sample.fst_node * shape.trie_nodes(), None),
-                Kind::Dict => (
-                    dict_bytes(shape, sample, dict_index::DEFAULT_BLOCK),
-                    Some(dict_index::DEFAULT_BLOCK),
-                ),
+                Kind::Dict => {
+                    let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                    (
+                        dict_bytes(shape, sample.dict_fit(block), block),
+                        Some(block),
+                    )
+                }
                 #[cfg(feature = "mph")]
                 Kind::Compact => (line(sample.hash_fit[0], shape.n), None),
                 #[cfg(feature = "mph")]
@@ -816,18 +918,14 @@ fn model(shape: &Shape, sample: &Sample, kinds: &[Kind]) -> Vec<Estimate> {
 
 /// The format as the model: a header, the symbol tables, one head a block stored whole, one byte
 /// an entry, the suffixes the table squeezed, and the packed arrays.
-fn dict_bytes(shape: &Shape, sample: &Sample, block: usize) -> f64 {
+fn dict_bytes(shape: &Shape, fit: &DictFit, block: usize) -> f64 {
     let n = shape.n as f64;
     let blocks = shape.n.div_ceil(block) as f64;
     let entries = n - blocks;
     let restarts = blocks * (block.div_ceil(dict_index::micro_for(block)) - 1) as f64;
-    let data = entries + sample.ratio * suffix_bytes(shape, entries, restarts);
-    let tables = shards_for(shape.n, block) as f64 * sample.table;
-    dict_index::HEADER as f64
-        + tables
-        + blocks * shape.mean_len()
-        + data
-        + sample.per_block * blocks
+    let data = entries + fit.ratio * suffix_bytes(shape, entries, restarts);
+    let tables = shards_for(shape.n, block) as f64 * fit.table;
+    dict_index::HEADER as f64 + tables + blocks * shape.mean_len() + data + fit.per_block * blocks
 }
 
 #[cfg(test)]
@@ -1075,6 +1173,147 @@ mod tests {
                 100.0 * err
             );
         }
+    }
+
+    /// The block is a candidate, not a default: all three are priced, and the ladder marks the one
+    /// that won rather than every row of the kind that won.
+    #[test]
+    fn every_dict_block_is_its_own_candidate() {
+        let keys = corpus(1_500);
+        let plan = plan(&keys, Needs::default().ordered()).unwrap();
+        let dicts: Vec<&Estimate> = plan
+            .estimates()
+            .iter()
+            .filter(|e| e.kind == Kind::Dict)
+            .collect();
+        assert_eq!(dicts.len(), DICT_BLOCKS.len());
+        for e in &dicts {
+            let block = e.block.unwrap();
+            assert!(DICT_BLOCKS.contains(&block), "{block}");
+            let built = DictIndex::build_with_block(&keys, block)
+                .unwrap()
+                .serialized_len() as u64;
+            assert_eq!(e.bytes, built, "at block {block}");
+        }
+        let mut blocks: Vec<usize> = dicts.iter().map(|e| e.block.unwrap()).collect();
+        blocks.sort_unstable();
+        blocks.dedup();
+        assert_eq!(blocks.len(), DICT_BLOCKS.len(), "one row a block");
+
+        let text = plan.to_string();
+        assert_eq!(text.matches('*').count(), 1, "one winner: {text}");
+        for block in DICT_BLOCKS {
+            assert!(text.contains(&format!("at block {block}")), "{text}");
+        }
+    }
+
+    /// The modelled block curve is the one a real build walks: bigger blocks are smaller, and each
+    /// point is within a couple of per cent of the build it predicts.
+    #[test]
+    fn the_model_prices_each_block_within_two_per_cent() {
+        let keys = corpus(20_000);
+        let plan = with_sample(2_000, || {
+            plan_for(&keys, Needs::default().ordered(), Objective::Memory).unwrap()
+        });
+        let mut dicts: Vec<&Estimate> = plan
+            .estimates()
+            .iter()
+            .filter(|e| e.kind == Kind::Dict)
+            .collect();
+        dicts.sort_by_key(|e| e.block);
+        assert_eq!(dicts.len(), DICT_BLOCKS.len());
+        for e in &dicts {
+            assert!(!e.measured);
+            let truth = DictIndex::build_with_block(&keys, e.block.unwrap())
+                .unwrap()
+                .serialized_len() as f64;
+            let err = (e.bytes as f64 - truth) / truth;
+            assert!(
+                err.abs() < 0.02,
+                "block {:?}: {} against {truth} ({:+.1} %)",
+                e.block,
+                e.bytes,
+                100.0 * err
+            );
+        }
+        assert!(
+            dicts.windows(2).all(|w| w[0].bytes > w[1].bytes),
+            "a bigger block stores less: {dicts:?}"
+        );
+    }
+
+    /// The draw takes the size it asked for at any corpus size. A `step_by(n / want)` gives a step
+    /// of one just past `want` -- 150 001 keys would "sample" all 150 001 of them -- and the
+    /// fractional stride is what fixes it.
+    #[test]
+    fn the_sample_is_the_size_it_asked_for() {
+        let keys = corpus(150_001);
+        let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 150_001, "the corpus is distinct");
+
+        let drawn = sample(&sorted, SAMPLE);
+        assert_eq!(drawn.len(), SAMPLE);
+        assert!(drawn.windows(2).all(|w| w[0] < w[1]), "in order, distinct");
+        // Same keys, same draw: a plan over one corpus is reproducible.
+        assert_eq!(drawn, sample(&sorted, SAMPLE));
+        // And the phase is the corpus's, so two corpora of the same size do not draw alike.
+        let other = corpus(150_001)
+            .iter()
+            .map(|k| format!("z{k}"))
+            .collect::<Vec<_>>();
+        let mut theirs: Vec<&str> = other.iter().map(String::as_str).collect();
+        theirs.sort_unstable();
+        let offsets = |ks: &[&str], drawn: &[&str]| -> Vec<usize> {
+            drawn
+                .iter()
+                .map(|k| ks.binary_search(k).unwrap())
+                .take(16)
+                .collect()
+        };
+        assert_ne!(
+            offsets(&sorted, &drawn),
+            offsets(&theirs, &sample(&theirs, SAMPLE))
+        );
+
+        // A corpus no larger than the draw is the draw.
+        assert_eq!(sample(&sorted[..SAMPLE], SAMPLE).len(), SAMPLE);
+    }
+
+    /// Two dictionary blocks are always within a per cent or two of each other, and warning about
+    /// that would be warning about every plan. The doubt is about kinds.
+    #[test]
+    fn two_dict_blocks_are_not_the_close_call() {
+        let estimate = |kind, block, bytes| Estimate {
+            kind,
+            bytes,
+            block,
+            measured: false,
+        };
+        let of = |estimates| Plan {
+            keys: 1_000,
+            mean_len: 10.0,
+            mean_lcp: 4.0,
+            estimates,
+            needs: Needs::default(),
+            objective: Objective::Memory,
+        };
+        let dicts = |blocks: [u64; 3]| {
+            vec![
+                estimate(Kind::Dict, Some(32), blocks[0]),
+                estimate(Kind::Dict, Some(256), blocks[1]),
+                estimate(Kind::Dict, Some(1024), blocks[2]),
+            ]
+        };
+
+        let mut rows = dicts([1_020, 1_010, 1_000]);
+        rows.push(estimate(Kind::String, None, 4_000));
+        assert!(!of(rows).close(), "three blocks of one kind are one answer");
+
+        let mut rows = dicts([1_020, 1_010, 1_000]);
+        rows.push(estimate(Kind::String, None, 1_100));
+        assert!(of(rows).close(), "a second kind inside 1.3x is the warning");
     }
 
     #[test]

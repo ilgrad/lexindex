@@ -486,11 +486,12 @@ What no statistic gives is what a *compressor* will do: the ratio the FSST symbo
 suffix into, the bytes an fst actually spends per trie node once it has merged what it can, and the
 bits the perfect hash spends per key. Those are read off one build of a 100 000-key sample, and
 below that size there is nothing to model — the candidates are built and reported at what they
-weigh. Scored against the built blob on 23 corpora of half a million to ten million keys, the
-`DictIndex` estimate lands within **1.4 % median, 4.5 % at the 90th percentile and 5.1 % at worst**.
+weigh. Scored against the built blob on 23 corpora of half a million to ten million keys, at each
+of the three priced blocks, the `DictIndex` estimate lands within **1.4 % median, 4.5 % at the 90th
+percentile and 5.4 % at worst**.
 
 The two places it does not hold are reported rather than papered over. `StringIndex` is looser —
-3.5 % median, 9.6 % at the 90th percentile, 30 % on a corpus of file paths — because an fst merges
+3.4 % median, 9.8 % at the 90th percentile, 30 % on a corpus of file paths — because an fst merges
 equal suffixes and how much it merges is a property of the whole key set, not of a sample of it: the
 sample sees fewer sharable tails than the corpus has, so the estimate runs high exactly where the
 corpus is most repetitive. And a corpus whose mean suffix is under two bytes — ten million decimal

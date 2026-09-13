@@ -415,8 +415,9 @@ fn note_implied_exact(cmd: &Cmd, err: &mut dyn Write) -> Result<(), Fail> {
 }
 
 fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<(), Fail> {
-    // `plan` prices `DictIndex` at the default block, so a block named alongside `auto` would build
-    // something other than what was quoted. Naming the index is what naming its block goes with.
+    // The plan prices every named `DictIndex` block and ranks them with the rest, so a block
+    // alongside `auto` would ask the planner to choose one and then overrule its answer. Naming the
+    // index is what naming its block goes with.
     if cmd.block.is_some() && cmd.index != Choice::One(Kind::Dict) {
         return Err(Fail::Usage(
             "--block is the DictIndex block size and needs `--index dict`".to_string(),
@@ -445,16 +446,19 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     }
     let (keys, blank) = read_keys(path, stdin)?;
     note_blank(path, blank, err)?;
-    let kind = match cmd.index {
-        Choice::One(k) => k,
+    // The block comes back with the kind: the ladder names one on the winning line, and building
+    // the default block instead would write a blob the quote does not describe.
+    let (kind, block) = match cmd.index {
+        Choice::One(k) => (k, cmd.block),
         Choice::Auto => {
             let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
             note_implied_exact(cmd, err)?;
-            ranked.best().kind
+            let best = ranked.best();
+            (best.kind, best.block)
         }
     };
-    let n = build_and_save(kind, &keys, dest, cmd.block)?;
+    let n = build_and_save(kind, &keys, dest, block)?;
     note_written(kind, n, dest, err)
 }
 
@@ -1140,6 +1144,41 @@ mod tests {
             "the failing line is named: {err}"
         );
         assert!(err.contains("UTF-8"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The ladder prices every `DictIndex` block, marks one, and `--index auto` builds *that*
+    /// block. Below the sample every estimate is a real build, so the blob is the quoted size to
+    /// the byte — which is the whole point of quoting it.
+    #[test]
+    fn an_auto_build_writes_the_block_the_ladder_named() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(3_000));
+        let blob = dir.join("auto.bin");
+        let dest = blob.to_str().unwrap();
+        let (code, out, err) = go(
+            &["build", keys.as_str(), dest, "--ordered", "--reverse"],
+            "",
+        );
+        assert_eq!((code, out.as_str()), (0, ""), "{err}");
+        let marked: Vec<&str> = err.lines().filter(|l| l.starts_with('*')).collect();
+        assert_eq!(marked.len(), 1, "one winner: {err}");
+        assert_eq!(
+            err.lines().filter(|l| l.contains("at block ")).count(),
+            3,
+            "one row a priced block: {err}"
+        );
+        let won = marked[0];
+        assert!(
+            won.contains("DictIndex") && won.contains("at block "),
+            "{err}"
+        );
+        let quoted: u64 = won.split_whitespace().nth(2).unwrap().parse().unwrap();
+        assert_eq!(
+            std::fs::metadata(&blob).unwrap().len(),
+            quoted,
+            "the blob is the line that was marked: {err}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

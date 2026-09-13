@@ -31,8 +31,9 @@ their size comes from. Nothing is required by default, so a bare `plan(keys)` pr
 Past 100 000 keys the three numbers no statistic gives — what the symbol table squeezes a suffix
 into, the bytes an fst spends per trie node, the bits the perfect hash spends per key — come from
 one build of a sample of that size, and each estimate says so in `measured`. Scored against the
-built blob on 23 corpora of half a million to ten million keys, `DictIndex` lands within **1.4 %
-median, 4.5 % at the 90th percentile and 5.1 % at worst**; `StringIndex` within 3.5 / 9.6 / 30.3,
+built blob on 23 corpora of half a million to ten million keys, at each of the three priced
+blocks, `DictIndex` lands within **1.4 % median, 4.5 % at the 90th percentile and 5.4 % at
+worst**; `StringIndex` within 3.4 / 9.8 / 30.5,
 because an fst merges equal suffixes and how much it merges is a property of the whole key set
 rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
 and reported at what they weigh.
@@ -756,23 +757,27 @@ nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
+* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
+  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
+  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
+  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
+* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
+  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
+  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
+  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
-wrote words.bin: DictIndex over 479823 keys, 1361816 bytes (2.84 B/key)
+wrote words.bin: DictIndex over 479823 keys, 1338541 bytes (2.79 B/key)
 
 $ lexindex inspect words.bin
 kind: DictIndex
 format: BDX2
-bytes: 1361816
+bytes: 1338541
 keys: 479823
-arena_bytes: 1306718
+arena_bytes: 1299482
 
 $ lexindex dump words.bin | head -3
 A
@@ -788,34 +793,34 @@ and as a share:
 $ lexindex inspect words.bin --sections
 kind: DictIndex
 format: BDX2
-bytes: 1361816
+bytes: 1338541
 keys: 479823
-arena_bytes: 1306718
+arena_bytes: 1299482
 sections.header: 56 (0.0001 B/key, 0.00 %)
-sections.tables: 7197 (0.0150 B/key, 0.53 %)
-sections.heads: 17380 (0.0362 B/key, 1.28 %)
-sections.samples: 15000 (0.0313 B/key, 1.10 %)
-sections.head_ends: 2592 (0.0054 B/key, 0.19 %)
-sections.block_offsets: 3998 (0.0083 B/key, 0.29 %)
-sections.micro_offsets: 26255 (0.0547 B/key, 1.93 %)
-sections.restart_headers: 13120 (0.0273 B/key, 0.96 %)
+sections.tables: 7209 (0.0150 B/key, 0.54 %)
+sections.heads: 4282 (0.0089 B/key, 0.32 %)
+sections.samples: 3752 (0.0078 B/key, 0.28 %)
+sections.head_ends: 659 (0.0014 B/key, 0.05 %)
+sections.block_offsets: 1128 (0.0024 B/key, 0.08 %)
+sections.micro_offsets: 26255 (0.0547 B/key, 1.96 %)
+sections.restart_headers: 14526 (0.0303 B/key, 1.09 %)
 sections.restart_wide: 0 (0.0000 B/key, 0.00 %)
-sections.restart_codes: 42527 (0.0886 B/key, 3.12 %)
-sections.entry_headers: 464828 (0.9687 B/key, 34.13 %)
+sections.restart_codes: 47075 (0.0981 B/key, 3.52 %)
+sections.entry_headers: 464828 (0.9687 B/key, 34.73 %)
 sections.entry_wide: 5794 (0.0121 B/key, 0.43 %)
-sections.entry_codes: 763069 (1.5903 B/key, 56.03 %)
-sections.total: 1361816 (2.8382 B/key, 100.00 %)
-sections.restarts: 13120
+sections.entry_codes: 762977 (1.5901 B/key, 57.00 %)
+sections.total: 1338541 (2.7897 B/key, 100.00 %)
+sections.restarts: 14526
 sections.entries: 464828
 sections.wide: 2897
 ```
 
 Read it as three groups. The **codes** are the front-coded suffixes under the symbol table, which is
-what the index is for. The **headers** are one byte an entry — a flat 0.97 bytes a key at the
-default block, which on this corpus is a third of the blob and on dense decimal ids is near half of
-it, since there is almost nothing else to store. The **directory** — samples, the three packed
-offset arrays, the block heads — is 3.3 % here and never more than a few per cent, which is worth
-knowing before optimising it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
+what the index is for. The **headers** are one byte an entry — a flat 0.97 bytes a key here, which
+on this corpus is a third of the blob and on dense decimal ids is near half of it, since there is
+almost nothing else to store. The **directory** — samples, the three packed offset arrays, the
+block heads — is 2.7 % at this block and never more than a few per cent, which is worth knowing
+before optimising it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
 The same numbers are on [`DictSections`](https://docs.rs/lexindex/latest/lexindex/struct.DictSections.html)
 for a program that would rather not parse text.
 
@@ -848,9 +853,11 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
-  PerfectHashIndex       5228937 bytes  10.90 B/key    205 ns  estimated
+* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
+  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
+  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
+  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
+  PerfectHashIndex       5229448 bytes  10.90 B/key    205 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
@@ -867,17 +874,19 @@ needs narrow a *choice*, and naming one is not a choice to narrow. The library i
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect` names one instead and skips the plan entirely.
-On the 479 823-word dictionary that is 287.6-287.9 ms against 116.9-117.4 -- `--index auto` pays for
-the planner's 100 000-key sample, which builds all five candidates however the needs narrowed the
-ranking. Below 100 000 keys the plan builds the real indexes rather than modelling them, so an auto
-build there builds the corpus twice; naming the index is how not to.
+On the 479 823-word dictionary that is 307-335 ms against 111-119 over nine alternating runs --
+`--index auto` pays for the planner's 100 000-key sample, which builds every candidate the needs
+left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes
+rather than modelling them, so an auto build there builds every candidate and then the winner again;
+naming the index is how not to.
 
 `--objective` is what the ladder ranks *for*. `memory` is the default and the smallest blob, which
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at 2.78 B/key and `latency` answers `PerfectHashIndex`, which is four times the
-size and a third of the wait.
+answers `DictIndex` at block 1024 and 2.73 B/key, `latency` answers `PerfectHashIndex`, four times
+the size and half the wait, and `balanced` answers the same dictionary at block 32 -- 12 % faster
+for 16 % more space. The block is a candidate of its own, so an objective picks one of those too.
 
 **The nanoseconds are modelled, and of one machine.** `a + b·log2(n / 100 000) + c·mean_len` per
 structure, least-squares fitted to 240 cells timed on this crate's own hardware -- a Ryzen 7 5800HS
@@ -893,9 +902,10 @@ measures 234 and 266. The overhead falls on every candidate, so it moves the num
 ranking -- but do not quote them as your own.
 
 `--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
-1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices
-`DictIndex` at the default block and names it on the line, so a block chosen for the build would
-quietly not be the one that was quoted. Run `plan`, read the block off the ladder, then name both.
+1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices all
+three named blocks as candidates of their own and ranks them with the rest, so a block named beside
+`auto` would ask the planner to choose one and then overrule its answer. `--index auto` builds the
+block on the line it marked; to choose one yourself, read it off the ladder and name both.
 
 `--stream` decides whether the build holds the corpus. With a named `--index` and a keys file --
 never standard input, which cannot be rewound -- `build` feeds the file straight into the streaming

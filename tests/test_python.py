@@ -1460,11 +1460,15 @@ def test_plan_prices_every_index_that_answers_the_question():
     # Two hundred keys is under the sample size, so nothing is modelled: every number is a build.
     assert all(e["measured"] for e in p["estimates"])
     by_kind = {e["kind"]: e for e in p["estimates"]}
-    assert by_kind["DictIndex"]["bytes"] == len(lexindex.DictIndex(keys).to_bytes())
     assert by_kind["StringIndex"]["bytes"] == len(lexindex.StringIndex(keys).to_bytes())
-    assert by_kind["DictIndex"]["block"] == 256
+    # The block is a candidate of its own, so the dictionary is three rows, each the build at its
+    # own block -- and every other kind carries no block at all.
+    dicts = {e["block"]: e for e in p["estimates"] if e["kind"] == "DictIndex"}
+    assert sorted(dicts) == [32, 256, 1024]
+    for block, e in dicts.items():
+        assert e["bytes"] == len(lexindex.DictIndex(keys, block).to_bytes())
     assert [e["block"] for e in p["estimates"] if e["kind"] != "DictIndex"] == [None] * 4
-    assert by_kind["DictIndex"]["bytes_per_key"] == by_kind["DictIndex"]["bytes"] / 200
+    assert dicts[256]["bytes_per_key"] == dicts[256]["bytes"] / 200
     assert p["mean_length"] == 7.0
     assert not p["close"] and not p["thin"]
     assert p["text"].startswith("200 keys, mean length 7.0")

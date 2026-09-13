@@ -49,8 +49,9 @@ All notable changes to this project are documented here. The format follows
   moved. `Latency` ranks by the modelled cost of one `id(key)`; `Balanced` picks whichever
   candidate gives up least on the axis it does worse on. The candidates and their sizes do not
   change with the objective, only the order and so `Plan::best`. On an English word list asked for
-  a reverse lookup, `Memory` answers `DictIndex` at 2.78 bytes a key and `Latency` answers
-  `PerfectHashIndex`, four times the size and a third of the wait. `lexindex plan|build
+  a reverse lookup, `Memory` answers `DictIndex` at 2.73 bytes a key and block 1024, `Latency`
+  answers `PerfectHashIndex`, four times the size and half the wait, and `Balanced` answers the
+  same dictionary at block 32 — 12 % faster for 16 % more space. `lexindex plan|build
   --objective memory|latency|balanced` and Python's `plan(..., objective=...)` reach it, and every
   estimate now carries `nanos`.
 
@@ -103,6 +104,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
+  2.79 against 3.23 bytes a key on an English word list — a spread wider than the gap between some
+  whole indexes — and the ranking hid it by pricing the default, 256, and nothing else. `Fast`
+  (32), `Balanced` (256) and `Compact` (1024) are three rows on the ladder now, each with its own
+  size and modelled latency, `Plan::best` may name any of them, and `lexindex build --index auto`
+  builds the block on the line it marked rather than the default one. Two consequences inside. The
+  sample is fitted per block — the compression ratio, the packed per-block arrays and the symbol
+  table all move with the block, and carrying the default block's constants across read 9.5 % high
+  at 32. And `Plan::close` compares the two cheapest candidates *of different kinds*: two blocks of
+  one index are always within a per cent or two of each other, and warning about that would be
+  warning about every plan. `--block` is still refused alongside `--index auto`, now because
+  naming one would ask the planner to rank the three and then overrule its answer.
+- **The planner draws its sample with a fractional stride instead of `step_by`.** `step_by(n /
+  100_000)` is integer division: at 150 001 keys the step is one, so "the sample" was the whole
+  corpus and every constant was read off a build the size of the real index — and above that a
+  periodic stride over sorted keys lands on the same offset of every prefix group. `⌊(i·n +
+  phase) / want⌋` takes exactly 100 000 keys at any size, with the phase hashed from the corpus's
+  own first and last key so that a plan over the same keys is still the same plan. Measured over
+  23 corpora at all three blocks, the modelled `DictIndex` size is within **1.4 % of the build at
+  the median and 5.4 % at worst** outside the two corpora the plan flags as thin, and the
+  `StringIndex` estimate improves on most of them — `idents` 12.3 % → 0.1 %, `titles-zh` 15.5 % →
+  2.7 %, `paths` 54.9 % → 30.5 %.
 - **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
   they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
   Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
