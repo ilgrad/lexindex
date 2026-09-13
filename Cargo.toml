@@ -69,6 +69,10 @@ mph = []
 mmap = ["dep:memmap2"]
 # Python bindings (PyO3 abi3 extension module); pulls in `mph` + `mmap` for the full API surface.
 python = ["dep:pyo3", "mph", "mmap"]
+# The C ABI (`src/capi.rs`, header `include/lexindex.h`): one opaque handle over the five indexes.
+# `cargo build --release --features capi` exports it from the `cdylib`; `cargo rustc --release
+# --features capi --crate-type staticlib` gives the archive. No dependency.
+capi = ["mph"]
 # The MPH's own size/speed measurements (`mphf::spike`). Off by default because they run for
 # minutes and are `#[ignore]`d, and an ignored test's body still counts against the coverage floor.
 bench-mphf = ["mph"]

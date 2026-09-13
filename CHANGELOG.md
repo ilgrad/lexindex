@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A C ABI**, under the `capi` feature: one opaque `LexindexIndex` handle over the five indexes
+  and fourteen `lexindex_*` functions — open, from bytes, build, save, kind, len, `id`, `ids`,
+  `contains`, `key`, free, and the version, ABI-version and last-error accessors — declared in
+  `include/lexindex.h`, which `cbindgen` generates from `src/capi.rs` and CI regenerates to check.
+  Every fallible call returns a `LexindexStatus`; the message behind a failure is thread-local and
+  read with `lexindex_last_error`. A C caller opens a blob it may not have written, so the kind is
+  a run-time fact and one handle type serves all five: what a kind cannot answer — `key` on the
+  two that store no keys, `contains` on the bare perfect hash — is `LEXINDEX_STATUS_UNSUPPORTED`
+  rather than a missing symbol. `cargo build --release --features capi` exports it from the
+  `cdylib`; `cargo rustc --release --features capi --crate-type staticlib` gives the archive.
+  `examples/capi.c` walks the whole surface and runs in CI against the built library. The ABI has
+  a number of its own, `LEXINDEX_ABI_VERSION`, append-only within a crate major. Not in it, each
+  additive when asked: `Overlay`, the mmap loaders, the automata queries, the fingerprint and
+  block knobs of `build`.
+
 ## [3.0.0] — 2026-09-13
 
 ### Changed

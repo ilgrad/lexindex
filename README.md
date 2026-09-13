@@ -9,7 +9,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22119002.svg)](https://doi.org/10.5281/zenodo.22119002)
 [![Sponsor](https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ilgrad)
 
-**Compact, immutable string ↔ id indexes for huge catalogs**, with a Rust core and Python bindings.
+**Compact, immutable string ↔ id indexes for huge catalogs**, with a Rust core, Python bindings and a C ABI.
 Build once over a set of strings — entity names, document keys, vocabulary terms, cluster labels —
 persist a flat blob, and query it many times, memory-mapped where the structure allows. Pairs with
 [`betula-cluster`](https://github.com/ilgrad/betula-cluster) (string ids ↔ cluster ids, both ways)
@@ -190,6 +190,30 @@ assert_eq!(dict.lower_bound("P"), 2);                  // the "P…" keys are id
 # std::fs::remove_file("verbs.bmp").ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
+
+## C
+
+Under the `capi` feature the same five indexes are one opaque handle behind fourteen `lexindex_*`
+functions, declared in [`include/lexindex.h`](include/lexindex.h):
+
+```c
+#include "lexindex.h"
+
+const char *keys[] = {"cherry", "apple", "banana", "apricot"};
+size_t lens[] = {6, 5, 6, 7};
+LexindexIndex *index = NULL;
+lexindex_index_build(LEXINDEX_KIND_DICT, keys, lens, 4, &index);
+
+uint64_t id;
+lexindex_index_id(index, "banana", 6, &id);            /* 2 — the sorted rank */
+char key[16]; size_t len;
+lexindex_index_key(index, 0, key, sizeof key, &len);   /* "apple" */
+lexindex_index_free(index);
+```
+
+Every fallible call returns a `LexindexStatus`, zero on success, with the message behind a failure
+in `lexindex_last_error()`. `cargo build --release --features capi` builds the shared library with
+the symbols; `examples/capi.c` walks the whole surface and [usage](docs/usage.md#c) has the rules.
 
 ## Design notes
 

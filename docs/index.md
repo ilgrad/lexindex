@@ -60,7 +60,7 @@ crate.
 
 ## What's here
 
-- **[Usage guide](usage.md)** — every interface with runnable Python and Rust snippets.
+- **[Usage guide](usage.md)** — every interface with runnable Python, Rust and C snippets.
 - **[Design](design.md)** — how the FST rank-walk, the fingerprint and minimal-perfect-hash
   dictionaries, and zero-copy memory-mapping work, and the serialised blob layout.
 - **[API reference](api.md)** — the typed public surface.

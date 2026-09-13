@@ -682,6 +682,70 @@ The blob records which base wrote it, so `from_bytes_with` refuses a mismatch be
 loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by
 mistake.
 
+## C
+
+The `capi` feature exports the five indexes to C: one opaque `LexindexIndex` handle, fourteen
+`lexindex_*` functions, and the header `include/lexindex.h`, generated from `src/capi.rs` by
+`cbindgen` and regenerated in CI so the two cannot drift.
+
+```bash
+cargo build --release --features capi                           # target/release/liblexindex.so
+cargo rustc --release --features capi --crate-type staticlib    # liblexindex.a instead
+cc -std=c11 examples/capi.c -Iinclude -Ltarget/release -llexindex -o capi
+LD_LIBRARY_PATH=target/release ./capi
+```
+
+```c
+#include "lexindex.h"
+
+const char *keys[] = {"cherry", "apple", "banana", "apricot"};
+size_t lens[] = {6, 5, 6, 7};
+LexindexIndex *index = NULL;
+if (lexindex_index_build(LEXINDEX_KIND_DICT, keys, lens, 4, &index) != LEXINDEX_STATUS_OK)
+    fprintf(stderr, "%s\n", lexindex_last_error());
+
+uint64_t id;
+lexindex_index_id(index, "banana", 6, &id);             /* LEXINDEX_STATUS_OK, id 2 */
+lexindex_index_id(index, "durian", 6, &id);             /* LEXINDEX_STATUS_NOT_FOUND */
+uint64_t ids[4];
+lexindex_index_ids(index, keys, lens, 4, ids);          /* 3 0 2 1; LEXINDEX_NO_ID for a miss */
+
+char key[16]; size_t len;
+lexindex_index_key(index, 0, key, sizeof key, &len);    /* "apple", NUL-terminated, len 5 */
+lexindex_index_key(index, 3, NULL, 0, &len);            /* BUFFER_TOO_SMALL, len 6: the size first */
+
+lexindex_index_save(index, "fruit.bdx");
+LexindexIndex *again = NULL;
+lexindex_index_open("fruit.bdx", &again);               /* whatever kind the file holds */
+lexindex_index_free(again);
+lexindex_index_free(index);
+```
+
+The rules, each of which the header states beside the function it binds:
+
+- **Every fallible call returns a `LexindexStatus`**, `LEXINDEX_STATUS_OK` being zero. A failure
+  leaves its message in `lexindex_last_error()`, one per thread, valid until the next failure on
+  that thread; `NOT_FOUND` is an answer rather than a failure and leaves it alone. A null pointer
+  where one is required is `INVALID_ARGUMENT` on every function that has a status to return it in.
+- **One handle, five kinds.** A C caller opens a blob it may not have written, so the kind is a
+  run-time fact: `lexindex_index_kind` says which, and what a kind cannot answer is `UNSUPPORTED`
+  rather than a missing symbol — `key` on `LEXINDEX_KIND_COMPACT` and `LEXINDEX_KIND_CLOSED`, which
+  store no keys; `contains` on `LEXINDEX_KIND_CLOSED`, the perfect hash alone. `id` means what the
+  kind means: exact for string, dict and perfect; a miss answers as present one time in 256 for
+  compact; every key gets some id for closed.
+- **Keys are `(pointer, length)` UTF-8**, not NUL-terminated, so `strlen` is the caller's; paths
+  are NUL-terminated. `key` writes NUL-terminated and reports the length without the terminator;
+  `buf = NULL, cap = 0` asks for the size, and `BUFFER_TOO_SMALL` reports it as well.
+- **Ownership.** A handle is freed by `lexindex_index_free` and nothing else; keys and paths are
+  borrowed for the call; `lexindex_index_from_bytes` copies. A handle is immutable, so any number of
+  threads may query one at once.
+- **Versioning.** `LEXINDEX_ABI_VERSION` is the ABI the header describes and `lexindex_abi_version()`
+  the one the library was built with; within a number symbols are only added, and a change to one is
+  a major release of the crate. `lexindex_version()` is the crate version.
+
+Not in the ABI, each additive when someone asks: `Overlay`, the mmap loaders, the automata queries
+(prefix, range, fuzzy, subsequence), and the fingerprint and block knobs of `build`.
+
 ## Command line
 
 The crate ships a binary of the same name, so the choice between five indexes can be made without

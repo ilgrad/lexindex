@@ -87,7 +87,11 @@ map (`ClosedHashIndex` is the perfect hash and nothing else), plus `load_mmap_un
 one `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
 bounds-checked before it runs. The `python` feature adds nine more, each a one-line call from a
 `load_mmap*` binding into the `unsafe fn` of the same name, forwarding the same obligation to the
-Python caller. `unsafe_op_in_unsafe_fn` is denied, so every one names its own justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
+Python caller. The `capi` feature adds the eleven `unsafe extern "C"` functions that take a
+pointer and twenty-two `unsafe` blocks under them, each reading or writing memory the C caller
+vouched for in the function's `# Safety` line — the header carries it verbatim — after a null
+check on every function that has a status to report one in. `unsafe_op_in_unsafe_fn` is denied,
+so every one names its own justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
 target, and libFuzzer over the six parsers a target can hold to a return value: `BCH7`, `BMP7`,
 `BCL1`, `BDX2` — loaded and then queried, since its block data is bounds-checked on the read
 rather than at load — `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run

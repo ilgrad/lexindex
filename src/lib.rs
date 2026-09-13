@@ -114,6 +114,10 @@ pub use perfect_hash::PerfectHashIndex;
 #[cfg(feature = "python")]
 mod python;
 
+// The `cfg` sits inside the file, on the module itself: cbindgen reads the attribute on a `mod`
+// item as a condition on every symbol and would wrap the whole header in an `#if`.
+mod capi;
+
 /// Entry points for the fuzz targets in `fuzz/`, and **not public API**: the `fuzzing` feature is
 /// off by default and this module may change or vanish in any release.
 ///

@@ -70,8 +70,8 @@ jobs:
       # tools do not both report the same advisory under different exit codes.
       - name: cargo deny (licences, bans, sources)
         run: cargo deny check licenses bans sources
-      - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap)
-        run: cargo llvm-cov --summary-only --fail-under-lines 95
+      - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap, plus the C ABI)
+        run: cargo llvm-cov --summary-only --fail-under-lines 95 --features capi
 
   # The release workflow ships wheels for Windows and macOS, so their platform-specific code paths
   # — `save`'s rename-over-existing and permission handling, mmap — deserve a test run, not just a
@@ -204,6 +204,35 @@ jobs:
   # not `test`: there is no 32-bit runner to execute on, and the property is a compilation one --
   # what a 32-bit target could get wrong at runtime is a `u64 -> usize` truncation, and every one on
   # a load path is a `try_from` that fails identically at any width.
+  capi:
+    name: c abi (header in sync · clippy · test · a C caller)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # install-action carries no cbindgen manifest, so this builds it from source -- about a
+      # minute, in a job that runs beside the others. The version is pinned because the header is
+      # cbindgen's output byte for byte: a newer cbindgen would fail the sync check on a change of
+      # its own, and that is the moment to regenerate and review, not to float.
+      - name: install cbindgen
+        run: cargo install cbindgen --locked --version 0.29.4
+      - name: header in sync with src/capi.rs
+        run: cbindgen --config cbindgen.toml src/capi.rs | diff -u include/lexindex.h -
+      - name: clippy (capi)
+        run: cargo clippy --features capi --all-targets -- -D warnings
+      - name: test (capi)
+        run: cargo test --features capi --test capi
+      - name: build the shared library
+        run: cargo build --release --features capi
+      - name: a C caller, -Wpedantic -Werror
+        run: |
+          cc -std=c11 -Wall -Wextra -Wpedantic -Werror examples/capi.c -Iinclude -Ltarget/release -llexindex -o target/capi
+          LD_LIBRARY_PATH=target/release target/capi
+
   targets:
     name: targets (32-bit and wasm, with mph)
     runs-on: ubuntu-latest
@@ -296,3 +325,5 @@ jobs:
         run: cargo check --no-default-features --all-targets --locked
       - name: check (python bindings)
         run: cargo check --features python --locked
+      - name: check (the C ABI)
+        run: cargo check --features capi --locked

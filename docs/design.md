@@ -500,6 +500,11 @@ The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, 
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
 release, not a patch.
 
+The C ABI has a number of its own, `LEXINDEX_ABI_VERSION`, because nothing like `cargo semver-checks`
+watches a C header. Within a number the ABI is append-only — a newer library serves an older header —
+and removing or changing a symbol bumps it, which is a major release of the crate. The header is
+generated from `src/capi.rs` by `cbindgen` and CI regenerates it to compare, so the two cannot drift.
+
 ## Security
 
 What is validated on load and what is merely trusted is spelled out per format above; the threat
@@ -556,6 +561,10 @@ down outside the index belongs with the blob that produced it.
 - `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`). The one feature with a target
   it cannot serve: there is nothing to map on `wasm32`.
 - `python` — the PyO3 abi3 extension module.
+- `capi` — the C ABI: one opaque handle over the five indexes and fourteen `lexindex_*` functions,
+  declared in `include/lexindex.h`. Pulls `mph`, no dependency. `cargo build --release --features
+  capi` exports it from the `cdylib`; `cargo rustc --release --features capi --crate-type staticlib`
+  gives the archive.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and
   owned `save`/`load`, depending on nothing but `fst`. The full default build depends on `fst` and
   `memmap2` and nothing else, and `cargo audit` reports nothing on either. CI cross-checks `i686`
