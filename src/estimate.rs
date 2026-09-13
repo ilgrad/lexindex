@@ -151,7 +151,7 @@ impl Kind {
     }
 
     /// The type's name, for an explanation a reader can act on.
-    fn name(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Compact => "CompactHashIndex",
             Self::Closed => "ClosedHashIndex",

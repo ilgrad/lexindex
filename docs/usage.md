@@ -2,6 +2,46 @@
 
 Runnable snippets for every interface, in Python and Rust.
 
+## `plan` — which index, before you build one
+
+Five indexes with five size curves is a choice nobody should have to make from a README table: the
+sizes are corpus-specific, and the spread between them on one corpus is larger than the spread of
+any one of them across corpora. `plan` sorts the keys once, measures what the formats are actually
+paid in, and prices every index that answers the questions you say you need answered.
+
+```python
+import lexindex
+
+keys = ["apple", "apricot", "banana", "blackberry", "blueberry", "cherry"]
+
+p = lexindex.plan(keys, prefix=True)   # prefix and range queries; nothing else required
+print(p["best"]["kind"])               # the cheapest index that answers them
+print(p["text"])                       # the whole ladder, and why the winner won
+
+# An index that cannot answer what was asked is left out of the ranking rather than ranked last.
+assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "StringIndex"}
+```
+
+Which index wins is a property of your keys and not of this library — six fruit names are not a
+corpus, and neither is a range of numbers, which an fst folds into almost nothing. Run it on the
+keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key)`), `ordered`,
+`prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes, which is where
+their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five.
+
+Past 100 000 keys the three numbers no statistic gives — what the symbol table squeezes a suffix
+into, the bytes an fst spends per trie node, the bits the perfect hash spends per key — come from
+one build of a sample of that size, and each estimate says so in `measured`. Scored against the
+built blob on 23 corpora of half a million to ten million keys, `DictIndex` lands within **1.4 %
+median, 4.5 % at the 90th percentile and 5.1 % at worst**; `StringIndex` within 3.5 / 9.6 / 30.3,
+because an fst merges equal suffixes and how much it merges is a property of the whole key set
+rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
+and reported at what they weigh.
+
+Two flags say when not to trust the ranking. `close` means the two cheapest are within 1.3× of each
+other, which is inside what an estimate can separate; `thin` means the mean suffix is under two
+bytes, where a compression ratio read from a sample stops carrying to full density — ten million
+numbers land 19 % off. Either one means build both and measure.
+
 ## `StringIndex` — ordered, FST-backed
 
 ```python

@@ -41,7 +41,7 @@ use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValu
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyDict, PyIterator, PyMemoryView, PySlice, PyString, PyType};
+use pyo3::types::{PyBytes, PyDict, PyIterator, PyList, PyMemoryView, PySlice, PyString, PyType};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -2950,6 +2950,71 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
     Ok(d)
 }
 
+/// What each index would cost on these keys, and which of them answer the caller's questions.
+///
+/// The keys are sorted once and priced from the statistics the formats are actually paid in. The
+/// three numbers no statistic gives -- what the symbol table squeezes a suffix into, the bytes an
+/// fst spends per trie node, the bits the perfect hash spends per key -- come from one build of a
+/// 100 000-key sample, so past that size every entry is a model and `measured` is `False`; below it
+/// the candidates are built and `bytes` is what they weigh.
+///
+/// The keyword arguments say what the index has to be able to do. One that cannot is left out of
+/// the ranking rather than ranked last, so `estimates` holds only usable answers and `best` is
+/// always one of them. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
+/// suffixes are too short for a sampled compression ratio to carry; either one means build rather
+/// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
+#[pyfunction(name = "plan")]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false))]
+fn py_plan<'py>(
+    py: Python<'py>,
+    keys: &Bound<'py, PyAny>,
+    reverse: bool,
+    ordered: bool,
+    prefix: bool,
+    fuzzy: bool,
+    exact: bool,
+) -> PyResult<Bound<'py, PyDict>> {
+    let keys = collect_strs(keys)?;
+    let needs = crate::Needs {
+        reverse,
+        ordered,
+        prefix,
+        fuzzy,
+        exact,
+    };
+    let plan = py.detach(|| crate::plan(&keys, needs)).map_err(to_py)?;
+    let n = plan.keys();
+    let (mean_len, mean_lcp) = plan.shape();
+    let d = PyDict::new(py);
+    d.set_item("keys", n)?;
+    d.set_item("mean_length", mean_len)?;
+    d.set_item("mean_lcp", mean_lcp)?;
+    d.set_item("best", estimate_dict(py, &plan.best(), n)?)?;
+    let estimates = PyList::empty(py);
+    for e in plan.estimates() {
+        estimates.append(estimate_dict(py, e, n)?)?;
+    }
+    d.set_item("estimates", estimates)?;
+    d.set_item("close", plan.close())?;
+    d.set_item("thin", plan.thin())?;
+    d.set_item("text", plan.to_string())?;
+    Ok(d)
+}
+
+fn estimate_dict<'py>(
+    py: Python<'py>,
+    e: &crate::Estimate,
+    keys: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("kind", e.kind.name())?;
+    d.set_item("bytes", e.bytes)?;
+    d.set_item("bytes_per_key", e.bytes_per_key(keys))?;
+    d.set_item("block", e.block)?;
+    d.set_item("measured", e.measured)?;
+    Ok(d)
+}
+
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
@@ -2964,5 +3029,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDictIndex>()?;
     m.add_class::<DictIndexIterator>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
+    m.add_function(wrap_pyfunction!(py_plan, m)?)?;
     Ok(())
 }

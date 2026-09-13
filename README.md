@@ -297,7 +297,12 @@ own, so that is a result about these words at these settings rather than a gener
 Every size above is one corpus at one `n`, and the ranking is stable across neither: a trie's size
 depends on how much the keys share, a fingerprint index's does not
 ([three corpora, and 10 M](https://ilgrad.github.io/lexindex/benchmarks/#which-one-to-pick-and-how-much-the-corpus-decides-it)).
-In decision order:
+**`plan` does this on your keys.** `lexindex.plan(keys, prefix=True)` in Python,
+`lexindex::plan(&keys, Needs::default().prefix())` in Rust: it prices every index that answers what
+you asked for, ranks them cheapest first, and says when two are too close to call or when the corpus
+is one its model cannot carry. Past 100 000 keys it models from a sample of that size and lands
+within **1.4 % of the built `DictIndex` blob at the median, 5.1 % at worst**; below it, it builds
+the candidates and reports what they weigh. By hand, in decision order:
 
 - **Do the keys need to come back out, or be scanned in order?** Then the fingerprint indexes are
   out: `StringIndex` for prefix / range / fuzzy, `DictIndex` for exact `string ↔ rank` at 52 % less,

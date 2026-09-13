@@ -11,12 +11,15 @@ __all__ = [
     "ClosedHashIndex",
     "CompactHashIndex",
     "DictIndex",
+    "Estimate",
     "Overlay",
     "OverlayInfo",
     "PerfectHashIndex",
+    "Plan",
     "StringIndex",
     "__version__",
     "inspect",
+    "plan",
 ]
 
 _T = TypeVar("_T")
@@ -770,4 +773,80 @@ def inspect(blob: str | os.PathLike[str] | bytes) -> BlobInfo:
     is decoded or verified. Bytes that are not a lexindex blob, or a header
     whose lengths run past the end, raise ``ValueError``; so does a blob from before 1.0, with the
     type to rebuild it in the message.
+    """
+
+class Estimate(TypedDict):
+    """What one index would weigh on the keys :func:`plan` was given.
+
+    ``bytes`` is the size of its serialised blob and ``bytes_per_key`` that over the number of
+    distinct keys. ``block`` is the ``DictIndex`` block the estimate was priced at and ``None``
+    for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
+    which is what happens below the 100 000-key sample size.
+    """
+
+    kind: Literal[
+        "CompactHashIndex",
+        "ClosedHashIndex",
+        "PerfectHashIndex",
+        "StringIndex",
+        "DictIndex",
+    ]
+    bytes: int
+    bytes_per_key: float
+    block: int | None
+    measured: bool
+
+class Plan(TypedDict):
+    """What :func:`plan` priced: the ranking, the shape of the corpus and the caveats.
+
+    ``estimates`` is every index that answers what was asked, cheapest first, and ``best`` is its
+    first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean length in bytes
+    and ``mean_lcp`` the mean prefix an adjacent pair shares -- the difference between the two is
+    the suffix a front-coded format actually stores.
+
+    ``close`` says the two cheapest are within 1.3x of each other, which is inside what an estimate
+    can separate; ``thin`` says the mean suffix is under two bytes, where a compression ratio read
+    from a sample stops carrying to full density. Either one means build both and measure rather
+    than trust the ranking. ``text`` is all of it as the paragraph the Rust ``Plan`` prints.
+    """
+
+    keys: int
+    mean_length: float
+    mean_lcp: float
+    best: Estimate
+    estimates: list[Estimate]
+    close: bool
+    thin: bool
+    text: str
+
+def plan(
+    keys: Iterable[str],
+    *,
+    reverse: bool = False,
+    ordered: bool = False,
+    prefix: bool = False,
+    fuzzy: bool = False,
+    exact: bool = False,
+) -> Plan:
+    """What each index would cost on these keys, and which of them answer your questions.
+
+    Five indexes with five corpus-specific size curves is a choice nobody should have to make from
+    a README table: the spread between them on one corpus is larger than the spread of any one of
+    them across corpora. The keys are sorted once and priced from the statistics the formats are
+    actually paid in -- the count, the mean length, the shared prefixes, the trie nodes.
+
+    The three numbers no statistic gives -- what the symbol table squeezes a suffix into, the bytes
+    an fst spends per trie node, the bits the perfect hash spends per key -- come from one build of
+    a 100 000-key sample, so past that size every entry is a model and ``measured`` is ``False``.
+    Scored against the built blob on 23 corpora of half a million to ten million keys, the
+    ``DictIndex`` estimate lands within 1.4 % median, 4.5 % at the 90th percentile and 5.1 % at
+    worst; ``StringIndex`` within 3.5 / 9.6 / 30.3, because an fst merges equal suffixes and how
+    much it merges is a property of the whole key set rather than of a sample of it. Below the
+    sample size nothing is modelled: the candidates are built and reported at what they weigh.
+
+    The keyword arguments say what the index has to be able to do -- ``key(id)`` as well as
+    ``id(key)``; ids in lexicographic order; prefix and range queries; fuzzy search; and exact
+    membership, without which a probabilistic index is allowed, which is how the two smallest get
+    their size. An index that cannot answer one of them is left out of the ranking rather than
+    ranked last.
     """

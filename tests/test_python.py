@@ -1428,6 +1428,68 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
         lexindex.inspect(tmp_path / "missing.blob")
 
 
+def test_plan_prices_every_index_that_answers_the_question():
+    keys = [f"key{i:04}" for i in range(200)]
+    p = lexindex.plan(keys)
+    assert p["keys"] == 200
+    assert p["best"] == p["estimates"][0]
+    sizes = [e["bytes"] for e in p["estimates"]]
+    assert sizes == sorted(sizes)
+    assert {e["kind"] for e in p["estimates"]} == {
+        "ClosedHashIndex",
+        "CompactHashIndex",
+        "DictIndex",
+        "PerfectHashIndex",
+        "StringIndex",
+    }
+    # Two hundred keys is under the sample size, so nothing is modelled: every number is a build.
+    assert all(e["measured"] for e in p["estimates"])
+    by_kind = {e["kind"]: e for e in p["estimates"]}
+    assert by_kind["DictIndex"]["bytes"] == len(lexindex.DictIndex(keys).to_bytes())
+    assert by_kind["StringIndex"]["bytes"] == len(lexindex.StringIndex(keys).to_bytes())
+    assert by_kind["DictIndex"]["block"] == 256
+    assert [e["block"] for e in p["estimates"] if e["kind"] != "DictIndex"] == [None] * 4
+    assert by_kind["DictIndex"]["bytes_per_key"] == by_kind["DictIndex"]["bytes"] / 200
+    assert p["mean_length"] == 7.0
+    assert not p["close"] and not p["thin"]
+    assert p["text"].startswith("200 keys, mean length 7.0")
+
+
+def test_plan_leaves_out_what_cannot_answer():
+    keys = [f"key{i:04}" for i in range(200)]
+    assert [e["kind"] for e in lexindex.plan(keys, fuzzy=True)["estimates"]] == ["StringIndex"]
+    assert {e["kind"] for e in lexindex.plan(keys, prefix=True)["estimates"]} == {
+        "DictIndex",
+        "StringIndex",
+    }
+    assert {e["kind"] for e in lexindex.plan(keys, ordered=True)["estimates"]} == {
+        "DictIndex",
+        "StringIndex",
+    }
+    # Exact membership rules out the two probabilistic indexes, and that is where their size comes
+    # from; a reverse lookup rules out nothing further that survived it.
+    assert {e["kind"] for e in lexindex.plan(keys, exact=True, reverse=True)["estimates"]} == {
+        "DictIndex",
+        "PerfectHashIndex",
+        "StringIndex",
+    }
+
+
+def test_plan_counts_distinct_keys_and_takes_any_iterable():
+    p = lexindex.plan(k for k in ["b", "a", "b", "c"])
+    assert p["keys"] == 3
+    assert (p["mean_length"], p["mean_lcp"]) == (1.0, 0.0)
+    assert lexindex.plan([])["keys"] == 0
+    assert all(e["bytes_per_key"] == 0.0 for e in lexindex.plan([])["estimates"])
+
+
+def test_plan_refuses_what_is_not_a_string():
+    with pytest.raises(TypeError):
+        lexindex.plan([1, 2, 3])
+    with pytest.raises(TypeError):
+        lexindex.plan(["a"], fuzzy="yes")
+
+
 def test_build_to_file_writes_what_the_constructor_would_save(tmp_path):
     keys = [f"k{(i * 7919) % 500:03}" for i in range(500)] * 2
     path = tmp_path / "ext.bix"

@@ -123,7 +123,8 @@ All notable changes to this project are documented here. The format follows
   nothing is modelled: the plan builds the candidates and reports what they weigh. Two candidates
   inside 1.3× of each other are reported as a tie worth building both ways, and a corpus whose mean
   suffix is under two bytes — ten million numbers, where the sampled ratio is 19 % off — is flagged
-  rather than quoted.
+  rather than quoted. `lexindex.plan(keys, prefix=True)` from Python returns the same ranking as a
+  dict of plain types, with the paragraph the Rust `Plan` prints under `text`.
 
 - **A block size can be named instead of measured out.** `DictProfile::Fast`, `Balanced` and
   `Compact` — `block="fast" | "balanced" | "compact"` from Python, in the same argument as the

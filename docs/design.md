@@ -445,6 +445,48 @@ could not check them at any price. Upstream agreed: `epserde` 0.13 made `deseria
 `unsafe fn`, and PtrHash declined a checked `try_index()` for the same reason. The fix was not more
 checking but a different MPH.
 
+## Choosing an index: `plan`
+
+Five structures with five corpus-specific size curves is a table nobody can read an answer out of.
+The spread between them on one corpus is larger than the spread of any one of them across corpora,
+so the only honest recommendation is one computed on the keys in hand. `plan` does that, and the
+question it had to answer first was how much of the answer can be *derived* rather than built.
+
+Most of it. One walk over the sorted keys gives the count, the mean length, the mean shared prefix
+with the previous key and the same for the keys 32 apart — which is exactly what a front-coded
+block is paid in — and the trie-node count an fst is paid in. Both come out of the same identity:
+with the keys sorted, the number of adjacent pairs sharing at least `d` bytes is `n − D(d)`, where
+`D(d)` counts the distinct `d`-byte prefixes, so summing `1 − D(d)/n` over the depths gives the mean
+adjacent prefix, and `Σ (len − lcp)` gives the nodes a trie needs. Nothing there is a sample.
+
+The sort is not an extra cost: a plan is followed by a build, and the build needs the keys sorted
+anyway, so the same copy serves both. That is what makes measuring the exact statistics affordable
+and it is why the sketching route was dropped. A HyperLogLog per depth estimates `D(d)` without
+sorting — 2^16 registers a depth hold `lcp₁` to ±1.3 % — but it never became cheaper than the sort it
+replaced, and it has a sharp edge the sort does not: `d lcp₁ / d ln n = maxdepth − lcp₁`, which is 39
+on the 480 k-word dictionary, so an approximate `n` moves the answer far more than an approximate
+`D`. A second finding survived the experiment even though the route did not: the mean prefix shared
+by keys `k` apart is linear in `ln k`, and a random 1-in-`step` sample reads that curve at
+`k = step·e^{−γ}` rather than at `step` — the offset is the Euler–Mascheroni constant, and for pairs
+`j` apart in the sample it is `ln step + ψ(j)`.
+
+What no statistic gives is what a *compressor* will do: the ratio the FSST symbol table squeezes a
+suffix into, the bytes an fst actually spends per trie node once it has merged what it can, and the
+bits the perfect hash spends per key. Those are read off one build of a 100 000-key sample, and
+below that size there is nothing to model — the candidates are built and reported at what they
+weigh. Scored against the built blob on 23 corpora of half a million to ten million keys, the
+`DictIndex` estimate lands within **1.4 % median, 4.5 % at the 90th percentile and 5.1 % at worst**.
+
+The two places it does not hold are reported rather than papered over. `StringIndex` is looser —
+3.5 % median, 9.6 % at the 90th percentile, 30 % on a corpus of file paths — because an fst merges
+equal suffixes and how much it merges is a property of the whole key set, not of a sample of it: the
+sample sees fewer sharable tails than the corpus has, so the estimate runs high exactly where the
+corpus is most repetitive. And a corpus whose mean suffix is under two bytes — ten million decimal
+numbers, where a sampled compression ratio lands 19 % off — is flagged, not quoted. So is a pair of
+candidates within 1.3× of each other, which is inside what an estimate can separate. In both cases
+the plan says to build both and measure, which is the same advice this document gives everywhere
+else.
+
 ## Versioning
 
 Semantic versioning, with one qualification that matters more here than the API does: **a blob format
