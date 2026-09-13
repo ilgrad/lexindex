@@ -48,6 +48,9 @@ Sponsor = "https://github.com/sponsors/ilgrad"
 features = ["python"]
 module-name = "lexindex._core"
 python-source = "python"
+# The sdist follows the crate's `exclude`, which keeps the Python tests out of the Rust tarball; a
+# source distribution is what a packager builds *and tests* from, so they ride along in that one.
+include = [{ path = "tests/test_python.py", format = "sdist" }]
 
 [tool.ruff]
 line-length = 100

@@ -110,8 +110,8 @@ All notable changes to this project are documented here. The format follows
 - **The crate tarball is the Rust crate and nothing else.** It now carries the sources, the examples,
   the integration tests with their golden blobs, `README.md` and `docs/usage.md` (both pulled
   into the crate docs), and the licence, changelog, security policy and citation. CI, the docs
-  site, the Python package and its build files, the benchmark tooling and its 67 measurement logs
-  stay in the repository: 169 → 73 files, and 712 KB of logs leave every `cargo install` and
+  site, the Python package, its build files and its examples, the benchmark tooling and its 67
+  measurement logs stay in the repository: 169 → 71 files, and 712 KB of logs leave every `cargo install` and
   docs.rs build.
 
 ### Added

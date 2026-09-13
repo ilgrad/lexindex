@@ -25,6 +25,7 @@ exclude = [
     "deny.toml",
     "docs/*",
     "!docs/usage.md",
+    "examples/*.py",
     "mkdocs.yml",
     "pyproject.toml",
     "python/",
