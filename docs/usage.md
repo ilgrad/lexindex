@@ -705,7 +705,7 @@ kind: DictIndex
 format: BDX2
 bytes: 1361816
 keys: 479823
-arena_bytes: 1322757
+arena_bytes: 1306718
 ```
 
 `plan` and `build` take the same five **needs**, which say what the index must be able to do and so

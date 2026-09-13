@@ -97,17 +97,6 @@ struct Cmd {
     block: Option<usize>,
 }
 
-/// The type name of an index, the token `plan` and `inspect` already print.
-fn type_name(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Compact => "CompactHashIndex",
-        Kind::Closed => "ClosedHashIndex",
-        Kind::Perfect => "PerfectHashIndex",
-        Kind::String => "StringIndex",
-        Kind::Dict => "DictIndex",
-    }
-}
-
 fn choice(name: &str) -> Result<Choice, Fail> {
     Ok(match name {
         "auto" => Choice::Auto,
@@ -280,7 +269,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         err,
         "wrote {}: {} over {n} keys, {bytes} bytes ({per_key:.2} B/key)",
         dest.display(),
-        type_name(kind)
+        kind.name()
     )
     .map_err(io_fail)
 }
@@ -329,7 +318,7 @@ fn build_and_save(
         other => {
             return Err(Fail::Failed(format!(
                 "{} needs the `mph` feature, which this build does not have",
-                type_name(other)
+                other.name()
             )));
         }
     };
