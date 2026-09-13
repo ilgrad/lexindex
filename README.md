@@ -50,10 +50,10 @@ therefore read into memory rather than borrowed.</sub>
   **2.84 bytes/key**, 52 % below `StringIndex`, `id` 298–302 ns against its 265–272, `key_into`
   207 against its `key` at 466–473. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **375 ns where `marisa-trie` must enumerate every match to
-  count it (123 444)**. Blocks of 512 store **2.81 bytes/key, under `marisa-trie` at every setting it
-  has** *on this corpus* — over the thirteen-corpus set the ranking goes both ways, marisa smaller
+  count it (123 444)**. Blocks of 512 store **2.81 bytes/key, under every `marisa-trie` setting
+  measured on it** — over the thirteen-corpus set the ranking goes both ways, marisa smaller
   wherever the keys share deep structure and `DictIndex` smaller where they do not, while
-  `DictIndex` answers faster on all but `numeric`, 1.8–2.9× at a million keys. Exact queries,
+  `DictIndex` answers faster on all but `numeric`, 1.7–2.9× at a million keys. Exact queries,
   every id back to its key, small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
   hash plus a fingerprint per key, *no keys stored*. **1.26 bytes/key** on real words — **2.4× below

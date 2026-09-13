@@ -248,54 +248,69 @@ support: which structure is smallest, and *where*.
 
 ## Every structure over the whole set
 
-`bench/sweep.py` builds nine structures on each corpus and measures serialised bytes per key, build
-time and one lookup: three `DictIndex` block sizes against three `marisa-trie` configurations,
+`bench/sweep.py` builds eleven structures on each corpus and measures serialised bytes per key,
+build time and one lookup: three `DictIndex` block sizes against five `marisa-trie` configurations,
 because both are curves and a single point of either invites the objection that the other was left
-untuned. The two keyless indexes are there to show what a structure that stores no keys costs, which
+untuned. Marisa's curve runs to sixteen tries because four — its floor on an English word list, and
+what this page took for its floor everywhere — is not where it bottoms out on keys that share more,
+or on keys that share nothing. The two keyless indexes are there to show what a structure that stores no keys costs, which
 turns out to be the only row a reader can carry to their own corpus without measuring it.
 
 ### Bytes per key at one million keys
 
-| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.80 | 7.70 | 7.62 | 17.74 | 7.52 | 7.56 | 7.71 |
-| `domains` | 13.8 | 0.26 | 1.26 | 5.14 | 5.07 | 5.01 | 10.50 | 4.81 | 4.87 | 4.99 |
-| `idents` | 17.3 | 0.26 | 1.26 | 6.73 | 6.66 | 6.60 | 10.55 | 5.45 | 5.62 | 5.74 |
-| `numeric` | 5.9 | 0.26 | 1.26 | 2.18 | 2.13 | 2.08 | 0.00 | 1.62 | 1.64 | 1.72 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.85 | 13.80 | 13.76 | 21.44 | 18.23 | 18.82 | 19.04 |
-| `paths` | 125.0 | 0.26 | 1.26 | 15.11 | 14.67 | 14.34 | 17.48 | 9.26 | 9.47 | 9.60 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 9.46 | 9.37 | 9.31 | 17.28 | 7.79 | 8.19 | 8.37 |
-| `titles-ru` | 35.8 | 0.26 | 1.26 | 11.50 | 11.36 | 11.27 | 31.75 | 8.07 | 8.61 | 8.77 |
-| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.35 | 8.28 | 8.23 | 17.52 | 6.33 | 6.54 | 6.70 |
-| `urls` | 52.4 | 0.26 | 1.26 | 11.46 | 11.25 | 11.11 | 16.88 | 7.95 | 8.39 | 8.58 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.55 | 20.45 | 20.37 | 37.11 | 32.93 | 34.58 | 34.80 |
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 0.26 | 1.26 | 7.80 | 7.70 | 7.62 | 17.74 | 7.52 | 7.52 | 7.52 | 7.56 | 7.71 |
+| `domains` | 13.8 | 0.26 | 1.26 | 5.14 | 5.07 | 5.01 | 10.50 | 4.81 | 4.80 | 4.80 | 4.87 | 4.99 |
+| `idents` | 17.3 | 0.26 | 1.26 | 6.73 | 6.66 | 6.60 | 10.55 | 5.45 | 5.34 | 5.30 | 5.62 | 5.74 |
+| `numeric` | 5.9 | 0.26 | 1.26 | 2.18 | 2.13 | 2.08 | 0.00 | 1.62 | 1.62 | 1.62 | 1.64 | 1.72 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.85 | 13.80 | 13.76 | 21.44 | 18.23 | 15.55 | 15.55 | 18.82 | 19.04 |
+| `paths` | 125.0 | 0.26 | 1.26 | 15.11 | 14.67 | 14.34 | 17.48 | 9.26 | 9.04 | 8.83 | 9.47 | 9.60 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 9.46 | 9.37 | 9.31 | 17.28 | 7.79 | 7.52 | 7.49 | 8.19 | 8.37 |
+| `titles-ru` | 35.8 | 0.26 | 1.26 | 11.50 | 11.36 | 11.27 | 31.75 | 8.07 | 7.67 | 7.61 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.26 | 1.26 | 8.35 | 8.28 | 8.23 | 17.52 | 6.33 | 6.22 | 6.22 | 6.54 | 6.70 |
+| `urls` | 52.4 | 0.26 | 1.26 | 11.46 | 11.25 | 11.11 | 16.88 | 7.95 | 7.61 | 7.57 | 8.39 | 8.58 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.55 | 20.45 | 20.37 | 37.11 | 32.93 | 22.99 | 22.98 | 34.58 | 34.80 |
 
 <sub>`words` and `pypi` have no million-key file; their 100 000 grid, every build time, and the
 100 000 rows for the rest are in
-[`bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-12-arz-386b2e6-dirty.json)
-(the tree is the commit; what was uncommitted is the pages being re-measured and the result files
-this run wrote). The three `DictIndex` columns were measured again at `68f5336`, where the symbol
-table is one per shard of 65 536 keys ([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)); every other column is the sweep's, and a
-size is exact, so the two agree cell for cell wherever the builder did not move.</sub>
+[`bench/results/sweep-2026-09-13-arz-4128d6a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-13-arz-4128d6a.json)
+— one run of the whole set, 264 cells, on a clean tree that began at a load average of
+0.00 / 0.29 / 0.69. Every column comes from that one run, the three `DictIndex` blocks included, so
+this table needs no reconciliation between harnesses.</sub>
 
 **Where `marisa-trie` wins, it wins on shared structure.** It is the smallest key-storing structure
-on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.58× on
-`paths`, where a million paths run through a few thousand directories, 1.41× on `titles-ru`, 1.42×
-on `urls`, 1.22× on `idents` — and within 5 % on `dna` and `domains` (1.02× and 1.05×). That is
-what a LOUDS trie is for, and front coding in fixed blocks does not answer it.
+on nine of these eleven corpora, and the margin tracks how much the keys have in common: 1.62× on
+`paths`, where a million paths run through a few thousand directories, 1.48× on `titles-ru`, 1.47×
+on `urls`, 1.32× on `titles-zh`, 1.24× on `idents` and on `titles-en` — and within 5 % on `dna` and
+`domains` (1.01× and 1.05×). That is what a LOUDS trie is for, and front coding in fixed blocks does
+not answer it.
 
-**Where lexindex wins, it wins on entropy.** `DictIndex` is the smaller of the two on `opaque`
-(13.76 against 18.23, 1.32×) and on `uuid` (20.37 against 32.93, 1.62×) — keys with nothing to
-share, where a trie pays for a node per character and front coding pays for a prefix that is not
-there. On `words`, the corpus every table above is measured on, `DictIndex` at its default block is
-3.48 against marisa's 3.70 at 100 000 keys, and 2.84 against 2.96 on the full 479 823. That is a
-real result on a real corpus, and it is not the general case: it is the favourable end of a
-distribution whose other end is `paths`.
+**Its floor is eight or sixteen tries on nine of the eleven, not the four this page quoted through
+3.0.0.** The recursion keeps paying wherever the keys share — `titles-ru` 8.07 → 7.61, `urls`
+7.95 → 7.57, `paths` 9.26 → 8.83, about 5 % each — and it pays most where they share least: `opaque`
+18.23 → 15.55 and `uuid` 32.93 → 22.98, 15 % and **30 %** of the blob. The two corpora where four
+tries is not beaten are `dna` and `numeric`, where all three settings agree to the hundredth; on
+`domains` the gain is 0.3 % and on `titles-zh` 1.8 %, so "tune it" is worth measuring and not worth
+assuming. What the tries cost is time, and the cost is where the gain is: `uuid` builds 1.37× and
+answers 1.65× slower at sixteen tries than at four, `paths` answers 1.30× slower, and on the corpora
+where the setting buys nothing the two are level. Marisa's smallest configuration is its slowest.
+
+**Where lexindex wins, it wins on entropy — and by less than this page used to claim.** `DictIndex`
+is the smaller of the two on `opaque` (13.76 against 15.55, **1.13×**) and on `uuid` (20.37 against
+22.98, **1.13×**) — keys with nothing to share, where a trie pays for a node per character and front
+coding pays for a prefix that is not there. Against marisa's four-try setting the same two margins
+read 1.32× and 1.62×, and that is what this page published until the curve was measured to its end:
+a tuned marisa takes back four fifths of the `uuid` gap. On `words`, the corpus every table above is
+measured on, `DictIndex` at its default block is 3.48 against marisa's 3.70 at 100 000 keys, and
+2.84 against 2.96 on the full 479 823 — and there four tries really is marisa's floor, eight and
+sixteen reading 3.71 and 3.74. That is a real result on a real corpus, and it is not the general
+case: it is the favourable end of a distribution whose other end is `paths`.
 
 **The two keyless rows are flat and every other row is not.** `ClosedHashIndex` is 0.26 bytes a key
 and `CompactHashIndex` 1.26 on all eleven corpora at all three sizes, because their size is a
 function of `n` and the fingerprint width and of nothing about the keys. Against the best trie that
-is a 7.3× margin on `paths` and 1.3× on `numeric` — the same two structures, neither of them
+is a 7.0× margin on `paths` and 1.3× on `numeric` — the same two structures, neither of them
 changed, and the whole spread between those two numbers belongs to the corpus.
 
 **`StringIndex` on `numeric` reads 0.00 bytes a key, and it is not a bug.** Ten million dense
@@ -307,30 +322,32 @@ because dense ids are a corpus somebody really has.
 
 ### Lookups at one million keys
 
-| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 108 | 150 | 424 | 410 | 399 | 702 | 1090 | 1091 | 1049 |
-| `domains` | 13.8 | 120 | 156 | 430 | 424 | 421 | 485 | 796 | 799 | 756 |
-| `idents` | 17.3 | 91 | 148 | 467 | 487 | 531 | 509 | 999 | 924 | 961 |
-| `numeric` | 5.9 | 110 | 143 | 314 | 379 | 366 | 223 | 354 | 388 | 341 |
-| `opaque` | 16.0 | 144 | 177 | 510 | 542 | 558 | 558 | 2232 | 1617 | 1592 |
-| `paths` | 125.0 | 209 | 204 | 978 | 966 | 1025 | 1641 | 3791 | 3080 | 2781 |
-| `titles-en` | 21.0 | 195 | 165 | 632 | 633 | 665 | 831 | 1578 | 1471 | 1440 |
-| `titles-ru` | 35.8 | 239 | 281 | 749 | 764 | 796 | 1147 | 2127 | 1973 | 1916 |
-| `titles-zh` | 16.9 | 214 | 256 | 661 | 678 | 721 | 794 | 1471 | 1412 | 1346 |
-| `urls` | 52.4 | 101 | 150 | 694 | 668 | 689 | 800 | 1335 | 1279 | 1220 |
-| `uuid` | 36.0 | 156 | 181 | 683 | 653 | 709 | 809 | 2544 | 1859 | 1776 |
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 86 | 133 | 388 | 409 | 362 | 621 | 947 | 968 | 1054 | 1035 | 1024 |
+| `domains` | 13.8 | 78 | 125 | 410 | 401 | 419 | 447 | 708 | 713 | 718 | 686 | 676 |
+| `idents` | 17.3 | 93 | 143 | 498 | 494 | 525 | 554 | 995 | 1031 | 1039 | 942 | 909 |
+| `numeric` | 5.9 | 65 | 106 | 265 | 281 | 295 | 173 | 291 | 284 | 284 | 281 | 257 |
+| `opaque` | 16.0 | 100 | 125 | 429 | 431 | 440 | 429 | 1425 | 1514 | 1530 | 1136 | 1093 |
+| `paths` | 125.0 | 137 | 171 | 793 | 786 | 827 | 1324 | 3012 | 3532 | 3928 | 2488 | 2257 |
+| `titles-en` | 21.0 | 127 | 162 | 547 | 537 | 547 | 619 | 1246 | 1338 | 1314 | 1205 | 1230 |
+| `titles-ru` | 35.8 | 181 | 223 | 649 | 628 | 662 | 972 | 1630 | 1674 | 1812 | 1657 | 1616 |
+| `titles-zh` | 16.9 | 97 | 139 | 486 | 483 | 522 | 534 | 1020 | 1054 | 1063 | 985 | 949 |
+| `urls` | 52.4 | 113 | 159 | 738 | 720 | 735 | 792 | 1244 | 1367 | 1527 | 1264 | 1229 |
+| `uuid` | 36.0 | 123 | 160 | 594 | 537 | 580 | 618 | 1691 | 2717 | 2787 | 1448 | 1386 |
 
 **`DictIndex` answers faster than every `marisa-trie` setting on ten of the eleven corpora** —
-1.8–2.9× at its default block, against marisa's *fastest* configuration and not its smallest. The
-eleventh is `numeric`, where marisa's fastest is 10 % ahead of the default block (341 ns against
-379) and 9 % behind a block of 128 (314): a million dense decimal ids are the corpus where a trie
-has the least to walk. `DictIndex` also builds 2.3–4.3× faster everywhere except `numeric`, where
-the two are level. So the size table above is not the whole trade: on `paths`, marisa is 1.58×
-smaller and 2.9× slower to answer and 4.3× slower to build.
+1.7–2.9× at its default block, against marisa's *fastest* configuration and not its smallest. The
+eleventh is `numeric`, where marisa's fastest is 9 % ahead of the default block (257 ns against 281)
+and 3 % ahead of a block of 128 (265): a million dense decimal ids are the corpus where a trie has
+the least to walk. `DictIndex` also builds 1.8–3.9× faster than marisa's quickest build everywhere
+except `numeric`, where marisa is 1.2× ahead. So the size table above is not the whole trade, and
+the settings that make marisa smallest are the ones that make it slowest: on `paths` its sixteen-try
+floor is 1.62× smaller than `DictIndex` at 1024 a block, 4.7× slower to answer and 4.0× slower to
+build.
 
 **The block is a smaller knob than it was.** A lookup scans one restart a microblock and then one
-microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −6 % (`dna`) to +16 %
+microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −7 % (`dna`) to +11 %
 (`numeric`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.09–0.77 bytes a key
 over 128, every corpus in the same direction. It did not use to be: `paths` at 1024 keys a block
 stored *more* than at 256 (16.13 against 15.89), and the cause was the symbol table rather than the
@@ -345,20 +362,27 @@ last digit and lookups 1–15 % higher on every structure, controls included.</s
 
 ### Ten million keys
 
-| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa small | marisa def. | marisa fast |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.13 | 7.02 | 6.94 | 15.98 | 6.69 | 6.75 | 6.99 |
-| `numeric` | 6.9 | 0.26 | 1.26 | 2.19 | 2.13 | 2.08 | 0.00 | 1.63 | 1.66 | 1.77 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.42 | 13.37 | 13.33 | 21.47 | 15.19 | 18.33 | 18.68 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 7.74 | 7.65 | 7.59 | 13.25 | 5.57 | 5.71 | 5.87 |
-| `urls` | 52.4 | 0.26 | 1.26 | 9.59 | 9.38 | 9.23 | 13.10 | 5.66 | 5.83 | 5.99 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.98 | 19.90 | 36.07 | 29.97 | 33.21 | 33.56 |
+| corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dna` | 24.0 | 0.26 | 1.26 | 7.13 | 7.02 | 6.94 | 15.98 | 6.69 | 6.69 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.26 | 1.26 | 2.19 | 2.13 | 2.08 | 0.00 | 1.63 | 1.63 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.26 | 1.26 | 13.42 | 13.37 | 13.33 | 21.47 | 15.19 | 14.72 | 14.72 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.26 | 1.26 | 7.74 | 7.65 | 7.59 | 13.25 | 5.57 | 5.49 | 5.48 | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.26 | 1.26 | 9.59 | 9.38 | 9.23 | 13.10 | 5.66 | 5.56 | 5.55 | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.98 | 19.90 | 36.07 | 29.97 | 20.62 | 20.62 | 33.21 | 33.56 |
 
-Ten times the keys moves every trie and neither hash: at its smallest setting `marisa` goes
-7.79 → 5.57 on `titles-en` and 7.95 → 5.66 on `urls` as the sharing deepens, `DictIndex` at its
-default block 9.37 → 7.65 and 11.25 → 9.38, and the two keyless rows do not move at all. The
-ranking is the same one the million-key table gives, so the answer to "which is smallest" is
-decided by the corpus and not by the scale.
+Ten times the keys moves every trie and neither hash: at its floor `marisa` goes 7.49 → 5.48 on
+`titles-en` and 7.57 → 5.55 on `urls` as the sharing deepens, `DictIndex` at its default block
+9.37 → 7.65 and 11.25 → 9.38, and the two keyless rows do not move at all. The ranking is the same
+one the million-key table gives, so the answer to "which is smallest" is decided by the corpus and
+not by the scale.
+
+**Scale closes the one gap this page leans on.** `DictIndex` is still the smaller structure on
+`uuid` and `opaque` at ten million, but barely: 19.90 against marisa's tuned 20.62 is 3.5 % smaller,
+where a million keys gave 11 % and where four tries alone would have it at 34 %. The reason is the trie's, not ours — ten
+times the random identifiers share ten times more three- and four-character fragments, and a
+recursive trie is built to find exactly that, while a block of front-coded keys shares only with its
+own block. Read `uuid` as a gap that closes with n, and do not build a claim on it.
 
 **The block buys less here.** 128 → 1024 keys a block is 0.09–0.36 bytes a key over these six,
 against 0.09–0.77 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
@@ -367,11 +391,12 @@ and those are the symbol table's business, not the block's — which is why the 
 runs of a constant length and per shard, and why `titles-en` at 1024 reads 7.59 where whole-block
 training over one table left it at 7.93, above its own 256.
 
-<sub>Measured 2026-09-12
-([`bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-12-arz-386b2e6-dirty.json)),
-`marisa-trie` 1.4.1. Two builds per cell, three rounds of 20 000 lookups. The three `DictIndex`
-columns were measured again at `68f5336`, where the symbol table is one per shard of 65 536 keys
-([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)).</sub>
+<sub>Measured 2026-09-13 at `4128d6a`
+([`bench/results/sweep10m-2026-09-13-arz-4128d6a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-13-arz-4128d6a.json)),
+`marisa-trie` 1.4.1, one build per cell at this size and three rounds of 20 000 lookups, started at
+a load average of 0.07 / 0.42 / 0.66. Every non-marisa cell reads to the hundredth what the
+2026-09-12 run read — a size is exact, so the two runs agree wherever the builder did not move, and
+what moved is marisa's two new columns.</sub>
 
 ### A cold mapping, and what is actually resident
 
@@ -507,6 +532,10 @@ a head, so fewer blocks are fewer dependent misses, and that outweighs a scan te
 nominally the same configuration `rsmarisa` is larger than the C++ marisa measured above — on
 `words`, 0.2 % at the smallest setting, 3.1 % at the default and 12 % at the fastest — so the flag
 words evidently do not mean quite the same thing, and each library's own curve is what to read.
+**"Smallest" here is the smallest of its three cache levels at the default number of tries, not its
+floor**: the sweep above shows the C++ library bottoming out at eight or sixteen tries on nine of
+these corpora, by 30 % on `uuid`, and this harness does not turn that knob. Read the left column as
+one point on a curve whose other end is not measured.
 
 <sub>Measured 2026-09-12 on a clean tree
 ([`bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt)),
