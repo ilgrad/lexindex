@@ -3527,4 +3527,116 @@ mod spike {
             );
         }
     }
+
+    /// R-02: what partitioning the table would cost and buy. The keys are cut by their top
+    /// `LEXINDEX_MPHF_PART_BITS` bits into parts, each built as its own `Mphf` after one multiply
+    /// remixes the hash (a part's keys share their top bits, and the bucket is the top bits), and
+    /// a lookup is `offsets[part] + part.index(h')`. Against the monolithic table, A-B-A-B over
+    /// `LEXINDEX_MPHF_ROUNDS`: size, build on `LEXINDEX_MPHF_THREADS` (parts claimed from a
+    /// counter, each built single-threaded), lookup over one shuffled probe order. The remix and
+    /// the per-part sort are done before the clock starts, as the monolith's sort is.
+    #[test]
+    #[ignore = "measurement, not a test"]
+    fn partitioned() {
+        const REMIX: u64 = 0x9E37_79B9_7F4A_7C15;
+        let n = env("LEXINDEX_MPHF_N", 10_000_000);
+        let rounds = env("LEXINDEX_MPHF_ROUNDS", 3);
+        let threads = env("LEXINDEX_MPHF_THREADS", 1);
+        let part_bits = env("LEXINDEX_MPHF_PART_BITS", 6) as u32;
+        let hs = bigram_hashes(n);
+        let parts = 1usize << part_bits;
+        let part_of = |h: u64| (h >> (64 - part_bits)) as usize;
+        let bounds: Vec<usize> = (0..=parts)
+            .map(|p| hs.partition_point(|&h| part_of(h) < p))
+            .collect();
+        let keys: Vec<Vec<u64>> = (0..parts)
+            .map(|p| {
+                let mut k: Vec<u64> = hs[bounds[p]..bounds[p + 1]]
+                    .iter()
+                    .map(|h| h.wrapping_mul(REMIX))
+                    .collect();
+                k.sort_unstable();
+                k
+            })
+            .collect();
+        let mut offsets = vec![0u64; parts + 1];
+        for p in 0..parts {
+            offsets[p + 1] = offsets[p] + keys[p].len() as u64;
+        }
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        let mut r = 0x2545_F491_4F6C_DD1Du64;
+        for i in (1..n).rev() {
+            r ^= r << 13;
+            r ^= r >> 7;
+            r ^= r << 17;
+            order.swap(i, (r % (i as u64 + 1)) as usize);
+        }
+        let build_parts = || -> Vec<Mphf> {
+            let next = AtomicUsize::new(0);
+            let built: Vec<Mutex<Option<Mphf>>> = (0..parts).map(|_| Mutex::new(None)).collect();
+            std::thread::scope(|s| {
+                for _ in 0..threads {
+                    s.spawn(|| {
+                        loop {
+                            let p = next.fetch_add(1, Ordering::Relaxed);
+                            if p >= parts {
+                                break;
+                            }
+                            let m = Mphf::build_with_threads(&keys[p], 1).expect("part");
+                            *built[p].lock().unwrap() = Some(m);
+                        }
+                    });
+                }
+            });
+            built
+                .into_iter()
+                .map(|m| m.into_inner().unwrap().unwrap())
+                .collect()
+        };
+        let (mut mono_build, mut parts_build) = (f64::INFINITY, f64::INFINITY);
+        let (mut mono_look, mut parts_look) = (f64::INFINITY, f64::INFINITY);
+        let (mut mono_bits, mut parts_bits) = (0.0, 0.0);
+        let mut shape_s = String::new();
+        for _ in 0..rounds {
+            let t = std::time::Instant::now();
+            let mono = Mphf::build_with_threads(&hs, threads).expect("mono");
+            mono_build = mono_build.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+            let t = std::time::Instant::now();
+            let ps = build_parts();
+            parts_build = parts_build.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+            mono_bits = mono.bits_per_key();
+            let bytes: usize = ps.iter().map(Mphf::byte_len).sum::<usize>() + 8 * (parts + 1);
+            parts_bits = bytes as f64 * 8.0 / n as f64;
+            shape_s = shape(&mono);
+            let mut seen = vec![false; n];
+            for &h in &hs {
+                let p = part_of(h);
+                let id = (offsets[p] + ps[p].index(h.wrapping_mul(REMIX))) as usize;
+                assert!(id < n && !seen[id], "parts: not a bijection");
+                seen[id] = true;
+            }
+            for _ in 0..3 {
+                let t = std::time::Instant::now();
+                let mut acc = 0u64;
+                for &i in &order {
+                    acc = acc.wrapping_add(mono.index(hs[i as usize]));
+                }
+                std::hint::black_box(acc);
+                mono_look = mono_look.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+                let t = std::time::Instant::now();
+                let mut acc = 0u64;
+                for &i in &order {
+                    let h = hs[i as usize];
+                    let p = part_of(h);
+                    acc = acc.wrapping_add(offsets[p] + ps[p].index(h.wrapping_mul(REMIX)));
+                }
+                std::hint::black_box(acc);
+                parts_look = parts_look.min(t.elapsed().as_secs_f64() * 1e9 / n as f64);
+            }
+        }
+        println!(
+            "n {n} parts {parts} (~{} keys each) threads {threads} rounds {rounds}\n  mono   bits/key {mono_bits:>6.3}   build {mono_build:>6.1} ns/key   lookup {mono_look:>5.1} ns   {shape_s}\n  parts  bits/key {parts_bits:>6.3}   build {parts_build:>6.1} ns/key   lookup {parts_look:>5.1} ns",
+            n / parts
+        );
+    }
 }

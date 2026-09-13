@@ -1,0 +1,21 @@
+R-02 partition spike, 2026-09-13T15:59+03:00, 2a19584+spike, load 0.52 2.25 2.90
+  Executable unittests src/lib.rs (target/release/deps/lexindex-3cd21076f2720a2c)
+n 10000000 parts 32 (~312500 keys each) threads 1 rounds 3
+  mono   bits/key  2.088   build   43.8 ns/key   lookup  25.3 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.109   build   48.9 ns/key   lookup  38.9 ns
+n 10000000 parts 64 (~156250 keys each) threads 1 rounds 3
+  mono   bits/key  2.088   build   43.7 ns/key   lookup  25.3 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.114   build   54.0 ns/key   lookup  38.8 ns
+n 10000000 parts 128 (~78125 keys each) threads 1 rounds 3
+  mono   bits/key  2.088   build   44.0 ns/key   lookup  25.0 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.121   build   60.0 ns/key   lookup  39.1 ns
+n 10000000 parts 32 (~312500 keys each) threads 8 rounds 3
+  mono   bits/key  2.088   build    7.3 ns/key   lookup  25.1 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.109   build    6.7 ns/key   lookup  38.5 ns
+n 10000000 parts 64 (~156250 keys each) threads 8 rounds 3
+  mono   bits/key  2.088   build    7.3 ns/key   lookup  25.1 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.114   build    7.5 ns/key   lookup  38.8 ns
+n 10000000 parts 128 (~78125 keys each) threads 8 rounds 3
+  mono   bits/key  2.088   build    7.3 ns/key   lookup  25.1 ns   levels [10000000, 303186, 10874, 426] tail 65
+  parts  bits/key  2.121   build    8.1 ns/key   lookup  39.3 ns
+load after 1.57 2.18 2.80

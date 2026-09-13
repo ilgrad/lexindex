@@ -148,6 +148,18 @@ the perfect hash's construction alone at 0.9 bytes per key — 0.6 of it the tab
 first level bumped, since a level's pieces go into the table as they finish rather than being kept
 for a merge, so what a first level holds beyond that is the chunks in flight.
 
+**Partitioning the table was measured and not done.** Cutting the keys by their top bits into 32–128
+parts, each its own `MPH2` over a remixed hash with a prefix offset per part, would bound the build's
+peak memory by the part rather than by `n` — the one thing the monolith cannot offer past 10⁹ keys.
+Measured on the 10 M bigram hashes (`mphf::spike::partitioned` under `bench-mphf`,
+[`bench/results/mphf-partition-2026-09-13-arz-2a19584.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-partition-2026-09-13-arz-2a19584.txt)):
++1.0–1.6 % size, one-thread build +12–37 %, eight-thread build −8 % at 32 parts, and lookup
+**25 → 39 ns**, because a monolith's pointer chain stays in L1 while a part's differs per query. A
+flat layout — one seeds array and one slot space with per-part offsets — would win most of the
+lookup back at the price of a new format for all three hash indexes, and the memory it saves is not
+the binding constraint at the scale that would need it: at 10⁹ keys the MPHF's construction peak is
+0.94 GB and the sort scratch 44 GB of disk.
+
 ## `ClosedHashIndex`
 
 `CompactHashIndex` with the fingerprint table removed, and the `Option` with it. The minimal
