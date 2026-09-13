@@ -24,11 +24,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 import statistics
 import sys
+import time
 from pathlib import Path
 
-import _probes  # noqa: F401  (imported for the side effect sweep.py depends on)
+import _probes
 import _results
 import corpora
 import lexindex
@@ -39,6 +41,91 @@ import sweep
 BLOCKS = (32, 128, 256, 1024)
 SIZES = (100_000, 1_000_000, 10_000_000)
 SAMPLE = 100_000  # the plan's sample size, and where the model reads its intercept
+
+# The op lanes `Objective::Workload` needs, past the mixed `id` the first model was fitted to.
+# `prefix` is measured as `prefix_count` on purpose: what an enumeration costs is dominated by how
+# many keys the prefix carries, which the planner cannot know, and the count is the part that is
+# the structure's own. `batch` is measured at both ends of a decade, since a batch of sixteen and
+# one of a thousand are not the same query.
+OPS_PROBES = 20_000
+CP_PROBES = 5_000
+BATCHES = (16, 1_024)
+ROUNDS = 3
+
+
+class Probes:
+    """One draw a corpus, shared by every structure, so the lanes answer the same questions.
+
+    The mixed set is `bench/_probes`' -- half members, half strangers, shuffled -- which is what
+    the size model's `lookup_ns` was measured over and what keeps the two comparable. The halves
+    are then separated, because a workload that is mostly hits and one that is mostly strangers are
+    different questions and some structures answer them at different prices.
+    """
+
+    def __init__(self, keys: list[str]) -> None:
+        self.mixed, _ = _probes.probe_set(keys, OPS_PROBES)
+        member = set(keys)
+        self.hits = [p for p in self.mixed if p in member]
+        self.misses = [p for p in self.mixed if p not in member]
+        rng = random.Random(0x5EED)
+        self.ids = [rng.randrange(len(keys)) for _ in range(OPS_PROBES)]
+        self.prefixes = [self.hits[rng.randrange(len(self.hits))][:3] for _ in range(OPS_PROBES)]
+        # The `common_prefix` protocol of `docs/benchmarks.md`: a real key with one to three more
+        # characters on it, except every fourth, which is characters alone and matches nothing.
+        alphabet = sorted({k[-1] for k in keys})
+        self.queries = []
+        for i in range(CP_PROBES):
+            base = keys[rng.randrange(len(keys))]
+            extra = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 3)))
+            self.queries.append(extra if i % 4 == 3 else base + extra)
+
+
+def _walk(fn, xs) -> None:
+    for x in xs:
+        fn(x)
+
+
+def _lanes(obj, probe: Probes) -> list[tuple[str, int, object]]:
+    """`(op, calls, pass)` for every op this structure answers, each pass walking a set once."""
+    out: list[tuple[str, int, object]] = []
+    ident = getattr(obj, "id", None)
+    if ident is not None:
+        for op, xs in (("mixed", probe.mixed), ("hit", probe.hits), ("miss", probe.misses)):
+            out.append((op, len(xs), lambda f=ident, xs=xs: _walk(f, xs)))
+    ids_of = getattr(obj, "ids_of", None)
+    if ids_of is not None:
+        for size in BATCHES:
+            chunks = [probe.mixed[i : i + size] for i in range(0, len(probe.mixed), size)]
+            out.append((f"batch{size}", len(probe.mixed), lambda f=ids_of, cs=chunks: _walk(f, cs)))
+    for op, attr, xs in (
+        ("key", "key", probe.ids),
+        ("prefix_count", "prefix_count", probe.prefixes),
+        ("common_prefix", "common_prefix", probe.queries),
+        ("longest_prefix", "longest_prefix", probe.queries),
+    ):
+        fn = getattr(obj, attr, None)
+        if fn is not None:
+            out.append((op, len(xs), lambda f=fn, xs=xs: _walk(f, xs)))
+    return out
+
+
+def _time(lanes: list[tuple[tuple[str, str], int, object]]) -> dict[tuple[str, str], float]:
+    """One pass a lane a round, every lane alternating with every other, the minimum kept.
+
+    Alternating across ops as well as across structures: a lane run to completion is timed with the
+    caches still warm from its own previous pass, and the ops of one structure share those caches
+    more than any two structures do.
+    """
+    best: dict[tuple[str, str], float] = {}
+    for _, _, walk in lanes:
+        walk()
+    for _ in range(ROUNDS):
+        for key, calls, walk in lanes:
+            start = time.perf_counter_ns()
+            walk()
+            ns = (time.perf_counter_ns() - start) / calls
+            best[key] = min(best.get(key, float("inf")), ns)
+    return best
 
 
 def structures():
@@ -55,8 +142,45 @@ def structures():
     return lanes
 
 
+def _cell(path: Path, corpus: str, size: int) -> list[dict]:
+    """Every structure over one corpus, built once and then timed on every op it answers."""
+    keys = path.read_text(encoding="utf-8").splitlines()
+    raw = sum(len(k.encode()) for k in keys) / len(keys)
+    print(f"\n{corpus} {len(keys):,} keys, raw {raw:.2f} B/key  ({path.name})")
+    probe = Probes(keys)
+    cells, lanes, alive = [], [], []
+    for name, build, keeps in structures():
+        start = time.perf_counter()
+        obj = build(keys)
+        build_ms = (time.perf_counter() - start) * 1e3
+        alive.append(obj)
+        lanes.extend(((name, op), calls, walk) for op, calls, walk in _lanes(obj, probe))
+        cells.append(
+            {
+                "corpus": corpus,
+                "size": size,
+                "keys": len(keys),
+                "raw_bytes_per_key": raw,
+                "structure": name,
+                "keeps_keys": keeps,
+                "bytes_per_key": sweep._size(obj) / len(keys),
+                "build_ms": build_ms,
+            }
+        )
+    timed = _time(lanes)
+    for cell in cells:
+        ops = {op: ns for (name, op), ns in timed.items() if name == cell["structure"]}
+        cell["ops"] = ops
+        cell["lookup_ns"] = ops.get("mixed")
+        print(
+            f"  {cell['structure']:<24}{cell['bytes_per_key']:8.3f} B/key"
+            f"{cell['build_ms']:9.0f} ms   " + "  ".join(f"{op} {ns:.0f}" for op, ns in ops.items())
+        )
+    alive.clear()
+    return cells
+
+
 def measure() -> int:
-    sweep._structures = structures
     manifest = json.loads(corpora.MANIFEST.read_text(encoding="utf-8"))
     cells: list[dict] = []
     for name, entry in manifest["corpora"].items():
@@ -67,7 +191,7 @@ def measure() -> int:
             if not path.exists():
                 print(f"{name}: {one['file']} not built, skipped")
                 continue
-            cells.extend(sweep._one(path, name, one["keys"], 1))
+            cells.extend(_cell(path, name, one["keys"]))
     if not cells:
         sys.exit("nothing measured: build the corpora first (`python bench/corpora.py build`)")
     path = _results.write(
@@ -75,8 +199,10 @@ def measure() -> int:
         cells,
         corpora=str(corpora.ROOT),
         build_repeats=1,
-        probes=sweep.PROBES,
-        rounds=sweep.ROUNDS,
+        probes=OPS_PROBES,
+        common_prefix_probes=CP_PROBES,
+        batches=list(BATCHES),
+        rounds=ROUNDS,
     )
     print(f"\nresults -> {path}")
     median = statistics.median(c["build_ms"] for c in cells)
