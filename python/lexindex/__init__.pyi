@@ -640,7 +640,18 @@ class Overlay:
         """Remove ``key``, returning whether it was there.
 
         Over a :class:`CompactHashIndex` base this inherits that index's false-positive rate: a
-        ``contains`` that was never true of a real key can retire an id.
+        ``contains`` that was never true of a real key can retire an id. Remove by a key you know
+        is present, or by the id itself with :meth:`retire_id`.
+        """
+
+    def retire_id(self, id: int) -> bool:
+        """Retire ``id`` itself, returning whether it was live.
+
+        The same tombstone :meth:`remove` sets, without the key lookup in front of it -- which over
+        a :class:`CompactHashIndex` base is the part a false positive corrupts. An application that
+        stored the id it was given when the key was added has the exact id to retire and needs no
+        membership test. An id at or above :meth:`id_space`, or one already retired, is ``False``
+        and changes nothing.
         """
 
     def key(self, id: int) -> str | None:

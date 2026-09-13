@@ -108,7 +108,8 @@ every week and teach us to ignore a red job.
   construction, at the false-positive rate `fingerprint_bits` buys.
 - **`Overlay::remove` retiring an id over a probabilistic base, and `Overlay::add` answering a
   stranger's id there.** Removal is by id, and a false positive can supply one; both methods
-  document it, and the base alone would have answered the same.
+  document it, and the base alone would have answered the same. `Overlay::retire_id` takes the id
+  and no key, so a caller that keeps the ids it was issued has a removal nothing can mislead.
 - **Hash collisions found offline.** See above.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set
   you hand in, not to a number a blob claims.

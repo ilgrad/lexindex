@@ -918,6 +918,21 @@ def test_overlay_core():
     assert ov.add("apple") == 0, "re-adding revives the original id"
 
 
+def test_overlay_retires_an_id_without_a_membership_test():
+    base = lexindex.CompactHashIndex(["apple", "banana"], fingerprint_bits=32)
+    ov = lexindex.Overlay(base)
+    cherry = ov.add("cherry")
+    # The id the caller was handed is all a removal needs; over a probabilistic base the key
+    # lookup in front of `remove` is the part a false positive corrupts.
+    assert ov.retire_id(cherry) and "cherry" not in ov and len(ov) == 2
+    assert not ov.retire_id(cherry), "retiring twice is not a second removal"
+    assert not ov.retire_id(ov.id_space())
+    assert not ov.retire_id(2**64 - 1)
+    assert len(ov) == 2 and ov.id_space() == 3
+    assert ov.add("cherry") == cherry, "re-adding revives the id it had"
+    assert ov.retire_id(ov.id("apple")) and "apple" not in ov
+
+
 def test_overlay_shares_the_base_rather_than_taking_it():
     si = lexindex.StringIndex(["apple", "banana"])
     ov = lexindex.Overlay(si)

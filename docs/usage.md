@@ -414,7 +414,16 @@ does not carry; saving it again writes the current one and it gains them.
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
 a compile error, since the methods live on a trait the keyless index cannot implement. Removal over
 that base also inherits its false-positive rate: a `contains` that was never true of a real key can
-retire an id, so remove by a key you know is present.
+retire an id, so remove by a key you know is present — or by the id itself:
+
+```python
+ids = {key: ov.add(key) for key in ("neologism", "typo")}   # whatever the caller already stores
+ov.retire_id(ids.pop("typo"))                               # the tombstone, with no key to be wrong
+```
+
+`retire_id` sets exactly the tombstone `remove` sets and asks the base nothing, so it is the one
+removal a false positive cannot mislead. An id at or above `id_space()`, or one already retired, is
+`False` and changes nothing.
 
 ### Batched lookups into a buffer
 

@@ -2371,9 +2371,21 @@ impl PyOverlay {
     /// Remove `key`, returning whether it was there. The id is retired, never reissued.
     ///
     /// Over a `CompactHashIndex` base this inherits that index's false-positive rate: a `contains`
-    /// that was never true of a real key can retire an id. Remove by a key you know is present.
+    /// that was never true of a real key can retire an id. Remove by a key you know is present, or
+    /// by the id itself with `retire_id`.
     fn remove(&self, py: Python<'_>, key: &str) -> bool {
         on_base!(mut self.lock(py), |ov| ov.remove(key))
+    }
+
+    /// Retire `id` itself, returning whether it was live: the same tombstone `remove` sets, without
+    /// the key lookup in front of it.
+    ///
+    /// Over a `CompactHashIndex` base that lookup is the part a false positive corrupts, so an
+    /// application holding the id it was given when the key was added should retire that id and
+    /// never ask the question. An id at or above `id_space()`, or one already retired, is `False`
+    /// and changes nothing.
+    fn retire_id(&self, py: Python<'_>, id: u64) -> bool {
+        on_base!(mut self.lock(py), |ov| ov.retire_id(id))
     }
 
     /// Key for `id`, or `None` if it is out of range or retired. Raises `TypeError` on a

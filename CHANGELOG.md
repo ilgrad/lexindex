@@ -108,6 +108,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **An id can be retired without a membership test.** `Overlay::retire_id(id)` — `retire_id` from
+  Python — sets exactly the tombstone `remove` sets, with no key lookup in front of it. Over a
+  `CompactHashIndex` base that lookup is the one write a false positive costs something on: a string
+  the base has never seen can match a live id, and removing it retires that id along with the real
+  key behind it. An application that stores the id it was handed when the key was added now has a
+  removal nothing can mislead. An id at or above `id_space()`, or one already retired, is `false`
+  and changes nothing. `remove` became that method with a lookup in front, so the tombstone and the
+  live count are maintained in one place rather than two.
+
 - **`plan` prices every index before one is built.** Five indexes with five corpus-specific size
   curves is a choice nobody should have to make from a README table, and the spread between them on
   one corpus is larger than the spread of any one of them across corpora. `lexindex::plan(&keys,

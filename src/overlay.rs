@@ -21,7 +21,9 @@
 //!
 //! The same probabilistic base makes [`remove`](Overlay::remove) the one operation to be careful
 //! with: a key the base has never seen can match a live id, and removing it retires that id along
-//! with the real key behind it. See the method for the whole of it.
+//! with the real key behind it. [`retire_id`](Overlay::retire_id) is the way out for a caller that
+//! kept the id — it retires exactly that id and asks the base nothing. See both methods for the
+//! whole of it.
 
 use crate::IndexError;
 
@@ -404,13 +406,32 @@ impl<I: OverlayBase> Overlay<I> {
     /// something.** [`CompactHashIndex`](crate::CompactHashIndex) stores no keys, so a string it
     /// has never seen can still match a live id — and removing it retires *that* id, taking a real
     /// key with it. Reads already had this contract; a write does not get to be safer than the
-    /// index it writes to. Remove only keys the caller knows are present, or put the overlay over
-    /// [`PerfectHashIndex`](crate::PerfectHashIndex), whose membership is verified against the
-    /// stored key.
+    /// index it writes to. A caller that kept the id it was given when the key was added can retire
+    /// it directly with [`retire_id`](Self::retire_id) and never ask the question; otherwise put
+    /// the overlay over [`PerfectHashIndex`](crate::PerfectHashIndex), whose membership is verified
+    /// against the stored key.
     pub fn remove(&mut self, key: &str) -> bool {
-        let Some(id) = self.id(key) else {
+        match self.id(key) {
+            Some(id) => self.retire_id(id),
+            None => false,
+        }
+    }
+
+    /// Retire `id` itself. Returns whether it was live.
+    ///
+    /// The same tombstone [`remove`](Self::remove) sets, without the key lookup in front of it —
+    /// which is the whole point over a probabilistic base, where that lookup is what a false
+    /// positive corrupts. An application that stores the id it was handed when the key was added
+    /// has the exact id to retire and needs no membership test at all; over
+    /// [`CompactHashIndex`](crate::CompactHashIndex) this is the only removal that cannot take a
+    /// stranger's key with it.
+    ///
+    /// An id at or above [`id_space`](Self::id_space), or one already retired, is `false` and
+    /// changes nothing.
+    pub fn retire_id(&mut self, id: u64) -> bool {
+        if id >= self.id_space() || self.is_dead(id) {
             return false;
-        };
+        }
         self.set_dead(id, true);
         self.live -= 1;
         true
@@ -1816,6 +1837,26 @@ mod tests {
         assert!(!ov.remove("b"), "removing twice is not a second removal");
         assert_eq!(ov.len(), 2);
         assert_eq!(ov.keys(), vec!["a".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn an_id_retires_without_the_base_being_asked_about_a_key() {
+        let mut ov = Overlay::new(StringIndex::build(["a", "b", "c"]).unwrap());
+        let d = ov.add("d");
+        assert!(ov.retire_id(1));
+        assert_eq!((ov.id("b"), ov.key(1), ov.len()), (None, None, 3));
+        assert!(!ov.retire_id(1), "retiring twice is not a second removal");
+        // Past the issued ids there is nothing to retire, and saying so must not grow the bitmap
+        // into a range `key` would then read as retired.
+        assert!(!ov.retire_id(ov.id_space()));
+        assert!(!ov.retire_id(u64::MAX));
+        assert_eq!((ov.len(), ov.id_space()), (3, 4));
+        // The same tombstone `remove` sets: an addition retired by id revives on re-add like any
+        // other, with the id it had.
+        assert!(ov.retire_id(d));
+        assert_eq!(ov.key(d), None);
+        assert_eq!(ov.add("d"), d);
+        assert_eq!(ov.keys(), ["a", "c", "d"].map(String::from));
     }
 
     #[test]
