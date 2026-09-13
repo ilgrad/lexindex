@@ -281,7 +281,14 @@ data, the packed block starts and the packed microblock starts; the loader check
 checksums, the table and the arrays' order before anything is trusted, and the block data — bounded
 on every read rather than validated up front — is what the fuzz target queries after loading. The
 two start arrays come last because their widths are known only once the data is encoded, which is
-what lets a streamed build write every section once and in order. `load_mmap` borrows
+what lets a streamed build write every section once and in order. One delta width serves a whole
+array, and a width per superblock was measured rather than assumed: over thirteen corpora at three
+blocks each it is worth at best **0.10 % of the blob** (`pypi` at 32 keys a block), and it is
+*negative* on six of the thirteen, the table of widths costing about what the narrowing saves. A
+third of the arrays clear the obvious gate — 5 % of their superblocks could drop two bits or more —
+and they are the block-level arrays, which have between two and fifty superblocks in the first
+place; `micro_offsets`, thirty times as many entries, clears it twice in twenty-six, microblock
+spans being uniform by construction. The distribution says yes and the bytes say no. `load_mmap` borrows
 every section but the per-block samples, which two binary searches read on every lookup (below);
 there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them

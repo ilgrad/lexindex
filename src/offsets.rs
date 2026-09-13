@@ -14,7 +14,9 @@ use crate::blob::SharedBytes;
 /// block-level arrays and a wider superblock spans more bytes, so the delta widens by about a bit
 /// each time the shift goes up: on the dictionary at the default block, shifts 3/4/5/6/7/8 measured
 /// 33/27/25/25/26/27 bits a block for those two together. Five and six tie at the floor, and
-/// six is the one whose bases array is half the size.
+/// six is the one whose bases array is half the size. A width per *superblock* rather than per
+/// array was measured too, and is worth at best 0.10 % of a blob and less than nothing on six of
+/// thirteen corpora — the table of widths costs about what the narrowing saves. `docs/design.md`.
 pub(crate) const SHIFT: u32 = 6;
 /// The widest delta a blob may declare. A read is one eight-byte load at a byte offset, so the
 /// bits of one entry must fit a word after a shift of at most seven.
