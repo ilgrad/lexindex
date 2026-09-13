@@ -1,0 +1,114 @@
+# Plan items 61 and 43: is the block search where the lookup's time is, and does a cache-line-wide
+# node beat the binary search over the samples?
+# lexindex 2.1.0 at dab25e3 in a worktree (`/tmp/lexindex-stree`, `local/stree`), arz (Ryzen 7
+# 5800HS, Zen 3), rustc 1.98.1, 2026-09-13, machine otherwise idle (load average under 1).
+#
+# One process, one index, one probe list. `SEARCH_MODE` selects the sample search *inside*
+# `locate`, so the lanes differ in nothing else, and every lane is checked to answer what the
+# shipped search answers on every probe before any of them is timed. Lanes run as a palindrome
+# (0, 1, 2, 3, 3, 2, 1, 0) so a drift that is linear over a round cancels, and a `StringIndex`
+# lane no lane can touch runs alongside as the control.
+#
+#   binary  the shipped pair of `partition_point`s over `samples`
+#   tree    levels of eight `u64`, each entry the maximum of its group below, derived at load
+#           (nb/7 words, 44 KB at ten million); both bounds in one descent, scalar nodes
+#   scan    one `partition_point` and a walk over the run of equal samples -- no second structure
+#   avx2    the tree with `_mm256_cmpgt_epi64` nodes, rank by bit scan rather than `count_ones`
+#           (`popcnt` is not in the baseline target and AVX2 does not imply it)
+#
+# Three lanes price the lookup itself, all on the same code `locate` runs:
+#
+#   search  `sample_of` and both bounds                     (`probe_sample_range`)
+#   block   the same plus the head boundary                 (`probe_block`)
+#   rest    the scan once the block is known                (`probe_locate_in`)
+#
+# `id` is not `block + rest`: at ten million the two halves take cache from each other and the
+# residual is ~50 ns of 615. At half a million there is nothing to compete for and they add to
+# within 0.5 %.
+
+## Ten million titles, block 256, 2 M shuffled probes, members only
+
+local/corpora/titles-en-10000000.txt: 10000000 keys, block 256, 2000000 probes (members only), 7.652 B/key
+round 1  binary    615.9  tree    618.9 (+0.48 %)  scan    626.8 (+1.76 %)  avx2    616.4 (+0.08 %)  control    780.5
+  search 1  binary     37.1  tree     53.1 (+43.20 %)  scan     33.9 (-8.56 %)  avx2     43.3 (+16.82 %)  control      0.0
+  block  1      85.1   rest    479.6
+round 2  binary    614.9  tree    616.4 (+0.25 %)  scan    628.5 (+2.22 %)  avx2    614.0 (-0.13 %)  control    775.3
+  search 2  binary     37.1  tree     53.0 (+42.97 %)  scan     33.5 (-9.54 %)  avx2     43.2 (+16.52 %)  control      0.0
+  block  2      85.7   rest    485.0
+round 3  binary    617.0  tree    615.4 (-0.26 %)  scan    625.9 (+1.45 %)  avx2    615.7 (-0.22 %)  control    774.0
+  search 3  binary     37.2  tree     53.7 (+44.46 %)  scan     33.8 (-9.08 %)  avx2     43.4 (+16.64 %)  control      0.0
+  block  3      85.5   rest    477.7
+min        binary    614.9  tree    615.4 (+0.09 %)  scan    625.9 (+1.80 %)  avx2    614.0 (-0.13 %)  control    774.0
+min search  binary     37.1  tree     53.0 (+42.97 %)  scan     33.5 (-9.54 %)  avx2     43.2 (+16.52 %)  control      0.0
+
+## The same index, 20 000 probes -- a sparse probe stream, which is what the 2026-09-12 file used
+
+# A lookup costs 20 % more per probe and the head boundary nearly doubles, because neither the
+# heads nor the block starts stay resident between probes. The sample search does not move: its
+# 312 KB is warmed by the probes themselves either way.
+
+local/corpora/titles-en-10000000.txt: 10000000 keys, block 256, 20000 probes (members only), 7.652 B/key
+round 1  binary    738.7  tree    740.8 (+0.29 %)  scan    752.5 (+1.87 %)  avx2    728.4 (-1.39 %)  control   1126.1
+  search 1  binary     40.6  tree     57.1 (+40.62 %)  scan     36.7 (-9.66 %)  avx2     46.7 (+14.96 %)  control      0.0
+  block  1     130.0   rest    622.2
+round 2  binary    771.7  tree    757.6 (-1.82 %)  scan    779.0 (+0.95 %)  avx2    754.9 (-2.18 %)  control   1153.8
+  search 2  binary     41.0  tree     57.8 (+40.79 %)  scan     37.2 (-9.44 %)  avx2     47.5 (+15.83 %)  control      0.0
+  block  2     120.1   rest    640.4
+round 3  binary    753.9  tree    747.2 (-0.89 %)  scan    757.5 (+0.48 %)  avx2    733.5 (-2.71 %)  control   1142.8
+  search 3  binary     40.9  tree     57.0 (+39.35 %)  scan     36.9 (-9.85 %)  avx2     46.7 (+14.01 %)  control      0.0
+  block  3     124.1   rest    653.0
+min        binary    738.7  tree    740.8 (+0.29 %)  scan    752.5 (+1.87 %)  avx2    728.4 (-1.39 %)  control   1126.1
+min search  binary     40.6  tree     57.0 (+40.49 %)  scan     36.7 (-9.66 %)  avx2     46.7 (+14.95 %)  control      0.0
+
+## Ten million titles, block 256, 2 M probes, half of them misses one byte past a member
+
+local/corpora/titles-en-10000000.txt: 10000000 keys, block 256, 2000000 probes, 7.652 B/key
+round 1  binary    604.5  tree    596.7 (-1.29 %)  scan    614.2 (+1.61 %)  avx2    598.0 (-1.08 %)  control    789.0
+  search 1  binary     37.8  tree     54.1 (+43.01 %)  scan     34.1 (-9.97 %)  avx2     43.0 (+13.67 %)  control      0.0
+  block  1      85.9   rest    473.3
+round 2  binary    603.6  tree    595.2 (-1.40 %)  scan    613.3 (+1.61 %)  avx2    598.6 (-0.83 %)  control    788.7
+  search 2  binary     37.8  tree     53.5 (+41.60 %)  scan     34.3 (-9.31 %)  avx2     43.1 (+14.05 %)  control      0.0
+  block  2      87.0   rest    472.3
+round 3  binary    604.9  tree    594.5 (-1.72 %)  scan    616.6 (+1.94 %)  avx2    595.6 (-1.53 %)  control    788.8
+  search 3  binary     37.9  tree     54.6 (+44.02 %)  scan     34.1 (-9.88 %)  avx2     43.3 (+14.24 %)  control      0.0
+  block  3      86.1   rest    472.2
+min        binary    603.6  tree    594.5 (-1.51 %)  scan    613.3 (+1.61 %)  avx2    595.6 (-1.32 %)  control    788.7
+min search  binary     37.8  tree     53.5 (+41.60 %)  scan     34.1 (-9.83 %)  avx2     43.0 (+13.85 %)  control      0.0
+
+## The dictionary, block 256, every key probed once, members only
+
+/usr/share/dict/words: 479823 keys, block 256, 479823 probes (members only), 2.838 B/key
+round 1  binary    273.8  tree    285.4 (+4.25 %)  scan    269.7 (-1.49 %)  avx2    283.6 (+3.58 %)  control    246.2
+  block  1      45.1   rest    229.2
+round 2  binary    273.4  tree    286.5 (+4.80 %)  scan    273.4 (+0.01 %)  avx2    280.9 (+2.74 %)  control    248.0
+min        binary    273.4  tree    285.4 (+4.42 %)  scan    269.7 (-1.33 %)  avx2    280.9 (+2.74 %)  control    246.2
+min search  binary     22.4  tree     41.1 (+83.27 %)  scan     15.5 (-30.71 %)  avx2     27.9 (+24.47 %)  control      0.0
+
+## What it says
+
+# Where the time is, quiet machine, members only, block 256:
+#
+#   corpus            id      search   head boundary   scan, block known   routing / id
+#   words 480 k    273.4     22.4          22.7              229.2            16 %
+#   titles 10 M    614.9     37.1          48.0              477.7            14 %
+#   titles 10 M    738.7     40.6          79.5              622.2            16 %   (20 k probes)
+#
+# The routing is a sixth of a lookup and the block scan is the rest. The 2026-09-12 file put the
+# block search at 31 % of 835 ns at ten million (152 the samples, 107 the head boundary); that run
+# was an instrumented worktree and its `id` baseline is 20-35 % above this one's. Neither the share
+# nor the absolute survives a quiet, uninstrumented, in-process measurement.
+#
+# The wide node loses, and not by a little. Five levels of eight beat fifteen binary steps on
+# *accesses* and lose on *work*: a node is eight compares and a rank where a binary step is one
+# compare and a conditional move, the descent is strictly serial where the two `partition_point`s
+# are independent chains the out-of-order engine overlaps, and the first eight steps of a binary
+# search re-read the same 255 elements for every probe -- 2 KB, permanently in L1. AVX2 nodes take
+# the tree from 53 to 43 ns (-19 %) and it is still 16 % above the binary search.
+#
+# End to end the tree is worth nothing: +0.1 % on `id` at ten million with members only, -1.3 to
+# -2.8 % with half the probes misses, +4.4 % on the dictionary. Below the 5 % bar in every cell,
+# and negative at half a million keys. 61 and 43 close.
+#
+# The one lane that beats the shipped search -- one `partition_point` and a walk over the run of
+# equal samples -- is worth -30 % of the search at 480 k and -9 % at ten million, which is 7 ns of
+# 273 and 3.4 of 615. `id` does not move on it. Not shipped.

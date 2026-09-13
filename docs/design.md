@@ -240,16 +240,28 @@ at 344–347. Against one level at the same size the reverse lookup halves and `
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
 removes.
 
-Where the lookup spends that time was measured directly, by timing `id` against an `id` handed the
-block it must search
-([`bench/results/dict-lines-2026-09-12-arz-e8533ff.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-lines-2026-09-12-arz-e8533ff.txt)):
-on the dictionary at `block = 256` finding the block is 59 ns of 289, and on ten million titles it
-is 258 of 835 — a third of the lookup, of which 152 ns is the binary search over the samples and
-107 the head boundary. That is the other half of the block ladder: a larger block spends less on
-the search and more on the scan, one for one, so past a million keys `id` barely moves across the
-ladder while on the dictionary it rises steadily. The search is not collected by a summary array
-over the samples — 12.5 lines of them is 312 KB, L2-resident, so the levels a summary removes are
-hits and not misses, and an A-B of exactly that landed inside the control's own drift.
+Where the lookup spends that time was measured two ways in one process on an idle machine
+([`bench/results/dict-routing-2026-09-13-arz-dab25e3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-routing-2026-09-13-arz-dab25e3.txt)):
+by timing the routing itself — the sample search and the head boundary, on the code `locate` runs —
+and by timing an `id` handed the block it must search. On the dictionary at `block = 256` the two
+agree, 45.1 ns directly against 44.2 by difference, of a 273 ns lookup; on ten million titles the
+routing is 85.1 ns of 615 directly and 137 by difference, the gap being the cache the two halves
+take from each other once the index is past the last level of it. **So the routing is a sixth of a
+lookup and the in-block scan is the rest** — 37.1 ns of it the two binary searches over the
+samples, 48 the head boundary. A sparser probe stream moves the second and not the first: at 20 000
+probes rather than two million the head boundary nearly doubles, the heads and the block starts no
+longer staying resident between lookups, while the sample search does not move.
+
+That split is the other half of the block ladder: a larger block spends less on the search and more
+on the scan, one for one, so past a million keys `id` barely moves across the ladder while on the
+dictionary it rises steadily. Neither half of the routing is collected by a better structure over
+the samples. A summary level removes no cold miss — 312 KB of samples at ten million is L2-resident,
+so what it removes are hits — and an A-B of exactly that landed inside the control's own drift. A
+cache-line-wide tree of eight-`u64` nodes, five levels where the binary search takes fifteen steps,
+is **43 % slower** than the two `partition_point`s it replaces, and 16 % slower with AVX2 nodes:
+the first eight steps of a binary search re-read the same 2 KB for every probe, `partition_point`
+selects branchlessly, and its two searches are independent chains where a descent is strictly
+serial.
 
 The serialised blob is `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
 [offset widths][micro][check]`, then the table, the heads, the packed head ends, the samples, the
