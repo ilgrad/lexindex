@@ -857,8 +857,8 @@ def plan(
     an fst spends per trie node, the bits the perfect hash spends per key -- come from one build of
     a 100 000-key sample, so past that size every entry is a model and ``measured`` is ``False``.
     Scored against the built blob on 23 corpora of half a million to ten million keys, at each of
-    the three priced ``DictIndex`` blocks, that estimate lands within 1.4 % median, 4.5 % at the
-    90th percentile and 5.4 % at worst; ``StringIndex`` within 3.4 / 9.8 / 30.5, because an fst
+    the three priced ``DictIndex`` blocks, that estimate lands within 1.3 % median, 3.9 % at the
+    90th percentile and 5.1 % at worst; ``StringIndex`` within 3.0 / 7.6 / 31.5, because an fst
     merges equal suffixes and how much it merges is a property of the whole key set rather than of
     a sample of it. Below the sample size nothing is modelled: the candidates are built and
     reported at what they weigh.

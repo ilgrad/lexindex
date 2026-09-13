@@ -77,7 +77,7 @@ mod string_index;
 mod subsequence;
 
 pub use dict_index::{DictIndex, DictProfile, DictSections};
-pub use estimate::{Estimate, Kind, Needs, Objective, Plan, plan, plan_for};
+pub use estimate::{Estimate, Kind, Needs, Objective, Plan, plan, plan_file, plan_for};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;

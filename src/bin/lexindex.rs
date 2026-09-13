@@ -9,7 +9,7 @@
 
 use lexindex::{
     BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Objective, Overlay,
-    OverlayBase, StringIndex, plan_for,
+    OverlayBase, StringIndex, plan_file, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -388,9 +388,17 @@ fn cmd_plan(
     err: &mut dyn Write,
 ) -> Result<(), Fail> {
     let path = &cmd.positional[0];
-    let (keys, blank) = read_keys(path, stdin)?;
-    note_blank(path, blank, err)?;
-    write!(out, "{}", plan_for(&keys, cmd.needs, cmd.objective)?).map_err(io_fail)?;
+    // A file is priced without being held: `plan_file` sorts it externally and counts the shape
+    // during the merge, and the answer is the one `plan` gives for the same keys, to the byte.
+    // Standard input cannot be sorted that way -- it cannot be read twice -- so it is read in.
+    let ranked = if path == "-" {
+        let (keys, blank) = read_keys(path, stdin)?;
+        note_blank(path, blank, err)?;
+        plan_for(&keys, cmd.needs, cmd.objective)?
+    } else {
+        plan_file(path, cmd.needs, cmd.objective)?
+    };
+    write!(out, "{ranked}").map_err(io_fail)?;
     note_implied_exact(cmd, err)
 }
 
@@ -425,32 +433,44 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
     let big = stream_above(cmd.stream, path);
-    let streamed = match (cmd.index, big) {
-        (Choice::One(kind), Some(_)) if can_stream(kind) => Some(kind),
-        _ => None,
+    // What to build, decided before the keys are read wherever it can be. `--index auto` over a
+    // file prices it with `plan_file`, which does not hold it either, so a ranked build streams as
+    // readily as a named one; standard input is the exception, since it cannot be priced and then
+    // read again. The block comes back with the kind -- the ladder names one on the winning line,
+    // and building the default block instead would write a blob the quote does not describe.
+    let decided = match cmd.index {
+        Choice::One(kind) => Some((kind, cmd.block)),
+        Choice::Auto if path != "-" => {
+            let ranked = plan_file(path, cmd.needs, cmd.objective)?;
+            write!(err, "{ranked}").map_err(io_fail)?;
+            note_implied_exact(cmd, err)?;
+            let best = ranked.best();
+            Some((best.kind, best.block))
+        }
+        Choice::Auto => None,
     };
-    if let Some(kind) = streamed {
-        let src = Source::new(path);
-        let n = stream_to_file(kind, &src, dest, cmd.block)?;
-        note_blank(path, src.blank.get(), err)?;
-        return note_written(kind, n, dest, err);
-    }
-    if big.is_some() {
-        writeln!(
-            err,
-            "reading {path}: this file is large enough to build without holding it, but \
-             `--index auto` prices the corpus, which means reading it. Name an index with \
-             --index to stream instead."
-        )
-        .map_err(io_fail)?;
+    if let Some((kind, block)) = decided {
+        if big.is_some() && can_stream(kind) {
+            let src = Source::new(path);
+            let n = stream_to_file(kind, &src, dest, block)?;
+            note_blank(path, src.blank.get(), err)?;
+            return note_written(kind, n, dest, err);
+        }
+        if big.is_some() {
+            writeln!(
+                err,
+                "reading {path}: this file is large enough to build without holding it, but \
+                 {} has no streaming build in this configuration.",
+                kind.name()
+            )
+            .map_err(io_fail)?;
+        }
     }
     let (keys, blank) = read_keys(path, stdin)?;
     note_blank(path, blank, err)?;
-    // The block comes back with the kind: the ladder names one on the winning line, and building
-    // the default block instead would write a blob the quote does not describe.
-    let (kind, block) = match cmd.index {
-        Choice::One(k) => (k, cmd.block),
-        Choice::Auto => {
+    let (kind, block) = match decided {
+        Some(pair) => pair,
+        None => {
             let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
             note_implied_exact(cmd, err)?;
@@ -1300,7 +1320,7 @@ mod tests {
     /// `--index auto` has to price the corpus, so it says why it is reading a file it could
     /// otherwise have streamed.
     #[test]
-    fn auto_over_a_large_file_says_why_it_reads_it() {
+    fn auto_over_a_large_file_streams_what_it_ranked() {
         let dir = tmpdir();
         let keys = keys_file(&dir, &corpus(300));
         let blob = dir.join("out.bin");
@@ -1315,8 +1335,29 @@ mod tests {
             "",
         );
         assert_eq!(code, 0, "{err}");
-        assert!(err.contains("prices the corpus"), "{err}");
-        assert!(err.contains("--index"), "{err}");
+        // It used to read the file in and say why: pricing a corpus meant holding it. `plan_file`
+        // prices it without, so a ranked build streams like a named one.
+        assert!(!err.contains("prices the corpus"), "{err}");
+        let marked: Vec<&str> = err.lines().filter(|l| l.starts_with('*')).collect();
+        assert_eq!(marked.len(), 1, "the ladder is still printed: {err}");
+        let quoted: u64 = marked[0]
+            .split_whitespace()
+            .nth(2)
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&blob).unwrap().len(),
+            quoted,
+            "the streamed blob is the line that was marked: {err}"
+        );
+        assert_eq!(
+            entries(&dir)
+                .iter()
+                .filter(|e| e.contains(".part."))
+                .count(),
+            0
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

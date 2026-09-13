@@ -334,9 +334,11 @@ depends on how much the keys share, a fingerprint index's does not
 `lexindex::plan(&keys, Needs::default().prefix())` in Rust: it prices every index that answers what
 you asked for — the dictionary at each of its three block sizes — ranks them cheapest first, and
 says when two are too close to call or when the corpus is one its model cannot carry. Past 100 000
-keys it models from a sample of that size and lands within **1.4 % of the built `DictIndex` blob at
-the median and 5.4 % at worst**, over 23 corpora at three blocks each, bar the two it flags as thin;
-below it, it builds the candidates and reports what they weigh. By hand, in decision order:
+keys it models from a sample of that size and lands within **1.3 % of the built `DictIndex` blob at
+the median and 5.1 % at worst**, over 23 corpora at three blocks each, bar the two it flags as thin;
+below it, it builds the candidates and reports what they weigh. `plan_file` does the same for a
+keys file **without ever holding it**: 0.27 GB of resident memory against 1.30 on a 925 MB path
+list, and the same ladder to the byte. By hand, in decision order:
 
 - **Do the keys need to come back out, or be scanned in order?** Then the fingerprint indexes are
   out: `StringIndex` for prefix / range / fuzzy, `DictIndex` for exact `string ↔ rank` at 52 % less,

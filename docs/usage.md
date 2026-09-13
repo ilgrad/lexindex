@@ -32,16 +32,33 @@ Past 100 000 keys the three numbers no statistic gives — what the symbol table
 into, the bytes an fst spends per trie node, the bits the perfect hash spends per key — come from
 one build of a sample of that size, and each estimate says so in `measured`. Scored against the
 built blob on 23 corpora of half a million to ten million keys, at each of the three priced
-blocks, `DictIndex` lands within **1.4 % median, 4.5 % at the 90th percentile and 5.4 % at
-worst**; `StringIndex` within 3.4 / 9.8 / 30.5,
-because an fst merges equal suffixes and how much it merges is a property of the whole key set
-rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
-and reported at what they weigh.
+blocks, `DictIndex` lands within **1.3 % median, 3.9 % at the 90th percentile and 5.1 % at
+worst**; `StringIndex` within 3.0 / 7.6 / 31.5, because an fst merges equal suffixes and how much it
+merges is a property of the whole key set rather than of a sample of it. Below the sample size
+nothing is modelled: the candidates are built and reported at what they weigh.
+
+The sample is drawn **by hash**: a key is kept while its hash is under a cutoff, and the cutoff
+falls as the draw fills. That is a uniform sample of the distinct keys, it is the same sample on
+every run over the same keys, and it needs neither the corpus's size in advance nor the corpus in
+memory — which is what lets `plan_file` give the same answer as `plan` without holding the keys. It
+is also the more accurate draw: a stride over sorted keys takes one key from every prefix group
+whatever the group's size, and a `StringIndex` estimate read off such a sample runs 5 % low on a
+corpus of shared prefixes where this one lands within 0.4 %.
 
 Two flags say when not to trust the ranking. `close` means the two cheapest are within 1.3× of each
 other, which is inside what an estimate can separate; `thin` means the mean suffix is under two
 bytes, where a compression ratio read from a sample stops carrying to full density — ten million
-numbers land 19 % off. Either one means build both and measure.
+numbers land 20 % off. Either one means build both and measure.
+
+`plan_file(path, needs, objective)` prices a keys file the same way **without ever holding it**.
+The file is sorted externally — runs in memory, spilled beside it, merged back — and the merge is
+where the key count, the mean length and both shared-prefix distances are counted, exactly rather
+than sampled; only the three unmeasurable constants still come from a sample, and that sample is
+the hash draw above, which does not depend on the corpus being in hand. So it is not an
+approximation of `plan`: on a 925 MB, 7 343 721-line path list the two print the **same ladder to
+the byte**, at 0.27 GB of resident memory against 1.30 and in less wall time. The runs go in a
+directory beside the file and are removed however the call ends, so that directory must be
+writable.
 
 ## `StringIndex` — ordered, FST-backed
 
@@ -751,24 +768,24 @@ Not in the ABI, each additive when someone asks: `Overlay`, the mmap loaders, th
 
 The crate ships a binary of the same name, so the choice between five indexes can be made without
 writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. It is a
-shell over `plan`, the builders, `inspect_file` and the indexes' own key iterators, and computes
-nothing of its own.
+shell over `plan_file`, the builders, `inspect_file` and the indexes' own key iterators, and
+computes nothing of its own.
 
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
-  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
-  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
-  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
+* DictIndex              1322343 bytes   2.76 B/key    423 ns  estimated at block 1024
+  DictIndex              1345575 bytes   2.80 B/key    396 ns  estimated at block 256
+  DictIndex              1530283 bytes   3.19 B/key    372 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    362 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
-  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
-  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
-  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
+* DictIndex              1322343 bytes   2.76 B/key    423 ns  estimated at block 1024
+  DictIndex              1345575 bytes   2.80 B/key    396 ns  estimated at block 256
+  DictIndex              1530283 bytes   3.19 B/key    372 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    362 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 wrote words.bin: DictIndex over 479823 keys, 1338541 bytes (2.79 B/key)
 
@@ -853,11 +870,11 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1312234 bytes   2.73 B/key    423 ns  estimated at block 1024
-  DictIndex              1335642 bytes   2.78 B/key    396 ns  estimated at block 256
-  DictIndex              1521129 bytes   3.17 B/key    372 ns  estimated at block 32
-  StringIndex            2629137 bytes   5.48 B/key    362 ns  estimated
-  PerfectHashIndex       5229448 bytes  10.90 B/key    205 ns  estimated
+* DictIndex              1322343 bytes   2.76 B/key    423 ns  estimated at block 1024
+  DictIndex              1345575 bytes   2.80 B/key    396 ns  estimated at block 256
+  DictIndex              1530283 bytes   3.19 B/key    372 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    362 ns  estimated
+  PerfectHashIndex       5230704 bytes  10.90 B/key    205 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
@@ -884,7 +901,7 @@ naming the index is how not to.
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at block 1024 and 2.73 B/key, `latency` answers `PerfectHashIndex`, four times
+answers `DictIndex` at block 1024 and 2.76 B/key, `latency` answers `PerfectHashIndex`, four times
 the size and half the wait, and `balanced` answers the same dictionary at block 32 -- 12 % faster
 for 16 % more space. The block is a candidate of its own, so an objective picks one of those too.
 
@@ -916,12 +933,15 @@ path list the peak resident set falls from 1.34 to 0.28 GB for `string`, 1.42 to
 1.29 to 0.15 for `compact` and `closed`, and 2.96 to 0.97 for `perfect` -- whose own blob is 935 MB,
 so it is the one index that cannot end below the file it was built from. **The blobs are byte for
 byte the ones the in-memory build writes**, so this is a memory setting and never a format.
-`--index auto` still reads the file: pricing a corpus means seeing it, and `build` says so on
-stderr rather than streaming something the ladder did not rank.
+`--index auto` streams too, since `plan_file` prices the file without holding it either: the
+ladder is printed from the streamed plan and the winner is then built the same way. What is still
+read in is standard input, and a kind with no streaming build in the current feature set — `build`
+says which on stderr rather than pretending.
 
 A keys file is one key per line, UTF-8, in any order; `-` reads standard input, and duplicates are
-removed by the builders. **An empty line is skipped** and the count is reported on stderr -- a file
-that ends in a newline is the common case and an empty key is not. **Invalid UTF-8 is an error**
+removed by the builders. **An empty line is skipped** -- a file that ends in a newline is the common
+case and an empty key is not -- and the count is reported on stderr wherever the command reads the
+file in. `plan` over a file does not read it in, so there it is skipped silently. **Invalid UTF-8 is an error**
 naming the line rather than a replacement character, since the library takes `&str` and an index
 built from lossy bytes would hold keys the file does not.
 

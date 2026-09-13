@@ -11,8 +11,8 @@
 //! so one build of a 100 000-key sample supplies it, along with the bytes an fst spends per trie
 //! node and the bits the perfect hash spends per key. Scored against the built blob on 23 corpora
 //! of half a million to ten million keys, at each of the three priced blocks, the [`DictIndex`]
-//! estimate lands within **1.4 % median, 4.5 % at the 90th percentile and 5.4 % at worst**.
-//! [`StringIndex`] is looser — 3.4 % median, 9.8 % at the 90th percentile, and 30 % on a corpus of
+//! estimate lands within **1.3 % median, 3.9 % at the 90th percentile and 5.1 % at worst**.
+//! [`StringIndex`] is looser — 3.0 % median, 7.6 % at the 90th percentile, and 32 % on a corpus of
 //! file paths — because an fst merges equal
 //! suffixes, and how much it merges is a property of the whole key set rather than of a sample of
 //! it. The one family past both is corpora whose mean suffix is about a byte, where the ratio read
@@ -532,6 +532,7 @@ impl fmt::Display for Plan {
 }
 
 /// What one walk over the sorted keys tells the models. All of it exact.
+#[derive(Default)]
 struct Shape {
     n: usize,
     /// Bytes in all the keys.
@@ -546,24 +547,11 @@ struct Shape {
 
 impl Shape {
     fn of(keys: &[&str]) -> Self {
-        let mut s = Self {
-            n: keys.len(),
-            len: 0,
-            lcp1: 0,
-            lcp32: 0,
-            pairs32: 0,
-        };
-        for (i, k) in keys.iter().enumerate() {
-            s.len += k.len() as u64;
-            if i > 0 {
-                s.lcp1 += dict_index::lcp(keys[i - 1].as_bytes(), k.as_bytes()) as u64;
-            }
-            if i >= 32 {
-                s.lcp32 += dict_index::lcp(keys[i - 32].as_bytes(), k.as_bytes()) as u64;
-                s.pairs32 += 1;
-            }
+        let mut walk = ShapeWalk::default();
+        for k in keys {
+            walk.push(k);
         }
-        s
+        walk.finish()
     }
 
     fn mean_len(&self) -> f64 {
@@ -585,6 +573,118 @@ impl Shape {
     /// Characters the keys add over their predecessors: the nodes of the trie an fst minimises.
     fn trie_nodes(&self) -> f64 {
         (self.len - self.lcp1) as f64
+    }
+}
+
+/// Keys back a restart entry is coded against, and so the second distance [`Shape`] measures.
+const LCP_BACK: usize = 32;
+
+/// [`Shape`] gathered one key at a time, for a stream that is never all in memory at once.
+///
+/// The ring holds the last [`LCP_BACK`] keys, which is all a walk needs to see to measure both
+/// distances: the key before this one, and the key a restart entry would be coded against.
+#[derive(Default)]
+struct ShapeWalk {
+    shape: Shape,
+    ring: Vec<String>,
+}
+
+impl ShapeWalk {
+    /// The next key of an ascending, distinct stream.
+    fn push(&mut self, key: &str) {
+        let n = self.shape.n;
+        self.shape.len += key.len() as u64;
+        if n > 0 {
+            let prev = &self.ring[(n - 1) % LCP_BACK];
+            self.shape.lcp1 += dict_index::lcp(prev.as_bytes(), key.as_bytes()) as u64;
+        }
+        if n >= LCP_BACK {
+            // The slot about to be overwritten holds the key `LCP_BACK` back, and nothing else
+            // reads it.
+            let back = &self.ring[n % LCP_BACK];
+            self.shape.lcp32 += dict_index::lcp(back.as_bytes(), key.as_bytes()) as u64;
+            self.shape.pairs32 += 1;
+        }
+        if self.ring.len() < LCP_BACK {
+            self.ring.push(key.to_owned());
+        } else {
+            let slot = &mut self.ring[n % LCP_BACK];
+            slot.clear();
+            slot.push_str(key);
+        }
+        self.shape.n += 1;
+    }
+
+    fn finish(self) -> Shape {
+        self.shape
+    }
+}
+
+/// At most `want` keys of a stream, drawn by hash rather than by position.
+///
+/// A key is kept while its hash is under a cutoff; when twice the wanted count has gathered, the
+/// cutoff drops to the median and the half above it goes. What survives is a uniform sample of the
+/// distinct keys — the hash decides, not where a key fell — and it is the same sample on every run
+/// over the same keys, which is what keeps a plan reproducible. The resident cost is bounded by
+/// twice the sample, whatever the corpus, so the same draw serves [`plan`], which holds the sorted
+/// keys, and [`plan_file`], which never holds them at all.
+///
+/// It is also the more accurate draw, which is not obvious: a stride over sorted keys takes one
+/// key from every prefix group whatever the group's size, and a `StringIndex` estimate read off
+/// such a sample runs 5 % low on a corpus of shared prefixes where this one lands within 0.4 %.
+struct HashSample<K> {
+    want: usize,
+    cutoff: u64,
+    kept: Vec<(u64, K)>,
+}
+
+impl<K: AsRef<str> + Ord> HashSample<K> {
+    fn new(want: usize) -> Self {
+        Self {
+            want,
+            cutoff: u64::MAX,
+            kept: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, key: K) {
+        let hash = crate::blob::hash_bytes(key.as_ref().as_bytes());
+        self.keep(hash, key);
+    }
+
+    /// The hash of a key the draw would keep, and `None` for one it would not — so a caller that
+    /// has to copy a key to hand it over copies only the ones that survive.
+    fn wanted(&self, key: &str) -> Option<u64> {
+        let hash = crate::blob::hash_bytes(key.as_bytes());
+        (hash <= self.cutoff).then_some(hash)
+    }
+
+    fn keep(&mut self, hash: u64, key: K) {
+        if hash > self.cutoff {
+            return;
+        }
+        self.kept.push((hash, key));
+        if self.want > 0 && self.kept.len() >= 2 * self.want {
+            self.trim();
+        }
+    }
+
+    fn trim(&mut self) {
+        if self.kept.len() <= self.want {
+            return;
+        }
+        self.kept
+            .select_nth_unstable_by_key(self.want - 1, |(h, _)| *h);
+        self.kept.truncate(self.want);
+        self.cutoff = self.kept.iter().map(|(h, _)| *h).max().unwrap_or(u64::MAX);
+    }
+
+    /// The sample, ascending — the order every model constant is read in.
+    fn finish(mut self) -> Vec<K> {
+        self.trim();
+        let mut keys: Vec<K> = self.kept.into_iter().map(|(_, k)| k).collect();
+        keys.sort_unstable();
+        keys
     }
 }
 
@@ -776,6 +876,151 @@ pub fn plan_for<S: AsRef<str>>(
     })
 }
 
+/// [`plan_for`] over a keys file, without ever holding the corpus.
+///
+/// One key a line, UTF-8, in any order; **an empty line is not a key**, since a file that ends in a
+/// newline is the common case and an empty key is not. Duplicates are counted once, as they are in
+/// [`plan`].
+///
+/// The file is sorted externally — runs in memory, spilled beside it, merged back — and the merge
+/// is where `n`, the mean key length and both shared-prefix distances are counted, exactly and not
+/// from a sample. What a sample is still needed for is the three numbers no statistic gives, and
+/// those come from 100 000 keys drawn **by hash**: a uniform draw over the distinct keys that costs
+/// one pass and no ordering, where [`plan`] can afford to take its sample by position because it
+/// has the sorted corpus in hand. So the two agree on the shape to the byte and differ on the
+/// constants by whatever separates two samples of one corpus.
+///
+/// The resident cost is the run budget plus the sample, not the corpus: on a 925 MB, 7 343 721-line
+/// path list this peaks at a third of a gigabyte where [`plan`] on the loaded keys peaks at 1.4.
+/// The runs are written to a directory beside `path` and removed however the call ends, so the
+/// file's own directory must be writable.
+///
+/// ```no_run
+/// # use lexindex::{plan_file, Needs, Objective};
+/// let p = plan_file("keys.txt", Needs::default().prefix(), Objective::Memory)?;
+/// println!("{p}");
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+pub fn plan_file(
+    path: impl AsRef<std::path::Path>,
+    needs: Needs,
+    objective: Objective,
+) -> Result<Plan, IndexError> {
+    plan_file_with(path.as_ref(), needs, objective, crate::extsort::RUN_BYTES)
+}
+
+/// [`plan_file`] at a chosen run budget, so a test can reach the merge without a corpus that
+/// spills a quarter of a gigabyte.
+fn plan_file_with(
+    path: &std::path::Path,
+    needs: Needs,
+    objective: Objective,
+    run_bytes: usize,
+) -> Result<Plan, IndexError> {
+    use crate::extsort::{Replay, Run, Runs};
+    let mut run = Run::with_budget(run_bytes);
+    let mut runs = Runs::beside(path);
+    read_lines(path, &mut |key| {
+        if !run.fits(key) {
+            if run.is_empty() {
+                return Err(IndexError::Format("plan: a key longer than the run budget"));
+            }
+            runs.spill(run.sorted())?;
+            run.clear();
+        }
+        run.push(key);
+        Ok(())
+    })?;
+
+    let want = sample_size();
+    let mut walk = ShapeWalk::default();
+    let mut sample: HashSample<String> = HashSample::new(want);
+    // A corpus no larger than the sample is weighed rather than modelled, exactly as `plan` weighs
+    // one, so the two answer a small file identically. Kept only while it stays small enough to be
+    // the sample itself.
+    let mut all: Option<Vec<String>> = Some(Vec::new());
+    let mut each = |key: &str| {
+        walk.push(key);
+        if let Some(hash) = sample.wanted(key) {
+            sample.keep(hash, key.to_owned());
+        }
+        if let Some(keys) = &mut all {
+            keys.push(key.to_owned());
+            if keys.len() > want {
+                all = None;
+            }
+        }
+        Ok(())
+    };
+    if runs.is_empty() {
+        (&mut run).each(&mut each)?;
+    } else {
+        if !run.is_empty() {
+            runs.spill(run.sorted())?;
+        }
+        // The run's arena is the plan's largest allocation and nothing reads it again.
+        drop(run);
+        (&mut runs).each(&mut each)?;
+    }
+
+    let shape = walk.finish();
+    let candidates = candidates(needs);
+    let mut estimates = match all {
+        Some(keys) => {
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+            weigh(&keys, &candidates)?
+        }
+        None => {
+            let drawn = sample.finish();
+            let drawn: Vec<&str> = drawn.iter().map(String::as_str).collect();
+            model(&shape, &Sample::of(&drawn)?, &candidates)
+        }
+    };
+    rank(&mut estimates, objective, shape.n, shape.mean_len());
+    Ok(Plan {
+        keys: shape.n,
+        mean_len: shape.mean_len(),
+        mean_lcp: shape.mean_lcp1(),
+        estimates,
+        needs,
+        objective,
+    })
+}
+
+/// Every non-empty line of a keys file, in order, with the line number in any UTF-8 error — the
+/// number is the whole difference between an error a caller can act on and one they cannot.
+fn read_lines(
+    path: &std::path::Path,
+    each: &mut dyn FnMut(&str) -> Result<(), IndexError>,
+) -> Result<(), IndexError> {
+    use std::io::BufRead;
+    let open = std::fs::File::open(path)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+    let mut reader = std::io::BufReader::new(open);
+    let mut line = String::new();
+    let mut at = 0usize;
+    loop {
+        line.clear();
+        at += 1;
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(IndexError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{}:{at}: not UTF-8", path.display()),
+                )));
+            }
+            Err(e) => return Err(IndexError::Io(e)),
+        }
+        let key = line.strip_suffix('\n').unwrap_or(&line);
+        let key = key.strip_suffix('\r').unwrap_or(key);
+        if !key.is_empty() {
+            each(key)?;
+        }
+    }
+}
+
 /// Put the candidates in the objective's order, best first. Ties, and every order, break on bytes,
 /// so two runs over the same keys rank them the same way.
 fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len: f64) {
@@ -823,25 +1068,20 @@ fn candidates(needs: Needs) -> Vec<(Kind, Option<usize>)> {
     out
 }
 
-/// `want` keys spread over the sorted corpus, in order, and exactly `want` of them.
+/// `want` keys of the sorted corpus, in order, drawn by [`HashSample`].
 ///
-/// A plain `step_by(n / want)` is a stride rather than a sample, and integer division makes it a
-/// poor one: a corpus of 150 001 keys gets a step of one, so "the sample" is the whole corpus and
-/// the constants are read off a build the size of the real index. The fractional stride
-/// `⌊(i·n + phase) / want⌋` takes `want` keys at any size, and the phase — derived from the corpus
-/// itself, so that a plan over the same keys is still reproducible — stops the draw from landing
-/// on the same offset of every prefix group.
+/// Not `step_by(n / want)`, which was neither a sample nor `want` keys: integer division gives a
+/// step of one at 150 001 keys, so "the sample" was the whole corpus and every constant was read
+/// off a build the size of the real index.
 fn sample<'a>(sorted: &[&'a str], want: usize) -> Vec<&'a str> {
-    let n = sorted.len();
-    if n <= want || want == 0 {
+    if sorted.len() <= want || want == 0 {
         return sorted.to_vec();
     }
-    let ends = crate::blob::hash_bytes(sorted[0].as_bytes())
-        ^ crate::blob::hash_bytes(sorted[n - 1].as_bytes());
-    let phase = (ends ^ n as u64) % n as u64;
-    (0..want as u64)
-        .map(|i| sorted[((i * n as u64 + phase) / want as u64) as usize])
-        .collect()
+    let mut draw = HashSample::new(want);
+    for key in sorted {
+        draw.push(*key);
+    }
+    draw.finish()
 }
 
 /// Build every candidate and report what it weighs. What a corpus no larger than the sample gets,
@@ -1314,6 +1554,128 @@ mod tests {
         let mut rows = dicts([1_020, 1_010, 1_000]);
         rows.push(estimate(Kind::String, None, 1_100));
         assert!(of(rows).close(), "a second kind inside 1.3x is the warning");
+    }
+
+    fn keys_file(name: &str, text: &str) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "lexindex-plan-file-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    fn beside(path: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// A file no larger than the sample is weighed, and weighed exactly as `plan` weighs the same
+    /// keys in memory: same candidates, same bytes, same order.
+    #[test]
+    fn a_small_file_plans_exactly_as_the_loaded_corpus_does() {
+        let keys = corpus(1_500);
+        let text = keys.join("\n") + "\n";
+        let path = keys_file("small.txt", &text);
+        for objective in [Objective::Memory, Objective::Latency, Objective::Balanced] {
+            let needs = Needs::default().reverse().ordered();
+            let want = plan_for(&keys, needs, objective).unwrap();
+            let got = plan_file(&path, needs, objective).unwrap();
+            assert_eq!(got, want, "{objective:?}");
+            assert!(got.estimates().iter().all(|e| e.measured));
+        }
+        assert_eq!(beside(&path), vec!["small.txt".to_string()], "no runs left");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// Past the sample the two plans are the *same* plan: the shape is counted during the merge
+    /// rather than sampled, and the sample is drawn by hash, which does not depend on whether the
+    /// keys arrived as a slice or as a merge of spilled runs.
+    #[test]
+    fn a_merged_file_plans_exactly_as_the_loaded_corpus_does() {
+        let keys = corpus(20_000);
+        let path = keys_file("merged.txt", &(keys.join("\n") + "\n"));
+        let needs = Needs::default().ordered();
+        let (want, got) = with_sample(2_000, || {
+            (
+                plan(&keys, needs).unwrap(),
+                // 8 KiB a run over 20 000 keys is a real merge: hundreds of runs, collapsed.
+                plan_file_with(&path, needs, Objective::Memory, 8 << 10).unwrap(),
+            )
+        });
+        assert!(got.estimates().iter().all(|e| !e.measured));
+        assert_eq!(
+            got.shape(),
+            want.shape(),
+            "the shape is counted, not sampled"
+        );
+        assert_eq!(got, want);
+        assert_eq!(
+            beside(&path),
+            vec!["merged.txt".to_string()],
+            "no runs left"
+        );
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// A file is lines, not keys: a blank line is the newline at the end of the last one, and a
+    /// key written twice is one key.
+    #[test]
+    fn blank_lines_are_skipped_and_duplicates_counted_once() {
+        let path = keys_file("odd.txt", "b\n\na\nb\r\n\nc\n");
+        let p = plan_file(&path, Needs::default(), Objective::Memory).unwrap();
+        assert_eq!(p.keys(), 3);
+        assert_eq!(p, plan(&["a", "b", "c"], Needs::default()).unwrap());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The library takes `&str`, so a line that is not UTF-8 is an error naming the line rather
+    /// than a key spelled with replacement characters.
+    #[test]
+    fn a_line_that_is_not_utf8_names_itself() {
+        let path = keys_file("bad.txt", "");
+        std::fs::write(&path, b"ok\nfine\n\xff\xfe\n").unwrap();
+        let err = plan_file(&path, Needs::default(), Objective::Memory).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("bad.txt:3:"), "{text}");
+        assert!(text.contains("not UTF-8"), "{text}");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    /// The draw is the hash's, not the position's, so it is the same draw every time and it is
+    /// spread over the corpus rather than over its start.
+    #[test]
+    fn the_hash_sample_is_uniform_and_reproducible() {
+        let keys = corpus(50_000);
+        let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        let draw = || {
+            let mut s = HashSample::new(1_000);
+            for k in &sorted {
+                s.push(k);
+            }
+            s.finish()
+        };
+        let first = draw();
+        assert_eq!(first.len(), 1_000);
+        assert!(first.windows(2).all(|w| w[0] < w[1]), "ascending, distinct");
+        assert_eq!(first, draw(), "the same file draws the same sample");
+        // Uniform: each tenth of the corpus holds about a tenth of the draw.
+        let mut buckets = [0usize; 10];
+        for k in &first {
+            let at = sorted.binary_search(k).unwrap();
+            buckets[at * 10 / sorted.len()] += 1;
+        }
+        assert!(
+            buckets.iter().all(|&b| (40..=160).contains(&b)),
+            "{buckets:?}"
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::extsort::{RUN_BYTES, Run, Runs};
+use crate::extsort::{RUN_BYTES, Replay, Run, Runs};
 use crate::fsst::{self, ESCAPE, Table};
 use crate::offsets::{self, Offsets};
 use std::cmp::Ordering;
@@ -2617,51 +2617,6 @@ impl std::fmt::Debug for DictIndex {
             .field("block", &self.block)
             .field("bytes", &self.serialized_len())
             .finish_non_exhaustive()
-    }
-}
-
-/// A sorted, distinct key stream [`DictIndex::build_to_file`] can walk more than once — either the
-/// single in-memory run the corpus fitted in, or a merge of the runs it spilled.
-trait Replay {
-    fn each(&mut self, f: &mut dyn FnMut(&str) -> Result<(), IndexError>)
-    -> Result<(), IndexError>;
-}
-
-impl Replay for &mut Run {
-    fn each(
-        &mut self,
-        f: &mut dyn FnMut(&str) -> Result<(), IndexError>,
-    ) -> Result<(), IndexError> {
-        for key in self.sorted() {
-            f(key)?;
-        }
-        Ok(())
-    }
-}
-
-impl Replay for &mut Runs {
-    fn each(
-        &mut self,
-        f: &mut dyn FnMut(&str) -> Result<(), IndexError>,
-    ) -> Result<(), IndexError> {
-        // The merge interleaves the runs but deduplicates only within one, so equal keys arrive
-        // adjacent; dropping them here is what makes this stream the one `build` sorts to.
-        let failed = std::cell::RefCell::new(None);
-        let mut prev = String::new();
-        let mut seen = false;
-        for key in self.merge(&failed)? {
-            if seen && prev == key {
-                continue;
-            }
-            f(&key)?;
-            prev.clear();
-            prev.push_str(&key);
-            seen = true;
-        }
-        if let Some(e) = failed.borrow_mut().take() {
-            return Err(IndexError::Io(e));
-        }
-        Ok(())
     }
 }
 
