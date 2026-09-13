@@ -25,12 +25,13 @@ const USAGE: &str = concat!(
 usage:
   lexindex plan    <keys-file> [needs]
   lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [needs]
-  lexindex inspect <blob>
+  lexindex inspect <blob> [--sections]
   lexindex dump    <blob>
 
   plan     what every index that answers the needs would weigh, cheapest first
   build    build one index and save it; `--index auto` asks plan and builds the winner
-  inspect  what a blob already on disk is, from its header alone
+  inspect  what a blob already on disk is, from its header alone; `--sections` reads a
+           DictIndex whole and prints where its bytes went
   dump     the keys a blob holds, one per line, in id order — `dump | build` is the
            migration path off a format a later version stops reading
 
@@ -46,6 +47,7 @@ options (`--name value` or `--name=value`):
   --index NAME   auto (default), dict, string, compact, closed, perfect
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
+  --sections     with `inspect`, on a DictIndex: the blob's byte split
   -h, --help     this text
   -V, --version  the version
 
@@ -81,8 +83,10 @@ fn io_fail(e: std::io::Error) -> Fail {
 /// rather than a silent no-op.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Accepts {
-    /// `inspect` and `dump`: the blob, and nothing else.
+    /// `dump`: the blob, and nothing else.
     Nothing,
+    /// `inspect`: the blob, and whether to read it whole.
+    Sections,
     /// `plan`: the needs.
     Needs,
     /// `build`: the needs, plus what to build and how.
@@ -103,6 +107,7 @@ struct Cmd {
     needs: Needs,
     index: Choice,
     block: Option<usize>,
+    sections: bool,
 }
 
 fn choice(name: &str) -> Result<Choice, Fail> {
@@ -164,6 +169,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         needs: Needs::default(),
         index: Choice::Auto,
         block: None,
+        sections: false,
     };
     let mut at = 0;
     while at < args.len() {
@@ -174,8 +180,9 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             _ => (arg.as_str(), None),
         };
         match name {
+            "--sections" if accepts == Accepts::Sections => cmd.sections = true,
             "--reverse" | "--ordered" | "--prefix" | "--fuzzy" | "--exact"
-                if accepts != Accepts::Nothing =>
+                if !matches!(accepts, Accepts::Nothing | Accepts::Sections) =>
             {
                 let flag = match name {
                     "--reverse" => &mut cmd.needs.reverse,
@@ -429,7 +436,61 @@ fn dump_overlay(path: &str, info: &BlobInfo, out: &mut dyn Write) -> Result<(), 
 fn cmd_inspect(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     let path = &cmd.positional[0];
     let info = lexindex::inspect_file(path).map_err(|e| Fail::Failed(format!("{path}: {e}")))?;
-    print_info(&info, "", out)
+    print_info(&info, "", out)?;
+    if cmd.sections {
+        if info.kind != BlobKind::DictIndex {
+            return Err(Fail::Failed(format!(
+                "{path}: --sections is a DictIndex's byte split, and this is a {:?}",
+                info.kind
+            )));
+        }
+        print_sections(&DictIndex::load(path)?, out)?;
+    }
+    Ok(())
+}
+
+/// Where a `DictIndex`'s bytes went: one line a section, with what it costs a key and what share
+/// of the blob it is, since a section is only ever read against those two.
+fn print_sections(index: &DictIndex, out: &mut dyn Write) -> Result<(), Fail> {
+    let s = index.sections();
+    let total = s.total();
+    let keys = index.len().max(1) as f64;
+    for (name, bytes) in [
+        ("header", s.header),
+        ("tables", s.tables),
+        ("heads", s.heads),
+        ("samples", s.samples),
+        ("head_ends", s.head_ends),
+        ("block_offsets", s.block_offsets),
+        ("micro_offsets", s.micro_offsets),
+        ("restart_headers", s.restart_headers),
+        ("restart_wide", s.restart_wide),
+        ("restart_codes", s.restart_codes),
+        ("entry_headers", s.entry_headers),
+        ("entry_wide", s.entry_wide),
+        ("entry_codes", s.entry_codes),
+        ("total", total),
+    ] {
+        let share = if total == 0 {
+            0.0
+        } else {
+            100.0 * bytes as f64 / total as f64
+        };
+        writeln!(
+            out,
+            "sections.{name}: {bytes} ({:.4} B/key, {share:.2} %)",
+            bytes as f64 / keys
+        )
+        .map_err(io_fail)?;
+    }
+    for (name, count) in [
+        ("restarts", s.restarts),
+        ("entries", s.entries),
+        ("wide", s.wide),
+    ] {
+        writeln!(out, "sections.{name}: {count}").map_err(io_fail)?;
+    }
+    Ok(())
 }
 
 /// Every field the header gave, one per line. The optional ones are index-specific, so a field
@@ -494,7 +555,10 @@ fn dispatch(
             stdin,
             err,
         ),
-        "inspect" => cmd_inspect(&parse(rest, Accepts::Nothing, 1, "inspect <blob>")?, out),
+        "inspect" => cmd_inspect(
+            &parse(rest, Accepts::Sections, 1, "inspect <blob> [--sections]")?,
+            out,
+        ),
         "dump" => cmd_dump(&parse(rest, Accepts::Nothing, 1, "dump <blob>")?, out),
         other => Err(Fail::Usage(format!("no such subcommand `{other}`"))),
     }
@@ -870,6 +934,78 @@ mod tests {
         let (code, _, err) = go(&["dump", path.to_str().unwrap(), "--exact"], "");
         assert_eq!(code, 2);
         assert!(err.contains("no such option `--exact`"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn inspect_sections_accounts_for_every_byte_of_a_dict_blob() {
+        let dir = tmpdir();
+        let text = corpus(2_000);
+        let keys = keys_file(&dir, &text);
+        let blob = dir.join("sections.bin");
+        let dest = blob.to_str().unwrap();
+        assert_eq!(
+            go(&["build", keys.as_str(), dest, "--index", "dict"], "").0,
+            0
+        );
+        let (code, out, err) = go(&["inspect", dest, "--sections"], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        // The header block is still printed, and the split comes after it.
+        assert!(out.contains("kind: DictIndex\n"), "{out}");
+        let of = |name: &str| -> u64 {
+            let at = out
+                .find(&format!("sections.{name}: "))
+                .unwrap_or_else(|| panic!("no {name} in {out}"));
+            let rest = &out[at + name.len() + 11..];
+            rest[..rest.find([' ', '\n']).unwrap()].parse().unwrap()
+        };
+        let parts = [
+            "header",
+            "tables",
+            "heads",
+            "samples",
+            "head_ends",
+            "block_offsets",
+            "micro_offsets",
+            "restart_headers",
+            "restart_wide",
+            "restart_codes",
+            "entry_headers",
+            "entry_wide",
+            "entry_codes",
+        ];
+        let sum: u64 = parts.iter().map(|p| of(p)).sum();
+        assert_eq!(sum, of("total"), "{out}");
+        assert_eq!(sum, std::fs::metadata(&blob).unwrap().len(), "{out}");
+        // Every key is a head, a restart or an entry, and the blob says how many keys it holds.
+        let keys_held: u64 = {
+            let at = out.find("keys: ").unwrap();
+            let rest = &out[at + 6..];
+            rest[..rest.find('\n').unwrap()].parse().unwrap()
+        };
+        let blocks = of("samples") / 8;
+        assert_eq!(blocks + of("restarts") + of("entries"), keys_held, "{out}");
+        assert!(out.contains(" B/key, "), "the split is read per key: {out}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn inspect_sections_refuses_a_blob_that_is_not_a_dict_and_dump_refuses_the_flag() {
+        let dir = tmpdir();
+        let blob = dir.join("string.bin");
+        StringIndex::build(["a", "b"]).unwrap().save(&blob).unwrap();
+        let dest = blob.to_str().unwrap();
+        let (code, out, err) = go(&["inspect", dest, "--sections"], "");
+        assert_eq!(code, 1);
+        // What the header said is still printed before the refusal names the kind.
+        assert!(out.contains("kind: StringIndex\n"), "{out}");
+        assert!(
+            err.contains("--sections is a DictIndex's byte split"),
+            "{err}"
+        );
+        let (code, _, err) = go(&["dump", dest, "--sections"], "");
+        assert_eq!(code, 2);
+        assert!(err.contains("no such option `--sections`"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

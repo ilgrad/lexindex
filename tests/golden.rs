@@ -650,6 +650,31 @@ fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     assert_eq!(walked, sorted);
 }
 
+/// The byte split of the pinned dictionary blob accounts for all of it, and says the same thing
+/// about the same bytes as it did when the blob was written. A section that starts drifting is a
+/// format change nobody declared.
+#[test]
+fn the_golden_dict_blobs_sections_account_for_every_byte() {
+    let path = data("golden-2.2.0-dict.bdx");
+    let idx = lexindex::DictIndex::load(&path).unwrap();
+    let s = idx.sections();
+    assert_eq!(
+        s.total(),
+        std::fs::metadata(&path).unwrap().len(),
+        "the sections do not add up to the blob"
+    );
+    assert_eq!(s.header, 56);
+    // A head, a restart or an entry: every key is stored exactly once.
+    let blocks = s.samples / 8;
+    assert_eq!(blocks + s.restarts + s.entries, idx.len() as u64);
+    assert_eq!(
+        (s.restart_headers, s.entry_headers),
+        (s.restarts, s.entries)
+    );
+    // Where the blob actually goes: the coded suffixes, not the directory around them.
+    assert!(s.entry_codes > s.entry_headers + s.entry_wide, "{s:?}");
+}
+
 /// `inspect` names every blob in `tests/data/` from its header alone, and refuses the pre-1.0
 /// hash blobs the way the loaders do: by the type to rebuild, not as corrupt.
 #[test]

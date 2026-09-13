@@ -410,6 +410,45 @@ impl<'a> Entries<'a> {
     }
 }
 
+/// One front-coded run's bytes, told apart: [`DictSections`] sums these over every run in the blob.
+#[derive(Default)]
+struct RunSplit {
+    headers: u64,
+    wide_bytes: u64,
+    codes: u64,
+    entries: u64,
+    wide: u64,
+}
+
+/// Split one run of `keys` front-coded keys into its header bytes, the `(lcp, len)` varints of the
+/// entries too wide for a one-byte header, and the symbol-coded suffixes.
+///
+/// The three always sum to `data`, because the codes are what is left rather than what was walked:
+/// a stream this crate did not write ends the walk early and leaves the split approximate, not the
+/// total wrong, which is the way round an accounting tool wants it.
+fn split_run(data: &[u8], keys: usize) -> RunSplit {
+    let mut entries = Entries::of(data, keys);
+    let mut split = RunSplit {
+        headers: entries.hdrs.len() as u64,
+        ..RunSplit::default()
+    };
+    let suffixes = entries.sfx.len() as u64;
+    loop {
+        let before = entries.off;
+        let Some((_, len)) = entries.head() else {
+            break;
+        };
+        split.entries += 1;
+        if entries.off != before {
+            split.wide_bytes += (entries.off - before) as u64;
+            split.wide += 1;
+        }
+        entries.skip(len);
+    }
+    split.codes = suffixes.saturating_sub(split.wide_bytes);
+    split
+}
+
 /// What one thread produces for its contiguous range of blocks: the sections it would have
 /// appended, with the two that are offsets kept relative to the range so the concatenation can
 /// rebase them.
@@ -543,6 +582,80 @@ fn encode_range<S: AsRef<str>>(
         part.data.extend_from_slice(&body);
     }
     part
+}
+
+/// Where a [`DictIndex`] blob's bytes go, section by section — [`DictIndex::sections`].
+///
+/// The byte fields sum to [`total`](Self::total), which is
+/// [`serialized_len`](DictIndex::serialized_len); the three counts are keys and entries, not bytes.
+/// The front-coded data is split the way it is written: one header byte an entry, the `(lcp, len)`
+/// pair of the entries too wide for that byte, and the symbol-coded suffixes — so a corpus whose
+/// cost is its headers can be told from one whose cost is its suffixes, which is the question a
+/// change to the format has to answer first.
+///
+/// ```
+/// # use lexindex::DictIndex;
+/// let index = DictIndex::build(["apple", "apricot", "banana"])?;
+/// let s = index.sections();
+/// assert_eq!(s.total() as usize, index.serialized_len());
+/// // Three keys in one block: one head, no restarts, two front-coded entries.
+/// assert_eq!((s.restarts, s.entries), (0, 2));
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct DictSections {
+    /// The fixed header.
+    pub header: u64,
+    /// The symbol tables, one per shard of blocks.
+    pub tables: u64,
+    /// Every block's first key, stored whole.
+    pub heads: u64,
+    /// Eight bytes a block — the first eight of its head — which the opening search reads.
+    pub samples: u64,
+    /// Packed: where each block's head ends.
+    pub head_ends: u64,
+    /// Packed: where each block's data starts.
+    pub block_offsets: u64,
+    /// Packed: where each microblock's entries start. Empty when a block is one microblock.
+    pub micro_offsets: u64,
+    /// One header byte per restart.
+    pub restart_headers: u64,
+    /// The `(lcp, len)` varints of the restarts too wide for a one-byte header.
+    pub restart_wide: u64,
+    /// The restarts' symbol-coded suffixes.
+    pub restart_codes: u64,
+    /// One header byte per front-coded entry.
+    pub entry_headers: u64,
+    /// The `(lcp, len)` varints of the entries too wide for a one-byte header.
+    pub entry_wide: u64,
+    /// The entries' symbol-coded suffixes, which is where most of a blob goes.
+    pub entry_codes: u64,
+    /// Restarts stored: one per microblock past each block's first.
+    pub restarts: u64,
+    /// Front-coded entries stored: every key that is neither a block head nor a restart.
+    pub entries: u64,
+    /// How many of those two needed the wide header, the count the one-byte form is chosen on.
+    pub wide: u64,
+}
+
+impl DictSections {
+    /// The byte fields' sum, which is the blob.
+    pub fn total(&self) -> u64 {
+        self.header
+            + self.tables
+            + self.heads
+            + self.samples
+            + self.head_ends
+            + self.block_offsets
+            + self.micro_offsets
+            + self.restart_headers
+            + self.restart_wide
+            + self.restart_codes
+            + self.entry_headers
+            + self.entry_wide
+            + self.entry_codes
+    }
 }
 
 /// A block size named for what an index is wanted for, for a caller who would rather not pick the
@@ -1952,7 +2065,7 @@ impl DictIndex {
     /// The payload sections in order, each handed to `f` once, from where they are; the symbol
     /// table and the samples, the two the index does not hold as their serialised bytes, go out
     /// in pieces so that nothing the size of the index is copied.
-    fn sections(
+    fn write_sections(
         &self,
         mut f: impl FnMut(&[u8]) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
@@ -1983,7 +2096,7 @@ impl DictIndex {
 
     fn header(&self) -> [u8; HEADER] {
         let mut hasher = crate::blob::BlockHasher::new();
-        self.sections(|s| {
+        self.write_sections(|s| {
             hasher.update(s);
             Ok(())
         })
@@ -2015,7 +2128,7 @@ impl DictIndex {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
         out.extend_from_slice(&self.header());
-        self.sections(|s| {
+        self.write_sections(|s| {
             out.extend_from_slice(s);
             Ok(())
         })
@@ -2050,6 +2163,53 @@ impl DictIndex {
             + self.blocks.len()
             + self.micros.len()
             + self.data.len()
+    }
+
+    /// Where this index's bytes go, section by section: [`DictSections`].
+    ///
+    /// Walks every block rather than reading the header, so it costs a pass over the blob. The
+    /// sections sum to [`serialized_len`](Self::serialized_len) whatever the blob holds.
+    ///
+    /// ```
+    /// # use lexindex::DictIndex;
+    /// let index = DictIndex::build(["apple", "apricot", "avocado", "banana"])?;
+    /// let s = index.sections();
+    /// assert_eq!(s.total() as usize, index.to_bytes().len());
+    /// assert!(s.entry_codes > 0 && s.heads > 0);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn sections(&self) -> DictSections {
+        let mut s = DictSections {
+            header: HEADER as u64,
+            tables: tables_len(&self.tables) as u64,
+            heads: self.heads.len() as u64,
+            samples: (self.blocks_len() * 8) as u64,
+            head_ends: self.head_ends.len() as u64,
+            block_offsets: self.blocks.len() as u64,
+            micro_offsets: self.micros.len() as u64,
+            ..DictSections::default()
+        };
+        for b in 0..self.blocks_len() {
+            let micros = self.micros_in(b);
+            // A block that is one microblock stores no restart run, and its region is empty.
+            if micros > 1 {
+                let run = split_run(self.restart_data(b), micros);
+                s.restart_headers += run.headers;
+                s.restart_wide += run.wide_bytes;
+                s.restart_codes += run.codes;
+                s.restarts += run.entries;
+                s.wide += run.wide;
+            }
+            for j in 0..micros {
+                let run = split_run(self.micro_data(b, j), self.micro_count(b, j));
+                s.entry_headers += run.headers;
+                s.entry_wide += run.wide_bytes;
+                s.entry_codes += run.codes;
+                s.entries += run.entries;
+                s.wide += run.wide;
+            }
+        }
+        s
     }
 
     /// Reconstruct from [`DictIndex::to_bytes`] output.
@@ -2400,7 +2560,7 @@ impl DictIndex {
 
     fn write_to(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
         w.write_all(&self.header())?;
-        self.sections(|s| Ok(w.write_all(s)?))
+        self.write_sections(|s| Ok(w.write_all(s)?))
     }
 
     /// Load an index previously written with [`DictIndex::save`]. Safe on any file — see
@@ -2607,6 +2767,76 @@ mod tests {
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
         }
+    }
+
+    #[test]
+    fn the_sections_account_for_every_byte_and_every_key() {
+        let keys = corpus();
+        for block in [1, 2, 3, 7, 32, 500, 1024] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            let s = idx.sections();
+            let what = format!("block {block}");
+            assert_eq!(s.total() as usize, idx.serialized_len(), "{what}");
+            assert_eq!(s.total() as usize, idx.to_bytes().len(), "{what}");
+            // Every key is stored exactly once, as a head, a restart or an entry.
+            let blocks = keys.len().div_ceil(block) as u64;
+            assert_eq!(blocks + s.restarts + s.entries, keys.len() as u64, "{what}");
+            // One header byte an entry, both runs.
+            assert_eq!(s.restart_headers, s.restarts, "{what}");
+            assert_eq!(s.entry_headers, s.entries, "{what}");
+            if block == 1 {
+                // Every key is its own block head, so nothing is front-coded at all.
+                assert_eq!(
+                    (s.entries, s.entry_headers, s.entry_codes, s.wide),
+                    (0, 0, 0, 0),
+                    "{what}"
+                );
+            } else {
+                // This corpus carries keys past the one-byte header's fifteen on purpose.
+                assert!(s.wide > 0 && s.entry_wide > 0, "{what}");
+            }
+            // A mapping walks the same blob to the same split.
+            assert_eq!(
+                DictIndex::from_bytes(&idx.to_bytes()).unwrap().sections(),
+                s,
+                "{what}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_block_that_is_one_microblock_stores_no_restarts() {
+        let keys = corpus();
+        // `micro_for(32)` is 32, so a block of 32 is one microblock and has no restart run.
+        let whole = DictIndex::build_with_block(&keys, 32).unwrap();
+        let s = whole.sections();
+        assert_eq!(
+            (
+                s.restarts,
+                s.restart_headers,
+                s.restart_wide,
+                s.restart_codes
+            ),
+            (0, 0, 0, 0)
+        );
+        assert_eq!(
+            s.micro_offsets, 0,
+            "no array is stored for a single microblock"
+        );
+        assert_eq!(s.total() as usize, whole.serialized_len());
+        // A block of 256 is eight microblocks, and the restarts that reach them are paid for.
+        let cut = DictIndex::build_with_block(&keys, 256).unwrap();
+        let t = cut.sections();
+        assert!(t.restarts > 0 && t.micro_offsets > 0);
+        assert_eq!(t.total() as usize, cut.serialized_len());
+    }
+
+    #[test]
+    fn an_empty_index_has_only_a_header_and_a_table() {
+        let idx = DictIndex::build(Vec::<String>::new()).unwrap();
+        let s = idx.sections();
+        assert_eq!((s.heads, s.samples, s.entries, s.restarts), (0, 0, 0, 0));
+        assert_eq!(s.total() as usize, idx.serialized_len());
     }
 
     #[test]

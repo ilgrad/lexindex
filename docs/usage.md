@@ -778,6 +778,45 @@ A's
 AMD
 ```
 
+`inspect --sections` reads a `DictIndex` whole and says where its bytes went. The sections always
+sum to the blob, so the output is an accounting rather than an estimate, and each is given per key
+and as a share:
+
+```console
+$ lexindex inspect words.bin --sections
+kind: DictIndex
+format: BDX2
+bytes: 1361816
+keys: 479823
+arena_bytes: 1306718
+sections.header: 56 (0.0001 B/key, 0.00 %)
+sections.tables: 7197 (0.0150 B/key, 0.53 %)
+sections.heads: 17380 (0.0362 B/key, 1.28 %)
+sections.samples: 15000 (0.0313 B/key, 1.10 %)
+sections.head_ends: 2592 (0.0054 B/key, 0.19 %)
+sections.block_offsets: 3998 (0.0083 B/key, 0.29 %)
+sections.micro_offsets: 26255 (0.0547 B/key, 1.93 %)
+sections.restart_headers: 13120 (0.0273 B/key, 0.96 %)
+sections.restart_wide: 0 (0.0000 B/key, 0.00 %)
+sections.restart_codes: 42527 (0.0886 B/key, 3.12 %)
+sections.entry_headers: 464828 (0.9687 B/key, 34.13 %)
+sections.entry_wide: 5794 (0.0121 B/key, 0.43 %)
+sections.entry_codes: 763069 (1.5903 B/key, 56.03 %)
+sections.total: 1361816 (2.8382 B/key, 100.00 %)
+sections.restarts: 13120
+sections.entries: 464828
+sections.wide: 2897
+```
+
+Read it as three groups. The **codes** are the front-coded suffixes under the symbol table, which is
+what the index is for. The **headers** are one byte an entry — a flat 0.97 bytes a key at the
+default block, which on this corpus is a third of the blob and on dense decimal ids is near half of
+it, since there is almost nothing else to store. The **directory** — samples, the three packed
+offset arrays, the block heads — is 3.3 % here and never more than a few per cent, which is worth
+knowing before optimising it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
+The same numbers are on [`DictSections`](https://docs.rs/lexindex/latest/lexindex/struct.DictSections.html)
+for a program that would rather not parse text.
+
 `dump` writes the keys a blob holds, one per line, in id order — sorted order for the two ordered
 indexes, construction order for `PerfectHashIndex`, and live keys only for an `Overlay`. It exists
 for one reason: **`lexindex dump old.blob | lexindex build - new.blob` is the migration path** off a

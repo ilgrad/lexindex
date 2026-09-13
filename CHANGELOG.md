@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`lexindex inspect <blob> --sections`** and
+  [`DictIndex::sections`](https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.sections),
+  which return a `DictSections`: where a dictionary blob's bytes actually go. Thirteen byte fields
+  that sum to the blob — the symbol tables, the block heads, the samples, the three packed offset
+  arrays, and the front-coded data split the way it is written, into one header byte an entry, the
+  `(lcp, len)` varints of the entries too wide for that byte, and the symbol-coded suffixes — plus
+  the counts of restarts, entries and wide headers. The sum is exact for any blob, including one
+  this crate did not write: the codes are what is left after the headers rather than what a walk
+  managed to read, so a damaged stream leaves the split approximate and the total right. On an
+  English word list at the default block it reports 56 % suffix codes, **34 % header bytes** and
+  3.3 % directory, which is the measurement a change to the format has to start from.
+
 - **A C ABI**, under the `capi` feature: one opaque `LexindexIndex` handle over the five indexes
   and fourteen `lexindex_*` functions — open, from bytes, build, save, kind, len, `id`, `ids`,
   `contains`, `key`, free, and the version, ABI-version and last-error accessors — declared in
