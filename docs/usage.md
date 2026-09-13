@@ -874,6 +874,18 @@ build there builds the corpus twice; naming the index is how not to.
 `DictIndex` at the default block and names it on the line, so a block chosen for the build would
 quietly not be the one that was quoted. Run `plan`, read the block off the ladder, then name both.
 
+`--stream` decides whether the build holds the corpus. With a named `--index` and a keys file --
+never standard input, which cannot be rewound -- `build` feeds the file straight into the streaming
+builders, and what stays in memory is the index being made rather than the keys. `auto` (the
+default) does it past a quarter of what `/proc/meminfo` says is available, `always` and `never`
+force it either way, and a size (`1000`, `512M`, `4G`) sets the threshold. On a 925 MB, 7 343 721-line
+path list the peak resident set falls from 1.34 to 0.28 GB for `string`, 1.42 to 0.26 for `dict`,
+1.29 to 0.15 for `compact` and `closed`, and 2.96 to 0.97 for `perfect` -- whose own blob is 935 MB,
+so it is the one index that cannot end below the file it was built from. **The blobs are byte for
+byte the ones the in-memory build writes**, so this is a memory setting and never a format.
+`--index auto` still reads the file: pricing a corpus means seeing it, and `build` says so on
+stderr rather than streaming something the ladder did not rank.
+
 A keys file is one key per line, UTF-8, in any order; `-` reads standard input, and duplicates are
 removed by the builders. **An empty line is skipped** and the count is reported on stderr -- a file
 that ends in a newline is the common case and an empty key is not. **Invalid UTF-8 is an error**

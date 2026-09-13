@@ -24,7 +24,7 @@ const USAGE: &str = concat!(
 
 usage:
   lexindex plan    <keys-file> [needs]
-  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [needs]
+  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--stream MODE] [needs]
   lexindex inspect <blob> [--sections]
   lexindex dump    <blob>
 
@@ -54,6 +54,11 @@ options (`--name value` or `--name=value`):
   --index NAME   auto (default), dict, string, compact, closed, perfect
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
+  --stream MODE  when to build straight to the blob instead of holding the corpus:
+                 auto (default), always, never, or the keys-file size past which to do
+                 it (1000, 512M, 4G). `auto` is a quarter of the memory the machine
+                 says is available. Needs a named `--index`: `auto` prices the corpus,
+                 which means reading it
   --sections     with `inspect`, on a DictIndex: the blob's byte split
   -h, --help     this text
   -V, --version  the version
@@ -115,6 +120,7 @@ struct Cmd {
     index: Choice,
     block: Option<usize>,
     sections: bool,
+    stream: Stream,
     /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
     /// the ladder worth a line about what it left out.
     implied_exact: bool,
@@ -130,6 +136,83 @@ fn choice(name: &str) -> Result<Choice, Fail> {
         "perfect" => Choice::One(Kind::Perfect),
         other => return Err(Fail::Usage(format!("--index: no such index `{other}`"))),
     })
+}
+
+/// `--stream`: when `build` writes the blob as it reads rather than holding the keys.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Stream {
+    /// Past a quarter of what the machine says is available.
+    Auto,
+    Always,
+    Never,
+    /// Past this many bytes of keys file.
+    Above(u64),
+}
+
+/// Keys-file bytes past which `--stream auto` streams where the machine will not say what it has.
+/// A build holds the corpus, the index it is making and the builder's working set at once, so a
+/// file this size is already the larger part of a small machine.
+const STREAM_FALLBACK: u64 = 1 << 30;
+
+fn stream_mode(spec: &str) -> Result<Stream, Fail> {
+    Ok(match spec {
+        "auto" => Stream::Auto,
+        "always" => Stream::Always,
+        "never" => Stream::Never,
+        other => Stream::Above(byte_size(other)?),
+    })
+}
+
+/// A byte count, with an optional `K` / `M` / `G` for the binary multiples.
+fn byte_size(spec: &str) -> Result<u64, Fail> {
+    let (digits, scale) = match spec.chars().last() {
+        Some('K' | 'k') => (&spec[..spec.len() - 1], 1u64 << 10),
+        Some('M' | 'm') => (&spec[..spec.len() - 1], 1 << 20),
+        Some('G' | 'g') => (&spec[..spec.len() - 1], 1 << 30),
+        _ => (spec, 1),
+    };
+    digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .ok_or_else(|| {
+            Fail::Usage(format!(
+                "--stream: `{spec}` is neither a size (1000, 512M, 4G) nor one of auto / always / never"
+            ))
+        })
+}
+
+/// What the kernel says is available, in bytes. `MemAvailable` is the figure that accounts for
+/// reclaimable cache, which is what a build actually gets to use; `None` wherever there is no
+/// `/proc`, and `--stream auto` falls back to [`STREAM_FALLBACK`] there.
+fn available_memory() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = meminfo.lines().find(|l| l.starts_with("MemAvailable:"))?;
+    line.split_whitespace()
+        .nth(1)?
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(1024)
+}
+
+/// The size of the keys file when `build` should stream it, `None` when it should not. Standard
+/// input never streams: the dictionary builder reads its source three times and the perfect hash
+/// twice, and a pipe cannot be rewound.
+fn stream_above(mode: Stream, path: &str) -> Option<u64> {
+    let floor = match mode {
+        Stream::Never => return None,
+        Stream::Always => 0,
+        Stream::Above(n) => n,
+        // A build holds the corpus, the index it is making and the builder's own working set at
+        // once, so a quarter of what is available is the point past which reading the file first
+        // stops being the cheap option.
+        Stream::Auto => available_memory().map_or(STREAM_FALLBACK, |free| free / 4),
+    };
+    if path == "-" {
+        return None;
+    }
+    let bytes = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
+    (bytes >= floor).then_some(bytes)
 }
 
 /// A `--block` spec: one of the three named points of the size/speed curve, or the number itself.
@@ -180,6 +263,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         index: Choice::Auto,
         block: None,
         sections: false,
+        stream: Stream::Auto,
         implied_exact: false,
     };
     let mut closed_vocabulary = false;
@@ -213,6 +297,9 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             }
             "--block" if accepts == Accepts::NeedsAndIndex => {
                 cmd.block = Some(block_size(&value(args, &mut at, name, inline)?)?);
+            }
+            "--stream" if accepts == Accepts::NeedsAndIndex => {
+                cmd.stream = stream_mode(&value(args, &mut at, name, inline)?)?;
             }
             "-" => cmd.positional.push(arg.clone()),
             other if other.starts_with('-') => {
@@ -313,6 +400,26 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         ));
     }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
+    let big = stream_above(cmd.stream, path);
+    let streamed = match (cmd.index, big) {
+        (Choice::One(kind), Some(_)) if can_stream(kind) => Some(kind),
+        _ => None,
+    };
+    if let Some(kind) = streamed {
+        let src = Source::new(path);
+        let n = stream_to_file(kind, &src, dest, cmd.block)?;
+        note_blank(path, src.blank.get(), err)?;
+        return note_written(kind, n, dest, err);
+    }
+    if big.is_some() {
+        writeln!(
+            err,
+            "reading {path}: this file is large enough to build without holding it, but \
+             `--index auto` prices the corpus, which means reading it. Name an index with \
+             --index to stream instead."
+        )
+        .map_err(io_fail)?;
+    }
     let (keys, blank) = read_keys(path, stdin)?;
     note_blank(path, blank, err)?;
     let kind = match cmd.index {
@@ -325,6 +432,11 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         }
     };
     let n = build_and_save(kind, &keys, dest, cmd.block)?;
+    note_written(kind, n, dest, err)
+}
+
+/// What was written, and what it cost a key.
+fn note_written(kind: Kind, n: usize, dest: &Path, err: &mut dyn Write) -> Result<(), Fail> {
     let bytes = std::fs::metadata(dest)
         .map_err(|e| Fail::Failed(format!("{}: {e}", dest.display())))?
         .len();
@@ -336,6 +448,134 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         kind.name()
     )
     .map_err(io_fail)
+}
+
+/// Whether `kind` has a streaming builder in this build. Where it does not, `build` falls back to
+/// reading the corpus, which either works or fails with its own message about the missing feature.
+fn can_stream(kind: Kind) -> bool {
+    match kind {
+        Kind::Dict | Kind::String => true,
+        Kind::Compact | Kind::Closed => cfg!(feature = "mph"),
+        // Its file build fills the arena through a mapping.
+        Kind::Perfect => cfg!(all(feature = "mph", feature = "mmap")),
+    }
+}
+
+/// A keys file the streaming builders can read again — the dictionary reads its source three
+/// times, the perfect hash twice — skipping empty lines. They take a plain `Iterator`, which
+/// cannot carry a failure, so a read error ends the stream and is parked here for the caller to
+/// find once the build has returned.
+struct Source {
+    path: std::path::PathBuf,
+    failed: std::rc::Rc<std::cell::RefCell<Option<Fail>>>,
+    blank: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl Source {
+    fn new(path: &str) -> Self {
+        Self {
+            path: std::path::PathBuf::from(path),
+            failed: std::rc::Rc::default(),
+            blank: std::rc::Rc::default(),
+        }
+    }
+
+    /// The keys, one per line. Each call reopens the file, and counts the empty lines of that
+    /// pass alone.
+    fn keys(&self) -> Box<dyn Iterator<Item = String>> {
+        let (failed, blank) = (self.failed.clone(), self.blank.clone());
+        blank.set(0);
+        let name = self.path.display().to_string();
+        let file = match std::fs::File::open(&self.path) {
+            Ok(file) => file,
+            Err(e) => {
+                *failed.borrow_mut() = Some(Fail::Failed(format!("{name}: {e}")));
+                return Box::new(std::iter::empty());
+            }
+        };
+        let lines = std::io::BufReader::new(file)
+            .lines()
+            .enumerate()
+            // `lines()` reports invalid UTF-8 as an `InvalidData` error, which is what this parks:
+            // the library takes `&str`, and a lossy conversion would index keys the file does not
+            // hold.
+            .map_while(move |(i, line)| match line {
+                Ok(line) => Some(line),
+                Err(e) => {
+                    *failed.borrow_mut() = Some(Fail::Failed(format!("{name}:{}: {e}", i + 1)));
+                    None
+                }
+            })
+            .filter(move |line| {
+                if line.is_empty() {
+                    blank.set(blank.get() + 1);
+                }
+                !line.is_empty()
+            });
+        Box::new(lines)
+    }
+}
+
+/// Build one index straight to `dest`, reading the file rather than holding it.
+///
+/// The builders publish atomically, but that is a promise against a crash: a source that fails
+/// halfway ends their iterator and they finish a whole, short index over what they did read. So
+/// the blob lands on a sibling name and is renamed into place only once the source is known to
+/// have run to the end — whatever was at `dest` survives a failure.
+fn stream_to_file(
+    kind: Kind,
+    src: &Source,
+    dest: &Path,
+    block: Option<usize>,
+) -> Result<usize, Fail> {
+    let part = dest.with_file_name(format!(
+        "{}.part.{}",
+        dest.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id()
+    ));
+    let built = build_streamed(kind, src, &part, block);
+    let failed = src.failed.borrow_mut().take();
+    let n = match (built, failed) {
+        (Ok(n), None) => n,
+        (built, failed) => {
+            std::fs::remove_file(&part).ok();
+            return Err(failed.unwrap_or_else(|| built.expect_err("a failure or an error")));
+        }
+    };
+    std::fs::rename(&part, dest).map_err(|e| {
+        std::fs::remove_file(&part).ok();
+        Fail::Failed(format!("{}: {e}", dest.display()))
+    })?;
+    Ok(n)
+}
+
+fn build_streamed(
+    kind: Kind,
+    src: &Source,
+    dest: &Path,
+    block: Option<usize>,
+) -> Result<usize, Fail> {
+    let n = match kind {
+        Kind::String => StringIndex::build_to_file(src.keys(), dest)?,
+        Kind::Dict => match block {
+            Some(b) => DictIndex::build_to_file_with_block(src.keys(), dest, b)?,
+            None => DictIndex::build_to_file(src.keys(), dest)?,
+        },
+        #[cfg(feature = "mph")]
+        Kind::Compact => CompactHashIndex::build_to_file(src.keys(), dest, 1)?,
+        #[cfg(feature = "mph")]
+        Kind::Closed => ClosedHashIndex::build_to_file(src.keys(), dest)?,
+        #[cfg(all(feature = "mph", feature = "mmap"))]
+        Kind::Perfect => PerfectHashIndex::build_to_file(dest, || src.keys())?,
+        #[cfg(not(all(feature = "mph", feature = "mmap")))]
+        other => {
+            return Err(Fail::Failed(format!(
+                "{} has no streaming build without the `mph` and `mmap` features",
+                other.name()
+            )));
+        }
+    };
+    Ok(n)
 }
 
 /// Build one index and save it, returning the distinct keys it holds.
@@ -685,6 +925,14 @@ mod tests {
         )
     }
 
+    /// The names left in a directory, for asserting that a build cleaned up after itself.
+    fn entries(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
     fn keys_file(dir: &Path, text: &str) -> String {
         let path = dir.join("keys.txt");
         std::fs::write(&path, text).unwrap();
@@ -809,6 +1057,192 @@ mod tests {
             "the failing line is named: {err}"
         );
         assert!(err.contains("UTF-8"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The streaming route writes the blob the in-memory one writes, byte for byte, for every
+    /// index that has one — which is what makes `--stream` a memory setting and not a format.
+    #[test]
+    fn a_streamed_build_writes_the_blob_the_in_memory_one_does() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(2_000));
+        for (index, kind, block) in named_indexes() {
+            let mut written = Vec::new();
+            for mode in ["never", "always"] {
+                let blob = dir.join(format!("{index}-{mode}.bin"));
+                let dest = blob.to_str().unwrap();
+                let mut args = vec!["build", keys.as_str(), dest, "--index", index];
+                args.extend(block.iter().copied());
+                args.extend(["--stream", mode]);
+                let (code, out, err) = go(&args, "");
+                assert_eq!((code, out.as_str()), (0, ""), "{index} {mode}: {err}");
+                assert!(
+                    err.contains(&format!("wrote {dest}: {kind} over 2000 keys")),
+                    "{index} {mode}: {err}"
+                );
+                written.push(std::fs::read(&blob).unwrap());
+            }
+            assert!(written[0] == written[1], "{index}: the blobs differ");
+            assert_eq!(
+                entries(&dir)
+                    .iter()
+                    .filter(|e| e.contains(".part."))
+                    .count(),
+                0
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A source that goes bad halfway is an error naming the line, and what was already at the
+    /// destination is still there: the streaming builders would otherwise publish a whole index
+    /// over the part of the file they managed to read.
+    #[test]
+    fn a_streamed_build_over_a_broken_file_publishes_nothing() {
+        let dir = tmpdir();
+        let path = dir.join("broken.txt");
+        let mut bytes = corpus(500).into_bytes();
+        bytes.extend_from_slice(b"good\n\xff\xfe not utf-8\nmore\n");
+        std::fs::write(&path, &bytes).unwrap();
+        let blob = dir.join("out.bin");
+        std::fs::write(&blob, b"the previous index").unwrap();
+        let (code, out, err) = go(
+            &[
+                "build",
+                path.to_str().unwrap(),
+                blob.to_str().unwrap(),
+                "--index",
+                "string",
+                "--stream",
+                "always",
+            ],
+            "",
+        );
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert!(err.contains("broken.txt:502"), "{err}");
+        assert_eq!(std::fs::read(&blob).unwrap(), b"the previous index");
+        assert_eq!(
+            entries(&dir)
+                .iter()
+                .filter(|e| e.contains(".part."))
+                .count(),
+            0
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Standard input cannot be rewound, so it is built in memory whatever `--stream` says, and
+    /// the empty lines are still counted on the streaming path.
+    #[test]
+    fn stream_skips_standard_input_and_still_counts_blank_lines() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, "alpha\n\nbeta\n\ngamma\n");
+        let blob = dir.join("out.bin");
+        let dest = blob.to_str().unwrap();
+        let (code, _, err) = go(
+            &[
+                "build",
+                keys.as_str(),
+                dest,
+                "--index",
+                "string",
+                "--stream",
+                "always",
+            ],
+            "",
+        );
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("2 empty lines skipped"), "{err}");
+        assert!(err.contains("over 3 keys"), "{err}");
+        let piped = dir.join("piped.bin");
+        let (code, _, err) = go(
+            &[
+                "build",
+                "-",
+                piped.to_str().unwrap(),
+                "--index",
+                "string",
+                "--stream",
+                "always",
+            ],
+            "alpha\n\nbeta\n\ngamma\n",
+        );
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(
+            std::fs::read(&blob).unwrap(),
+            std::fs::read(&piped).unwrap()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `--index auto` has to price the corpus, so it says why it is reading a file it could
+    /// otherwise have streamed.
+    #[test]
+    fn auto_over_a_large_file_says_why_it_reads_it() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(300));
+        let blob = dir.join("out.bin");
+        let (code, _, err) = go(
+            &[
+                "build",
+                keys.as_str(),
+                blob.to_str().unwrap(),
+                "--stream",
+                "always",
+            ],
+            "",
+        );
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("prices the corpus"), "{err}");
+        assert!(err.contains("--index"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn stream_takes_a_mode_or_a_size_and_nothing_else() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(50));
+        let blob = dir.join("out.bin");
+        let dest = blob.to_str().unwrap();
+        for size in ["0", "1000", "512M", "4G", "8k"] {
+            let (code, _, err) = go(
+                &[
+                    "build",
+                    keys.as_str(),
+                    dest,
+                    "--index",
+                    "string",
+                    "--stream",
+                    size,
+                ],
+                "",
+            );
+            assert_eq!(code, 0, "{size}: {err}");
+        }
+        for bad in ["", "512MB", "-1", "lots", "4E"] {
+            let (code, _, err) = go(
+                &[
+                    "build",
+                    keys.as_str(),
+                    dest,
+                    "--index",
+                    "string",
+                    "--stream",
+                    bad,
+                ],
+                "",
+            );
+            assert_eq!(code, 2, "{bad}: {err}");
+            assert!(err.contains("--stream"), "{bad}: {err}");
+        }
+        for cmd in [
+            vec!["plan", keys.as_str(), "--stream", "always"],
+            vec!["inspect", dest, "--stream", "always"],
+            vec!["dump", dest, "--stream", "always"],
+        ] {
+            let (code, _, err) = go(&cmd, "");
+            assert_eq!((code, err.contains("--stream")), (2, true), "{err}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

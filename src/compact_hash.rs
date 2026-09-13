@@ -113,7 +113,7 @@ static SCRATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// The streaming builder's files, in a directory beside the output: the spilled runs, the merged
 /// pairs, the range files. Created at the first spill, removed when this is dropped, whichever way
 /// the build ends; a corpus that fits one run and whose table fits the budget leaves no trace.
-struct Scratch {
+pub(crate) struct Scratch {
     beside: std::path::PathBuf,
     dir: Option<std::path::PathBuf>,
     runs: usize,
@@ -123,7 +123,7 @@ struct Scratch {
 }
 
 impl Scratch {
-    fn beside(target: &std::path::Path, threads: usize) -> Self {
+    pub(crate) fn beside(target: &std::path::Path, threads: usize) -> Self {
         Self {
             beside: target.to_path_buf(),
             dir: None,
@@ -693,9 +693,44 @@ fn pair_of(rec: [u8; PAIR_BYTES]) -> (u64, u64) {
     )
 }
 
+/// Pass one of a streaming hash build, and the only pass that sees a key: each is hashed to its
+/// 16-byte pair and the string dropped, every `budget.run_bytes` of pairs is sorted, deduplicated
+/// and spilled into `scratch`, and the runs are merged. A corpus that fitted one run never
+/// reaches the disk. `check` is asked once the input has ended, before the merge, so a source
+/// that failed does not pay for one.
+pub(crate) fn stream_pairs(
+    pairs: impl Iterator<Item = (u64, u64)>,
+    scratch: &mut Scratch,
+    check: &mut dyn FnMut() -> Result<(), IndexError>,
+    budget: Budget,
+) -> Result<Pairs, IndexError> {
+    let cap = (budget.run_bytes / PAIR_BYTES).max(1);
+    let mut run: Vec<(u64, u64)> = Vec::new();
+    for pair in pairs {
+        if run.capacity() == 0 {
+            run.reserve_exact(cap);
+        }
+        run.push(pair);
+        if run.len() == cap {
+            scratch.spill(&mut run)?;
+        }
+    }
+    check()?;
+    if scratch.runs == 0 {
+        sort_run(&mut run, scratch.threads);
+        run.dedup();
+        return Ok(Pairs::Memory(run));
+    }
+    if !run.is_empty() {
+        scratch.spill(&mut run)?;
+    }
+    drop(run);
+    scratch.merge()
+}
+
 /// The distinct pairs of a streaming build, ascending: in memory when the source fit one run,
 /// else the merged files, read back once for the perfect hash and once for the fingerprints.
-enum Pairs {
+pub(crate) enum Pairs {
     Memory(Vec<(u64, u64)>),
     File {
         paths: Vec<std::path::PathBuf>,
@@ -706,7 +741,7 @@ enum Pairs {
 
 impl Pairs {
     /// Distinct pairs, and how many of them share their hash with an earlier one.
-    fn counts(&self) -> (usize, usize) {
+    pub(crate) fn counts(&self) -> (usize, usize) {
         match self {
             Pairs::Memory(pairs) => (
                 pairs.len(),
@@ -716,18 +751,31 @@ impl Pairs {
         }
     }
 
-    fn reps(&self) -> Result<Reps<'_>, IndexError> {
+    pub(crate) fn reps(&self) -> Result<Reps<'_>, IndexError> {
         Ok(Reps {
-            from: match self {
-                Pairs::Memory(pairs) => From::Memory(pairs),
-                Pairs::File { paths, .. } => From::File {
-                    segments: Segments::open(paths)?,
-                    pending: Vec::with_capacity((1 << 20) / PAIR_BYTES),
-                    at: 0,
-                },
-            },
+            from: self.source()?,
             last: None,
             error: None,
+        })
+    }
+
+    /// Every distinct pair, ascending, for a caller that needs the equal-hash runs and not just
+    /// their representatives.
+    pub(crate) fn all(&self) -> Result<All<'_>, IndexError> {
+        Ok(All {
+            from: self.source()?,
+            error: None,
+        })
+    }
+
+    fn source(&self) -> Result<From<'_>, IndexError> {
+        Ok(match self {
+            Pairs::Memory(pairs) => From::Memory(pairs),
+            Pairs::File { paths, .. } => From::File {
+                segments: Segments::open(paths)?,
+                pending: Vec::with_capacity((1 << 20) / PAIR_BYTES),
+                at: 0,
+            },
         })
     }
 }
@@ -744,10 +792,41 @@ enum From<'a> {
 /// One hash per distinct value — the first pair of each equal-hash run — for the perfect hash,
 /// which cannot take a `Result`: a read error is parked and ends the stream, and the builder
 /// asks for it before it trusts the table.
-struct Reps<'a> {
+pub(crate) struct Reps<'a> {
     from: From<'a>,
     last: Option<u64>,
-    error: Option<std::io::Error>,
+    pub(crate) error: Option<std::io::Error>,
+}
+
+impl From<'_> {
+    /// The next pair, ascending, or `None` at the end. The error is returned rather than parked,
+    /// for the iterator above — which cannot carry a `Result` — to park where its consumer looks.
+    fn next(&mut self) -> Result<Option<(u64, u64)>, std::io::Error> {
+        match self {
+            From::Memory(pairs) => {
+                let Some((&pair, rest)) = pairs.split_first() else {
+                    return Ok(None);
+                };
+                *pairs = rest;
+                Ok(Some(pair))
+            }
+            From::File {
+                segments,
+                pending,
+                at,
+            } => {
+                if *at == pending.len() {
+                    if !segments.fill(pending)? {
+                        return Ok(None);
+                    }
+                    *at = 0;
+                }
+                let pair = pending[*at];
+                *at += 1;
+                Ok(Some(pair))
+            }
+        }
+    }
 }
 
 impl Iterator for Reps<'_> {
@@ -755,30 +834,12 @@ impl Iterator for Reps<'_> {
 
     fn next(&mut self) -> Option<u64> {
         loop {
-            let h = match &mut self.from {
-                From::Memory(pairs) => {
-                    let (&(h, _), rest) = pairs.split_first()?;
-                    *pairs = rest;
-                    h
-                }
-                From::File {
-                    segments,
-                    pending,
-                    at,
-                } => {
-                    if *at == pending.len() {
-                        match segments.fill(pending) {
-                            Ok(true) => *at = 0,
-                            Ok(false) => return None,
-                            Err(e) => {
-                                self.error = Some(e);
-                                return None;
-                            }
-                        }
-                    }
-                    let (h, _) = pending[*at];
-                    *at += 1;
-                    h
+            let h = match self.from.next() {
+                Ok(Some((h, _))) => h,
+                Ok(None) => return None,
+                Err(e) => {
+                    self.error = Some(e);
+                    return None;
                 }
             };
             if self.last != Some(h) {
@@ -789,23 +850,29 @@ impl Iterator for Reps<'_> {
     }
 }
 
-/// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
-type SerialisedParts = ([u8; HEADER_V7], Vec<u8>, Vec<u8>);
+/// Every distinct pair of a streaming build, ascending. Like [`Reps`] it parks a read error and
+/// ends the stream, and the builder asks for it before it trusts what it read.
+pub(crate) struct All<'a> {
+    from: From<'a>,
+    pub(crate) error: Option<std::io::Error>,
+}
 
-/// A writer that hashes what passes through it, for a payload written in pieces.
-struct Hashed<'a, W: std::io::Write>(&'a mut W, &'a mut crate::blob::BlockHasher);
+impl Iterator for All<'_> {
+    type Item = (u64, u64);
 
-impl<W: std::io::Write> std::io::Write for Hashed<'_, W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write_all(buf)?;
-        self.1.update(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
+    fn next(&mut self) -> Option<(u64, u64)> {
+        match self.from.next() {
+            Ok(pair) => pair,
+            Err(e) => {
+                self.error = Some(e);
+                None
+            }
+        }
     }
 }
+
+/// Header + owned sections (MPH buffer, side buffer) of a serialised blob.
+type SerialisedParts = ([u8; HEADER_V7], Vec<u8>, Vec<u8>);
 
 /// The validated framing of a blob — every field a query will trust — with the MPH region located
 /// but not parsed. Produced by `parse_frame` and consumed by `from_shared`; both are safe, because
@@ -1057,29 +1124,7 @@ impl CompactHashIndex {
         // Pass one: hash, in runs sorted and spilled beside the output.
         let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         let mut scratch = Scratch::beside(path, threads);
-        let cap = (budget.run_bytes / PAIR_BYTES).max(1);
-        let mut run: Vec<(u64, u64)> = Vec::new();
-        for pair in pairs {
-            if run.capacity() == 0 {
-                run.reserve_exact(cap);
-            }
-            run.push(pair);
-            if run.len() == cap {
-                scratch.spill(&mut run)?;
-            }
-        }
-        check()?;
-        let pairs = if scratch.runs == 0 {
-            sort_run(&mut run, threads);
-            run.dedup();
-            Pairs::Memory(run)
-        } else {
-            if !run.is_empty() {
-                scratch.spill(&mut run)?;
-            }
-            drop(run);
-            scratch.merge()?
-        };
+        let pairs = stream_pairs(pairs, &mut scratch, &mut check, budget)?;
         let (n, side_len) = pairs.counts();
         if n > u32::MAX as usize {
             return Err(IndexError::Format(
@@ -1201,7 +1246,7 @@ impl CompactHashIndex {
             // Straight from the table: at 10⁹ keys its blob is a quarter of a gigabyte, and a
             // copy of it here would be the build's peak.
             if let Some(mph) = &mph {
-                mph.write_into(&mut Hashed(w, &mut payload))?;
+                mph.write_into(&mut crate::blob::Hashed(w, &mut payload))?;
             }
             if in_memory {
                 w.write_all(&fps)?;

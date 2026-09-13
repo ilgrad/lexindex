@@ -228,6 +228,26 @@ pub(crate) fn hash_bytes(bytes: &[u8]) -> u64 {
 /// cannot alias a shorter stream. Version-stable like [`hash_bytes`]: written blobs pin it forever.
 /// Like the header check, it guards **accidental** corruption, not a crafted blob — it is public
 /// and deterministic, so an attacker can recompute it.
+/// A writer that hashes what passes through it, for a payload written in pieces.
+#[cfg(feature = "mph")]
+pub(crate) struct Hashed<'a, W: std::io::Write>(
+    pub(crate) &'a mut W,
+    pub(crate) &'a mut BlockHasher,
+);
+
+#[cfg(feature = "mph")]
+impl<W: std::io::Write> std::io::Write for Hashed<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write_all(buf)?;
+        self.1.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
 pub(crate) struct BlockHasher {
     h: u64,
     buf: [u8; 8],

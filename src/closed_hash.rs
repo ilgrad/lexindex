@@ -22,6 +22,20 @@ const HEADER: usize = 36;
 const CHECKED: usize = 32; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + second hash u64 + id u32
 
+/// The serialised header: the blob's shape, then a hash of the shape. `payload` is the streaming
+/// hash of everything that follows it, which the two writers compute their own way.
+fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER] {
+    let mut header = [0u8; HEADER];
+    header[0..4].copy_from_slice(MAGIC);
+    header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
+    header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
+    header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
+    header[24..32].copy_from_slice(&payload.to_le_bytes());
+    let check = crate::blob::hash_bytes(&header[..CHECKED]) as u32;
+    header[CHECKED..].copy_from_slice(&check.to_le_bytes());
+    header
+}
+
 /// The validated framing of a blob — every field a query will trust — with the MPH region located
 /// but not parsed.
 struct Frame {
@@ -111,6 +125,150 @@ impl ClosedHashIndex {
             n,
             side,
         })
+    }
+
+    /// Build straight to a file, from a source that need not fit in memory: the file
+    /// [`build`](Self::build) and [`save`](Self::save) would have written, byte for byte, without
+    /// ever holding the keys or their hashes. Returns the number of distinct keys written.
+    ///
+    /// One pass over `items` hashes each key to its 16-byte pair and drops the string; every
+    /// 256 MiB of pairs is sorted, deduplicated and spilled as a run beside the output, and the
+    /// runs are merged into one sorted file the perfect hash is built from one first-level chunk
+    /// at a time — the table [`build`](Self::build) gives the same keys, since both feed the same
+    /// placement. There is no second pass: this index stores nothing per key, so what is left in
+    /// memory is the perfect hash itself, which *is* the blob. The scratch beside the output is
+    /// the distinct pairs twice, 32 bytes per key, removed on every exit path.
+    ///
+    /// ```
+    /// # use lexindex::ClosedHashIndex;
+    /// # let dir = std::env::temp_dir().join("lexindex-doc-closed-build-to-file");
+    /// # std::fs::create_dir_all(&dir).unwrap();
+    /// # let path = dir.join("tokens.bcl");
+    /// let n = ClosedHashIndex::build_to_file(["alpha", "beta", "gamma"], &path)?;
+    /// assert_eq!(n, 3);
+    /// let index = ClosedHashIndex::load(&path)?;
+    /// assert!(index.id("beta") < 3);
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn build_to_file<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(items, path, || Ok(()))
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked once the
+    /// input has ended — before the merge, so a source that failed does not pay for one — and
+    /// again **inside** the atomic write, before the rename that publishes the file. It exists for
+    /// a source that cannot report failure through its iterator: the Python binding adapts an
+    /// arbitrary iterable, and one that raises halfway simply stops.
+    pub(crate) fn build_to_file_checked<I, S, C>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        check: C,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        C: FnMut() -> Result<(), IndexError>,
+    {
+        Self::build_to_file_with(
+            items.into_iter().map(|s| hash_pair(s.as_ref())),
+            path.as_ref(),
+            check,
+            crate::compact_hash::Budget::DEFAULT,
+        )
+    }
+
+    /// The streaming build over hashed pairs, with its memory budget exposed.
+    pub(crate) fn build_to_file_with(
+        pairs: impl Iterator<Item = (u64, u64)>,
+        path: &std::path::Path,
+        mut check: impl FnMut() -> Result<(), IndexError>,
+        budget: crate::compact_hash::Budget,
+    ) -> Result<usize, IndexError> {
+        use std::io::{Seek, Write};
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let mut scratch = crate::compact_hash::Scratch::beside(path, threads);
+        let pairs = crate::compact_hash::stream_pairs(pairs, &mut scratch, &mut check, budget)?;
+        let (n, side_len) = pairs.counts();
+        if n > u32::MAX as usize {
+            return Err(IndexError::Format(
+                "closed-hash: more than u32::MAX keys; ids are u32",
+            ));
+        }
+        let m = n - side_len;
+        let mph = if m == 0 {
+            None
+        } else {
+            let mut reps = pairs.reps()?;
+            let built = Mphf::build_from_sorted(m as u64, &mut reps, threads);
+            if let Some(e) = reps.error.take() {
+                return Err(e.into());
+            }
+            Some(built?)
+        };
+        // The same-hash leftovers with the tail ids `build` gives them, and one bit per slot —
+        // not one byte — to catch a construction that was not minimal or perfect. `build` makes
+        // that check and this must too: an index that stores nothing per key has no second chance
+        // to notice that two keys were handed one id.
+        let mut side: Vec<(u64, u64, u32)> = Vec::with_capacity(side_len);
+        let mut seen = vec![0u64; m.div_ceil(64)];
+        let mut last = None;
+        let mut all = pairs.all()?;
+        for (h, second) in &mut all {
+            if last == Some(h) {
+                side.push((h, second, (m + side.len()) as u32));
+                continue;
+            }
+            last = Some(h);
+            let slot = mph.as_ref().expect("m > 0 means a table").index(h) as usize;
+            if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
+                return Err(IndexError::Format(
+                    "closed-hash: construction was not minimal/perfect",
+                ));
+            }
+            seen[slot / 64] |= 1 << (slot % 64);
+        }
+        if let Some(e) = all.error.take() {
+            return Err(e.into());
+        }
+        drop(all);
+        drop(seen);
+        debug_assert_eq!(side.len(), side_len);
+        drop(pairs);
+
+        let mph_len = mph.as_ref().map_or(0, Mphf::byte_len);
+        let mut side_buf = Vec::with_capacity(side.len() * SIDE_ENTRY);
+        for &(h, second, id) in &side {
+            side_buf.extend_from_slice(&h.to_le_bytes());
+            side_buf.extend_from_slice(&second.to_le_bytes());
+            side_buf.extend_from_slice(&id.to_le_bytes());
+        }
+        // The header carries the payload's hash, so it goes in last, over the space left for it.
+        crate::blob::write_atomically_with(path, |w| {
+            let mut payload = crate::blob::BlockHasher::new();
+            w.write_all(&[0u8; HEADER])?;
+            // Straight from the table: at 10⁹ keys its blob is a quarter of a gigabyte, and a
+            // copy of it here would be the build's peak.
+            if let Some(mph) = &mph {
+                mph.write_into(&mut crate::blob::Hashed(w, &mut payload))?;
+            }
+            w.write_all(&side_buf)?;
+            payload.update(&side_buf);
+            check()?;
+            let header = header_bytes(n, mph_len, side.len(), payload.finish());
+            w.flush()?;
+            w.get_mut().seek(std::io::SeekFrom::Start(0))?;
+            w.write_all(&header)?;
+            Ok(())
+        })?;
+        Ok(n)
     }
 
     /// Number of distinct keys.
@@ -219,14 +377,7 @@ impl ClosedHashIndex {
         let mut payload = crate::blob::BlockHasher::new();
         payload.update(&mph_buf);
         payload.update(&side_buf);
-        let mut header = [0u8; HEADER];
-        header[0..4].copy_from_slice(MAGIC);
-        header[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
-        header[12..20].copy_from_slice(&(mph_buf.len() as u64).to_le_bytes());
-        header[20..24].copy_from_slice(&(self.side.len() as u32).to_le_bytes());
-        header[24..32].copy_from_slice(&payload.finish().to_le_bytes());
-        let check = crate::blob::hash_bytes(&header[..CHECKED]) as u32;
-        header[CHECKED..].copy_from_slice(&check.to_le_bytes());
+        let header = header_bytes(self.n, mph_buf.len(), self.side.len(), payload.finish());
         (header, mph_buf, side_buf)
     }
 
@@ -604,6 +755,122 @@ mod tests {
         let back = ClosedHashIndex::load(&path).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), idx.to_bytes());
         assert_eq!(back.id("b"), idx.id("b"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("lexindex_cl_{}_{name}", std::process::id()))
+    }
+
+    /// Nothing of the build is left beside its output.
+    fn no_scratch_beside(path: &std::path::Path) {
+        let stem = path.file_name().unwrap().to_string_lossy().into_owned();
+        let left: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&stem) && name != &stem)
+            .collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+
+    /// Byte for byte the blob `build` and `save` write, whichever way the budget routes it — one
+    /// run held in memory or many spilled and merged — over keys with duplicates and a real
+    /// 64-bit hash collision, so the side table is exercised on both paths.
+    #[test]
+    fn build_to_file_writes_the_blob_build_would_have() {
+        let (a, b) = crate::hash::COLLIDING_PAIR;
+        let mut keys: Vec<String> = (0..2_000).map(|i| format!("token-{i:05}")).collect();
+        keys.extend((0..500).map(|i| format!("token-{i:05}"))); // duplicates
+        keys.push(a.to_string());
+        keys.push(b.to_string());
+        let expected = ClosedHashIndex::build(&keys).unwrap().to_bytes();
+        let path = tmp("same.bcl");
+        for (i, budget) in [
+            crate::compact_hash::Budget::DEFAULT,
+            crate::compact_hash::Budget {
+                run_bytes: 16 * 64,
+                ..crate::compact_hash::Budget::DEFAULT
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let n = ClosedHashIndex::build_to_file_with(
+                keys.iter().map(|k| hash_pair(k)),
+                &path,
+                || Ok(()),
+                budget,
+            )
+            .unwrap();
+            assert_eq!(n, 2_002, "budget {i}");
+            assert!(std::fs::read(&path).unwrap() == expected, "budget {i}");
+            let back = ClosedHashIndex::load(&path).unwrap();
+            assert_ne!(back.id(a), back.id(b));
+            no_scratch_beside(&path);
+            std::fs::remove_file(&path).ok();
+        }
+    }
+
+    /// Enough keys for the perfect hash's first level to be several chunks, fed from the merged
+    /// file rather than from memory: the chunk feed is what this exercises, against `build`.
+    #[test]
+    fn build_to_file_streams_the_perfect_hash_from_the_merged_file() {
+        let keys: Vec<String> = (0..200_000).map(|i| format!("k{i}")).collect();
+        let expected = ClosedHashIndex::build(&keys).unwrap().to_bytes();
+        let path = tmp("chunks.bcl");
+        let n = ClosedHashIndex::build_to_file_with(
+            keys.iter().map(|k| hash_pair(k)),
+            &path,
+            || Ok(()),
+            crate::compact_hash::Budget {
+                run_bytes: 16 * 50_000,
+                ..crate::compact_hash::Budget::DEFAULT
+            },
+        )
+        .unwrap();
+        assert_eq!(n, keys.len());
+        assert!(std::fs::read(&path).unwrap() == expected);
+        let back = ClosedHashIndex::load(&path).unwrap();
+        let mut ids: Vec<u32> = keys.iter().map(|k| back.id(k)).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            keys.len(),
+            "ids must stay a bijection onto [0, n)"
+        );
+        no_scratch_beside(&path);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A source that fails after the last key: nothing is published and nothing is left behind.
+    #[test]
+    fn build_to_file_aborts_on_the_check_and_leaves_nothing() {
+        let keys: Vec<String> = (0..5_000).map(|i| format!("k{i}")).collect();
+        let path = tmp("aborted.bcl");
+        let err = ClosedHashIndex::build_to_file_checked(&keys, &path, || {
+            Err(IndexError::Format("the source failed"))
+        })
+        .unwrap_err();
+        assert!(matches!(err, IndexError::Format("the source failed")));
+        assert!(!path.exists(), "a failed build published a file");
+        no_scratch_beside(&path);
+    }
+
+    #[test]
+    fn build_to_file_handles_an_empty_source() {
+        let path = tmp("empty.bcl");
+        let n = ClosedHashIndex::build_to_file(Vec::<String>::new(), &path).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            ClosedHashIndex::build(Vec::<String>::new())
+                .unwrap()
+                .to_bytes()
+        );
+        assert!(ClosedHashIndex::load(&path).unwrap().is_empty());
+        no_scratch_beside(&path);
         std::fs::remove_file(&path).ok();
     }
 }

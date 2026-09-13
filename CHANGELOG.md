@@ -42,6 +42,28 @@ All notable changes to this project are documented here. The format follows
   additive when asked: `Overlay`, the mmap loaders, the automata queries, the fingerprint and
   block knobs of `build`.
 
+- **`lexindex build --stream`**: the command line builds without holding the corpus. With a named
+  `--index` and a keys file, `build` feeds the file into the streaming builders instead of reading
+  it into a `Vec<String>` first — `auto` (the default) past a quarter of the memory
+  `/proc/meminfo` reports available, `always` / `never` either way, or a size (`1000`, `512M`,
+  `4G`). Measured on a 925 MB, 7 343 721-line path list, the peak resident set falls from 1.34 to
+  0.28 GB for `string`, 1.42 to 0.26 for `dict`, 1.29 to 0.15 for `compact` and for `closed`, and
+  2.96 to 0.97 for `perfect` — whose blob is itself 935 MB, so it is the one index that cannot
+  finish below the file it was built from. All five blobs are **byte for byte** the ones the
+  in-memory build writes: `--stream` is a memory setting, never a format. Standard input is never
+  streamed, because the dictionary builder reads its source three times and a pipe cannot be
+  rewound; and `--index auto` still reads the file, since pricing a corpus means seeing it — it
+  says so on stderr rather than ranking something it did not measure.
+
+- **[`ClosedHashIndex::build_to_file`](https://docs.rs/lexindex/latest/lexindex/struct.ClosedHashIndex.html#method.build_to_file)**,
+  the fifth and last index to get one, so every kind the command line can build now has a
+  streaming path. One pass hashes each key to its 16-byte pair and drops the string; runs are
+  spilled and merged beside the output and the perfect hash is built from the merged file. There
+  is no second pass — this index stores nothing per key, so what is left in memory is the perfect
+  hash itself, which *is* the blob. It keeps the check `build` makes, one bit per slot, that the
+  construction was minimal and perfect: an index that stores nothing per key has no second chance
+  to notice that two keys were handed one id.
+
 - **`lexindex dump <blob>`**, the fourth subcommand: the keys a blob holds, one per line, in id
   order — sorted order for `StringIndex` and `DictIndex`, construction order for
   `PerfectHashIndex`, live keys only for an `Overlay`. `lexindex dump old.blob | lexindex build -
