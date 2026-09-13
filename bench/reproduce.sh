@@ -21,12 +21,19 @@ LOAD_CEILING=1.0
 # The empty Python call over the same probe set, from the artifact the README cites. It is the one
 # number in the table no change to this library can move, so a run whose floor is somewhere else is
 # a run on a different machine -- whatever `uptime` says about it.
-REFERENCE_FLOOR_NS=49
+REFERENCE_FLOOR_NS=47
 FLOOR_TOLERANCE=1.25
 
 # The probe set is drawn from a set of words, and a set iterates strings in an order that changes
 # every process unless this is fixed.
 export PYTHONHASHSEED=0
+
+# The wheel maturin builds is abi3 (`cp3x-abi3-*`), and a free-threaded interpreter cannot install
+# one -- it has no stable ABI. uv defaults to its own managed builds, and a managed 3.14 may well be
+# the free-threaded variant, which fails here with "you're using free-threaded CPython, but the wheel
+# was built for the stable ABI" after the whole build has already run. Prefer whatever the system
+# ships, which is GIL-enabled; `system` still falls back to a managed build where there is none.
+export UV_PYTHON_PREFERENCE=${UV_PYTHON_PREFERENCE:-system}
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
@@ -103,8 +110,10 @@ fi
 wheel=${wheels[0]}
 echo "built $wheel"
 
+python_request=${LEXINDEX_PYTHON:-$(cat .python-version)}
+
 run() {
-  uv run --no-project --python "$(cat .python-version)" --with "$wheel" --with matplotlib \
+  uv run --no-project --python "$python_request" --with "$wheel" --with matplotlib \
     --with "marisa-trie==$MARISA" --with "dawg2==$DAWG2" --with "datrie==$DATRIE" \
     python "$@"
 }
