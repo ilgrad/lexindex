@@ -104,8 +104,8 @@ All notable changes to this project are documented here. The format follows
   `IndexError::Format("dict: the block heads exceed 4 GiB; use a larger block")` can no longer
   happen. The `BDX2` header grows three bytes for the two widths and the superblock shift, and the
   block starts move behind the block data: their width is only known once the encoding is done,
-  which is what lets a streamed build write every section once and in order. `BDX2` has not shipped,
-  so nothing outside this tree has written the layout this replaces.
+  which is what lets a streamed build write every section once and in order. No release wrote the
+  layout this replaces, so nothing outside this tree ever held a blob in it.
 
 ### Added
 
