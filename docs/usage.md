@@ -836,6 +836,31 @@ probabilistic indexes are allowed:
 --exact      a non-member must be answered as one     -- bars CompactHashIndex and ClosedHashIndex
 ```
 
+**The command line assumes an open vocabulary, and so implies `--exact`.** Asked to rank with no
+needs at all, the honest answer on size is `ClosedHashIndex` at 0.26 bytes a key — and it answers a
+key it has never seen with some member's id, because it stores nothing to check against. That is the
+right index for a fixed vocabulary and a trap for anything else, and a ranking is read by someone
+who has not yet decided. So `plan` and `--index auto` leave the two probabilistic indexes out and
+say on stderr that they did:
+
+```console
+$ lexindex plan words.txt
+479823 keys, mean length 9.3, mean shared prefix 6.3
+* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key  estimated
+  PerfectHashIndex       5228937 bytes  10.90 B/key  estimated
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
+(a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
+in this file, and they are ranked with the rest.
+```
+
+`--closed-vocabulary` is that promise, and puts both back in the ranking. The line is printed only
+when the default is what excluded them: ask for `--prefix` and they were never candidates, so
+nothing is explained. Naming an index with `--index closed` builds it whatever the needs say — the
+needs narrow a *choice*, and naming one is not a choice to narrow. The library is unchanged:
+`Needs::default()` in Rust and Python still asks only for `id(key)`, because a program that calls
+`plan` has a caller who decided, and a command line has a person who is still deciding.
+
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect` names one instead and skips the plan entirely.

@@ -43,6 +43,13 @@ needs — what the index must be able to do. They narrow what `plan` ranks and w
   --fuzzy      Levenshtein and subsequence queries
   --exact      a non-member must be answered as one, barring the probabilistic indexes
 
+`plan` and `--index auto` assume an **open** vocabulary and so imply `--exact`: left to itself
+the ranking is won by the index that answers a stranger with some member's id, and nothing in
+the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
+the file, and the two probabilistic indexes are ranked with the rest — `ClosedHashIndex` at
+0.26 bytes a key, `CompactHashIndex` at 1.26. Naming an index with `--index` builds it whatever
+the needs say.
+
 options (`--name value` or `--name=value`):
   --index NAME   auto (default), dict, string, compact, closed, perfect
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
@@ -108,6 +115,9 @@ struct Cmd {
     index: Choice,
     block: Option<usize>,
     sections: bool,
+    /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
+    /// the ladder worth a line about what it left out.
+    implied_exact: bool,
 }
 
 fn choice(name: &str) -> Result<Choice, Fail> {
@@ -170,7 +180,9 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         index: Choice::Auto,
         block: None,
         sections: false,
+        implied_exact: false,
     };
+    let mut closed_vocabulary = false;
     let mut at = 0;
     while at < args.len() {
         let arg = &args[at];
@@ -181,6 +193,9 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         };
         match name {
             "--sections" if accepts == Accepts::Sections => cmd.sections = true,
+            "--closed-vocabulary" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
+                closed_vocabulary = true;
+            }
             "--reverse" | "--ordered" | "--prefix" | "--fuzzy" | "--exact"
                 if !matches!(accepts, Accepts::Nothing | Accepts::Sections) =>
             {
@@ -208,6 +223,18 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
     }
     if cmd.positional.len() != want {
         return Err(Fail::Usage(format!("expected `lexindex {form}`")));
+    }
+    // With no needs at all the cheapest index that answers `id(key)` is the one that answers a
+    // stranger with some other key's id, and nothing in the output would say so. A tool asked
+    // "which index" should not answer with the one whose failure is silent unless the caller has
+    // said the vocabulary is closed. The library's `Needs::default()` is unchanged: this is the
+    // command line choosing a default for a person, not the API choosing one for a program.
+    if !matches!(accepts, Accepts::Nothing | Accepts::Sections)
+        && !closed_vocabulary
+        && !cmd.needs.exact
+    {
+        cmd.needs.exact = true;
+        cmd.implied_exact = true;
     }
     Ok(cmd)
 }
@@ -253,7 +280,28 @@ fn cmd_plan(
     let path = &cmd.positional[0];
     let (keys, blank) = read_keys(path, stdin)?;
     note_blank(path, blank, err)?;
-    write!(out, "{}", plan(&keys, cmd.needs)?).map_err(io_fail)
+    write!(out, "{}", plan(&keys, cmd.needs)?).map_err(io_fail)?;
+    note_implied_exact(cmd, err)
+}
+
+/// What the ladder left out and how to ask for it back. Printed only when `--exact` was the
+/// command line's idea rather than the caller's, since otherwise it says nothing new.
+fn note_implied_exact(cmd: &Cmd, err: &mut dyn Write) -> Result<(), Fail> {
+    let mut without = cmd.needs;
+    without.exact = false;
+    // And only when the default is what excluded them: an index that answers nothing but `id(key)`
+    // is already ruled out by any other need, and a build without `mph` does not have one at all —
+    // in either case the line would name something that was never a candidate.
+    if !cmd.implied_exact || !cfg!(feature = "mph") || !Kind::Closed.answers(without) {
+        return Ok(());
+    }
+    writeln!(
+        err,
+        "excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and \
+         ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every \
+         key you will ask about is in this file, and they are ranked with the rest."
+    )
+    .map_err(io_fail)
 }
 
 fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<(), Fail> {
@@ -272,6 +320,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto => {
             let ranked = plan(&keys, cmd.needs)?;
             write!(err, "{ranked}").map_err(io_fail)?;
+            note_implied_exact(cmd, err)?;
             ranked.best().kind
         }
     };
@@ -734,7 +783,14 @@ mod tests {
         let (code, out, err) = go(&["plan", "-"], "b\n\na\n\n\nc\n");
         assert_eq!(code, 0);
         assert!(out.starts_with("3 keys,"), "{out}");
-        assert_eq!(err, "-: 3 empty lines skipped\n");
+        // The count is the first thing on stderr; with no needs given, the open-vocabulary
+        // default explains itself underneath — where there is a probabilistic index to leave out.
+        assert!(err.starts_with("-: 3 empty lines skipped\n"), "{err}");
+        assert_eq!(
+            err.contains("excluded: needs exact"),
+            cfg!(feature = "mph"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -934,6 +990,59 @@ mod tests {
         let (code, _, err) = go(&["dump", path.to_str().unwrap(), "--exact"], "");
         assert_eq!(code, 2);
         assert!(err.contains("no such option `--exact`"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn auto_assumes_an_open_vocabulary_until_told_otherwise() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(500));
+        // The ladder leaves the two probabilistic indexes out, and says so on stderr.
+        let (code, out, err) = go(&["plan", keys.as_str()], "");
+        assert_eq!(code, 0);
+        assert!(!out.contains("ClosedHashIndex"), "{out}");
+        assert!(!out.contains("CompactHashIndex"), "{out}");
+        // So `auto` cannot build one by default, whatever the corpus makes cheapest.
+        let blob = dir.join("auto.bin");
+        let dest = blob.to_str().unwrap();
+        assert_eq!(go(&["build", keys.as_str(), dest], "").0, 0);
+        assert_ne!(&std::fs::read(&blob).unwrap()[..4], b"BCL1");
+        let (_, out, _) = go(&["inspect", dest], "");
+        assert!(out.contains("kind: DictIndex\n"), "{out}");
+        if !cfg!(feature = "mph") {
+            // Without `mph` there is no probabilistic index to leave out, so nothing is explained.
+            assert!(!err.contains("excluded"), "{err}");
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+        assert!(err.contains("excluded: needs exact"), "{err}");
+        assert!(err.contains("--closed-vocabulary"), "{err}");
+
+        // With the flag they are ranked with the rest, and `auto` picks the smallest again.
+        let (code, out, err) = go(&["plan", keys.as_str(), "--closed-vocabulary"], "");
+        assert_eq!(code, 0);
+        assert!(out.contains("* ClosedHashIndex"), "{out}");
+        assert!(!err.contains("excluded"), "{err}");
+        let open = dir.join("closed.bin");
+        let dest = open.to_str().unwrap();
+        assert_eq!(
+            go(&["build", keys.as_str(), dest, "--closed-vocabulary"], "").0,
+            0
+        );
+        assert_eq!(&std::fs::read(&open).unwrap()[..4], b"BCL1");
+
+        // Asking for one by name builds it whatever the needs would have said.
+        let named = dir.join("named.bin");
+        let dest = named.to_str().unwrap();
+        let (code, _, err) = go(&["build", keys.as_str(), dest, "--index", "closed"], "");
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(&std::fs::read(&named).unwrap()[..4], b"BCL1");
+        // No ladder was printed, so there is nothing to explain.
+        assert!(!err.contains("excluded"), "{err}");
+
+        // An explicit `--exact` is the caller's own, so the line stays out of the way.
+        let (_, _, err) = go(&["plan", keys.as_str(), "--exact"], "");
+        assert!(!err.contains("excluded"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

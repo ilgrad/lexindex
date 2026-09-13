@@ -6,7 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
+  they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
+  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
+  it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
+  a reader who has not decided yet. The two probabilistic indexes are put back by
+  **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
+  for them; that line is printed only when the default is what excluded them, since any other need
+  rules them out anyway. Naming one with `--index closed` still builds it. **The library is
+  unchanged**: `Needs::default()` asks only for `id(key)` in Rust and Python, because `plan`'s
+  caller there has already decided and a command line's has not.
+
 ### Added
+
+- **[`Kind::answers`](https://docs.rs/lexindex/latest/lexindex/enum.Kind.html#method.answers)** is
+  public: whether an index of that kind answers everything a `Needs` asks for, which is what `plan`
+  filters its five candidates by. A caller that presents the ranking can now say *why* a kind is
+  missing from it without restating the capability table — which is exactly what the command line
+  above needed.
 
 - **`lexindex inspect <blob> --sections`** and
   [`DictIndex::sections`](https://docs.rs/lexindex/latest/lexindex/struct.DictIndex.html#method.sections),

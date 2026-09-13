@@ -130,8 +130,19 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Whether an index of this kind answers everything `needs` asks for.
-    fn answers(self, needs: &Needs) -> bool {
+    /// Whether an index of this kind answers everything `needs` asks for — what [`plan`] filters
+    /// the five candidates by, public so a caller that presents the ranking can say *why* a kind
+    /// is missing from it without restating the table.
+    ///
+    /// ```
+    /// use lexindex::{Kind, Needs};
+    /// // The two hash indexes answer `id(key)` and nothing else.
+    /// assert!(Kind::Closed.answers(Needs::default()));
+    /// assert!(!Kind::Closed.answers(Needs::default().exact()));
+    /// assert!(Kind::Dict.answers(Needs::default().prefix().exact()));
+    /// assert!(!Kind::Dict.answers(Needs::default().fuzzy()));
+    /// ```
+    pub fn answers(self, needs: Needs) -> bool {
         let (reverse, ordered, fuzzy, exact) = match self {
             Self::Compact => (false, false, false, false),
             Self::Closed => (false, false, false, false),
@@ -459,7 +470,7 @@ pub fn plan<S: AsRef<str>>(keys: &[S], needs: Needs) -> Result<Plan, IndexError>
         Kind::Dict,
     ]
     .into_iter()
-    .filter(|k| k.answers(&needs) && k.available())
+    .filter(|k| k.answers(needs) && k.available())
     .collect();
 
     let mut estimates = if sorted.len() <= sample_size() {
@@ -606,7 +617,7 @@ mod tests {
             assert!(!plan.estimates().is_empty(), "{needs:?}");
             for e in plan.estimates() {
                 assert!(
-                    e.kind.answers(&needs),
+                    e.kind.answers(needs),
                     "{:?} does not answer {needs:?}",
                     e.kind
                 );
