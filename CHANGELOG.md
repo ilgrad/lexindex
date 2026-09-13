@@ -108,6 +108,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A command line: `lexindex plan | build | inspect`.** Choosing between five indexes no longer
+  needs a Rust file. `lexindex plan keys.txt --reverse --prefix` prints the ladder `Plan`'s own
+  `Display` writes — every candidate the needs allow, cheapest first, with the `DictIndex` block it
+  priced and the "build both" / "too thin to quote" caveats. `lexindex build keys.txt out.bin` asks
+  the same planner and builds the winner, writing the ladder it chose from to stderr;
+  `--index dict | string | compact | closed | perfect` names one instead, and `--block` takes
+  `1..=1024` or `fast` / `balanced` / `compact`. `lexindex inspect out.bin` prints the header one
+  field per line, an overlay's base included, in about a millisecond whatever the blob weighs. A
+  keys file is one key per line, UTF-8, in any order, `-` for standard input; an empty line is
+  skipped and the count reported on stderr, and invalid UTF-8 is an error naming the line rather
+  than a replacement character — the library takes `&str`, and an index built from lossy bytes
+  would hold keys the file does not. The exit code is 0, 2 for a command line that does not parse,
+  1 for work that fails. **No new dependency and no new public API**: the argument parsing is
+  hand-rolled in the binary, and the binary computes no number of its own — on the 479 823-word
+  system dictionary the five `build` runs report **0.26 / 1.26 / 2.84 / 5.95 / 10.90 bytes a key**,
+  the figures the tables already carry, and `plan` puts them at 0.26 / 1.26 / 2.78 / 5.55 / 10.90
+  without building any of them (−0.7 / −0.1 / −2.1 / −6.7 / −0.02 %). **`--index auto` costs a
+  plan**: over that dictionary it takes **287.6–287.9 ms against 116.9–117.4** for `--index dict`,
+  the difference being the planner's 100 000-key sample, which builds all five candidates whatever
+  the needs narrowed the ranking to (hyperfine, 5 runs each, A-B-A-B, σ ≤ 1.7 ms). Below 100 000
+  keys the plan builds the real indexes rather than modelling them, so `--index auto` there builds
+  the corpus twice and naming the index is the way not to.
+
 - **An id can be retired without a membership test.** `Overlay::retire_id(id)` — `retire_id` from
   Python — sets exactly the tombstone `remove` sets, with no key lookup in front of it. Over a
   `CompactHashIndex` base that lookup is the one write a false positive costs something on: a string

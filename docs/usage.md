@@ -682,6 +682,68 @@ The blob records which base wrote it, so `from_bytes_with` refuses a mismatch be
 loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by
 mistake.
 
+## Command line
+
+The crate ships a binary of the same name, so the choice between five indexes can be made without
+writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. It is a
+shell over `plan`, the builders and `inspect_file` and computes nothing of its own.
+
+```console
+$ lexindex plan /usr/share/dict/words --reverse --prefix
+479823 keys, mean length 9.3, mean shared prefix 6.3
+* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key  estimated
+
+$ lexindex build /usr/share/dict/words words.bin --reverse --prefix
+479823 keys, mean length 9.3, mean shared prefix 6.3
+* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key  estimated
+wrote words.bin: DictIndex over 479823 keys, 1361816 bytes (2.84 B/key)
+
+$ lexindex inspect words.bin
+kind: DictIndex
+format: BDX2
+bytes: 1361816
+keys: 479823
+arena_bytes: 1322757
+```
+
+`plan` and `build` take the same five **needs**, which say what the index must be able to do and so
+narrow what may be picked — with none of them the only question asked is `id(key)`, and the two
+probabilistic indexes are allowed:
+
+```text
+--reverse    key(id) as well as id(key)
+--ordered    ids in lexicographic order, and in-order iteration
+--prefix     prefix and range queries (an ordered index)
+--fuzzy      Levenshtein and subsequence queries      -- only StringIndex answers this
+--exact      a non-member must be answered as one     -- bars CompactHashIndex and ClosedHashIndex
+```
+
+`build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
+stays free. `--index auto` is the default and is what asks the planner;
+`--index dict | string | compact | closed | perfect` names one instead and skips the plan entirely.
+On the 479 823-word dictionary that is 287.6-287.9 ms against 116.9-117.4 -- `--index auto` pays for
+the planner's 100 000-key sample, which builds all five candidates however the needs narrowed the
+ranking. Below 100 000 keys the plan builds the real indexes rather than modelling them, so an auto
+build there builds the corpus twice; naming the index is how not to.
+
+`--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
+1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices
+`DictIndex` at the default block and names it on the line, so a block chosen for the build would
+quietly not be the one that was quoted. Run `plan`, read the block off the ladder, then name both.
+
+A keys file is one key per line, UTF-8, in any order; `-` reads standard input, and duplicates are
+removed by the builders. **An empty line is skipped** and the count is reported on stderr -- a file
+that ends in a newline is the common case and an empty key is not. **Invalid UTF-8 is an error**
+naming the line rather than a replacement character, since the library takes `&str` and an index
+built from lossy bytes would hold keys the file does not.
+
+The exit code is `0`, `2` for a command line that does not parse (the usage text follows the
+message), and `1` for work that fails -- a missing file, a blob that is not one, a build the library
+refuses. `lexindex --help` prints the whole surface; three of the five indexes need the `mph`
+feature, and a build without it says so rather than pretending.
+
 ## Benchmark
 
 `python bench/compare.py` measures **serialised size** on real dictionary words against `marisa-trie`,

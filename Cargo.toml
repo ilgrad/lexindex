@@ -24,6 +24,13 @@ name = "lexindex"
 # `cdylib` for the Python extension module (maturin/PyO3); `rlib` for use as a normal Rust crate.
 crate-type = ["cdylib", "rlib"]
 
+# The command line over `plan`, the builders and `inspect_file`. No `required-features`: it has to
+# build in every combination CI checks, so the three `mph` indexes are named at run time and refused
+# with a message on a build that does not have them.
+[[bin]]
+name = "lexindex"
+path = "src/bin/lexindex.rs"
+
 [dependencies]
 # `levenshtein` adds the bounded edit-distance automaton (tiny `utf8-ranges` dep) for fuzzy search.
 fst = { version = "0.4", features = ["levenshtein"] }
