@@ -107,6 +107,9 @@ All notable changes to this project are documented here. The format follows
   which is what lets a streamed build write every section once and in order. No release wrote the
   layout this replaces, so nothing outside this tree ever held a blob in it.
 
+- **The crate tarball no longer carries `bench/results/`.** The 67 measurement logs behind the
+  published numbers stay in the repository; 712 KB leave every `cargo install` and docs.rs build.
+
 ### Added
 
 - **A command line: `lexindex plan | build | inspect`.** Choosing between five indexes no longer

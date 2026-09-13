@@ -10,6 +10,10 @@ repository = "https://github.com/ilgrad/lexindex"
 readme = "README.md"
 keywords = ["index", "fst", "perfect-hash", "prefix", "catalog"]
 categories = ["data-structures", "text-processing"]
+# Measurement logs behind the numbers in the docs, 67 files and 712 KB; they belong in the repository
+# and not in every `cargo install` and docs.rs build. The Python bindings, the examples, the golden
+# blobs and both `include_str!`'d pages stay in.
+exclude = ["bench/results/"]
 
 # docs.rs builds the Rust-facing API — `mph` + `mmap`, the defaults. Not `python`: that surface is
 # PyO3 classes whose documentation lives in the type stubs, and its build script wants an interpreter.
