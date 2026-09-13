@@ -10,10 +10,26 @@ repository = "https://github.com/ilgrad/lexindex"
 readme = "README.md"
 keywords = ["index", "fst", "perfect-hash", "prefix", "catalog"]
 categories = ["data-structures", "text-processing"]
-# Measurement logs behind the numbers in the docs, 67 files and 712 KB; they belong in the repository
-# and not in every `cargo install` and docs.rs build. The Python bindings, the examples, the golden
-# blobs and both `include_str!`'d pages stay in.
-exclude = ["bench/results/"]
+# The tarball is the Rust crate and what a reader of it needs: the sources, the examples, the
+# integration tests with their golden blobs, `README.md` and `docs/usage.md` (both `include_str!`'d
+# into the crate docs), and the licence, changelog, security policy and citation. Everything else --
+# CI, the docs site, the Python package and its build files, the benchmark tooling and its 712 KB of
+# measurement logs, repository housekeeping -- lives in the repository, where a claim can be checked
+# against its artefact, and not in every `cargo install` and docs.rs build.
+exclude = [
+    ".github/",
+    ".gitignore",
+    ".python-version",
+    ".zenodo.json",
+    "bench/",
+    "deny.toml",
+    "docs/*",
+    "!docs/usage.md",
+    "mkdocs.yml",
+    "pyproject.toml",
+    "python/",
+    "tests/test_python.py",
+]
 
 # docs.rs builds the Rust-facing API — `mph` + `mmap`, the defaults. Not `python`: that surface is
 # PyO3 classes whose documentation lives in the type stubs, and its build script wants an interpreter.

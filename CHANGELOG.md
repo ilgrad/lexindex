@@ -107,8 +107,12 @@ All notable changes to this project are documented here. The format follows
   which is what lets a streamed build write every section once and in order. No release wrote the
   layout this replaces, so nothing outside this tree ever held a blob in it.
 
-- **The crate tarball no longer carries `bench/results/`.** The 67 measurement logs behind the
-  published numbers stay in the repository; 712 KB leave every `cargo install` and docs.rs build.
+- **The crate tarball is the Rust crate and nothing else.** It now carries the sources, the examples,
+  the integration tests with their golden blobs, `README.md` and `docs/usage.md` (both pulled
+  into the crate docs), and the licence, changelog, security policy and citation. CI, the docs
+  site, the Python package and its build files, the benchmark tooling and its 67 measurement logs
+  stay in the repository: 169 → 73 files, and 712 KB of logs leave every `cargo install` and
+  docs.rs build.
 
 ### Added
 
