@@ -85,9 +85,9 @@ pip install lexindex      # one abi3 wheel for CPython 3.11+, no runtime depende
 
 ```toml
 [dependencies]
-lexindex = "2.1"
+lexindex = "3.0"
 # fst-only (drop the memory-mapping and perfect-hash code):
-# lexindex = { version = "2.1", default-features = false }
+# lexindex = { version = "3.0", default-features = false }
 ```
 
 ## Python

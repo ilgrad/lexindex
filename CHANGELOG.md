@@ -4,9 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] — 2026-09-13
 
 ### Changed
+
+- **Breaking: `DictIndex` blocks put their headers first, and the format is `BDX2`.** A block held
+  each entry's header immediately before its own suffix; it now holds every header, one byte each,
+  and
+  then every suffix. The same bytes in a different order — a blob is the same length to the byte —
+  but a scan rules most entries out by the shared-prefix length alone, which lives in the header,
+  and 127 of those are two cache lines where they used to be spread over the seven of a 128-key
+  block. On the dictionary `id` fell **9 % at 128 keys a block and 15 % at 256** (384 against 437
+  ns, 487 against 593), 2–4 % at 32 and 64, with `key_into` unchanged and every size identical.
+  Measured A-B-A against a `StringIndex` control that this change cannot touch.
+  **A `BDX1` blob is refused by name** — the message says that the fix is to rebuild — so this is a
+  format break, and an index on disk has to be built again. The
+  Python comparison table has not been re-run for it; see the note on that table's reproducibility
+  in `docs/benchmarks.md`.
 
 - **`DictIndex` trains a symbol table per shard of 65 536 keys.** One table for the whole index is
   a compromise between neighbourhoods that share nothing — the suffixes of a million paths under
@@ -92,19 +106,6 @@ All notable changes to this project are documented here. The format follows
   block starts move behind the block data: their width is only known once the encoding is done,
   which is what lets a streamed build write every section once and in order. `BDX2` has not shipped,
   so nothing outside this tree has written the layout this replaces.
-
-- **`DictIndex` blocks put their headers first, and the format is `BDX2`.** A block held each
-  entry's header immediately before its own suffix; it now holds every header, one byte each, and
-  then every suffix. The same bytes in a different order — a blob is the same length to the byte —
-  but a scan rules most entries out by the shared-prefix length alone, which lives in the header,
-  and 127 of those are two cache lines where they used to be spread over the seven of a 128-key
-  block. On the dictionary `id` fell **9 % at 128 keys a block and 15 % at 256** (384 against 437
-  ns, 487 against 593), 2–4 % at 32 and 64, with `key_into` unchanged and every size identical.
-  Measured A-B-A against a `StringIndex` control that this change cannot touch.
-  **A `BDX1` blob is refused by name** — the message says that the fix is to rebuild — so this is a
-  format break, and an index on disk has to be built again. The
-  Python comparison table has not been re-run for it; see the note on that table's reproducibility
-  in `docs/benchmarks.md`.
 
 ### Added
 
