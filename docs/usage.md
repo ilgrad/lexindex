@@ -542,7 +542,9 @@ microblock, about `(mean head length + 20) / block + 8 / micro` bytes per key �
 default on the dictionary — so a larger block holds less as well as storing less; the block data,
 which is the bulk of the index, goes into the file as it is encoded. The rest is the symbol tables:
 one trains per shard of 65 536 keys and they train in parallel, so a build holds one trainer per
-training thread, about 2.9 MB each. That is bounded by the thread count and not by `n` — on one
+training thread, about 2.9 MB each and **at most 64 MB between them**: past 21 trainers they queue
+rather than multiply, which is what keeps the peak a property of the work and not of the core
+count. It is never a function of `n` — on one
 thread the same two builds peak at 15.3 MB and 31.2, against 12.7 and 32.1 when a single table
 covered the whole index. It reads the sorted keys three times, and pays about 26 % in build time
 for it.

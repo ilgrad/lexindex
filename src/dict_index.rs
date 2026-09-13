@@ -205,6 +205,23 @@ fn write_tables(tables: &[Table], out: &mut Vec<u8>) {
     }
 }
 
+/// What the trainers may hold between them. One runs per training thread and each holds its own
+/// sample, so an unbounded build's peak follows the core count rather than the work: 3.0 MB a
+/// trainer is 45 MB over sixteen threads and 380 over a machine with 128. The bound is in bytes
+/// rather than in threads because a thread count is fitted to the machine it was written on, and it
+/// costs nothing measurable — training is not the critical path until the cap is far below this
+/// one: capping a ten-million-key build at 8 trainers moved it −0.4 %, at 4 by +2.9 %.
+const TRAIN_BUDGET: usize = 64 << 20;
+/// What one trainer holds while it runs, from narrowing the affinity mask `available_parallelism`
+/// reads from sixteen threads down to one and reading `VmHWM`: 2.6 MB over a million keys, 3.0 over
+/// ten million, and flat in `n` either way.
+const TRAIN_BYTES: usize = 3 << 20;
+
+/// Trainers the budget allows, and never none.
+fn train_threads(threads: usize) -> usize {
+    threads.clamp(1, TRAIN_BUDGET / TRAIN_BYTES)
+}
+
 /// One symbol table a shard, trained in parallel: the shards are independent, and training is
 /// linear in the sample, so a table a shard costs the whole budget again on every one of them.
 fn train_shards(samples: &[Vec<&[u8]>], threads: usize) -> Vec<Table> {
@@ -862,7 +879,7 @@ impl DictIndex {
                 .map(|s| s.iter().map(|&(a, b)| &arena[a..b]).collect())
                 .collect();
             let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-            train_shards(&samples, threads.min(shards))
+            train_shards(&samples, train_threads(threads.min(shards)))
         };
         drop(arena);
         drop(spans);
@@ -1058,7 +1075,7 @@ impl DictIndex {
             }
             prev = key;
         }
-        let tables = train_shards(&pieces, threads);
+        let tables = train_shards(&pieces, train_threads(threads));
         drop(pieces);
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
@@ -2573,6 +2590,22 @@ mod tests {
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
         }
+    }
+
+    #[test]
+    fn the_trainers_are_bounded_by_a_budget_and_not_by_the_core_count() {
+        assert_eq!(train_threads(1), 1);
+        assert_eq!(train_threads(8), 8);
+        let cap = train_threads(usize::MAX);
+        assert_eq!(train_threads(4096), cap);
+        assert!(
+            cap * TRAIN_BYTES <= TRAIN_BUDGET,
+            "{cap} trainers overrun the budget"
+        );
+        assert!(
+            cap >= 16,
+            "a bound below this machine's own thread count would cost build time"
+        );
     }
 
     #[test]

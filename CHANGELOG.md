@@ -27,7 +27,12 @@ All notable changes to this project are documented here. The format follows
   three corpora gives `id` +0.5 / −2.0 / −2.4 % against a control moving −0.7 / −2.5 / −0.4 %.
   Building costs **17–23 % more**, and holds one symbol-table trainer per training thread — about
   2 MB each — so on sixteen threads the dictionary's in-memory build peaks 32.1 → 51.6 MB and its
-  streamed build 12.7 → 27.1. The trainers are bounded by the thread count and not by `n`: on one
+  streamed build 12.7 → 27.1. The trainers are bounded by a **64 MB budget** and never by `n`: one
+  holds 2.6 MB over a million keys and 3.0 over ten million, so past 21 of them they queue instead
+  of multiplying, and a machine with 128 cores keeps the peak a property of the work rather than of
+  its core count — 380 MB of trainer state would otherwise sit under a ten-million-key build that
+  holds 391. The bound is free where it can be measured: capping the same build at 8 trainers ran
+  −0.4 % against uncapped on sixteen threads, and only a cap of 4 cost anything (+2.9 %). On one
   thread the same two builds peak at 31.2 and 15.3, the second paying only for the eight tables.
 
 - **`DictIndex` splits every block into microblocks, and the default block is 256.** A block was
