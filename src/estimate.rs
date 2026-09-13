@@ -173,6 +173,179 @@ impl Kind {
     }
 }
 
+/// What [`plan_for`] ranks its candidates by.
+///
+/// [`Memory`](Self::Memory) is what [`plan`] has always done and is the default, so a caller who
+/// has not thought about it is not moved by this existing.
+///
+/// ```
+/// # use lexindex::{plan_for, Needs, Objective, Kind};
+/// let keys = ["apple", "apricot", "banana", "blueberry"];
+/// let small = plan_for(&keys, Needs::default().exact(), Objective::Memory)?;
+/// let quick = plan_for(&keys, Needs::default().exact(), Objective::Latency)?;
+/// assert!(small.best().bytes <= quick.best().bytes);
+/// assert!(quick.nanos(&quick.best()) <= small.nanos(&small.best()));
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Objective {
+    /// The smallest blob, which is what [`plan`] ranks by.
+    #[default]
+    Memory,
+    /// The fastest `id(key)`, from [the model](Plan::nanos) — an ordering, never a prediction of
+    /// your machine's nanoseconds.
+    Latency,
+    /// Whichever candidate is nearest to both: the one whose worse ratio — its bytes against the
+    /// smallest, its modelled latency against the fastest — is smallest. On a corpus where one
+    /// index is both, that index; where they differ, the one that gives up least on either.
+    Balanced,
+}
+
+/// The three constants of one structure's `id(key)` latency: `a + b·log2(n / 100 000) + c·len`,
+/// nanoseconds, where `len` is the mean key length in bytes.
+#[derive(Clone, Copy)]
+struct Cost {
+    a: f64,
+    b: f64,
+    c: f64,
+}
+
+impl Cost {
+    /// Below [`SAMPLE`] the fit has no evidence, so this reports the 100 000-key figure rather
+    /// than extrapolating a curve past where it was measured — a smaller corpus is not slower,
+    /// and what the number is for is the ordering.
+    fn nanos(self, keys: usize, mean_len: f64) -> f64 {
+        let n = (keys.max(SAMPLE) as f64 / SAMPLE as f64).log2();
+        self.a + self.b * n + self.c * mean_len
+    }
+
+    /// Between two measured blocks, linear in `log2(block)`, which is what the three constants
+    /// move in over 32..=1024.
+    fn between(self, other: Self, t: f64) -> Self {
+        let mix = |x: f64, y: f64| x + (y - x) * t;
+        Self {
+            a: mix(self.a, other.a),
+            b: mix(self.b, other.b),
+            c: mix(self.c, other.c),
+        }
+    }
+}
+
+/// Least squares over 240 measured cells: eight structures over thirteen corpora at 100 000,
+/// 1 000 000 and 10 000 000 keys, in one process, the lanes alternating so that no structure is
+/// timed with the caches still warm from its own build. `bench/latency_model.py measure` produced
+/// them and `fit` re-derives this table from
+/// `bench/results/latency-model-2026-09-13-arz-6786f74-dirty.json` — the tree was dirty with the
+/// planner change these constants are for, which cannot move an `id`. Mean absolute error is
+/// 9–21 % of the measurement.
+///
+/// **Far too coarse to quote and quite enough to rank.** Scored against the *published* sweep,
+/// which these were not fitted to: the fastest of its six lexindex lanes is named in 30 of 30
+/// corpus-size cells — though `ClosedHashIndex` wins most of those outright, so the number that
+/// means something is the comparison a caller actually faces. `DictIndex` against `StringIndex`,
+/// which decides an ordered index, is right in **27 of 30** and thirteen of thirteen at 100 000
+/// keys; which `DictIndex` block is fastest, 26 of 30.
+///
+/// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
+/// through the Python binding so that every one of them carries that call. Nothing here rescales
+/// them for another machine, and no number they produce is a measurement of the caller's corpus.
+const COST: [(Kind, Cost); 4] = [
+    (
+        Kind::Closed,
+        Cost {
+            a: 47.0,
+            b: 14.10,
+            c: 0.37,
+        },
+    ),
+    (
+        Kind::Compact,
+        Cost {
+            a: 61.7,
+            b: 23.99,
+            c: 0.30,
+        },
+    ),
+    (
+        Kind::Perfect,
+        Cost {
+            a: 101.5,
+            b: 41.29,
+            c: 1.11,
+        },
+    ),
+    (
+        Kind::String,
+        Cost {
+            a: 140.4,
+            b: 60.47,
+            c: 9.10,
+        },
+    ),
+];
+
+/// [`Kind::Dict`] is a curve, not a point: the block trades a scan against a search and both ends
+/// of 32..=1024 were measured. Ascending by block, interpolated in between and clamped outside.
+const DICT_COST: [(usize, Cost); 4] = [
+    (
+        32,
+        Cost {
+            a: 180.7,
+            b: 68.17,
+            c: 3.98,
+        },
+    ),
+    (
+        128,
+        Cost {
+            a: 214.3,
+            b: 64.29,
+            c: 4.01,
+        },
+    ),
+    (
+        256,
+        Cost {
+            a: 230.3,
+            b: 56.78,
+            c: 3.95,
+        },
+    ),
+    (
+        1024,
+        Cost {
+            a: 278.2,
+            b: 47.15,
+            c: 4.10,
+        },
+    ),
+];
+
+/// The cost constants for one candidate.
+fn cost_of(kind: Kind, block: Option<usize>) -> Cost {
+    if kind != Kind::Dict {
+        let (_, cost) = COST
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .expect("every kind but Dict is in the table");
+        return *cost;
+    }
+    let block = block.unwrap_or(dict_index::DEFAULT_BLOCK);
+    let at = DICT_COST.partition_point(|(b, _)| *b < block);
+    if at == 0 {
+        return DICT_COST[0].1;
+    }
+    if at == DICT_COST.len() {
+        return DICT_COST[DICT_COST.len() - 1].1;
+    }
+    let (lo, low) = DICT_COST[at - 1];
+    let (hi, high) = DICT_COST[at];
+    let t =
+        ((block as f64).log2() - (lo as f64).log2()) / ((hi as f64).log2() - (lo as f64).log2());
+    low.between(high, t)
+}
+
 /// What one index is expected to weigh.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Estimate {
@@ -206,18 +379,45 @@ pub struct Plan {
     mean_lcp: f64,
     estimates: Vec<Estimate>,
     needs: Needs,
+    objective: Objective,
 }
 
 impl Plan {
-    /// The cheapest candidate that answers the caller's questions. There is always one:
-    /// [`StringIndex`] answers every question this crate can be asked.
+    /// The candidate the [`Objective`] puts first among those that answer the caller's questions.
+    /// There is always one: [`StringIndex`] answers every question this crate can be asked.
     pub fn best(&self) -> Estimate {
         self.estimates[0]
     }
 
-    /// Every candidate the [`Needs`] allow, cheapest first.
+    /// Every candidate the [`Needs`] allow, in the [`Objective`]'s order, best first.
     pub fn estimates(&self) -> &[Estimate] {
         &self.estimates
+    }
+
+    /// What this plan ranked by.
+    pub fn objective(&self) -> Objective {
+        self.objective
+    }
+
+    /// The modelled `id(key)` latency of a candidate, in nanoseconds.
+    ///
+    /// **An estimate, and of one machine.** `a + b·log2(n / 100 000) + c·mean_len` per structure,
+    /// least-squares fitted to 240 cells measured on this crate's own hardware — an AMD Ryzen 7
+    /// 5800HS with 16 MB of L3 — with mean absolute error 9–21 % of the measurement. It is
+    /// accurate enough to order the candidates and nowhere near accurate enough to quote: on the
+    /// published sweep, which it was not fitted to, it picks `DictIndex` over `StringIndex` the
+    /// way the measurement does in 27 of 30 corpus-size cells and 13 of 13 at 100 000 keys — and
+    /// it will not tell you what your own lookup costs.
+    ///
+    /// ```
+    /// # use lexindex::{plan, Needs};
+    /// let p = plan(&["apple", "apricot", "banana"], Needs::default())?;
+    /// // Cheaper to store is not cheaper to ask.
+    /// assert!(p.estimates().iter().all(|e| p.nanos(e) > 0.0));
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn nanos(&self, estimate: &Estimate) -> f64 {
+        cost_of(estimate.kind, estimate.block).nanos(self.keys, self.mean_len)
     }
 
     /// Distinct keys the plan was made for.
@@ -252,8 +452,15 @@ impl fmt::Display for Plan {
         let best = self.best();
         writeln!(
             f,
-            "{} keys, mean length {:.1}, mean shared prefix {:.1}",
-            self.keys, self.mean_len, self.mean_lcp
+            "{} keys, mean length {:.1}, mean shared prefix {:.1}, ranked by {}",
+            self.keys,
+            self.mean_len,
+            self.mean_lcp,
+            match self.objective {
+                Objective::Memory => "size",
+                Objective::Latency => "latency",
+                Objective::Balanced => "balance",
+            }
         )?;
         for e in &self.estimates {
             let mark = if e.kind == best.kind { '*' } else { ' ' };
@@ -263,14 +470,19 @@ impl fmt::Display for Plan {
             };
             writeln!(
                 f,
-                "{mark} {:<17} {:>12} bytes  {:5.2} B/key  {}{}",
+                "{mark} {:<17} {:>12} bytes  {:5.2} B/key  {:>5.0} ns  {}{}",
                 e.kind.name(),
                 e.bytes,
                 e.bytes_per_key(self.keys),
+                self.nanos(e),
                 if e.measured { "built" } else { "estimated" },
                 block
             )?;
         }
+        writeln!(
+            f,
+            "the nanoseconds are a model of this crate's own machine, not a measurement of yours"
+        )?;
         if self.close() {
             writeln!(
                 f,
@@ -458,6 +670,26 @@ fn hash_fits(keys: &[&str]) -> Result<[(f64, f64); 3], IndexError> {
 /// println!("{p}");   // the explanation
 /// ```
 pub fn plan<S: AsRef<str>>(keys: &[S], needs: Needs) -> Result<Plan, IndexError> {
+    plan_for(keys, needs, Objective::Memory)
+}
+
+/// [`plan`], ranked by something other than the blob size.
+///
+/// The candidates and their sizes are the same; only the order, and so [`Plan::best`], differ.
+/// [`Objective::Memory`] is exactly [`plan`].
+///
+/// ```
+/// # use lexindex::{plan_for, Needs, Objective};
+/// let keys = ["apple", "apricot", "banana"];
+/// let p = plan_for(&keys, Needs::default().reverse(), Objective::Latency)?;
+/// println!("{p}");   // the ladder, fastest first, with the modelled nanoseconds
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+pub fn plan_for<S: AsRef<str>>(
+    keys: &[S],
+    needs: Needs,
+    objective: Objective,
+) -> Result<Plan, IndexError> {
     let mut sorted: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
     sorted.sort_unstable();
     sorted.dedup();
@@ -480,14 +712,39 @@ pub fn plan<S: AsRef<str>>(keys: &[S], needs: Needs) -> Result<Plan, IndexError>
         let sample: Vec<&str> = sorted.iter().step_by(step).copied().collect();
         model(&shape, &Sample::of(&sample)?, &kinds)
     };
-    estimates.sort_by_key(|e| e.bytes);
+    rank(&mut estimates, objective, sorted.len(), shape.mean_len());
     Ok(Plan {
         keys: sorted.len(),
         mean_len: shape.mean_len(),
         mean_lcp: shape.mean_lcp1(),
         estimates,
         needs,
+        objective,
     })
+}
+
+/// Put the candidates in the objective's order, best first. Ties, and every order, break on bytes,
+/// so two runs over the same keys rank them the same way.
+fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len: f64) {
+    let nanos = |e: &Estimate| cost_of(e.kind, e.block).nanos(keys, mean_len);
+    match objective {
+        Objective::Memory => estimates.sort_by_key(|e| e.bytes),
+        Objective::Latency => {
+            estimates.sort_by(|x, y| nanos(x).total_cmp(&nanos(y)).then(x.bytes.cmp(&y.bytes)));
+        }
+        Objective::Balanced => {
+            let smallest = estimates.iter().map(|e| e.bytes).min().unwrap_or(0).max(1) as f64;
+            let fastest = estimates
+                .iter()
+                .map(nanos)
+                .fold(f64::INFINITY, f64::min)
+                .max(1.0);
+            // What it gives up on the objective it does worse on. The winner is the candidate
+            // whose worse ratio is smallest, which is the one nearest to both at once.
+            let worse = |e: &Estimate| (e.bytes as f64 / smallest).max(nanos(e) / fastest);
+            estimates.sort_by(|x, y| worse(x).total_cmp(&worse(y)).then(x.bytes.cmp(&y.bytes)));
+        }
+    }
 }
 
 /// Build every candidate and report what it weighs. What a corpus no larger than the sample gets,
@@ -624,6 +881,123 @@ mod tests {
             }
             let best = plan.best();
             assert!(plan.estimates().iter().all(|e| e.bytes >= best.bytes));
+        }
+    }
+
+    /// The default objective is what `plan` always did, to the byte and to the order.
+    #[test]
+    fn memory_ranks_exactly_as_it_always_did() {
+        let keys = corpus(2_000);
+        for bits in 0..32u8 {
+            let needs = Needs {
+                reverse: bits & 1 != 0,
+                ordered: bits & 2 != 0,
+                prefix: bits & 4 != 0,
+                fuzzy: bits & 8 != 0,
+                exact: bits & 16 != 0,
+            };
+            let p = plan(&keys, needs).unwrap();
+            assert_eq!(p.objective(), Objective::Memory);
+            assert_eq!(p, plan_for(&keys, needs, Objective::Memory).unwrap());
+            assert!(p.estimates().windows(2).all(|w| w[0].bytes <= w[1].bytes));
+        }
+    }
+
+    /// The objectives disagree, which is the whole point of having them: asked for exact
+    /// membership and a reverse lookup, the smallest answer is the dictionary and the fastest is
+    /// the perfect hash.
+    #[test]
+    fn latency_and_memory_pick_different_indexes() {
+        let keys = corpus(2_000);
+        let needs = Needs::default().exact().reverse();
+        let small = plan_for(&keys, needs, Objective::Memory).unwrap();
+        let quick = plan_for(&keys, needs, Objective::Latency).unwrap();
+        assert_eq!(small.best().kind, Kind::Dict);
+        assert!(
+            quick
+                .estimates()
+                .windows(2)
+                .all(|w| { quick.nanos(&w[0]) <= quick.nanos(&w[1]) })
+        );
+        if cfg!(feature = "mph") {
+            assert_eq!(quick.best().kind, Kind::Perfect);
+            assert!(quick.best().bytes > small.best().bytes);
+            assert!(quick.nanos(&quick.best()) < small.nanos(&small.best()));
+        }
+        // Same candidates, same sizes; only the order moved.
+        let mut a: Vec<_> = small.estimates().to_vec();
+        let mut b: Vec<_> = quick.estimates().to_vec();
+        a.sort_by_key(|e| e.bytes);
+        b.sort_by_key(|e| e.bytes);
+        assert_eq!(a, b);
+    }
+
+    /// Balance is what it says: the winner gives up less, on whichever axis it does worse, than
+    /// either extreme's winner does on the axis it ignores.
+    #[test]
+    fn balanced_gives_up_less_than_either_extreme() {
+        let keys = corpus(2_000);
+        let needs = Needs::default().exact().reverse();
+        let plans: Vec<Plan> = [Objective::Memory, Objective::Latency, Objective::Balanced]
+            .into_iter()
+            .map(|o| plan_for(&keys, needs, o).unwrap())
+            .collect();
+        let small = plans[0].best().bytes as f64;
+        let fast = plans[1].nanos(&plans[1].best());
+        let worse = |p: &Plan| {
+            let e = p.best();
+            (e.bytes as f64 / small).max(p.nanos(&e) / fast)
+        };
+        let balanced = worse(&plans[2]);
+        assert!(balanced <= worse(&plans[0]) + f64::EPSILON, "{balanced}");
+        assert!(balanced <= worse(&plans[1]) + f64::EPSILON, "{balanced}");
+    }
+
+    /// The model is a curve in the block, fitted at four points and read anywhere in 1..=1024.
+    #[test]
+    fn the_dict_cost_follows_the_block_it_was_measured_at() {
+        let at = |block: usize| cost_of(Kind::Dict, Some(block)).nanos(SAMPLE, 10.0);
+        // Below and above the measured ends it is clamped, not extrapolated.
+        assert_eq!(at(1), at(32));
+        assert_eq!(at(1024), at(4096));
+        // Between them it moves, and at 100 000 keys a bigger block costs more.
+        assert!(at(32) < at(64) && at(64) < at(128));
+        assert!(at(256) < at(512) && at(512) < at(1024));
+    }
+
+    /// Both arguments of the model do what the measurements said they do.
+    #[test]
+    fn the_model_grows_with_the_corpus_and_with_the_keys() {
+        for kind in [Kind::Closed, Kind::Perfect, Kind::String, Kind::Dict] {
+            if !kind.available() {
+                continue;
+            }
+            let c = cost_of(kind, None);
+            assert!(
+                c.nanos(SAMPLE, 10.0) < c.nanos(SAMPLE * 100, 10.0),
+                "{kind:?}"
+            );
+            assert!(c.nanos(SAMPLE, 10.0) < c.nanos(SAMPLE, 40.0), "{kind:?}");
+            // Nothing below the sample extrapolates past where the fit has evidence.
+            assert_eq!(c.nanos(1, 10.0), c.nanos(SAMPLE, 10.0), "{kind:?}");
+        }
+    }
+
+    /// The ladder says what it ranked by and that the nanoseconds are not a measurement.
+    #[test]
+    fn the_ladder_names_its_objective_and_disclaims_the_model() {
+        let keys = corpus(500);
+        for (objective, word) in [
+            (Objective::Memory, "ranked by size"),
+            (Objective::Latency, "ranked by latency"),
+            (Objective::Balanced, "ranked by balance"),
+        ] {
+            let text = plan_for(&keys, Needs::default(), objective)
+                .unwrap()
+                .to_string();
+            assert!(text.contains(word), "{text}");
+            assert!(text.contains(" ns  "), "{text}");
+            assert!(text.contains("not a measurement of yours"), "{text}");
         }
     }
 

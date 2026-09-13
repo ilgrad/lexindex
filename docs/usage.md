@@ -755,14 +755,16 @@ nothing of its own.
 
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
-479823 keys, mean length 9.3, mean shared prefix 6.3
-* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key  estimated
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
-479823 keys, mean length 9.3, mean shared prefix 6.3
-* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key  estimated
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
 wrote words.bin: DictIndex over 479823 keys, 1361816 bytes (2.84 B/key)
 
 $ lexindex inspect words.bin
@@ -845,10 +847,11 @@ say on stderr that they did:
 
 ```console
 $ lexindex plan words.txt
-479823 keys, mean length 9.3, mean shared prefix 6.3
-* DictIndex              1332857 bytes   2.78 B/key  estimated at block 256
-  StringIndex            2664857 bytes   5.55 B/key  estimated
-  PerfectHashIndex       5228937 bytes  10.90 B/key  estimated
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1332857 bytes   2.78 B/key    396 ns  estimated at block 256
+  StringIndex            2664857 bytes   5.55 B/key    362 ns  estimated
+  PerfectHashIndex       5228937 bytes  10.90 B/key    205 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
 in this file, and they are ranked with the rest.
@@ -868,6 +871,26 @@ On the 479 823-word dictionary that is 287.6-287.9 ms against 116.9-117.4 -- `--
 the planner's 100 000-key sample, which builds all five candidates however the needs narrowed the
 ranking. Below 100 000 keys the plan builds the real indexes rather than modelling them, so an auto
 build there builds the corpus twice; naming the index is how not to.
+
+`--objective` is what the ladder ranks *for*. `memory` is the default and the smallest blob, which
+is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
+candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
+with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
+answers `DictIndex` at 2.78 B/key and `latency` answers `PerfectHashIndex`, which is four times the
+size and a third of the wait.
+
+**The nanoseconds are modelled, and of one machine.** `a + b·log2(n / 100 000) + c·mean_len` per
+structure, least-squares fitted to 240 cells timed on this crate's own hardware -- a Ryzen 7 5800HS
+with 16 MB of L3 -- by `bench/latency_model.py`, whose `fit` re-derives the table in
+`src/estimate.rs` from the artifact under `bench/results/`. Mean absolute error 9-21 %. Two things
+follow. It is an *ordering*: scored against the published sweep, which it was not fitted to, it
+picks `DictIndex` over `StringIndex` the way the measurement does in 27 of 30 corpus-size cells and
+13 of 13 at 100 000 keys. (Over every lane at once it is 30 of 30, but `ClosedHashIndex` wins most
+of those outright, so that number flatters it.) And it is *high*: the cells were timed through the
+Python binding, so every number carries that call, and the model reads 362 and 396 ns for
+`StringIndex` and `DictIndex` on the word list where the Rust harness in `docs/benchmarks.md`
+measures 234 and 266. The overhead falls on every candidate, so it moves the numbers and not the
+ranking -- but do not quote them as your own.
 
 `--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
 1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices

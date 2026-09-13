@@ -2976,7 +2976,10 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
-#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false))]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false, objective="memory"))]
+// The arguments are the keyword arguments; pyo3 binds them one by one, so a parameter object here
+// would be a dict the caller has to build rather than a call they can read.
+#[allow(clippy::too_many_arguments)]
 fn py_plan<'py>(
     py: Python<'py>,
     keys: &Bound<'py, PyAny>,
@@ -2985,6 +2988,7 @@ fn py_plan<'py>(
     prefix: bool,
     fuzzy: bool,
     exact: bool,
+    objective: &str,
 ) -> PyResult<Bound<'py, PyDict>> {
     let keys = collect_strs(keys)?;
     let needs = crate::Needs {
@@ -2994,17 +2998,29 @@ fn py_plan<'py>(
         fuzzy,
         exact,
     };
-    let plan = py.detach(|| crate::plan(&keys, needs)).map_err(to_py)?;
+    let objective = match objective {
+        "memory" => crate::Objective::Memory,
+        "latency" => crate::Objective::Latency,
+        "balanced" => crate::Objective::Balanced,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "objective: `{other}` is not one of memory / latency / balanced"
+            )));
+        }
+    };
+    let plan = py
+        .detach(|| crate::plan_for(&keys, needs, objective))
+        .map_err(to_py)?;
     let n = plan.keys();
     let (mean_len, mean_lcp) = plan.shape();
     let d = PyDict::new(py);
     d.set_item("keys", n)?;
     d.set_item("mean_length", mean_len)?;
     d.set_item("mean_lcp", mean_lcp)?;
-    d.set_item("best", estimate_dict(py, &plan.best(), n)?)?;
+    d.set_item("best", estimate_dict(py, &plan.best(), &plan)?)?;
     let estimates = PyList::empty(py);
     for e in plan.estimates() {
-        estimates.append(estimate_dict(py, e, n)?)?;
+        estimates.append(estimate_dict(py, e, &plan)?)?;
     }
     d.set_item("estimates", estimates)?;
     d.set_item("close", plan.close())?;
@@ -3016,14 +3032,15 @@ fn py_plan<'py>(
 fn estimate_dict<'py>(
     py: Python<'py>,
     e: &crate::Estimate,
-    keys: usize,
+    plan: &crate::Plan,
 ) -> PyResult<Bound<'py, PyDict>> {
     let d = PyDict::new(py);
     d.set_item("kind", e.kind.name())?;
     d.set_item("bytes", e.bytes)?;
-    d.set_item("bytes_per_key", e.bytes_per_key(keys))?;
+    d.set_item("bytes_per_key", e.bytes_per_key(plan.keys()))?;
     d.set_item("block", e.block)?;
     d.set_item("measured", e.measured)?;
+    d.set_item("nanos", plan.nanos(e))?;
     Ok(d)
 }
 

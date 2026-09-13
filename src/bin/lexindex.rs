@@ -8,8 +8,8 @@
 //! from a unit test.
 
 use lexindex::{
-    BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Overlay, OverlayBase,
-    StringIndex, plan,
+    BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Objective, Overlay,
+    OverlayBase, StringIndex, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -23,8 +23,9 @@ const USAGE: &str = concat!(
     r#" — price, build and inspect string↔id indexes
 
 usage:
-  lexindex plan    <keys-file> [needs]
-  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--stream MODE] [needs]
+  lexindex plan    <keys-file> [--objective NAME] [needs]
+  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--stream MODE]
+                   [--objective NAME] [needs]
   lexindex inspect <blob> [--sections]
   lexindex dump    <blob>
 
@@ -51,6 +52,10 @@ the file, and the two probabilistic indexes are ranked with the rest — `Closed
 the needs say.
 
 options (`--name value` or `--name=value`):
+  --objective N  what the ladder ranks by: memory (default, the smallest blob), latency
+                 (the fastest id(key), modelled) or balanced (nearest to both). The
+                 nanoseconds are a model of this crate's own machine, never a
+                 measurement of yours
   --index NAME   auto (default), dict, string, compact, closed, perfect
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
@@ -121,9 +126,23 @@ struct Cmd {
     block: Option<usize>,
     sections: bool,
     stream: Stream,
+    objective: Objective,
     /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
     /// the ladder worth a line about what it left out.
     implied_exact: bool,
+}
+
+fn objective(name: &str) -> Result<Objective, Fail> {
+    Ok(match name {
+        "memory" => Objective::Memory,
+        "latency" => Objective::Latency,
+        "balanced" => Objective::Balanced,
+        other => {
+            return Err(Fail::Usage(format!(
+                "--objective: `{other}` is not one of memory / latency / balanced"
+            )));
+        }
+    })
 }
 
 fn choice(name: &str) -> Result<Choice, Fail> {
@@ -264,6 +283,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         block: None,
         sections: false,
         stream: Stream::Auto,
+        objective: Objective::Memory,
         implied_exact: false,
     };
     let mut closed_vocabulary = false;
@@ -291,6 +311,9 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
                     _ => &mut cmd.needs.exact,
                 };
                 *flag = true;
+            }
+            "--objective" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
+                cmd.objective = objective(&value(args, &mut at, name, inline)?)?;
             }
             "--index" if accepts == Accepts::NeedsAndIndex => {
                 cmd.index = choice(&value(args, &mut at, name, inline)?)?;
@@ -367,7 +390,7 @@ fn cmd_plan(
     let path = &cmd.positional[0];
     let (keys, blank) = read_keys(path, stdin)?;
     note_blank(path, blank, err)?;
-    write!(out, "{}", plan(&keys, cmd.needs)?).map_err(io_fail)?;
+    write!(out, "{}", plan_for(&keys, cmd.needs, cmd.objective)?).map_err(io_fail)?;
     note_implied_exact(cmd, err)
 }
 
@@ -425,7 +448,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     let kind = match cmd.index {
         Choice::One(k) => k,
         Choice::Auto => {
-            let ranked = plan(&keys, cmd.needs)?;
+            let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
             note_implied_exact(cmd, err)?;
             ranked.best().kind
@@ -1015,14 +1038,74 @@ mod tests {
         assert!(out.starts_with("400 keys, mean length"), "{out}");
         assert!(out.contains("DictIndex"), "{out}");
         assert!(out.contains('*'), "the chosen line is marked: {out}");
-        // `--fuzzy` leaves exactly one candidate, so the ladder is one line under the shape.
+        // `--fuzzy` leaves exactly one candidate, so the ladder is one line under the shape —
+        // and one under that, the line saying the nanoseconds are modelled.
         let (code, out, _) = go(&["plan", &keys, "--fuzzy"], "");
         assert_eq!(code, 0);
-        assert_eq!(out.lines().count(), 2, "{out}");
+        assert_eq!(out.lines().count(), 3, "{out}");
         assert!(out.contains("StringIndex"), "{out}");
         // The remaining needs parse and narrow nothing that is not already covered.
         let (code, _, _) = go(&["plan", &keys, "--ordered", "--exact"], "");
         assert_eq!(code, 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The ladder ranks for what it was asked to rank for, and says which that was.
+    #[test]
+    fn objective_reorders_the_ladder_and_is_named_on_it() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(400));
+        let mut first = Vec::new();
+        for (name, word) in [
+            ("memory", "ranked by size"),
+            ("latency", "ranked by latency"),
+            ("balanced", "ranked by balance"),
+        ] {
+            let (code, out, err) = go(&["plan", &keys, "--reverse", "--objective", name], "");
+            assert_eq!((code, err.as_str()), (0, ""), "{name}");
+            assert!(out.lines().next().unwrap().ends_with(word), "{out}");
+            assert!(out.contains(" ns  "), "{out}");
+            first.push(
+                out.lines()
+                    .nth(1)
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .to_string(),
+            );
+        }
+        if cfg!(feature = "mph") {
+            assert_ne!(first[0], first[1], "size and latency picked the same index");
+        }
+        // And it reaches the build, which asks the same ladder.
+        let blob = dir.join("out.bin");
+        let (code, _, err) = go(
+            &[
+                "build",
+                &keys,
+                blob.to_str().unwrap(),
+                "--objective",
+                "latency",
+            ],
+            "",
+        );
+        assert_eq!(code, 0, "{err}");
+        assert!(err.contains("ranked by latency"), "{err}");
+        for bad in ["", "fast", "size"] {
+            let (code, _, err) = go(&["plan", &keys, "--objective", bad], "");
+            assert_eq!(
+                (code, err.contains("--objective")),
+                (2, true),
+                "{bad}: {err}"
+            );
+        }
+        // `inspect` and `dump` rank nothing.
+        let (code, _, err) = go(
+            &["dump", blob.to_str().unwrap(), "--objective", "memory"],
+            "",
+        );
+        assert_eq!((code, err.contains("--objective")), (2, true), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

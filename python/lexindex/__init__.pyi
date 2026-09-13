@@ -793,6 +793,11 @@ class Estimate(TypedDict):
     distinct keys. ``block`` is the ``DictIndex`` block the estimate was priced at and ``None``
     for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
+
+    ``nanos`` is the modelled cost of one ``id(key)``, and is never measured: it comes from a
+    least-squares fit to 240 cells timed on this crate's own machine, with a mean absolute error
+    of 7-20 %. It is accurate enough to order the candidates and nowhere near accurate enough to
+    quote as your own latency.
     """
 
     kind: Literal[
@@ -806,14 +811,15 @@ class Estimate(TypedDict):
     bytes_per_key: float
     block: int | None
     measured: bool
+    nanos: float
 
 class Plan(TypedDict):
     """What :func:`plan` priced: the ranking, the shape of the corpus and the caveats.
 
-    ``estimates`` is every index that answers what was asked, cheapest first, and ``best`` is its
-    first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean length in bytes
-    and ``mean_lcp`` the mean prefix an adjacent pair shares -- the difference between the two is
-    the suffix a front-coded format actually stores.
+    ``estimates`` is every index that answers what was asked, in the objective's order, and
+    ``best`` is its first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean
+    length in bytes and ``mean_lcp`` the mean prefix an adjacent pair shares -- the difference
+    between the two is the suffix a front-coded format actually stores.
 
     ``close`` says the two cheapest are within 1.3x of each other, which is inside what an estimate
     can separate; ``thin`` says the mean suffix is under two bytes, where a compression ratio read
@@ -838,6 +844,7 @@ def plan(
     prefix: bool = False,
     fuzzy: bool = False,
     exact: bool = False,
+    objective: Literal["memory", "latency", "balanced"] = "memory",
 ) -> Plan:
     """What each index would cost on these keys, and which of them answer your questions.
 
@@ -860,4 +867,9 @@ def plan(
     membership, without which a probabilistic index is allowed, which is how the two smallest get
     their size. An index that cannot answer one of them is left out of the ranking rather than
     ranked last.
+
+    ``objective`` is what the ranking is *for*: ``memory`` (the default, the smallest blob),
+    ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``) or ``balanced``,
+    whichever candidate gives up least on either. The candidates and their sizes do not change
+    with it; only the order, and so ``best``, do.
     """
