@@ -6,20 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
-
-- **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
-  they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
-  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
-  it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
-  a reader who has not decided yet. The two probabilistic indexes are put back by
-  **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
-  for them; that line is printed only when the default is what excluded them, since any other need
-  rules them out anyway. Naming one with `--index closed` still builds it. **The library is
-  unchanged**: `Needs::default()` asks only for `id(key)` in Rust and Python, because `plan`'s
-  caller there has already decided and a command line's has not.
-
 ### Added
+
 
 - **[`Kind::answers`](https://docs.rs/lexindex/latest/lexindex/enum.Kind.html#method.answers)** is
   public: whether an index of that kind answers everything a `Needs` asks for, which is what `plan`
@@ -64,6 +52,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
+  they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
+  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
+  it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
+  a reader who has not decided yet. The two probabilistic indexes are put back by
+  **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
+  for them; that line is printed only when the default is what excluded them, since any other need
+  rules them out anyway. Naming one with `--index closed` still builds it. **The library is
+  unchanged**: `Needs::default()` asks only for `id(key)` in Rust and Python, because `plan`'s
+  caller there has already decided and a command line's has not.
 - **A new blob format now ships beside a reader for the old one.** 1.0 and 3.0 each refused what
   the previous major wrote; from 3.0 on a writer change lands in a *minor* release whose loader
   still reads the previous format, and dropping a reader is reserved for a major with `lexindex
@@ -96,6 +94,17 @@ All notable changes to this project are documented here. The format follows
   6.9 against 13.5 ns — with ConsensusRecSplit on the authors' harness in its own process:
   1.46–1.58 bits a key at 7–49× the build and 15–27× the lookup. The 2026-09-10 results file stays
   as measured.
+
+### Fixed
+
+- **A streaming build no longer opens one file per spilled run.** The external sort merged every
+  run it had written in one heap, a descriptor and a 1 MiB read buffer each — so the resident cost
+  of the merge followed the corpus, in a builder whose whole point is that nothing does. At 256 MiB
+  of keys a run, a thousand runs is a corpus of ~256 GiB: a gigabyte of read buffers, and a
+  descriptor count that outruns a 1 024 soft limit wherever one is still in force. The runs are now
+  collapsed in groups of 128 first, so a merge opens at most 128 readers whatever the corpus was —
+  one extra pass over the spilled bytes per factor of 128, and the common case, a build that spills
+  fewer runs than that, does no extra work at all.
 
 ## [3.0.0] — 2026-09-13
 

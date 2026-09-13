@@ -914,7 +914,7 @@ impl DictIndex {
         }
         // The run's arena is the build's largest allocation and nothing reads it again.
         drop(run);
-        Self::write_sorted(&runs, path, block, check)
+        Self::write_sorted(&mut runs, path, block, check)
     }
 
     /// The three passes and the write, over a key stream that can be walked again.
@@ -2639,7 +2639,7 @@ impl Replay for &mut Run {
     }
 }
 
-impl Replay for &Runs {
+impl Replay for &mut Runs {
     fn each(
         &mut self,
         f: &mut dyn FnMut(&str) -> Result<(), IndexError>,
@@ -2767,6 +2767,30 @@ mod tests {
             assert_eq!(back.to_bytes(), blob, "block {block}");
             check(&back, &keys);
         }
+    }
+
+    /// A corpus spilled into more runs than a merge may open builds the same blob as one held in
+    /// memory. The collapse runs between the spill and the three passes, and if it lost, reordered
+    /// or duplicated a key the bytes would differ.
+    #[test]
+    fn a_streamed_build_over_a_collapsed_merge_writes_the_same_blob() {
+        let keys = corpus();
+        crate::extsort::set_fan_in(4);
+        let dir = scratch("dictcollapse");
+        let path = dir.join("idx.bdx");
+        for block in [1usize, 32, 256] {
+            let want = DictIndex::build_with_block(&keys, block)
+                .unwrap()
+                .to_bytes();
+            // A 32-byte run budget over this corpus is dozens of runs against a fan-in of four.
+            let n = DictIndex::build_to_file_runs(&keys, &path, block, || Ok(()), 32).unwrap();
+            assert_eq!(n, keys.len());
+            assert_eq!(std::fs::read(&path).unwrap(), want, "block {block}");
+            assert_eq!(entries(&dir), ["idx.bdx"], "the runs directory is gone");
+            check(&DictIndex::load(&path).unwrap(), &keys);
+        }
+        crate::extsort::set_fan_in(0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
