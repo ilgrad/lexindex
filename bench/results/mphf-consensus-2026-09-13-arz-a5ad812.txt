@@ -1,0 +1,177 @@
+ConsensusRecSplit (https://github.com/ByteHamster/ConsensusRecSplit, GPLv3, C++20; Lehmann, Sanders, Walzer,
+Ziegler, arXiv:2502.05613) at 11deea6, the authors' benchmark/benchmark_construction.cpp built with their CMake
+(Release, prebuilt oneTBB 2023.1.0), run alone, one configuration per process, single-threaded, 2026-09-13
+16:36-16:41, the same machine as mphf-vs-2026-09-13-arz-a5ad812.txt right after it, load 0.4-1.2 at the start
+of each run. The licence keeps it out of a crate that links lexindex, so the comparison is between processes
+and on their terms: XorShift64 u64 keys seeded from the clock, one construction per run timed in milliseconds,
+numQueries keys drawn with replacement into a plan array (so, as in mphf_vs, a query reads its key from a
+sequential stream), the query loop timed once. ns/key = constructionTimeMilliseconds * 1e6 / N;
+ns/query = queryTimeMilliseconds * 1e6 / numQueries. -k is the bucket size, -e the space overhead over the
+1.443-bit lower bound, -o the query-optimised variant.
+
+R-01 ConsensusRecSplit: local/consensus/build/Benchmark at 11deea6, single process, single thread, 2026-09-13T16:36:09+03:00, load 0.43 0.98 1.39
+
+--- Benchmark -n 1000000 -q 1000000 -k 256 -e 0.1   (load 0.43 0.98 1.39)
+Generating input data (Seed: 1789306569357)
+Constructing
+Level 0 (256 keys each): 15 ms, 0 us per output bit
+Level 1 (128 keys each): 14 ms, 0 us per output bit
+Level 2 (64 keys each): 13 ms, 0 us per output bit
+Level 3 (32 keys each): 14 ms, 0 us per output bit
+Level 4 (16 keys each): 17 ms, 0 us per output bit
+Level 5 (8 keys each): 24 ms, 0 us per output bit
+Level 6 (4 keys each): 48 ms, 0 us per output bit
+Level 7 (2 keys each): 71 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=61 constructionTimeMilliseconds=288 bitsPerElement=1.58336
+rc=0
+
+--- Benchmark -n 1000000 -q 1000000 -k 256 -e 0.01   (load 0.55 1.00 1.39)
+Generating input data (Seed: 1789306571793)
+Constructing
+Level 0 (256 keys each): 50 ms, 2 us per output bit
+Level 1 (128 keys each): 55 ms, 1 us per output bit
+Level 2 (64 keys each): 64 ms, 1 us per output bit
+Level 3 (32 keys each): 79 ms, 0 us per output bit
+Level 4 (16 keys each): 114 ms, 0 us per output bit
+Level 5 (8 keys each): 191 ms, 0 us per output bit
+Level 6 (4 keys each): 403 ms, 1 us per output bit
+Level 7 (2 keys each): 678 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=55 constructionTimeMilliseconds=1706 bitsPerElement=1.47846
+rc=0
+
+--- Benchmark -n 1000000 -q 1000000 -k 32768 -e 0.1   (load 0.55 1.00 1.39)
+Generating input data (Seed: 1789306575640)
+Constructing
+Level 0 (32768 keys each): 100 ms, 41 us per output bit
+Level 1 (16384 keys each): 82 ms, 27 us per output bit
+Level 2 (8192 keys each): 65 ms, 16 us per output bit
+Level 3 (4096 keys each): 44 ms, 8 us per output bit
+Level 4 (2048 keys each): 34 ms, 4 us per output bit
+Level 5 (1024 keys each): 24 ms, 2 us per output bit
+Level 6 (512 keys each): 19 ms, 1 us per output bit
+Level 7 (256 keys each): 16 ms, 0 us per output bit
+Level 8 (128 keys each): 13 ms, 0 us per output bit
+Level 9 (64 keys each): 13 ms, 0 us per output bit
+Level 10 (32 keys each): 14 ms, 0 us per output bit
+Level 11 (16 keys each): 17 ms, 0 us per output bit
+Level 12 (8 keys each): 24 ms, 0 us per output bit
+Level 13 (4 keys each): 45 ms, 0 us per output bit
+Level 14 (2 keys each): 72 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=106 constructionTimeMilliseconds=654 bitsPerElement=1.62013
+rc=0
+
+--- Benchmark -n 1000000 -q 1000000 -k 32768 -e 0.01   (load 0.67 1.02 1.40)
+Generating input data (Seed: 1789306578545)
+Constructing
+Level 0 (32768 keys each): 99 ms, 220 us per output bit
+Level 1 (16384 keys each): 85 ms, 122 us per output bit
+Level 2 (8192 keys each): 59 ms, 52 us per output bit
+Level 3 (4096 keys each): 49 ms, 26 us per output bit
+Level 4 (2048 keys each): 38 ms, 11 us per output bit
+Level 5 (1024 keys each): 42 ms, 7 us per output bit
+Level 6 (512 keys each): 44 ms, 4 us per output bit
+Level 7 (256 keys each): 45 ms, 2 us per output bit
+Level 8 (128 keys each): 58 ms, 1 us per output bit
+Level 9 (64 keys each): 62 ms, 1 us per output bit
+Level 10 (32 keys each): 75 ms, 0 us per output bit
+Level 11 (16 keys each): 107 ms, 0 us per output bit
+Level 12 (8 keys each): 189 ms, 0 us per output bit
+Level 13 (4 keys each): 381 ms, 1 us per output bit
+Level 14 (2 keys each): 674 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=105 constructionTimeMilliseconds=2083 bitsPerElement=1.49264
+rc=0
+
+--- Benchmark -n 1000000 -q 1000000 -k 256 -e 0.1 -o   (load 0.70 1.02 1.39)
+Generating input data (Seed: 1789306582881)
+Constructing
+Tree space per bucket: 393
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.1 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=80 constructionTimeMilliseconds=419 bitsPerElement=1.58
+rc=0
+
+--- Benchmark -n 1000000 -q 1000000 -k 32768 -e 0.01 -o   (load 0.70 1.02 1.39)
+Generating input data (Seed: 1789306585477)
+Constructing
+Tree space per bucket: 47736
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.01 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=130 constructionTimeMilliseconds=3229 bitsPerElement=1.49149
+rc=0
+
+--- Benchmark -n 10000000 -q 10000000 -k 256 -e 0.1   (load 0.72 1.02 1.39)
+Generating input data (Seed: 1789306590992)
+Constructing
+Level 0 (256 keys each): 164 ms, 0 us per output bit
+Level 1 (128 keys each): 141 ms, 0 us per output bit
+Level 2 (64 keys each): 142 ms, 0 us per output bit
+Level 3 (32 keys each): 147 ms, 0 us per output bit
+Level 4 (16 keys each): 179 ms, 0 us per output bit
+Level 5 (8 keys each): 243 ms, 0 us per output bit
+Level 6 (4 keys each): 471 ms, 0 us per output bit
+Level 7 (2 keys each): 713 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=256 N=10000000 numQueries=10000000 queryTimeMilliseconds=966 constructionTimeMilliseconds=2998 bitsPerElement=1.57874
+rc=0
+
+--- Benchmark -n 10000000 -q 10000000 -k 32768 -e 0.01   (load 0.68 1.00 1.38)
+Generating input data (Seed: 1789306598275)
+Constructing
+Level 0 (32768 keys each): 1209 ms, 264 us per output bit
+Level 1 (16384 keys each): 807 ms, 114 us per output bit
+Level 2 (8192 keys each): 619 ms, 54 us per output bit
+Level 3 (4096 keys each): 508 ms, 26 us per output bit
+Level 4 (2048 keys each): 446 ms, 13 us per output bit
+Level 5 (1024 keys each): 430 ms, 7 us per output bit
+Level 6 (512 keys each): 454 ms, 4 us per output bit
+Level 7 (256 keys each): 504 ms, 2 us per output bit
+Level 8 (128 keys each): 562 ms, 1 us per output bit
+Level 9 (64 keys each): 666 ms, 1 us per output bit
+Level 10 (32 keys each): 796 ms, 0 us per output bit
+Level 11 (16 keys each): 1114 ms, 0 us per output bit
+Level 12 (8 keys each): 1887 ms, 0 us per output bit
+Level 13 (4 keys each): 3987 ms, 1 us per output bit
+Level 14 (2 keys each): 6710 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=32768 N=10000000 numQueries=10000000 queryTimeMilliseconds=1559 constructionTimeMilliseconds=21401 bitsPerElement=1.45885
+rc=0
+
+--- Benchmark -n 10000000 -q 10000000 -k 256 -e 0.1 -o   (load 1.05 1.06 1.39)
+Generating input data (Seed: 1789306625415)
+Constructing
+Tree space per bucket: 393
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.1 k=256 N=10000000 numQueries=10000000 queryTimeMilliseconds=858 constructionTimeMilliseconds=4334 bitsPerElement=1.57537
+rc=0
+
+--- Benchmark -n 10000000 -q 10000000 -k 32768 -e 0.01 -o   (load 1.20 1.09 1.40)
+Generating input data (Seed: 1789306633771)
+Constructing
+Tree space per bucket: 47736
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.01 k=32768 N=10000000 numQueries=10000000 queryTimeMilliseconds=1455 constructionTimeMilliseconds=33527 bitsPerElement=1.45869
+rc=0
+
+load after 1.35 1.14 1.40

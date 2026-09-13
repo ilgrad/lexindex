@@ -665,40 +665,107 @@ with nothing persisted.
 ## The perfect hash against PtrHash and PHast
 
 `bench/mphf_vs` is its own crate, outside the workspace, so that neither competitor becomes a
-dependency of lexindex: `cd bench/mphf_vs && cargo run --release -- 10000000 3 <threads>`. One
-process builds every function over the **same 10 M distinct splitmix64 keys** in turn, three rounds
+dependency of lexindex: `cd bench/mphf_vs && cargo run --release -- <keys> <rounds> <threads>`. One
+process builds every function over the **same distinct splitmix64 keys** in turn, three rounds
 A-B-A-B (builds: the minimum), and looks every key up in **one shuffled probe order** (the minimum
-of three passes). `ph` 0.11.0 is the PHast authors' crate: `Function2` with `ShiftOnlyWrapped` is
-PHast+ with wrapping, the design this crate's `MPH2` follows; `Function` with `SeedOnly` is regular
-PHast. Both at 8-bit seeds and bucket size 4.5, as here. `ptr_hash` 2.1.1 is PtrHash's three
-parameter sets.
+of nine passes) — the keys copied into an array in that order, so that a query reads its own key
+from a sequential stream and the column is the function alone. Beside every minimum the harness
+prints its spread, the slowest repeat over the fastest, and a batch column: lexindex's
+`index_all` and `ptr_hash`'s `index_stream::<32, _>` over chunks of 4096 keys, the two forms that
+pull a later key's cache line in while the current one resolves (`ph` has no batch form). `ph`
+0.11.0 is the PHast authors' crate: `Function2` with `ShiftOnlyWrapped` is PHast+ with wrapping,
+the design this crate's `MPH2` follows; `Function` with `SeedOnly` is regular PHast. Both at 8-bit
+seeds and bucket size 4.5, as here. `ptr_hash` 2.1.1 is PtrHash's three parameter sets. Bits and
+lookups are the 1-thread process's; the 8-thread process builds the same functions to within
+0.02 bits.
 
-| function | bits/key | build, 1 thread | build, 8 threads | lookup |
-|---|---:|---:|---:|---:|
-| **lexindex `MPH2`** | **2.088** | **44.8 ns/key** | **7.6 ns/key** | **29 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.148 | 82.2 | 18.1 | 74 |
-| `ph` PHast (`SeedOnly`) | 1.922 | 640.1 | 102.4 | 70 |
-| `ptr_hash` compact | 2.143 | 186.7 | 48.0 | 46 |
-| `ptr_hash` balanced | 2.378 | 120.0 | 29.6 | 47 |
-| `ptr_hash` fast | 2.990 | 174.3 | 160.2 | 26 |
+**1 M keys** — 260 KB of table, inside L2:
 
-In this harness, at the size this crate chose, about 2.1 bits, `MPH2` builds 1.8× faster than the
-PHast+ it is modelled on and 4.2× faster than PtrHash's compact set, and its lookup is the fastest
-of the three — with the asymmetry below inside those ratios;
-regular PHast is the smallest function here, 1.92 bits, at 14× the build; PtrHash's fast set has
-the fastest lookup, 26 ns, at 3 bits. One asymmetry is in the numbers and should be read out of
-them: lexindex takes the keys as 64-bit hashes (its indexes hash the string once, before), while
-`ph` hashes each key with wyhash on build and on every lookup level and `ptr_hash` with one
-multiply — a few nanoseconds of the gap on the `ph` rows is that. PTHash and ConsensusRecSplit are
-C++ and are not in the harness.
+| function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
+|---|---:|---:|---:|---:|---:|
+| **lexindex `MPH2`** | **2.099** | **44.9 ns/key** | **9.9 ns/key** | 3.7 ns | 4.3 ns |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.162 | 74.8 | 18.7 | 9.5 | — |
+| `ph` PHast (`SeedOnly`) | 1.935 | 634.8 | 104.8 | 8.3 | — |
+| `ptr_hash` compact | 2.144 | 160.4 | 84.6 | 4.5 | 4.9 |
+| `ptr_hash` balanced | 2.378 | 99.5 | 50.4 | 4.6 | 4.9 |
+| `ptr_hash` fast | 2.990 | 81.1 | 74.1 | **2.0** | **2.6** |
 
-<sub>Measured 2026-09-10 on the tree that removes the seed-family decode from the lookup
-([`bench/results/mphf-vs-2026-09-10-arz-5ba9f36.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-10-arz-5ba9f36.txt)),
-Ryzen 7 5800HS, load 1.0–1.3 with an editor open; lexindex's rows match its idle measurements from
-`src/mphf.rs`'s sweep (46.3 / 27.5 ns). Against the 2026-09-09 file
-([`mphf-vs-2026-09-09-arz-1e24d81.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-09-arz-1e24d81.txt))
-the competitors' builds repeat within 2 % and their lookups read 1–7 % slower, while lexindex's
-lookup went from 33 to 29 ns: the change, not the machine.</sub>
+**10 M keys** — 2.6 MB, inside the 16 MB L3:
+
+| function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
+|---|---:|---:|---:|---:|---:|
+| **lexindex `MPH2`** | **2.088** | **43.3 ns/key** | **7.4 ns/key** | 5.8 ns | 5.3 ns |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.148 | 82.1 | 17.8 | 14.2 | — |
+| `ph` PHast (`SeedOnly`) | 1.922 | 641.6 | 96.6 | 12.6 | — |
+| `ptr_hash` compact | 2.143 | 174.7 | 46.3 | 6.6 | 5.3 |
+| `ptr_hash` balanced | 2.378 | 112.3 | 28.7 | 6.5 | 5.3 |
+| `ptr_hash` fast | 2.990 | 162.1 | 149.4 | **3.2** | **3.0** |
+
+**100 M keys** — 26 MB, every scalar lookup a DRAM miss:
+
+| function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
+|---|---:|---:|---:|---:|---:|
+| **lexindex `MPH2`** | **2.086** | **43.4 ns/key** | **7.2 ns/key** | 20.1 ns | 13.5 ns |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.146 | 111.9 | 20.5 | 52.4 | — |
+| `ph` PHast (`SeedOnly`) | 1.920 | 673.1 | 97.8 | 43.4 | — |
+| `ptr_hash` compact | 2.143 | 180.5 | 45.0 | 21.0 | 6.9 |
+| `ptr_hash` balanced | 2.378 | 113.8 | 26.5 | 21.7 | 7.0 |
+| `ptr_hash` fast | 2.990 | 308.4 | 289.3 | **11.9** | **5.5** |
+
+`MPH2` is the fastest build in every table, and the one whose cost does not move with the size:
+43–45 ns/key from 1 M to 100 M, where PHast+ goes 75 → 112 and PtrHash's fast set 81 → 308. It
+builds 1.7–2.6× faster than the PHast+ it is modelled on (1.9–2.8× on eight threads) and 3.6–4.2×
+faster than PtrHash's compact set (6.3–8.5×). Among the rows near 2.1 bits its scalar lookup is
+the fastest at every size: 18 % ahead of PtrHash compact at 1 M, 12 % at 10 M, level at 100 M,
+where both are one miss. Outright, PtrHash's fast set has the fastest lookup, at 3 bits, and
+regular PHast is the smallest function, 1.92 bits, at 14–16× the build. The batch column is the
+one place PtrHash leads: with the table in cache the two forms are level, but at 100 M
+`index_stream`, thirty-two keys ahead, hides the miss down to 6.9 ns, while `index_all`, sixteen
+ahead and the first level only, stops at 13.5 — a follow-up, not a mystery. One asymmetry is in
+the numbers and should be read out of them: lexindex takes the keys as 64-bit hashes (its indexes
+hash the string once, before), while `ph` hashes each key with wyhash on build and on every lookup
+level and `ptr_hash` with one multiply — a few nanoseconds of the gap on the `ph` rows is that.
+
+**ConsensusRecSplit** ([Lehmann, Sanders, Walzer, Ziegler 2025](https://arxiv.org/abs/2502.05613)),
+the space record at 1.444 + ε bits, is C++20 under the GPL, so it ran in its own process on the
+authors' harness at their commit `11deea6`: XorShift64 keys, one construction timed in
+milliseconds, the queries drawn with replacement into a plan array (as above, no key fetch inside
+the query), single-threaded, one run per configuration, on the same machine right after the tables
+above. `k` is the bucket size, ε the overhead over the bound, `-o` the query-optimised variant.
+
+| function | 1 M: bits/key | build | lookup | 10 M: bits/key | build | lookup |
+|---|---:|---:|---:|---:|---:|---:|
+| ConsensusRecSplit k = 256, ε = 0.1 | 1.583 | 288 ns/key | 61 ns | 1.579 | 300 ns/key | 97 ns |
+| … k = 256, ε = 0.1, `-o` | 1.580 | 419 | 80 | 1.575 | 433 | 86 |
+| … k = 256, ε = 0.01 | 1.478 | 1 706 | 55 | — | — | — |
+| … k = 32 768, ε = 0.1 | 1.620 | 654 | 106 | — | — | — |
+| … k = 32 768, ε = 0.01 | 1.493 | 2 083 | 105 | **1.459** | 2 140 | 156 |
+| … k = 32 768, ε = 0.01, `-o` | 1.491 | 3 229 | 130 | **1.459** | 3 353 | 146 |
+| **lexindex `MPH2`**, one thread | 2.099 | **44.9** | **3.7** | 2.088 | **43.3** | **5.8** |
+
+The trade is 0.5–0.6 bits a key — on a `CompactHashIndex` at 1.3 bytes a key, 5–6 % of the index —
+for 7–49× the build and 15–27× the lookup at 10 M. That is the right answer for an archive written
+once and read rarely; this crate's tables are read on every `id`, and 2.09 bits is where its build
+and lookup stay first.
+
+What this campaign does not have. A second CPU: one Ryzen 7 5800HS, a mobile part with 16 MB of
+L3, and the 100 M rows are where its memory system shows — a server part with a larger cache and
+more channels moves every row there. A 1 B row: 8 GB of keys, a probe array of the same size and
+each contender's construction memory do not fit an A-B-A-B in one process in 38 GB. Confidence
+intervals: in their place, every cell's minimum with the spread of its repeats, in the results
+file — builds repeat within 8 % (PHast+'s 8-thread build at 1 M, 20 %), lookups within 13 % (the
+2 ns cells within 24 %), batches within 5 %.
+
+<sub>Measured 2026-09-13 at `a5ad812`
+([`bench/results/mphf-vs-2026-09-13-arz-a5ad812.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-13-arz-a5ad812.txt),
+[`mphf-consensus-2026-09-13-arz-a5ad812.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-consensus-2026-09-13-arz-a5ad812.txt)),
+load 0.4–1.2 at the start of each part with an editor open. The lookups here are a fifth of the
+2026-09-10 file's
+([`mphf-vs-2026-09-10-arz-5ba9f36.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-10-arz-5ba9f36.txt))
+— 5.8 against 29 ns for `MPH2`, 6.6 against 46 for PtrHash compact — because that harness read
+each probe key through `keys[order[i]]`, a random 8-byte fetch from an 80 MB array per query, and
+so charged every row one DRAM miss that was the caller's, not the function's; the builds agree
+within 7 %. The old files stay as they were measured.</sub>
 
 ## A fingerprinted `PerfectHashIndex` on mostly-absent keys
 

@@ -23,6 +23,19 @@ All notable changes to this project are documented here. The format follows
   additive when asked: `Overlay`, the mmap loaders, the automata queries, the fingerprint and
   block knobs of `build`.
 
+### Changed
+
+- **`bench/mphf_vs` measures the function, not the caller's key array.** Its lookup pass read
+  each probe key through `keys[order[i]]` — a random 8-byte fetch from an 80 MB array per query,
+  one DRAM miss charged to every row alike — and the perfect hash's lookup was published as 29 ns
+  at 10 M; with the keys copied into an array in probe order it is 5.8 (PtrHash compact 6.6,
+  PHast+ 14.2), the builds unchanged. The harness now prints every minimum's spread and a batch
+  column (`index_all` against `index_stream`), and `docs/benchmarks.md` carries the re-measured
+  comparison at 1 M, 10 M and 100 M keys — where the 100 M batch is the one column PtrHash leads,
+  6.9 against 13.5 ns — with ConsensusRecSplit on the authors' harness in its own process:
+  1.46–1.58 bits a key at 7–49× the build and 15–27× the lookup. The 2026-09-10 results file stays
+  as measured.
+
 ## [3.0.0] — 2026-09-13
 
 ### Changed
