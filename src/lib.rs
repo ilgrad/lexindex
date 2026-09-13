@@ -67,6 +67,7 @@ mod mphf;
 #[doc(hidden)]
 pub use mphf::Mphf;
 mod dict_index;
+mod estimate;
 mod extsort;
 mod fsst;
 mod inspect;
@@ -76,6 +77,7 @@ mod string_index;
 mod subsequence;
 
 pub use dict_index::{DictIndex, DictProfile};
+pub use estimate::{Estimate, Kind, Needs, Plan, plan};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
 pub use string_index::StringIndex;

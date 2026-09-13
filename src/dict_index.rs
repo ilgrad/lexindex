@@ -49,9 +49,9 @@ const LEGACY_MAGIC: [(&[u8; 4], &str); 1] = [(
 /// The header byte that says an entry's shared-prefix and suffix lengths did not fit a nibble
 /// each, and are varints at the start of its suffix instead.
 const WIDE: u8 = 0xFF;
-const HEADER: usize = 56;
+pub(crate) const HEADER: usize = 56;
 const CHECKED: usize = 52; // header bytes the trailing check covers
-const DEFAULT_BLOCK: usize = 256;
+pub(crate) const DEFAULT_BLOCK: usize = 256;
 const MAX_BLOCK: usize = 1024;
 /// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
 /// up tracking it and decodes every entry instead. The dictionary reaches 12 at the largest block
@@ -168,7 +168,7 @@ fn sample_of(key: &[u8]) -> u64 {
 /// A divisor keeps every microblock of a block full but the last, which is what makes a restart's
 /// rank `j * micro` rather than a running sum. A block of 32 or fewer, or a prime one, is a single
 /// microblock, the layout of one level.
-fn micro_for(block: usize) -> usize {
+pub(crate) fn micro_for(block: usize) -> usize {
     (2..=32).rev().find(|d| block % d == 0).unwrap_or(block)
 }
 
@@ -181,7 +181,7 @@ thread_local! {
 
 /// Blocks one symbol table covers, for a given block size: [`SHARD_KEYS`] keys' worth, at least one
 /// block and never more than the header's `u16` can name. Read once, on the thread that builds.
-fn shard_blocks_for(block: usize) -> usize {
+pub(crate) fn shard_blocks_for(block: usize) -> usize {
     #[cfg(test)]
     {
         let over = SHARD_OVERRIDE.with(std::cell::Cell::get);
@@ -287,7 +287,7 @@ fn head_of<'a>(heads: &'a [u8], ends: &Offsets, b: usize) -> &'a [u8] {
 
 /// How many leading bytes `a` and `b` share.
 #[inline]
-fn lcp(a: &[u8], b: &[u8]) -> usize {
+pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
     let n = a.len().min(b.len());
     let mut i = 0;
     while i + 8 <= n {
@@ -2021,6 +2021,23 @@ impl DictIndex {
         })
         .expect("appending the sections cannot fail");
         out
+    }
+
+    /// The four sections a size model has to tell apart: the symbol tables, the stored block
+    /// heads, the packed per-block arrays, and the front-coded data. Their sum plus [`HEADER`] is
+    /// [`serialized_len`](Self::serialized_len).
+    pub(crate) fn section_lens(&self) -> [usize; 4] {
+        [
+            tables_len(&self.tables),
+            self.heads.len(),
+            self.blocks_len() * 8 + self.head_ends.len() + self.blocks.len() + self.micros.len(),
+            self.data.len(),
+        ]
+    }
+
+    /// Keys per microblock, which the block chooses: [`micro_for`].
+    pub(crate) fn micro(&self) -> usize {
+        self.micro
     }
 
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.

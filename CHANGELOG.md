@@ -108,6 +108,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`plan` prices every index before one is built.** Five indexes with five corpus-specific size
+  curves is a choice nobody should have to make from a README table, and the spread between them on
+  one corpus is larger than the spread of any one of them across corpora. `lexindex::plan(&keys,
+  needs)` sorts the keys once, measures what the formats are actually paid in — `n`, the mean key
+  length, the LCP structure, the trie-node count — and returns a `Plan` that ranks every index the
+  caller's `Needs` allow, with a `Display` that prints the ladder and says why each line is where it
+  is. One build of a 100 000-key sample supplies the three numbers no statistic gives: what the
+  symbol table squeezes a suffix into, the bytes an fst spends per trie node and the bits the
+  perfect hash spends per key. Scored against the built blob on 23 corpora of half a million to ten
+  million keys, `DictIndex` lands within **1.4 % median, 4.5 % at the 90th percentile and 5.1 % at
+  worst**, `StringIndex` within 3.5 / 9.6 / 30.3 — an fst merges equal suffixes, and how much it
+  merges is a property of the whole key set rather than of a sample of it. Below the sample size
+  nothing is modelled: the plan builds the candidates and reports what they weigh. Two candidates
+  inside 1.3× of each other are reported as a tie worth building both ways, and a corpus whose mean
+  suffix is under two bytes — ten million numbers, where the sampled ratio is 19 % off — is flagged
+  rather than quoted.
+
 - **A block size can be named instead of measured out.** `DictProfile::Fast`, `Balanced` and
   `Compact` — `block="fast" | "balanced" | "compact"` from Python, in the same argument as the
   number, so there is no second setting to contradict the first — stand for 32, 256 and 1024 keys a
