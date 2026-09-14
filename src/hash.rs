@@ -333,17 +333,13 @@ mod quality {
     /// a shared prefix, a shared suffix, a dense numeric tail, a small alphabet, multi-byte
     /// characters, and the pre-sorted integer sequence a synthetic benchmark generates.
     fn families(n: usize) -> Vec<(&'static str, Vec<Vec<u8>>)> {
-        let words = dictionary().unwrap_or_default();
-        let word = |i: usize| -> &str {
-            if words.is_empty() {
-                "lexindex"
-            } else {
-                words[i % words.len()].as_str()
-            }
-        };
         let mut rng = Rng(0x5eed_0007);
         let mut out: Vec<(&'static str, Vec<Vec<u8>>)> = Vec::new();
-        if !words.is_empty() {
+        // Every family spelled from words is built here or not at all: without a dictionary there
+        // is nothing to spell with, and a stand-in word makes the family one key repeated `n`
+        // times, which the collision count then reports as a broken hash.
+        if let Some(words) = dictionary() {
+            let word = |i: usize| words[i % words.len()].as_str();
             out.push((
                 "words",
                 words
@@ -368,6 +364,15 @@ mod quality {
                 "suffixed",
                 (0..n)
                     .map(|i| format!("{}@mail.example.com", word(i)).into_bytes())
+                    .collect(),
+            ));
+            out.push((
+                "paths",
+                (0..n)
+                    .map(|i| {
+                        format!("/usr/lib/{}/{}/{}.so", word(i), word(i * 3), word(i * 5))
+                            .into_bytes()
+                    })
                     .collect(),
             ));
         }
@@ -416,14 +421,16 @@ mod quality {
                 .map(|_| (0..40).map(|_| b"ACGT"[rng.below(4)]).collect())
                 .collect(),
         ));
-        out.push((
-            "paths",
-            (0..n)
-                .map(|i| {
-                    format!("/usr/lib/{}/{}/{}.so", word(i), word(i * 3), word(i * 5)).into_bytes()
-                })
-                .collect(),
-        ));
+        for (name, keys) in &out {
+            let mut distinct: Vec<&[u8]> = keys.iter().map(Vec::as_slice).collect();
+            distinct.sort_unstable();
+            distinct.dedup();
+            assert_eq!(
+                distinct.len(),
+                keys.len(),
+                "{name} repeats a key: its collisions would measure this generator, not the hash"
+            );
+        }
         out
     }
 

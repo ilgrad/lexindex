@@ -196,6 +196,12 @@ All notable changes to this project are documented here. The format follows
   collapsed in groups of 128 first, so a merge opens at most 128 readers whatever the corpus was —
   one extra pass over the spilled bytes per factor of 128, and the common case, a build that spills
   fewer runs than that, does no extra work at all.
+- **The hash battery reported 99 999 collisions in 100 000 keys on a machine without a
+  dictionary** — its first scheduled run, on a CI runner. The hash was not at fault: the `paths`
+  family was spelled from dictionary words outside the check that there is a dictionary, and the
+  stand-in word made it one key repeated a hundred thousand times. The families that need words
+  are built only where the words exist now, and every family is checked for a repeated key before
+  its collisions are counted. Every number the battery prints is unchanged.
 
 ## [3.0.0] — 2026-09-13
 
