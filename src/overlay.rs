@@ -1431,7 +1431,8 @@ mod tests {
         }
         let keys = ["apple", "banana", "cherry"];
         check(fruit(StringIndex::build(keys).unwrap()), &path);
-        #[cfg(feature = "mph")]
+        // Not under Miri: it cannot map a file, and this base streams its arena through one.
+        #[cfg(all(feature = "mph", not(miri)))]
         check(fruit(crate::PerfectHashIndex::build(keys).unwrap()), &path);
         check(
             fruit(VecBase::rebuild(keys.map(str::to_owned).to_vec()).unwrap()),
@@ -2047,7 +2048,8 @@ mod tests {
         assert!(ov.id("d").is_some() && ov.id("b").is_none());
         let (ov, _) = ov.compact_with_remap().unwrap();
         assert!(ov.base().has_fingerprints());
-        #[cfg(feature = "mmap")]
+        // Not under Miri, which cannot map the file the perfect hash streams its arena into.
+        #[cfg(all(feature = "mmap", not(miri)))]
         {
             let dir = std::env::temp_dir().join(format!("lexindex-ovl-fp-{}", std::process::id()));
             std::fs::create_dir_all(&dir).unwrap();

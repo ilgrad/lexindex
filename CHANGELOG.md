@@ -207,6 +207,10 @@ All notable changes to this project are documented here. The format follows
   stand-in word made it one key repeated a hundred thousand times. The families that need words
   are built only where the words exist now, and every family is checked for a repeated key before
   its collisions are counted. Every number the battery prints is unchanged.
+- **The weekly 32-bit Miri job stopped at the first overlay test that streams a perfect hash into
+  a file.** The arena is written through a file mapping, which Miri cannot interpret, so that test
+  and every overlay test after it went unchecked on a 32-bit target. The mapping half of the two
+  tests that reach it is compiled out under Miri; the rest of both still runs there.
 
 ## [3.0.0] — 2026-09-13
 
