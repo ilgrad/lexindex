@@ -1,0 +1,111 @@
+name: Fuzz
+
+# The blob parsers are the only place untrusted bytes reach, so every libFuzzer target runs daily:
+# four processes for thirty minutes, two CPU-hours a target where the weekly slot in `sanitize.yml`
+# this replaces gave ten CPU-minutes. OSS-Fuzz takes projects with a wide user base, which this one
+# does not have yet, so the campaign runs on the repository's own runners. Never a gate on a push.
+
+on:
+  schedule:
+    - cron: "41 2 * * *" # daily, 02:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A manual run started during the scheduled one waits for it: both would save a corpus, and the next
+# restore keeps only the newer of the two.
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: libFuzzer (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    # Thirty minutes of fuzzing plus the build and the minimisation; a job past an hour has hung.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - parse_compact
+          - parse_closed
+          - parse_dict
+          - parse_perfect
+          - parse_overlay
+          - parse_overlay_untrusted
+          - parse_mphf
+          - parse_string
+          # Not a blob parser: `inspect` reads a header of any of the formats above and was found
+          # non-total on a crafted overlay, so the target holds it to a return value on any bytes.
+          - parse_inspect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ". -> target\nfuzz -> fuzz/target"
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      # The corpus lives across runs: what one day reached, the next starts from. A key that no run
+      # shares makes every run save; the prefix restores the newest one saved, which on the first
+      # run is the corpus the weekly job left behind.
+      - name: restore the corpus the last run left
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      # The blobs `tests/golden.rs` checks are the seed corpus: reaching a valid header by chance is
+      # hopeless (magic, two checksums and a length that must agree), so without seeds the fuzzer
+      # only ever exercises the rejection paths.
+      #
+      # LTO must stay off or the run is theatre: it re-codegens the lexindex crate from bitcode and
+      # drops the coverage instrumentation, leaving libFuzzer blind to everything outside the target
+      # crate. The manifest says so too, but a `config.toml` outranks a manifest profile and only an
+      # env override outranks both.
+      # The seeds first, with no mutation at all. A target that dies on its own corpus is a bug in
+      # the target, and it reads identically to a real finding in the run below -- `parse_string`
+      # shipped that way once, aborting on a committed blob because libfuzzer-sys's panic hook fires
+      # before the `catch_unwind` the loader is built around. This step names it.
+      - name: ${{ matrix.target }} accepts its own seed corpus
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            fuzz/corpus/${{ matrix.target }} tests/data -- -runs=0
+      # `--jobs 4` is libFuzzer's fork mode: a process for each of the runner's four cores, each
+      # merging what it finds back into the first corpus directory. `tests/data` stays read-only.
+      - name: fuzz ${{ matrix.target }} for 30 minutes on four processes
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+        run: |
+          cargo +nightly fuzz run --jobs 4 ${{ matrix.target }} \
+            fuzz/corpus/${{ matrix.target }} tests/data \
+            -- -max_total_time=1800 -print_final_stats=1
+      # Daily runs only ever add files. `cmin` keeps the smallest set that reaches the same coverage
+      # and swaps it in only when its merge succeeded; a run that found a crash never gets here.
+      - name: minimise the corpus
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+        run: cargo +nightly fuzz cmin ${{ matrix.target }} fuzz/corpus/${{ matrix.target }}
+      - name: save the corpus for the next run
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+      - name: upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

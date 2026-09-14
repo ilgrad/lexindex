@@ -1,5 +1,5 @@
 # libFuzzer targets for lexindex's *safe* blob parsers. Not published, not a workspace member of the
-# crate above it, and never built by the normal gate — `sanitize.yml` runs it on a schedule.
+# crate above it, and never built by the normal gate — `fuzz.yml` runs it daily.
 [package]
 name = "lexindex-fuzz"
 version = "0.0.0"

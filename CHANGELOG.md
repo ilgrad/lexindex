@@ -185,6 +185,11 @@ All notable changes to this project are documented here. The format follows
   6.9 against 13.5 ns — with ConsensusRecSplit on the authors' harness in its own process:
   1.46–1.58 bits a key at 7–49× the build and 15–27× the lookup. The 2026-09-10 results file stays
   as measured.
+- **The fuzzers run daily, on four processes for thirty minutes a target.** They had ten minutes a
+  week on one core inside `sanitize.yml`; `fuzz.yml` gives each target two CPU-hours a day,
+  starting from the corpus the last run left and minimising it with `cargo fuzz cmin` before it is
+  kept, so what the cache carries is the smallest set that reaches the same coverage rather than
+  every file a month of runs ever wrote.
 
 ### Fixed
 

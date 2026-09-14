@@ -56,7 +56,7 @@ jobs:
       # regression tests for the remap bound are only meaningful in both.
       - name: test (release)
         run: cargo test --release
-      # The `fuzzing` feature is off by default and `sanitize.yml` only runs weekly, so the test
+      # The `fuzzing` feature is off by default and `fuzz.yml` only runs daily, so the test
       # that keeps the fuzz seed corpus current has no other job that builds it. It went stale for
       # exactly that reason once already: 1.0 changed the blob formats and every seed became a
       # blob refused on its magic, which the fuzzers would have reported as a clean run.

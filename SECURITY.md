@@ -93,7 +93,7 @@ pointer and twenty-two `unsafe` blocks under them, each reading or writing memor
 vouched for in the function's `# Safety` line — the header carries it verbatim — after a null
 check on every function that has a status to report one in. `unsafe_op_in_unsafe_fn` is denied,
 so every one names its own justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
-target, and libFuzzer over the six parsers a target can hold to a return value: `BCH7`, `BMP7`,
+target, and libFuzzer daily over the six parsers a target can hold to a return value: `BCH7`, `BMP7`,
 `BCL1`, `BDX2` — loaded and then queried, since its block data is bounds-checked on the read
 rather than at load — `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run
 starting from the
