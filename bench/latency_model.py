@@ -54,30 +54,61 @@ ROUNDS = 3
 
 
 class Probes:
-    """One draw a corpus, shared by every structure, so the lanes answer the same questions.
+    """One draw a lane a corpus, shared by every structure, so the lanes answer the same questions.
 
     The mixed set is `bench/_probes`' -- half members, half strangers, shuffled -- which is what
-    the size model's `lookup_ns` was measured over and what keeps the two comparable. The halves
-    are then separated, because a workload that is mostly hits and one that is mostly strangers are
-    different questions and some structures answer them at different prices.
+    the size model's `lookup_ns` was measured over and what keeps the two comparable. Every other
+    lane draws a set of its own. Lanes cut from one set time each other's cache: while the hits and
+    the misses were its halves and both batches its chunks, each of them ran over the structure
+    memory the lane before had just pulled in, and `ClosedHashIndex` at ten million keys read 266 ns
+    mixed, 121 on hits and 55 batched -- most of that spread was the cache and not the op.
     """
 
     def __init__(self, keys: list[str]) -> None:
         self.mixed, _ = _probes.probe_set(keys, OPS_PROBES)
         member = set(keys)
-        self.hits = [p for p in self.mixed if p in member]
-        self.misses = [p for p in self.mixed if p not in member]
+        # Hits and misses from two draws as well: a stranger is its member with the last character
+        # swapped, so in an ordered index the two walk the same block.
+        hits, _ = _probes.probe_set(keys, OPS_PROBES, 0x5EED + 1)
+        misses, _ = _probes.probe_set(keys, OPS_PROBES, 0x5EED + 2)
+        self.hits = [p for p in hits if p in member]
+        self.misses = [p for p in misses if p not in member]
+        self.batches = {
+            size: _probes.probe_set(keys, OPS_PROBES, 0x5EED + 3 + i)[0]
+            for i, size in enumerate(BATCHES)
+        }
         rng = random.Random(0x5EED)
         self.ids = [rng.randrange(len(keys)) for _ in range(OPS_PROBES)]
         self.prefixes = [self.hits[rng.randrange(len(self.hits))][:3] for _ in range(OPS_PROBES)]
         # The `common_prefix` protocol of `docs/benchmarks.md`: a real key with one to three more
         # characters on it, except every fourth, which is characters alone and matches nothing.
+        # Two sets, since `longest_prefix` over the same queries would walk the blocks
+        # `common_prefix` had just read.
         alphabet = sorted({k[-1] for k in keys})
-        self.queries = []
-        for i in range(CP_PROBES):
-            base = keys[rng.randrange(len(keys))]
-            extra = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 3)))
-            self.queries.append(extra if i % 4 == 3 else base + extra)
+
+        def queries() -> list[str]:
+            out = []
+            for i in range(CP_PROBES):
+                base = keys[rng.randrange(len(keys))]
+                extra = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 3)))
+                out.append(extra if i % 4 == 3 else base + extra)
+            return out
+
+        self.queries = queries()
+        self.longest = queries()
+
+
+# The order a round times its lanes in: every structure's pass at one op, then the next op.
+OPS = (
+    "mixed",
+    "hit",
+    "miss",
+    *(f"batch{size}" for size in BATCHES),
+    "key",
+    "prefix_count",
+    "common_prefix",
+    "longest_prefix",
+)
 
 
 def _walk(fn, xs) -> None:
@@ -85,44 +116,58 @@ def _walk(fn, xs) -> None:
         fn(x)
 
 
-def _lanes(obj, probe: Probes) -> list[tuple[str, int, object]]:
-    """`(op, calls, pass)` for every op this structure answers, each pass walking a set once."""
-    out: list[tuple[str, int, object]] = []
+def _touch(xs: list) -> None:
+    """Read every probe once, so that a pass is not timed fetching its own inputs."""
+    for x in xs:
+        if isinstance(x, list):
+            _touch(x)
+        else:
+            hash(x)
+
+
+def _lanes(obj, probe: Probes) -> list[tuple[str, int, list, object]]:
+    """`(op, calls, probes, fn)` for each op the structure answers: a pass calls `fn` per probe."""
+    out: list[tuple[str, int, list, object]] = []
     ident = getattr(obj, "id", None)
     if ident is not None:
         for op, xs in (("mixed", probe.mixed), ("hit", probe.hits), ("miss", probe.misses)):
-            out.append((op, len(xs), lambda f=ident, xs=xs: _walk(f, xs)))
+            out.append((op, len(xs), xs, ident))
     ids_of = getattr(obj, "ids_of", None)
     if ids_of is not None:
-        for size in BATCHES:
-            chunks = [probe.mixed[i : i + size] for i in range(0, len(probe.mixed), size)]
-            out.append((f"batch{size}", len(probe.mixed), lambda f=ids_of, cs=chunks: _walk(f, cs)))
-    for op, attr, xs in (
-        ("key", "key", probe.ids),
-        ("prefix_count", "prefix_count", probe.prefixes),
-        ("common_prefix", "common_prefix", probe.queries),
-        ("longest_prefix", "longest_prefix", probe.queries),
+        for size, xs in probe.batches.items():
+            chunks = [xs[i : i + size] for i in range(0, len(xs), size)]
+            out.append((f"batch{size}", len(xs), chunks, ids_of))
+    for op, xs in (
+        ("key", probe.ids),
+        ("prefix_count", probe.prefixes),
+        ("common_prefix", probe.queries),
+        ("longest_prefix", probe.longest),
     ):
-        fn = getattr(obj, attr, None)
+        fn = getattr(obj, op, None)
         if fn is not None:
-            out.append((op, len(xs), lambda f=fn, xs=xs: _walk(f, xs)))
+            out.append((op, len(xs), xs, fn))
     return out
 
 
-def _time(lanes: list[tuple[tuple[str, str], int, object]]) -> dict[tuple[str, str], float]:
-    """One pass a lane a round, every lane alternating with every other, the minimum kept.
+def _time(
+    lanes: list[tuple[tuple[str, str], int, list, object]],
+) -> dict[tuple[str, str], float]:
+    """One pass a lane a round, the minimum of the rounds kept.
 
-    Alternating across ops as well as across structures: a lane run to completion is timed with the
-    caches still warm from its own previous pass, and the ops of one structure share those caches
-    more than any two structures do.
+    In op order rather than structure order, so no lane follows another of its own structure: the
+    pass before it always read a different index, and a structure is as cold for its `hit` pass as
+    for its `mixed` one. Timed in structure order, the ops of one index shared its warm cache down
+    the row.
     """
+    lanes = sorted(lanes, key=lambda lane: OPS.index(lane[0][1]))
     best: dict[tuple[str, str], float] = {}
-    for _, _, walk in lanes:
-        walk()
+    for _, _, xs, fn in lanes:
+        _walk(fn, xs)
     for _ in range(ROUNDS):
-        for key, calls, walk in lanes:
+        for key, calls, xs, fn in lanes:
+            _touch(xs)
             start = time.perf_counter_ns()
-            walk()
+            _walk(fn, xs)
             ns = (time.perf_counter_ns() - start) / calls
             best[key] = min(best.get(key, float("inf")), ns)
     return best
@@ -154,7 +199,7 @@ def _cell(path: Path, corpus: str, size: int) -> list[dict]:
         obj = build(keys)
         build_ms = (time.perf_counter() - start) * 1e3
         alive.append(obj)
-        lanes.extend(((name, op), calls, walk) for op, calls, walk in _lanes(obj, probe))
+        lanes.extend(((name, op), calls, xs, fn) for op, calls, xs, fn in _lanes(obj, probe))
         cells.append(
             {
                 "corpus": corpus,
