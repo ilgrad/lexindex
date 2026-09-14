@@ -32,7 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: stable
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # `uv.lock` is gitignored, so the cache's dependency glob matches nothing and the
           # post-step would fail on it; off is exactly the v5 behaviour this job was written for.
