@@ -3,10 +3,13 @@
 //! single pass with no warm-up, which is what `benchmark.cpp` there does. Three more passes follow,
 //! and their mean and minimum are printed beside the cold number. Sizes are the serialised blob.
 //! `bench/frontier/run.sh` runs one index kind a process.
-use std::io::Read;
+use std::io::BufRead;
 use std::time::Instant;
 
 use lexindex::{DictIndex, StringIndex};
+
+/// The longest key libstdc++'s `std::string` keeps inside the object rather than behind a pointer.
+const SSO: usize = 15;
 
 fn xorshift(state: &mut u64) -> u64 {
     let mut x = *state;
@@ -63,8 +66,31 @@ fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
     let build_ms = t0.elapsed().as_secs_f64() * 1e3;
     let size_mib = index.bytes() as f64 / (1024.0 * 1024.0);
 
+    // The queries laid out as `benchmark.cpp`'s shuffled copy of the keys lays them out. A copied
+    // `std::string` holds a key of up to 15 bytes inside itself, so the shuffle carries those bytes
+    // into probe order, and allocates a longer key's buffer in sorted order, where the shuffle leaves
+    // it. Borrowing every query from `keys` charged each lookup here a fetch of its key from a random
+    // place in the heap, which the C++ rows pay only past 15 bytes.
     let order = shuffled(keys.len(), 2);
-    let queries: Vec<&str> = order.iter().map(|&i| keys[i as usize].as_str()).collect();
+    let long: Vec<Option<String>> = keys
+        .iter()
+        .map(|key| (key.len() > SSO).then(|| key.clone()))
+        .collect();
+    let mut inline = vec![[0u8; SSO]; keys.len()];
+    for (slot, &i) in inline.iter_mut().zip(&order) {
+        let key = keys[i as usize].as_bytes();
+        if key.len() <= SSO {
+            slot[..key.len()].copy_from_slice(key);
+        }
+    }
+    let queries: Vec<&str> = order
+        .iter()
+        .zip(&inline)
+        .map(|(&i, slot)| match &long[i as usize] {
+            Some(copy) => copy.as_str(),
+            None => std::str::from_utf8(&slot[..keys[i as usize].len()]).expect("a key is UTF-8"),
+        })
+        .collect();
 
     let mut sink = 0u64;
     let t = Instant::now();
@@ -82,10 +108,16 @@ fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
     }
     let mean = passes.iter().sum::<f64>() / passes.len() as f64;
     let min = passes.iter().cloned().fold(f64::INFINITY, f64::min);
+    // Four passes over keys whose ids are the ranks 0..n: any other sum is a wrong answer.
+    let n = keys.len() as u64;
+    assert_eq!(
+        sink,
+        (n * n.saturating_sub(1) / 2).wrapping_mul(4),
+        "{label} answered a wrong id"
+    );
     println!(
-        "{label}: build {build_ms:.0} ms, size {size_mib:.3} MiB ({:.3} B/key), latency cold {cold:.1} ns, then mean {mean:.1} / min {min:.1} ns (sink {})",
+        "{label}: build {build_ms:.0} ms, size {size_mib:.3} MiB ({:.3} B/key), latency cold {cold:.1} ns, then mean {mean:.1} / min {min:.1} ns",
         index.bytes() as f64 / keys.len() as f64,
-        sink & 1
     );
     println!("{build_ms:.3},{size_mib:.6},{cold:.3}");
 }
@@ -96,15 +128,13 @@ fn main() {
         eprintln!("usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|string>...");
         std::process::exit(2);
     }
-    let mut text = String::new();
-    std::fs::File::open(&args[1])
-        .expect("open")
-        .read_to_string(&mut text)
-        .expect("read");
-    let mut keys: Vec<String> = text
+    // A line at a time, as `std::getline` reads it: the whole file held beside the keys would count
+    // into this process's peak memory and no C++ row's.
+    let file = std::fs::File::open(&args[1]).expect("open");
+    let mut keys: Vec<String> = std::io::BufReader::new(file)
         .lines()
-        .filter(|l| !l.is_empty())
-        .map(str::to_owned)
+        .map(|line| line.expect("read"))
+        .filter(|line| !line.is_empty())
         .collect();
     keys.sort_unstable();
     keys.dedup();
