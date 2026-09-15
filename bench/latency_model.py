@@ -58,31 +58,50 @@ BATCHES = (16, 1_024)
 ROUNDS = 8
 
 
+def _fresh(xs: list[str]) -> list[str]:
+    """`xs` as new strings, allocated in the order a pass asks them."""
+    return [x.encode().decode() for x in xs]
+
+
 class Probes:
     """One draw a lane a corpus, shared by every structure, so the lanes answer the same questions.
 
-    The mixed set is `bench/_probes`' -- half members, half strangers, shuffled -- which is what
-    the size model's `lookup_ns` was measured over and what keeps the two comparable. Every other
-    lane draws a set of its own. Lanes cut from one set time each other's cache: while the hits and
-    the misses were its halves and both batches its chunks, each of them ran over the structure
-    memory the lane before had just pulled in, and `ClosedHashIndex` at ten million keys read 266 ns
-    mixed, 121 on hits and 55 batched -- most of that spread was the cache and not the op.
+    Every lane draws a set of its own. Lanes cut from one set time each other's cache: while the
+    hits and the misses were halves of the mixed set and both batches its chunks, each of them ran
+    over the structure memory the lane before had just pulled in, and `ClosedHashIndex` at ten
+    million keys read 266 ns mixed, 121 on hits and 55 batched -- most of that spread was the cache
+    and not the op.
+
+    No lane holds a member together with its stranger. `bench/_probes` spells a stranger from a
+    member by swapping its last character, so an ordered index walks the pair through one block and
+    finds it cached the second time: over 1 000 000 titles `StringIndex` read 572-575 ns on such
+    pairs and 637-638 on members and strangers from two draws, `DictIndex 32` 426-433 and 452-455,
+    and a hash index about 2 % apart. So the mixed lanes take their two halves from two draws.
+
+    Every probe is a new string, allocated in the order it is asked, and every lane holds as many.
+    A member drawn from `keys` is the corpus's own string, scattered through a heap as large as the
+    corpus, and a pass paid for fetching it: over 1 000 000 titles `ClosedHashIndex` read 82-84 ns
+    on hits drawn from it and 63-64 on hits copied, and `StringIndex` 635-648 and 596-608.
     """
 
     def __init__(self, keys: list[str]) -> None:
-        self.mixed, _ = _probes.probe_set(keys, OPS_PROBES)
         member = set(keys)
-        # Hits and misses from two draws as well: a stranger is its member with the last character
-        # swapped, so in an ordered index the two walk the same block.
-        hits, _ = _probes.probe_set(keys, OPS_PROBES, 0x5EED + 1)
-        misses, _ = _probes.probe_set(keys, OPS_PROBES, 0x5EED + 2)
-        self.hits = [p for p in hits if p in member]
-        self.misses = [p for p in misses if p not in member]
-        self.batches = {
-            size: _probes.probe_set(keys, OPS_PROBES, 0x5EED + 3 + i)[0]
-            for i, size in enumerate(BATCHES)
-        }
         rng = random.Random(0x5EED)
+
+        def draw(seed: int, members: bool) -> list[str]:
+            probes, _ = _probes.probe_set(keys, 2 * OPS_PROBES, seed)
+            return [p for p in probes if (p in member) == members][:OPS_PROBES]
+
+        def mixed(seed: int) -> list[str]:
+            half = OPS_PROBES // 2
+            out = draw(seed, True)[:half] + draw(seed + 1, False)[:half]
+            rng.shuffle(out)
+            return out
+
+        self.mixed = _fresh(mixed(0x5EED + 10))
+        self.hits = _fresh(draw(0x5EED + 1, True))
+        self.misses = _fresh(draw(0x5EED + 2, False))
+        self.batches = {size: _fresh(mixed(0x5EED + 12 + 2 * i)) for i, size in enumerate(BATCHES)}
         self.ids = [rng.randrange(len(keys)) for _ in range(OPS_PROBES)]
         self.prefixes = [self.hits[rng.randrange(len(self.hits))][:3] for _ in range(OPS_PROBES)]
         # The `common_prefix` protocol of `docs/benchmarks.md`: a real key with one to three more
