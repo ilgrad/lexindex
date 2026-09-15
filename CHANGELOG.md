@@ -148,6 +148,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`Mphf::index_all` answers the keys the first level bumps in staged prefetches, and the single
+  lookup ranks and selects off derived counts.** The batch used to pull in only the first level's
+  seed, sixteen keys ahead, so each of the ~3 % of keys that level bumps made four more dependent
+  misses in turn — its next level's seed, the rank words, the select sample, the high words — and
+  at 100 M keys the batch stopped at 13.5 ns a key against 6.9 for PtrHash's `index_stream`. The
+  keys now go through the first level in blocks of 1024 with each seed pulled in 64 keys ahead,
+  and a block's bumped keys are answered after it in five stages that run eight keys apart, each
+  stage pulling in what the next one reads; below 2^18 first-level seeds (about 1.2 M keys) the
+  level sits in L2 and the batch is the single lookup in a loop. The single lookup gains too: the
+  remap's rank reads a 16-bit count per word instead of counting its block's words in a loop, and
+  the Elias–Fano select compares a window of counts at once and finds the bit inside its word
+  without a loop, where the old scan's mispredicted exits were most of a bumped key's cost. Both
+  count directories are derived on build and on load and never written — **the blob format is
+  unchanged** — and cost 0.023 bits a key in memory. In `bench/mphf_vs` at 1 M / 10 M / 100 M keys:
+  the batch 4.3 / 5.3 / 13.5 → **3.2 / 4.2 / 5.8 ns**, ahead of PtrHash compact and balanced
+  (4.6 / 4.9 / 6.3) at every size and never above the single lookup; the single lookup 3.7 / 5.8 /
+  20.1 → **3.2 / 4.9 / 15.8 ns** (compact 4.2 / 6.0 / 17.6). PtrHash's fast set, at 2.99 bits,
+  still leads both lookup columns outright. `docs/benchmarks.md` carries the re-measured tables.
 - **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
   2.79 against 3.23 bytes a key on an English word list — a spread wider than the gap between some
   whole indexes — and the ranking hid it by pricing the default, 256, and nothing else. `Fast`
