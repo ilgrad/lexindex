@@ -1,0 +1,17 @@
+# lexindex under the C² benchmark's protocol, for bench/frontier/run.sh. Its own crate, outside the
+# workspace like bench/mphf_vs, and built as the crate ships -- no `target-cpu=native`:
+# `cargo build --release --manifest-path bench/frontier/frontier_lex/Cargo.toml`.
+[package]
+name = "frontier_lex"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+lexindex = { path = "../../.." }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

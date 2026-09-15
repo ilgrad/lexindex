@@ -24,3 +24,5 @@ __pycache__/
 
 # The MPHF comparison harness is its own crate (bench/mphf_vs), outside the workspace.
 bench/mphf_vs/target/
+# So is the frontier harness's lexindex side (bench/frontier/frontier_lex).
+bench/frontier/frontier_lex/target/
