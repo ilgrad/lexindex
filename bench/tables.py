@@ -9,20 +9,23 @@ A generated table lives between two markers and is not written by hand:
 
 `--check` re-renders every marked block and reports the ones that differ; CI runs it, so a cell
 edited by hand fails the build. `--write` rewrites them in place. The check also reads the caption
-that follows a block: a table may only be captioned with the artifact it was rendered from, which
-is the bug this script exists to make unrepeatable -- the 2.1.0 and 3.0.0 tables cited one commit
-while some of their cells came from another.
+that follows a block, up to the next block: a table may only be captioned with the artifact it was
+rendered from, which is the bug this script exists to make unrepeatable -- the 2.1.0 and 3.0.0
+tables cited one commit while some of their cells came from another.
 
     uv run --no-sync python bench/tables.py --check
     uv run --no-sync python bench/tables.py --write
 
-Numbers come from the artifact; three things cannot, and are declared here rather than inferred:
-the display label of a row, the wording of a membership cell that is neither yes nor no, and
-whether a library answers common-prefix queries -- a capability `bench/compare.py` does not
-measure.
+Two kinds of table. A `compare` table is `bench/compare.py`'s: its numbers come from the artifact;
+three things cannot, and are declared here rather than inferred: the display label of a row, the
+wording of a membership cell that is neither yes nor no, and whether a library answers
+common-prefix queries -- a capability `bench/compare.py` does not measure. A `frontier` table is a
+research-frontier campaign's overview, or with `corpus=` one corpus's table, rendered by
+`bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed.
 """
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -35,7 +38,12 @@ OPEN = re.compile(r"^<!-- table: (?P<kind>[\w-]+) (?P<artifact>\S+)(?P<opts>[^>]
 CLOSE = "<!-- /table -->"
 # How far past a block the caption is looked for; a citation further away than this is prose.
 CAPTION_LINES = 20
-ARTIFACT_LINK = re.compile(r"bench/results/(compare-[\w.-]+\.json)")
+ARTIFACT_LINK = re.compile(r"bench/results/((?:compare|frontier)-[\w.-]+\.json)")
+
+# Loaded by path: its module name, `tables`, is this file's own.
+_spec = importlib.util.spec_from_file_location("frontier_tables", ROOT / "bench/frontier/tables.py")
+FRONTIER = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(FRONTIER)
 
 # The artifact's `library` string -> how the published tables spell it. A row the map does not
 # know is an error: a new competitor has to be named here before it can be published.
@@ -93,8 +101,12 @@ def _cell(name: str, caps: dict, library: str) -> str:
     return YES if COLUMNS[name][1](caps, library) else NO
 
 
-def render_compare(artifact: dict, columns: list[str]) -> str:
+def render_compare(artifact: dict, opts: dict[str, str]) -> str:
     """The size-and-capability table, sorted by bytes a key, with the builtin `dict` last."""
+    columns = opts["columns"].split(",") if opts.get("columns") else []
+    unknown = [c for c in columns if c not in COLUMNS]
+    if unknown:
+        raise ValueError(f"{unknown} are not columns")
     rows = sorted(artifact["cells"], key=lambda c: c["bytes_per_key"])
     unknown = [r["library"] for r in rows if r["library"] not in LABELS]
     if unknown:
@@ -129,7 +141,18 @@ def render_compare(artifact: dict, columns: list[str]) -> str:
     return "\n".join(lines)
 
 
-RENDERERS = {"compare": render_compare}
+def render_frontier(artifact: dict, opts: dict[str, str]) -> str:
+    """A frontier campaign's overview, or with `corpus=` that corpus's table."""
+    corpora = FRONTIER.corpora_of(artifact)
+    if "corpus" not in opts:
+        return FRONTIER.overview(corpora)
+    for corpus in corpora:
+        if corpus["corpus"] == opts["corpus"]:
+            return FRONTIER.corpus_table(corpus)
+    raise ValueError(f"the artifact has no corpus `{opts['corpus']}`")
+
+
+RENDERERS = {"compare": render_compare, "frontier": render_frontier}
 
 
 def blocks(text: str):
@@ -144,9 +167,14 @@ def blocks(text: str):
 
 
 def caption_cites(text: str, after: int, artifact: str) -> str | None:
-    """What the prose under a block cites, if it names a compare artifact at all."""
-    tail = "\n".join(text[after:].splitlines()[:CAPTION_LINES])
-    named = set(ARTIFACT_LINK.findall(tail))
+    """What the prose under a block cites, up to the next block, if it names an artifact at all."""
+    tail = []
+    for line in text[after:].splitlines()[:CAPTION_LINES]:
+        # The next block's marker names its own artifact: a caption ends where that block starts.
+        if OPEN.match(line):
+            break
+        tail.append(line)
+    named = set(ARTIFACT_LINK.findall("\n".join(tail)))
     if not named:
         return "no artifact cited under the table"
     if named != {artifact}:
@@ -165,11 +193,10 @@ def process(write: bool) -> int:
             if kind not in RENDERERS:
                 raise SystemExit(f"{name}: no renderer for a `{kind}` table")
             data = json.loads((ROOT / artifact).read_text(encoding="utf-8"))
-            columns = opts.get("columns", "").split(",") if opts.get("columns") else []
-            for c in columns:
-                if c not in COLUMNS:
-                    raise SystemExit(f"{name}: `{c}` is not a column")
-            want = RENDERERS[kind](data, columns) + "\n"
+            try:
+                want = RENDERERS[kind](data, opts) + "\n"
+            except ValueError as e:
+                raise SystemExit(f"{name}: {e}") from e
             have = text[body_at:end]
             why = caption_cites(text, end, Path(artifact).name)
             if why:

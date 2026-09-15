@@ -1,18 +1,25 @@
-"""Parse a frontier campaign log from bench/frontier/run.sh into its JSON artifact and markdown.
+"""Parse frontier campaign logs from bench/frontier/run.sh into their JSON artifact and markdown.
 
     uv run --no-sync python bench/frontier/tables.py bench/results/frontier-1m-<...>.log
     uv run --no-sync python bench/frontier/tables.py --json bench/results/frontier-1m-<...>.log
+    uv run --no-sync python bench/frontier/tables.py --json <campaign>.log <re-measurement>.log
 
 The log is the evidence: every process's own output, under a header that names the machine, the
-toolchain and every competitor's commit. `--json` writes the same name with a `.json` suffix, one
-cell a structure and corpus holding each round's run, with the header as its environment. The
-markdown printed is what the docs quote: an overview, then a table a corpus.
+toolchain and every competitor's commit. `--json` writes the first log's name with a `.json`
+suffix, one cell a structure and corpus holding each round's run, with the header as its
+environment. A later log is a re-measurement of some of the campaign's corpora -- run.sh given
+their names, after a round of theirs ran beside other work -- and its cells replace the campaign's
+for those corpora. It has to come from the same commit, machine, toolchain and pins, and the
+artifact names it under `replaced`. The markdown printed is what the docs quote, and what
+bench/tables.py renders from the artifact: an overview, then a table a corpus.
 
 A cell's `id` and build times are the medians of its rounds, and its spread is the range of the `id`
 times over that median; a structure that fails in any round has no numbers, only the reason. Sizes
 are each structure's own account of itself: lexindex's serialised blob, `space_cost()` for the C²
 benchmark's structures and `memory_in_bytes` for XCDAT. ART and C-ART count their nodes and not the
-keys they point into, so they are printed for reference and kept out of every comparison.
+keys they point into, so they are printed for reference and kept out of every comparison. Each
+run's peak resident memory is kept in the artifact and not tabled: it counts the driver's own copies
+of the keys and the queries, which the C++ drivers and frontier_lex hold differently.
 """
 
 from __future__ import annotations
@@ -43,6 +50,9 @@ LEXINDEX = {
 REFERENCE = {"ART", "C-ART"}
 # What GNU timeout exits with when it had to stop the process.
 TIMED_OUT = 124
+# The header lines a re-measurement may differ in. Any other line that differs is another commit,
+# machine, toolchain or pin, and cells measured under it cannot stand in for the campaign's.
+PER_RUN = {"date", "table", "load at start"}
 
 HEADER = re.compile(r"^(?P<key>[\w/ -]+): (?P<value>.+)$")
 CORPUS = re.compile(
@@ -170,6 +180,17 @@ def summarise(name: str, runs: list[dict], ticks: int) -> dict:
     return cell
 
 
+def summarised(log: Path) -> tuple[dict[str, str], list[dict]]:
+    """A log's header, and its corpora with one summarised cell a structure."""
+    environment, corpora = parse(log.read_text(encoding="utf-8"))
+    ticks = int(environment["clock ticks"])
+    for corpus in corpora:
+        corpus["cells"] = [
+            summarise(name, runs, ticks) for name, runs in corpus.pop("runs").items()
+        ]
+    return environment, corpora
+
+
 def measured(cell: dict) -> bool:
     return "id_ns" in cell
 
@@ -249,30 +270,50 @@ def overview(corpora: list[dict]) -> str:
 
 
 def corpus_table(corpus: dict) -> str:
-    raw = raw_bytes_per_key(corpus)
+    raw = corpus["raw_bytes_per_key"]
     on_front = front(corpus["cells"])
     lines = [
         f"**`{corpus['corpus']}`** — {corpus['keys']:,} keys, {raw:.2f} bytes a key raw",
         "",
-        "| structure | bytes/key | % of raw | build ms | `id` ns | spread | peak MiB | front |",
-        "|---|---:|---:|---:|---:|---:|---:|:---:|",
+        "| structure | bytes/key | % of raw | build ms | `id` ns | spread | front |",
+        "|---|---:|---:|---:|---:|---:|:---:|",
     ]
     for cell in corpus["cells"]:
         name = cell["structure"]
         if not measured(cell):
-            lines.append(f"| {name} | — | — | — | — | — | — | {cell['failure']} |")
+            lines.append(f"| {name} | — | — | — | — | — | {cell['failure']} |")
             continue
         mark = "ref" if name in REFERENCE else "●" if name in on_front else ""
         bpk = cell["bytes_per_key"]
         lines.append(
             f"| {name} | {size(bpk)} | {100 * bpk / raw:.1f} | {cell['build_ms']:.0f} "
-            f"| {cell['id_ns']:.0f} | {100 * cell['id_ns_spread']:.0f} % "
-            f"| {cell['maxrss_mib']:.0f} | {mark} |"
+            f"| {cell['id_ns']:.0f} | {100 * cell['id_ns_spread']:.0f} % | {mark} |"
         )
     return "\n".join(lines)
 
 
-def artifact(environment: dict[str, str], corpora: list[dict]) -> dict:
+def artifact(logs: list[Path]) -> dict:
+    """The first log's campaign, with each later log's corpora in place of the campaign's own."""
+    environment, corpora = summarised(logs[0])
+    by_name = {corpus["corpus"]: corpus for corpus in corpora}
+    replaced: dict[str, str] = {}
+    for log in logs[1:]:
+        other, again = summarised(log)
+        differ = sorted(
+            key
+            for key in environment.keys() | other.keys()
+            if key not in PER_RUN and environment.get(key) != other.get(key)
+        )
+        if differ:
+            raise SystemExit(f"{log.name} differs from {logs[0].name} in: {', '.join(differ)}")
+        for corpus in again:
+            mine = by_name.get(corpus["corpus"])
+            if mine is None:
+                raise SystemExit(f"{log.name} measured {corpus['corpus']}; the campaign did not")
+            if (mine["keys"], mine["bytes"]) != (corpus["keys"], corpus["bytes"]):
+                raise SystemExit(f"{log.name} measured another {corpus['corpus']} file")
+            by_name[corpus["corpus"]] = corpus
+            replaced[corpus["corpus"]] = log.name
     cells = [
         {
             "corpus": corpus["corpus"],
@@ -280,28 +321,53 @@ def artifact(environment: dict[str, str], corpora: list[dict]) -> dict:
             "raw_bytes_per_key": round(raw_bytes_per_key(corpus), 3),
             **cell,
         }
-        for corpus in corpora
+        for corpus in by_name.values()
         for cell in corpus["cells"]
     ]
-    return {"table": environment.get("table"), "environment": environment, "cells": cells}
+    return {
+        "table": environment.get("table"),
+        "environment": environment,
+        "replaced": replaced,
+        "cells": cells,
+    }
+
+
+def corpora_of(artifact: dict) -> list[dict]:
+    """The artifact's cells grouped back into corpora, in the order the campaign ran them."""
+    corpora: dict[str, dict] = {}
+    for cell in artifact["cells"]:
+        corpus = corpora.setdefault(
+            cell["corpus"],
+            {
+                "corpus": cell["corpus"],
+                "keys": cell["keys"],
+                "raw_bytes_per_key": cell["raw_bytes_per_key"],
+                "cells": [],
+            },
+        )
+        corpus["cells"].append(cell)
+    return list(corpora.values())
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("log", type=Path, help="a bench/results/frontier-*.log")
-    parser.add_argument("--json", action="store_true", help="write the JSON artifact beside it")
+    parser.add_argument(
+        "logs",
+        type=Path,
+        nargs="+",
+        metavar="log",
+        help="a bench/results/frontier-*.log, then any re-measurement of its corpora",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="write the JSON artifact beside the first log"
+    )
     args = parser.parse_args()
-    environment, corpora = parse(args.log.read_text(encoding="utf-8"))
-    ticks = int(environment["clock ticks"])
-    for corpus in corpora:
-        corpus["cells"] = [
-            summarise(name, runs, ticks) for name, runs in corpus.pop("runs").items()
-        ]
+    data = artifact(args.logs)
     if args.json:
-        out = args.log.with_suffix(".json")
-        payload = json.dumps(artifact(environment, corpora), indent=2, ensure_ascii=False)
-        out.write_text(payload + "\n", encoding="utf-8")
+        out = args.logs[0].with_suffix(".json")
+        out.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"wrote {out}\n")
+    corpora = corpora_of(data)
     print(quietness(corpora))
     print()
     print(overview(corpora))

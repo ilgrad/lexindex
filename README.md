@@ -308,10 +308,12 @@ thirteen corpora at three scales — where the ranking between `DictIndex` and `
 with how much the keys share, which one word list cannot show.</sub>
 
 Two claims, scoped to libraries a Python or Rust project can install. The research-grade C++
-frontier — PDT, SuRF/FST, XCDAT, CoCo-trie, C², and the front-coding line this index descends from
-(libCSD, IBiS) — is cited, not claimed against, since none of it has a binding to benchmark here:
-papers, code and licences are
-[tabled in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited).
+frontier has no binding, so it is measured in a harness of its own, on the C² paper's protocol:
+lexindex is on the size–latency front on ten of thirteen corpora at a million keys and five of six
+at ten million, `DictIndex` builds faster than every compressed trie there, and a recursive trie is
+12–37 % smaller on paths, URLs and titles
+([measured in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-measured);
+papers, code and licences [cited](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited)).
 **`CompactHashIndex` is the smallest `string → dense id` map here, 2.4× below `marisa-trie` at the
 default 8-bit fingerprint and 3.9× at 4 bits**, when a bounded false-positive rate is acceptable:
 about `2^-fingerprint_bits` by design, measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over

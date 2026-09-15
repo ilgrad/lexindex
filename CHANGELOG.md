@@ -133,6 +133,19 @@ All notable changes to this project are documented here. The format follows
   than writing an empty file, and a key holding a line break is an error naming its id rather than
   a line a builder would read back as two keys.
 
+- **The research frontier, measured.** `bench/frontier/` builds the C² paper's benchmark — C²-FST,
+  C²-CoCo and C²-MARISA beside FST, CoCo-trie, MARISA, PDT, ART and C-ART, every dependency at a
+  pinned commit — and XCDAT, and runs `DictIndex` and `StringIndex` under the same protocol: one
+  build, then one cold pass over every key in a fixed shuffle, three rounds a structure, each
+  process waiting for a quiet machine. `docs/benchmarks.md` tables it at a million and ten million
+  keys. lexindex is on the size–latency front on ten of thirteen corpora and five of six;
+  `DictIndex` is the smallest structure on `words`, `opaque` and `uuid` at one scale or the other,
+  the fastest on `dna` at ten million, and builds before every compressed trie on every corpus.
+  MARISA's recursion is 3–37 % smaller where fragments repeat across the key set, and C²-MARISA is
+  smaller and faster on URLs and on the Russian and Chinese titles. Nothing of the competitors is
+  vendored — CoCo-trie is GPLv3, PDT non-commercial — and `bench/tables.py` renders the published
+  frontier tables from their artifacts and checks them like the rest.
+
 ### Changed
 
 - **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
