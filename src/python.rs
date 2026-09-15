@@ -41,7 +41,9 @@ use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValu
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
-use pyo3::types::{PyBytes, PyDict, PyIterator, PyList, PyMemoryView, PySlice, PyString, PyType};
+use pyo3::types::{
+    PyBytes, PyDict, PyIterator, PyList, PyMapping, PyMemoryView, PySlice, PyString, PyType,
+};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -2976,7 +2978,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
-#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false, objective="memory"))]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false, objective=crate::Objective::Memory))]
 // The arguments are the keyword arguments; pyo3 binds them one by one, so a parameter object here
 // would be a dict the caller has to build rather than a call they can read.
 #[allow(clippy::too_many_arguments)]
@@ -2988,7 +2990,7 @@ fn py_plan<'py>(
     prefix: bool,
     fuzzy: bool,
     exact: bool,
-    objective: &str,
+    #[pyo3(from_py_with = objective_of)] objective: crate::Objective,
 ) -> PyResult<Bound<'py, PyDict>> {
     let keys = collect_strs(keys)?;
     let needs = crate::Needs {
@@ -2997,16 +2999,6 @@ fn py_plan<'py>(
         prefix,
         fuzzy,
         exact,
-    };
-    let objective = match objective {
-        "memory" => crate::Objective::Memory,
-        "latency" => crate::Objective::Latency,
-        "balanced" => crate::Objective::Balanced,
-        other => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "objective: `{other}` is not one of memory / latency / balanced"
-            )));
-        }
     };
     let plan = py
         .detach(|| crate::plan_for(&keys, needs, objective))
@@ -3027,6 +3019,58 @@ fn py_plan<'py>(
     d.set_item("thin", plan.thin())?;
     d.set_item("text", plan.to_string())?;
     Ok(d)
+}
+
+/// `objective=`: a ranking by name, or a workload as a mapping from operation to weight.
+fn objective_of(obj: &Bound<'_, PyAny>) -> PyResult<crate::Objective> {
+    if let Ok(name) = obj.cast::<PyString>() {
+        return match name.to_str()? {
+            "memory" => Ok(crate::Objective::Memory),
+            "latency" => Ok(crate::Objective::Latency),
+            "balanced" => Ok(crate::Objective::Balanced),
+            other => Err(PyValueError::new_err(format!(
+                "objective: `{other}` is not one of memory / latency / balanced"
+            ))),
+        };
+    }
+    let Ok(ops) = obj.cast::<PyMapping>() else {
+        return Err(PyTypeError::new_err(
+            "objective: a name, or a mapping from operation to weight",
+        ));
+    };
+    let mut workload = crate::Workload::default();
+    for item in ops.items()?.iter() {
+        let (op, weight): (Bound<'_, PyAny>, Bound<'_, PyAny>) = item.extract()?;
+        let name = op
+            .cast::<PyString>()
+            .map_err(|_| PyTypeError::new_err("objective: an operation is named by a string"))?;
+        let name = name.to_str()?;
+        let count = || {
+            weight.extract::<u64>().map_err(|_| {
+                PyValueError::new_err(format!(
+                    "objective: `{name}` is not a whole number of 0 or more"
+                ))
+            })
+        };
+        workload = match name {
+            "hits" => workload.hits(count()?),
+            "misses" => workload.misses(count()?),
+            "reverse" => workload.reverse(count()?),
+            "prefix" => workload.prefix(count()?),
+            "common_prefix" => workload.common_prefix(count()?),
+            "longest_prefix" => workload.longest_prefix(count()?),
+            "batch" => workload.batch(u32::try_from(count()?).map_err(|_| {
+                PyValueError::new_err("objective: `batch` is past what a batch can hold")
+            })?),
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "objective: `{other}` is not one of hits / misses / reverse / prefix / \
+                     common_prefix / longest_prefix / batch"
+                )));
+            }
+        };
+    }
+    Ok(crate::Objective::Workload(workload))
 }
 
 fn estimate_dict<'py>(

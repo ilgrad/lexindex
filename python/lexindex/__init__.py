@@ -101,6 +101,18 @@ class Plan(TypedDict):
     text: str
 
 
+class Workload(TypedDict, total=False):
+    """How often each operation is asked of the index, for :func:`plan` to rank by."""
+
+    hits: int
+    misses: int
+    reverse: int
+    prefix: int
+    common_prefix: int
+    longest_prefix: int
+    batch: int
+
+
 __all__ = [
     "BlobInfo",
     "ClosedHashIndex",
@@ -112,6 +124,7 @@ __all__ = [
     "PerfectHashIndex",
     "Plan",
     "StringIndex",
+    "Workload",
     "__version__",
     "inspect",
     "plan",

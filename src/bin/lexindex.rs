@@ -9,7 +9,7 @@
 
 use lexindex::{
     BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Objective, Overlay,
-    OverlayBase, StringIndex, plan_file, plan_for,
+    OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -53,8 +53,11 @@ the needs say.
 
 options (`--name value` or `--name=value`):
   --objective N  what the ladder ranks by: memory (default, the smallest blob), latency
-                 (the fastest id(key), modelled) or balanced (nearest to both). The
-                 nanoseconds are a model of this crate's own machine, never a
+                 (the fastest id(key), modelled), balanced (nearest to both), or a
+                 workload of op=weight pairs between commas, as in hits=9,misses=1 —
+                 ops hits, misses, reverse, prefix, common_prefix, longest_prefix, and
+                 batch=N for the keys an ids_of call holds. An op adds the need it asks
+                 for. The nanoseconds are a model of this crate's own machine, never a
                  measurement of yours
   --index NAME   auto (default), dict, string, compact, closed, perfect
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
@@ -137,12 +140,40 @@ fn objective(name: &str) -> Result<Objective, Fail> {
         "memory" => Objective::Memory,
         "latency" => Objective::Latency,
         "balanced" => Objective::Balanced,
+        spec if spec.contains('=') => Objective::Workload(workload(spec)?),
         other => {
             return Err(Fail::Usage(format!(
-                "--objective: `{other}` is not one of memory / latency / balanced"
+                "--objective: `{other}` is not one of memory / latency / balanced, or a workload \
+                 such as hits=9,misses=1"
             )));
         }
     })
+}
+
+/// `--objective hits=9,common_prefix=1,batch=64`: a workload, one `op=weight` between commas.
+fn workload(spec: &str) -> Result<Workload, Fail> {
+    let mut asked = Workload::default();
+    for pair in spec.split(',') {
+        let bad = || {
+            Fail::Usage(format!(
+                "--objective: `{pair}` is not op=weight, with op one of hits / misses / reverse / \
+                 prefix / common_prefix / longest_prefix / batch"
+            ))
+        };
+        let (op, weight) = pair.split_once('=').ok_or_else(bad)?;
+        let weight: u64 = weight.parse().map_err(|_| bad())?;
+        asked = match op {
+            "hits" => asked.hits(weight),
+            "misses" => asked.misses(weight),
+            "reverse" => asked.reverse(weight),
+            "prefix" => asked.prefix(weight),
+            "common_prefix" => asked.common_prefix(weight),
+            "longest_prefix" => asked.longest_prefix(weight),
+            "batch" => asked.batch(u32::try_from(weight).map_err(|_| bad())?),
+            _ => return Err(bad()),
+        };
+    }
+    Ok(asked)
 }
 
 fn choice(name: &str) -> Result<Choice, Fail> {
@@ -399,13 +430,14 @@ fn cmd_plan(
         plan_file(path, cmd.needs, cmd.objective)?
     };
     write!(out, "{ranked}").map_err(io_fail)?;
-    note_implied_exact(cmd, err)
+    note_implied_exact(cmd, &ranked, err)
 }
 
 /// What the ladder left out and how to ask for it back. Printed only when `--exact` was the
 /// command line's idea rather than the caller's, since otherwise it says nothing new.
-fn note_implied_exact(cmd: &Cmd, err: &mut dyn Write) -> Result<(), Fail> {
-    let mut without = cmd.needs;
+fn note_implied_exact(cmd: &Cmd, ranked: &Plan, err: &mut dyn Write) -> Result<(), Fail> {
+    // The plan's needs rather than the command line's: a workload's operations add to them.
+    let mut without = ranked.needs();
     without.exact = false;
     // And only when the default is what excluded them: an index that answers nothing but `id(key)`
     // is already ruled out by any other need, and a build without `mph` does not have one at all —
@@ -443,7 +475,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto if path != "-" => {
             let ranked = plan_file(path, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, err)?;
+            note_implied_exact(cmd, &ranked, err)?;
             let best = ranked.best();
             Some((best.kind, best.block))
         }
@@ -473,7 +505,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         None => {
             let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, err)?;
+            note_implied_exact(cmd, &ranked, err)?;
             let best = ranked.best();
             (best.kind, best.block)
         }
@@ -1130,6 +1162,71 @@ mod tests {
             "",
         );
         assert_eq!((code, err.contains("--objective")), (2, true), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A workload on the command line is the library's, spelled `op=weight`.
+    #[test]
+    fn a_workload_objective_parses_and_ranks() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(400));
+        let ladder = |spec: &str| {
+            let (code, out, err) = go(&["plan", &keys, "--objective", spec], "");
+            assert_eq!((code, err.as_str()), (0, ""), "{spec}");
+            out
+        };
+        let first = |out: &str| {
+            out.lines()
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .nth(1)
+                .unwrap()
+                .to_string()
+        };
+        let out = ladder("common_prefix=9,hits=1");
+        assert!(
+            out.lines()
+                .next()
+                .unwrap()
+                .ends_with("ranked by workload (hits 1, common_prefix 9)"),
+            "{out}"
+        );
+        assert_eq!(first(&out), "StringIndex", "{out}");
+        assert_eq!(first(&ladder("prefix=9,hits=1")), "DictIndex");
+        let every =
+            ladder("hits=1,misses=2,reverse=3,prefix=4,common_prefix=5,longest_prefix=6,batch=64");
+        assert!(
+            every.lines().next().unwrap().ends_with(
+                "ranked by workload (hits 1, misses 2, reverse 3, prefix 4, common_prefix 5, \
+                 longest_prefix 6, batch 64)"
+            ),
+            "{every}"
+        );
+        // Only a question the two hashes cannot answer rules them out; hits alone leave it to the
+        // implied --exact, and the note says so — in a build that has the two at all.
+        let (code, _, err) = go(&["plan", &keys, "--objective", "hits=9,misses=1"], "");
+        assert_eq!(
+            (code, err.contains("excluded: needs exact")),
+            (0, cfg!(feature = "mph")),
+            "{err}"
+        );
+        for bad in [
+            "hits",
+            "hits=",
+            "hits=-1",
+            "bogus=1",
+            "batch=99999999999",
+            "hits=1,",
+            "=1",
+        ] {
+            let (code, _, err) = go(&["plan", &keys, "--objective", bad], "");
+            assert_eq!(
+                (code, err.contains("--objective")),
+                (2, true),
+                "{bad}: {err}"
+            );
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

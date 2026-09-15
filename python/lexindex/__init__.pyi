@@ -17,6 +17,7 @@ __all__ = [
     "PerfectHashIndex",
     "Plan",
     "StringIndex",
+    "Workload",
     "__version__",
     "inspect",
     "plan",
@@ -794,10 +795,11 @@ class Estimate(TypedDict):
     for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
 
-    ``nanos`` is the modelled cost of one ``id(key)``, and is never measured: it comes from a
-    least-squares fit to 240 cells timed on this crate's own machine, with a mean absolute error
-    of 7-20 %. It is accurate enough to order the candidates and nowhere near accurate enough to
-    quote as your own latency.
+    ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a :class:`Workload`, of
+    the workload's mean operation -- and is never measured: it comes from a fit to 240 cells timed
+    on this crate's own machine, with a mean absolute error of 5-13 % on ``id(key)``. It is
+    accurate enough to order the candidates and nowhere near accurate enough to quote as your own
+    latency.
     """
 
     kind: Literal[
@@ -836,6 +838,29 @@ class Plan(TypedDict):
     thin: bool
     text: str
 
+class Workload(TypedDict, total=False):
+    """How often each operation is asked of the index, for :func:`plan` to rank by.
+
+    The weights are relative -- ``{"hits": 9, "misses": 1}`` is nine hits to a miss, and so is
+    ``{"hits": 900, "misses": 100}`` -- so counts read off a log serve as they are. ``hits`` and
+    ``misses`` are ``id(key)`` on a member and on a stranger, ``reverse`` is ``key(id)``,
+    ``prefix`` is a prefix or range query, priced as a ``prefix_count``, and ``common_prefix`` and
+    ``longest_prefix`` are those queries. ``batch`` is the keys an ``ids_of`` call holds, for the
+    hits and the misses.
+
+    Every operation is a question the index has to answer, so it adds to the keyword arguments: a
+    share of ``reverse`` rules out the two indexes that store no keys, and any prefix query asks
+    for an ordered one. A workload that asks nothing is ``"latency"``.
+    """
+
+    hits: int
+    misses: int
+    reverse: int
+    prefix: int
+    common_prefix: int
+    longest_prefix: int
+    batch: int
+
 def plan(
     keys: Iterable[str],
     *,
@@ -844,7 +869,7 @@ def plan(
     prefix: bool = False,
     fuzzy: bool = False,
     exact: bool = False,
-    objective: Literal["memory", "latency", "balanced"] = "memory",
+    objective: Literal["memory", "latency", "balanced"] | Workload = ...,
 ) -> Plan:
     """What each index would cost on these keys, and which of them answer your questions.
 
@@ -874,7 +899,9 @@ def plan(
     ranked last.
 
     ``objective`` is what the ranking is *for*: ``memory`` (the default, the smallest blob),
-    ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``) or ``balanced``,
-    whichever candidate gives up least on either. The candidates and their sizes do not change
-    with it; only the order, and so ``best``, do.
+    ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``), ``balanced``
+    (whichever candidate gives up least on either), or a :class:`Workload` -- a mapping from
+    operation to weight such as ``{"hits": 9, "misses": 1, "batch": 64}`` -- ranked by its mean
+    operation. The candidates and their sizes do not change with it; only the order, and so
+    ``best``, do -- except that a workload's operations add to what the index has to answer.
     """

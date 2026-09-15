@@ -1509,6 +1509,35 @@ def test_plan_refuses_what_is_not_a_string():
         lexindex.plan(["a"], fuzzy="yes")
 
 
+def test_plan_ranks_a_workload_by_what_it_asks():
+    keys = [f"key{i:04}" for i in range(200)]
+
+    def best(objective):
+        return lexindex.plan(keys, objective=objective)["best"]["kind"]
+
+    # A prefix query asks for an ordered index, and which one depends on the query.
+    assert best({"common_prefix": 9, "hits": 1}) == "StringIndex"
+    assert best({"prefix": 9, "hits": 1}) == "DictIndex"
+    # So does a reverse lookup: it rules out the two indexes that store no keys.
+    kinds = {e["kind"] for e in lexindex.plan(keys, objective={"reverse": 1})["estimates"]}
+    assert kinds == {"DictIndex", "PerfectHashIndex", "StringIndex"}
+    p = lexindex.plan(keys, objective={"hits": 3, "misses": 1, "batch": 64})
+    nanos = [e["nanos"] for e in p["estimates"]]
+    assert nanos == sorted(nanos)
+    assert p["text"].splitlines()[0].endswith("ranked by workload (hits 3, misses 1, batch 64)")
+    # A workload that asks nothing is latency.
+    assert lexindex.plan(keys, objective={}) == lexindex.plan(keys, objective="latency")
+
+
+def test_plan_refuses_an_objective_it_cannot_price():
+    for bad in ("fast", {"hit": 1}, {"hits": -1}, {"hits": 1.5}, {"batch": 2**40}):
+        with pytest.raises(ValueError):
+            lexindex.plan(["a", "b"], objective=bad)
+    for bad in (3, None, {1: 1}):
+        with pytest.raises(TypeError):
+            lexindex.plan(["a", "b"], objective=bad)
+
+
 def test_build_to_file_writes_what_the_constructor_would_save(tmp_path):
     keys = [f"k{(i * 7919) % 500:03}" for i in range(500)] * 2
     path = tmp_path / "ext.bix"

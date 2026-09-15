@@ -444,12 +444,14 @@ def fit(artifact: Path | None) -> int:
 
 
 def _score(model: Model, cells: list[dict], lanes: list[str], label: str) -> None:
-    """How often the model names the structure the measurement ranks fastest, over `lanes`."""
+    """How often the model names the structure the measurement ranks fastest, over `lanes`, and
+    what its worst pick costs against that fastest."""
     groups: dict[tuple[str, int], dict[str, dict]] = {}
     for c in cells:
         if c["structure"] in lanes:
             groups.setdefault((c["corpus"], c["size"]), {})[c["structure"]] = c
     ok = total = 0
+    worst = 1.0
     per: dict[int, list[int]] = {}
     for (_, size), row in sorted(groups.items()):
         if len(row) < len(lanes):
@@ -458,11 +460,12 @@ def _score(model: Model, cells: list[dict], lanes: list[str], label: str) -> Non
         per.setdefault(size, [0, 0])[1] += 1
         measured = min(row, key=lambda s: row[s]["lookup_ns"])
         modelled = min(row, key=lambda s: model.nanos(s, "mixed", row[s]))
+        worst = max(worst, row[modelled]["lookup_ns"] / row[measured]["lookup_ns"])
         if measured == modelled:
             ok += 1
             per[size][0] += 1
     spread = " ".join(f"{k // 1000}k: {v[0]}/{v[1]}" for k, v in sorted(per.items()))
-    print(f"{label:<30} {ok:>2}/{total}   {spread}")
+    print(f"{label:<30} {ok:>2}/{total}   worst {worst:.3f}   {spread}")
 
 
 # What `_held_out` scores the model on: a label, the weight of each op, and the ops a candidate has

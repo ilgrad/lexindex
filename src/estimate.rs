@@ -211,136 +211,434 @@ pub enum Objective {
     /// smallest, its modelled latency against the fastest — is smallest. On a corpus where one
     /// index is both, that index; where they differ, the one that gives up least on either.
     Balanced,
+    /// The cheapest to run a [`Workload`] on: every candidate priced at the mean of the operations
+    /// the workload asks, weighted as it weighs them, from the model behind
+    /// [`Latency`](Self::Latency). An operation is a question the index has to answer as well, so a
+    /// workload adds to the [`Needs`] — see [`Workload`].
+    Workload(Workload),
 }
 
-/// The three constants of one structure's `id(key)` latency: `a + b·log2(n / 100 000) + c·len`,
-/// nanoseconds, where `len` is the mean key length in bytes.
+impl Objective {
+    /// `needs`, with whatever this objective's own operations require added to it.
+    fn asks(self, needs: Needs) -> Needs {
+        match self {
+            Self::Workload(workload) => workload.asks(needs),
+            _ => needs,
+        }
+    }
+}
+
+/// How often each operation is asked of the index, for [`Objective::Workload`].
+///
+/// The weights are relative: `hits(9).misses(1)` is nine hits to a miss, and so is
+/// `hits(900).misses(100)`, so counts read off a log serve as they are. An operation left at zero
+/// is one the workload never asks, and a workload that asks none of them is an `id(key)` over half
+/// members and half strangers — [`Objective::Latency`], exactly.
+///
+/// Every operation is a question the index must be able to answer, so the plan adds it to the
+/// [`Needs`]: a share of [`reverse`](Self::reverse) rules out the two indexes that store no keys,
+/// as [`Needs::reverse`] does, and a share of any of the three prefix queries asks for an ordered
+/// index, as [`Needs::prefix`] does.
+///
+/// ```
+/// # use lexindex::{plan_for, Kind, Needs, Objective, Workload};
+/// let keys = ["apple", "apricot", "banana", "blueberry"];
+/// let asked = Workload::default().hits(1).common_prefix(9);
+/// let p = plan_for(&keys, Needs::default(), Objective::Workload(asked))?;
+/// // A prefix query asks for an ordered index, whatever the needs said.
+/// assert!(matches!(p.best().kind, Kind::String | Kind::Dict));
+/// # Ok::<(), lexindex::IndexError>(())
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Workload {
+    hits: u64,
+    misses: u64,
+    reverse: u64,
+    prefix: u64,
+    common_prefix: u64,
+    longest_prefix: u64,
+    batch: u32,
+}
+
+impl Workload {
+    /// `id(key)` on a key the index holds.
+    pub fn hits(mut self, weight: u64) -> Self {
+        self.hits = weight;
+        self
+    }
+
+    /// `id(key)` on a key it does not hold.
+    pub fn misses(mut self, weight: u64) -> Self {
+        self.misses = weight;
+        self
+    }
+
+    /// `key(id)`.
+    pub fn reverse(mut self, weight: u64) -> Self {
+        self.reverse = weight;
+        self
+    }
+
+    /// A prefix or range query, priced as a `prefix_count`: what enumerating one costs past the
+    /// count is how many keys it returns, which is a fact about the corpus and not the index.
+    pub fn prefix(mut self, weight: u64) -> Self {
+        self.prefix = weight;
+        self
+    }
+
+    /// `common_prefix(query)`: every key that is a prefix of the query.
+    pub fn common_prefix(mut self, weight: u64) -> Self {
+        self.common_prefix = weight;
+        self
+    }
+
+    /// `longest_prefix(query)`: the longest key that is a prefix of the query.
+    pub fn longest_prefix(mut self, weight: u64) -> Self {
+        self.longest_prefix = weight;
+        self
+    }
+
+    /// Keys an `ids_of` call holds, for the [`hits`](Self::hits) and [`misses`](Self::misses);
+    /// `0` and `1` are one key a call. Batches of 16 and 1 024 were measured: in between, what a
+    /// key costs is linear in `log2(size)`, and past 1 024 it costs what it does at 1 024.
+    pub fn batch(mut self, size: u32) -> Self {
+        self.batch = size;
+        self
+    }
+
+    /// `needs`, with what these operations require added to it.
+    fn asks(self, needs: Needs) -> Needs {
+        Needs {
+            reverse: needs.reverse || self.reverse > 0,
+            prefix: needs.prefix
+                || self.prefix > 0
+                || self.common_prefix > 0
+                || self.longest_prefix > 0,
+            ..needs
+        }
+    }
+
+    /// The mean nanoseconds of this workload's operations on a structure with these costs, at
+    /// `(s, len)` from [`Ops::at`]; infinite if the structure cannot answer one of them.
+    fn nanos(self, ops: &Ops, s: f64, len: f64) -> f64 {
+        let at = |cost: Cost| cost.nanos(s, len);
+        // A batch was measured over mixed probes, so what it saves is read there, as a share of
+        // one call, and taken to save hits and misses alike.
+        let one = at(ops.mixed);
+        let log = f64::from(self.batch.max(1)).log2().min(10.0);
+        let batched = if log <= 4.0 {
+            one + (at(ops.batch16) - one) * log / 4.0
+        } else {
+            at(ops.batch16) + (at(ops.batch1024) - at(ops.batch16)) * (log - 4.0) / 6.0
+        };
+        let share = batched / one;
+        let asked = [
+            (self.hits, Some(ops.hit), share),
+            (self.misses, Some(ops.miss), share),
+            (self.reverse, ops.key, 1.0),
+            (self.prefix, ops.prefix, 1.0),
+            (self.common_prefix, ops.common_prefix, 1.0),
+            (self.longest_prefix, ops.longest_prefix, 1.0),
+        ];
+        let total: f64 = asked.iter().map(|&(weight, ..)| weight as f64).sum();
+        if total == 0.0 {
+            return batched;
+        }
+        asked
+            .iter()
+            .filter(|&&(weight, ..)| weight > 0)
+            .map(|&(weight, cost, share)| weight as f64 * cost.map_or(f64::INFINITY, at) * share)
+            .sum::<f64>()
+            / total
+    }
+
+    /// What the ladder's first line says was ranked by. A workload that asks nothing is latency,
+    /// and says so.
+    fn describe(self) -> String {
+        let mut asked: Vec<String> = [
+            ("hits", self.hits),
+            ("misses", self.misses),
+            ("reverse", self.reverse),
+            ("prefix", self.prefix),
+            ("common_prefix", self.common_prefix),
+            ("longest_prefix", self.longest_prefix),
+        ]
+        .iter()
+        .filter(|&&(_, weight)| weight > 0)
+        .map(|(name, weight)| format!("{name} {weight}"))
+        .collect();
+        let name = if asked.is_empty() {
+            "latency"
+        } else {
+            "workload"
+        };
+        if self.batch > 1 {
+            asked.push(format!("batch {}", self.batch));
+        }
+        if asked.is_empty() {
+            name.to_string()
+        } else {
+            format!("{name} ({})", asked.join(", "))
+        }
+    }
+}
+
+/// One operation's latency constants: `a + b·s + c·len + d·s·len` nanoseconds, where `len` is the
+/// mean key length in bytes and `s` is where the candidate's blob sits against the cache, as
+/// [`Ops::at`] reads it.
 #[derive(Clone, Copy)]
 struct Cost {
     a: f64,
     b: f64,
     c: f64,
+    d: f64,
 }
 
 impl Cost {
-    /// Below [`SAMPLE`] the fit has no evidence, so this reports the 100 000-key figure rather
-    /// than extrapolating a curve past where it was measured — a smaller corpus is not slower,
-    /// and what the number is for is the ordering.
-    fn nanos(self, keys: usize, mean_len: f64) -> f64 {
-        let n = (keys.max(SAMPLE) as f64 / SAMPLE as f64).log2();
-        self.a + self.b * n + self.c * mean_len
+    fn nanos(self, s: f64, len: f64) -> f64 {
+        self.a + self.b * s + self.c * len + self.d * s * len
     }
 
-    /// Between two measured blocks, linear in `log2(block)`, which is what the three constants
-    /// move in over 32..=1024.
+    /// Between two measured blocks, linear in `log2(block)`, which is what the constants move in
+    /// over 32..=1024.
     fn between(self, other: Self, t: f64) -> Self {
         let mix = |x: f64, y: f64| x + (y - x) * t;
         Self {
             a: mix(self.a, other.a),
             b: mix(self.b, other.b),
             c: mix(self.c, other.c),
+            d: mix(self.d, other.d),
         }
     }
 }
 
-/// Least squares over 240 measured cells: eight structures over thirteen corpora at 100 000,
-/// 1 000 000 and 10 000 000 keys, in one process, the lanes alternating so that no structure is
-/// timed with the caches still warm from its own build. `bench/latency_model.py measure` produced
-/// them and `fit` re-derives this table from
-/// `bench/results/latency-model-2026-09-13-arz-6786f74-dirty.json` — the tree was dirty with the
-/// planner change these constants are for, which cannot move an `id`. Mean absolute error is
-/// 9–21 % of the measurement.
+/// One entry of the tables below, on one line.
+const fn cost(a: f64, b: f64, c: f64, d: f64) -> Cost {
+    Cost { a, b, c, d }
+}
+
+/// Where `s` counts from: a blob under 64 KiB is priced as a blob of 64 KiB.
+const HINGE: f64 = 65_536.0;
+
+/// The shortest mean key length of any corpus the model was fitted on. Shorter keys are priced as
+/// these, rather than on a slope read off longer ones.
+const LEN_FLOOR: f64 = 4.89;
+
+/// One structure's constants for each operation the model prices, and `None` for one it does not
+/// answer.
+#[derive(Clone, Copy)]
+struct Ops {
+    /// The smallest `s` the structure was fitted at, never below zero. A smaller blob is priced
+    /// here, since below it the fit has no evidence.
+    floor: f64,
+    /// `id(key)` over half members and half strangers, shuffled: what [`Objective::Latency`] and
+    /// [`Objective::Balanced`] rank by.
+    mixed: Cost,
+    /// `id(key)` on members.
+    hit: Cost,
+    /// `id(key)` on strangers.
+    miss: Cost,
+    /// A key of an `ids_of` batch of 16, half members and half strangers.
+    batch16: Cost,
+    /// The same, in batches of 1 024.
+    batch1024: Cost,
+    /// `key(id)`.
+    key: Option<Cost>,
+    /// `prefix_count` of a member's first three characters.
+    prefix: Option<Cost>,
+    /// `common_prefix` of a member with one to three characters added, or of the characters alone.
+    common_prefix: Option<Cost>,
+    /// `longest_prefix` of the same.
+    longest_prefix: Option<Cost>,
+}
+
+impl Ops {
+    /// `(s, len)` for a candidate whose blob is `bytes` over `keys` keys of mean length `mean_len`.
+    ///
+    /// `s` is `log2` of the blob over [`HINGE`] rather than of the key count, because what a lookup
+    /// waits on is how far its bytes are from the CPU, and the bytes a key takes differ tenfold
+    /// between corpora for a `DictIndex` alone. A corpus under [`SAMPLE`] keys is read at its
+    /// [`SAMPLE`]-key equivalent — a smaller corpus is not slower, and was not measured — and `s`
+    /// and `len` are held at the edges of the evidence, [`floor`](Self::floor) and [`LEN_FLOOR`].
+    fn at(&self, bytes: u64, keys: usize, mean_len: f64) -> (f64, f64) {
+        let scale = (SAMPLE as f64 / keys.max(1) as f64).max(1.0);
+        let s = (bytes as f64 * scale / HINGE).log2().max(self.floor);
+        (s, mean_len.max(LEN_FLOOR))
+    }
+
+    /// Between two measured blocks, each constant the way [`Cost::between`] moves one.
+    fn between(self, other: Self, t: f64) -> Self {
+        let mix = |x: Option<Cost>, y: Option<Cost>| Some(x?.between(y?, t));
+        Self {
+            floor: self.floor + (other.floor - self.floor) * t,
+            mixed: self.mixed.between(other.mixed, t),
+            hit: self.hit.between(other.hit, t),
+            miss: self.miss.between(other.miss, t),
+            batch16: self.batch16.between(other.batch16, t),
+            batch1024: self.batch1024.between(other.batch1024, t),
+            key: mix(self.key, other.key),
+            prefix: mix(self.prefix, other.prefix),
+            common_prefix: mix(self.common_prefix, other.common_prefix),
+            longest_prefix: mix(self.longest_prefix, other.longest_prefix),
+        }
+    }
+}
+
+/// Least squares on relative error over 240 measured cells: eight structures over thirteen corpora
+/// at 100 000 keys, eleven at 1 000 000 and six at 10 000 000, in one process, every operation over
+/// fresh probes of its own and every structure timed at every place in its operation's round.
+/// `bench/latency_model.py measure` produced them and `fit` re-derives these tables from
+/// `bench/results/latency-model-2026-09-15-arz-e6b3319.json`, with no slope below zero. Mean
+/// absolute error is 5–13 % of the measurement on `id(key)`, and 23–28 % at worst, on prefix
+/// counts.
 ///
-/// **Far too coarse to quote and quite enough to rank.** Scored against the *published* sweep,
-/// which these were not fitted to: the fastest of its six lexindex lanes is named in 30 of 30
-/// corpus-size cells — though `ClosedHashIndex` wins most of those outright, so the number that
-/// means something is the comparison a caller actually faces. `DictIndex` against `StringIndex`,
-/// which decides an ordered index, is right in **27 of 30** and thirteen of thirteen at 100 000
-/// keys; which `DictIndex` block is fastest, 26 of 30.
+/// **Far too coarse to quote and quite enough to rank.** Fitted with a corpus left out, the model
+/// names the fastest `id(key)` on that corpus in 30 of 30 corpus-size cells and the fastest ordered
+/// index in 24, where its worst pick costs 1.24× the fastest; over ten workloads, from batched
+/// lookups to `common_prefix`, no pick costs more than 1.49×. Against the *published* sweep, which
+/// it was not fitted to, it names the fastest of every lane in 30 of 30 cells, the faster of
+/// `DictIndex` and `StringIndex` in 24 — never picking one more than 1.20× slower — and the fastest
+/// `DictIndex` block in 22, never more than 1.07× slower.
 ///
 /// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
 /// through the Python binding so that every one of them carries that call. Nothing here rescales
 /// them for another machine, and no number they produce is a measurement of the caller's corpus.
-const COST: [(Kind, Cost); 4] = [
+const COST: [(Kind, Ops); 4] = [
     (
         Kind::Closed,
-        Cost {
-            a: 47.0,
-            b: 14.10,
-            c: 0.37,
+        Ops {
+            floor: 0.00,
+            mixed: cost(51.3, 9.65, 0.159, 0.007),
+            hit: cost(51.3, 9.38, 0.152, 0.008),
+            miss: cost(48.6, 9.68, 0.158, 0.015),
+            batch16: cost(39.1, 3.50, 0.134, 0.000),
+            batch1024: cost(38.6, 1.63, 0.136, 0.000),
+            key: None,
+            prefix: None,
+            common_prefix: None,
+            longest_prefix: None,
         },
     ),
     (
         Kind::Compact,
-        Cost {
-            a: 61.7,
-            b: 23.99,
-            c: 0.30,
+        Ops {
+            floor: 0.95,
+            mixed: cost(46.7, 18.27, 0.185, 0.000),
+            hit: cost(44.0, 18.52, 0.155, 0.000),
+            miss: cost(30.0, 17.44, 0.200, 0.006),
+            batch16: cost(44.2, 5.17, 0.179, 0.000),
+            batch1024: cost(42.2, 2.55, 0.154, 0.000),
+            key: None,
+            prefix: None,
+            common_prefix: None,
+            longest_prefix: None,
         },
     ),
     (
         Kind::Perfect,
-        Cost {
-            a: 101.5,
-            b: 41.29,
-            c: 1.11,
+        Ops {
+            floor: 3.30,
+            mixed: cost(-24.8, 32.65, 0.000, 0.000),
+            hit: cost(-35.7, 33.27, 0.000, 0.000),
+            miss: cost(-57.6, 34.74, 0.000, 0.000),
+            batch16: cost(37.3, 10.14, 0.203, 0.000),
+            batch1024: cost(49.3, 4.27, 0.026, 0.021),
+            key: Some(cost(-30.6, 27.61, 0.000, 0.000)),
+            prefix: None,
+            common_prefix: None,
+            longest_prefix: None,
         },
     ),
     (
         Kind::String,
-        Cost {
-            a: 140.4,
-            b: 60.47,
-            c: 9.10,
+        Ops {
+            floor: 0.00,
+            mixed: cost(146.7, 19.15, 0.000, 1.221),
+            hit: cost(145.0, 21.28, 0.000, 1.205),
+            miss: cost(137.3, 19.46, 0.000, 1.190),
+            batch16: cost(140.2, 21.80, 0.000, 1.197),
+            batch1024: cost(139.6, 21.84, 0.000, 1.204),
+            key: Some(cost(251.4, 27.14, 9.766, 1.903)),
+            prefix: Some(cost(354.1, 95.69, 1.058, 0.000)),
+            common_prefix: Some(cost(361.2, 0.00, 0.000, 1.389)),
+            longest_prefix: Some(cost(203.6, 21.52, 0.000, 1.119)),
         },
     ),
 ];
 
 /// [`Kind::Dict`] is a curve, not a point: the block trades a scan against a search and both ends
 /// of 32..=1024 were measured. Ascending by block, interpolated in between and clamped outside.
-const DICT_COST: [(usize, Cost); 4] = [
+const DICT_COST: [(usize, Ops); 4] = [
     (
         32,
-        Cost {
-            a: 180.7,
-            b: 68.17,
-            c: 3.98,
+        Ops {
+            floor: 1.89,
+            mixed: cost(85.2, 39.35, 0.000, 0.472),
+            hit: cost(64.6, 46.07, 0.000, 0.433),
+            miss: cost(63.5, 45.35, 0.000, 0.445),
+            batch16: cost(188.7, 21.34, 0.125, 0.445),
+            batch1024: cost(181.5, 21.52, 0.000, 0.450),
+            key: Some(cost(105.9, 31.84, 2.493, 0.000)),
+            prefix: Some(cost(232.6, 14.48, 0.000, 0.000)),
+            common_prefix: Some(cost(586.6, 0.00, 64.963, 10.489)),
+            longest_prefix: Some(cost(352.1, 53.28, 1.221, 0.799)),
         },
     ),
     (
         128,
-        Cost {
-            a: 214.3,
-            b: 64.29,
-            c: 4.01,
+        Ops {
+            floor: 1.73,
+            mixed: cost(127.1, 36.46, 0.000, 0.507),
+            hit: cost(110.9, 41.84, 0.000, 0.481),
+            miss: cost(108.1, 41.20, 0.000, 0.489),
+            batch16: cost(205.7, 24.56, 0.000, 0.487),
+            batch1024: cost(193.4, 25.69, 0.000, 0.477),
+            key: Some(cost(131.5, 35.51, 3.157, 0.011)),
+            prefix: Some(cost(279.4, 10.43, 0.000, 0.000)),
+            common_prefix: Some(cost(626.8, 0.00, 88.646, 9.279)),
+            longest_prefix: Some(cost(462.3, 44.13, 1.088, 0.883)),
         },
     ),
     (
         256,
-        Cost {
-            a: 230.3,
-            b: 56.78,
-            c: 3.95,
+        Ops {
+            floor: 1.70,
+            mixed: cost(149.6, 34.05, 0.000, 0.481),
+            hit: cost(136.2, 37.85, 0.000, 0.466),
+            miss: cost(132.0, 37.51, 0.000, 0.469),
+            batch16: cost(216.9, 25.87, 0.000, 0.465),
+            batch1024: cost(203.2, 26.70, 0.000, 0.458),
+            key: Some(cost(156.3, 35.31, 3.145, 0.000)),
+            prefix: Some(cost(298.7, 8.89, 0.000, 0.000)),
+            common_prefix: Some(cost(636.8, 0.00, 97.227, 8.682)),
+            longest_prefix: Some(cost(480.3, 43.25, 2.265, 0.714)),
         },
     ),
     (
         1024,
-        Cost {
-            a: 278.2,
-            b: 47.15,
-            c: 4.10,
+        Ops {
+            floor: 1.67,
+            mixed: cost(210.6, 25.92, 0.128, 0.543),
+            hit: cost(198.9, 29.17, 0.235, 0.506),
+            miss: cost(192.7, 29.11, 0.390, 0.484),
+            batch16: cost(254.2, 25.59, 0.339, 0.442),
+            batch1024: cost(241.8, 25.54, 0.427, 0.427),
+            key: Some(cost(216.7, 32.60, 4.246, 0.000)),
+            prefix: Some(cost(344.2, 10.31, 0.000, 0.000)),
+            common_prefix: Some(cost(652.5, 0.00, 125.207, 7.933)),
+            longest_prefix: Some(cost(591.4, 30.62, 2.942, 0.812)),
         },
     ),
 ];
 
-/// The cost constants for one candidate.
-fn cost_of(kind: Kind, block: Option<usize>) -> Cost {
+/// The constants for one candidate.
+fn ops_of(kind: Kind, block: Option<usize>) -> Ops {
     if kind != Kind::Dict {
-        let (_, cost) = COST
+        let (_, ops) = COST
             .iter()
             .find(|(k, _)| *k == kind)
             .expect("every kind but Dict is in the table");
-        return *cost;
+        return *ops;
     }
     let block = block.unwrap_or(dict_index::DEFAULT_BLOCK);
     let at = DICT_COST.partition_point(|(b, _)| *b < block);
@@ -355,6 +653,17 @@ fn cost_of(kind: Kind, block: Option<usize>) -> Cost {
     let t =
         ((block as f64).log2() - (lo as f64).log2()) / ((hi as f64).log2() - (lo as f64).log2());
     low.between(high, t)
+}
+
+/// What one operation of `objective` is modelled to cost on a candidate: `id(key)`, unless the
+/// objective is a workload, whose mean operation it is.
+fn nanos_of(objective: Objective, estimate: &Estimate, keys: usize, mean_len: f64) -> f64 {
+    let ops = ops_of(estimate.kind, estimate.block);
+    let (s, len) = ops.at(estimate.bytes, keys, mean_len);
+    match objective {
+        Objective::Workload(workload) => workload.nanos(&ops, s, len),
+        _ => ops.mixed.nanos(s, len),
+    }
 }
 
 /// What one index is expected to weigh.
@@ -410,15 +719,33 @@ impl Plan {
         self.objective
     }
 
-    /// The modelled `id(key)` latency of a candidate, in nanoseconds.
+    /// What every candidate had to answer: the needs the plan was asked for, and whatever the
+    /// [`Objective`] adds to them. [`Kind::answers`] against these is why a kind is missing from
+    /// the ranking.
     ///
-    /// **An estimate, and of one machine.** `a + b·log2(n / 100 000) + c·mean_len` per structure,
-    /// least-squares fitted to 240 cells measured on this crate's own hardware — an AMD Ryzen 7
-    /// 5800HS with 16 MB of L3 — with mean absolute error 9–21 % of the measurement. It is
-    /// accurate enough to order the candidates and nowhere near accurate enough to quote: on the
-    /// published sweep, which it was not fitted to, it picks `DictIndex` over `StringIndex` the
-    /// way the measurement does in 27 of 30 corpus-size cells and 13 of 13 at 100 000 keys — and
-    /// it will not tell you what your own lookup costs.
+    /// ```
+    /// # use lexindex::{plan_for, Kind, Needs, Objective, Workload};
+    /// let asked = Objective::Workload(Workload::default().hits(9).longest_prefix(1));
+    /// let p = plan_for(&["apple", "apricot"], Needs::default(), asked)?;
+    /// // A prefix query is a question only an ordered index answers.
+    /// assert!(p.needs().prefix && !Kind::Perfect.answers(p.needs()));
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn needs(&self) -> Needs {
+        self.needs
+    }
+
+    /// The modelled cost of one of the objective's operations on a candidate, in nanoseconds:
+    /// `id(key)`, or under [`Objective::Workload`] the workload's mean operation — infinite on a
+    /// candidate that cannot answer one of them.
+    ///
+    /// **An estimate, and of one machine.** `a + b·s + c·mean_len + d·s·mean_len` per structure
+    /// and operation, where `s` is `log2` of the candidate's blob over 64 KiB, fitted to 240 cells
+    /// measured on this crate's own hardware — an AMD Ryzen 7 5800HS with 16 MB of L3 — with mean
+    /// absolute error 5–13 % on `id(key)`. It is accurate enough to order the candidates and
+    /// nowhere near accurate enough to quote: fitted with a corpus left out, its fastest ordered
+    /// index on that corpus is the measured fastest in 24 of 30 corpus-size cells and never more
+    /// than 1.24× slower than it — and it will not tell you what your own lookup costs.
     ///
     /// ```
     /// # use lexindex::{plan, Needs};
@@ -428,7 +755,7 @@ impl Plan {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn nanos(&self, estimate: &Estimate) -> f64 {
-        cost_of(estimate.kind, estimate.block).nanos(self.keys, self.mean_len)
+        nanos_of(self.objective, estimate, self.keys, self.mean_len)
     }
 
     /// Distinct keys the plan was made for.
@@ -481,9 +808,10 @@ impl fmt::Display for Plan {
             self.mean_len,
             self.mean_lcp,
             match self.objective {
-                Objective::Memory => "size",
-                Objective::Latency => "latency",
-                Objective::Balanced => "balance",
+                Objective::Memory => "size".to_string(),
+                Objective::Latency => "latency".to_string(),
+                Objective::Balanced => "balance".to_string(),
+                Objective::Workload(workload) => workload.describe(),
             }
         )?;
         for e in &self.estimates {
@@ -839,8 +1167,9 @@ pub fn plan<S: AsRef<str>>(keys: &[S], needs: Needs) -> Result<Plan, IndexError>
 
 /// [`plan`], ranked by something other than the blob size.
 ///
-/// The candidates and their sizes are the same; only the order, and so [`Plan::best`], differ.
-/// [`Objective::Memory`] is exactly [`plan`].
+/// The candidates and their sizes are the same; only the order, and so [`Plan::best`], differ —
+/// except that a [`Workload`]'s operations add to the needs, since each is a question the index has
+/// to answer. [`Objective::Memory`] is exactly [`plan`].
 ///
 /// ```
 /// # use lexindex::{plan_for, Needs, Objective};
@@ -854,6 +1183,7 @@ pub fn plan_for<S: AsRef<str>>(
     needs: Needs,
     objective: Objective,
 ) -> Result<Plan, IndexError> {
+    let needs = objective.asks(needs);
     let mut sorted: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
     sorted.sort_unstable();
     sorted.dedup();
@@ -918,6 +1248,7 @@ fn plan_file_with(
     run_bytes: usize,
 ) -> Result<Plan, IndexError> {
     use crate::extsort::{Replay, Run, Runs};
+    let needs = objective.asks(needs);
     let mut run = Run::with_budget(run_bytes);
     let mut runs = Runs::beside(path);
     read_lines(path, &mut |key| {
@@ -1024,10 +1355,10 @@ fn read_lines(
 /// Put the candidates in the objective's order, best first. Ties, and every order, break on bytes,
 /// so two runs over the same keys rank them the same way.
 fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len: f64) {
-    let nanos = |e: &Estimate| cost_of(e.kind, e.block).nanos(keys, mean_len);
+    let nanos = |e: &Estimate| nanos_of(objective, e, keys, mean_len);
     match objective {
         Objective::Memory => estimates.sort_by_key(|e| e.bytes),
-        Objective::Latency => {
+        Objective::Latency | Objective::Workload(_) => {
             estimates.sort_by(|x, y| nanos(x).total_cmp(&nanos(y)).then(x.bytes.cmp(&y.bytes)));
         }
         Objective::Balanced => {
@@ -1294,7 +1625,11 @@ mod tests {
     /// The model is a curve in the block, fitted at four points and read anywhere in 1..=1024.
     #[test]
     fn the_dict_cost_follows_the_block_it_was_measured_at() {
-        let at = |block: usize| cost_of(Kind::Dict, Some(block)).nanos(SAMPLE, 10.0);
+        let at = |block: usize| {
+            let ops = ops_of(Kind::Dict, Some(block));
+            let (s, len) = ops.at(300_000, SAMPLE, 10.0);
+            ops.mixed.nanos(s, len)
+        };
         // Below and above the measured ends it is clamped, not extrapolated.
         assert_eq!(at(1), at(32));
         assert_eq!(at(1024), at(4096));
@@ -1303,22 +1638,198 @@ mod tests {
         assert!(at(256) < at(512) && at(512) < at(1024));
     }
 
-    /// Both arguments of the model do what the measurements said they do.
+    /// Every constant the fit produced, at every operation: never below zero, never cheaper for a
+    /// larger blob or longer keys, and never read past the edge of its evidence — a blob under its
+    /// smallest fitted size, keys shorter than any corpus's and a corpus under the sample are all
+    /// priced at those edges.
     #[test]
-    fn the_model_grows_with_the_corpus_and_with_the_keys() {
-        for kind in [Kind::Closed, Kind::Perfect, Kind::String, Kind::Dict] {
-            if !kind.available() {
-                continue;
+    fn the_model_grows_with_the_blob_and_the_keys_and_stops_at_its_evidence() {
+        let kinds = [
+            (Kind::Closed, None),
+            (Kind::Compact, None),
+            (Kind::Perfect, None),
+            (Kind::String, None),
+            (Kind::Dict, Some(32)),
+            (Kind::Dict, Some(100)),
+            (Kind::Dict, Some(1024)),
+        ];
+        for (kind, block) in kinds {
+            let ops = ops_of(kind, block);
+            assert!(ops.floor >= 0.0, "{kind:?} {block:?}");
+            let costs = [ops.mixed, ops.hit, ops.miss, ops.batch16, ops.batch1024]
+                .into_iter()
+                .chain(
+                    [ops.key, ops.prefix, ops.common_prefix, ops.longest_prefix]
+                        .into_iter()
+                        .flatten(),
+                );
+            for cost in costs {
+                let nanos = |bytes: u64, keys: usize, len: f64| {
+                    let (s, len) = ops.at(bytes, keys, len);
+                    cost.nanos(s, len)
+                };
+                let mut last = 0.0;
+                for shift in 10..40 {
+                    for len in [1.0, 10.0, 40.0, 200.0] {
+                        assert!(
+                            nanos(1 << shift, SAMPLE * 100, len) > 0.0,
+                            "{kind:?} {block:?}"
+                        );
+                    }
+                    let now = nanos(1 << shift, SAMPLE * 100, 20.0);
+                    assert!(now >= last, "{kind:?} {block:?}");
+                    assert!(
+                        nanos(1 << shift, SAMPLE * 100, 40.0) >= now,
+                        "{kind:?} {block:?}"
+                    );
+                    last = now;
+                }
+                assert_eq!(nanos(1, SAMPLE, 1.0), nanos(0, SAMPLE, LEN_FLOOR));
+                assert_eq!(
+                    nanos(1 << 20, SAMPLE / 10, 20.0),
+                    nanos(10 << 20, SAMPLE, 20.0)
+                );
             }
-            let c = cost_of(kind, None);
+            // `id(key)` itself gets dearer as the blob grows, which is what `Latency` ranks by.
+            let (near, len) = ops.at(1 << 20, SAMPLE, 20.0);
+            let (far, _) = ops.at(1 << 30, SAMPLE, 20.0);
             assert!(
-                c.nanos(SAMPLE, 10.0) < c.nanos(SAMPLE * 100, 10.0),
-                "{kind:?}"
+                ops.mixed.nanos(near, len) < ops.mixed.nanos(far, len),
+                "{kind:?} {block:?}"
             );
-            assert!(c.nanos(SAMPLE, 10.0) < c.nanos(SAMPLE, 40.0), "{kind:?}");
-            // Nothing below the sample extrapolates past where the fit has evidence.
-            assert_eq!(c.nanos(1, 10.0), c.nanos(SAMPLE, 10.0), "{kind:?}");
         }
+    }
+
+    /// The model prices an operation for every kind that answers it and for no kind that does not,
+    /// so what decides a workload's candidates is its needs and never a missing constant.
+    #[test]
+    fn every_kind_prices_exactly_the_operations_it_answers() {
+        for kind in [
+            Kind::Compact,
+            Kind::Closed,
+            Kind::Perfect,
+            Kind::String,
+            Kind::Dict,
+        ] {
+            let ops = ops_of(kind, None);
+            let reverse = kind.answers(Needs::default().reverse());
+            let prefix = kind.answers(Needs::default().prefix());
+            assert_eq!(ops.key.is_some(), reverse, "{kind:?}");
+            assert_eq!(ops.prefix.is_some(), prefix, "{kind:?}");
+            assert_eq!(ops.common_prefix.is_some(), prefix, "{kind:?}");
+            assert_eq!(ops.longest_prefix.is_some(), prefix, "{kind:?}");
+        }
+    }
+
+    /// A batch is priced between the sizes that were measured and at the last of them past it, and
+    /// saves hits and misses the share it saved the mixed lookups it was measured on.
+    #[test]
+    fn a_batch_is_priced_between_the_sizes_measured() {
+        let ops = ops_of(Kind::Perfect, None);
+        let (s, len) = ops.at(1 << 30, SAMPLE * 100, 12.0);
+        let at = |size: u32| Workload::default().hits(1).batch(size).nanos(&ops, s, len);
+        let hit = ops.hit.nanos(s, len);
+        let share = |cost: Cost| cost.nanos(s, len) / ops.mixed.nanos(s, len);
+        let close = |x: f64, y: f64| (x - y).abs() <= 1e-9 * y.abs();
+        assert!(close(at(0), hit) && close(at(1), hit));
+        assert!(close(at(16), hit * share(ops.batch16)));
+        assert!(close(at(1_024), hit * share(ops.batch1024)));
+        assert!(close(at(u32::MAX), at(1_024)));
+        let (lo, hi) = (at(16).min(at(1_024)), at(16).max(at(1_024)));
+        assert!(
+            (lo..=hi).contains(&at(128)),
+            "{} not in {lo}..={hi}",
+            at(128)
+        );
+        assert!(at(16) < at(1), "a key of a batch costs less than a call");
+    }
+
+    /// A workload is ranked by what it asks: among the ordered indexes, the fst for a workload of
+    /// `common_prefix` and the dictionary for one of prefix counts, and for batches of lookups a
+    /// hash index ahead of both.
+    #[test]
+    fn a_workload_ranks_by_what_it_asks() {
+        let keys = corpus(2_000);
+        let best = |asked: Workload| {
+            plan_for(&keys, Needs::default(), Objective::Workload(asked))
+                .unwrap()
+                .best()
+                .kind
+        };
+        assert_eq!(
+            best(Workload::default().hits(1).common_prefix(9)),
+            Kind::String
+        );
+        assert_eq!(best(Workload::default().hits(1).prefix(9)), Kind::Dict);
+        if cfg!(feature = "mph") {
+            let kind = best(Workload::default().hits(1).batch(1_024));
+            assert!(matches!(kind, Kind::Closed | Kind::Compact), "{kind:?}");
+        }
+    }
+
+    /// An operation is a question the index has to answer, so a workload that asks one narrows the
+    /// candidates exactly as the need would.
+    #[test]
+    fn a_workload_asks_for_what_its_operations_need() {
+        let keys = corpus(500);
+        let kinds = |p: Plan| {
+            let mut kinds: Vec<_> = p
+                .estimates()
+                .iter()
+                .map(|e| (e.kind.name(), e.block))
+                .collect();
+            kinds.sort_unstable();
+            kinds
+        };
+        for (asked, needs) in [
+            (Workload::default().reverse(1), Needs::default().reverse()),
+            (Workload::default().prefix(1), Needs::default().prefix()),
+            (
+                Workload::default().common_prefix(1),
+                Needs::default().prefix(),
+            ),
+            (
+                Workload::default().longest_prefix(1),
+                Needs::default().prefix(),
+            ),
+        ] {
+            let got = plan_for(&keys, Needs::default(), Objective::Workload(asked)).unwrap();
+            assert_eq!(kinds(got), kinds(plan(&keys, needs).unwrap()), "{asked:?}");
+        }
+    }
+
+    /// With nothing asked, a workload is an `id(key)` over half members and half strangers: the
+    /// ranking, the nanoseconds and the ladder of `Latency`.
+    #[test]
+    fn a_workload_that_asks_nothing_is_latency() {
+        let keys = corpus(2_000);
+        let needs = Needs::default().exact();
+        let latency = plan_for(&keys, needs, Objective::Latency).unwrap();
+        let empty = plan_for(&keys, needs, Objective::Workload(Workload::default())).unwrap();
+        assert_eq!(latency.estimates(), empty.estimates());
+        for e in latency.estimates() {
+            assert_eq!(latency.nanos(e), empty.nanos(e));
+        }
+        assert_eq!(latency.to_string(), empty.to_string());
+    }
+
+    #[test]
+    fn the_ladder_names_the_workload_it_ranked_by() {
+        let ladder = |asked: Workload| {
+            plan_for(&corpus(500), Needs::default(), Objective::Workload(asked))
+                .unwrap()
+                .to_string()
+        };
+        let text = ladder(Workload::default().hits(9).misses(1).batch(64));
+        let first = text.lines().next().unwrap();
+        assert!(
+            first.ends_with("ranked by workload (hits 9, misses 1, batch 64)"),
+            "{text}"
+        );
+        assert!(text.contains("not a measurement of yours"), "{text}");
+        let text = ladder(Workload::default().batch(64));
+        let first = text.lines().next().unwrap();
+        assert!(first.ends_with("ranked by latency (batch 64)"), "{text}");
     }
 
     /// The ladder says what it ranked by and that the nanoseconds are not a measurement.
@@ -1583,7 +2094,12 @@ mod tests {
         let keys = corpus(1_500);
         let text = keys.join("\n") + "\n";
         let path = keys_file("small.txt", &text);
-        for objective in [Objective::Memory, Objective::Latency, Objective::Balanced] {
+        for objective in [
+            Objective::Memory,
+            Objective::Latency,
+            Objective::Balanced,
+            Objective::Workload(Workload::default().hits(3).longest_prefix(1)),
+        ] {
             let needs = Needs::default().reverse().ordered();
             let want = plan_for(&keys, needs, objective).unwrap();
             let got = plan_file(&path, needs, objective).unwrap();

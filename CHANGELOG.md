@@ -63,26 +63,45 @@ All notable changes to this project are documented here. The format follows
   change with the objective, only the order and so `Plan::best`. On an English word list asked for
   a reverse lookup, `Memory` answers `DictIndex` at 2.76 bytes a key and block 1024, `Latency`
   answers `PerfectHashIndex`, four times the size and half the wait, and `Balanced` answers the
-  same dictionary at block 32 — 12 % faster for 16 % more space. `lexindex plan|build
+  same dictionary at block 32 — 18 % faster for 16 % more space. `lexindex plan|build
   --objective memory|latency|balanced` and Python's `plan(..., objective=...)` reach it, and every
   estimate now carries `nanos`.
 
+- **[`Objective::Workload`](https://docs.rs/lexindex/latest/lexindex/struct.Workload.html)**: rank
+  by what the index will actually be asked. A `Workload` weighs `hits`, `misses`, `reverse`,
+  `prefix`, `common_prefix` and `longest_prefix` against each other — relative weights, so counts
+  read off a log serve as they are — and `batch` sets the keys an `ids_of` call holds. Every
+  candidate is priced at the workload's mean operation from constants fitted per operation, and one
+  that cannot answer an operation prices itself out. An operation is a need as well: `reverse` rules
+  out the two indexes that store no keys and a prefix query asks for an ordered one, and
+  [`Plan::needs`](https://docs.rs/lexindex/latest/lexindex/struct.Plan.html#method.needs) says what
+  a ranking was made under. The ordered pair is where it decides something: on an English word list
+  `common_prefix` nine to one against hits answers `StringIndex` at 420 ns against 1 502 for the
+  fastest dictionary, `prefix` in the same proportion answers `DictIndex` at block 32, 298 ns
+  against 824, and batches of 1 024 leave `PerfectHashIndex` first at 74 ns a key. A workload that
+  asks nothing is `Latency`. `lexindex plan|build --objective hits=9,misses=1,batch=64` and Python's
+  `plan(..., objective={"hits": 9, "misses": 1, "batch": 64})` reach it.
+
 - **[`Plan::nanos`](https://docs.rs/lexindex/latest/lexindex/struct.Plan.html#method.nanos), and a
-  nanosecond column on the ladder.** `a + b·log2(n / 100 000) + c·mean_len` per structure and per
-  `DictIndex` block, least-squares fitted to 240 cells: eight structures over thirteen corpora at
-  100 000, 1 000 000 and 10 000 000 keys, timed in one process with the lanes alternating so that
-  nothing is measured with the caches still warm from its own build. **`bench/latency_model.py`**
-  is the harness; its `fit` re-derives the table in `src/estimate.rs` from the artifact in
-  `bench/results/`, so the constants are checkable rather than asserted. Mean absolute error
-  9–21 %. **It is an ordering, not a prediction.** Scored against the published sweep, which it was
-  not fitted to, it picks `DictIndex` over `StringIndex` the way the measurement does in 27 of 30
-  corpus-size cells and 13 of 13 at 100 000 keys — over every lane at once it is 30 of 30, but
-  `ClosedHashIndex` wins most of those outright, so that number flatters it. And because the cells
-  were timed through the Python binding it reads 362 and 396 ns for `StringIndex` and `DictIndex`
-  on the word list where the Rust harness in `docs/benchmarks.md` measures 234 and 266; that
-  overhead falls on every candidate alike, so it moves the numbers and not the ranking. The ladder
-  says so on its last line, every time it prints one. Below 100 000 keys the model reports the
-  100 000-key figure rather than extrapolating past the evidence.
+  nanosecond column on the ladder.** `a + b·s + c·len + d·s·len` per structure, operation and
+  `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the candidate's blob
+  over 64 KiB — what a lookup waits on is how far its bytes are from the CPU, which the key count
+  alone does not say. Fitted on relative error to 240 cells: eight structures over thirteen corpora
+  at 100 000 keys, eleven at 1 000 000 and six at 10 000 000, timed in one process with every
+  operation over fresh probes of its own and every structure timed at every place in its round.
+  **`bench/latency_model.py`** is the harness; its `fit` re-derives the tables in `src/estimate.rs`
+  from the artifact in `bench/results/`, so the constants are checkable rather than asserted. Mean
+  absolute error 5–13 % on `id(key)`, 23–28 % at worst on prefix counts. **It is an ordering, not a
+  prediction.** Fitted with a corpus left out, it names the fastest `id(key)` on that corpus in 30
+  of 30 corpus-size cells and the fastest ordered index in 24, never picking one more than 1.24×
+  slower; against the published sweep, which it was not fitted to, it picks between `DictIndex` and
+  `StringIndex` the way the measurement does in 24 of 30 cells, never one more than 1.20× slower.
+  And because the cells were timed through the Python binding it reads 311 and 318 ns for
+  `StringIndex` and `DictIndex` on the word list where the Rust harness in `docs/benchmarks.md`
+  measures 234 and 266; that overhead falls on every candidate alike, so it moves the numbers and
+  not the ranking. The ladder says so on its last line, every time it prints one. A corpus under
+  100 000 keys is priced as its 100 000-key equivalent, and the blob and key length are held at the
+  smallest the fit saw rather than extrapolated past the evidence.
 
 - **`lexindex build --stream`**: the command line builds without holding the corpus. With a named
   `--index` and a keys file, `build` feeds the file into the streaming builders instead of reading
