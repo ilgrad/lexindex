@@ -235,6 +235,19 @@ const RANK_BLOCK: usize = 512;
 /// Set bits per select sample of an Elias–Fano upper vector.
 const SELECT_BLOCK: usize = 128;
 
+/// First-level seeds, a byte each, from which [`V2::index_all`] prefetches them: a smaller level
+/// sits in L2 on current cores, where a prefetch is only more work.
+const PREFETCH_SEEDS: usize = 1 << 18;
+
+/// Keys between a first-level seed's prefetch and its read in [`V2::index_all`].
+const SEED_AHEAD: usize = 64;
+
+/// Keys [`V2::index_all`] takes through the first level before it answers those it bumped.
+const BATCH_BLOCK: usize = 1024;
+
+/// Bumped keys between one stage of [`V2::resolve_bumped`] and the next.
+const STAGE_GAP: usize = 8;
+
 /// Multiply-shift range reduction: `x` scaled into `[0, k)` without a division.
 #[inline(always)]
 fn scale(x: u64, k: u64) -> u64 {
@@ -256,6 +269,45 @@ fn mix(x: u64) -> u64 {
 #[inline(always)]
 fn level_hash(h: u64, level: usize) -> u64 {
     mix(h ^ (level as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+}
+
+const ONES: u64 = 0x0101_0101_0101_0101;
+
+/// `SELECT_IN_BYTE[r << 8 | b]` is the position of the `r`-th set bit of the byte `b`, from 0.
+const SELECT_IN_BYTE: [u8; 2048] = {
+    let mut table = [0u8; 2048];
+    let mut b = 0usize;
+    while b < 256 {
+        let (mut r, mut bit) = (0usize, 0usize);
+        while bit < 8 {
+            if (b >> bit) & 1 == 1 {
+                table[(r << 8) | b] = bit as u8;
+                r += 1;
+            }
+            bit += 1;
+        }
+        b += 1;
+    }
+    table
+};
+
+/// The position of the `r`-th set bit of `x`, from 0, for `r` below `x`'s set bits; past them,
+/// some position in the word. The byte holding it comes from the running byte counts compared all
+/// at once, the bit from a table, and nothing branches: which bit it is is as unpredictable as the
+/// key that asked.
+#[inline(always)]
+fn select_in_word(x: u64, r: u64) -> u64 {
+    let s = x - ((x >> 1) & 0x5555_5555_5555_5555);
+    let s = (s & 0x3333_3333_3333_3333) + ((s >> 2) & 0x3333_3333_3333_3333);
+    // Byte `i` counts the set bits of bytes `0..=i`, at most 64.
+    let sums = ((s + (s >> 4)) & 0x0F0F_0F0F_0F0F_0F0F).wrapping_mul(ONES);
+    // The high bit of byte `i` is set where that count is at most `r`: both are below 128, so no
+    // byte borrows from the next.
+    let at_most = (((r & 0x7F).wrapping_mul(ONES) | (ONES << 7)) - sums) & (ONES << 7);
+    let byte = ((((at_most >> 7).wrapping_mul(ONES)) >> 56) * 8).min(56);
+    let before = ((sums << 8) >> byte) & 0xFF;
+    let rank = r.wrapping_sub(before) & 7;
+    byte + u64::from(SELECT_IN_BYTE[((rank << 8) | ((x >> byte) & 0xFF)) as usize])
 }
 
 /// Occupancy of a level's values, laid out so that the values one key can take under consecutive
@@ -677,7 +729,15 @@ struct Ef {
     low: Vec<u64>,
     high: Vec<u64>,
     sel: Vec<u32>,
+    /// Set bits of `high` before each of its words, modulo 2^16. Derived whenever the table is
+    /// built or read, never stored: it turns the walk from a select sample to the bit into one
+    /// comparison a word.
+    counts: Vec<u16>,
 }
+
+/// Words of `high` that [`Ef::get`] compares against the index it looks for at once; past them it
+/// moves a window on, which the density of the high bits makes rare.
+const SELECT_WINDOW: usize = 8;
 
 impl Ef {
     /// Low bits per value for `len` values below `u`: what leaves the high part about as dense as
@@ -710,6 +770,7 @@ impl Ef {
             low: vec![0; Self::low_words(len, low_bits)],
             high: vec![0; Self::high_words(len, u, low_bits)],
             sel: Vec::with_capacity(Self::samples(len)),
+            counts: Vec::new(),
         };
         let mut j = 0u64;
         for v in values {
@@ -731,38 +792,68 @@ impl Ef {
             j += 1;
         }
         debug_assert_eq!(j, len);
+        ef.counts = Self::counts(&ef.high);
         ef
+    }
+
+    /// [`counts`](Self::counts) for `high`.
+    fn counts(high: &[u64]) -> Vec<u16> {
+        high.iter()
+            .scan(0u16, |seen, word| {
+                let before = *seen;
+                *seen = seen.wrapping_add(word.count_ones() as u16);
+                Some(before)
+            })
+            .collect()
+    }
+
+    /// Pulls in what [`get`](Self::get) reads first for `j`: its select sample and its low bits.
+    #[inline(always)]
+    fn prefetch_sample(&self, j: u64) {
+        crate::blob::prefetch(&self.sel, j as usize / SELECT_BLOCK);
+        crate::blob::prefetch(&self.low, (j * u64::from(self.low_bits) / 64) as usize);
+    }
+
+    /// Pulls in the words [`get`](Self::get) compares and selects in for `j`, from its sample.
+    #[inline(always)]
+    fn prefetch_high(&self, j: u64) {
+        if let Some(&sample) = self.sel.get(j as usize / SELECT_BLOCK) {
+            let w = sample as usize / 64;
+            crate::blob::prefetch(&self.counts, w);
+            crate::blob::prefetch(&self.counts, w + SELECT_WINDOW);
+            crate::blob::prefetch(&self.high, w);
+            crate::blob::prefetch(&self.high, w + SELECT_WINDOW - 1);
+        }
     }
 
     /// The `j`-th value, for `j < len`. On a validated table this is exact; on anything else it
     /// is some number, which is all the caller needs.
+    ///
+    /// The high part is the `j`-th set bit, a few words past the sampled one. Which word holds it is
+    /// read off [`counts`](Self::counts): every word of a window is compared against `j` at once,
+    /// and the bit is found inside its word without a loop. A scan word by word, then bit by bit,
+    /// stops after as many steps as the key dictates, and its mispredicted exits were most of a
+    /// bumped key's lookup.
+    #[inline(always)]
     fn get(&self, j: u64) -> u64 {
         let Some(&sample) = self.sel.get(j as usize / SELECT_BLOCK) else {
             return 0;
         };
-        // From the sampled set bit, the (j mod block)-th set bit after it.
-        let mut need = (j as usize % SELECT_BLOCK) as u32;
-        let mut w = sample as usize / 64;
-        let mut word = self
-            .high
-            .get(w)
-            .map_or(0, |x| x & (u64::MAX << (sample % 64)));
-        let p = loop {
-            let c = word.count_ones();
-            if c > need {
-                let mut x = word;
-                for _ in 0..need {
-                    x &= x - 1;
-                }
-                break w as u64 * 64 + u64::from(x.trailing_zeros());
-            }
-            need -= c;
-            w += 1;
-            let Some(&next) = self.high.get(w) else {
-                return 0;
-            };
-            word = next;
+        // Within a window the counts are a few hundred from `j`, so their difference modulo 2^16
+        // still says on which side of the `j`-th bit a word starts.
+        let jj = j as u16;
+        let starts_before = |w: usize| {
+            self.counts
+                .get(w)
+                .is_some_and(|&c| jj.wrapping_sub(c) < 0x8000)
         };
+        let mut w = sample as usize / 64;
+        while starts_before(w + SELECT_WINDOW) {
+            w += SELECT_WINDOW;
+        }
+        let w = w + (1..SELECT_WINDOW).filter(|&d| starts_before(w + d)).count();
+        let r = jj.wrapping_sub(self.counts.get(w).copied().unwrap_or(jj));
+        let p = w as u64 * 64 + select_in_word(self.high.get(w).copied().unwrap_or(0), r.into());
         let high = p - j;
         let low = if self.low_bits == 0 {
             0
@@ -817,6 +908,10 @@ struct Remap {
     /// The first level's holes, in order. Empty when there is no first level: the holes are then
     /// all of `[0, n)` and the `j`-th is `j`.
     holes: Ef,
+    /// Set bits before each word of `set` within its rank block. Derived whenever the table is built
+    /// or read, never stored: with it a rank reads three numbers and counts one word, where
+    /// counting the block's words before it was a loop as long as the key dictates.
+    before: Vec<u16>,
 }
 
 impl Remap {
@@ -828,23 +923,56 @@ impl Remap {
         entries.div_ceil(RANK_BLOCK)
     }
 
-    /// The hole for value `i` of the levels below the first: the `j`-th hole for the `j`-th set
-    /// bit at or before `i`. A value no key landed on — a hash that was never built in — takes
+    fn new(set: Vec<u64>, rank: Vec<u32>, holes: Ef) -> Self {
+        let before = set
+            .chunks(RANK_BLOCK / 64)
+            .flat_map(|block| {
+                block.iter().scan(0u16, |seen, word| {
+                    let before = *seen;
+                    *seen += word.count_ones() as u16;
+                    Some(before)
+                })
+            })
+            .collect();
+        Self {
+            set,
+            rank,
+            holes,
+            before,
+        }
+    }
+
+    /// Which hole value `i` of the levels below the first takes: the `j`-th for the `j`-th set bit
+    /// at or before `i`. A value no key landed on — a hash that was never built in — takes
     /// whichever hole its predecessor took, or the first.
-    fn lookup(&self, i: u64) -> u64 {
+    #[inline(always)]
+    fn hole_index(&self, i: u64) -> u64 {
         let i = i as usize;
         let (w, o) = (i / 64, i % 64);
-        let mut j = u64::from(self.rank[i / RANK_BLOCK]);
-        for &word in &self.set[(i / RANK_BLOCK) * (RANK_BLOCK / 64)..w] {
-            j += u64::from(word.count_ones());
-        }
-        j += u64::from((self.set[w] & (u64::MAX >> (63 - o))).count_ones());
-        let j = j.saturating_sub(1);
+        let j = u64::from(self.rank[i / RANK_BLOCK])
+            + u64::from(self.before[w])
+            + u64::from((self.set[w] & (u64::MAX >> (63 - o))).count_ones());
+        j.saturating_sub(1)
+    }
+
+    /// The hole for value `i` of the levels below the first.
+    #[inline(always)]
+    fn lookup(&self, i: u64) -> u64 {
+        let j = self.hole_index(i);
         if self.holes.len == 0 {
             j
         } else {
             self.holes.get(j)
         }
+    }
+
+    /// Pulls in what [`hole_index`](Self::hole_index) reads for `i`.
+    #[inline(always)]
+    fn prefetch_hole_index(&self, i: u64) {
+        let i = i as usize;
+        crate::blob::prefetch(&self.set, i / 64);
+        crate::blob::prefetch(&self.before, i / 64);
+        crate::blob::prefetch(&self.rank, i / RANK_BLOCK);
     }
 
     /// One pass: every rank sample is the count before its block. Returns the total.
@@ -1131,22 +1259,120 @@ impl V2 {
     #[cold]
     #[inline(never)]
     fn index_bumped(&self, h: u64) -> u64 {
+        self.bumped_value(h).map_or(0, |v| self.remap.lookup(v))
+    }
+
+    /// The remap entry a bumped key lands on: its value on the first further level that places it,
+    /// after every earlier level's values, or its place in the tail; `None` when the tail is empty.
+    #[inline(always)]
+    fn bumped_value(&self, h: u64) -> Option<u64> {
         let mut shift = 0u64;
         for (i, l) in self.rest.iter().enumerate() {
             let hi = level_hash(h, i + 1);
             let seed = l.seeds[scale(hi, l.buckets) as usize];
             if seed != 0 {
-                return self.remap.lookup(shift + l.value(hi, seed));
+                return Some(shift + l.value(hi, seed));
             }
             shift += l.n;
         }
         let t = &self.tail;
         if t.buckets == 0 {
-            return 0;
+            return None;
         }
         let ht = mix(h ^ t.seed);
         let seed = t.seeds[scale(ht, t.buckets) as usize];
-        self.remap.lookup(shift + Tail::position(ht, seed, t.range))
+        Some(shift + Tail::position(ht, seed, t.range))
+    }
+
+    /// [`Mphf::index_all`] on this table.
+    fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
+        self.index_all_from(hashes, PREFETCH_SEEDS)
+    }
+
+    /// [`index_all`](Self::index_all) with the first-level size it prefetches from as a parameter.
+    /// Below it the batch is the single lookup in a loop. From it, a key's seed is pulled in
+    /// [`SEED_AHEAD`] keys before its turn, and the keys the first level bumps are noted and
+    /// answered once their block has been through it.
+    fn index_all_from(&self, hashes: &[u64], prefetch_seeds: usize) -> Vec<u64> {
+        let Some(l) = self
+            .first
+            .as_ref()
+            .filter(|l| l.seeds.len() >= prefetch_seeds)
+        else {
+            return hashes.iter().map(|&h| self.index(h)).collect();
+        };
+        let mut out = Vec::with_capacity(hashes.len());
+        // A bumped key's offset in its block, and how far its answer has got.
+        let mut bumped: Vec<(usize, u64)> = Vec::new();
+        for (b, block) in hashes.chunks(BATCH_BLOCK).enumerate() {
+            let base = b * BATCH_BLOCK;
+            bumped.clear();
+            out.extend(block.iter().enumerate().map(|(k, &h)| {
+                if let Some(&next) = hashes.get(base + k + SEED_AHEAD) {
+                    crate::blob::prefetch_byte(&l.seeds, scale(next, l.buckets) as usize);
+                }
+                let seed = l.seeds[scale(h, l.buckets) as usize];
+                if seed == 0 {
+                    bumped.push((k, 0));
+                }
+                l.value(h, seed)
+            }));
+            if !bumped.is_empty() {
+                let start = out.len() - block.len();
+                self.resolve_bumped(block, &mut bumped, &mut out[start..]);
+            }
+        }
+        out
+    }
+
+    /// The keys of `block` the first level bumped, each held in `bumped` by its offset and how far
+    /// its answer has got — `u64::MAX` once that answer is 0 — answered into `out`, the block's
+    /// answers.
+    ///
+    /// Such a key makes four more loads, each known only once the one before it is read: its next
+    /// level's seed, the rank words, the select sample, the high words. Its answer is five stages,
+    /// each pulling in what the next one reads, and the stages run side by side, each
+    /// [`STAGE_GAP`] keys behind the one before it: a load is issued that many steps before it is
+    /// read however many keys the block bumped, where a pass over all of them per stage leaves the
+    /// later stages' loads almost no lead.
+    #[inline(always)]
+    fn resolve_bumped(&self, block: &[u64], bumped: &mut [(usize, u64)], out: &mut [u64]) {
+        let holes = &self.remap.holes;
+        let behind = |i: usize, stages: usize| i.checked_sub(stages * STAGE_GAP);
+        for i in 0..bumped.len() + 4 * STAGE_GAP {
+            if let Some(&(k, _)) = bumped.get(i) {
+                if let Some(next) = self.rest.first() {
+                    let at = scale(level_hash(block[k], 1), next.buckets) as usize;
+                    crate::blob::prefetch_byte(&next.seeds, at);
+                }
+            }
+            if let Some((k, at)) = behind(i, 1).and_then(|j| bumped.get_mut(j)) {
+                *at = self.bumped_value(block[*k]).map_or(u64::MAX, |v| {
+                    self.remap.prefetch_hole_index(v);
+                    v
+                });
+            }
+            if let Some((_, at)) = behind(i, 2).and_then(|j| bumped.get_mut(j)) {
+                if *at != u64::MAX {
+                    *at = self.remap.hole_index(*at);
+                    holes.prefetch_sample(*at);
+                }
+            }
+            if let Some(&(_, at)) = behind(i, 3).and_then(|j| bumped.get(j)) {
+                if at != u64::MAX {
+                    holes.prefetch_high(at);
+                }
+            }
+            if let Some(&(k, at)) = behind(i, 4).and_then(|j| bumped.get(j)) {
+                out[k] = if at == u64::MAX {
+                    0
+                } else if holes.len == 0 {
+                    at
+                } else {
+                    holes.get(at)
+                };
+            }
+        }
     }
 
     fn build(hashes: &[u64], threads: usize) -> Result<Self, IndexError> {
@@ -1272,7 +1498,7 @@ impl V2 {
             first: levels.next(),
             rest: levels.collect(),
             tail,
-            remap: Remap { set, rank, holes },
+            remap: Remap::new(set, rank, holes),
         })
     }
 
@@ -1811,17 +2037,19 @@ impl V2 {
         let high = take(bytes, &mut p, high_words, u64::from_le_bytes);
         let sel = take(bytes, &mut p, samples, u32::from_le_bytes);
         debug_assert_eq!(p, bytes.len());
-        let remap = Remap {
+        let counts = Ef::counts(&high);
+        let remap = Remap::new(
             set,
             rank,
-            holes: Ef {
+            Ef {
                 len: holes,
                 low_bits,
                 low,
                 high,
                 sel,
+                counts,
             },
-        };
+        );
 
         // The checks that cost more than a comparison, and the ones that make the image a promise
         // rather than a hope: the rank samples must count what they claim, so that a set bit's
@@ -2098,33 +2326,31 @@ impl Mphf {
         }
     }
 
-    /// [`index`](Self::index) over a batch, with the seed byte a later key will need pulled into
-    /// cache while the current key resolves.
+    /// [`index`](Self::index) over a batch, which a single lookup cannot see past: the cache lines
+    /// a later key will read are pulled in while the current one resolves.
     ///
-    /// The seed table is the only access in `index` that is random over more than a page, and at
-    /// ~2 bits a key it outgrows L2 somewhere around a million keys — from there every lookup pays
-    /// a miss whose latency nothing else in the query can hide. A batch can see the next key's
-    /// bucket and a single lookup cannot, which is the whole of the difference; recomputing that
-    /// bucket to issue the prefetch costs a multiply against the miss it hides.
+    /// The first level's seed is the only load most keys make, and at ~2 bits a key the seeds
+    /// outgrow L2 around a million keys: from there every lookup pays a miss nothing else in the
+    /// query can hide, unless the batch issued it a few dozen keys before; below it the batch is the
+    /// single lookup in a loop. The few per cent of keys the first level bumps make four more loads,
+    /// each known only once the one before it is read — their next level's seed, the rank words,
+    /// the select sample, the high words — so they are answered after their block, in stages that
+    /// each run a few keys behind the one before.
     pub fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
-        const AHEAD: usize = 16;
-        let mut out = Vec::with_capacity(hashes.len());
-        for (i, &h) in hashes.iter().enumerate() {
-            if let Some(&next) = hashes.get(i + AHEAD) {
-                match &self.table {
-                    Table::V2(t) => {
-                        if let Some(l) = &t.first {
-                            crate::blob::prefetch_byte(&l.seeds, scale(next, l.buckets) as usize);
-                        }
-                    }
-                    Table::V1(t) => {
+        match &self.table {
+            Table::V2(t) => t.index_all(hashes),
+            Table::V1(t) => {
+                const AHEAD: usize = 16;
+                let mut out = Vec::with_capacity(hashes.len());
+                for (i, &h) in hashes.iter().enumerate() {
+                    if let Some(&next) = hashes.get(i + AHEAD) {
                         crate::blob::prefetch_byte(&t.pilots, t.locate(next).1 as usize);
                     }
+                    out.push(t.index(h));
                 }
+                out
             }
-            out.push(self.index(h));
         }
-        out
     }
 
     /// How many keys are in the image.
@@ -2638,6 +2864,120 @@ mod tests {
     fn it_is_a_bijection_onto_the_dense_range() {
         for n in [1usize, 2, 3, 7, 64, 1_000, 10_000, 20_000] {
             assert_bijection(&hashes(n));
+        }
+    }
+
+    /// The batch answers what the single lookup answers, key for key, for members and for hashes
+    /// never built in: in a loop and staged, over tables with no first level, with only a tail
+    /// behind it and with later levels, and on batches that end inside a block.
+    #[test]
+    fn index_all_answers_what_index_answers() {
+        let strangers: Vec<u64> = (0..20_000u64).map(|i| mix(!i)).collect();
+        for n in [1usize, 100, 300, 5_000, 200_000] {
+            let hs = hashes(n);
+            let m = Mphf::build(&hs).expect("build");
+            let t = v2(&m);
+            if n == 200_000 {
+                assert!(!t.rest.is_empty(), "no later level to stage through");
+            }
+            for probe in [&hs[..], &strangers[..]] {
+                let want: Vec<u64> = probe.iter().map(|&h| m.index(h)).collect();
+                assert_eq!(m.index_all(probe), want, "n = {n}");
+                for len in [0, 1, SEED_AHEAD + 1, BATCH_BLOCK + 3, probe.len()] {
+                    let part = &probe[..len.min(probe.len())];
+                    assert_eq!(
+                        t.index_all_from(part, 0),
+                        want[..part.len()],
+                        "n = {n}, {len} keys"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The select inside a word finds the bit that clearing the lower set bits one at a time
+    /// reaches, for every rank, in words dense, sparse and with whole bytes empty.
+    #[test]
+    fn select_in_word_finds_the_rth_set_bit() {
+        let edges = [
+            1u64,
+            1 << 63,
+            u64::MAX,
+            0x8000_0000_0000_0001,
+            0x00FF_0000_0000_FF00,
+        ];
+        let random = (0..20_000u64).map(|i| {
+            let x = mix(i);
+            match i % 4 {
+                0 => x,
+                1 => x & mix(!x),
+                2 => x & mix(!x) & mix(x ^ i),
+                _ => x | mix(!x),
+            }
+        });
+        for word in edges.into_iter().chain(random) {
+            let mut rest = word;
+            for r in 0..u64::from(word.count_ones()) {
+                assert_eq!(
+                    select_in_word(word, r),
+                    u64::from(rest.trailing_zeros()),
+                    "{word:#x}, r = {r}"
+                );
+                rest &= rest - 1;
+            }
+        }
+    }
+
+    /// `Ef::get` returns every value it encoded: uniform sequences over dense and sparse universes,
+    /// one long enough that the derived counts wrap, and two clusters at the ends of the universe,
+    /// whose empty middle is wider than a window of words.
+    #[test]
+    fn elias_fano_returns_every_value_it_encoded() {
+        let uniform = |len: u64, u: u64| {
+            let mut v: Vec<u64> = (0..len).map(|i| scale(mix(i ^ u), u)).collect();
+            v.sort_unstable();
+            v
+        };
+        let top = 1u64 << 32;
+        let cases = [
+            (vec![7], 10),
+            ((0..700).collect(), 700),
+            (uniform(1_000, 2_000), 2_000),
+            (uniform(3_000, 100_000), 100_000),
+            (uniform(200_000, 1 << 36), 1 << 36),
+            ((0..1_000).chain(top - 1_000..top).collect(), top),
+        ];
+        for (values, u) in cases {
+            let ef = Ef::encode(values.iter().copied(), values.len() as u64, u);
+            for (j, &v) in values.iter().enumerate() {
+                assert_eq!(
+                    ef.get(j as u64),
+                    v,
+                    "value {j} of {} below {u}",
+                    values.len()
+                );
+            }
+        }
+    }
+
+    /// The rank off the derived counts is the plain count of set bits up to the value, for every
+    /// value of a real table's remap, set or not, across its rank blocks.
+    #[test]
+    fn hole_index_counts_the_set_bits_up_to_a_value() {
+        let m = Mphf::build(&hashes(200_000)).expect("build");
+        let remap = &v2(&m).remap;
+        assert!(
+            remap.set.len() * 64 > 4 * RANK_BLOCK,
+            "a single rank block proves little"
+        );
+        let mut seen = 0u64;
+        for i in 0..remap.set.len() * 64 {
+            seen += (remap.set[i / 64] >> (i % 64)) & 1;
+            assert_eq!(
+                remap.hole_index(i as u64),
+                seen.saturating_sub(1),
+                "value {i}"
+            );
         }
     }
 
