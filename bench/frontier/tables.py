@@ -5,12 +5,14 @@
 
 The log is the evidence: every process's own output, under a header that names the machine, the
 toolchain and every competitor's commit. `--json` writes the same name with a `.json` suffix, one
-cell a structure and corpus with the header as its environment. The markdown printed is what the
-docs quote: an overview, then a table a corpus.
+cell a structure and corpus holding each round's run, with the header as its environment. The
+markdown printed is what the docs quote: an overview, then a table a corpus.
 
-Sizes are each structure's own account of itself: lexindex's serialised blob, `space_cost()` for the
-C² benchmark's structures and `memory_in_bytes` for XCDAT. ART and C-ART count their nodes and not
-the keys they point into, so they are printed for reference and kept out of every comparison.
+A cell's `id` and build times are the medians of its rounds, and its spread is the range of the `id`
+times over that median; a structure that fails in any round has no numbers, only the reason. Sizes
+are each structure's own account of itself: lexindex's serialised blob, `space_cost()` for the C²
+benchmark's structures and `memory_in_bytes` for XCDAT. ART and C-ART count their nodes and not the
+keys they point into, so they are printed for reference and kept out of every comparison.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 from pathlib import Path
 
 C2_CASES = {
@@ -38,16 +41,26 @@ LEXINDEX = {
     "string": "lexindex StringIndex",
 }
 REFERENCE = {"ART", "C-ART"}
+# What GNU timeout exits with when it had to stop the process.
+TIMED_OUT = 124
 
 HEADER = re.compile(r"^(?P<key>[\w/ -]+): (?P<value>.+)$")
-CORPUS = re.compile(r"^##### (?P<name>\S+) \((?P<keys>\d+) lines, (?P<bytes>\d+) bytes\)")
+CORPUS = re.compile(
+    r"^##### (?P<name>\S+) \((?P<keys>\d+) lines, (?P<bytes>\d+) bytes\)   round (?P<round>\d+)/"
+)
 PROCESS = re.compile(r"^--- (?P<label>.+?)   load ")
+SKIPPED = re.compile(r"^--- .+?   skipped: ")
 # What C²'s protocol has no column for: the three warm passes frontier_lex times after the cold one.
 LEX_WARM = re.compile(r"^lexindex .+, then mean (?P<mean>[\d.]+) / min (?P<min>[\d.]+) ns")
 CSV = re.compile(r"^(?P<build>[\d.]+),(?P<mib>[\d.]+),(?P<ns>[\d.]+)$")
-TIME = re.compile(r"^\[time (?P<seconds>[\d.]+) s, maxrss (?P<kb>\d+) KB\]$")
+TIME = re.compile(
+    r"^\[time (?P<seconds>[\d.]+) s, user (?P<user>[\d.]+) s, sys (?P<sys>[\d.]+) s, "
+    r"maxrss (?P<kb>\d+) KB\]$"
+)
+BUSY = re.compile(r"^\[busy (?P<ticks>\d+) jiffies\]$")
 EXIT = re.compile(r"^\[exit (?P<code>\d+)\]$")
-FAILURE = re.compile(r"Command (?:terminated by signal|exited with non-zero status) \d+")
+SIGNAL = re.compile(r"Command terminated by signal (?P<signal>\d+)")
+WHAT = re.compile(r"^\s*what\(\):\s+(?P<what>.+)$")
 
 
 def structure(label: str) -> str:
@@ -65,42 +78,100 @@ def structure(label: str) -> str:
 
 
 def parse(text: str) -> tuple[dict[str, str], list[dict]]:
+    """The header, and every corpus with each structure's runs in the order the rounds ran them."""
     environment: dict[str, str] = {}
-    corpora: list[dict] = []
-    cell: dict | None = None
+    corpora: dict[str, dict] = {}
+    corpus: dict | None = None
+    run: dict | None = None
+    round_no = 0
     for line in text.splitlines():
         if m := CORPUS.match(line):
-            corpora.append(
-                {"corpus": m["name"], "keys": int(m["keys"]), "bytes": int(m["bytes"]), "cells": []}
+            corpus = corpora.setdefault(
+                m["name"],
+                {"corpus": m["name"], "keys": int(m["keys"]), "bytes": int(m["bytes"]), "runs": {}},
             )
-            cell = None
-        elif not corpora:
+            round_no = int(m["round"])
+            run = None
+        elif corpus is None:
             if m := HEADER.match(line):
                 environment[m["key"]] = m["value"]
         elif m := PROCESS.match(line):
-            cell = {"structure": structure(m["label"])}
-            corpora[-1]["cells"].append(cell)
-        elif cell is None:
+            run = {"round": round_no}
+            corpus["runs"].setdefault(structure(m["label"]), []).append(run)
+        elif SKIPPED.match(line):
+            run = None
+        elif run is None:
             continue
         elif m := LEX_WARM.match(line):
-            cell.update(id_ns_warm_mean=float(m["mean"]), id_ns_warm_min=float(m["min"]))
+            run.update(id_ns_warm_mean=float(m["mean"]), id_ns_warm_min=float(m["min"]))
         elif m := CSV.match(line):
-            cell.update(
+            run.update(
                 build_ms=float(m["build"]),
-                bytes_per_key=float(m["mib"]) * 2**20 / corpora[-1]["keys"],
+                bytes_per_key=float(m["mib"]) * 2**20 / corpus["keys"],
                 id_ns=float(m["ns"]),
             )
         elif m := TIME.match(line):
-            cell.update(seconds=float(m["seconds"]), maxrss_mib=int(m["kb"]) / 1024)
+            run.update(
+                seconds=float(m["seconds"]),
+                cpu_seconds=round(float(m["user"]) + float(m["sys"]), 2),
+                maxrss_mib=int(m["kb"]) / 1024,
+            )
+        elif m := BUSY.match(line):
+            run["busy_ticks"] = int(m["ticks"])
         elif m := EXIT.match(line):
-            cell["exit"] = int(m["code"])
-        elif m := FAILURE.search(line):
-            cell["failure"] = m[0]
-    return environment, corpora
+            run["exit"] = int(m["code"])
+        elif m := SIGNAL.search(line):
+            run["signal"] = int(m["signal"])
+        elif m := WHAT.match(line):
+            run["what"] = m["what"]
+    return environment, list(corpora.values())
+
+
+def failure(run: dict) -> str | None:
+    """Why a run has no numbers, or None where it has them."""
+    if "what" in run:
+        return f"aborted: {run['what']}"
+    if "signal" in run:
+        return f"signal {run['signal']}"
+    if run.get("exit") == TIMED_OUT:
+        return "timed out"
+    if run.get("exit") != 0:
+        return f"exit {run.get('exit')}"
+    if "bytes_per_key" not in run or "id_ns" not in run:
+        return "no result line"
+    return None
+
+
+def summarise(name: str, runs: list[dict], ticks: int) -> dict:
+    """One structure on one corpus: the medians of its rounds, or why it has none."""
+    for run in runs:
+        if run.get("seconds") and "busy_ticks" in run:
+            others = run["busy_ticks"] / ticks - run["cpu_seconds"]
+            run["others_busy_cpus"] = round(others / run["seconds"], 2)
+    cell: dict = {"structure": name}
+    failures = [(run["round"], why) for run in runs if (why := failure(run))]
+    if failures:
+        round_no, why = failures[0]
+        cell["failure"] = why if round_no == 1 else f"{why}, round {round_no}"
+    else:
+        sizes = {run["bytes_per_key"] for run in runs}
+        if len(sizes) != 1:
+            raise ValueError(f"{name}: the size differs between rounds, {sorted(sizes)}")
+        times = [run["id_ns"] for run in runs]
+        median = statistics.median(times)
+        cell.update(
+            bytes_per_key=sizes.pop(),
+            id_ns=median,
+            id_ns_spread=(max(times) - min(times)) / median,
+            build_ms=statistics.median(run["build_ms"] for run in runs),
+            maxrss_mib=max(run["maxrss_mib"] for run in runs),
+        )
+    cell["runs"] = runs
+    return cell
 
 
 def measured(cell: dict) -> bool:
-    return cell.get("exit") == 0 and "bytes_per_key" in cell and "id_ns" in cell
+    return "id_ns" in cell
 
 
 def front(cells: list[dict]) -> set[str]:
@@ -121,8 +192,30 @@ def raw_bytes_per_key(corpus: dict) -> float:
     return (corpus["bytes"] - corpus["keys"]) / corpus["keys"]
 
 
+def size(bytes_per_key: float) -> str:
+    """Two decimals, or two significant digits below a tenth of a byte."""
+    return f"{bytes_per_key:.2f}" if bytes_per_key >= 0.1 else f"{bytes_per_key:.2g}"
+
+
 def point(cell: dict) -> str:
-    return f"{cell['bytes_per_key']:.2f} @ {cell['id_ns']:.0f}"
+    return f"{size(cell['bytes_per_key'])} @ {cell['id_ns']:.0f}"
+
+
+def quietness(corpora: list[dict]) -> str:
+    """How much else the machine did while the campaign's processes ran."""
+    others = sorted(
+        run["others_busy_cpus"]
+        for corpus in corpora
+        for cell in corpus["cells"]
+        for run in cell["runs"]
+        if "others_busy_cpus" in run
+    )
+    if not others:
+        return "No process ran."
+    return (
+        f"Other work while the {len(others)} processes ran: median "
+        f"{statistics.median(others):.2f} busy CPUs, most {others[-1]:.2f}."
+    )
 
 
 def overview(corpora: list[dict]) -> str:
@@ -161,20 +254,20 @@ def corpus_table(corpus: dict) -> str:
     lines = [
         f"**`{corpus['corpus']}`** — {corpus['keys']:,} keys, {raw:.2f} bytes a key raw",
         "",
-        "| structure | bytes/key | % of raw | build ms | `id` ns | peak MiB | front |",
-        "|---|---:|---:|---:|---:|---:|:---:|",
+        "| structure | bytes/key | % of raw | build ms | `id` ns | spread | peak MiB | front |",
+        "|---|---:|---:|---:|---:|---:|---:|:---:|",
     ]
     for cell in corpus["cells"]:
         name = cell["structure"]
         if not measured(cell):
-            why = cell.get("failure") or f"exit {cell.get('exit')}"
-            lines.append(f"| {name} | — | — | — | — | — | {why} |")
+            lines.append(f"| {name} | — | — | — | — | — | — | {cell['failure']} |")
             continue
         mark = "ref" if name in REFERENCE else "●" if name in on_front else ""
-        rss = f"{cell['maxrss_mib']:.0f}" if "maxrss_mib" in cell else "—"
+        bpk = cell["bytes_per_key"]
         lines.append(
-            f"| {name} | {cell['bytes_per_key']:.2f} | {100 * cell['bytes_per_key'] / raw:.1f} "
-            f"| {cell['build_ms']:.0f} | {cell['id_ns']:.0f} | {rss} | {mark} |"
+            f"| {name} | {size(bpk)} | {100 * bpk / raw:.1f} | {cell['build_ms']:.0f} "
+            f"| {cell['id_ns']:.0f} | {100 * cell['id_ns_spread']:.0f} % "
+            f"| {cell['maxrss_mib']:.0f} | {mark} |"
         )
     return "\n".join(lines)
 
@@ -199,11 +292,18 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="write the JSON artifact beside it")
     args = parser.parse_args()
     environment, corpora = parse(args.log.read_text(encoding="utf-8"))
+    ticks = int(environment["clock ticks"])
+    for corpus in corpora:
+        corpus["cells"] = [
+            summarise(name, runs, ticks) for name, runs in corpus.pop("runs").items()
+        ]
     if args.json:
         out = args.log.with_suffix(".json")
         payload = json.dumps(artifact(environment, corpora), indent=2, ensure_ascii=False)
         out.write_text(payload + "\n", encoding="utf-8")
         print(f"wrote {out}\n")
+    print(quietness(corpora))
+    print()
     print(overview(corpora))
     for corpus in corpora:
         print()
