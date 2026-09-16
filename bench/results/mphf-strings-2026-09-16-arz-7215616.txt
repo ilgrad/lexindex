@@ -11,7 +11,8 @@ URLs, UUIDs, English Wikipedia titles, file paths; the 1 M and 10 M files are th
 Rows: `ClosedHashIndex` (lexindex's key hash, then its perfect hash; `id`, `ids_of`), the bare `Mphf` over
 `hash_key_bytes` (the same two steps without the index's framing), ptr_hash's fast and compact sets over the same
 hash (so that pair of rows isolates the perfect hash) and over xxh3 of the bytes (PtrHash as a user would build
-it over strings), and `CompactHashIndex` at fingerprint_bits = 8 (fp=1: the same path plus the membership check).
+it over strings), and `CompactHashIndex` at fingerprint_bits = 8 (fp=1; its single lookup is `id_unchecked`, the same probe without
+the fingerprint compare, its batch `ids_of`, which compares).
 One process per corpus, rows A-B-A-B for 3 rounds (builds: min; the index builds use their own threads, the bare
 functions one), lookups over every key in one shuffled order with the key read from the corpus (min of 9 passes);
 batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares

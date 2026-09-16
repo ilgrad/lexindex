@@ -804,9 +804,9 @@ the bare function is inside a 40 ns path — and the hash decides the rest: the 
 9–35 ns behind. The batch column is the crate's alone: `ids_of` hashes the next keys while the
 current ones' lines arrive, 28.7 / 23.0 / 15.5 ns on 1 M URLs / UUIDs / titles against
 `index_stream`'s 33.4 / 29.8 / 21.4 over the same hash and 58 / 52 / 38 over xxh3, which does not
-overlap the hashing. `CompactHashIndex::id`, the same path plus the fingerprint compare, reads
-within 1 ns of `ClosedHashIndex` on every corpus (its fingerprint line is pulled in beside the
-seed); its `ids_of` pays that line's miss, 33–83 ns. Against the same protocol over the hash
+overlap the hashing. The `CompactHashIndex` row's single lookup is `id_unchecked`, the same
+perfect-hash probe without the fingerprint compare, within 1 ns of `ClosedHashIndex` on every
+corpus; its batch is `ids_of`, which does compare, and pays the fingerprint line's miss, 33–83 ns. Against the same protocol over the hash
 2.0–3.x shipped, run the same morning
 ([`bench/results/mphf-strings-2026-09-16-arz-b4544db.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-16-arz-b4544db.txt)),
 every lexindex row is 10–30 % quicker — 1 M URLs 54.5 → 43.0 ns, paths 92 → 65, titles 32 → 28,
