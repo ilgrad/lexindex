@@ -58,6 +58,26 @@ impl Stat {
 
 type Batch<'a, T> = Option<&'a (dyn Fn(&T, &[&str]) -> u64 + Sync)>;
 
+/// One pass of single lookups over `probe`, out of line: each function's lookup is inlined into
+/// a loop of its own rather than into the round beside everything else in it.
+#[inline(never)]
+fn sweep<T>(f: &T, probe: &[&str], get: &impl Fn(&T, &str) -> u64) -> u64 {
+    let mut acc = 0u64;
+    for &k in probe {
+        acc = acc.wrapping_add(get(f, k));
+    }
+    acc
+}
+
+#[inline(never)]
+fn sweep_batch<T>(f: &T, probe: &[&str], batch: &(dyn Fn(&T, &[&str]) -> u64 + Sync)) -> u64 {
+    let mut acc = 0u64;
+    for chunk in probe.chunks(CHUNK) {
+        acc = acc.wrapping_add(batch(f, chunk));
+    }
+    acc
+}
+
 struct Row {
     name: &'static str,
     run: bool,
@@ -102,19 +122,11 @@ impl Row {
         self.bits = bits(&f);
         for _ in 0..3 {
             let t = Instant::now();
-            let mut acc = 0u64;
-            for &k in probe {
-                acc = acc.wrapping_add(get(&f, k));
-            }
-            std::hint::black_box(acc);
+            std::hint::black_box(sweep(&f, probe, &get));
             self.lookup.add(t.elapsed().as_secs_f64() * 1e9 / n);
             if let Some(batch) = batch {
                 let t = Instant::now();
-                let mut acc = 0u64;
-                for chunk in probe.chunks(CHUNK) {
-                    acc = acc.wrapping_add(batch(&f, chunk));
-                }
-                std::hint::black_box(acc);
+                std::hint::black_box(sweep_batch(&f, probe, batch));
                 self.batch.add(t.elapsed().as_secs_f64() * 1e9 / n);
             }
         }
@@ -127,13 +139,7 @@ impl Row {
             let t = Instant::now();
             std::thread::scope(|scope| {
                 for part in probe.chunks(share) {
-                    scope.spawn(move || {
-                        let mut acc = 0u64;
-                        for &k in part {
-                            acc = acc.wrapping_add(get(f, k));
-                        }
-                        std::hint::black_box(acc);
-                    });
+                    scope.spawn(move || std::hint::black_box(sweep(f, part, get)));
                 }
             });
             self.lookup_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);
@@ -141,13 +147,7 @@ impl Row {
                 let t = Instant::now();
                 std::thread::scope(|scope| {
                     for part in probe.chunks(share) {
-                        scope.spawn(move || {
-                            let mut acc = 0u64;
-                            for chunk in part.chunks(CHUNK) {
-                                acc = acc.wrapping_add(batch(f, chunk));
-                            }
-                            std::hint::black_box(acc);
-                        });
+                        scope.spawn(move || std::hint::black_box(sweep_batch(f, part, batch)));
                     }
                 });
                 self.batch_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);

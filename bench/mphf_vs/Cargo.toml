@@ -11,7 +11,7 @@ publish = false
 
 [dependencies]
 lexindex = { path = "../..", features = ["bench-mphf"] }
-ph = "0.11.0"
+ph = { version = "0.11.0", features = ["wyhash"] }
 ptr_hash = "2.1.1"
 rayon = "1"
 

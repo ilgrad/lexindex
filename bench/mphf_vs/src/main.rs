@@ -92,6 +92,9 @@ struct Row {
     /// Peak resident growth over the build, in MB: the table and whatever the build held at
     /// its peak, above the keys and the probe order the process already holds.
     peak_mb: f64,
+    /// Anonymous huge pages in the process right after the build, in MB: whether the table got
+    /// the 2 MiB pages it asked for (only lexindex's asks).
+    huge_mb: f64,
     bits: f64,
     lookup: Stat,
     batch: Stat,
@@ -103,6 +106,26 @@ struct Row {
 /// A row's batch lookup: the wrapping sum of the answers to a chunk, if it has one.
 type Batch<'a, T> = Option<&'a (dyn Fn(&T, &[u64]) -> u64 + Sync)>;
 
+/// One pass of single lookups over `probe`, out of line: each function's lookup is inlined into
+/// a loop of its own rather than into the round beside everything else in it.
+#[inline(never)]
+fn sweep<T>(f: &T, probe: &[u64], get: &impl Fn(&T, u64) -> u64) -> u64 {
+    let mut acc = 0u64;
+    for &k in probe {
+        acc = acc.wrapping_add(get(f, k));
+    }
+    acc
+}
+
+#[inline(never)]
+fn sweep_batch<T>(f: &T, probe: &[u64], batch: &(dyn Fn(&T, &[u64]) -> u64 + Sync)) -> u64 {
+    let mut acc = 0u64;
+    for chunk in probe.chunks(CHUNK) {
+        acc = acc.wrapping_add(batch(f, chunk));
+    }
+    acc
+}
+
 /// A `/proc/self/status` field in kB: `VmRSS:` for the resident set now, `VmHWM:` for its
 /// peak since the last reset.
 fn status_kb(field: &str) -> f64 {
@@ -112,6 +135,18 @@ fn status_kb(field: &str) -> f64 {
         .find_map(|l| l.strip_prefix(field))
         .and_then(|v| v.trim().trim_end_matches(" kB").parse().ok())
         .expect("a VmRSS/VmHWM line")
+}
+
+/// A `/proc/self/smaps_rollup` field in kB, `AnonHugePages:` for the huge pages backing the
+/// process's anonymous memory.
+fn smaps_kb(field: &str) -> f64 {
+    let rollup =
+        std::fs::read_to_string("/proc/self/smaps_rollup").expect("/proc/self/smaps_rollup");
+    rollup
+        .lines()
+        .find_map(|l| l.strip_prefix(field))
+        .and_then(|v| v.trim().trim_end_matches(" kB").parse().ok())
+        .expect("an AnonHugePages line")
 }
 
 /// Resets the process's peak resident set to its current one (`clear_refs` 5), so that the
@@ -127,6 +162,7 @@ impl Row {
             run,
             build: Stat::NONE,
             peak_mb: 0.0,
+            huge_mb: 0.0,
             bits: 0.0,
             lookup: Stat::NONE,
             batch: Stat::NONE,
@@ -158,22 +194,15 @@ impl Row {
         self.build
             .add(t.elapsed().as_secs_f64() * 1e9 / keys as f64);
         self.peak_mb = self.peak_mb.max((status_kb("VmHWM:") - before) / 1024.0);
+        self.huge_mb = self.huge_mb.max(smaps_kb("AnonHugePages:") / 1024.0);
         self.bits = bits(&f);
         for _ in 0..3 {
             let t = Instant::now();
-            let mut acc = 0u64;
-            for &h in probe {
-                acc = acc.wrapping_add(get(&f, h));
-            }
-            std::hint::black_box(acc);
+            std::hint::black_box(sweep(&f, probe, &get));
             self.lookup.add(t.elapsed().as_secs_f64() * 1e9 / n);
             if let Some(batch) = batch {
                 let t = Instant::now();
-                let mut acc = 0u64;
-                for chunk in probe.chunks(CHUNK) {
-                    acc = acc.wrapping_add(batch(&f, chunk));
-                }
-                std::hint::black_box(acc);
+                std::hint::black_box(sweep_batch(&f, probe, batch));
                 self.batch.add(t.elapsed().as_secs_f64() * 1e9 / n);
             }
         }
@@ -186,13 +215,7 @@ impl Row {
             let t = Instant::now();
             std::thread::scope(|scope| {
                 for part in probe.chunks(share) {
-                    scope.spawn(move || {
-                        let mut acc = 0u64;
-                        for &h in part {
-                            acc = acc.wrapping_add(get(f, h));
-                        }
-                        std::hint::black_box(acc);
-                    });
+                    scope.spawn(move || std::hint::black_box(sweep(f, part, get)));
                 }
             });
             self.lookup_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);
@@ -200,13 +223,7 @@ impl Row {
                 let t = Instant::now();
                 std::thread::scope(|scope| {
                     for part in probe.chunks(share) {
-                        scope.spawn(move || {
-                            let mut acc = 0u64;
-                            for chunk in part.chunks(CHUNK) {
-                                acc = acc.wrapping_add(batch(f, chunk));
-                            }
-                            std::hint::black_box(acc);
-                        });
+                        scope.spawn(move || std::hint::black_box(sweep_batch(f, part, batch)));
                     }
                 });
                 self.batch_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);
@@ -424,7 +441,7 @@ fn main() {
             String::new()
         },
         if single {
-            format!("{:>14}", "build peak MB")
+            format!("{:>14}{:>9}", "build peak MB", "huge MB")
         } else {
             String::new()
         }
@@ -443,7 +460,7 @@ fn main() {
                 String::new()
             },
             if single {
-                format!("{:>14.1}", r.peak_mb)
+                format!("{:>14.1}{:>9.1}", r.peak_mb, r.huge_mb)
             } else {
                 String::new()
             }
