@@ -37,8 +37,9 @@
 //!
 //! # Format
 //!
-//! `MPH2` is what this version writes. `MPH1`, the eviction-based table 1.0 wrote, is still read:
-//! its lookup is a different function over a different header, and both live here.
+//! `MPH3` is what this version writes. `MPH2`, the same tables 1.1 to 3.0 wrote with one offset
+//! field and 255 shifts a seed, is still read under its own seed geometry; so is `MPH1`, the
+//! eviction-based table 1.0 wrote, whose lookup is a different function over a different header.
 //!
 //! [PTHash]: https://arxiv.org/abs/2104.10402
 //! [PHast]: https://arxiv.org/abs/2504.17918
@@ -57,16 +58,18 @@ const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in m
 /// Keys per bucket on every bumping level. Seeds are `8/λ` bits per key, and every bucket that no
 /// seed places is bumped, so a larger `λ` is fewer seeds but more bumped keys, each of which
 /// costs its own level's seed share and ~8 bits of remap. Measured on 10 M word-bigram hashes,
-/// one thread:
+/// one thread, one run (`MPH3`; `MPH2` was 2.154 / 2.089 / 2.070 bits at 4.15 / 4.5 / 4.7):
 ///
-/// | λ    | bits/key | bumped | build ns/key | lookup ns |
-/// |------|----------|--------|--------------|-----------|
-/// | 4.15 | 2.154    | 2.1 %  | 48           | 32.6      |
-/// | 4.5  | 2.089    | 3.0 %  | 49           | 33.6      |
-/// | 4.7  | 2.070    | 3.8 %  | 51           | 34.5      |
+/// | λ    | bits/key | bumped | build ns/key |
+/// |------|----------|--------|--------------|
+/// | 4.2  | 1.989    | 0.7 %  | 69           |
+/// | 4.35 | 1.962    | 1.1 %  | 67           |
+/// | 4.5  | 1.954    | 1.6 %  | 65           |
+/// | 4.65 | 1.951    | 2.2 %  | 65           |
+/// | 4.8  | 1.959    | 2.9 %  | 65           |
 ///
-/// The lookup is over shuffled probes of all 10 M keys, so it is bound by memory; the bumped keys
-/// are what separates the rows.
+/// The bits are flat from 4.5 to 4.65 and a bumped key is the lookup's cost — a chain of
+/// dependent lines where a placed key is one — so the lower `λ` of the two is the one shipped.
 ///
 /// A ratio, `9 / 2`, so the bucket count is exact integer arithmetic: see [`ceil_div_ratio`].
 const LAMBDA: (u64, u64) = (9, 2);
@@ -75,10 +78,20 @@ const LAMBDA: (u64, u64) = (9, 2);
 /// [`slice_for`]. A key's values under every seed stay inside its slice.
 const SLICE: u64 = 1024;
 
-/// Values between two consecutive shifts of one key, a power of two. Two rather than one spreads
-/// a bucket's candidate placements over twice the slice for the same 255 seeds, which is worth a
-/// tenth of the bumped keys; three would be worth a little more and is slower to search.
+/// Values between two consecutive shifts of one key on an `MPH2` level, a power of two. Two
+/// rather than one spreads a bucket's candidate placements over twice the slice for the same 255
+/// seeds, which is worth a tenth of the bumped keys. An `MPH3` level's stride is its slice over
+/// its shifts, so that a key's shifts run once round its slice.
 const STRIDE: u64 = 2;
+
+/// Mode bits of an `MPH3` seed: its top bits pick which field of the hash is a key's offset in
+/// its slice, the rest are its shift — four fields and 64 shifts each. A bucket's keys are one
+/// rigid constellation a mode, which the shifts rotate; two keys of a bucket on one value in one
+/// mode, stuck there under every shift, part in the others, and four constellations chosen among
+/// by the lowest sum pack tighter than one: measured on 10 M word-bigram hashes, 1.58 % of the
+/// keys bumped and 1.954 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
+/// build. `MPH2` is zero mode bits: one field, 255 shifts.
+const MODE_BITS: u32 = 2;
 
 /// Buckets the placement order may look ahead. A bucket of one key is held back until every
 /// larger bucket within roughly a slice ahead of it is placed, because a single key fits any hole
@@ -429,11 +442,45 @@ fn slice_for(n: u64) -> u64 {
     natural.min(tun(1, SLICE as f64) as u64)
 }
 
-/// Magic of a standalone minimal-perfect-hash blob.
-const MAGIC: &[u8; 4] = b"MPH2";
+/// Magic of a standalone minimal-perfect-hash blob, and its format version.
+const MAGIC: &[u8; 4] = b"MPH3";
+const FORMAT: u16 = 3;
 
-/// Blob format version.
-const FORMAT: u16 = 2;
+/// The magic and version 1.1 to 3.0 wrote: the same tables over [`Geometry::Mph2`]'s seeds.
+const MAGIC_V2: &[u8; 4] = b"MPH2";
+const FORMAT_V2: u16 = 2;
+
+/// The seed geometry of a table's levels, which its magic names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Geometry {
+    /// One offset field and 255 shifts a seed, at [`STRIDE`].
+    Mph2,
+    /// [`MODE_BITS`] mode bits, the shifts at a stride of the slice over them.
+    Mph3,
+}
+
+impl Geometry {
+    fn magic(self) -> &'static [u8; 4] {
+        match self {
+            Self::Mph2 => MAGIC_V2,
+            Self::Mph3 => MAGIC,
+        }
+    }
+
+    fn version(self) -> u16 {
+        match self {
+            Self::Mph2 => FORMAT_V2,
+            Self::Mph3 => FORMAT,
+        }
+    }
+
+    fn mode_bits(self) -> u32 {
+        match self {
+            Self::Mph2 => 0,
+            Self::Mph3 => tun(2, f64::from(MODE_BITS)) as u32,
+        }
+    }
+}
 
 /// Magic 4, version 2, reserved 2, then seven `u64` scalars: `n`, level count, tail keys, tail
 /// buckets, tail range, tail seed, hole count. A level row of three `u64` per level follows, then
@@ -580,12 +627,18 @@ fn weights() -> [i64; 7] {
     WEIGHTS
 }
 
-/// The stride of a level with `slice`: [`STRIDE`], or less on a slice too short for 255 shifts
-/// at that stride to be distinct positions.
-fn stride_for(slice: u64) -> u64 {
-    let stride = tun(7, STRIDE as f64) as u64;
+/// The stride of a level with `slice` under `mode_bits`: with modes, the slice over the shifts,
+/// so that a key's shifts run once round its slice; without, [`STRIDE`], or less on a slice too
+/// short for 255 shifts at that stride to be distinct positions.
+fn stride_for(slice: u64, mode_bits: u32) -> u64 {
+    let natural = if mode_bits == 0 {
+        (slice >> 8).clamp(1, STRIDE)
+    } else {
+        slice >> (8 - mode_bits)
+    };
+    let stride = tun(7, natural as f64) as u64;
     debug_assert!(stride.is_power_of_two());
-    (slice / 256).clamp(1, stride).next_power_of_two()
+    stride
 }
 
 /// Bucket-size term of the placement priority: [`WEIGHTS`] up to seven keys, linear past that,
@@ -632,6 +685,8 @@ struct Level {
     /// Values between two consecutive shifts of a key; [`stride_for`] the slice, kept because it
     /// is on every lookup.
     stride: u64,
+    /// Mode bits of the level's seeds: [`Geometry::mode_bits`].
+    mode_bits: u32,
     /// One per bucket; 0 is bumped.
     seeds: Vec<u8>,
 }
@@ -667,24 +722,37 @@ fn held_share() -> u64 {
 impl Level {
     /// The shape of a level over `n` keys, before its seeds are found. `n` must be at least the
     /// slice, which every level above [`TAIL_KEYS`] is.
-    fn shape(n: u64) -> Self {
+    fn shape(n: u64, geometry: Geometry) -> Self {
         let slice = slice_for(n);
+        let mode_bits = geometry.mode_bits();
         Self {
             n,
             buckets: ceil_div_ratio(n, ratio(0, LAMBDA)).max(1),
             slice,
-            stride: stride_for(slice),
+            stride: stride_for(slice, mode_bits),
+            mode_bits,
             seeds: Vec::new(),
         }
     }
 
-    /// The value of `h` under `seed`, which is nonzero: the key's offset in its slice, moved by
-    /// the seed's strides and wrapped inside the slice, from the slice's start, wrapped inside
-    /// the range. Below `n` for every `h` and every seed.
+    /// A key's offset in its slice under `mode`: ten bits of its hash, a different field per
+    /// mode, so that two keys on one value in one mode are on different ones in another.
+    #[inline(always)]
+    fn offset(&self, h: u64, mode: u32) -> u64 {
+        (h >> (8 * mode)) & (self.slice - 1)
+    }
+
+    /// The value of `h` under `seed`, which is nonzero: the seed's mode picks the key's offset in
+    /// its slice, its shift moves the key that many strides on, wrapped inside the slice, from
+    /// the slice's start, wrapped inside the range. Below `n` for every `h` and every seed.
     #[inline(always)]
     fn value(&self, h: u64, seed: u8) -> u64 {
         let mask = self.slice - 1;
-        let v = scale(h, self.n) + (((h & mask) + self.stride * u64::from(seed)) & mask);
+        let seed = u64::from(seed);
+        let shift_bits = 8 - self.mode_bits;
+        let mode = (seed >> shift_bits) as u32;
+        let t = seed & ((1u64 << shift_bits) - 1);
+        let v = scale(h, self.n) + ((self.offset(h, mode) + self.stride * t) & mask);
         if v >= self.n { v - self.n } else { v }
     }
 }
@@ -992,6 +1060,8 @@ impl Remap {
 struct V2 {
     /// How many keys were built in; the image is exactly `[0, n)`.
     n: u64,
+    /// The seed geometry of every level, which the magic names.
+    geometry: Geometry,
     /// The bumping level over every key, inline because it is on every lookup; `None` when `n` is
     /// at most [`TAIL_KEYS`].
     first: Option<Level>,
@@ -1431,7 +1501,7 @@ impl V2 {
 
         while remaining.len() as u64 > TAIL_KEYS && levels.len() < MAX_LEVELS {
             let lv = levels.len();
-            let buckets = Level::shape(remaining.len() as u64).buckets;
+            let buckets = Level::shape(remaining.len() as u64, Geometry::Mph3).buckets;
             let keys = group_by_bucket(&remaining, lv, buckets, threads);
             phase("level pairs");
             let (level, taken, _, _) =
@@ -1495,6 +1565,7 @@ impl V2 {
         let mut levels = levels.into_iter();
         Ok(Self {
             n,
+            geometry: Geometry::Mph3,
             first: levels.next(),
             rest: levels.collect(),
             tail,
@@ -1510,7 +1581,7 @@ impl V2 {
         threads: usize,
         deep: bool,
     ) -> (Level, Map, Vec<u64>, u64) {
-        let mut level = Level::shape(n);
+        let mut level = Level::shape(n, Geometry::Mph3);
         let buckets = level.buckets;
         let slice = level.slice;
         let starts = chunk_starts(buckets, deep);
@@ -1541,7 +1612,7 @@ impl V2 {
             }
             Feed::Slice { .. } => 0,
         };
-        let shift = stride_for(slice).trailing_zeros();
+        let shift = level.stride.trailing_zeros();
         let align = |v: u64| v & !((64 << shift) - 1);
         let word = |o: u64| (o >> shift) as i64 / 64;
 
@@ -1826,8 +1897,8 @@ impl V2 {
     fn write_into(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         let hl = header_len(self.level_count());
         let mut header = vec![0u8; hl];
-        header[0..4].copy_from_slice(MAGIC);
-        header[4..6].copy_from_slice(&FORMAT.to_le_bytes());
+        header[0..4].copy_from_slice(self.geometry.magic());
+        header[4..6].copy_from_slice(&self.geometry.version().to_le_bytes());
         // Reserved; written zero and required to be zero, so a later flag cannot be read as absent.
         header[6..8].copy_from_slice(&0u16.to_le_bytes());
         let scalars = [
@@ -1876,6 +1947,11 @@ impl V2 {
     /// a remap index below the entry count, a hole index below the hole count, and a hole below
     /// `n`.
     fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
+        let geometry = match bytes.get(0..4) {
+            Some(m) if m == MAGIC => Geometry::Mph3,
+            Some(m) if m == MAGIC_V2 => Geometry::Mph2,
+            _ => return Err(IndexError::Format("mphf: bad magic or truncated header")),
+        };
         if bytes.len() < FIXED + 4 {
             return Err(IndexError::Format("mphf: truncated header"));
         }
@@ -1893,7 +1969,7 @@ impl V2 {
         if check != crate::blob::hash_bytes(&bytes[..hl - 4]) as u32 {
             return Err(IndexError::Format("mphf: header checksum mismatch"));
         }
-        if u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")) != FORMAT {
+        if u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")) != geometry.version() {
             return Err(IndexError::Format("mphf: unsupported format version"));
         }
         if u16::from_le_bytes(bytes[6..8].try_into().expect("2 bytes")) != 0 {
@@ -1921,6 +1997,7 @@ impl V2 {
             }
             return Ok(Self {
                 n: 0,
+                geometry,
                 first: None,
                 rest: Vec::new(),
                 tail,
@@ -1950,7 +2027,8 @@ impl V2 {
                 n: ln,
                 buckets,
                 slice,
-                stride: stride_for(slice),
+                stride: stride_for(slice, geometry.mode_bits()),
+                mode_bits: geometry.mode_bits(),
                 seeds: Vec::new(),
             });
         }
@@ -2077,6 +2155,7 @@ impl V2 {
         let mut levels = levels.into_iter();
         Ok(Self {
             n,
+            geometry,
             first: levels.next(),
             rest: levels.collect(),
             tail,
@@ -2147,18 +2226,174 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
 /// The seed that lands every key of the bucket on a distinct free value, marking those values
 /// taken; 0 if there is none.
 ///
-/// Shift `t` puts a key `t` strides past its offset, wrapping inside the slice, so the shifts that
-/// put one key on a free value are the zero bits of its occupancy window read at stride, and the
-/// shifts that place the bucket are the zero bits of the OR of its keys' windows — up to 64 shifts
-/// for one load per key. Two keys with the same base collide under nearly every shift; the rest
-/// are caught when a candidate's values are listed.
+/// A seed is a mode and a shift. The mode picks each key's offset in its slice; shift `t` puts a
+/// key `t` strides past that offset, wrapping inside the slice. On the map a key's values under
+/// consecutive shifts are consecutive bits of one plane, so with at most 64 shifts a mode its
+/// occupancy under every shift is one word — its run up to its wrap, and from `period` bits back
+/// after it — and the shifts that place the bucket are the zero bits of the OR of its keys'
+/// words. Two keys with the same base in a mode collide under every shift of that mode and are
+/// tried in the others; the rest are caught when a candidate's values are listed.
 ///
 /// The seed to take is the one whose values are lowest, because low values are what the buckets
-/// still to come cannot use anyway. Values grow with the shift until a key wraps and drops by a
-/// slice, so the sum is lowest in some later interval between wraps, and the first feasible seed
-/// of each interval is a candidate. Intervals are visited from the last; one whose values at
-/// entry already exceed the best candidate is skipped, and most are.
+/// still to come cannot use anyway. Within a mode values grow with the shift until a key wraps
+/// and drops by a slice, so the sum is lowest at the first feasible shift at or after some wrap,
+/// and those are the candidates: one `trailing_zeros` each, the sum from the wraps at or before
+/// it. Levels with more shifts a mode go through [`seed_bucket_wide`].
 fn seed_bucket(
+    level: &Level,
+    ks: &[u64],
+    taken: &mut Map,
+    origin: u64,
+    scratch: &mut Scratch,
+) -> u8 {
+    let shift_bits = 8 - level.mode_bits;
+    if shift_bits > 6 {
+        return seed_bucket_wide(level, ks, taken, origin, scratch);
+    }
+    let k = ks.len();
+    if k > MAX_BUCKET {
+        return 0;
+    }
+    let Scratch {
+        starts,
+        offs,
+        cut,
+        plane,
+        bit,
+        vals,
+        ..
+    } = scratch;
+    count!(BUCKETS, 1);
+    let (slice, mask) = (level.slice, level.slice - 1);
+    let delta = level.stride;
+    let (shift, dm) = (delta.trailing_zeros(), delta - 1);
+    let period = slice >> shift;
+    let ks_delta = k as u64 * delta;
+    // Values past the range's end wrap to its beginning; `limit` is where that is on this map,
+    // which a chunk's private map never reaches. A key whose slice crosses it is read bit by bit.
+    let limit = level.n - origin;
+    let fold = |v: u64| if v >= limit { v - limit } else { v };
+    let mut slow = 0u64;
+    for i in 0..k {
+        starts[i] = scale(ks[i], level.n) - origin;
+        slow |= u64::from(starts[i] + slice > limit) << i;
+    }
+    let end = 1u64 << shift_bits;
+    let mut best: Option<(u64, u32, u64)> = None;
+    for mode in 0..1u32 << level.mode_bits {
+        // The keys' offsets in this mode, the shifts at which they wrap, and where their runs
+        // start on the map.
+        let mut base = 0u64;
+        let mut wraps = 0u64;
+        for i in 0..k {
+            let o = level.offset(ks[i], mode);
+            offs[i] = o;
+            base += o;
+            let c = (slice - o + dm) >> shift;
+            cut[i] = c;
+            if c < end {
+                wraps |= 1 << c;
+            }
+            vals[i] = fold(starts[i] + o);
+            let (p, b) = taken.at(vals[i]);
+            plane[i] = p;
+            bit[i] = b;
+        }
+        // Two keys on one value under shift 0 stay together under every shift of this mode.
+        let collides = if k <= 16 {
+            (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
+        } else {
+            let mut sorted = vals[..k].to_vec();
+            sorted.sort_unstable();
+            sorted.windows(2).any(|w| w[0] == w[1])
+        };
+        if collides {
+            continue;
+        }
+        // The value of key `i` under shift `t`.
+        let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
+        // Shifts no key can take: shift 0 of mode 0, everything past `end`, and every key's word.
+        let mut u = u64::from(mode == 0);
+        if end < 64 {
+            u |= u64::MAX << end;
+        }
+        for i in 0..k {
+            count!(WINDOWS, 1);
+            u |= if slow >> i & 1 == 1 {
+                (0..end).fold(0, |w, j| w | (u64::from(taken.get(value(i, j))) << j))
+            } else if period == 64 {
+                // The run after the wrap is the `64 - cut` positions right before the run to
+                // it, so the word is one window ending at the wrap, rotated.
+                taken
+                    .window(plane[i], bit[i] + cut[i] - 64)
+                    .rotate_left(cut[i] as u32)
+            } else if cut[i] >= end {
+                taken.window(plane[i], bit[i])
+            } else {
+                let c = cut[i];
+                let before = taken.window(plane[i], bit[i]) & ((1u64 << c) - 1);
+                before | (taken.window(plane[i], bit[i] + c - period) << c)
+            };
+            if u == u64::MAX {
+                break;
+            }
+        }
+        // Candidates: the first feasible shift at or after each wrap, and after shift 0. The
+        // sum of the values there is the offsets, plus a stride a key a shift, less a slice
+        // for every key that has wrapped. A candidate whose values fold onto one another is
+        // struck out and the wrap retried.
+        let mut from = wraps | 1;
+        while from != 0 {
+            let c = u64::from(from.trailing_zeros());
+            from &= from - 1;
+            let free = !u & (u64::MAX << c);
+            if free == 0 {
+                break;
+            }
+            let t = u64::from(free.trailing_zeros());
+            count!(CANDIDATES, 1);
+            let wrapped = (0..k).filter(|&i| cut[i] <= t).count() as u64;
+            let sum = base + ks_delta * t - slice * wrapped;
+            if best.is_some_and(|(s, _, _)| s <= sum) {
+                continue;
+            }
+            for (i, v) in vals[..k].iter_mut().enumerate() {
+                *v = value(i, t);
+            }
+            if (0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
+                u |= 1 << t;
+                from |= 1 << c;
+                continue;
+            }
+            best = Some((sum, mode, t));
+        }
+    }
+    let Some((_, mode, t)) = best else {
+        return 0;
+    };
+    for i in 0..k {
+        let o = level.offset(ks[i], mode);
+        taken.set(fold(starts[i] + ((o + (t << shift)) & mask)));
+    }
+    (mode << shift_bits) as u8 | t as u8
+}
+
+/// The seed for a level of more than 64 shifts a mode, the `MPH2` function: the same search
+/// over up to four windows a key, interval by interval.
+///
+/// A seed is a mode and a shift. The mode picks each key's offset in its slice; shift `t` puts a
+/// key `t` strides past that offset, wrapping inside the slice, so the shifts that put one key on
+/// a free value are the zero bits of its occupancy window read at stride, and the shifts that
+/// place the bucket are the zero bits of the OR of its keys' windows — up to 64 shifts for one
+/// load per key. Two keys with the same base in a mode collide under every shift of that mode
+/// and are tried in the others; the rest are caught when a candidate's values are listed.
+///
+/// The seed to take is the one whose values are lowest, because low values are what the buckets
+/// still to come cannot use anyway. Within a mode values grow with the shift until a key wraps
+/// and drops by a slice, so the sum is lowest in some later interval between wraps, and the first
+/// feasible seed of each interval is a candidate. Intervals are visited from the last; one whose
+/// values at entry already exceed the best candidate is skipped, and most are.
+fn seed_bucket_wide(
     level: &Level,
     ks: &[u64],
     taken: &mut Map,
@@ -2196,121 +2431,176 @@ fn seed_bucket(
         starts[i] = scale(ks[i], level.n) - origin;
         slow |= u64::from(starts[i] + slice > limit) << i;
     }
-    // The shifts are `1..end`, seed 256 having no byte. The keys' offsets, and the shifts at
-    // which they wrap, sorted: inside an interval between two the sum grows by `k` strides per
-    // shift, and at each cut a key drops by a slice.
-    let end = 256u64;
-    let mut n = 0;
-    for i in 0..k {
-        let o = ks[i] & mask;
-        offs[i] = o;
-        let c = (slice - o + dm) >> shift;
-        cut[i] = c;
-        if c < end {
-            let mut at = n;
-            while at > 0 && cuts[at - 1] > c {
-                cuts[at] = cuts[at - 1];
-                at -= 1;
+    // The shifts of a mode are `0..end`, less shift 0 of mode 0, which is the bumped seed.
+    let shift_bits = 8 - level.mode_bits;
+    let modes = 1u32 << level.mode_bits;
+    let end = 1u64 << shift_bits;
+    let mut best: Option<(u64, u32, u64)> = None;
+    for mode in 0..modes {
+        // The keys' offsets in this mode, and the shifts at which they wrap, sorted: inside an
+        // interval between two the sum grows by `k` strides per shift, and at each cut a key
+        // drops by a slice.
+        let mut n = 0;
+        for i in 0..k {
+            let o = level.offset(ks[i], mode);
+            offs[i] = o;
+            let c = (slice - o + dm) >> shift;
+            cut[i] = c;
+            if c < end {
+                let mut at = n;
+                while at > 0 && cuts[at - 1] > c {
+                    cuts[at] = cuts[at - 1];
+                    at -= 1;
+                }
+                cuts[at] = c;
+                n += 1;
             }
-            cuts[at] = c;
-            n += 1;
         }
-    }
-    *nc = n;
-    let mut best: Option<(u64, u64)> = None;
-    for i in 0..k {
-        vals[i] = fold(starts[i] + offs[i]);
-        let (p, b) = taken.at(vals[i]);
-        plane[i] = p;
-        bit[i] = b;
-    }
-    // Two keys on one value under shift 0 stay together under every shift.
-    let collides = if k <= 16 {
-        (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
-    } else {
-        let mut sorted = vals[..k].to_vec();
-        sorted.sort_unstable();
-        sorted.windows(2).any(|w| w[0] == w[1])
-    };
-    if collides {
-        return 0;
-    }
-    // The value of key `i` under shift `t`.
-    let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
-    // First feasible shift in `[from, to)`, an interval no key wraps inside, so each key's
-    // occupancy under 64 consecutive shifts is one window of its plane: from the bit of
-    // shift 0, or `period` bits before it once the key has wrapped. A shift where two keys
-    // fold onto one value is skipped.
-    let first_feasible = |taken: &Map, from: u64, to: u64, vals: &mut [u64]| -> Option<u64> {
-        let mut t0 = from;
-        while t0 < to {
-            let mut u = u64::from(t0 == 0);
-            if to - t0 < 64 {
-                u |= u64::MAX << (to - t0);
+        *nc = n;
+        for i in 0..k {
+            vals[i] = fold(starts[i] + offs[i]);
+            let (p, b) = taken.at(vals[i]);
+            plane[i] = p;
+            bit[i] = b;
+        }
+        // Two keys on one value under shift 0 stay together under every shift of this mode.
+        let collides = if k <= 16 {
+            (0..k).any(|i| vals[i + 1..k].contains(&vals[i]))
+        } else {
+            let mut sorted = vals[..k].to_vec();
+            sorted.sort_unstable();
+            sorted.windows(2).any(|w| w[0] == w[1])
+        };
+        if collides {
+            continue;
+        }
+        // The value of key `i` under shift `t`.
+        let value = |i: usize, t: u64| fold(starts[i] + ((offs[i] + (t << shift)) & mask));
+        // With at most 64 shifts, a mode's whole occupancy is one word a key: its run up to
+        // its wrap, and from `period` bits back after it.
+        let mut whole = (end <= 64).then(|| {
+            let mut u = u64::from(mode == 0);
+            if end < 64 {
+                u |= u64::MAX << end;
             }
             for i in 0..k {
                 count!(WINDOWS, 1);
                 u |= if slow >> i & 1 == 1 {
-                    (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j))
+                    (0..end).fold(0, |w, j| w | (u64::from(taken.get(value(i, j))) << j))
+                } else if cut[i] >= end {
+                    taken.window(plane[i], bit[i])
                 } else {
-                    let back = if cut[i] <= t0 { period } else { 0 };
-                    taken.window(plane[i], bit[i] + t0 - back)
+                    let c = cut[i];
+                    let before = taken.window(plane[i], bit[i]) & ((1u64 << c) - 1);
+                    before | (taken.window(plane[i], bit[i] + c - period) << c)
                 };
-                if u == u64::MAX {
-                    break;
-                }
             }
-            while u != u64::MAX {
-                count!(CANDIDATES, 1);
-                let j = u64::from((!u).trailing_zeros());
-                for (i, v) in vals[..k].iter_mut().enumerate() {
-                    *v = value(i, t0 + j);
-                }
-                if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
-                    return Some(t0 + j);
-                }
-                u |= 1 << j;
-            }
-            t0 += 64;
+            u
+        });
+        if whole == Some(u64::MAX) {
+            continue;
         }
-        None
-    };
-    // Intervals from the last, whose values are lowest: one is worth scanning only while it
-    // can still beat the best, and at each cut going back one key un-wraps.
-    let mut from = if n == 0 { 0 } else { cuts[n - 1] };
-    let mut floor: u64 = (0..k).map(|i| (offs[i] + (from << shift)) & mask).sum();
-    let mut to = end;
-    for j in (0..=n).rev() {
-        if from < to {
-            let stop = match best {
-                Some((sum, _)) if floor + margin >= sum => None,
-                Some((sum, _)) => Some(to.min(from + (sum - floor).div_ceil(ks_delta))),
-                None => Some(to),
-            };
-            if let Some(stop) = stop {
-                count!(INTERVALS, 1);
-                if let Some(t) = first_feasible(taken, from, stop, vals) {
-                    let sum = floor + ks_delta * (t - from);
-                    if best.is_none_or(|(s, sd)| sum < s || (sum == s && t < sd)) {
-                        best = Some((sum, t));
+        // First feasible shift in `[from, to)`, an interval no key wraps inside, so each key's
+        // occupancy under 64 consecutive shifts is one window of its plane: from the bit of
+        // shift 0, or `period` bits before it once the key has wrapped. A shift where two keys
+        // fold onto one value is skipped.
+        let first_feasible = |taken: &Map,
+                              from: u64,
+                              to: u64,
+                              vals: &mut [u64],
+                              whole: &mut Option<u64>|
+         -> Option<u64> {
+            if let Some(u) = whole {
+                let above = if to >= 64 { u64::MAX } else { (1u64 << to) - 1 };
+                loop {
+                    let free = !*u & (u64::MAX << from) & above;
+                    if free == 0 {
+                        return None;
+                    }
+                    let t = u64::from(free.trailing_zeros());
+                    count!(CANDIDATES, 1);
+                    for (i, v) in vals[..k].iter_mut().enumerate() {
+                        *v = value(i, t);
+                    }
+                    if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
+                        return Some(t);
+                    }
+                    *u |= 1 << t;
+                }
+            }
+            let mut t0 = from;
+            while t0 < to {
+                let mut u = u64::from(t0 == 0 && mode == 0);
+                if to - t0 < 64 {
+                    u |= u64::MAX << (to - t0);
+                }
+                for i in 0..k {
+                    count!(WINDOWS, 1);
+                    u |= if slow >> i & 1 == 1 {
+                        (0..64).fold(0, |w, j| w | (u64::from(taken.get(value(i, t0 + j))) << j))
+                    } else {
+                        let back = if cut[i] <= t0 { period } else { 0 };
+                        taken.window(plane[i], bit[i] + t0 - back)
+                    };
+                    if u == u64::MAX {
+                        break;
+                    }
+                }
+                while u != u64::MAX {
+                    count!(CANDIDATES, 1);
+                    let j = u64::from((!u).trailing_zeros());
+                    for (i, v) in vals[..k].iter_mut().enumerate() {
+                        *v = value(i, t0 + j);
+                    }
+                    if !(0..k).any(|i| vals[i + 1..k].contains(&vals[i])) {
+                        return Some(t0 + j);
+                    }
+                    u |= 1 << j;
+                }
+                t0 += 64;
+            }
+            None
+        };
+        // Intervals from the last, whose values are lowest: one is worth scanning only while it
+        // can still beat the best, and at each cut going back one key un-wraps.
+        let mut from = if n == 0 { 0 } else { cuts[n - 1] };
+        let mut floor: u64 = (0..k).map(|i| (offs[i] + (from << shift)) & mask).sum();
+        let mut to = end;
+        for j in (0..=n).rev() {
+            if from < to {
+                let stop = match best {
+                    Some((sum, _, _)) if floor + margin >= sum => None,
+                    Some((sum, _, _)) => Some(to.min(from + (sum - floor).div_ceil(ks_delta))),
+                    None => Some(to),
+                };
+                if let Some(stop) = stop {
+                    count!(INTERVALS, 1);
+                    if let Some(t) = first_feasible(taken, from, stop, vals, &mut whole) {
+                        let sum = floor + ks_delta * (t - from);
+                        if best
+                            .is_none_or(|(s, m, sd)| sum < s || (sum == s && (mode, t) < (m, sd)))
+                        {
+                            best = Some((sum, mode, t));
+                        }
                     }
                 }
             }
-        }
-        if j > 0 {
-            let prev = if j == 1 { 0 } else { cuts[j - 2] };
-            floor = floor + slice - ks_delta * (from - prev);
-            to = from;
-            from = prev;
+            if j > 0 {
+                let prev = if j == 1 { 0 } else { cuts[j - 2] };
+                floor = floor + slice - ks_delta * (from - prev);
+                to = from;
+                from = prev;
+            }
         }
     }
-    let Some((_, seed)) = best else {
+    let Some((_, mode, t)) = best else {
         return 0;
     };
     for i in 0..k {
-        taken.set(value(i, seed));
+        let o = level.offset(ks[i], mode);
+        taken.set(fold(starts[i] + ((o + (t << shift)) & mask)));
     }
-    seed as u8
+    (mode << shift_bits) as u8 | t as u8
 }
 
 impl Mphf {
@@ -2415,7 +2705,7 @@ impl Mphf {
     /// and a blob that is merely wrong rather than malformed answers wrong ids, not unsound ones.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         let table = match bytes.get(0..4) {
-            Some(m) if m == MAGIC => Table::V2(V2::from_bytes(bytes)?),
+            Some(m) if m == MAGIC || m == MAGIC_V2 => Table::V2(V2::from_bytes(bytes)?),
             Some(m) if m == MAGIC_V1 => Table::V1(V1::from_bytes(bytes)?),
             _ => return Err(IndexError::Format("mphf: bad magic or truncated header")),
         };
@@ -3087,7 +3377,7 @@ mod tests {
 
     /// One table big enough to have two chunks, a second bumping level and a tail, built once:
     /// every blob test below mutates *this* blob rather than random bytes, because random bytes
-    /// never spell `MPH2` and would only ever exercise the first line of the loader.
+    /// never spell `MPH3` and would only ever exercise the first line of the loader.
     fn reference() -> &'static (Vec<u64>, Vec<u8>) {
         static REF: std::sync::OnceLock<(Vec<u64>, Vec<u8>)> = std::sync::OnceLock::new();
         REF.get_or_init(|| {
@@ -3333,22 +3623,52 @@ mod tests {
         }
     }
 
-    /// The committed `MPH2` fixture is byte for byte what a fresh build over the golden keys'
+    /// The committed `MPH3` fixture is byte for byte what a fresh build over the golden keys'
     /// hashes writes: construction is deterministic, so a changed header field, section order,
     /// checksum or placement rule fails here, at the line that names the format. Regenerate it
     /// only after a deliberate change, with the `write_golden_mphf` spike.
     #[test]
     fn the_current_golden_blob_is_byte_identical_to_a_fresh_build() {
-        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-2.0.0-mphf.bin");
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-3.1.0-mphf.bin");
         let mphf = Mphf::build(&golden_hashes()).expect("build");
         assert!(matches!(mphf.table, Table::V2(_)));
         assert_eq!(&GOLDEN[..4], MAGIC);
         assert_eq!(
             mphf.to_bytes(),
             GOLDEN,
-            "regenerate tests/data/golden-2.0.0-mphf.bin"
+            "regenerate tests/data/golden-3.1.0-mphf.bin"
         );
         assert_eq!(Mphf::from_bytes(GOLDEN).expect("parses"), mphf);
+    }
+
+    /// The committed `MPH2` fixture — the same keys under 3.0's geometry — still parses, still
+    /// writes back byte for byte, and still answers the same bijection: a lookup goes through
+    /// the loaded geometry, not this version's.
+    #[test]
+    fn the_mph2_golden_blob_still_reads_under_its_own_geometry() {
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-2.0.0-mphf.bin");
+        let mphf = Mphf::from_bytes(GOLDEN).expect("the committed MPH2 fixture parses");
+        assert_eq!(&GOLDEN[..4], MAGIC_V2);
+        assert_eq!(mphf.to_bytes(), GOLDEN);
+        let Table::V2(t) = &mphf.table else {
+            panic!("an MPH2 blob is a levels table");
+        };
+        assert_eq!(t.geometry, Geometry::Mph2);
+        assert!(
+            t.levels()
+                .all(|l| l.mode_bits == 0 && l.stride == stride_for(l.slice, 0))
+        );
+        let hs = golden_hashes();
+        let mut seen = vec![false; hs.len()];
+        for &h in &hs {
+            let id = mphf.index(h) as usize;
+            assert!(id < hs.len() && !seen[id]);
+            seen[id] = true;
+        }
+        assert_ne!(
+            Mphf::build(&hs).expect("build").to_bytes()[..4],
+            GOLDEN[..4]
+        );
     }
 
     /// The committed `MPH1` fixture, parsed and written straight back — byte for byte.
@@ -3567,7 +3887,7 @@ mod spike {
         let hs = bigram_hashes(n);
         let spec = std::env::var("LEXINDEX_MPHF_SWEEP").unwrap_or_default();
         let names = [
-            "lambda", "slice", "unused2", "unused3", "tlambda", "talpha", "window", "delta", "w1",
+            "lambda", "slice", "modes", "unused3", "tlambda", "talpha", "window", "delta", "w1",
             "w2", "w3", "w4", "w5", "w6", "w7", "unused15", "margin", "chunk", "phantom", "tail",
         ];
         let threads = env("LEXINDEX_MPHF_THREADS", 1);
@@ -3759,14 +4079,14 @@ mod spike {
         }
     }
 
-    /// Rewrite the committed `MPH2` fixture after a deliberate format change. Nothing else may.
+    /// Rewrite the committed `MPH3` fixture after a deliberate format change. Nothing else may.
     #[test]
     #[ignore = "writes a fixture"]
     fn write_golden_mphf() {
         let blob = Mphf::build(&golden_hashes()).expect("build").to_bytes();
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/golden-2.0.0-mphf.bin"
+            "/tests/data/golden-3.1.0-mphf.bin"
         );
         std::fs::write(path, &blob).expect("write the fixture");
         println!("{path}: {} bytes", blob.len());

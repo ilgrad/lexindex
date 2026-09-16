@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The perfect hash is 6 % smaller and bumps half as many keys: its seeds gain modes, and the
+  blob format moves to `MPH3`.** An `MPH2` seed was one shift: a bucket's keys sit at fixed
+  offsets in their slices and the seed slides them along together, 255 positions at stride 2,
+  and a bucket two of whose keys share an offset can never be placed — that was half of the 3 %
+  of keys bumped to the next level. An `MPH3` seed is two mode bits and six shift bits: each mode
+  reads a bucket's offsets from a different field of the hash, so the four modes are four
+  independent constellations of the bucket, each slid 64 positions at a stride of a sixty-fourth
+  of the slice, and the seed taken is the lowest-sum placement over all four. Measured on 10 M
+  real word-bigram hashes: **1.954 bits/key** against 2.088, **1.58 %** of keys bumped against
+  3.03 %, for 1.4× the single-thread build time (fewer than half of PtrHash's or PHast+'s). The
+  search runs on one occupancy word a key per mode — a key's 64 shifts are 64 consecutive bits of
+  one plane of the map, its run to the wrap and the rest before it — so the feasible shifts of a
+  bucket are the zero bits of an OR, and the lowest sum is at the first free shift at or after
+  some wrap: a `trailing_zeros` a wrap. Every `BMP7`, `BCH7` and `BCL1` blob written from here on
+  carries an `MPH3` table, which 3.0 cannot read; the `MPH2` tables 1.1 to 3.0 wrote still load,
+  inside those containers and standalone, and keep their geometry when written back. The
+  `golden-3.1.0-*` fixtures pin the new bytes; the 2.0.0 ones stay as read fixtures.
+
 ### Added
 
 

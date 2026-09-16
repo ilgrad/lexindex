@@ -286,7 +286,7 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [header + table, keyed, arrays])?;
             Ok(i)
         }
-        b"MPH1" | b"MPH2" => {
+        b"MPH1" | b"MPH2" | b"MPH3" => {
             // `[magic 4][version u16][reserved u16][n u64]…`
             let n = w.u64(8)?;
             let mut i = info(BlobKind::Mphf, format, bytes, n);
@@ -545,7 +545,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.mph_bytes),
-            (BlobKind::Mphf, "MPH2", Some(300), Some(blob.len() as u64))
+            (BlobKind::Mphf, "MPH3", Some(300), Some(blob.len() as u64))
         );
     }
 

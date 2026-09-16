@@ -106,9 +106,10 @@ lengths in the same slot order.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
-and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 2.154
-bits/key at 4.15, 2.089 at 4.5, 2.070 at 4.7, within three nanoseconds per key of each other to
-build. The table has no load factor at all — every level's range is exactly its key count, and the
+and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.962
+bits/key at 4.35, 1.954 at 4.5, 1.951 at 4.65, within a few nanoseconds per key of each other to
+build, and the bumped share — the lookup's cost — rises through it, 1.1 % to 2.2 %. The table
+has no load factor at all — every level's range is exactly its key count, and the
 slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
 one way and nothing the other is not worth the API surface; `fingerprint_bits` is the knob that
 *does* have a monotone trade, and it is public.
@@ -116,8 +117,8 @@ one way and nothing the other is not worth the API surface; `fingerprint_bits` i
 **Every read the MPH makes is bounded by a length in its own header.** That is the whole reason it is
 in-crate. `index` touches a seed table per level, the tail's, and the remap — a rank bit vector
 over the lower levels' values and the Elias–Fano hole list's three arrays — and each of those
-lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH2` header
-rather than read beside them, so a loader that recomputes them cannot be handed a length that
+lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH3` header
+(and of `MPH2`'s, the same header under the seed geometry 1.1 to 3.0 wrote) rather than read beside them, so a loader that recomputes them cannot be handed a length that
 disagrees with the table it describes. The remap is the one table whose *contents* can leave the
 image, so it is the one checked by value: every rank sample must count what it claims, and every
 hole must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
@@ -552,7 +553,7 @@ or — never — read it wrong.
 | `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
 | `BDX2` | 3.0 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH2` | 1.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 3.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so both

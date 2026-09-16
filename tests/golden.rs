@@ -19,7 +19,9 @@
 //! 1.1 changed the perfect hash once more (`MPH2`, a different function over the same keys) and
 //! re-encoded the key arena, and 2.0 replaced the key hash itself — the round it shipped with had
 //! a two-word collision family on ordinary text — so the hash blobs 1.0 and 1.1 wrote are refused
-//! by name like the pre-1.0 ones, and the blobs 2.0 writes are the ones pinned byte for byte.
+//! by name like the pre-1.0 ones. 3.1 changed the perfect hash's seed geometry (`MPH3`) and reads
+//! `MPH2` under its own, so the 2.0 hash blobs are the read fixtures — loaded and answered, `MPH2`
+//! inside — and the blobs 3.1 writes are the ones pinned byte for byte.
 
 use std::path::PathBuf;
 
@@ -177,9 +179,9 @@ mod mph {
     ///
     /// Each is named by the release whose writer first produced it, and only the current set is
     /// pinned this way: 1.1 re-encoded the key arena and replaced the perfect hash, 2.0 replaced
-    /// the key hash, so the 1.0 and 1.1 files are now the refused fixtures and every hash blob
-    /// here is 2.0's — the plain pair, the fingerprinted arena, the overflow arena and the
-    /// `ClosedHashIndex` blob.
+    /// the key hash, 3.1 the perfect hash's seed geometry, so the 1.0 and 1.1 files are the
+    /// refused fixtures, the 2.0 files the read ones, and every hash blob here is 3.1's — the
+    /// plain pair, the fingerprinted arena, the overflow arena and the `ClosedHashIndex` blob.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:
     /// `cargo run --release --manifest-path local/goldengen/Cargo.toml`.
@@ -207,15 +209,15 @@ mod mph {
         let closed = lexindex::ClosedHashIndex::build(&keys).unwrap().to_bytes();
 
         for (name, magic, fresh) in [
-            ("golden-2.0.0-compact.bch", &b"BCH7"[..], compact),
-            ("golden-2.0.0-perfect.bmp", &b"BMP7"[..], perfect),
-            ("golden-2.0.0-perfect-fp.bmp", &b"BMP7"[..], perfect_fp),
+            ("golden-3.1.0-compact.bch", &b"BCH7"[..], compact),
+            ("golden-3.1.0-perfect.bmp", &b"BMP7"[..], perfect),
+            ("golden-3.1.0-perfect-fp.bmp", &b"BMP7"[..], perfect_fp),
             (
-                "golden-2.0.0-perfect-overflow.bmp",
+                "golden-3.1.0-perfect-overflow.bmp",
                 &b"BMP7"[..],
                 perfect_overflow,
             ),
-            ("golden-2.0.0-closed.bcl", &b"BCL1"[..], closed),
+            ("golden-3.1.0-closed.bcl", &b"BCL1"[..], closed),
         ] {
             let path = data(name);
             let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -252,6 +254,71 @@ mod mph {
                 "{name}: no {mphf:?} inside"
             );
         }
+    }
+
+    /// The 2.0 hash blobs carry `MPH2`, the seed geometry 1.1 to 3.0 wrote, which this version
+    /// reads under its own rule: each still loads, answers every golden key with a distinct id,
+    /// and writes back byte for byte — a loaded table keeps the geometry it was written in.
+    #[test]
+    fn the_mph2_hash_blobs_still_load_and_answer() {
+        let keys = keys();
+        let distinct = |ids: Vec<usize>, name: &str| {
+            let mut seen = vec![false; keys.len()];
+            for id in ids {
+                assert!(
+                    id < keys.len() && !std::mem::replace(&mut seen[id], true),
+                    "{name}: id {id} is not distinct"
+                );
+            }
+        };
+        for name in ["golden-2.0.0-compact.bch", "golden-2.0.0-closed.bcl"] {
+            let stored = std::fs::read(data(name)).unwrap();
+            assert!(
+                stored.windows(4).any(|w| w == b"MPH2"),
+                "{name}: no MPH2 inside"
+            );
+        }
+        let name = "golden-2.0.0-compact.bch";
+        let compact = lexindex::CompactHashIndex::load(data(name)).unwrap();
+        assert_eq!(compact.len(), keys.len(), "{name}");
+        distinct(
+            keys.iter()
+                .map(|k| compact.id(k).unwrap_or_else(|| panic!("{name}: {k:?}")) as usize)
+                .collect(),
+            name,
+        );
+        assert_eq!(
+            compact.to_bytes().unwrap(),
+            std::fs::read(data(name)).unwrap(),
+            "{name}"
+        );
+        for name in ["golden-2.0.0-perfect.bmp", "golden-2.0.0-perfect-fp.bmp"] {
+            let stored = std::fs::read(data(name)).unwrap();
+            assert!(
+                stored.windows(4).any(|w| w == b"MPH2"),
+                "{name}: no MPH2 inside"
+            );
+            let perfect = lexindex::PerfectHashIndex::load(data(name)).unwrap();
+            assert_eq!(perfect.len(), keys.len(), "{name}");
+            let ids: Vec<usize> = keys
+                .iter()
+                .map(|k| perfect.id(k).unwrap_or_else(|| panic!("{name}: {k:?}")) as usize)
+                .collect();
+            for (key, &id) in keys.iter().zip(&ids) {
+                assert_eq!(perfect.key(id as u32), Some(key.as_str()), "{name}");
+            }
+            distinct(ids, name);
+            assert_eq!(perfect.to_bytes().unwrap(), stored, "{name}");
+        }
+        let name = "golden-2.0.0-closed.bcl";
+        let closed = lexindex::ClosedHashIndex::load(data(name)).unwrap();
+        assert_eq!(closed.len(), keys.len(), "{name}");
+        distinct(keys.iter().map(|k| closed.id(k) as usize).collect(), name);
+        assert_eq!(
+            closed.to_bytes(),
+            std::fs::read(data(name)).unwrap(),
+            "{name}"
+        );
     }
 
     /// The closed index's blob: it loads, every golden key gets a distinct id below `n`, and so
@@ -387,6 +454,23 @@ fn the_fuzz_shims_accept_a_real_blob() {
         );
     }
 
+    // The 3.1 hash blobs, `MPH3` inside, through the same targets.
+    for name in [
+        "golden-3.1.0-perfect.bmp",
+        "golden-3.1.0-perfect-fp.bmp",
+        "golden-3.1.0-perfect-overflow.bmp",
+    ] {
+        let blob = std::fs::read(data(name)).unwrap();
+        assert!(
+            lexindex::fuzzing::parse_perfect_frame(&blob, true),
+            "{name}"
+        );
+    }
+    let blob = std::fs::read(data("golden-3.1.0-compact.bch")).unwrap();
+    assert!(lexindex::fuzzing::parse_compact_frame(&blob, true));
+    let blob = std::fs::read(data("golden-3.1.0-closed.bcl")).unwrap();
+    assert!(lexindex::fuzzing::parse_closed_frame(&blob));
+
     // The closed index's blob, through its own target; the other hash blobs are refused at the
     // magic, and its blob at theirs.
     let closed = std::fs::read(data("golden-2.0.0-closed.bcl")).unwrap();
@@ -435,6 +519,7 @@ fn the_fuzz_shims_accept_a_real_blob() {
         ("golden-1.0.0-mphf.bin", &b"MPH1"[..]),
         ("golden-1.1.0-mphf.bin", &b"MPH2"[..]),
         ("golden-2.0.0-mphf.bin", &b"MPH2"[..]),
+        ("golden-3.1.0-mphf.bin", &b"MPH3"[..]),
     ] {
         let mphf = std::fs::read(data(name)).unwrap();
         assert_eq!(&mphf[..4], magic, "{name}");
