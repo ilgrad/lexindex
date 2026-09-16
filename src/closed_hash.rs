@@ -354,7 +354,7 @@ impl ClosedHashIndex {
         let mut hashes = Vec::with_capacity(n);
         for i in 0..n {
             if i + AHEAD < n {
-                crate::blob::prefetch_byte(key(i + AHEAD), 0);
+                crate::blob::prefetch_key(key(i + AHEAD));
             }
             hashes.push(hash_key_bytes(key(i)));
         }

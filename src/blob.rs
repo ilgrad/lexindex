@@ -108,6 +108,15 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     prefetch(data, i);
 }
 
+/// [`prefetch_byte`] of a key's first and last bytes: the hash reads the key to its end, and a
+/// key of a few dozen bytes lies across two lines as often as not.
+#[cfg(feature = "mph")]
+#[inline(always)]
+pub(crate) fn prefetch_key(key: &[u8]) {
+    prefetch(key, 0);
+    prefetch(key, key.len().wrapping_sub(1));
+}
+
 /// [`prefetch_byte`] for a slice of any element.
 #[inline(always)]
 pub(crate) fn prefetch<T>(data: &[T], i: usize) {

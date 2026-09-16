@@ -1447,10 +1447,10 @@ impl CompactHashIndex {
         for i in 0..n {
             // The slice holds the `String` headers contiguously, but their bytes are wherever the
             // allocator put them, so hashing a batch is one dependent cache miss per key and the
-            // hashes cannot start until each arrives. Pulling a later key's first line in now is
-            // the one prefetch the per-key `id` cannot make — it has no next key to look at.
+            // hashes cannot start until each arrives. Pulling a later key's lines in now is the
+            // one prefetch the per-key `id` cannot make — it has no next key to look at.
             if i + AHEAD < n {
-                crate::blob::prefetch_byte(key(i + AHEAD), 0);
+                crate::blob::prefetch_key(key(i + AHEAD));
             }
             let (h, full) = hash_pair_bytes(key(i));
             hashes.push(h);

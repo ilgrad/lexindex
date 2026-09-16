@@ -650,7 +650,7 @@ impl PerfectHashIndex {
         let mut fps: Vec<u8> = Vec::with_capacity(if fingerprints { n } else { 0 });
         for i in 0..n {
             if i + AHEAD < n {
-                crate::blob::prefetch_byte(key(i + AHEAD), 0);
+                crate::blob::prefetch_key(key(i + AHEAD));
             }
             if fingerprints {
                 let (h, fp) = hash_pair_bytes(key(i));
@@ -681,7 +681,7 @@ impl PerfectHashIndex {
                     self.arena.prefetch_span(*sp);
                 }
                 if i + AHEAD / 2 < n {
-                    crate::blob::prefetch_byte(key(i + AHEAD / 2), 0);
+                    crate::blob::prefetch_key(key(i + AHEAD / 2));
                 }
                 let hit = spans[i].and_then(|sp| {
                     (self.arena.str_at(sp).map(str::as_bytes) == Some(key(i)))

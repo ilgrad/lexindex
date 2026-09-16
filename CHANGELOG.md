@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The batch lookups prefetch a key's last line as well as its first.** `ids_of` on the three
+  hash indexes pulled in the first byte of a key 32 keys ahead and left the rest of the key to a
+  demand miss; the hash reads a key to its end, and a key of a few dozen bytes lies across two
+  lines as often as not. Naming the last byte too: on 1 M URLs `ClosedHashIndex::ids_of` 32 → 17
+  ns a key and `CompactHashIndex::ids_of` 47 → 22, on 1 M titles 20 → 12 and 29 → 18, on 1 M
+  paths 54 → 48 and 91 → 79 (hot machine, ratios; the cool numbers follow in the benchmark
+  page). A single `id` cannot make that prefetch — it has no next key to look at — and does not
+  change.
 - **The key hash is new — branch-free over the key's length, half the time on real words — and
   every hash blob moves to `BMP8`, `BCH8` and `BCL2`.** The hash 2.0–3.x shipped read a key eight
   bytes at a time in a loop and finished with a tail switch; on real keys 6 of its 9.5 ns were
