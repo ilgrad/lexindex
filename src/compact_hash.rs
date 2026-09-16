@@ -1324,7 +1324,7 @@ impl CompactHashIndex {
     /// Slot for a key hash; `None` only for an empty index. The MPH's remap covers every slot it
     /// can produce, so the answer is always a real fingerprint row and membership is decided by the
     /// fingerprint alone.
-    #[inline]
+    #[inline(always)]
     fn slot_for(&self, h: u64) -> Option<usize> {
         Some(self.mph.as_ref()?.index(h) as usize)
     }
@@ -1347,6 +1347,7 @@ impl CompactHashIndex {
 
     /// Dense id of `key`, or `None`. Membership is checked against the stored fingerprint, so a `Some`
     /// result is correct except for a `2^-fingerprint_bits` false-positive chance on a non-member.
+    #[inline]
     pub fn id(&self, key: &str) -> Option<u32> {
         self.id_bytes(key.as_bytes())
     }
@@ -1799,8 +1800,34 @@ fn fp_mask(bits: u32) -> u64 {
 }
 
 /// Fingerprint of `slot` from the bit-packed table, or `None` if the table is too short.
+///
+/// A byte-wide fingerprint — the default 8 bits, or 16, 32 and 64 — is one load; the other
+/// widths go through the bit-packed read.
 #[inline(always)]
 fn read_fp(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
+    if bits & 7 == 0 {
+        let k = (bits / 8) as usize;
+        let at = slot.checked_mul(k)?;
+        return match k {
+            1 => bytes.get(at).map(|&b| b as u64),
+            2 => bytes
+                .get(at..at + 2)
+                .map(|c| u16::from_le_bytes(c.try_into().unwrap()) as u64),
+            4 => bytes
+                .get(at..at + 4)
+                .map(|c| u32::from_le_bytes(c.try_into().unwrap()) as u64),
+            8 => bytes
+                .get(at..at + 8)
+                .map(|c| u64::from_le_bytes(c.try_into().unwrap())),
+            _ => read_fp_bits(bytes, slot, bits),
+        };
+    }
+    read_fp_bits(bytes, slot, bits)
+}
+
+/// [`read_fp`] for any width: the bit-packed read.
+#[inline]
+fn read_fp_bits(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
     let bitpos = (slot as u64).checked_mul(bits as u64)?;
     let byte = (bitpos / 8) as usize;
     let off = (bitpos % 8) as u32;

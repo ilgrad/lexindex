@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`CompactHashIndex::id` runs 23 % fewer instructions.** The checked lookup called its slot
+  lookup and the pair hash out of line and read every fingerprint through the bit-packed path,
+  with its overflow and tail checks; `id_unchecked` had both inlined. Now `id`, the slot lookup
+  and the pair hash are inlined into the caller and a byte-wide fingerprint — the default 8 bits,
+  or 16, 32, 64 — is one load. 1 M URLs, keys read from memory: 198 → 152 instructions and
+  314 → 268 cycles a lookup (`perf stat`, exact counts). In this regime the instruction count
+  bounds how many keys' cache misses the core overlaps, so it is the lever: the fingerprint
+  derived from the hash's own state (below) took the same lookup from 117 to 65 ns on a hot
+  machine where the in-cache hash alone gained 5.
 - **The batch lookups prefetch a key's last line as well as its first.** `ids_of` on the three
   hash indexes pulled in the first byte of a key 32 keys ahead and left the rest of the key to a
   demand miss; the hash reads a key to its end, and a key of a few dozen bytes lies across two

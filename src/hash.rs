@@ -220,7 +220,7 @@ pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
 }
 
 /// [`hash_pair`] over the key's bytes: what a lookup reading an Arrow buffer holds.
-#[inline]
+#[inline(always)]
 pub fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
     let len = b.len() as u64;
     let w = key_words(b, &SLOT);
