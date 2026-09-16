@@ -1,0 +1,44 @@
+# cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
+# lexindex 3.0.0 at 67650b3, 2026-09-16, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# The first run of the battery over the hash 4.0 ships: branch-free over three length classes,
+# two 64x64->128 multiplies folded to 64 bits side by side and one merging them with the length,
+# constants the consecutive words of pi (src/hash.rs). Same battery as the 2026-09-12 run over
+# the 2.0-3.x hash, so the same cell counts and the same bound.
+#
+# Every number is a standard-normal z (chi-square through Wilson-Hilferty). The battery runs
+# 88 064 avalanche cells, 1 806 336 bit-independence cells and 40 tables; a family-wise
+# false-alarm rate of 1e-3 over 1 894 400 cells wants |z| < 6.211, so the bound is 6.5 and the
+# realised rate is 1.5e-4. The largest |z| should sit near sqrt(2 ln N) ~ 5.4, and sits below it.
+#
+# Against the 2026-09-12 run: avalanche 4.31 against 4.49, bit independence 4.52 against 4.54,
+# the per-corpus tables' largest |z| 2.32 against 2.38, the two-byte differential
+# and the 64-bit collision counts still zero. The same reading: nothing distinguishes either
+# hash from random on these families.
+lexindex hash quality — bound |z| < 6.5
+
+corpus source: /usr/share/dict/words plus generated families
+
+avalanche (strict, 8192 keys per cell, 5 lengths, both hashes)
+  worst |z|   4.31   slot len 24 in-bit 148 out-bit 2
+
+bit independence (2048 keys, lengths 8/16/24/80, both hashes, ≤128 input bits each)
+  worst |z|   4.52   slot len 80 in-bit 28 out-bits (21,62)
+
+two-byte differential (24-byte keys, 2048 bases per combo)
+  17664 combos, worst double collision 0/2048   none
+
+per corpus (n = 100 000 where the family allows it)
+  family           n   coll   z top12   z low12     z fp8   z joint
+  words       100000      0     -1.00     -0.40      0.95      0.47
+  bigrams     100000      0      2.32     -0.58     -0.16     -0.37
+  prefixed    100000      0      1.17     -1.30     -0.66     -0.27
+  suffixed    100000      0      1.25      1.68      0.13     -0.46
+  paths       100000      0      0.16     -0.10     -0.58      0.01
+  numeric     100000      0      0.70     -0.76     -1.04     -0.01
+  decimal     100000      0     -0.01     -0.03      0.40     -0.65
+  uuid        100000      0     -0.55     -0.74     -0.05      0.56
+  cyrillic    100000      0     -0.07     -0.10     -1.16     -1.42
+  dna         100000      0     -0.45      1.05     -0.45     -0.24
+
+all cells within the bound
