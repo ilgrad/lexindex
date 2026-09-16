@@ -12,6 +12,10 @@
 //! that size.
 //!
 //! `cd bench/mphf_vs && cargo run --release -- [n] [rounds] [threads]`
+//!
+//! `MPHF_VS_ROWS=lexindex,fast` runs only the rows whose name contains one of the substrings.
+//! `MPHF_VS_NO_THP=1` turns transparent huge pages off for the process (`prctl`): the control
+//! for lexindex's tables, which ask for them from 2 MiB up; no competitor's table asks.
 use lexindex::Mphf;
 use ph::phast::{
     Function, Function2, Params, SeedOnly, ShiftOnlyWrapped, bits_per_seed_to_100_bucket_size,
@@ -65,12 +69,17 @@ impl Stat {
         if self.min.is_infinite() {
             return format!("{:>8} {:>7}", "-", "");
         }
-        format!("{:>8.1} {:>+6.1}%", self.min, (self.max / self.min - 1.0) * 100.0)
+        format!(
+            "{:>8.1} {:>+6.1}%",
+            self.min,
+            (self.max / self.min - 1.0) * 100.0
+        )
     }
 }
 
 struct Row {
     name: &'static str,
+    run: bool,
     build: Stat,
     bits: f64,
     lookup: Stat,
@@ -78,9 +87,10 @@ struct Row {
 }
 
 impl Row {
-    fn new(name: &'static str) -> Self {
+    fn new(name: &'static str, run: bool) -> Self {
         Self {
             name,
+            run,
             build: Stat::NONE,
             bits: 0.0,
             lookup: Stat::NONE,
@@ -98,6 +108,9 @@ impl Row {
         get: impl Fn(&T, u64) -> u64,
         batch: Option<&dyn Fn(&T, &[u64]) -> u64>,
     ) {
+        if !self.run {
+            return;
+        }
         let n = probe.len() as f64;
         let t = Instant::now();
         let f = build();
@@ -124,6 +137,17 @@ impl Row {
     }
 }
 
+/// Transparent huge pages off for this process, whatever a table asks for.
+fn disable_thp() {
+    unsafe extern "C" {
+        fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
+    }
+    const PR_SET_THP_DISABLE: i32 = 41;
+    // SAFETY: a process-wide flag; no memory is touched.
+    let rc = unsafe { prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) };
+    assert_eq!(rc, 0, "prctl(PR_SET_THP_DISABLE) failed");
+}
+
 fn main() {
     let arg = |i: usize, default: usize| {
         std::env::args()
@@ -132,6 +156,13 @@ fn main() {
             .unwrap_or(default)
     };
     let (n, rounds, threads) = (arg(1, 10_000_000), arg(2, 3), arg(3, 1));
+    let only: Vec<String> = std::env::var("MPHF_VS_ROWS")
+        .map(|s| s.split(',').map(str::to_owned).collect())
+        .unwrap_or_default();
+    let wanted = |name: &str| only.is_empty() || only.iter().any(|f| name.contains(f.as_str()));
+    if std::env::var_os("MPHF_VS_NO_THP").is_some() {
+        disable_thp();
+    }
     let mut keys: Vec<u64> = (0..n as u64).map(splitmix).collect();
     keys.sort_unstable();
     keys.dedup();
@@ -143,12 +174,18 @@ fn main() {
         .build()
         .expect("rayon pool");
     let mut rows = [
-        Row::new("lexindex MPH3"),
-        Row::new("ph 0.11 PHast+ (ShiftOnlyWrapped)"),
-        Row::new("ph 0.11 PHast (SeedOnly)"),
-        Row::new("ptr_hash 2.1.1 compact"),
-        Row::new("ptr_hash 2.1.1 balanced"),
-        Row::new("ptr_hash 2.1.1 fast"),
+        Row::new("lexindex MPH3", wanted("lexindex MPH3")),
+        Row::new(
+            "ph 0.11 PHast+ (ShiftOnlyWrapped)",
+            wanted("ph 0.11 PHast+ (ShiftOnlyWrapped)"),
+        ),
+        Row::new(
+            "ph 0.11 PHast (SeedOnly)",
+            wanted("ph 0.11 PHast (SeedOnly)"),
+        ),
+        Row::new("ptr_hash 2.1.1 compact", wanted("ptr_hash 2.1.1 compact")),
+        Row::new("ptr_hash 2.1.1 balanced", wanted("ptr_hash 2.1.1 balanced")),
+        Row::new("ptr_hash 2.1.1 fast", wanted("ptr_hash 2.1.1 fast")),
     ];
     for _ in 0..rounds {
         rows[0].round(
@@ -253,7 +290,7 @@ fn main() {
         "{:<36} {:>9} {:>16} {:>16} {:>16}",
         "", "bits/key", "build ns/key", "lookup ns", "batch ns"
     );
-    for r in &rows {
+    for r in rows.iter().filter(|r| r.run) {
         println!(
             "{:<36} {:>9.3} {} {} {}",
             r.name,

@@ -42,6 +42,16 @@ All notable changes to this project are documented here. The format follows
   list are decoded into lines when it loads, so it is written back as `MPH3` under its own seed
   geometry — not byte for byte, as `OVL1` became `OVL2` in 1.x.
 
+- **The perfect hash's tables ask for transparent huge pages.** A table of a huge page or more —
+  the first level's seeds from about 9 M keys up — is allocated on a 2 MiB boundary and advised
+  `MADV_HUGEPAGE` before its first write, so a Linux kernel with transparent huge pages at
+  `madvise` (the common default) or `always` backs it with 2 MiB pages from the first touch, and
+  a random lookup stops missing the TLB on nearly every seed. Measured against the same process
+  with huge pages turned off: single lookups 10 % faster at 10 M keys and 3–4 % at 100 M,
+  batches 12 % and 2–3 %; bits and build unchanged. Nothing changes below 2 MiB, on other
+  systems, or where the advice is refused; the file-backed tables of `load_mmap` cannot get
+  them. No dependency: one `madvise` declaration.
+
 ### Added
 
 

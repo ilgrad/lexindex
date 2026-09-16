@@ -125,6 +125,14 @@ every value it decodes must lie below `n`. What that buys is a `from_bytes` that
 crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
 the same rule over their own eight scalars.
 
+**Its tables ask for huge pages.** A first level of 9 M keys or more is a seed table past 2 MiB,
+and read at random on 4 KiB pages it misses the TLB on most lookups. Every table of the MPH of a
+huge page or more is allocated on a 2 MiB boundary and advised `MADV_HUGEPAGE` before its first
+write, so a Linux kernel with transparent huge pages at `madvise` — the common default — or
+`always` backs it with 2 MiB pages from the first touch. The advice is best effort: where it is
+refused the table sits on small pages and reads the same, a table below 2 MiB is an ordinary
+allocation, and the file-backed tables of `load_mmap` are outside its reach.
+
 **Blobs from before 2.0 are refused, by name.** Every slot in a `BMP5`, `BMP6` or `BCH6` blob is
 keyed on the 1.0 hash, a value this version does not compute — loaded under the new hash it would
 answer wrong ids, silently — and every `BMP*`/`BCH*` format before 1.0 embedded a `ptr_hash` image

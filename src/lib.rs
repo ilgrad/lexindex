@@ -61,6 +61,8 @@
 mod blob;
 #[cfg(feature = "mph")]
 mod mphf;
+#[cfg(feature = "mph")]
+mod pages;
 /// The perfect hash on its own, for a harness that compares it with other MPHFs over the same
 /// hashes. A measurement export, not API: it exists only under `bench-mphf` and is hidden.
 #[cfg(feature = "bench-mphf")]

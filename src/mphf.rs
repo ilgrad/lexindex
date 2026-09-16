@@ -51,6 +51,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::IndexError;
+use crate::pages::{Pages, Zeroed};
 
 /// The one error every overflow check below reports; naming it keeps the arithmetic readable.
 const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in memory");
@@ -673,7 +674,7 @@ struct Level {
     /// Mode bits of the level's seeds: [`Geometry::mode_bits`].
     mode_bits: u32,
     /// One per bucket; 0 is bumped.
-    seeds: Vec<u8>,
+    seeds: Pages<u8>,
 }
 
 /// `ceil(n / (num / den))`, exactly. Every size the format derives from a load factor — a level's
@@ -716,7 +717,7 @@ impl Level {
             slice,
             stride: stride_for(slice, mode_bits),
             mode_bits,
-            seeds: Vec::new(),
+            seeds: Pages::default(),
         }
     }
 
@@ -790,6 +791,9 @@ const SPARSE_LINE_BITS: usize = LINE_BITS - LINE;
 #[repr(C, align(64))]
 struct Line([u64; 8]);
 
+// SAFETY: eight words, each of which may be zero.
+unsafe impl Zeroed for Line {}
+
 /// The base's top bit: the line is sparse.
 const SPARSE: u64 = 1 << 31;
 
@@ -808,8 +812,8 @@ struct Remap {
     /// Low bits a value: from what the density alone asks, up to what leaves every line's unary
     /// part inside the line.
     low_bits: u32,
-    low: Vec<u64>,
-    lines: Vec<Line>,
+    low: Pages<u64>,
+    lines: Pages<Line>,
 }
 
 impl Remap {
@@ -858,8 +862,8 @@ impl Remap {
         let mut remap = Self {
             len,
             low_bits,
-            low: vec![0; Self::low_words(len, low_bits)],
-            lines: Vec::with_capacity(Self::line_count(len)),
+            low: Pages::zeroed(Self::low_words(len, low_bits)),
+            lines: Pages::zeroed(Self::line_count(len)),
         };
         if low_bits > 0 {
             for (j, &v) in values.iter().enumerate() {
@@ -873,7 +877,7 @@ impl Remap {
                 }
             }
         }
-        for line in values.chunks(LINE) {
+        for (k, line) in values.chunks(LINE).enumerate() {
             let sparse = Self::line_fits(line, low_bits).expect("low bits at which it fits");
             let bits = low_bits + u32::from(sparse);
             let base = line[0] >> bits;
@@ -886,7 +890,7 @@ impl Remap {
                     words[6 + r / 64] |= (v >> low_bits & 1) << (r % 64);
                 }
             }
-            remap.lines.push(Line(words));
+            remap.lines[k] = Line(words);
         }
         remap
     }
@@ -1591,7 +1595,7 @@ impl V2 {
         // whichever thread finds it so — and the gaps' after them: the order the level hands
         // on. The list is reserved here, at about the share a level bumps, so that a worker's
         // append does not move it into that worker's heap, where it would outlive its use.
-        let placed = Mutex::new((vec![0u8; buckets as usize], Map::new(n, shift)));
+        let placed = Mutex::new((Pages::zeroed(buckets as usize), Map::new(n, shift)));
         let pieces: Vec<Mutex<Option<Piece>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
         let bumps: Vec<Mutex<Option<Vec<u64>>>> = (0..chunks).map(|_| Mutex::new(None)).collect();
         let bumped = Mutex::new((0usize, Vec::with_capacity(n as usize / 32)));
@@ -1990,7 +1994,7 @@ impl V2 {
                 slice,
                 stride: stride_for(slice, geometry.mode_bits()),
                 mode_bits: geometry.mode_bits(),
-                seeds: Vec::new(),
+                seeds: Pages::default(),
             });
         }
         // An empty tail answers 0, which is inside the image; a non-empty one needs both tables.
@@ -2071,7 +2075,7 @@ impl V2 {
         let mut p = hl;
         for l in &mut levels {
             let len = l.buckets as usize;
-            l.seeds = bytes[p..p + len].to_vec();
+            l.seeds = Pages::from_slice(&bytes[p..p + len]);
             p += len;
         }
         fn take<const W: usize, T>(
@@ -2116,8 +2120,8 @@ impl V2 {
             Remap {
                 len: entries as u64,
                 low_bits,
-                low,
-                lines,
+                low: Pages::from_slice(&low),
+                lines: Pages::from_slice(&lines),
             }
         };
         debug_assert_eq!(p, bytes.len());
