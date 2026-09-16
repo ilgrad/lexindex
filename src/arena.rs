@@ -333,8 +333,23 @@ impl StringArena {
     /// stores them, a slot whose fingerprint is not `fp` answers `None` from the offset line
     /// alone, without the read of the key that is a lookup's second cache miss. Under any other
     /// layout `fp` is ignored.
+    #[cfg(test)]
     pub(crate) fn get_matching(&self, i: usize, fp: u8) -> Option<&str> {
         self.str_at(self.span_matching(i, fp)?)
+    }
+
+    /// [`get`](Self::get)'s bytes, for a caller that only compares them against a key it
+    /// already holds: equal bytes are the same UTF-8, so the validation a `&str` costs — one
+    /// pass over the stored key — is skipped.
+    #[inline(always)]
+    pub(crate) fn bytes(&self, i: usize) -> Option<&[u8]> {
+        self.bytes_at(self.span(i)?)
+    }
+
+    /// [`get_matching`](Self::get_matching)'s bytes — see [`bytes`](Self::bytes).
+    #[inline(always)]
+    pub(crate) fn bytes_matching(&self, i: usize, fp: u8) -> Option<&[u8]> {
+        self.bytes_at(self.span_matching(i, fp)?)
     }
 
     /// Prefetch the lines slot `i`'s offsets are read from (pipelined batch lookups).
@@ -409,7 +424,13 @@ impl StringArena {
 
     #[inline(always)]
     pub(crate) fn str_at(&self, span: (usize, usize)) -> Option<&str> {
-        std::str::from_utf8(self.blob.as_ref().get(span.0..span.1)?).ok()
+        std::str::from_utf8(self.bytes_at(span)?).ok()
+    }
+
+    /// The bytes of `span`, unvalidated — see [`bytes`](Self::bytes).
+    #[inline(always)]
+    pub(crate) fn bytes_at(&self, span: (usize, usize)) -> Option<&[u8]> {
+        self.blob.as_ref().get(span.0..span.1)
     }
 
     /// The serialised layout, borrowed: the arena already *is* its own blob, so writing it out

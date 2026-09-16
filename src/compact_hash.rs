@@ -1329,6 +1329,28 @@ impl CompactHashIndex {
         Some(self.mph.as_ref()?.index(h) as usize)
     }
 
+    /// Whether the fingerprint stored at `slot` is `full`'s low bits. `slot` is below the slot
+    /// count: the MPH's image is `[0, m)` for every hash — validated when a blob is parsed — and
+    /// the table is sized to `m` there and at build, so the default width is one byte load with
+    /// no check; the other widths go through the checked read, out of line.
+    #[inline(always)]
+    fn fp_matches(&self, slot: usize, full: u64) -> bool {
+        debug_assert!(slot < self.mph.as_ref().map_or(0, |m| m.n() as usize));
+        if self.fp_bits == 8 {
+            // SAFETY: `fps` holds one byte a slot — `fp_table_len(m, 8)` at build, `m * 8 / 8`
+            // bytes checked at parse — and `slot < m` for every hash the MPH answers.
+            let fp = unsafe { *self.fps.as_ref().get_unchecked(slot) };
+            return u64::from(fp) == full & 0xff;
+        }
+        self.fp_matches_wide(slot, full)
+    }
+
+    /// [`fp_matches`](Self::fp_matches) off the default width.
+    #[inline(never)]
+    fn fp_matches_wide(&self, slot: usize, full: u64) -> bool {
+        read_fp(self.fps.as_ref(), slot, self.fp_bits) == Some(full & fp_mask(self.fp_bits))
+    }
+
     /// Width of the stored fingerprints in bits; the membership false-positive rate is
     /// `2^-fingerprint_bits`.
     pub fn fingerprint_bits(&self) -> u32 {
@@ -1353,7 +1375,7 @@ impl CompactHashIndex {
     }
 
     /// [`id`](Self::id) over the key's bytes.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
@@ -1362,9 +1384,7 @@ impl CompactHashIndex {
             // 1 in 100 queries) pays for a fingerprint it never compares.
             let (h, full) = hash_pair_bytes(key);
             let slot = self.slot_for(h)?;
-            return (read_fp(self.fps.as_ref(), slot, self.fp_bits)?
-                == full & fp_mask(self.fp_bits))
-            .then_some(slot as u32);
+            return self.fp_matches(slot, full).then_some(slot as u32);
         }
         self.id_with_side(key)
     }
@@ -1380,8 +1400,7 @@ impl CompactHashIndex {
             return Some(id);
         }
         let slot = self.slot_for(h)?;
-        (read_fp(self.fps.as_ref(), slot, self.fp_bits)? == full & fp_mask(self.fp_bits))
-            .then_some(slot as u32)
+        self.fp_matches(slot, full).then_some(slot as u32)
     }
 
     /// Dense id **without** checking the fingerprint — `key` must be a member, or the result is an
@@ -1444,7 +1463,6 @@ impl CompactHashIndex {
         const AHEAD: usize = 32;
         let mut hashes = Vec::with_capacity(n);
         let mut wanted = Vec::with_capacity(n);
-        let mask = fp_mask(self.fp_bits);
         for i in 0..n {
             // The slice holds the `String` headers contiguously, but their bytes are wherever the
             // allocator put them, so hashing a batch is one dependent cache miss per key and the
@@ -1455,7 +1473,7 @@ impl CompactHashIndex {
             }
             let (h, full) = hash_pair_bytes(key(i));
             hashes.push(h);
-            wanted.push(full & mask);
+            wanted.push(full);
         }
         // Every slot is a real fingerprint row — the MPH's remap covers its whole slot range —
         // so the two passes are a straight pipeline: pilots prefetched inside `index_all`, then
@@ -1468,8 +1486,7 @@ impl CompactHashIndex {
                     crate::blob::prefetch_byte(fps, (s * self.fp_bits as u64 / 8) as usize);
                 }
                 let slot = slots[i] as usize;
-                read_fp(fps, slot, self.fp_bits)
-                    .and_then(|f| (f == wanted[i]).then_some(slot as u32))
+                self.fp_matches(slot, wanted[i]).then_some(slot as u32)
             })
             .collect()
     }
@@ -1790,13 +1807,11 @@ fn fp_table_len(count: usize, bits: u32) -> Result<usize, IndexError> {
         .map_err(|_| IndexError::Format("compact-hash: fingerprint table too large"))
 }
 
+/// The low `bits` of a fingerprint, `bits` in `1..=64`.
 #[inline(always)]
 fn fp_mask(bits: u32) -> u64 {
-    if bits >= 64 {
-        u64::MAX
-    } else {
-        (1u64 << bits) - 1
-    }
+    debug_assert!((1..=64).contains(&bits));
+    u64::MAX >> (64 - bits)
 }
 
 /// Fingerprint of `slot` from the bit-packed table, or `None` if the table is too short.

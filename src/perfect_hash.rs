@@ -548,15 +548,13 @@ impl PerfectHashIndex {
         self.side[start..]
             .iter()
             .take_while(|e| e.0 == h)
-            .find_map(|e| {
-                (self.arena.get(e.1 as usize).map(str::as_bytes) == Some(key)).then_some(e.1)
-            })
+            .find_map(|e| (self.arena.bytes(e.1 as usize) == Some(key)).then_some(e.1))
     }
 
     /// Slot for a key hash; `None` only for an empty index. The MPH's remap covers every slot it
     /// can produce, so the answer is always a valid arena row and membership is decided by the
     /// stored key alone.
-    #[inline]
+    #[inline(always)]
     fn slot_for(&self, h: u64) -> Option<usize> {
         Some(self.mph.as_ref()?.index(h) as usize)
     }
@@ -578,12 +576,13 @@ impl PerfectHashIndex {
     }
 
     /// Dense id of `key`, or `None` if absent (membership is verified against the stored key).
+    #[inline]
     pub fn id(&self, key: &str) -> Option<u32> {
         self.id_bytes(key.as_bytes())
     }
 
     /// [`id`](Self::id) over the key's bytes.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u32> {
         if self.side.is_empty() {
             // The overwhelming case (no hash collision anywhere in the index): one predicted
@@ -592,11 +591,11 @@ impl PerfectHashIndex {
             if self.arena.has_fingerprints() {
                 let (h, fp) = hash_pair_bytes(key);
                 let slot = self.slot_for(h)?;
-                return (self.arena.get_matching(slot, fp as u8).map(str::as_bytes) == Some(key))
+                return (self.arena.bytes_matching(slot, fp as u8) == Some(key))
                     .then_some(slot as u32);
             }
             let slot = self.slot_for(hash_key_bytes(key))?;
-            return (self.arena.get(slot).map(str::as_bytes) == Some(key)).then_some(slot as u32);
+            return (self.arena.bytes(slot) == Some(key)).then_some(slot as u32);
         }
         self.id_with_side(key)
     }
@@ -607,7 +606,7 @@ impl PerfectHashIndex {
     fn id_with_side(&self, key: &[u8]) -> Option<u32> {
         let (h, fp) = hash_pair_bytes(key);
         if let Some(slot) = self.slot_for(h) {
-            if self.arena.get_matching(slot, fp as u8).map(str::as_bytes) == Some(key) {
+            if self.arena.bytes_matching(slot, fp as u8) == Some(key) {
                 return Some(slot as u32);
             }
         }
@@ -684,8 +683,7 @@ impl PerfectHashIndex {
                     crate::blob::prefetch_key(key(i + AHEAD / 2));
                 }
                 let hit = spans[i].and_then(|sp| {
-                    (self.arena.str_at(sp).map(str::as_bytes) == Some(key(i)))
-                        .then_some(slots[i] as u32)
+                    (self.arena.bytes_at(sp) == Some(key(i))).then_some(slots[i] as u32)
                 });
                 if hit.is_none() && !self.side.is_empty() {
                     return self.side_lookup(hashes[i], key(i));
