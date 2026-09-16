@@ -65,14 +65,30 @@ fn mum(a: u64, b: u64) -> u64 {
     (p as u64) ^ ((p >> 64) as u64)
 }
 
+/// Four bytes at `i`, little-endian, without a bounds check: every index the words below use
+/// is in bounds by construction, and the six checks LLVM could not prove from `d = (n / 8) * 4`
+/// and `n - p > 32` cost 6–16 % of the hash on real keys (`local/hashbench`, A-B-A-B).
+///
+/// # Safety
+///
+/// `i + 4 <= b.len()`.
 #[inline(always)]
-fn r4(b: &[u8], i: usize) -> u64 {
-    u32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as u64
+unsafe fn r4(b: &[u8], i: usize) -> u64 {
+    debug_assert!(i + 4 <= b.len());
+    // SAFETY: the caller's bound; a `[u8; 4]` has no alignment.
+    u32::from_le_bytes(unsafe { *(b.as_ptr().add(i) as *const [u8; 4]) }) as u64
 }
 
+/// Eight bytes at `i`, little-endian, without a bounds check.
+///
+/// # Safety
+///
+/// `i + 8 <= b.len()`.
 #[inline(always)]
-fn r8(b: &[u8], i: usize) -> u64 {
-    u64::from_le_bytes(b[i..i + 8].try_into().unwrap())
+unsafe fn r8(b: &[u8], i: usize) -> u64 {
+    debug_assert!(i + 8 <= b.len());
+    // SAFETY: the caller's bound; a `[u8; 8]` has no alignment.
+    u64::from_le_bytes(unsafe { *(b.as_ptr().add(i) as *const [u8; 8]) })
 }
 
 /// The four words of a key of 4..=32 bytes. To 16 bytes, two words from four 4-byte loads at 0,
@@ -84,16 +100,22 @@ fn r8(b: &[u8], i: usize) -> u64 {
 #[inline(always)]
 fn words(b: &[u8]) -> [u64; 4] {
     let n = b.len();
+    debug_assert!((4..=32).contains(&n));
     if n <= 16 {
         let d = (n >> 3) << 2;
-        [
-            r4(b, 0) | (r4(b, d) << 32),
-            r4(b, n - 4) | (r4(b, n - 4 - d) << 32),
-            0,
-            0,
-        ]
+        // SAFETY: n is 4..=16, so d is 0 below 8, 4 below 16 and 8 at 16: d + 4 <= n and
+        // n - 4 - d >= 0 at every n, and the loads at 0 and n - 4 need only n >= 4.
+        unsafe {
+            [
+                r4(b, 0) | (r4(b, d) << 32),
+                r4(b, n - 4) | (r4(b, n - 4 - d) << 32),
+                0,
+                0,
+            ]
+        }
     } else {
-        [r8(b, 0), r8(b, 8), r8(b, n - 16), r8(b, n - 8)]
+        // SAFETY: n is 17..=32, so the loads at 8 and n - 16 leave eight bytes each.
+        unsafe { [r8(b, 0), r8(b, 8), r8(b, n - 16), r8(b, n - 8)] }
     }
 }
 
@@ -144,7 +166,9 @@ fn key_words(b: &[u8], k: &[u64; 8]) -> [u64; 4] {
     let mut s = (k[6], k[7]);
     let mut p = 0;
     while n - p > 32 {
-        s = block(s, [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)], k);
+        // SAFETY: n - p > 32, so p + 32 <= n.
+        let w = unsafe { [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)] };
+        s = block(s, w, k);
         p += 32;
     }
     let mut w = words(&b[n - 32..]);
@@ -209,7 +233,8 @@ pub(crate) fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
     let (mut s, mut f) = ((SLOT[6], SLOT[7]), (FP[6], FP[7]));
     let mut p = 0;
     while n - p > 32 {
-        let w = [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)];
+        // SAFETY: n - p > 32, so p + 32 <= n.
+        let w = unsafe { [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)] };
         s = block(s, w, &SLOT);
         f = block(f, w, &FP);
         p += 32;

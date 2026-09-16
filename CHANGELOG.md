@@ -16,7 +16,9 @@ All notable changes to this project are documented here. The format follows
   as its first and last sixteen, longer keys through two multiply lanes over 32-byte blocks that
   end on the last 32, and 1–3 bytes as one word; the words go through two 64×64→128 multiplies
   folded to 64 bits, side by side, and one more that merges them with the length — no loop and
-  no branch on the length inside a class. The constants are consecutive words of π. Measured
+  no branch on the length inside a class, and no bounds check: every load's index is in bounds
+  by construction, and the six checks LLVM could not prove cost 6–16 % of the hash on real keys.
+  The constants are consecutive words of π. Measured
   A-B-A-B in one process on 2026-09-16, the hash alone over keys read in order: dictionary words
   3.9 ns against 7.3, English titles 7.4 against 11.2, URLs 6.5 against 13.2; 8-byte keys are the
   one loss, 3.8 against 2.9. The distribution battery (`bench/results/hash-quality-*`) reads the
