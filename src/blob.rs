@@ -6,6 +6,7 @@
 //! self-referential borrow and no `unsafe` beyond the single documented `Mmap::map`. This is what lets
 //! `from_bytes` (owned) and `load_mmap` (zero-copy) share one code path and one stored type.
 
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 /// The backing store for a [`SharedBytes`]: an owned heap buffer or a read-only memory map.
@@ -17,7 +18,6 @@ enum Source {
 }
 
 impl Source {
-    #[inline]
     fn bytes(&self) -> &[u8] {
         match self {
             Source::Owned(b) => b,
@@ -28,63 +28,69 @@ impl Source {
 }
 
 /// A cheap-to-clone, range-limited view into a shared byte source.
+///
+/// The view's bytes are resolved once, into a pointer and a length: the source's buffer never
+/// moves while an `Arc` to it is held, so a lookup reads through the pair instead of matching
+/// the source's kind, dereferencing its `Arc` and slicing a range on every access — a dozen
+/// instructions on a path where each one bounds how many lookups the core keeps in flight.
 #[derive(Clone)]
 pub(crate) struct SharedBytes {
     src: Source,
-    start: usize,
-    end: usize,
+    ptr: NonNull<u8>,
+    len: usize,
 }
 
+// SAFETY: the bytes behind `ptr` are `src`'s — an immutable heap buffer or a read-only map, both
+// `Send + Sync` — and are only ever read through the pointer.
+unsafe impl Send for SharedBytes {}
+unsafe impl Sync for SharedBytes {}
+
 impl SharedBytes {
+    fn whole(src: Source) -> Self {
+        let bytes = src.bytes();
+        let (ptr, len) = (NonNull::from(bytes).cast::<u8>(), bytes.len());
+        Self { src, ptr, len }
+    }
+
     /// Wrap an owned buffer (one heap copy at the boundary; querying never copies again).
     pub(crate) fn from_owned(bytes: Vec<u8>) -> Self {
-        let end = bytes.len();
-        Self {
-            src: Source::Owned(Arc::from(bytes.into_boxed_slice())),
-            start: 0,
-            end,
-        }
+        Self::whole(Source::Owned(Arc::from(bytes.into_boxed_slice())))
     }
 
     /// Wrap a read-only memory map — the zero-copy path. The `Arc` keeps the map alive for as long as
     /// any view (or `fst::Map`) borrows it, and lets the pages be shared across clones and processes.
     #[cfg(feature = "mmap")]
     pub(crate) fn from_mmap(mmap: Arc<memmap2::Mmap>) -> Self {
-        let end = mmap.len();
-        Self {
-            src: Source::Mapped(mmap),
-            start: 0,
-            end,
-        }
+        Self::whole(Source::Mapped(mmap))
     }
 
     /// A sub-view `[start, end)`, measured within this view; `None` if it would fall out of range.
     pub(crate) fn subslice(&self, start: usize, end: usize) -> Option<Self> {
-        if start > end {
+        if start > end || end > self.len {
             return None;
         }
-        let abs_start = self.start.checked_add(start)?;
-        let abs_end = self.start.checked_add(end)?;
-        if abs_end > self.end {
-            return None;
-        }
+        // SAFETY: `start <= len`, so the offset pointer is within the view's bytes or one past
+        // their end, and the source it points into is kept alive by the clone below.
+        let ptr = unsafe { NonNull::new_unchecked(self.ptr.as_ptr().add(start)) };
         Some(Self {
             src: self.src.clone(),
-            start: abs_start,
-            end: abs_end,
+            ptr,
+            len: end - start,
         })
     }
 
     #[inline]
     pub(crate) fn len(&self) -> usize {
-        self.end - self.start
+        self.len
     }
 }
 
 impl AsRef<[u8]> for SharedBytes {
-    #[inline]
+    #[inline(always)]
     fn as_ref(&self) -> &[u8] {
-        &self.src.bytes()[self.start..self.end]
+        // SAFETY: `ptr` and `len` name bytes of `src`, which lives as long as `self`, and no
+        // `&mut` to them is ever handed out.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 }
 

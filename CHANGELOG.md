@@ -20,9 +20,13 @@ All notable changes to this project are documented here. The format follows
   200 → 178). `PerfectHashIndex::id` validated the stored key as UTF-8 before comparing it with
   the probe — a pass over every byte that equality with a `&str` already implies — and called
   its slot lookup out of line: 420 → 198 instructions and 920 → 540 cycles a lookup on a hot
-  machine. In this regime the instruction count bounds how many keys' cache misses the core
-  overlaps, so it is the lever: the fingerprint derived from the hash's own state (below) took
-  the compact lookup from 117 to 65 ns on a hot machine where the in-cache hash alone gained 5.
+  machine. And every index's byte source now resolves its pointer once, when it is built or
+  loaded, instead of on every access — a tag match, an `Arc` dereference and a range check a
+  lookup: compact `id` 125 → 115 instructions, perfect `id` 198 → 180, `DictIndex::id`
+  5 490 → 4 950. In this regime the instruction count bounds how many keys' cache misses the
+  core overlaps, so it is the lever: the fingerprint derived from the hash's own state (below)
+  took the compact lookup from 117 to 65 ns on a hot machine where the in-cache hash alone
+  gained 5.
 - **The batch lookups prefetch a key's last line as well as its first.** `ids_of` on the three
   hash indexes pulled in the first byte of a key 32 keys ahead and left the rest of the key to a
   demand miss; the hash reads a key to its end, and a key of a few dozen bytes lies across two
