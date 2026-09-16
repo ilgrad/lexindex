@@ -1,0 +1,97 @@
+bench/mphf_vs `strings` at b4544db, 2026-09-16 11:32-11:38, ptr_hash 2.1.1 (default features plus `xxhash-rust`'s
+Xxh3 through its `Xxh3` hasher), Ryzen 7 5800HS (8 cores, 16 MB L3, 38 GB), Fedora 44, on mains, right after the
+mphf-vs run of the same commit with a cool-down to 50 C in between; load 0.7 at the start.
+The string-to-id path end to end, on real key corpora (local/corpora, not in the repository: an English word list,
+URLs, UUIDs, English Wikipedia titles, file paths; the 1 M and 10 M files are the first n distinct lines).
+Rows: `ClosedHashIndex` (lexindex's key hash, then its perfect hash; `id`, `ids_of`), the bare `Mphf` over
+`hash_key_bytes` (the same two steps without the index's framing), ptr_hash's fast and compact sets over the same
+hash (so that pair of rows isolates the perfect hash) and over xxh3 of the bytes (PtrHash as a user would build
+it over strings), and `CompactHashIndex` at fingerprint_bits = 8 (fp=1: the same path plus the membership check).
+One process per corpus, rows A-B-A-B for 3 rounds (builds: min; the index builds use their own threads, the bare
+functions one), lookups over every key in one shuffled order with the key read from the corpus (min of 9 passes);
+batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares
+of the probe order. bits/key is the serialised table; the CompactHashIndex row counts its fingerprint byte.
+The lookup loops are generic functions of their own (`sweep`), as in mphf-vs at this commit.
+
+R-4: bench/mphf_vs strings at b4544db, 2026-09-16T11:32+03:00, load 0.67 1.62 1.29, Tctl 49.9 C, ptr_hash 2.1.1, Ryzen 7 5800HS
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/words-full.txt: 479823 keys, mean 9.3 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.975     46.7  +30.6%     10.7  +36.6%     11.0   +1.1%      1.7  +24.1%      1.7  +11.5%
+lexindex Mphf + hash_key_bytes                   1.974     80.3   +7.5%     10.1  +22.7%      9.5   +7.8%      1.7  +82.9%      1.6  +29.5%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990     81.2  +12.4%      8.7  +53.2%      8.8   +9.5%      1.5 +107.4%      1.5  +29.9%
+ptr_hash 2.1.1 compact, lexindex's hash          2.145    162.1   +0.5%     12.7  +37.0%     11.0   +2.3%      2.1  +77.3%      1.8  +24.0%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990     83.8   +1.8%     17.8  +22.1%     13.8  +11.5%      2.8  +57.5%      2.2  +13.2%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.145    166.8   +1.9%     20.7  +22.9%     16.4   +3.9%      3.2  +62.6%      2.6   +9.5%
+lexindex CompactHashIndex fp=1                   9.975     46.8   +9.3%     10.8  +40.9%     15.5   +1.5%      1.7  +27.0%      2.3  +14.8%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/urls-1000000.txt: 1000000 keys, mean 52.4 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.962     92.7  +15.8%     54.5   +5.8%     33.1   +3.8%      8.7   +8.1%      6.6   +2.1%
+lexindex Mphf + hash_key_bytes                   1.962    111.0   +6.5%     54.6   +3.4%     42.7   +1.8%      8.6   +5.8%      7.4   +1.9%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    116.1   +8.2%     52.4   +2.9%     41.8   +1.1%      8.4   +5.3%      7.3   +3.3%
+ptr_hash 2.1.1 compact, lexindex's hash          2.144    190.8   +2.5%     62.5   +2.4%     44.0   +3.6%      9.4   +5.0%      7.5   +2.2%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    117.1   +2.9%     49.6   +2.0%     55.2   +0.8%      8.1  +16.1%      8.8  +40.3%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.144    195.5   +1.1%     61.3   +1.8%     58.9   +1.7%      9.2   +5.1%      9.1   +1.8%
+lexindex CompactHashIndex fp=1                   9.962     93.7   +2.5%     54.9   +3.4%     43.4   +1.9%      8.7   +6.4%      7.8   +1.4%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/uuid-1000000.txt: 1000000 keys, mean 36.0 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.962     79.9  +16.8%     46.1   +6.4%     24.4   +4.0%      7.2   +7.3%      5.2   +1.9%
+lexindex Mphf + hash_key_bytes                   1.962    103.6   +8.4%     45.8   +5.8%     37.0   +2.2%      7.2   +6.4%      6.3   +1.2%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    109.1   +8.4%     44.1   +4.2%     35.2   +3.0%      7.1   +6.1%      6.2   +1.3%
+ptr_hash 2.1.1 compact, lexindex's hash          2.144    186.9   +1.9%     52.3   +5.4%     37.6   +2.4%      7.9   +4.6%      6.4   +6.2%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    114.8   +1.0%     42.6   +3.0%     49.0   +3.5%      6.9  +55.9%      7.8  +28.6%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.144    191.8   +0.6%     55.1   +3.3%     53.0   +3.0%      8.2   +6.3%      8.1   +2.1%
+lexindex CompactHashIndex fp=1                   9.962     80.5   +6.3%     46.7   +5.3%     32.0   +2.4%      7.4  +39.1%      5.9   +8.7%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/titles-en-1000000.txt: 1000000 keys, mean 21.0 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.965     63.2  +24.7%     32.1  +15.3%     18.3   +7.0%      4.9  +12.8%      3.3   +5.1%
+lexindex Mphf + hash_key_bytes                   1.965     95.7   +5.8%     33.5  +11.5%     26.3   +4.8%      4.9  +11.3%      4.3   +2.5%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990     99.0   +9.7%     29.8  +12.7%     25.2   +4.0%      4.5  +15.1%      4.1   +3.3%
+ptr_hash 2.1.1 compact, lexindex's hash          2.144    175.1   +1.7%     37.2  +12.5%     27.2   +3.6%      5.4  +14.7%      4.3   +4.1%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    104.2   +5.4%     36.2   +9.4%     36.1   +3.9%      5.3   +9.3%      5.5   +1.9%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.144    182.6   +1.9%     44.7  +10.2%     42.3   +5.8%      6.2  +12.5%      6.1   +1.5%
+lexindex CompactHashIndex fp=1                   9.965     65.0   +4.0%     33.7   +7.9%     25.4   +4.4%      5.1  +16.2%      4.3   +2.6%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/paths-1000000.txt: 1000000 keys, mean 125.0 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.961    149.0   +8.2%     92.0   +3.3%     63.3   +3.6%     17.2   +3.3%     14.8   +3.0%
+lexindex Mphf + hash_key_bytes                   1.961    144.3   +5.5%     92.0   +2.1%     76.5   +1.0%     17.0   +2.8%     15.8   +3.1%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    146.9   +7.6%     87.8   +2.6%     74.4   +2.3%     16.5   +4.0%     16.0   +6.6%
+ptr_hash 2.1.1 compact, lexindex's hash          2.144    222.1   +1.1%    110.6   +2.8%     77.5   +1.1%     19.5   +2.6%     16.7   +2.4%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    166.1   +0.4%     95.6   +1.3%     98.3   +0.2%     15.5  +20.1%     15.7  +12.3%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.144    244.8   +0.7%    111.4   +2.1%    101.2   +1.5%     17.0   +2.6%     15.9   +1.2%
+lexindex CompactHashIndex fp=1                   9.961    148.2   +3.7%     93.5   +2.5%     95.0   +1.5%     17.4   +3.2%     18.6   +0.8%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/urls-10000000.txt: 10000000 keys, mean 52.4 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.952    109.4   +0.9%     61.2   +1.3%     36.1   +1.4%      9.6   +0.6%      7.5   +0.9%
+lexindex Mphf + hash_key_bytes                   1.952    124.9   +2.2%     60.8   +0.8%     45.6   +0.6%      9.5   +0.6%      8.0   +1.0%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    213.1   +0.8%     59.2   +1.0%     46.1   +0.4%      9.3   +4.9%      8.1   +1.3%
+ptr_hash 2.1.1 compact, lexindex's hash          2.143    214.5   +1.3%     71.5   +1.1%     48.2   +0.5%     10.7   +1.0%      8.2   +0.9%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    200.2   +1.5%     55.1   +2.1%     60.6   +0.4%      8.9   +0.9%      9.6   +3.6%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.143    215.3   +1.3%     68.0   +1.5%     64.5   +0.6%     10.3   +0.8%     10.0   +5.4%
+lexindex CompactHashIndex fp=1                   9.952    113.1   +1.0%     61.3   +0.7%     51.3   +1.4%      9.6   +0.8%      9.8   +7.1%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/uuid-10000000.txt: 10000000 keys, mean 36.0 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.953     96.6   +1.6%     56.8   +1.3%     28.8   +2.3%      8.8   +6.5%      6.2   +1.1%
+lexindex Mphf + hash_key_bytes                   1.953    117.1   +2.4%     56.7   +1.3%     41.3   +0.9%      8.8   +6.0%      7.2   +1.2%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    207.9   +0.3%     55.6   +1.4%     40.7   +1.0%      8.7   +0.6%      7.3   +0.9%
+ptr_hash 2.1.1 compact, lexindex's hash          2.143    209.8   +0.4%     62.3   +0.9%     43.3   +0.7%      9.5   +0.3%      7.4   +1.0%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    195.6   +0.2%     49.8   +1.8%     57.3   +0.3%      8.1   +8.2%      9.1   +0.8%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.143    209.5   +0.2%     63.6   +1.4%     61.6   +0.5%      9.7   +1.3%      9.6  +14.2%
+lexindex CompactHashIndex fp=1                   9.953     98.7   +2.0%     57.1   +0.7%     40.3   +3.0%      8.9   +0.7%      8.0   +6.2%
+
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora/titles-en-10000000.txt: 10000000 keys, mean 21.0 bytes; 1 thread(s) for the PtrHash and Mphf builds (the indexes use their own); builds min of 3 rounds; lookups over every key in one shuffled order, the key read from the corpus, min of 9 passes; spread = slowest over fastest; batch = ids_of / index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                              bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8
+lexindex ClosedHashIndex                         1.952     86.9   +0.6%     47.3   +1.0%     23.7   +0.9%      7.5   +3.8%      5.1   +1.2%
+lexindex Mphf + hash_key_bytes                   1.952    110.0   +1.9%     46.8   +0.8%     31.7   +0.8%      7.4   +1.1%      6.0   +0.3%
+ptr_hash 2.1.1 fast, lexindex's hash             2.990    198.7   +0.1%     42.7   +0.9%     32.3   +1.6%      7.0   +0.8%      6.1   +1.1%
+ptr_hash 2.1.1 compact, lexindex's hash          2.143    202.0   +0.7%     58.7   +0.8%     33.9   +0.9%      8.7   +0.5%      6.1   +0.8%
+ptr_hash 2.1.1 fast, xxh3 over the bytes         2.990    193.6   +0.5%     46.7   +2.0%     48.2   +0.6%      7.5   +8.5%      7.9   +1.4%
+ptr_hash 2.1.1 compact, xxh3 over the bytes      2.143    206.8   +0.9%     60.2   +0.9%     58.7   +0.6%      8.9   +5.4%      9.0   +9.4%
+lexindex CompactHashIndex fp=1                   9.952     90.7   +1.6%     47.8   +1.6%     34.6   +2.3%      7.5   +1.8%      6.7   +9.3%
+RUN DONE Tctl 82.4 C

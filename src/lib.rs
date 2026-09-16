@@ -14,7 +14,7 @@
 //!   no reverse lookup. Use it when footprint is paramount.
 //! - [`ClosedHashIndex`] — the perfect hash **and nothing else**: `id(key) -> u32`, no
 //!   `Option`, for a vocabulary known to be closed. A member's id, and for anything else some id
-//!   in `[0, n)`. 0.26 B/key, a fifth of `CompactHashIndex`, as a token → id map where every
+//!   in `[0, n)`. 0.24 B/key, a fifth of `CompactHashIndex`, as a token → id map where every
 //!   query is a member by construction.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,

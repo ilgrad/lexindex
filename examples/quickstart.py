@@ -76,14 +76,14 @@ def closed_hash_demo() -> None:
     vocab = ClosedHashIndex(VOCAB)
 
     # the same ids CompactHashIndex gives over the same keys, without the fingerprint table:
-    # ~0.26 B/key at scale, and a lookup with no compare behind it
+    # ~0.24 B/key at scale, and a lookup with no compare behind it
     assert vocab.id("grape") == CompactHashIndex(VOCAB).id_unchecked("grape")
     assert sorted(vocab.ids_of(VOCAB)) == list(range(len(VOCAB)))
 
     # nothing stored can tell a stranger from a member, so `id` never says "absent" -- a
     # stranger gets *some* id in [0, n), and there is no `in` / `contains` to pretend otherwise
     assert 0 <= vocab.id("durian") < len(VOCAB)
-    print("ClosedHashIndex:  id('grape') ->", vocab.id("grape"), "(dense [0, n); ~0.26 B/key)")
+    print("ClosedHashIndex:  id('grape') ->", vocab.id("grape"), "(dense [0, n); ~0.24 B/key)")
 
 
 def dict_index_demo() -> None:

@@ -289,7 +289,7 @@ n = CompactHashIndex.build_to_file((line.rstrip() for line in open("keys.txt")),
 
 ### Choosing the fingerprint width
 
-Size is the minimal perfect hash (0.26 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
+Size is the minimal perfect hash (0.24 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
 per key, and
 the membership false-positive rate is about `2^-fingerprint_bits` — a design rate for
 well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes;
@@ -329,7 +329,7 @@ from lexindex import ClosedHashIndex
 
 # For a vocabulary known to be closed: every query is a member by construction, so nothing is
 # stored to say otherwise. `id` returns a member's id, and for any other string *some* id in
-# [0, n) -- there is no `in`, no `[]`, no `contains`. About 0.26 B/key, a fifth of CompactHashIndex.
+# [0, n) -- there is no `in`, no `[]`, no `contains`. About 0.24 B/key, a fifth of CompactHashIndex.
 vocab = ClosedHashIndex(["the", "of", "and", "to"])
 i = vocab.id("the")            # the id CompactHashIndex([...]).id_unchecked("the") gives
 ids = vocab.ids_of(["to", "of"])   # list[int]; ids_of_bytes / ids_into as on the other indexes
@@ -548,7 +548,7 @@ let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // ~1.3 B/key, 
 let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // ~0.8 B/key, 6.25% FP rate
 assert!(small.contains("POST"));
 
-let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.26 B/key
+let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key
 assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
 let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.84 B/key

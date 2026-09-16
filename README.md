@@ -113,7 +113,7 @@ c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # ~1.3 B/key at scale; f
 c.id("POST")                 # dense id in [0, n); probabilistic membership, no id → key
 c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 
-z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])   # the perfect hash alone, ~0.26 B/key
+z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])   # the perfect hash alone, ~0.24 B/key
 z.id("POST")                 # a member's id; any other string gets *some* id in [0, n)
 
 w = DictIndex(["GET", "POST", "PUT", "DELETE"])         # ordered, keys stored, ~2.84 B/key
@@ -175,7 +175,7 @@ let compact = CompactHashIndex::build(verbs, 1)?;
 let id = compact.id("POST").unwrap();                  // Some(slot); a stranger may rarely read as present
 assert_eq!(compact.id_unchecked("POST"), id);          // no fingerprint check, for a closed vocabulary
 
-// The perfect hash alone, ~0.26 B/key: a member's id, and *some* id in [0, n) for anything else.
+// The perfect hash alone, ~0.24 B/key: a member's id, and *some* id in [0, n) for anything else.
 let closed = ClosedHashIndex::build(verbs)?;
 assert!((closed.id("POST") as usize) < closed.len());
 
@@ -424,10 +424,10 @@ which is what makes the build one streaming pass over sorted hashes.
 Until 1.0 the perfect hash **was** `ptr_hash`. Its pilot table was serialised behind private fields,
 so a blob holding one could not be validated from outside the crate that owned it, and `from_bytes`
 and `load_mmap` had to be `unsafe fn` on both hash indexes; an MPH whose every array length is
-written and checked here makes those loaders safe, and that is the whole of the trade. 1.1's
-PHast-shaped table builds 10 M real word-bigram hashes in **49 ns/key on one thread** (9 ns/key on
-eight) at **2.09 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and its lookup costs
-4.2 ns/key on in-order probes; the same-process comparison with `ptr_hash` and the PHast authors'
+written and checked here makes those loaders safe, and that is the whole of the trade. The
+`MPH3` table builds 10 M keys in **54 ns/key on one thread** (9 ns/key on eight) at
+**1.95 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and answers a lookup in 3.8 ns,
+3.0 in a batch; the same-process comparison with `ptr_hash` and the PHast authors'
 `ph` crate is [in the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-perfect-hash-against-ptrhash-and-phast).
 
 ## License
