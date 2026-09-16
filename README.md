@@ -426,9 +426,9 @@ Until 1.0 the perfect hash **was** `ptr_hash`. Its pilot table was serialised be
 so a blob holding one could not be validated from outside the crate that owned it, and `from_bytes`
 and `load_mmap` had to be `unsafe fn` on both hash indexes; an MPH whose every array length is
 written and checked here makes those loaders safe, and that is the whole of the trade. The
-`MPH3` table builds 10 M keys in **54 ns/key on one thread** (9 ns/key on eight) at
-**1.95 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and answers a lookup in 3.8 ns,
-3.0 in a batch; the same-process comparison with `ptr_hash` and the PHast authors'
+`MPH3` table builds 10 M keys in **56 ns/key on one thread** (9 ns/key on eight) at
+**1.95 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and answers a lookup in 3.1 ns,
+2.9 in a batch; the same-process comparison with `ptr_hash` and the PHast authors'
 `ph` crate is [in the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-perfect-hash-against-ptrhash-and-phast).
 
 ## License
