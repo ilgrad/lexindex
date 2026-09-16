@@ -265,6 +265,13 @@ fn scale(x: u64, k: u64) -> u64 {
     ((x as u128 * k as u128) >> 64) as u64
 }
 
+/// The bucket of `h` among `buckets`: [`scale`] of the hash, monotone in `h`, so keys sorted by
+/// hash are grouped by bucket, and the one place the bucket law lives.
+#[inline(always)]
+fn bucket_of(h: u64, buckets: u64) -> u64 {
+    scale(h, buckets)
+}
+
 /// A cheap bijective mix, used to derive independent streams from one hash.
 #[inline(always)]
 fn mix(x: u64) -> u64 {
@@ -721,6 +728,23 @@ impl Level {
         }
     }
 
+    /// The seed of `h`'s bucket.
+    #[inline(always)]
+    fn seed_of(&self, h: u64) -> u8 {
+        self.seed_at(bucket_of(h, self.buckets))
+    }
+
+    /// The seed of bucket `b`, which is below `buckets`: unchecked, because the check is a
+    /// compare against a length the loop has to keep somewhere, on every lookup.
+    #[inline(always)]
+    fn seed_at(&self, b: u64) -> u8 {
+        debug_assert!(b < self.buckets && self.buckets as usize == self.seeds.len());
+        // SAFETY: `seeds` is one byte a bucket — the placement allocates it `buckets` long and
+        // `from_bytes` reads exactly `buckets` bytes into it — and `b < buckets`: every caller
+        // passes a [`bucket_of`], below `buckets` for every hash since `buckets >= 1`.
+        unsafe { *self.seeds.get_unchecked(b as usize) }
+    }
+
     /// A key's offset in its slice under `mode`: ten bits of its hash, a different field per
     /// mode, so that two keys on one value in one mode are on different ones in another.
     #[inline(always)]
@@ -744,9 +768,9 @@ impl Level {
         let shift_bits = 8 - form.mode_bits;
         let mode = (seed >> shift_bits) as u32;
         let t = seed & ((1u64 << shift_bits) - 1);
-        let offset = (h >> (8 * mode)) & form.mask;
+        let offset = h >> (8 * mode);
         let v = scale(h, self.n) + ((offset + (t << form.shift)) & form.mask);
-        if v >= self.n { v - self.n } else { v }
+        if v >= self.n { wrapped(v, self.n) } else { v }
     }
 
     /// The geometry [`value`](Self::value) reads.
@@ -765,6 +789,15 @@ impl Level {
         shift: (SLICE >> (8 - MODE_BITS)).trailing_zeros(),
         mask: SLICE - 1,
     };
+}
+
+/// `v - n` for a key whose slice wraps past the range's end — `slice / n` of them, so out of the
+/// lookup's line: a compare and a branch never taken, where the select LLVM makes of the `if`
+/// is four instructions on every key.
+#[cold]
+#[inline(never)]
+fn wrapped(v: u64, n: u64) -> u64 {
+    v - n
 }
 
 /// What [`Level::value`] needs of a level's geometry.
@@ -1116,7 +1149,7 @@ impl Run<'_> {
 fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> Vec<u64> {
     let mut at = vec![0u32; buckets as usize + 1];
     for &h in hs {
-        at[scale(level_hash(h, lv), buckets) as usize + 1] += 1;
+        at[bucket_of(level_hash(h, lv), buckets) as usize + 1] += 1;
     }
     for b in 0..buckets as usize {
         at[b + 1] += at[b];
@@ -1136,7 +1169,7 @@ fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> Vec<u
                 let mut next: Vec<u32> = slots.iter().map(|&s| s - k0 as u32).collect();
                 for &h in hs {
                     let hi = level_hash(h, lv);
-                    let b = scale(hi, buckets) as usize;
+                    let b = bucket_of(hi, buckets) as usize;
                     if (b0..b1).contains(&b) {
                         let slot = &mut next[b - b0];
                         out[*slot as usize] = hi;
@@ -1207,7 +1240,7 @@ impl<'a> Feed<'a> {
                 keys,
                 bounds: starts
                     .iter()
-                    .map(|&first| keys.partition_point(|&h| scale(h, buckets) < first))
+                    .map(|&first| keys.partition_point(|&h| bucket_of(h, buckets) < first))
                     .chain(std::iter::once(keys.len()))
                     .collect(),
                 next: AtomicUsize::new(0),
@@ -1248,7 +1281,7 @@ impl<'a> Feed<'a> {
                 buf.clear();
                 let mut carried = c.pending.take();
                 while let Some(h) = carried.take().or_else(|| c.hashes.next()) {
-                    if limit.is_some_and(|l| scale(h, buckets) >= l) {
+                    if limit.is_some_and(|l| bucket_of(h, buckets) >= l) {
                         c.pending = Some(h);
                         break;
                     }
@@ -1303,7 +1336,7 @@ fn bucket_ends(keys: &[u64], from: usize, buckets: u64, first: u64, ends: &mut [
     for eight in &mut eights {
         let mut bs = [0usize; 8];
         for (b, &h) in bs.iter_mut().zip(eight) {
-            *b = (scale(h, buckets) - first) as usize;
+            *b = (bucket_of(h, buckets) - first) as usize;
         }
         for (j, &b) in bs.iter().enumerate() {
             ends[b] = (i + j + 1) as u32;
@@ -1311,7 +1344,7 @@ fn bucket_ends(keys: &[u64], from: usize, buckets: u64, first: u64, ends: &mut [
         i += 8;
     }
     for (j, &h) in eights.remainder().iter().enumerate() {
-        ends[(scale(h, buckets) - first) as usize] = (i + j + 1) as u32;
+        ends[(bucket_of(h, buckets) - first) as usize] = (i + j + 1) as u32;
     }
     let mut last = from as u32;
     for e in ends.iter_mut() {
@@ -1332,9 +1365,15 @@ impl V2 {
     #[inline(always)]
     fn index(&self, h: u64) -> u64 {
         if let Some(l) = &self.first {
-            let seed = l.seeds[scale(h, l.buckets) as usize];
+            let seed = l.seed_of(h);
             if seed != 0 {
-                return l.value(h, seed);
+                // The shipped geometry as immediates: three registers and three moves fewer in
+                // the placed path, and a loop over many keys is unswitched on the invariant.
+                return if l.form() == Level::SHIPPED {
+                    l.value_in(Level::SHIPPED, h, seed)
+                } else {
+                    l.value(h, seed)
+                };
             }
         }
         self.index_bumped(h)
@@ -1356,7 +1395,7 @@ impl V2 {
         let mut shift = 0u64;
         for (i, l) in self.rest.iter().enumerate() {
             let hi = level_hash(h, i + 1);
-            let seed = l.seeds[scale(hi, l.buckets) as usize];
+            let seed = l.seed_of(hi);
             if seed != 0 {
                 return Some(shift + l.value(hi, seed));
             }
@@ -1406,7 +1445,7 @@ impl V2 {
         // that the read does not find them again: a multiply a key fewer on the loop.
         let mut ring = [0u64; SEED_AHEAD];
         for (i, &h) in hashes.iter().take(SEED_AHEAD).enumerate() {
-            ring[i] = scale(h, l.buckets);
+            ring[i] = bucket_of(h, l.buckets);
             crate::blob::prefetch_byte(&l.seeds, ring[i] as usize);
         }
         let blocks = hashes.chunks(BATCH_BLOCK).zip(out.chunks_mut(BATCH_BLOCK));
@@ -1450,11 +1489,11 @@ impl V2 {
         let keys = pulled.iter().zip(next).zip(pulled_out.iter_mut());
         for (k, ((&h, &coming), answer)) in keys.enumerate() {
             let slot = (base + k) % SEED_AHEAD;
-            let at = ring[slot] as usize;
-            let bucket = scale(coming, l.buckets);
+            let at = ring[slot];
+            let bucket = bucket_of(coming, l.buckets);
             ring[slot] = bucket;
             crate::blob::prefetch_byte(seeds, bucket as usize);
-            let seed = seeds[at];
+            let seed = l.seed_at(at);
             if seed == 0 {
                 bumped.push((k, 0));
             }
@@ -1462,7 +1501,7 @@ impl V2 {
         }
         for (k, (&h, answer)) in rest.iter().zip(rest_out.iter_mut()).enumerate() {
             let k = ahead + k;
-            let seed = seeds[ring[(base + k) % SEED_AHEAD] as usize];
+            let seed = l.seed_at(ring[(base + k) % SEED_AHEAD]);
             if seed == 0 {
                 bumped.push((k, 0));
             }
@@ -1486,7 +1525,7 @@ impl V2 {
         for i in 0..bumped.len() + 2 * STAGE_GAP {
             if let Some(&(k, _)) = bumped.get(i) {
                 if let Some(next) = self.rest.first() {
-                    let at = scale(level_hash(block[k], 1), next.buckets) as usize;
+                    let at = bucket_of(level_hash(block[k], 1), next.buckets) as usize;
                     crate::blob::prefetch_byte(&next.seeds, at);
                 }
             }
@@ -1572,8 +1611,9 @@ impl V2 {
             // seed. A level that bumps everything has spread nothing; the tail takes the keys
             // as they are.
             let fed = remaining.len();
-            remaining
-                .retain(|&h| level.seeds[scale(level_hash(h, lv), level.buckets) as usize] == 0);
+            remaining.retain(|&h| {
+                level.seeds[bucket_of(level_hash(h, lv), level.buckets) as usize] == 0
+            });
             if remaining.len() == fed {
                 break;
             }
@@ -3363,11 +3403,11 @@ mod tests {
         assert!(t.remap.lines.len() > 4, "a few lines prove little");
         let bumped = hs
             .iter()
-            .filter(|&&h| first.seeds[scale(h, first.buckets) as usize] == 0)
+            .filter(|&&h| first.seeds[bucket_of(h, first.buckets) as usize] == 0)
             .count();
         let mut taken = vec![false; hs.len()];
         for &h in &hs {
-            let seed = first.seeds[scale(h, first.buckets) as usize];
+            let seed = first.seeds[bucket_of(h, first.buckets) as usize];
             if seed != 0 {
                 taken[first.value(h, seed) as usize] = true;
             }
@@ -4071,7 +4111,7 @@ mod spike {
             if let Some(l) = &v.first {
                 let mut size = vec![0u32; l.buckets as usize];
                 for &h in &hs {
-                    size[scale(h, l.buckets) as usize] += 1;
+                    size[bucket_of(h, l.buckets) as usize] += 1;
                 }
                 let mut keys = [0u64; 24];
                 let mut lost = [0u64; 24];
@@ -4099,6 +4139,25 @@ mod spike {
                     "    bumped by bucket size (share of its keys / share of all bumped): {}",
                     row.join(" ")
                 );
+                // What the seed bytes would cost under an entropy code: the floor for any
+                // recoding of the first level.
+                let mut hist = [0u64; 256];
+                for &sd in l.seeds.iter() {
+                    hist[sd as usize] += 1;
+                }
+                let entropy: f64 = hist
+                    .iter()
+                    .filter(|&&c| c > 0)
+                    .map(|&c| {
+                        let q = c as f64 / l.buckets as f64;
+                        -q * q.log2()
+                    })
+                    .sum();
+                println!(
+                    "    first level seeds: entropy {entropy:.3} bits a bucket = {:.3} a key; seed 0 {:.2}% of buckets",
+                    entropy * l.buckets as f64 / l.n as f64,
+                    100.0 * hist[0] as f64 / l.buckets as f64
+                );
                 // Buckets no shift can place: two keys on one value under shift 1 stay
                 // together under nearly every shift, whatever the load, so their keys are the
                 // floor under the bumped share. `hs` is sorted and `scale` is monotone, so a
@@ -4106,9 +4165,9 @@ mod spike {
                 let (mut stuck_keys, mut stuck_lost) = (0u64, 0u64);
                 let mut at = 0usize;
                 while at < hs.len() {
-                    let b = scale(hs[at], l.buckets);
+                    let b = bucket_of(hs[at], l.buckets);
                     let mut end = at;
-                    while end < hs.len() && scale(hs[end], l.buckets) == b {
+                    while end < hs.len() && bucket_of(hs[end], l.buckets) == b {
                         end += 1;
                     }
                     let run = &hs[at..end];
@@ -4134,7 +4193,7 @@ mod spike {
                 if std::env::var_os("LEXINDEX_MPHF_OFFSETS").is_some() {
                     let mut bins = [0u64; 16];
                     for &h in &hs {
-                        let b = scale(h, l.buckets);
+                        let b = bucket_of(h, l.buckets);
                         let seed = l.seeds[b as usize];
                         if seed == 0 {
                             continue;
