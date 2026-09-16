@@ -769,7 +769,9 @@ impl Level {
         let mode = (seed >> shift_bits) as u32;
         let t = seed & ((1u64 << shift_bits) - 1);
         let offset = h >> (8 * mode);
-        let v = scale(h, self.n) + ((offset + (t << form.shift)) & form.mask);
+        // The sum only matters below the mask, so it may wrap: `h` itself is the offset in
+        // mode 0, and a hash within a slice of `u64::MAX` would overflow a checked add.
+        let v = scale(h, self.n) + (offset.wrapping_add(t << form.shift) & form.mask);
         if v >= self.n { wrapped(v, self.n) } else { v }
     }
 
@@ -3867,6 +3869,22 @@ mod tests {
     fn each_v1_header_invariant_is_enforced() {
         const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-1.0.0-mphf.bin");
         let at = |i: usize| u64::from_le_bytes(GOLDEN[8 + i * 8..16 + i * 8].try_into().unwrap());
+    /// `value` for every seed at both extreme hashes, on a level this version built: in mode 0
+    /// the offset is `h` itself, and the sum the slice mask cuts must wrap, not overflow.
+    #[test]
+    fn every_seed_places_the_extreme_hashes_below_n() {
+        let mphf = Mphf::build(&golden_hashes()).expect("build");
+        let Table::V2(t) = &mphf.table else {
+            panic!("a fresh build is a levels table");
+        };
+        let l = t.levels().next().expect("a first level");
+        for seed in 1..=u8::MAX {
+            for h in [0, u64::MAX] {
+                assert!(l.value(h, seed) < l.n, "seed {seed} h {h:#x}");
+            }
+        }
+    }
+
         let (n, parts, stride) = (at(0), at(2), at(5));
         let (buckets_per_part, slots_per_part) = (at(3), at(4));
         assert!(parts >= 1);
