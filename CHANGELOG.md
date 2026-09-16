@@ -26,7 +26,12 @@ All notable changes to this project are documented here. The format follows
   folded to 64 bits, side by side, and one more that merges them with the length — no loop and
   no branch on the length inside a class, and no bounds check: every load's index is in bounds
   by construction, and the six checks LLVM could not prove cost 6–16 % of the hash on real keys.
-  The constants are consecutive words of π. Measured
+  The constants are consecutive words of π. The fingerprint is no longer a second pass: it
+  folds the hash's own two lane products under its own constants with the length rotated — one
+  multiply over the hash instead of a second merge and a second lane pair per block, so the pair
+  every `CompactHashIndex` lookup computes costs 1.06–1.23× the hash alone where it cost
+  1.6–1.95× (URLs 13.2 → 7.8 ns, UUIDs 12.2 → 7.1, 125-byte paths 21.7 → 12.6), with the same
+  distribution battery result and `hash_key` itself unchanged. Measured
   A-B-A-B in one process on 2026-09-16, the hash alone over keys read in order: dictionary words
   3.9 ns against 7.3, English titles 7.4 against 11.2, URLs 6.5 against 13.2; 8-byte keys are the
   one loss, 3.8 against 2.9. The distribution battery (`bench/results/hash-quality-*`) reads the

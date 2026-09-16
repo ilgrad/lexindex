@@ -44,9 +44,9 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
 - **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
-  computed from a **second** hash of the key, with a different basis and multiplier. `id(key)` accepts
-  the slot only if the query's fingerprint matches the stored one. The two hashes are uncorrelated for
-  well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
+  computed from a **second** 64-bit hash of the key — the same two lane products folded under other
+  constants, one multiply over the slot hash. `id(key)` accepts the slot only if the query's
+  fingerprint matches the stored one. The two hashes are uncorrelated for well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
   fingerprint about `2^-fingerprint_bits` — the tunable false-positive rate — ≈`2^-8k` by design:
   0.390 625 % at 1 byte, 0.001 526 % at 2.
   That is a *design* rate, not a guarantee against an adversary: both hashes are deterministic and

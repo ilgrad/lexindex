@@ -45,17 +45,9 @@ const SLOT: [u64; 8] = [
     0xba7c_9045_f12c_7f99,
     0x24a1_9947_b391_6cf7,
 ];
-/// The fingerprint's, in the same roles: the next eight such words.
-const FP: [u64; 8] = [
-    0x6369_20d8_7157_4e69,
-    0x7b54_a41d_c25a_59b5,
-    0x9c30_d539_2af2_6013,
-    0xca41_7918_b8db_38ef,
-    0xd715_77c1_bd31_4b27,
-    0xa154_86af_7c72_e993,
-    0x7a32_5381_2895_8677,
-    0x3b8f_4898_6b4b_b9af,
-];
+/// The fingerprint's merge constants: two more such words, in the roles of `SLOT[4]` and
+/// `SLOT[5]`.
+const FP: [u64; 2] = [0xd715_77c1_bd31_4b27, 0xa154_86af_7c72_e993];
 
 /// The full 128-bit product of two words, its halves folded together. One `mul` on a 64-bit
 /// machine and a short software product on a 32-bit one, the same value everywhere.
@@ -191,10 +183,11 @@ pub fn hash_key_bytes(b: &[u8]) -> u64 {
     merge(key_words(b, &SLOT), b.len() as u64, &SLOT)
 }
 
-/// The **fingerprint** hash: a *separate* hash of the key, uncorrelated with [`hash_key`] for
-/// well-distributed keys. That decorrelation is what makes the chance a non-member both lands on a
-/// used slot and matches the low `b` bits stored for that slot about `2^-b` — the tunable
-/// false-positive rate. It is an upper bound, not an equality: a non-member whose raw slot falls
+/// The **fingerprint** hash: a second 64-bit function of the key, uncorrelated with [`hash_key`]
+/// for well-distributed keys — it folds the same two lane products the hash does, under its own
+/// constants and the length rotated, so it costs one multiply over the hash (see [`hash_pair`]).
+/// That decorrelation is what makes the chance a non-member both lands on a used slot and matches
+/// the low `b` bits stored for that slot about `2^-b` — the tunable false-positive rate. It is an upper bound, not an equality: a non-member whose raw slot falls
 /// past the remap is rejected before the fingerprint is ever compared. Not a security primitive —
 /// both hashes are deterministic and unseeded, so an adversary who picks the queries can search for
 /// collisions.
@@ -210,13 +203,17 @@ pub(crate) fn fingerprint_full(s: &str) -> u64 {
 /// [`fingerprint_full`] over the key's bytes: what a lookup reading an Arrow buffer holds.
 #[inline]
 pub(crate) fn fingerprint_full_bytes(b: &[u8]) -> u64 {
-    merge(key_words(b, &FP), (b.len() as u64).rotate_left(32), &FP)
+    hash_pair_bytes(b).1
 }
 
-/// `(hash_key, fingerprint_full)` in one pass over the key's bytes — bit-for-bit the two functions
-/// above, the words read once and, above 32 bytes, both hashes' lanes run over each block as it is
-/// loaded. Every `CompactHashIndex` path needs both hashes; `PerfectHashIndex::build` keeps using
-/// [`hash_key`] alone, and `build_to_file` takes both, the second for its replay digest.
+/// `(hash_key, fingerprint_full)`: the fingerprint is one more multiply over the hash's own
+/// state. The words go through the two lane products `a` and `c` exactly as [`merge`] forms
+/// them for the hash, and the fingerprint folds the same two with the length rotated and its
+/// own constants — so it costs a multiply and two XORs over the hash, not a second pass over
+/// the key, and the pair is a 128-bit function of the 128-bit state `(a, c)`: two keys that
+/// agree on both hashes agree on the state, at `2^-128` a pair. Every `CompactHashIndex` path
+/// needs both hashes; `PerfectHashIndex::build` keeps using [`hash_key`] alone, and
+/// `build_to_file` takes both, the second for its replay digest.
 #[inline]
 pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
     hash_pair_bytes(s.as_bytes())
@@ -225,29 +222,13 @@ pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
 /// [`hash_pair`] over the key's bytes: what a lookup reading an Arrow buffer holds.
 #[inline]
 pub fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
-    let n = b.len();
-    let len = n as u64;
-    if n <= 32 {
-        let w = if n >= 4 { words(b) } else { short(b) };
-        return (merge(w, len, &SLOT), merge(w, len.rotate_left(32), &FP));
-    }
-    let (mut s, mut f) = ((SLOT[6], SLOT[7]), (FP[6], FP[7]));
-    let mut p = 0;
-    while n - p > 32 {
-        // SAFETY: n - p > 32, so p + 32 <= n.
-        let w = unsafe { [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)] };
-        s = block(s, w, &SLOT);
-        f = block(f, w, &FP);
-        p += 32;
-    }
-    let w = words(&b[n - 32..]);
+    let len = b.len() as u64;
+    let w = key_words(b, &SLOT);
+    let a = mum(w[0] ^ SLOT[0], w[1] ^ SLOT[1]);
+    let c = mum(w[2] ^ SLOT[2], w[3] ^ SLOT[3]);
     (
-        merge([w[0] ^ s.0, w[1], w[2] ^ s.1, w[3]], len, &SLOT),
-        merge(
-            [w[0] ^ f.0, w[1], w[2] ^ f.1, w[3]],
-            len.rotate_left(32),
-            &FP,
-        ),
+        mum(a ^ len ^ SLOT[4], c ^ SLOT[5]),
+        mum(a ^ len.rotate_left(32) ^ FP[0], c ^ FP[1]),
     )
 }
 
@@ -346,16 +327,16 @@ mod golden {
         pinned(
             fingerprint_full,
             &[
-                ("", 0x50a7_011a_5132_afaa),
-                ("GET", 0x2b62_d211_e028_8212),
-                ("apple", 0x8567_3f6c_e423_1e97),
-                ("é中🎉", 0xcf95_7356_4eaf_470d),
-                ("member-00042", 0x35e5_e583_590c_cfec),
-                ("a key of 17 bytes", 0x4447_7b95_328e_b27d),
-                ("thirty-three bytes: one block in!", 0xeaee_1e3a_1bcd_06a8),
+                ("", 0x1c51_8156_4d26_d06e),
+                ("GET", 0xbb91_2aa8_11fb_4754),
+                ("apple", 0x03ed_1926_7ae2_3e1f),
+                ("é中🎉", 0xfc5b_f844_19fb_3d25),
+                ("member-00042", 0xf078_cb8b_0bc5_3085),
+                ("a key of 17 bytes", 0xe243_e2ff_c8d5_d54e),
+                ("thirty-three bytes: one block in!", 0x6c99_f0a3_8b47_6b25),
                 (
                     "a key long enough for the block loop to run twice over it, and then some",
-                    0x6f6a_9237_53f3_ee3d,
+                    0xee95_f4a8_389f_60b8,
                 ),
             ],
         );
