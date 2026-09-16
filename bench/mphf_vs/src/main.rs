@@ -81,9 +81,35 @@ struct Row {
     name: &'static str,
     run: bool,
     build: Stat,
+    /// Peak resident growth over the build, in MB: the table and whatever the build held at
+    /// its peak, above the keys and the probe order the process already holds.
+    peak_mb: f64,
     bits: f64,
     lookup: Stat,
     batch: Stat,
+    /// Wall time a key with `lookup_threads` threads each taking a share of the probe order.
+    lookup_mt: Stat,
+    batch_mt: Stat,
+}
+
+/// A row's batch lookup: the wrapping sum of the answers to a chunk, if it has one.
+type Batch<'a, T> = Option<&'a (dyn Fn(&T, &[u64]) -> u64 + Sync)>;
+
+/// A `/proc/self/status` field in kB: `VmRSS:` for the resident set now, `VmHWM:` for its
+/// peak since the last reset.
+fn status_kb(field: &str) -> f64 {
+    let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix(field))
+        .and_then(|v| v.trim().trim_end_matches(" kB").parse().ok())
+        .expect("a VmRSS/VmHWM line")
+}
+
+/// Resets the process's peak resident set to its current one (`clear_refs` 5), so that the
+/// next `VmHWM` reading is the peak from here on.
+fn reset_high_water() {
+    std::fs::write("/proc/self/clear_refs", "5\n").expect("/proc/self/clear_refs");
 }
 
 impl Row {
@@ -92,29 +118,36 @@ impl Row {
             name,
             run,
             build: Stat::NONE,
+            peak_mb: 0.0,
             bits: 0.0,
             lookup: Stat::NONE,
             batch: Stat::NONE,
+            lookup_mt: Stat::NONE,
+            batch_mt: Stat::NONE,
         }
     }
 
     /// One round: time `build`, then take the size and the lookup times from what it produced.
     /// `get` answers one key, `batch` the wrapping sum of the answers to a chunk.
-    fn round<T>(
+    fn round<T: Sync>(
         &mut self,
         probe: &[u64],
+        lookup_threads: usize,
         build: impl FnOnce() -> T,
         bits: impl Fn(&T) -> f64,
-        get: impl Fn(&T, u64) -> u64,
-        batch: Option<&dyn Fn(&T, &[u64]) -> u64>,
+        get: impl Fn(&T, u64) -> u64 + Sync,
+        batch: Batch<'_, T>,
     ) {
         if !self.run {
             return;
         }
         let n = probe.len() as f64;
+        reset_high_water();
+        let before = status_kb("VmRSS:");
         let t = Instant::now();
         let f = build();
         self.build.add(t.elapsed().as_secs_f64() * 1e9 / n);
+        self.peak_mb = self.peak_mb.max((status_kb("VmHWM:") - before) / 1024.0);
         self.bits = bits(&f);
         for _ in 0..3 {
             let t = Instant::now();
@@ -132,6 +165,41 @@ impl Row {
                 }
                 std::hint::black_box(acc);
                 self.batch.add(t.elapsed().as_secs_f64() * 1e9 / n);
+            }
+        }
+        if lookup_threads < 2 {
+            return;
+        }
+        let share = probe.len().div_ceil(lookup_threads);
+        let (f, get) = (&f, &get);
+        for _ in 0..3 {
+            let t = Instant::now();
+            std::thread::scope(|scope| {
+                for part in probe.chunks(share) {
+                    scope.spawn(move || {
+                        let mut acc = 0u64;
+                        for &h in part {
+                            acc = acc.wrapping_add(get(f, h));
+                        }
+                        std::hint::black_box(acc);
+                    });
+                }
+            });
+            self.lookup_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);
+            if let Some(batch) = batch {
+                let t = Instant::now();
+                std::thread::scope(|scope| {
+                    for part in probe.chunks(share) {
+                        scope.spawn(move || {
+                            let mut acc = 0u64;
+                            for chunk in part.chunks(CHUNK) {
+                                acc = acc.wrapping_add(batch(f, chunk));
+                            }
+                            std::hint::black_box(acc);
+                        });
+                    }
+                });
+                self.batch_mt.add(t.elapsed().as_secs_f64() * 1e9 / n);
             }
         }
     }
@@ -163,6 +231,10 @@ fn main() {
     if std::env::var_os("MPHF_VS_NO_THP").is_some() {
         disable_thp();
     }
+    let lookup_threads: usize = std::env::var("MPHF_VS_LOOKUP_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
     let mut keys: Vec<u64> = (0..n as u64).map(splitmix).collect();
     keys.sort_unstable();
     keys.dedup();
@@ -190,6 +262,7 @@ fn main() {
     for _ in 0..rounds {
         rows[0].round(
             &probe,
+            lookup_threads,
             || Mphf::build_with_threads(&keys, threads).expect("build"),
             |m| m.byte_len() as f64 * 8.0 / n as f64,
             |m, h| m.index(h),
@@ -199,6 +272,7 @@ fn main() {
         );
         rows[1].round(
             &probe,
+            lookup_threads,
             || -> Function2<Bits8, ShiftOnlyWrapped> {
                 Function2::with_slice_p_threads_hash_sc(
                     &keys,
@@ -214,6 +288,7 @@ fn main() {
         );
         rows[2].round(
             &probe,
+            lookup_threads,
             || -> Function<Bits8, SeedOnly> {
                 Function::with_slice_p_threads_hash_sc(
                     &keys,
@@ -229,6 +304,7 @@ fn main() {
         );
         rows[3].round(
             &probe,
+            lookup_threads,
             || {
                 pool.install(|| {
                     CompactPtrHash::<FastIntHash, u64>::new(&keys, PtrHashParams::default_compact())
@@ -246,6 +322,7 @@ fn main() {
         );
         rows[4].round(
             &probe,
+            lookup_threads,
             || {
                 pool.install(|| {
                     CompactPtrHash::<FastIntHash, u64>::new(
@@ -266,6 +343,7 @@ fn main() {
         );
         rows[5].round(
             &probe,
+            lookup_threads,
             || {
                 pool.install(|| {
                     DefaultPtrHash::<FastIntHash, u64>::new(&keys, PtrHashParams::default_fast())
@@ -283,21 +361,57 @@ fn main() {
         );
     }
     println!(
-        "n {n}, {threads} thread(s), builds min of {rounds} rounds, lookups over one shuffled probe order, min of {} passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of {CHUNK}",
-        3 * rounds
+        "n {n}, {threads} thread(s), builds min of {rounds} rounds, lookups over one shuffled probe order, min of {} passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of {CHUNK}{}",
+        3 * rounds,
+        if lookup_threads > 1 {
+            format!(
+                "; x{lookup_threads} = wall ns a key with {lookup_threads} lookup threads over shares of the probe order"
+            )
+        } else {
+            String::new()
+        }
     );
+    let single = true;
     println!(
-        "{:<36} {:>9} {:>16} {:>16} {:>16}",
-        "", "bits/key", "build ns/key", "lookup ns", "batch ns"
+        "{:<36} {:>9} {:>16} {:>16} {:>16}{}{}",
+        "",
+        "bits/key",
+        "build ns/key",
+        "lookup ns",
+        "batch ns",
+        if lookup_threads > 1 {
+            format!(
+                "{:>17} {:>16}",
+                format!("lookup x{lookup_threads}"),
+                format!("batch x{lookup_threads}")
+            )
+        } else {
+            String::new()
+        },
+        if single {
+            format!("{:>14}", "build peak MB")
+        } else {
+            String::new()
+        }
     );
     for r in rows.iter().filter(|r| r.run) {
         println!(
-            "{:<36} {:>9.3} {} {} {}",
+            "{:<36} {:>9.3} {} {} {}{}{}",
             r.name,
             r.bits,
             r.build.cell(),
             r.lookup.cell(),
-            r.batch.cell()
+            r.batch.cell(),
+            if lookup_threads > 1 {
+                format!(" {} {}", r.lookup_mt.cell(), r.batch_mt.cell())
+            } else {
+                String::new()
+            },
+            if single {
+                format!("{:>14.1}", r.peak_mb)
+            } else {
+                String::new()
+            }
         );
     }
 }
