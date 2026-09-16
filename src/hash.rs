@@ -85,7 +85,7 @@ pub(crate) fn hash_key(s: &str) -> u64 {
 }
 
 /// [`hash_key`] over the key's bytes: what a lookup reading an Arrow buffer holds.
-pub(crate) fn hash_key_bytes(b: &[u8]) -> u64 {
+pub fn hash_key_bytes(b: &[u8]) -> u64 {
     let mut h = SLOT_SEED;
     let mut c = b.chunks_exact(8);
     for w in &mut c {

@@ -63,6 +63,11 @@ mod blob;
 mod mphf;
 #[cfg(feature = "mph")]
 mod pages;
+/// The key hash the hash indexes feed it, for the same harness to hash string keys the way
+/// `ClosedHashIndex` does. A measurement export on the same terms.
+#[cfg(feature = "bench-mphf")]
+#[doc(hidden)]
+pub use hash::hash_key_bytes;
 /// The perfect hash on its own, for a harness that compares it with other MPHFs over the same
 /// hashes. A measurement export, not API: it exists only under `bench-mphf` and is hidden.
 #[cfg(feature = "bench-mphf")]
