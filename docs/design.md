@@ -115,13 +115,13 @@ one way and nothing the other is not worth the API surface; `fingerprint_bits` i
 *does* have a monotone trade, and it is public.
 
 **Every read the MPH makes is bounded by a length in its own header.** That is the whole reason it is
-in-crate. `index` touches a seed table per level, the tail's, and the remap — a rank bit vector
-over the lower levels' values and the Elias–Fano hole list's three arrays — and each of those
+in-crate. `index` touches a seed table per level, the tail's, and the remap — a 64-byte Elias–Fano
+line per 128 values of the lower levels and a packed array of their low bits — and each of those
 lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH3` header
 (and of `MPH2`'s, the same header under the seed geometry 1.1 to 3.0 wrote) rather than read beside them, so a loader that recomputes them cannot be handed a length that
 disagrees with the table it describes. The remap is the one table whose *contents* can leave the
-image, so it is the one checked by value: every rank sample must count what it claims, and every
-hole must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
+image, so it is the one checked by value: every line must hold one bit per value it covers, and
+every value it decodes must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
 crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
 the same rule over their own eight scalars.
 

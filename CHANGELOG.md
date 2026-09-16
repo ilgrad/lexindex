@@ -23,8 +23,24 @@ All notable changes to this project are documented here. The format follows
   bucket are the zero bits of an OR, and the lowest sum is at the first free shift at or after
   some wrap: a `trailing_zeros` a wrap. Every `BMP7`, `BCH7` and `BCL1` blob written from here on
   carries an `MPH3` table, which 3.0 cannot read; the `MPH2` tables 1.1 to 3.0 wrote still load,
-  inside those containers and standalone, and keep their geometry when written back. The
+  inside those containers and standalone, and keep their seed geometry when written back. The
   `golden-3.1.0-*` fixtures pin the new bytes; the 2.0.0 ones stay as read fixtures.
+
+- **A bumped key's remap is one cache line of Elias–Fano, read in one step.** `MPH2` sent a
+  bumped key through four dependent lines after its first-level seed: the next level's seed, a
+  rank word over the lower levels' values, the hole list's select sample and low word, its high
+  words. `MPH3` stores the remap as a non-decreasing sequence over *every* value of the lower
+  levels — a value no key takes repeats its predecessor's hole — in 64-byte lines of 128 values
+  each: a `u32` base and the values' high parts in unary, read with eight popcounts and one
+  select, beside a packed array of their low bits. A line whose values spread too far for its
+  unary bits is marked sparse and keeps one more low bit a value in its last two words, so the
+  table's low bits stay at the natural count where the holes thin out locally. A bumped key is
+  now its next level's seed, then its line and its low word side by side: two dependent steps
+  where there were four, and one prefetch stage fewer in `index_all`. Measured on 10 M real
+  word-bigram hashes: **1.953 bits/key**, the remap 0.146 of them at 5 low bits, against 0.147
+  for the rank vector and hole list over fewer entries. An `MPH2` blob's rank vector and hole
+  list are decoded into lines when it loads, so it is written back as `MPH3` under its own seed
+  geometry — not byte for byte, as `OVL1` became `OVL2` in 1.x.
 
 ### Added
 

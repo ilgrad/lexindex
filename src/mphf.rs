@@ -32,8 +32,8 @@
 //! # Space
 //!
 //! `8/λ` bits per key for the first level's seeds, plus what the bumped keys cost: their own
-//! levels' seeds, a bit per lower-level value, and an Elias–Fano hole each. The trade against
-//! `λ` is tabulated on [`LAMBDA`].
+//! levels' seeds and an Elias–Fano hole per lower-level value. The trade against `λ` is
+//! tabulated on [`LAMBDA`].
 //!
 //! # Format
 //!
@@ -57,7 +57,7 @@ const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in m
 
 /// Keys per bucket on every bumping level. Seeds are `8/λ` bits per key, and every bucket that no
 /// seed places is bumped, so a larger `λ` is fewer seeds but more bumped keys, each of which
-/// costs its own level's seed share and ~8 bits of remap. Measured on 10 M word-bigram hashes,
+/// costs its own level's seed share and ~9 bits of remap. Measured on 10 M word-bigram hashes,
 /// one thread, one run (`MPH3`; `MPH2` was 2.154 / 2.089 / 2.070 bits at 4.15 / 4.5 / 4.7):
 ///
 /// | λ    | bits/key | bumped | build ns/key |
@@ -92,6 +92,9 @@ const STRIDE: u64 = 2;
 /// keys bumped and 1.954 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
 /// build. `MPH2` is zero mode bits: one field, 255 shifts.
 const MODE_BITS: u32 = 2;
+
+/// [`MODE_BITS`] as the header writes it.
+const MODE_BITS_BYTE: u8 = MODE_BITS as u8;
 
 /// Buckets the placement order may look ahead. A bucket of one key is held back until every
 /// larger bucket within roughly a slice ahead of it is placed, because a single key fits any hole
@@ -241,12 +244,6 @@ fn reserve(level: &Level, b: u64, origin: u64, map: &mut Map) -> Vec<u64> {
 
 /// Remap entries per block base in the 1.0 format.
 const REMAP_BLOCK: usize = 256;
-
-/// Bits per rank sample of the remap's occupancy vector.
-const RANK_BLOCK: usize = 512;
-
-/// Set bits per select sample of an Elias–Fano upper vector.
-const SELECT_BLOCK: usize = 128;
 
 /// First-level seeds, a byte each, from which [`V2::index_all`] prefetches them: a smaller level
 /// sits in L2 on current cores, where a prefetch is only more work.
@@ -446,34 +443,22 @@ fn slice_for(n: u64) -> u64 {
 const MAGIC: &[u8; 4] = b"MPH3";
 const FORMAT: u16 = 3;
 
-/// The magic and version 1.1 to 3.0 wrote: the same tables over [`Geometry::Mph2`]'s seeds.
+/// The magic and version 1.1 to 3.0 wrote: the same tables over [`Geometry::Mph2`]'s seeds, with
+/// the remap in an older layout, read and converted.
 const MAGIC_V2: &[u8; 4] = b"MPH2";
 const FORMAT_V2: u16 = 2;
 
-/// The seed geometry of a table's levels, which its magic names.
+/// The seed geometry of a table's levels, which the header's mode-bits byte names; an `MPH2`
+/// blob's is the first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Geometry {
-    /// One offset field and 255 shifts a seed, at [`STRIDE`].
+    /// One offset field and 255 shifts a seed, at [`STRIDE`]: zero mode bits.
     Mph2,
     /// [`MODE_BITS`] mode bits, the shifts at a stride of the slice over them.
     Mph3,
 }
 
 impl Geometry {
-    fn magic(self) -> &'static [u8; 4] {
-        match self {
-            Self::Mph2 => MAGIC_V2,
-            Self::Mph3 => MAGIC,
-        }
-    }
-
-    fn version(self) -> u16 {
-        match self {
-            Self::Mph2 => FORMAT_V2,
-            Self::Mph3 => FORMAT,
-        }
-    }
-
     fn mode_bits(self) -> u32 {
         match self {
             Self::Mph2 => 0,
@@ -482,9 +467,9 @@ impl Geometry {
     }
 }
 
-/// Magic 4, version 2, reserved 2, then seven `u64` scalars: `n`, level count, tail keys, tail
-/// buckets, tail range, tail seed, hole count. A level row of three `u64` per level follows, then
-/// a `u32` check over all of it.
+/// Magic 4, version 2, the levels' mode bits 1, reserved 1, then seven `u64` scalars: `n`, level
+/// count, tail keys, tail buckets, tail range, tail seed, the remap's low bits (`MPH2`: its hole
+/// count). A level row of three `u64` per level follows, then a `u32` check over all of it.
 const FIXED: usize = 4 + 2 + 2 + 7 * 8;
 
 /// Keys, buckets and slice length of one level.
@@ -787,142 +772,160 @@ impl Tail {
     }
 }
 
-/// Elias–Fano over a non-decreasing sequence of values below a universe `u`: each value's low
-/// bits packed, its high bits as a unary gap in a bit vector, and a position sample per
-/// [`SELECT_BLOCK`] set bits so that a value is a bounded scan away.
+/// Values a line of the remap holds, so that a value's line is its index shifted.
+const LINE: usize = 128;
+
+/// Bits of a line past its base: the high parts of its [`LINE`] values in unary.
+const LINE_BITS: usize = 512 - 32;
+
+/// The unary bits of a sparse line, which keeps one more low bit a value in its last two words.
+const SPARSE_LINE_BITS: usize = LINE_BITS - LINE;
+
+/// A 64-byte line of the remap: a `u32` base in the low half of the first word, then the high
+/// parts of [`LINE`] values above the base in unary — a zero a step, a one a value. Where a
+/// line's values are spread too far for that, the base's top bit marks it *sparse*: its high
+/// parts are one bit shorter, so the steps are half as many, and the bit that leaves each
+/// value is the value's bit in the line's last two words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C, align(64))]
+struct Line([u64; 8]);
+
+/// The base's top bit: the line is sparse.
+const SPARSE: u64 = 1 << 31;
+
+/// The remap: which hole of the first level each value of the levels below it, and of the tail,
+/// takes. The `j`-th value a key landed on takes the `j`-th hole, and a value no key landed on —
+/// a hash that was never built in — takes its predecessor's, so over every value the holes are
+/// a non-decreasing sequence, and it is Elias–Fano: the low bits packed, the high parts as unary
+/// gaps. The high parts are cut into lines of [`LINE`] values, each carrying its first value's
+/// high part as a base, so that a value's high part is one select inside one line rather than a
+/// walk from a sample; the low bits sit in a parallel array. A lookup is those two reads, which
+/// depend on nothing but the value.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct Ef {
+struct Remap {
+    /// Values of the levels below the first and of the tail, together: the sequence's length.
     len: u64,
+    /// Low bits a value: from what the density alone asks, up to what leaves every line's unary
+    /// part inside the line.
     low_bits: u32,
     low: Vec<u64>,
-    high: Vec<u64>,
-    sel: Vec<u32>,
-    /// Set bits of `high` before each of its words, modulo 2^16. Derived whenever the table is
-    /// built or read, never stored: it turns the walk from a select sample to the bit into one
-    /// comparison a word.
-    counts: Vec<u16>,
+    lines: Vec<Line>,
 }
 
-/// Words of `high` that [`Ef::get`] compares against the index it looks for at once; past them it
-/// moves a window on, which the density of the high bits makes rare.
-const SELECT_WINDOW: usize = 8;
-
-impl Ef {
-    /// Low bits per value for `len` values below `u`: what leaves the high part about as dense as
-    /// it is sparse.
-    fn low_bits(len: u64, u: u64) -> u32 {
-        u.checked_div(len).map_or(0, |q| q.max(1).ilog2())
-    }
-
-    fn high_words(len: u64, u: u64, low_bits: u32) -> usize {
-        if len == 0 {
-            0
-        } else {
-            ((len + (u >> low_bits) + 1) as usize).div_ceil(64)
-        }
-    }
-
+impl Remap {
     fn low_words(len: u64, low_bits: u32) -> usize {
         (len as usize * low_bits as usize).div_ceil(64)
     }
 
-    fn samples(len: u64) -> usize {
-        (len as usize).div_ceil(SELECT_BLOCK)
+    fn line_count(len: u64) -> usize {
+        (len as usize).div_ceil(LINE)
     }
 
-    fn encode(values: impl Iterator<Item = u64>, len: u64, u: u64) -> Self {
-        let low_bits = Self::low_bits(len, u);
-        let mut ef = Self {
+    /// Low bits for `len` values below `u` from the density alone: what leaves the high part
+    /// about as dense as it is sparse.
+    fn natural_low_bits(len: u64, u: u64) -> u32 {
+        u.checked_div(len).map_or(0, |q| q.max(1).ilog2())
+    }
+
+    /// Whether a line of `values` fits at `low_bits`: as a dense line, or as a sparse one; `None`
+    /// when as neither. A line holds a one a value and a zero a step of the high parts, and the
+    /// steps halve with each low bit.
+    fn line_fits(line: &[u64], low_bits: u32) -> Option<bool> {
+        let span = |bits: u32| {
+            let (first, last) = (line[0] >> bits, line[line.len() - 1] >> bits);
+            (last < SPARSE).then_some((last - first) as usize + line.len())
+        };
+        if span(low_bits).is_some_and(|s| s <= LINE_BITS) {
+            Some(false)
+        } else if span(low_bits + 1).is_some_and(|s| s <= SPARSE_LINE_BITS) {
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    /// The sequence `values`, non-decreasing and below `u`, at the fewest low bits from the
+    /// natural ones up at which every line fits, dense or sparse.
+    fn encode(values: &[u64], u: u64) -> Self {
+        let len = values.len() as u64;
+        let mut low_bits = Self::natural_low_bits(len, u);
+        while !values
+            .chunks(LINE)
+            .all(|line| Self::line_fits(line, low_bits).is_some())
+        {
+            low_bits += 1;
+        }
+        let mut remap = Self {
             len,
             low_bits,
             low: vec![0; Self::low_words(len, low_bits)],
-            high: vec![0; Self::high_words(len, u, low_bits)],
-            sel: Vec::with_capacity(Self::samples(len)),
-            counts: Vec::new(),
+            lines: Vec::with_capacity(Self::line_count(len)),
         };
-        let mut j = 0u64;
-        for v in values {
-            debug_assert!(v < u);
-            if low_bits > 0 {
+        if low_bits > 0 {
+            for (j, &v) in values.iter().enumerate() {
+                debug_assert!(v < u && (j == 0 || values[j - 1] <= v));
                 let low = v & ((1 << low_bits) - 1);
-                let at = j * u64::from(low_bits);
-                let (w, o) = ((at / 64) as usize, at % 64);
-                ef.low[w] |= low << o;
-                if o + u64::from(low_bits) > 64 {
-                    ef.low[w + 1] |= low >> (64 - o);
+                let at = j * low_bits as usize;
+                let (w, o) = (at / 64, at % 64);
+                remap.low[w] |= low << o;
+                if o + low_bits as usize > 64 {
+                    remap.low[w + 1] |= low >> (64 - o);
                 }
             }
-            let p = (v >> low_bits) + j;
-            ef.high[(p / 64) as usize] |= 1 << (p % 64);
-            if j as usize % SELECT_BLOCK == 0 {
-                ef.sel.push(p as u32);
+        }
+        for line in values.chunks(LINE) {
+            let sparse = Self::line_fits(line, low_bits).expect("low bits at which it fits");
+            let bits = low_bits + u32::from(sparse);
+            let base = line[0] >> bits;
+            let mut words = [0u64; 8];
+            words[0] = base | if sparse { SPARSE } else { 0 };
+            for (r, &v) in line.iter().enumerate() {
+                let p = 32 + r + ((v >> bits) - base) as usize;
+                words[p / 64] |= 1 << (p % 64);
+                if sparse {
+                    words[6 + r / 64] |= (v >> low_bits & 1) << (r % 64);
+                }
             }
-            j += 1;
+            remap.lines.push(Line(words));
         }
-        debug_assert_eq!(j, len);
-        ef.counts = Self::counts(&ef.high);
-        ef
-    }
-
-    /// [`counts`](Self::counts) for `high`.
-    fn counts(high: &[u64]) -> Vec<u16> {
-        high.iter()
-            .scan(0u16, |seen, word| {
-                let before = *seen;
-                *seen = seen.wrapping_add(word.count_ones() as u16);
-                Some(before)
-            })
-            .collect()
-    }
-
-    /// Pulls in what [`get`](Self::get) reads first for `j`: its select sample and its low bits.
-    #[inline(always)]
-    fn prefetch_sample(&self, j: u64) {
-        crate::blob::prefetch(&self.sel, j as usize / SELECT_BLOCK);
-        crate::blob::prefetch(&self.low, (j * u64::from(self.low_bits) / 64) as usize);
-    }
-
-    /// Pulls in the words [`get`](Self::get) compares and selects in for `j`, from its sample.
-    #[inline(always)]
-    fn prefetch_high(&self, j: u64) {
-        if let Some(&sample) = self.sel.get(j as usize / SELECT_BLOCK) {
-            let w = sample as usize / 64;
-            crate::blob::prefetch(&self.counts, w);
-            crate::blob::prefetch(&self.counts, w + SELECT_WINDOW);
-            crate::blob::prefetch(&self.high, w);
-            crate::blob::prefetch(&self.high, w + SELECT_WINDOW - 1);
-        }
+        remap
     }
 
     /// The `j`-th value, for `j < len`. On a validated table this is exact; on anything else it
     /// is some number, which is all the caller needs.
     ///
-    /// The high part is the `j`-th set bit, a few words past the sampled one. Which word holds it is
-    /// read off [`counts`](Self::counts): every word of a window is compared against `j` at once,
-    /// and the bit is found inside its word without a loop. A scan word by word, then bit by bit,
-    /// stops after as many steps as the key dictates, and its mispredicted exits were most of a
-    /// bumped key's lookup.
+    /// The high part is the `r`-th one of the line's unary part above the base, `r` the value's
+    /// index in its line: which word holds it is read off the words' counts, all eight compared
+    /// against `r` at once, and the bit is found inside its word without a loop. A sparse line's
+    /// last two words are its values' extra low bits rather than unary, and its high parts are
+    /// a bit shorter.
     #[inline(always)]
     fn get(&self, j: u64) -> u64 {
-        let Some(&sample) = self.sel.get(j as usize / SELECT_BLOCK) else {
+        let Some(line) = self.lines.get(j as usize / LINE) else {
             return 0;
         };
-        // Within a window the counts are a few hundred from `j`, so their difference modulo 2^16
-        // still says on which side of the `j`-th bit a word starts.
-        let jj = j as u16;
-        let starts_before = |w: usize| {
-            self.counts
-                .get(w)
-                .is_some_and(|&c| jj.wrapping_sub(c) < 0x8000)
-        };
-        let mut w = sample as usize / 64;
-        while starts_before(w + SELECT_WINDOW) {
-            w += SELECT_WINDOW;
+        let r = j % LINE as u64;
+        let sparse = line.0[0] >> 31 & 1;
+        let base = line.0[0] & (SPARSE - 1);
+        let unary = sparse.wrapping_sub(1);
+        let words = [
+            line.0[0] & !0xFFFF_FFFF,
+            line.0[1],
+            line.0[2],
+            line.0[3],
+            line.0[4],
+            line.0[5],
+            line.0[6] & unary,
+            line.0[7] & unary,
+        ];
+        let mut before = [0u64; 8];
+        for w in 1..8 {
+            before[w] = before[w - 1] + u64::from(words[w - 1].count_ones());
         }
-        let w = w + (1..SELECT_WINDOW).filter(|&d| starts_before(w + d)).count();
-        let r = jj.wrapping_sub(self.counts.get(w).copied().unwrap_or(jj));
-        let p = w as u64 * 64 + select_in_word(self.high.get(w).copied().unwrap_or(0), r.into());
-        let high = p - j;
+        let w = (1..8).filter(|&w| before[w] <= r).count();
+        let p = w as u64 * 64 + select_in_word(words[w], r - before[w]);
+        let extra = line.0[6 + (r / 64) as usize] >> (r % 64) & sparse;
+        let high = ((base + (p - 32) - r) << sparse) | extra;
         let low = if self.low_bits == 0 {
             0
         } else {
@@ -937,122 +940,100 @@ impl Ef {
         (high << self.low_bits) | low
     }
 
-    /// One pass over the high vector: exactly `len` set bits, every sample on the bit it names,
-    /// and every value below `u`. What makes `get` a bounded scan and its answer in range.
+    /// Pulls in what [`get`](Self::get) reads for `j`: its line and its low word.
+    #[inline(always)]
+    fn prefetch(&self, j: u64) {
+        crate::blob::prefetch(&self.lines, j as usize / LINE);
+        crate::blob::prefetch(&self.low, (j * u64::from(self.low_bits) / 64) as usize);
+    }
+
+    /// One pass over the lines: as many lines as the length needs, each holding exactly as many
+    /// ones as values, and every value below `u`. What keeps [`get`](Self::get) inside the image
+    /// for every `j` below the length.
     fn validate(&self, u: u64) -> bool {
+        if self.lines.len() != Self::line_count(self.len)
+            || self.low.len() != Self::low_words(self.len, self.low_bits)
+            || self.low_bits >= 64
+        {
+            return false;
+        }
+        for (k, line) in self.lines.iter().enumerate() {
+            let unary = if line.0[0] & SPARSE == 0 { 8 } else { 6 };
+            let ones = (line.0[0] >> 32).count_ones() as usize
+                + line.0[1..unary]
+                    .iter()
+                    .map(|w| w.count_ones() as usize)
+                    .sum::<usize>();
+            if ones != (self.len as usize - k * LINE).min(LINE) {
+                return false;
+            }
+        }
+        (0..self.len).all(|j| self.get(j) < u)
+    }
+
+    /// The remap of an `MPH2` blob, read into this layout: its occupancy bits over the values and
+    /// its Elias–Fano hole list, whose `j`-th hole the `j`-th set value takes. Refused unless the
+    /// set bits are as many as the holes and every hole is below `u`; the rank and select
+    /// samples it also carried are derivable and go unread.
+    fn from_v2(
+        set: &[u64],
+        low: &[u64],
+        high: &[u64],
+        holes: u64,
+        low_bits: u32,
+        entries: usize,
+        u: u64,
+    ) -> Result<Self, IndexError> {
+        const BAD: IndexError = IndexError::Format("mphf: a remap entry points outside the image");
+        let mut hole_at = Vec::with_capacity(holes as usize);
         let mut j = 0u64;
-        for (w, &word) in self.high.iter().enumerate() {
+        for (w, &word) in high.iter().enumerate() {
             let mut x = word;
             while x != 0 {
                 let p = w as u64 * 64 + u64::from(x.trailing_zeros());
                 x &= x - 1;
-                if j >= self.len {
-                    return false;
+                if j >= holes || p < j {
+                    return Err(BAD);
                 }
-                if j as usize % SELECT_BLOCK == 0 && self.sel[j as usize / SELECT_BLOCK] != p as u32
-                {
-                    return false;
+                let lo = if low_bits == 0 {
+                    0
+                } else {
+                    let at = j * u64::from(low_bits);
+                    let (lw, o) = ((at / 64) as usize, at % 64);
+                    let mut x = low[lw] >> o;
+                    if o + u64::from(low_bits) > 64 {
+                        x |= low[lw + 1] << (64 - o);
+                    }
+                    x & ((1 << low_bits) - 1)
+                };
+                let hole = ((p - j) << low_bits) | lo;
+                if hole >= u {
+                    return Err(BAD);
                 }
-                // `p - j` is the high part; with the low part it must stay below `u`.
-                if p < j || self.get(j) >= u {
-                    return false;
-                }
+                hole_at.push(hole);
                 j += 1;
             }
         }
-        j == self.len
-    }
-}
-
-/// The remap: which values of the levels after the first, and of the tail, a key landed on, and
-/// which hole of the first level each of those keys took. The `j`-th occupied value takes the
-/// `j`-th hole.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct Remap {
-    /// One bit per value of every level after the first and of the tail, set where a key landed.
-    set: Vec<u64>,
-    /// Set bits before each block of [`RANK_BLOCK`].
-    rank: Vec<u32>,
-    /// The first level's holes, in order. Empty when there is no first level: the holes are then
-    /// all of `[0, n)` and the `j`-th is `j`.
-    holes: Ef,
-    /// Set bits before each word of `set` within its rank block. Derived whenever the table is built
-    /// or read, never stored: with it a rank reads three numbers and counts one word, where
-    /// counting the block's words before it was a loop as long as the key dictates.
-    before: Vec<u16>,
-}
-
-impl Remap {
-    fn set_words(entries: usize) -> usize {
-        entries.div_ceil(64)
-    }
-
-    fn rank_samples(entries: usize) -> usize {
-        entries.div_ceil(RANK_BLOCK)
-    }
-
-    fn new(set: Vec<u64>, rank: Vec<u32>, holes: Ef) -> Self {
-        let before = set
-            .chunks(RANK_BLOCK / 64)
-            .flat_map(|block| {
-                block.iter().scan(0u16, |seen, word| {
-                    let before = *seen;
-                    *seen += word.count_ones() as u16;
-                    Some(before)
-                })
-            })
-            .collect();
-        Self {
-            set,
-            rank,
-            holes,
-            before,
+        if j != holes {
+            return Err(BAD);
         }
-    }
-
-    /// Which hole value `i` of the levels below the first takes: the `j`-th for the `j`-th set bit
-    /// at or before `i`. A value no key landed on — a hash that was never built in — takes
-    /// whichever hole its predecessor took, or the first.
-    #[inline(always)]
-    fn hole_index(&self, i: u64) -> u64 {
-        let i = i as usize;
-        let (w, o) = (i / 64, i % 64);
-        let j = u64::from(self.rank[i / RANK_BLOCK])
-            + u64::from(self.before[w])
-            + u64::from((self.set[w] & (u64::MAX >> (63 - o))).count_ones());
-        j.saturating_sub(1)
-    }
-
-    /// The hole for value `i` of the levels below the first.
-    #[inline(always)]
-    fn lookup(&self, i: u64) -> u64 {
-        let j = self.hole_index(i);
-        if self.holes.len == 0 {
-            j
-        } else {
-            self.holes.get(j)
-        }
-    }
-
-    /// Pulls in what [`hole_index`](Self::hole_index) reads for `i`.
-    #[inline(always)]
-    fn prefetch_hole_index(&self, i: u64) {
-        let i = i as usize;
-        crate::blob::prefetch(&self.set, i / 64);
-        crate::blob::prefetch(&self.before, i / 64);
-        crate::blob::prefetch(&self.rank, i / RANK_BLOCK);
-    }
-
-    /// One pass: every rank sample is the count before its block. Returns the total.
-    fn validate_rank(&self) -> Option<u64> {
-        let mut total = 0u64;
-        for (b, words) in self.set.chunks(RANK_BLOCK / 64).enumerate() {
-            if u64::from(*self.rank.get(b)?) != total {
-                return None;
+        let mut holes = hole_at.into_iter();
+        let mut hole = 0;
+        let mut values = Vec::with_capacity(entries);
+        for i in 0..entries {
+            if set[i / 64] >> (i % 64) & 1 == 1 {
+                hole = holes.next().ok_or(IndexError::Format(
+                    "mphf: occupied values disagree with the hole count",
+                ))?;
             }
-            total += words.iter().map(|w| u64::from(w.count_ones())).sum::<u64>();
+            values.push(hole);
         }
-        Some(total)
+        if holes.next().is_some() {
+            return Err(IndexError::Format(
+                "mphf: occupied values disagree with the hole count",
+            ));
+        }
+        Ok(Self::encode(&values, u))
     }
 }
 
@@ -1329,7 +1310,7 @@ impl V2 {
     #[cold]
     #[inline(never)]
     fn index_bumped(&self, h: u64) -> u64 {
-        self.bumped_value(h).map_or(0, |v| self.remap.lookup(v))
+        self.bumped_value(h).map_or(0, |v| self.remap.get(v))
     }
 
     /// The remap entry a bumped key lands on: its value on the first further level that places it,
@@ -1399,17 +1380,16 @@ impl V2 {
     /// its answer has got — `u64::MAX` once that answer is 0 — answered into `out`, the block's
     /// answers.
     ///
-    /// Such a key makes four more loads, each known only once the one before it is read: its next
-    /// level's seed, the rank words, the select sample, the high words. Its answer is five stages,
-    /// each pulling in what the next one reads, and the stages run side by side, each
-    /// [`STAGE_GAP`] keys behind the one before it: a load is issued that many steps before it is
-    /// read however many keys the block bumped, where a pass over all of them per stage leaves the
-    /// later stages' loads almost no lead.
+    /// Such a key makes two more loads, each known only once the one before it is read: its next
+    /// level's seed, then the remap's line and low word for the value it lands on. Its answer is
+    /// three stages, each pulling in what the next one reads, and the stages run side by side,
+    /// each [`STAGE_GAP`] keys behind the one before it: a load is issued that many steps before
+    /// it is read however many keys the block bumped, where a pass over all of them per stage
+    /// leaves the later stages' loads almost no lead.
     #[inline(always)]
     fn resolve_bumped(&self, block: &[u64], bumped: &mut [(usize, u64)], out: &mut [u64]) {
-        let holes = &self.remap.holes;
         let behind = |i: usize, stages: usize| i.checked_sub(stages * STAGE_GAP);
-        for i in 0..bumped.len() + 4 * STAGE_GAP {
+        for i in 0..bumped.len() + 2 * STAGE_GAP {
             if let Some(&(k, _)) = bumped.get(i) {
                 if let Some(next) = self.rest.first() {
                     let at = scale(level_hash(block[k], 1), next.buckets) as usize;
@@ -1418,28 +1398,15 @@ impl V2 {
             }
             if let Some((k, at)) = behind(i, 1).and_then(|j| bumped.get_mut(j)) {
                 *at = self.bumped_value(block[*k]).map_or(u64::MAX, |v| {
-                    self.remap.prefetch_hole_index(v);
+                    self.remap.prefetch(v);
                     v
                 });
             }
-            if let Some((_, at)) = behind(i, 2).and_then(|j| bumped.get_mut(j)) {
-                if *at != u64::MAX {
-                    *at = self.remap.hole_index(*at);
-                    holes.prefetch_sample(*at);
-                }
-            }
-            if let Some(&(_, at)) = behind(i, 3).and_then(|j| bumped.get(j)) {
-                if at != u64::MAX {
-                    holes.prefetch_high(at);
-                }
-            }
-            if let Some(&(k, at)) = behind(i, 4).and_then(|j| bumped.get(j)) {
+            if let Some(&(k, at)) = behind(i, 2).and_then(|j| bumped.get(j)) {
                 out[k] = if at == u64::MAX {
                     0
-                } else if holes.len == 0 {
-                    at
                 } else {
-                    holes.get(at)
+                    self.remap.get(at)
                 };
             }
         }
@@ -1527,40 +1494,35 @@ impl V2 {
         phase("tail");
 
         // Minimal at last: the values the levels below the first hand out, in order, take the
-        // holes the first level left, in order. There are exactly as many of each.
+        // holes the first level left, in order — there are exactly as many of each — and a value
+        // no key landed on takes its predecessor's, or the first.
         let entries =
             levels.iter().skip(1).map(|l| l.n as usize).sum::<usize>() + tail.range as usize;
-        let mut set = vec![0u64; Remap::set_words(entries)];
-        let mut rank = Vec::with_capacity(Remap::rank_samples(entries));
+        let mut holes: Box<dyn Iterator<Item = u64>> = match maps.first() {
+            Some(first) => Box::new(first.holes(n)),
+            None => Box::new(0..n),
+        };
+        let mut holes = holes.by_ref().peekable();
+        let mut hole = holes.peek().copied().unwrap_or(0);
         let ranges = maps
             .iter()
             .zip(&levels)
             .skip(1)
             .map(|(m, l)| (m, l.n))
             .chain(std::iter::once((&tail_map, tail.range)));
-        let mut i = 0usize;
-        let mut placed = 0u64;
+        let mut values = Vec::with_capacity(entries);
         for (map, range) in ranges {
             for v in 0..range {
                 if map.get(v) {
-                    set[i / 64] |= 1 << (i % 64);
-                    placed += 1;
+                    hole = holes.next().expect("a hole per value a key landed on");
                 }
-                i += 1;
+                values.push(hole);
             }
         }
-        let mut seen = 0u32;
-        for words in set.chunks(RANK_BLOCK / 64) {
-            rank.push(seen);
-            seen += words.iter().map(|w| w.count_ones()).sum::<u32>();
-        }
-        phase("remap set");
-        let holes = match maps.first() {
-            Some(first) => Ef::encode(first.holes(n), placed, n),
-            None => Ef::default(),
-        };
-        debug_assert!(holes.len == placed || maps.is_empty());
-        phase("remap holes");
+        debug_assert!(holes.next().is_none());
+        phase("remap values");
+        let remap = Remap::encode(&values, n);
+        phase("remap lines");
 
         let mut levels = levels.into_iter();
         Ok(Self {
@@ -1569,7 +1531,7 @@ impl V2 {
             first: levels.next(),
             rest: levels.collect(),
             tail,
-            remap: Remap::new(set, rank, holes),
+            remap,
         })
     }
 
@@ -1866,23 +1828,19 @@ impl V2 {
     }
 
     /// Section lengths, all derived from the header.
-    fn sections(&self) -> (usize, usize, usize, usize, usize, usize) {
-        let entries =
-            self.rest.iter().map(|l| l.n as usize).sum::<usize>() + self.tail.range as usize;
-        let (m, l) = (self.remap.holes.len, self.remap.holes.low_bits);
+    /// Bytes of the seeds (the levels' and the tail's), of the remap's low bits, and of its lines.
+    fn sections(&self) -> (usize, usize, usize) {
+        let (m, l) = (self.remap.len, self.remap.low_bits);
         (
             self.levels().map(|l| l.seeds.len()).sum::<usize>() + self.tail.seeds.len() * 2,
-            Remap::set_words(entries) * 8,
-            Remap::rank_samples(entries) * 4,
-            Ef::low_words(m, l) * 8,
-            Ef::high_words(m, self.n, l) * 8,
-            Ef::samples(m) * 4,
+            Remap::low_words(m, l) * 8,
+            Remap::line_count(m) * 64,
         )
     }
 
     fn byte_len(&self) -> usize {
-        let (a, b, c, d, e, f) = self.sections();
-        header_len(self.level_count()) + a + b + c + d + e + f
+        let (a, b, c) = self.sections();
+        header_len(self.level_count()) + a + b + c
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -1897,10 +1855,11 @@ impl V2 {
     fn write_into(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
         let hl = header_len(self.level_count());
         let mut header = vec![0u8; hl];
-        header[0..4].copy_from_slice(self.geometry.magic());
-        header[4..6].copy_from_slice(&self.geometry.version().to_le_bytes());
+        header[0..4].copy_from_slice(MAGIC);
+        header[4..6].copy_from_slice(&FORMAT.to_le_bytes());
+        header[6] = self.geometry.mode_bits() as u8;
         // Reserved; written zero and required to be zero, so a later flag cannot be read as absent.
-        header[6..8].copy_from_slice(&0u16.to_le_bytes());
+        header[7] = 0;
         let scalars = [
             self.n,
             self.level_count() as u64,
@@ -1908,7 +1867,7 @@ impl V2 {
             self.tail.buckets,
             self.tail.range,
             self.tail.seed,
-            self.remap.holes.len,
+            u64::from(self.remap.low_bits),
         ];
         let rows = self.levels().flat_map(|l| [l.n, l.buckets, l.slice]);
         for (i, v) in scalars.into_iter().chain(rows).enumerate() {
@@ -1924,32 +1883,25 @@ impl V2 {
         for &s in &self.tail.seeds {
             w.write_all(&s.to_le_bytes())?;
         }
-        for &word in &self.remap.set {
+        for &word in &self.remap.low {
             w.write_all(&word.to_le_bytes())?;
         }
-        for &r in &self.remap.rank {
-            w.write_all(&r.to_le_bytes())?;
-        }
-        for &word in &self.remap.holes.low {
-            w.write_all(&word.to_le_bytes())?;
-        }
-        for &word in &self.remap.holes.high {
-            w.write_all(&word.to_le_bytes())?;
-        }
-        for &p in &self.remap.holes.sel {
-            w.write_all(&p.to_le_bytes())?;
+        for line in &self.remap.lines {
+            for &word in &line.0 {
+                w.write_all(&word.to_le_bytes())?;
+            }
         }
         Ok(())
     }
 
     /// Every read `index` makes is bounded by a scalar in the header, and the checks are exactly
     /// that list: a bucket index below its level's seed count, a value below its level's range,
-    /// a remap index below the entry count, a hole index below the hole count, and a hole below
-    /// `n`.
+    /// a remap value below the entry count, a line holding a one for each of its values, and a
+    /// hole below `n`. An `MPH2` blob is read into this layout, its remap converted.
     fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        let geometry = match bytes.get(0..4) {
-            Some(m) if m == MAGIC => Geometry::Mph3,
-            Some(m) if m == MAGIC_V2 => Geometry::Mph2,
+        let v2 = match bytes.get(0..4) {
+            Some(m) if m == MAGIC => false,
+            Some(m) if m == MAGIC_V2 => true,
             _ => return Err(IndexError::Format("mphf: bad magic or truncated header")),
         };
         if bytes.len() < FIXED + 4 {
@@ -1969,10 +1921,18 @@ impl V2 {
         if check != crate::blob::hash_bytes(&bytes[..hl - 4]) as u32 {
             return Err(IndexError::Format("mphf: header checksum mismatch"));
         }
-        if u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")) != geometry.version() {
+        let version = u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes"));
+        if version != if v2 { FORMAT_V2 } else { FORMAT } {
             return Err(IndexError::Format("mphf: unsupported format version"));
         }
-        if u16::from_le_bytes(bytes[6..8].try_into().expect("2 bytes")) != 0 {
+        let geometry = match (v2, bytes[6]) {
+            (true, 0) | (false, 0) => Geometry::Mph2,
+            (false, MODE_BITS_BYTE) => Geometry::Mph3,
+            _ => {
+                return Err(IndexError::Format("mphf: unsupported seed geometry"));
+            }
+        };
+        if bytes[7] != 0 {
             return Err(IndexError::Format(
                 "mphf: reserved header field is not zero",
             ));
@@ -1984,12 +1944,13 @@ impl V2 {
             seed: at(5),
             seeds: Vec::new(),
         };
-        let holes = at(6);
+        // The remap's low bits, or an `MPH2` blob's hole count.
+        let scalar6 = at(6);
 
         if n == 0 {
             if bytes.len() != hl
                 || level_count != 0
-                || (tail.keys | tail.buckets | tail.range | tail.seed | holes) != 0
+                || (tail.keys | tail.buckets | tail.range | tail.seed | scalar6) != 0
             {
                 return Err(IndexError::Format(
                     "mphf: empty table with a non-empty shape",
@@ -2039,13 +2000,6 @@ impl V2 {
         entries = entries
             .checked_add(usize::try_from(tail.range).map_err(|_| SIZE)?)
             .ok_or(SIZE)?;
-        // Without a first level the holes are all of `[0, n)` and none are stored; with one, a
-        // hole index below the hole count is what keeps a lookup inside the image.
-        if (levels.is_empty() && holes != 0) || holes > n {
-            return Err(IndexError::Format("mphf: hole count out of range"));
-        }
-        let low_bits = Ef::low_bits(holes, n);
-
         // Narrowed rather than cast: on a 32-bit target `as usize` would truncate a fabricated
         // count into a plausible section length.
         let mut want = hl;
@@ -2055,31 +2009,59 @@ impl V2 {
                 .ok_or(SIZE)?;
         }
         let tail_buckets = usize::try_from(tail.buckets).map_err(|_| SIZE)?;
-        let holes_len = usize::try_from(holes).map_err(|_| SIZE)?;
-        let set_words = Remap::set_words(entries);
-        let rank_samples = Remap::rank_samples(entries);
-        let low_words = holes_len
-            .checked_mul(low_bits as usize)
-            .ok_or(SIZE)?
-            .div_ceil(64);
-        let high_words = if holes == 0 {
-            0
-        } else {
-            holes_len
-                .checked_add(usize::try_from(n >> low_bits).map_err(|_| SIZE)?)
-                .and_then(|v| v.checked_add(1))
-                .ok_or(SIZE)?
-                .div_ceil(64)
-        };
-        let samples = Ef::samples(holes);
         want = want
             .checked_add(tail_buckets.checked_mul(2).ok_or(SIZE)?)
-            .and_then(|v| v.checked_add(set_words.checked_mul(8)?))
-            .and_then(|v| v.checked_add(rank_samples.checked_mul(4)?))
-            .and_then(|v| v.checked_add(low_words.checked_mul(8)?))
-            .and_then(|v| v.checked_add(high_words.checked_mul(8)?))
-            .and_then(|v| v.checked_add(samples.checked_mul(4)?))
             .ok_or(SIZE)?;
+        // The remap's sections: this layout's low words and lines, or an `MPH2` blob's occupancy
+        // words, rank samples, and its hole list's low words, high words and select samples.
+        let mut v2_sizes = (0usize, 0usize, 0usize, 0usize, 0usize);
+        let (low_bits, holes) = if v2 {
+            let holes = scalar6;
+            if (levels.is_empty() && holes != 0) || holes > n {
+                return Err(IndexError::Format("mphf: hole count out of range"));
+            }
+            let low_bits = Remap::natural_low_bits(holes, n);
+            let holes_len = usize::try_from(holes).map_err(|_| SIZE)?;
+            let set_words = entries.div_ceil(64);
+            let rank_samples = entries.div_ceil(512);
+            let low_words = holes_len
+                .checked_mul(low_bits as usize)
+                .ok_or(SIZE)?
+                .div_ceil(64);
+            let high_words = if holes == 0 {
+                0
+            } else {
+                holes_len
+                    .checked_add(usize::try_from(n >> low_bits).map_err(|_| SIZE)?)
+                    .and_then(|v| v.checked_add(1))
+                    .ok_or(SIZE)?
+                    .div_ceil(64)
+            };
+            let samples = holes_len.div_ceil(128);
+            v2_sizes = (set_words, rank_samples, low_words, high_words, samples);
+            want = want
+                .checked_add(set_words.checked_mul(8).ok_or(SIZE)?)
+                .and_then(|v| v.checked_add(rank_samples.checked_mul(4)?))
+                .and_then(|v| v.checked_add(low_words.checked_mul(8)?))
+                .and_then(|v| v.checked_add(high_words.checked_mul(8)?))
+                .and_then(|v| v.checked_add(samples.checked_mul(4)?))
+                .ok_or(SIZE)?;
+            (low_bits, holes)
+        } else {
+            let low_bits = u32::try_from(scalar6)
+                .ok()
+                .filter(|&b| b < 64)
+                .ok_or(IndexError::Format("mphf: remap low bits out of range"))?;
+            let low_words = entries
+                .checked_mul(low_bits as usize)
+                .ok_or(SIZE)?
+                .div_ceil(64);
+            want = want
+                .checked_add(low_words.checked_mul(8).ok_or(SIZE)?)
+                .and_then(|v| v.checked_add(entries.div_ceil(LINE).checked_mul(64)?))
+                .ok_or(SIZE)?;
+            (low_bits, 0)
+        };
         if bytes.len() != want {
             return Err(IndexError::Format(
                 "mphf: blob length disagrees with the header",
@@ -2109,44 +2091,42 @@ impl V2 {
             seeds: take(bytes, &mut p, tail_buckets, u16::from_le_bytes),
             ..tail
         };
-        let set = take(bytes, &mut p, set_words, u64::from_le_bytes);
-        let rank = take(bytes, &mut p, rank_samples, u32::from_le_bytes);
-        let low = take(bytes, &mut p, low_words, u64::from_le_bytes);
-        let high = take(bytes, &mut p, high_words, u64::from_le_bytes);
-        let sel = take(bytes, &mut p, samples, u32::from_le_bytes);
-        debug_assert_eq!(p, bytes.len());
-        let counts = Ef::counts(&high);
-        let remap = Remap::new(
-            set,
-            rank,
-            Ef {
-                len: holes,
+        let remap = if v2 {
+            let (set_words, rank_samples, low_words, high_words, samples) = v2_sizes;
+            let set = take(bytes, &mut p, set_words, u64::from_le_bytes);
+            p += rank_samples * 4;
+            let low = take(bytes, &mut p, low_words, u64::from_le_bytes);
+            let high = take(bytes, &mut p, high_words, u64::from_le_bytes);
+            p += samples * 4;
+            Remap::from_v2(&set, &low, &high, holes, low_bits, entries, n)?
+        } else {
+            let low = take(
+                bytes,
+                &mut p,
+                Remap::low_words(entries as u64, low_bits),
+                u64::from_le_bytes,
+            );
+            let lines = take(bytes, &mut p, entries.div_ceil(LINE), |c: [u8; 64]| {
+                let mut words = [0u64; 8];
+                for (w, x) in words.iter_mut().zip(c.chunks_exact(8)) {
+                    *w = u64::from_le_bytes(x.try_into().expect("a whole word"));
+                }
+                Line(words)
+            });
+            Remap {
+                len: entries as u64,
                 low_bits,
                 low,
-                high,
-                sel,
-                counts,
-            },
-        );
+                lines,
+            }
+        };
+        debug_assert_eq!(p, bytes.len());
 
-        // The checks that cost more than a comparison, and the ones that make the image a promise
-        // rather than a hope: the rank samples must count what they claim, so that a set bit's
-        // index stays below the hole count; and every hole must lie below `n`. Callers index
-        // their own arrays by what `index` returns, so an id outside `[0, n)` is their
-        // unsoundness, not ours.
-        let placed = remap
-            .validate_rank()
-            .ok_or(IndexError::Format("mphf: a rank sample is wrong"))?;
-        if if levels.is_empty() {
-            placed > n
-        } else {
-            placed != holes
-        } {
-            return Err(IndexError::Format(
-                "mphf: occupied values disagree with the hole count",
-            ));
-        }
-        if !remap.holes.validate(n) {
+        // The check that costs more than a comparison, and the one that makes the image a promise
+        // rather than a hope: every line must hold a one for each of its values, so that a select
+        // stays inside it, and every hole must lie below `n`. Callers index their own arrays by
+        // what `index` returns, so an id outside `[0, n)` is their unsoundness, not ours.
+        if !remap.validate(n) {
             return Err(IndexError::Format(
                 "mphf: a remap entry points outside the image",
             ));
@@ -2622,10 +2602,10 @@ impl Mphf {
     /// The first level's seed is the only load most keys make, and at ~2 bits a key the seeds
     /// outgrow L2 around a million keys: from there every lookup pays a miss nothing else in the
     /// query can hide, unless the batch issued it a few dozen keys before; below it the batch is the
-    /// single lookup in a loop. The few per cent of keys the first level bumps make four more loads,
-    /// each known only once the one before it is read — their next level's seed, the rank words,
-    /// the select sample, the high words — so they are answered after their block, in stages that
-    /// each run a few keys behind the one before.
+    /// single lookup in a loop. The few per cent of keys the first level bumps make two more loads,
+    /// each known only once the one before it is read — their next level's seed, then the remap's
+    /// line and low word — so they are answered after their block, in stages that each run a few
+    /// keys behind the one before.
     pub fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
         match &self.table {
             Table::V2(t) => t.index_all(hashes),
@@ -3218,57 +3198,99 @@ mod tests {
         }
     }
 
-    /// `Ef::get` returns every value it encoded: uniform sequences over dense and sparse universes,
-    /// one long enough that the derived counts wrap, and two clusters at the ends of the universe,
-    /// whose empty middle is wider than a window of words.
+    /// `Remap::get` returns every value it encoded: uniform sequences over dense and sparse
+    /// universes, a sequence with runs of one value, two clusters at the ends of the universe, and
+    /// one whose last line spans far more than the natural low bits let a line hold, so that the
+    /// encoder has to go up from them.
     #[test]
-    fn elias_fano_returns_every_value_it_encoded() {
+    fn the_remap_returns_every_value_it_encoded() {
         let uniform = |len: u64, u: u64| {
             let mut v: Vec<u64> = (0..len).map(|i| scale(mix(i ^ u), u)).collect();
             v.sort_unstable();
             v
         };
         let top = 1u64 << 32;
+        let packed: Vec<u64> = (0..99 * LINE as u64 - 1).chain([1 << 30]).collect();
         let cases = [
             (vec![7], 10),
             ((0..700).collect(), 700),
+            ((0..3_000).map(|i| i / 7).collect(), 500),
             (uniform(1_000, 2_000), 2_000),
             (uniform(3_000, 100_000), 100_000),
             (uniform(200_000, 1 << 36), 1 << 36),
             ((0..1_000).chain(top - 1_000..top).collect(), top),
+            (packed, 1 << 30 | 1),
         ];
         for (values, u) in cases {
-            let ef = Ef::encode(values.iter().copied(), values.len() as u64, u);
+            let remap = Remap::encode(&values, u);
+            assert!(remap.validate(u));
+            assert!(remap.low_bits >= Remap::natural_low_bits(values.len() as u64, u));
             for (j, &v) in values.iter().enumerate() {
                 assert_eq!(
-                    ef.get(j as u64),
+                    remap.get(j as u64),
                     v,
                     "value {j} of {} below {u}",
                     values.len()
                 );
             }
         }
+        // A line spread too far for its low bits is sparse before the whole table's low bits
+        // go up: the sparse form holds twice the span, and past that the low bits rise.
+        let natural = |values: &[u64], u| Remap::natural_low_bits(values.len() as u64, u);
+        // 12 799 values below 2^19 keep 5 low bits; the last line's 127 values step by 100, a
+        // span of 393 high parts at 5 bits (too wide for 480 unary bits) and 196 at 6.
+        let sparse: Vec<u64> = (0..99 * LINE as u64)
+            .chain((0..LINE as u64 - 1).map(|i| 99 * LINE as u64 + i * 100))
+            .collect();
+        let u = 1 << 19;
+        let remap = Remap::encode(&sparse, u);
+        assert_eq!((remap.low_bits, natural(&sparse, u)), (5, 5));
+        assert!(remap.lines[..99].iter().all(|l| l.0[0] & SPARSE == 0));
+        assert!(remap.lines[99].0[0] & SPARSE != 0);
+        assert!((0..sparse.len()).all(|j| remap.get(j as u64) == sparse[j]));
+        let far: Vec<u64> = (0..99 * LINE as u64 - 1).chain([1 << 30]).collect();
+        let u = (1 << 30) + 1;
+        let remap = Remap::encode(&far, u);
+        assert!(remap.low_bits > natural(&far, u));
+        assert!((0..far.len()).all(|j| remap.get(j as u64) == far[j]));
     }
 
-    /// The rank off the derived counts is the plain count of set bits up to the value, for every
-    /// value of a real table's remap, set or not, across its rank blocks.
+    /// A real table's remap is the gapless sequence: one value per value of the levels below the
+    /// first and of the tail, non-decreasing, one step per key the first level bumped, and every
+    /// step onto a hole the first level left.
     #[test]
-    fn hole_index_counts_the_set_bits_up_to_a_value() {
-        let m = Mphf::build(&hashes(200_000)).expect("build");
-        let remap = &v2(&m).remap;
-        assert!(
-            remap.set.len() * 64 > 4 * RANK_BLOCK,
-            "a single rank block proves little"
-        );
-        let mut seen = 0u64;
-        for i in 0..remap.set.len() * 64 {
-            seen += (remap.set[i / 64] >> (i % 64)) & 1;
-            assert_eq!(
-                remap.hole_index(i as u64),
-                seen.saturating_sub(1),
-                "value {i}"
-            );
+    fn the_remap_is_the_gapless_hole_sequence() {
+        let hs = hashes(200_000);
+        let m = Mphf::build(&hs).expect("build");
+        let t = v2(&m);
+        let first = t.first.as_ref().expect("a first level");
+        let entries = t.rest.iter().map(|l| l.n).sum::<u64>() + t.tail.range;
+        assert_eq!(t.remap.len, entries);
+        assert!(t.remap.lines.len() > 4, "a few lines prove little");
+        let bumped = hs
+            .iter()
+            .filter(|&&h| first.seeds[scale(h, first.buckets) as usize] == 0)
+            .count();
+        let mut taken = vec![false; hs.len()];
+        for &h in &hs {
+            let seed = first.seeds[scale(h, first.buckets) as usize];
+            if seed != 0 {
+                taken[first.value(h, seed) as usize] = true;
+            }
         }
+        let mut steps = 0;
+        let mut last = t.remap.get(0);
+        assert!(!taken[last as usize]);
+        for j in 1..entries {
+            let v = t.remap.get(j);
+            assert!(v >= last, "value {j}");
+            if v > last {
+                steps += 1;
+                assert!(!taken[v as usize], "value {j} is not a hole");
+            }
+            last = v;
+        }
+        assert_eq!(steps + 1, bumped);
     }
 
     /// Sorted input is the fast path; unsorted input must build the same table.
@@ -3499,10 +3521,10 @@ mod tests {
                 with_row(blob, 1, 0, u64::MAX),
                 "a level range the remap cannot hold",
             ),
-            (with_scalar(blob, 6, n + 1), "more holes than keys"),
+            (with_scalar(blob, 6, 64), "remap low bits past a word"),
             (
                 with_scalar(blob, 6, at(6) ^ 1),
-                "a hole count disagreeing with the occupied values",
+                "remap low bits disagreeing with the sections",
             ),
         ];
         for (bad, what) in cases {
@@ -3512,10 +3534,11 @@ mod tests {
         // builder never would, which is a wrong blob, not an unsound one. That split is the whole
         // contract: validated for soundness, trusted for correctness.
         assert!(Mphf::from_bytes(&with_scalar(blob, 5, at(5) ^ 1)).is_ok());
-        // A header that checksums but was written by a different version of this file, and one
-        // whose reserved field carries a flag this version does not know about.
+        // A header that checksums but was written by a different version of this file, one
+        // naming a seed geometry this version does not know, and one whose reserved byte carries
+        // a flag it does not know about.
         let hl = header_len(levels_of(blob));
-        for (at, word) in [(4usize, FORMAT + 1), (6, 1)] {
+        for (at, word) in [(4usize, FORMAT + 1), (6, 1), (6, 1 << 8)] {
             let mut bad = blob.clone();
             bad[at..at + 2].copy_from_slice(&word.to_le_bytes());
             let check = crate::blob::hash_bytes(&bad[..hl - 4]) as u32;
@@ -3582,34 +3605,33 @@ mod tests {
         );
     }
 
-    /// The hole list is the one table whose contents can point outside the image, so it is the one
-    /// table checked by value. Move its last hole to the top of the universe, past `n`, and the blob
-    /// must be refused; so must a rank sample that miscounts, since the count is a hole index.
+    /// The remap is the one table whose contents can point outside the image, so it is the one
+    /// table checked by value. Raise a line's base so that its values pass `n`, and the blob must
+    /// be refused; so must a line with a one too few or too many, since a select past the last
+    /// one would read some other bit.
     #[test]
     fn a_remap_entry_outside_the_image_is_refused() {
         let (_, blob) = reference();
         let m = Mphf::from_bytes(blob).unwrap();
         let t = v2(&m);
-        let (seeds, set, rank, low, high, _) = t.sections();
-        let high_at = header_len(t.level_count()) + seeds + set + rank + low;
-        let last = t.remap.holes.high.iter().rposition(|&w| w != 0).unwrap();
+        let (seeds, low, _) = t.sections();
+        let lines_at = header_len(t.level_count()) + seeds + low;
+        let last = lines_at + (t.remap.lines.len() - 1) * 64;
         let mut bad = blob.clone();
-        let cleared = t.remap.holes.high[last] & (t.remap.holes.high[last] - 1);
-        bad[high_at + last * 8..high_at + last * 8 + 8].copy_from_slice(&cleared.to_le_bytes());
-        let end = high_at + high - 8;
-        let top = u64::from_le_bytes(bad[end..end + 8].try_into().unwrap()) | 1 << 63;
-        bad[end..end + 8].copy_from_slice(&top.to_le_bytes());
+        bad[last..last + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(
             Mphf::from_bytes(&bad).is_err(),
             "a hole past the image was accepted"
         );
-        let rank_at = header_len(t.level_count()) + seeds + set + 4;
-        let mut bad = blob.clone();
-        bad[rank_at] ^= 1;
-        assert!(
-            Mphf::from_bytes(&bad).is_err(),
-            "a wrong rank sample was accepted"
-        );
+        let word = t.remap.lines[0].0[1];
+        for flipped in [word & (word - 1), word | (!word & (!word).wrapping_neg())] {
+            let mut bad = blob.clone();
+            bad[lines_at + 8..lines_at + 16].copy_from_slice(&flipped.to_le_bytes());
+            assert!(
+                Mphf::from_bytes(&bad).is_err(),
+                "a line with the wrong number of ones was accepted"
+            );
+        }
     }
 
     #[test]
@@ -3641,15 +3663,15 @@ mod tests {
         assert_eq!(Mphf::from_bytes(GOLDEN).expect("parses"), mphf);
     }
 
-    /// The committed `MPH2` fixture — the same keys under 3.0's geometry — still parses, still
-    /// writes back byte for byte, and still answers the same bijection: a lookup goes through
-    /// the loaded geometry, not this version's.
+    /// The committed `MPH2` fixture — the same keys under 3.0's geometry — still parses and still
+    /// answers the same bijection, through the loaded geometry rather than this version's;
+    /// written again it is an `MPH3` blob naming that geometry, with the remap in this layout,
+    /// which loads to the same table.
     #[test]
     fn the_mph2_golden_blob_still_reads_under_its_own_geometry() {
         const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-2.0.0-mphf.bin");
         let mphf = Mphf::from_bytes(GOLDEN).expect("the committed MPH2 fixture parses");
         assert_eq!(&GOLDEN[..4], MAGIC_V2);
-        assert_eq!(mphf.to_bytes(), GOLDEN);
         let Table::V2(t) = &mphf.table else {
             panic!("an MPH2 blob is a levels table");
         };
@@ -3665,10 +3687,13 @@ mod tests {
             assert!(id < hs.len() && !seen[id]);
             seen[id] = true;
         }
-        assert_ne!(
-            Mphf::build(&hs).expect("build").to_bytes()[..4],
-            GOLDEN[..4]
-        );
+        let again = mphf.to_bytes();
+        assert_eq!((&again[..4], again[6]), (&MAGIC[..], 0));
+        assert_eq!(again.len(), mphf.byte_len());
+        assert_eq!(Mphf::from_bytes(&again).expect("loads"), mphf);
+        let fresh = Mphf::build(&hs).expect("build").to_bytes();
+        assert_eq!(fresh[6], MODE_BITS_BYTE);
+        assert_ne!(fresh, again);
     }
 
     /// The committed `MPH1` fixture, parsed and written straight back — byte for byte.
@@ -3919,7 +3944,7 @@ mod spike {
             let Table::V2(v) = &m.table else {
                 unreachable!()
             };
-            let (seeds, set, rank, low, high, sel) = v.sections();
+            let (seeds, low, lines) = v.sections();
             // Lookup cost over a shuffled probe order, min of 3.
             let mut order: Vec<u32> = (0..n as u32).collect();
             let mut r = 0x2545_F491_4F6C_DD1Du64;
@@ -4069,11 +4094,11 @@ mod spike {
                 }
             }
             println!(
-                "{cfg:<28} bits {:>6.3} = seeds {:.3} + set {:.3} + holes {:.3}  bumped [{}]  build {ns:>5.1} ns/key  id {id_ns:.2} ns",
+                "{cfg:<28} bits {:>6.3} = seeds {:.3} + remap {:.3} (low bits {})  bumped [{}]  build {ns:>5.1} ns/key  id {id_ns:.2} ns",
                 m.bits_per_key(),
                 seeds as f64 * 8.0 / n as f64,
-                (set + rank) as f64 * 8.0 / n as f64,
-                (low + high + sel) as f64 * 8.0 / n as f64,
+                (low + lines) as f64 * 8.0 / n as f64,
+                v.remap.low_bits,
                 eps.join(" "),
             );
         }

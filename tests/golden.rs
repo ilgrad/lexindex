@@ -257,8 +257,9 @@ mod mph {
     }
 
     /// The 2.0 hash blobs carry `MPH2`, the seed geometry 1.1 to 3.0 wrote, which this version
-    /// reads under its own rule: each still loads, answers every golden key with a distinct id,
-    /// and writes back byte for byte — a loaded table keeps the geometry it was written in.
+    /// reads under its own rule: each still loads and answers every golden key with a distinct
+    /// id, and saved again — as an `MPH3` table naming that geometry, so not byte for byte —
+    /// loads to the same answers.
     #[test]
     fn the_mph2_hash_blobs_still_load_and_answer() {
         let keys = keys();
@@ -287,11 +288,8 @@ mod mph {
                 .collect(),
             name,
         );
-        assert_eq!(
-            compact.to_bytes().unwrap(),
-            std::fs::read(data(name)).unwrap(),
-            "{name}"
-        );
+        let again = lexindex::CompactHashIndex::from_bytes(&compact.to_bytes().unwrap()).unwrap();
+        assert!(keys.iter().all(|k| again.id(k) == compact.id(k)), "{name}");
         for name in ["golden-2.0.0-perfect.bmp", "golden-2.0.0-perfect-fp.bmp"] {
             let stored = std::fs::read(data(name)).unwrap();
             assert!(
@@ -308,17 +306,16 @@ mod mph {
                 assert_eq!(perfect.key(id as u32), Some(key.as_str()), "{name}");
             }
             distinct(ids, name);
-            assert_eq!(perfect.to_bytes().unwrap(), stored, "{name}");
+            let again =
+                lexindex::PerfectHashIndex::from_bytes(&perfect.to_bytes().unwrap()).unwrap();
+            assert!(keys.iter().all(|k| again.id(k) == perfect.id(k)), "{name}");
         }
         let name = "golden-2.0.0-closed.bcl";
         let closed = lexindex::ClosedHashIndex::load(data(name)).unwrap();
         assert_eq!(closed.len(), keys.len(), "{name}");
         distinct(keys.iter().map(|k| closed.id(k) as usize).collect(), name);
-        assert_eq!(
-            closed.to_bytes(),
-            std::fs::read(data(name)).unwrap(),
-            "{name}"
-        );
+        let again = lexindex::ClosedHashIndex::from_bytes(&closed.to_bytes()).unwrap();
+        assert!(keys.iter().all(|k| again.id(k) == closed.id(k)), "{name}");
     }
 
     /// The closed index's blob: it loads, every golden key gets a distinct id below `n`, and so

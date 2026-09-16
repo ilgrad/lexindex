@@ -143,7 +143,7 @@ fn main() {
         .build()
         .expect("rayon pool");
     let mut rows = [
-        Row::new("lexindex MPH2"),
+        Row::new("lexindex MPH3"),
         Row::new("ph 0.11 PHast+ (ShiftOnlyWrapped)"),
         Row::new("ph 0.11 PHast (SeedOnly)"),
         Row::new("ptr_hash 2.1.1 compact"),
