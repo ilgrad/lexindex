@@ -16,8 +16,9 @@
 //! taken. Slice start and bucket both grow with the hash, so seeding the buckets in nearly
 //! ascending order keeps the live edge of the occupancy map in L1 and never returns to anything
 //! behind it. The seeds that place a bucket are read off one bitwise OR of its keys' occupancy
-//! windows, 64 seeds at a time, and of those the one whose values are lowest is taken: low values
-//! are what the buckets still to come cannot use. A bucket no seed places is *bumped* (seed 0)
+//! windows, 64 seeds at a time, and of those the one whose positions multiply to the least is
+//! taken: low positions are what the buckets still to come cannot use, and a product prefers the
+//! lowest of them lowest. A bucket no seed places is *bumped* (seed 0)
 //! and its keys go to a second, smaller table under a fresh hash, and so on down to a tail of a
 //! few hundred keys placed by exhaustive search. Bumped keys land in the holes the first table
 //! left, through a remap of every lower table's value to a hole; that is what makes the result
@@ -63,14 +64,15 @@ const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in m
 ///
 /// | λ    | bits/key | bumped | build ns/key |
 /// |------|----------|--------|--------------|
-/// | 4.2  | 1.989    | 0.7 %  | 69           |
-/// | 4.35 | 1.962    | 1.1 %  | 67           |
-/// | 4.5  | 1.954    | 1.6 %  | 65           |
-/// | 4.65 | 1.951    | 2.2 %  | 65           |
-/// | 4.8  | 1.959    | 2.9 %  | 65           |
+/// | 4.3  | 1.951    | 0.7 %  | 67           |
+/// | 4.4  | 1.934    | 1.0 %  | 64           |
+/// | 4.5  | 1.935    | 1.3 %  | 65           |
+/// | 4.6  | 1.927    | 1.7 %  | 62           |
+/// | 4.7  | 1.940    | 2.2 %  | 62           |
 ///
-/// The bits are flat from 4.5 to 4.65 and a bumped key is the lookup's cost — a chain of
-/// dependent lines where a placed key is one — so the lower `λ` of the two is the one shipped.
+/// The bits are flat from 4.4 to 4.6 but for the remap's staircase — 4.6 bumps more than a 64th
+/// of the keys, which costs its holes a low bit less each — and a bumped key is the lookup's
+/// cost, a chain of dependent lines where a placed key is one, so 4.5 is the one shipped.
 ///
 /// A ratio, `9 / 2`, so the bucket count is exact integer arithmetic: see [`ceil_div_ratio`].
 const LAMBDA: (u64, u64) = (9, 2);
@@ -89,10 +91,28 @@ const STRIDE: u64 = 2;
 /// its slice, the rest are its shift — four fields and 64 shifts each. A bucket's keys are one
 /// rigid constellation a mode, which the shifts rotate; two keys of a bucket on one value in one
 /// mode, stuck there under every shift, part in the others, and four constellations chosen among
-/// by the lowest sum pack tighter than one: measured on 10 M word-bigram hashes, 1.58 % of the
-/// keys bumped and 1.954 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
+/// by the lowest product pack tighter than one: measured on 10 M word-bigram hashes, 1.30 % of the
+/// keys bumped and 1.935 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
 /// build. `MPH2` is zero mode bits: one field, 255 shifts.
 const MODE_BITS: u32 = 2;
+
+/// What is added to each key's in-slice position before the positions of a bucket's keys are
+/// multiplied to score a seed, the lowest product taken. A sum of positions is indifferent to
+/// their spread; a product wants the lowest of them lowest, which is where the buckets still to
+/// come can least afford a hole, and the constant sets how much: at 0 one key on position 0 would
+/// win outright, at infinity the product is the sum. Measured on 10 M word-bigram hashes at
+/// `λ` 4.5, the bumped share bottoms out flat between 50 and 150.
+const PROD_C: usize = 95;
+
+/// `log₂(x)` in 16.16 fixed point for `x` below the table's length: a seed's score is the sum of
+/// its keys' entries, and a candidate is scored for every key, so the table stays in L1.
+static LOG2: std::sync::LazyLock<[u32; 4096]> = std::sync::LazyLock::new(|| {
+    let mut t = [0u32; 4096];
+    for (x, v) in t.iter_mut().enumerate().skip(1) {
+        *v = ((x as f64).log2() * 65536.0).round() as u32;
+    }
+    t
+});
 
 /// [`MODE_BITS`] as the header writes it.
 const MODE_BITS_BYTE: u8 = MODE_BITS as u8;
@@ -2350,11 +2370,12 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
 /// words. Two keys with the same base in a mode collide under every shift of that mode and are
 /// tried in the others; the rest are caught when a candidate's values are listed.
 ///
-/// The seed to take is the one whose values are lowest, because low values are what the buckets
-/// still to come cannot use anyway. Within a mode values grow with the shift until a key wraps
-/// and drops by a slice, so the sum is lowest at the first feasible shift at or after some wrap,
-/// and those are the candidates: one `trailing_zeros` each, the sum from the wraps at or before
-/// it. Levels with more shifts a mode go through [`seed_bucket_wide`].
+/// The seed to take is the one whose positions have the lowest product (see [`PROD_C`]), because
+/// low positions are what the buckets still to come cannot use anyway. Within a mode positions
+/// grow with the shift until a key wraps and drops to its slice's start, so the product is lowest
+/// at the first feasible shift at or after some wrap, and those are the candidates: one
+/// `trailing_zeros` each, the product a log table. Levels with more shifts a mode go through
+/// [`seed_bucket_wide`].
 fn seed_bucket(
     level: &Level,
     ks: &[u64],
@@ -2384,7 +2405,8 @@ fn seed_bucket(
     let delta = 1u64 << level.shift;
     let (shift, dm) = (delta.trailing_zeros(), delta - 1);
     let period = slice >> shift;
-    let ks_delta = k as u64 * delta;
+    let plus = tun(3, PROD_C as f64) as usize;
+    let log2 = &*LOG2;
     // Values past the range's end wrap to its beginning; `limit` is where that is on this map,
     // which a chunk's private map never reaches. A key whose slice crosses it is read bit by bit.
     let limit = level.n - origin;
@@ -2399,12 +2421,10 @@ fn seed_bucket(
     for mode in 0..1u32 << level.mode_bits {
         // The keys' offsets in this mode, the shifts at which they wrap, and where their runs
         // start on the map.
-        let mut base = 0u64;
         let mut wraps = 0u64;
         for i in 0..k {
             let o = level.offset(ks[i], mode);
             offs[i] = o;
-            base += o;
             let c = (slice - o + dm) >> shift;
             cut[i] = c;
             if c < end {
@@ -2454,10 +2474,9 @@ fn seed_bucket(
                 break;
             }
         }
-        // Candidates: the first feasible shift at or after each wrap, and after shift 0. The
-        // sum of the values there is the offsets, plus a stride a key a shift, less a slice
-        // for every key that has wrapped. A candidate whose values fold onto one another is
-        // struck out and the wrap retried.
+        // Candidates: the first feasible shift at or after each wrap, and after shift 0, scored
+        // by the product of the keys' positions there. A candidate whose values fold onto one
+        // another is struck out and the wrap retried.
         let mut from = wraps | 1;
         while from != 0 {
             let c = u64::from(from.trailing_zeros());
@@ -2468,9 +2487,11 @@ fn seed_bucket(
             }
             let t = u64::from(free.trailing_zeros());
             count!(CANDIDATES, 1);
-            let wrapped = (0..k).filter(|&i| cut[i] <= t).count() as u64;
-            let sum = base + ks_delta * t - slice * wrapped;
-            if best.is_some_and(|(s, _, _)| s <= sum) {
+            let prod: u64 = offs[..k]
+                .iter()
+                .map(|&o| u64::from(log2[((o + (t << shift)) & mask) as usize + plus]))
+                .sum();
+            if best.is_some_and(|(s, _, _)| s <= prod) {
                 continue;
             }
             for (i, v) in vals[..k].iter_mut().enumerate() {
@@ -2481,7 +2502,7 @@ fn seed_bucket(
                 from |= 1 << c;
                 continue;
             }
-            best = Some((sum, mode, t));
+            best = Some((prod, mode, t));
         }
     }
     let Some((_, mode, t)) = best else {
@@ -2508,7 +2529,9 @@ fn seed_bucket(
 /// still to come cannot use anyway. Within a mode values grow with the shift until a key wraps
 /// and drops by a slice, so the sum is lowest in some later interval between wraps, and the first
 /// feasible seed of each interval is a candidate. Intervals are visited from the last; one whose
-/// values at entry already exceed the best candidate is skipped, and most are.
+/// values at entry already exceed the best candidate is skipped, and most are. This search
+/// scores by the sum of the values, which is what its interval bounds are made of; the product
+/// of [`seed_bucket`] is not.
 fn seed_bucket_wide(
     level: &Level,
     ks: &[u64],
@@ -4079,7 +4102,7 @@ mod spike {
         let hs = bigram_hashes(n);
         let spec = std::env::var("LEXINDEX_MPHF_SWEEP").unwrap_or_default();
         let names = [
-            "lambda", "slice", "modes", "unused3", "tlambda", "talpha", "window", "delta", "w1",
+            "lambda", "slice", "modes", "prodc", "tlambda", "talpha", "window", "delta", "w1",
             "w2", "w3", "w4", "w5", "w6", "w7", "unused15", "margin", "chunk", "phantom", "tail",
         ];
         let threads = env("LEXINDEX_MPHF_THREADS", 1);

@@ -106,9 +106,9 @@ lengths in the same slot order.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
-and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.962
-bits/key at 4.35, 1.954 at 4.5, 1.951 at 4.65, within a few nanoseconds per key of each other to
-build, and the bumped share — the lookup's cost — rises through it, 1.1 % to 2.2 %. The table
+and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.934
+bits/key at 4.4, 1.935 at 4.5, 1.927 at 4.6, within a few nanoseconds per key of each other to
+build, and the bumped share — the lookup's cost — rises through it, 1.0 % to 1.7 %. The table
 has no load factor at all — every level's range is exactly its key count, and the
 slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
 one way and nothing the other is not worth the API surface; `fingerprint_bits` is the knob that

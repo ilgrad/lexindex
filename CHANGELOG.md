@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The perfect hash is 1 % smaller again and bumps a sixth fewer keys: a seed is chosen by the
+  product of its keys' positions, not their sum.** Of the seeds that place a bucket, `MPH3` took
+  the one whose keys' in-slice positions summed lowest, since low positions are what the buckets
+  still to come cannot use. A sum is indifferent to how those positions are spread; the product
+  of the positions plus a constant — PHast's `ShiftOnlyProdWrapped` objective, due to Piotr
+  Beling — wants the lowest of them lowest, which packs the front of every slice tighter where
+  the later buckets are placed. It is scored from a 16 KB table of `log₂` in fixed point, one
+  entry a key a candidate; the search itself, its candidates and its windows, is unchanged.
+  Measured on 10 M real word-bigram hashes at the shipped `λ` 4.5: **1.935 bits/key** against
+  1.952 and **1.30 %** of keys bumped against 1.57 %; at 100 M, 1.932 against 1.948 and 1.29 %
+  against 1.56 %. The constant is flat between 50 and 150 and 95 is shipped. The build runs
+  about 57 more instructions a key for the scoring, 2–3 ns of 63 on a hot machine, at the same
+  cycle count within noise. The seeds change, so the `golden-4.0.0-*` fixtures are re-pinned; the
+  format does not.
 - **The checked lookups run on fewer instructions: `CompactHashIndex::id` 37 % fewer,
   `PerfectHashIndex::id` 53 % fewer.** `CompactHashIndex::id` called its slot lookup and the
   pair hash out of line and read every fingerprint through the bit-packed path with its overflow

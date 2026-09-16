@@ -3,7 +3,7 @@
 //! [`CompactHashIndex`](crate::CompactHashIndex) stores a fingerprint per key so that it can say
 //! *no*; this index stores nothing per key and never says it. `id` returns a `u32` rather than an
 //! `Option`: a member's id, and for any other string some id in `[0, n)` — which is all a perfect
-//! hash can answer, and the whole contract. The size is the perfect hash alone, 1.95 bits per key
+//! hash can answer, and the whole contract. The size is the perfect hash alone, 1.94 bits per key
 //! on real words, a fifth of the smallest fingerprinted index and a tenth of any trie.
 //!
 //! It is a separate type rather than `CompactHashIndex` at zero fingerprint bits because a
