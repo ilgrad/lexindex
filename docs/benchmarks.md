@@ -790,8 +790,9 @@ rank words, the select sample, the high words — and a prefetch that names one 
 chain. The keys go through the first level in blocks of 1024 now, each seed pulled in 64 keys
 ahead; the bumped keys of a block are answered after it in five stages that run eight keys apart,
 each stage pulling in what the next one reads. Below 2^18 first-level seeds (about 1.2 M keys) the
-level sits in L2 and the batch is the single lookup in a loop, which is why the 1 M batch is the single lookup
-plus the cost of writing its answers out. The single lookup gained from the same work: the remap's rank reads a count per word
+level sits in L2 and the batch is the single lookup in a loop, which is why the 1 M batch is the
+single lookup plus the cost of writing its answers out. The single lookup gained from the same
+work: the remap's rank reads a count per word
 instead of counting a block's words in a loop, and the Elias–Fano select compares a window of
 counts at once and finds the bit inside its word without a loop, where the old scan's mispredicted
 exits were most of a bumped key's cost (3.7 → 3.2, 5.8 → 4.9 and 20.1 → 15.8 ns). Since
