@@ -20,7 +20,10 @@ All notable changes to this project are documented here. The format follows
   A-B-A-B in one process on 2026-09-16, the hash alone over keys read in order: dictionary words
   3.9 ns against 7.3, English titles 7.4 against 11.2, URLs 6.5 against 13.2; 8-byte keys are the
   one loss, 3.8 against 2.9. The distribution battery (`bench/results/hash-quality-*`) reads the
-  same. Every blob keyed on the old hash would answer wrong ids under the new one, so `BMP7`,
+  same. End to end, `ClosedHashIndex::id` over 1 M URLs / UUIDs / titles / paths reads 43 / 39 /
+  28 / 65 ns against 54.5 / 46 / 32 / 92 in the same protocol over the old hash, a path that
+  includes the key's own cache miss (`bench/results/mphf-strings-2026-09-16-*`); PtrHash's fast
+  set over xxh3 of the same strings reads 55 / 50 / 38 / 100. Every blob keyed on the old hash would answer wrong ids under the new one, so `BMP7`,
   `BCH7` and `BCL1` join the refused lists with a message naming `lexindex < 4.0` and the
   rebuild; `BIX4`, `BDX2` and `OVL2` are untouched, and the standalone `MPH1`–`MPH3` tables
   still load — a table is keyed on nothing but the hashes it was handed. `hash_key_bytes`
