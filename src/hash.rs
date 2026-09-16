@@ -223,7 +223,7 @@ pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
 }
 
 /// [`hash_pair`] over the key's bytes: what a lookup reading an Arrow buffer holds.
-pub(crate) fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
+pub fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
     let n = b.len();
     let len = n as u64;
     if n <= 32 {

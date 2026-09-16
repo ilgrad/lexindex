@@ -68,6 +68,11 @@ mod pages;
 #[cfg(feature = "bench-mphf")]
 #[doc(hidden)]
 pub use hash::hash_key_bytes;
+/// The key hash and the fingerprint from one pass over the key, as `CompactHashIndex::id`
+/// computes them. A measurement export on the same terms.
+#[cfg(feature = "bench-mphf")]
+#[doc(hidden)]
+pub use hash::hash_pair_bytes;
 /// The perfect hash on its own, for a harness that compares it with other MPHFs over the same
 /// hashes. A measurement export, not API: it exists only under `bench-mphf` and is hidden.
 #[cfg(feature = "bench-mphf")]
