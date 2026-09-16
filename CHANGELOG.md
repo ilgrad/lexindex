@@ -52,6 +52,16 @@ All notable changes to this project are documented here. The format follows
   systems, or where the advice is refused; the file-backed tables of `load_mmap` cannot get
   them. No dependency: one `madvise` declaration.
 
+- **`index_all` finds each key's bucket once and reads its geometry as immediates.** The batch
+  loop pulled a key's seed in 64 keys ahead and then found the key's bucket a second time when
+  its turn came, multiplied the shift by a stride it read from the level, and kept the level's
+  geometry and its own bookkeeping on the stack. It now keeps the buckets it found in a ring of
+  64, shifts instead of multiplying, and runs each block through a function of its own with
+  the geometry every table of this version has — four modes of 64 shifts, slices of 1024 —
+  folded in as constants: 54 → 47 instructions a key. Measured A-B-A-B against the loop before
+  it: 7–10 % faster at 10 M keys, 3–5 % at 100 M; below 2^18 first-level seeds the batch is the
+  single lookup in a loop, as before, and unchanged.
+
 ### Added
 
 

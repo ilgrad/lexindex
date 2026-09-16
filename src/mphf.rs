@@ -668,9 +668,9 @@ struct Level {
     /// in `[0, n)` and wraps past `n` to the range's beginning, so that every value is reachable
     /// from the same number of starts and the range has no underfilled ends.
     slice: u64,
-    /// Values between two consecutive shifts of a key; [`stride_for`] the slice, kept because it
-    /// is on every lookup.
-    stride: u64,
+    /// Log2 of the stride — the values between two consecutive shifts of a key, [`stride_for`]
+    /// the slice — kept because it is on every lookup.
+    shift: u32,
     /// Mode bits of the level's seeds: [`Geometry::mode_bits`].
     mode_bits: u32,
     /// One per bucket; 0 is bumped.
@@ -715,7 +715,7 @@ impl Level {
             n,
             buckets: ceil_div_ratio(n, ratio(0, LAMBDA)).max(1),
             slice,
-            stride: stride_for(slice, mode_bits),
+            shift: stride_for(slice, mode_bits).trailing_zeros(),
             mode_bits,
             seeds: Pages::default(),
         }
@@ -733,14 +733,46 @@ impl Level {
     /// the slice's start, wrapped inside the range. Below `n` for every `h` and every seed.
     #[inline(always)]
     fn value(&self, h: u64, seed: u8) -> u64 {
-        let mask = self.slice - 1;
+        self.value_in(self.form(), h, seed)
+    }
+
+    /// [`value`](Self::value) under `form`, the level's own or [`Self::SHIPPED`] where a caller
+    /// has checked they agree: a loop over many keys then reads the geometry as immediates.
+    #[inline(always)]
+    fn value_in(&self, form: Form, h: u64, seed: u8) -> u64 {
         let seed = u64::from(seed);
-        let shift_bits = 8 - self.mode_bits;
+        let shift_bits = 8 - form.mode_bits;
         let mode = (seed >> shift_bits) as u32;
         let t = seed & ((1u64 << shift_bits) - 1);
-        let v = scale(h, self.n) + ((self.offset(h, mode) + self.stride * t) & mask);
+        let offset = (h >> (8 * mode)) & form.mask;
+        let v = scale(h, self.n) + ((offset + (t << form.shift)) & form.mask);
         if v >= self.n { v - self.n } else { v }
     }
+
+    /// The geometry [`value`](Self::value) reads.
+    #[inline(always)]
+    fn form(&self) -> Form {
+        Form {
+            mode_bits: self.mode_bits,
+            shift: self.shift,
+            mask: self.slice - 1,
+        }
+    }
+
+    /// The geometry of every level of [`SLICE`] values a slice that this version builds.
+    const SHIPPED: Form = Form {
+        mode_bits: MODE_BITS,
+        shift: (SLICE >> (8 - MODE_BITS)).trailing_zeros(),
+        mask: SLICE - 1,
+    };
+}
+
+/// What [`Level::value`] needs of a level's geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Form {
+    mode_bits: u32,
+    shift: u32,
+    mask: u64,
 }
 
 /// The last level: no bumping, two-byte seeds, a table with slack, and a hash seed of its own
@@ -1356,28 +1388,86 @@ impl V2 {
         else {
             return hashes.iter().map(|&h| self.index(h)).collect();
         };
-        let mut out = Vec::with_capacity(hashes.len());
+        if l.form() == Level::SHIPPED {
+            self.batch::<true>(l, hashes)
+        } else {
+            self.batch::<false>(l, hashes)
+        }
+    }
+
+    /// [`index_all_from`](Self::index_all_from) past its check, over the first level `l`:
+    /// under [`Level::SHIPPED`] when `SHIPPED`, which the loop then reads as immediates.
+    #[inline(always)]
+    fn batch<const SHIPPED: bool>(&self, l: &Level, hashes: &[u64]) -> Vec<u64> {
+        let mut out = vec![0u64; hashes.len()];
         // A bumped key's offset in its block, and how far its answer has got.
         let mut bumped: Vec<(usize, u64)> = Vec::new();
-        for (b, block) in hashes.chunks(BATCH_BLOCK).enumerate() {
+        // The buckets of the next `SEED_AHEAD` keys, found when their seeds were pulled in, so
+        // that the read does not find them again: a multiply a key fewer on the loop.
+        let mut ring = [0u64; SEED_AHEAD];
+        for (i, &h) in hashes.iter().take(SEED_AHEAD).enumerate() {
+            ring[i] = scale(h, l.buckets);
+            crate::blob::prefetch_byte(&l.seeds, ring[i] as usize);
+        }
+        let blocks = hashes.chunks(BATCH_BLOCK).zip(out.chunks_mut(BATCH_BLOCK));
+        for (b, (block, answers)) in blocks.enumerate() {
             let base = b * BATCH_BLOCK;
             bumped.clear();
-            out.extend(block.iter().enumerate().map(|(k, &h)| {
-                if let Some(&next) = hashes.get(base + k + SEED_AHEAD) {
-                    crate::blob::prefetch_byte(&l.seeds, scale(next, l.buckets) as usize);
-                }
-                let seed = l.seeds[scale(h, l.buckets) as usize];
-                if seed == 0 {
-                    bumped.push((k, 0));
-                }
-                l.value(h, seed)
-            }));
+            // The keys `SEED_AHEAD` on from the block's, whose seeds it pulls in; the last keys
+            // of the batch have none.
+            let ahead = hashes
+                .len()
+                .saturating_sub(base + SEED_AHEAD)
+                .min(block.len());
+            let next = &hashes[(base + SEED_AHEAD).min(hashes.len())..][..ahead];
+            Self::answer_block::<SHIPPED>(l, block, next, base, &mut ring, answers, &mut bumped);
             if !bumped.is_empty() {
-                let start = out.len() - block.len();
-                self.resolve_bumped(block, &mut bumped, &mut out[start..]);
+                self.resolve_bumped(block, &mut bumped, answers);
             }
         }
         out
+    }
+
+    /// One block of [`batch`](Self::batch): the first level's answer for each key of `block`
+    /// into `answers`, the seeds of `next` — the keys [`SEED_AHEAD`] on — pulled in on the way,
+    /// and the keys the level bumped listed in `bumped` by their offset. Its own function so
+    /// that the loop's registers are its own.
+    #[inline(never)]
+    fn answer_block<const SHIPPED: bool>(
+        l: &Level,
+        block: &[u64],
+        next: &[u64],
+        base: usize,
+        ring: &mut [u64; SEED_AHEAD],
+        answers: &mut [u64],
+        bumped: &mut Vec<(usize, u64)>,
+    ) {
+        let form = if SHIPPED { Level::SHIPPED } else { l.form() };
+        let seeds: &[u8] = &l.seeds;
+        let ahead = next.len();
+        let (pulled, rest) = block.split_at(ahead);
+        let (pulled_out, rest_out) = answers.split_at_mut(ahead);
+        let keys = pulled.iter().zip(next).zip(pulled_out.iter_mut());
+        for (k, ((&h, &coming), answer)) in keys.enumerate() {
+            let slot = (base + k) % SEED_AHEAD;
+            let at = ring[slot] as usize;
+            let bucket = scale(coming, l.buckets);
+            ring[slot] = bucket;
+            crate::blob::prefetch_byte(seeds, bucket as usize);
+            let seed = seeds[at];
+            if seed == 0 {
+                bumped.push((k, 0));
+            }
+            *answer = l.value_in(form, h, seed);
+        }
+        for (k, (&h, answer)) in rest.iter().zip(rest_out.iter_mut()).enumerate() {
+            let k = ahead + k;
+            let seed = seeds[ring[(base + k) % SEED_AHEAD] as usize];
+            if seed == 0 {
+                bumped.push((k, 0));
+            }
+            *answer = l.value_in(form, h, seed);
+        }
     }
 
     /// The keys of `block` the first level bumped, each held in `bumped` by its offset and how far
@@ -1578,7 +1668,7 @@ impl V2 {
             }
             Feed::Slice { .. } => 0,
         };
-        let shift = level.stride.trailing_zeros();
+        let shift = level.shift;
         let align = |v: u64| v & !((64 << shift) - 1);
         let word = |o: u64| (o >> shift) as i64 / 64;
 
@@ -1992,7 +2082,7 @@ impl V2 {
                 n: ln,
                 buckets,
                 slice,
-                stride: stride_for(slice, geometry.mode_bits()),
+                shift: stride_for(slice, geometry.mode_bits()).trailing_zeros(),
                 mode_bits: geometry.mode_bits(),
                 seeds: Pages::default(),
             });
@@ -2249,7 +2339,7 @@ fn seed_bucket(
     } = scratch;
     count!(BUCKETS, 1);
     let (slice, mask) = (level.slice, level.slice - 1);
-    let delta = level.stride;
+    let delta = 1u64 << level.shift;
     let (shift, dm) = (delta.trailing_zeros(), delta - 1);
     let period = slice >> shift;
     let ks_delta = k as u64 * delta;
@@ -2402,7 +2492,7 @@ fn seed_bucket_wide(
     let margin = *margin;
     count!(BUCKETS, 1);
     let (slice, mask) = (level.slice, level.slice - 1);
-    let delta = level.stride;
+    let delta = 1u64 << level.shift;
     let (shift, dm) = (delta.trailing_zeros(), delta - 1);
     let period = slice >> shift;
     let ks_delta = k as u64 * delta;
@@ -3682,7 +3772,7 @@ mod tests {
         assert_eq!(t.geometry, Geometry::Mph2);
         assert!(
             t.levels()
-                .all(|l| l.mode_bits == 0 && l.stride == stride_for(l.slice, 0))
+                .all(|l| l.mode_bits == 0 && l.shift == stride_for(l.slice, 0).trailing_zeros())
         );
         let hs = golden_hashes();
         let mut seen = vec![false; hs.len()];
