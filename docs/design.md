@@ -106,8 +106,8 @@ lengths in the same slot order.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
-and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.934
-bits/key at 4.4, 1.935 at 4.5, 1.927 at 4.6, within a few nanoseconds per key of each other to
+and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.925
+bits/key at 4.4, 1.917 at 4.5, 1.914 at 4.6, within a few nanoseconds per key of each other to
 build, and the bumped share — the lookup's cost — rises through it, 1.0 % to 1.7 %. The table
 has no load factor at all — every level's range is exactly its key count, and the
 slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
@@ -115,13 +115,13 @@ one way and nothing the other is not worth the API surface; `fingerprint_bits` i
 *does* have a monotone trade, and it is public.
 
 **Every read the MPH makes is bounded by a length in its own header.** That is the whole reason it is
-in-crate. `index` touches a seed table per level, the tail's, and the remap — a 64-byte Elias–Fano
-line per 128 values of the lower levels and a packed array of their low bits — and each of those
-lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH3` header
+in-crate. `index` touches a seed table per level, the tail's, and the remap — an Elias–Fano stream of
+the lower levels' values' high parts with a sample per 64 of them, and a packed array of their
+low bits — and each of those lengths is *derived* on load from the seven scalars and the per-level rows of the `MPH3` header
 (and of `MPH2`'s, the same header under the seed geometry 1.1 to 3.0 wrote) rather than read beside them, so a loader that recomputes them cannot be handed a length that
 disagrees with the table it describes. The remap is the one table whose *contents* can leave the
-image, so it is the one checked by value: every line must hold one bit per value it covers, and
-every value it decodes must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
+image, so it is the one checked by value: the stream must hold one set bit per value, each sample
+must sit on its block's first one, and every value it decodes must lie below `n`. What that buys is a `from_bytes` that is a safe fn on arbitrary bytes — a
 crafted blob answers wrong ids, never out-of-range ones. The `MPH1` tables 1.0 wrote are read by
 the same rule over their own eight scalars.
 

@@ -95,21 +95,25 @@ All notable changes to this project are documented here. The format follows
   table, which 3.0 cannot read; the `MPH2` tables 1.1 to 3.0 wrote still load standalone and
   keep their seed geometry when written back. The `golden-4.0.0-*` fixtures pin the new bytes.
 
-- **A bumped key's remap is one cache line of Elias–Fano, read in one step.** `MPH2` sent a
+- **A bumped key's remap is a sampled Elias–Fano stream, read in two steps.** `MPH2` sent a
   bumped key through four dependent lines after its first-level seed: the next level's seed, a
   rank word over the lower levels' values, the hole list's select sample and low word, its high
   words. `MPH3` stores the remap as a non-decreasing sequence over *every* value of the lower
-  levels — a value no key takes repeats its predecessor's hole — in 64-byte lines of 128 values
-  each: a `u32` base and the values' high parts in unary, read with eight popcounts and one
-  select, beside a packed array of their low bits. A line whose values spread too far for its
-  unary bits is marked sparse and keeps one more low bit a value in its last two words, so the
-  table's low bits stay at the natural count where the holes thin out locally. A bumped key is
-  now its next level's seed, then its line and its low word side by side: two dependent steps
-  where there were four, and one prefetch stage fewer in `index_all`. Measured on 10 M real
-  word-bigram hashes: **1.953 bits/key**, the remap 0.146 of them at 5 low bits, against 0.147
-  for the rank vector and hole list over fewer entries. An `MPH2` blob's rank vector and hole
-  list are decoded into lines when it loads, so it is written back as `MPH3` under its own seed
-  geometry — not byte for byte, as `OVL1` became `OVL2` in 1.x.
+  levels — a value no key takes repeats its predecessor's hole — so it needs no rank: the
+  values' high parts in one unary stream, a `u32` sample a block of 64 values holding the
+  position of the block's first one, and a packed array of their low bits. A lookup reads its
+  block's sample — four bytes a block, under a megabyte for a billion keys, so in cache — then
+  counts through the four words from there with four popcounts and one select, beside its low
+  word; a block whose ones run past those four words, under one lookup in ten thousand on the
+  tables measured, goes on word by word. A bumped key is now its next level's seed, then its
+  four words and its low word side by side, and `index_all` has one prefetch stage fewer.
+  Measured on 10 M real word-bigram hashes: **1.917 bits/key**, the remap 0.116 of them at
+  6 low bits, where `MPH2`'s rank vector and hole list would take 0.125 for the same sequence;
+  at 100 M, 1.915 and 0.114. Blocks of 128 values would save 0.003 bits a key and need eight
+  words a lookup: 5–20 % slower on a bumped key and 1.5–6 % on `index_all`, hot.
+  An `MPH2` blob's rank vector and hole list are decoded into the stream when it loads, so it is
+  written back as `MPH3` under its own seed geometry — not byte for byte, as `OVL1` became `OVL2`
+  in 1.x.
 
 - **The perfect hash's tables ask for transparent huge pages.** A table of a huge page or more —
   the first level's seeds from about 9 M keys up — is allocated on a 2 MiB boundary and advised

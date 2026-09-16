@@ -52,27 +52,28 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::IndexError;
-use crate::pages::{Pages, Zeroed};
+use crate::pages::Pages;
 
 /// The one error every overflow check below reports; naming it keeps the arithmetic readable.
 const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in memory");
 
 /// Keys per bucket on every bumping level. Seeds are `8/λ` bits per key, and every bucket that no
 /// seed places is bumped, so a larger `λ` is fewer seeds but more bumped keys, each of which
-/// costs its own level's seed share and ~9 bits of remap. Measured on 10 M word-bigram hashes,
+/// costs its own level's seed share and ~8.5 bits of remap. Measured on 10 M word-bigram hashes,
 /// one thread, one run (`MPH3`; `MPH2` was 2.154 / 2.089 / 2.070 bits at 4.15 / 4.5 / 4.7):
 ///
 /// | λ    | bits/key | bumped | build ns/key |
 /// |------|----------|--------|--------------|
-/// | 4.3  | 1.951    | 0.7 %  | 67           |
-/// | 4.4  | 1.934    | 1.0 %  | 64           |
-/// | 4.5  | 1.935    | 1.3 %  | 65           |
-/// | 4.6  | 1.927    | 1.7 %  | 62           |
-/// | 4.7  | 1.940    | 2.2 %  | 62           |
+/// | 4.3  | 1.941    | 0.7 %  | 66           |
+/// | 4.4  | 1.925    | 1.0 %  | 65           |
+/// | 4.5  | 1.917    | 1.3 %  | 64           |
+/// | 4.6  | 1.914    | 1.7 %  | 64           |
+/// | 4.7  | 1.915    | 2.2 %  | 63           |
+/// | 4.8  | 1.919    | 2.6 %  | 63           |
 ///
-/// The bits are flat from 4.4 to 4.6 but for the remap's staircase — 4.6 bumps more than a 64th
-/// of the keys, which costs its holes a low bit less each — and a bumped key is the lookup's
-/// cost, a chain of dependent lines where a placed key is one, so 4.5 is the one shipped.
+/// The bits move by less than a fifth of a percent from 4.5 to 4.8 while the bumped share
+/// doubles, and a bumped key is the lookup's cost — a chain of dependent lines where a placed key
+/// is one — so 4.5 is the one shipped. At 100 M the same: 1.915 bits at 4.5, 1.912 at 4.7.
 ///
 /// A ratio, `9 / 2`, so the bucket count is exact integer arithmetic: see [`ceil_div_ratio`].
 const LAMBDA: (u64, u64) = (9, 2);
@@ -92,7 +93,7 @@ const STRIDE: u64 = 2;
 /// rigid constellation a mode, which the shifts rotate; two keys of a bucket on one value in one
 /// mode, stuck there under every shift, part in the others, and four constellations chosen among
 /// by the lowest product pack tighter than one: measured on 10 M word-bigram hashes, 1.30 % of the
-/// keys bumped and 1.935 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
+/// keys bumped and 1.917 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
 /// build. `MPH2` is zero mode bits: one field, 255 shifts.
 const MODE_BITS: u32 = 2;
 
@@ -860,47 +861,40 @@ impl Tail {
     }
 }
 
-/// Values a line of the remap holds, so that a value's line is its index shifted.
-const LINE: usize = 128;
+/// Values a sample of the remap covers: the `j`-th value's one is found from the sample of its
+/// block, `j / BLOCK`, by counting ones from there. 64 rather than 128: a block's ones then lie
+/// within [`SELECT_WORDS`] = 4 words of its sample for all but a few lookups in a hundred
+/// thousand, where 128 values needed 8, and a count over four words is half the work; the price
+/// is a quarter of a bit a value, 0.003 bits a key.
+const BLOCK: usize = 64;
 
-/// Bits of a line past its base: the high parts of its [`LINE`] values in unary.
-const LINE_BITS: usize = 512 - 32;
-
-/// The unary bits of a sparse line, which keeps one more low bit a value in its last two words.
-const SPARSE_LINE_BITS: usize = LINE_BITS - LINE;
-
-/// A 64-byte line of the remap: a `u32` base in the low half of the first word, then the high
-/// parts of [`LINE`] values above the base in unary — a zero a step, a one a value. Where a
-/// line's values are spread too far for that, the base's top bit marks it *sparse*: its high
-/// parts are one bit shorter, so the steps are half as many, and the bit that leaves each
-/// value is the value's bit in the line's last two words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C, align(64))]
-struct Line([u64; 8]);
-
-// SAFETY: eight words, each of which may be zero.
-unsafe impl Zeroed for Line {}
-
-/// The base's top bit: the line is sparse.
-const SPARSE: u64 = 1 << 31;
+/// Words of the high-part stream a lookup counts through from its sample, all at once. The
+/// stream is held with as many zero words past its end, so the window is always inside it; a
+/// blob stores none of them.
+const SELECT_WORDS: usize = 4;
 
 /// The remap: which hole of the first level each value of the levels below it, and of the tail,
 /// takes. The `j`-th value a key landed on takes the `j`-th hole, and a value no key landed on —
 /// a hash that was never built in — takes its predecessor's, so over every value the holes are
 /// a non-decreasing sequence, and it is Elias–Fano: the low bits packed, the high parts as unary
-/// gaps. The high parts are cut into lines of [`LINE`] values, each carrying its first value's
-/// high part as a base, so that a value's high part is one select inside one line rather than a
-/// walk from a sample; the low bits sit in a parallel array. A lookup is those two reads, which
+/// gaps in one stream, the `j`-th value's one at its high part plus `j`. A sample a [`BLOCK`] of
+/// values holds the position of the block's first one, so a value's high part is a count of ones
+/// from its sample: over a window of [`SELECT_WORDS`] words compared at once, and past the
+/// window — under one lookup in ten thousand on a real table — word by word. A lookup is the
+/// sample, which at four bytes a block stays in cache, then the window and the low word, which
 /// depend on nothing but the value.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Remap {
     /// Values of the levels below the first and of the tail, together: the sequence's length.
     len: u64,
-    /// Low bits a value: from what the density alone asks, up to what leaves every line's unary
-    /// part inside the line.
+    /// Low bits a value: what the density asks, `⌊log₂(u / len)⌋`.
     low_bits: u32,
     low: Pages<u64>,
-    lines: Pages<Line>,
+    /// The high parts in unary, [`high_words`](Self::high_words) of them, then [`SELECT_WORDS`]
+    /// zero words; nothing at all for an empty sequence.
+    high: Pages<u64>,
+    /// The position of each block's first one.
+    samples: Pages<u32>,
 }
 
 impl Remap {
@@ -908,8 +902,33 @@ impl Remap {
         (len as usize * low_bits as usize).div_ceil(64)
     }
 
-    fn line_count(len: u64) -> usize {
-        (len as usize).div_ceil(LINE)
+    /// Words of the high-part stream a blob stores for `len` values below `u`: every one lies at
+    /// its value's high part plus its index, so the last is below `((u - 1) >> low_bits) + len`.
+    /// `None` where that does not fit in memory.
+    fn high_words(len: u64, u: u64, low_bits: u32) -> Option<usize> {
+        if len == 0 {
+            return Some(0);
+        }
+        let bits = (u.saturating_sub(1) >> low_bits).checked_add(len)?;
+        usize::try_from(bits.div_ceil(64)).ok()
+    }
+
+    /// Words the stream is held in: the stored ones and the window's zero words after them.
+    fn held_words(len: u64, stored: usize) -> Option<usize> {
+        if len == 0 {
+            Some(0)
+        } else {
+            stored.checked_add(SELECT_WORDS)
+        }
+    }
+
+    /// The high-part stream as a blob stores it.
+    fn stored_high(&self) -> &[u64] {
+        &self.high[..self.high.len().saturating_sub(SELECT_WORDS)]
+    }
+
+    fn sample_count(len: u64) -> usize {
+        (len as usize).div_ceil(BLOCK)
     }
 
     /// Low bits for `len` values below `u` from the density alone: what leaves the high part
@@ -918,43 +937,23 @@ impl Remap {
         u.checked_div(len).map_or(0, |q| q.max(1).ilog2())
     }
 
-    /// Whether a line of `values` fits at `low_bits`: as a dense line, or as a sparse one; `None`
-    /// when as neither. A line holds a one a value and a zero a step of the high parts, and the
-    /// steps halve with each low bit.
-    fn line_fits(line: &[u64], low_bits: u32) -> Option<bool> {
-        let span = |bits: u32| {
-            let (first, last) = (line[0] >> bits, line[line.len() - 1] >> bits);
-            (last < SPARSE).then_some((last - first) as usize + line.len())
-        };
-        if span(low_bits).is_some_and(|s| s <= LINE_BITS) {
-            Some(false)
-        } else if span(low_bits + 1).is_some_and(|s| s <= SPARSE_LINE_BITS) {
-            Some(true)
-        } else {
-            None
-        }
-    }
-
-    /// The sequence `values`, non-decreasing and below `u`, at the fewest low bits from the
-    /// natural ones up at which every line fits, dense or sparse.
-    fn encode(values: &[u64], u: u64) -> Self {
+    /// The sequence `values`, non-decreasing and below `u`, at the natural low bits.
+    fn encode(values: &[u64], u: u64) -> Result<Self, IndexError> {
         let len = values.len() as u64;
-        let mut low_bits = Self::natural_low_bits(len, u);
-        while !values
-            .chunks(LINE)
-            .all(|line| Self::line_fits(line, low_bits).is_some())
-        {
-            low_bits += 1;
-        }
+        let low_bits = Self::natural_low_bits(len, u);
+        let high_words = Self::high_words(len, u, low_bits)
+            .and_then(|stored| Self::held_words(len, stored))
+            .ok_or(SIZE)?;
         let mut remap = Self {
             len,
             low_bits,
             low: Pages::zeroed(Self::low_words(len, low_bits)),
-            lines: Pages::zeroed(Self::line_count(len)),
+            high: Pages::zeroed(high_words),
+            samples: Pages::zeroed(Self::sample_count(len)),
         };
-        if low_bits > 0 {
-            for (j, &v) in values.iter().enumerate() {
-                debug_assert!(v < u && (j == 0 || values[j - 1] <= v));
+        for (j, &v) in values.iter().enumerate() {
+            debug_assert!(v < u && (j == 0 || values[j - 1] <= v));
+            if low_bits > 0 {
                 let low = v & ((1 << low_bits) - 1);
                 let at = j * low_bits as usize;
                 let (w, o) = (at / 64, at % 64);
@@ -963,60 +962,50 @@ impl Remap {
                     remap.low[w + 1] |= low >> (64 - o);
                 }
             }
-        }
-        for (k, line) in values.chunks(LINE).enumerate() {
-            let sparse = Self::line_fits(line, low_bits).expect("low bits at which it fits");
-            let bits = low_bits + u32::from(sparse);
-            let base = line[0] >> bits;
-            let mut words = [0u64; 8];
-            words[0] = base | if sparse { SPARSE } else { 0 };
-            for (r, &v) in line.iter().enumerate() {
-                let p = 32 + r + ((v >> bits) - base) as usize;
-                words[p / 64] |= 1 << (p % 64);
-                if sparse {
-                    words[6 + r / 64] |= (v >> low_bits & 1) << (r % 64);
-                }
+            let p = (v >> low_bits) as usize + j;
+            remap.high[p / 64] |= 1 << (p % 64);
+            if j % BLOCK == 0 {
+                remap.samples[j / BLOCK] = u32::try_from(p).map_err(|_| SIZE)?;
             }
-            remap.lines[k] = Line(words);
         }
-        remap
+        Ok(remap)
     }
 
     /// The `j`-th value, for `j < len`. On a validated table this is exact; on anything else it
     /// is some number, which is all the caller needs.
     ///
-    /// The high part is the `r`-th one of the line's unary part above the base, `r` the value's
-    /// index in its line: which word holds it is read off the words' counts, all eight compared
-    /// against `r` at once, and the bit is found inside its word without a loop. A sparse line's
-    /// last two words are its values' extra low bits rather than unary, and its high parts are
-    /// a bit shorter.
+    /// The high part is the position of the `j`-th one less `j`, and the one is counted to from
+    /// its block's sample: the window's words are counted, the counts all compared against the
+    /// ones to skip at once, and the bit is found inside its word without a loop. A block whose
+    /// ones and zeros run past the window goes on word by word.
     #[inline(always)]
     fn get(&self, j: u64) -> u64 {
-        let Some(line) = self.lines.get(j as usize / LINE) else {
+        let Some(&s) = self.samples.get(j as usize / BLOCK) else {
             return 0;
         };
-        let r = j % LINE as u64;
-        let sparse = line.0[0] >> 31 & 1;
-        let base = line.0[0] & (SPARSE - 1);
-        let unary = sparse.wrapping_sub(1);
-        let words = [
-            line.0[0] & !0xFFFF_FFFF,
-            line.0[1],
-            line.0[2],
-            line.0[3],
-            line.0[4],
-            line.0[5],
-            line.0[6] & unary,
-            line.0[7] & unary,
-        ];
-        let mut before = [0u64; 8];
-        for w in 1..8 {
+        let (w0, o) = (s as usize / 64, s % 64);
+        let Some(words) = self.high.get(w0..w0 + SELECT_WORDS) else {
+            return 0;
+        };
+        let r = j % BLOCK as u64;
+        // The window is read from where it lies, not copied: a copy on the stack is written in
+        // wide stores and read back in loads that straddle them, which forwarding cannot serve.
+        let first = words[0] & (u64::MAX << o);
+        let mut before = [0u64; SELECT_WORDS];
+        before[1] = u64::from(first.count_ones());
+        for w in 2..SELECT_WORDS {
             before[w] = before[w - 1] + u64::from(words[w - 1].count_ones());
         }
-        let w = (1..8).filter(|&w| before[w] <= r).count();
-        let p = w as u64 * 64 + select_in_word(words[w], r - before[w]);
-        let extra = line.0[6 + (r / 64) as usize] >> (r % 64) & sparse;
-        let high = ((base + (p - 32) - r) << sparse) | extra;
+        let last = SELECT_WORDS - 1;
+        let total = before[last] + u64::from(words[last].count_ones());
+        let p = if r < total {
+            let w = (1..SELECT_WORDS).filter(|&w| before[w] <= r).count();
+            let word = if w == 0 { first } else { words[w] };
+            (w0 + w) as u64 * 64 + select_in_word(word, r - before[w])
+        } else {
+            self.beyond(w0 + SELECT_WORDS, r - total)
+        };
+        let high = p.wrapping_sub(j);
         let low = if self.low_bits == 0 {
             0
         } else {
@@ -1031,35 +1020,67 @@ impl Remap {
         (high << self.low_bits) | low
     }
 
-    /// Pulls in what [`get`](Self::get) reads for `j`: its line and its low word.
+    /// The position of the `r`-th one from word `w` on, for a block whose ones run past its
+    /// sample's window; past the stream's end, some position.
+    #[cold]
+    #[inline(never)]
+    fn beyond(&self, mut w: usize, mut r: u64) -> u64 {
+        while let Some(&x) = self.high.get(w) {
+            let c = u64::from(x.count_ones());
+            if r < c {
+                return w as u64 * 64 + select_in_word(x, r);
+            }
+            r -= c;
+            w += 1;
+        }
+        0
+    }
+
+    /// Pulls in what [`get`](Self::get) reads for `j`: the lines its window starts and ends on,
+    /// and its low word. The sample is read rather than pulled in: at four bytes a block the
+    /// samples of a billion keys' remap are under a megabyte, in cache.
     #[inline(always)]
     fn prefetch(&self, j: u64) {
-        crate::blob::prefetch(&self.lines, j as usize / LINE);
+        if let Some(&s) = self.samples.get(j as usize / BLOCK) {
+            let w0 = s as usize / 64;
+            crate::blob::prefetch(&self.high, w0);
+            crate::blob::prefetch(&self.high, w0 + SELECT_WORDS - 1);
+        }
         crate::blob::prefetch(&self.low, (j * u64::from(self.low_bits) / 64) as usize);
     }
 
-    /// One pass over the lines: as many lines as the length needs, each holding exactly as many
-    /// ones as values, and every value below `u`. What keeps [`get`](Self::get) inside the image
-    /// for every `j` below the length.
+    /// One pass over the stream: as many ones as values, every block's sample on its first one,
+    /// nothing in the window's words past the end, and every value below `u`. What keeps
+    /// [`get`](Self::get) exact and inside the image for every `j` below the length.
     fn validate(&self, u: u64) -> bool {
-        if self.lines.len() != Self::line_count(self.len)
+        if self.low_bits >= 64
             || self.low.len() != Self::low_words(self.len, self.low_bits)
-            || self.low_bits >= 64
+            || Some(self.high.len())
+                != Self::high_words(self.len, u, self.low_bits)
+                    .and_then(|stored| Self::held_words(self.len, stored))
+            || self.samples.len() != Self::sample_count(self.len)
+            || self.high[self.stored_high().len()..]
+                .iter()
+                .any(|&w| w != 0)
         {
             return false;
         }
-        for (k, line) in self.lines.iter().enumerate() {
-            let unary = if line.0[0] & SPARSE == 0 { 8 } else { 6 };
-            let ones = (line.0[0] >> 32).count_ones() as usize
-                + line.0[1..unary]
-                    .iter()
-                    .map(|w| w.count_ones() as usize)
-                    .sum::<usize>();
-            if ones != (self.len as usize - k * LINE).min(LINE) {
-                return false;
+        let mut j = 0u64;
+        for (w, &word) in self.stored_high().iter().enumerate() {
+            let mut x = word;
+            while x != 0 {
+                let p = w as u64 * 64 + u64::from(x.trailing_zeros());
+                x &= x - 1;
+                if j >= self.len || p < j {
+                    return false;
+                }
+                if j % BLOCK as u64 == 0 && u64::from(self.samples[j as usize / BLOCK]) != p {
+                    return false;
+                }
+                j += 1;
             }
         }
-        (0..self.len).all(|j| self.get(j) < u)
+        j == self.len && (0..self.len).all(|j| self.get(j) < u)
     }
 
     /// The remap of an `MPH2` blob, read into this layout: its occupancy bits over the values and
@@ -1124,7 +1145,7 @@ impl Remap {
                 "mphf: occupied values disagree with the hole count",
             ));
         }
-        Ok(Self::encode(&values, u))
+        Self::encode(&values, u)
     }
 }
 
@@ -1536,7 +1557,7 @@ impl V2 {
     /// answers.
     ///
     /// Such a key makes two more loads, each known only once the one before it is read: its next
-    /// level's seed, then the remap's line and low word for the value it lands on. Its answer is
+    /// level's seed, then the remap's high and low words for the value it lands on. Its answer is
     /// three stages, each pulling in what the next one reads, and the stages run side by side,
     /// each [`STAGE_GAP`] keys behind the one before it: a load is issued that many steps before
     /// it is read however many keys the block bumped, where a pass over all of them per stage
@@ -1677,8 +1698,8 @@ impl V2 {
         }
         debug_assert!(holes.next().is_none());
         phase("remap values");
-        let remap = Remap::encode(&values, n);
-        phase("remap lines");
+        let remap = Remap::encode(&values, n)?;
+        phase("remap stream");
 
         let mut levels = levels.into_iter();
         Ok(Self {
@@ -1984,13 +2005,14 @@ impl V2 {
     }
 
     /// Section lengths, all derived from the header.
-    /// Bytes of the seeds (the levels' and the tail's), of the remap's low bits, and of its lines.
+    /// Bytes of the seeds (the levels' and the tail's), of the remap's low bits, and of its high
+    /// parts with their samples.
     fn sections(&self) -> (usize, usize, usize) {
         let (m, l) = (self.remap.len, self.remap.low_bits);
         (
             self.levels().map(|l| l.seeds.len()).sum::<usize>() + self.tail.seeds.len() * 2,
             Remap::low_words(m, l) * 8,
-            Remap::line_count(m) * 64,
+            self.remap.stored_high().len() * 8 + self.remap.samples.len() * 4,
         )
     }
 
@@ -2042,18 +2064,20 @@ impl V2 {
         for &word in &self.remap.low {
             w.write_all(&word.to_le_bytes())?;
         }
-        for line in &self.remap.lines {
-            for &word in &line.0 {
-                w.write_all(&word.to_le_bytes())?;
-            }
+        for &word in self.remap.stored_high() {
+            w.write_all(&word.to_le_bytes())?;
+        }
+        for &sample in &self.remap.samples {
+            w.write_all(&sample.to_le_bytes())?;
         }
         Ok(())
     }
 
     /// Every read `index` makes is bounded by a scalar in the header, and the checks are exactly
     /// that list: a bucket index below its level's seed count, a value below its level's range,
-    /// a remap value below the entry count, a line holding a one for each of its values, and a
-    /// hole below `n`. An `MPH2` blob is read into this layout, its remap converted.
+    /// a remap value below the entry count, a high-part stream holding one one a value with every
+    /// sample on its block's first, and a hole below `n`. An `MPH2` blob is read into this layout,
+    /// its remap converted.
     fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         let v2 = match bytes.get(0..4) {
             Some(m) if m == MAGIC => false,
@@ -2168,8 +2192,9 @@ impl V2 {
         want = want
             .checked_add(tail_buckets.checked_mul(2).ok_or(SIZE)?)
             .ok_or(SIZE)?;
-        // The remap's sections: this layout's low words and lines, or an `MPH2` blob's occupancy
-        // words, rank samples, and its hole list's low words, high words and select samples.
+        // The remap's sections: this layout's low words, high words and samples, or an `MPH2`
+        // blob's occupancy words, rank samples, and its hole list's low words, high words and
+        // select samples.
         let mut v2_sizes = (0usize, 0usize, 0usize, 0usize, 0usize);
         let (low_bits, holes) = if v2 {
             let holes = scalar6;
@@ -2212,9 +2237,11 @@ impl V2 {
                 .checked_mul(low_bits as usize)
                 .ok_or(SIZE)?
                 .div_ceil(64);
+            let high_words = Remap::high_words(entries as u64, n, low_bits).ok_or(SIZE)?;
             want = want
                 .checked_add(low_words.checked_mul(8).ok_or(SIZE)?)
-                .and_then(|v| v.checked_add(entries.div_ceil(LINE).checked_mul(64)?))
+                .and_then(|v| v.checked_add(high_words.checked_mul(8)?))
+                .and_then(|v| v.checked_add(entries.div_ceil(BLOCK).checked_mul(4)?))
                 .ok_or(SIZE)?;
             (low_bits, 0)
         };
@@ -2262,26 +2289,28 @@ impl V2 {
                 Remap::low_words(entries as u64, low_bits),
                 u64::from_le_bytes,
             );
-            let lines = take(bytes, &mut p, entries.div_ceil(LINE), |c: [u8; 64]| {
-                let mut words = [0u64; 8];
-                for (w, x) in words.iter_mut().zip(c.chunks_exact(8)) {
-                    *w = u64::from_le_bytes(x.try_into().expect("a whole word"));
-                }
-                Line(words)
-            });
+            let high_words = Remap::high_words(entries as u64, n, low_bits).ok_or(SIZE)?;
+            let mut high = take(bytes, &mut p, high_words, u64::from_le_bytes);
+            high.resize(
+                Remap::held_words(entries as u64, high_words).ok_or(SIZE)?,
+                0,
+            );
+            let samples = take(bytes, &mut p, entries.div_ceil(BLOCK), u32::from_le_bytes);
             Remap {
                 len: entries as u64,
                 low_bits,
                 low: Pages::from_slice(&low),
-                lines: Pages::from_slice(&lines),
+                high: Pages::from_slice(&high),
+                samples: Pages::from_slice(&samples),
             }
         };
         debug_assert_eq!(p, bytes.len());
 
         // The check that costs more than a comparison, and the one that makes the image a promise
-        // rather than a hope: every line must hold a one for each of its values, so that a select
-        // stays inside it, and every hole must lie below `n`. Callers index their own arrays by
-        // what `index` returns, so an id outside `[0, n)` is their unsoundness, not ours.
+        // rather than a hope: the stream must hold a one for each value with every sample on its
+        // block's first, so that a count from a sample finds the value's one, and every hole must
+        // lie below `n`. Callers index their own arrays by what `index` returns, so an id outside
+        // `[0, n)` is their unsoundness, not ours.
         if !remap.validate(n) {
             return Err(IndexError::Format(
                 "mphf: a remap entry points outside the image",
@@ -2763,7 +2792,7 @@ impl Mphf {
     /// query can hide, unless the batch issued it a few dozen keys before; below it the batch is the
     /// single lookup in a loop. The few per cent of keys the first level bumps make two more loads,
     /// each known only once the one before it is read — their next level's seed, then the remap's
-    /// line and low word — so they are answered after their block, in stages that each run a few
+    /// high and low words — so they are answered after their block, in stages that each run a few
     /// keys behind the one before.
     pub fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
         match &self.table {
@@ -3373,8 +3402,7 @@ mod tests {
 
     /// `Remap::get` returns every value it encoded: uniform sequences over dense and sparse
     /// universes, a sequence with runs of one value, two clusters at the ends of the universe, and
-    /// one whose last line spans far more than the natural low bits let a line hold, so that the
-    /// encoder has to go up from them.
+    /// one whose last block runs far past its sample's window.
     #[test]
     fn the_remap_returns_every_value_it_encoded() {
         let uniform = |len: u64, u: u64| {
@@ -3383,7 +3411,7 @@ mod tests {
             v
         };
         let top = 1u64 << 32;
-        let packed: Vec<u64> = (0..99 * LINE as u64 - 1).chain([1 << 30]).collect();
+        let packed: Vec<u64> = (0..99 * BLOCK as u64 - 1).chain([1 << 30]).collect();
         let cases = [
             (vec![7], 10),
             ((0..700).collect(), 700),
@@ -3395,9 +3423,12 @@ mod tests {
             (packed, 1 << 30 | 1),
         ];
         for (values, u) in cases {
-            let remap = Remap::encode(&values, u);
+            let remap = Remap::encode(&values, u).expect("encode");
             assert!(remap.validate(u));
-            assert!(remap.low_bits >= Remap::natural_low_bits(values.len() as u64, u));
+            assert_eq!(
+                remap.low_bits,
+                Remap::natural_low_bits(values.len() as u64, u)
+            );
             for (j, &v) in values.iter().enumerate() {
                 assert_eq!(
                     remap.get(j as u64),
@@ -3407,24 +3438,13 @@ mod tests {
                 );
             }
         }
-        // A line spread too far for its low bits is sparse before the whole table's low bits
-        // go up: the sparse form holds twice the span, and past that the low bits rise.
-        let natural = |values: &[u64], u| Remap::natural_low_bits(values.len() as u64, u);
-        // 12 799 values below 2^19 keep 5 low bits; the last line's 127 values step by 100, a
-        // span of 393 high parts at 5 bits (too wide for 480 unary bits) and 196 at 6.
-        let sparse: Vec<u64> = (0..99 * LINE as u64)
-            .chain((0..LINE as u64 - 1).map(|i| 99 * LINE as u64 + i * 100))
-            .collect();
-        let u = 1 << 19;
-        let remap = Remap::encode(&sparse, u);
-        assert_eq!((remap.low_bits, natural(&sparse, u)), (5, 5));
-        assert!(remap.lines[..99].iter().all(|l| l.0[0] & SPARSE == 0));
-        assert!(remap.lines[99].0[0] & SPARSE != 0);
-        assert!((0..sparse.len()).all(|j| remap.get(j as u64) == sparse[j]));
-        let far: Vec<u64> = (0..99 * LINE as u64 - 1).chain([1 << 30]).collect();
+        // Two clusters a universe apart in one block: the low bits stay natural, and the block's
+        // last one lies far past its sample's window, so the walk past it is what answers.
+        let far: Vec<u64> = (0..99 * BLOCK as u64 - 1).chain([1 << 30]).collect();
         let u = (1 << 30) + 1;
-        let remap = Remap::encode(&far, u);
-        assert!(remap.low_bits > natural(&far, u));
+        let remap = Remap::encode(&far, u).expect("encode");
+        assert_eq!(remap.low_bits, Remap::natural_low_bits(far.len() as u64, u));
+        assert!(remap.validate(u));
         assert!((0..far.len()).all(|j| remap.get(j as u64) == far[j]));
     }
 
@@ -3439,7 +3459,7 @@ mod tests {
         let first = t.first.as_ref().expect("a first level");
         let entries = t.rest.iter().map(|l| l.n).sum::<u64>() + t.tail.range;
         assert_eq!(t.remap.len, entries);
-        assert!(t.remap.lines.len() > 4, "a few lines prove little");
+        assert!(t.remap.samples.len() > 4, "a few blocks prove little");
         let bumped = hs
             .iter()
             .filter(|&&h| first.seeds[bucket_of(h, first.buckets) as usize] == 0)
@@ -3779,32 +3799,57 @@ mod tests {
     }
 
     /// The remap is the one table whose contents can point outside the image, so it is the one
-    /// table checked by value. Raise a line's base so that its values pass `n`, and the blob must
-    /// be refused; so must a line with a one too few or too many, since a select past the last
-    /// one would read some other bit.
+    /// table checked by value. Move the stream's last one to the stream's last bit and set every
+    /// low bit of its value, so that the value passes `n`, and the blob must be refused; so must
+    /// a stream with a one too few or too many, and a sample off its block's first one, since a
+    /// count from either lands on some other bit.
     #[test]
     fn a_remap_entry_outside_the_image_is_refused() {
         let (_, blob) = reference();
         let m = Mphf::from_bytes(blob).unwrap();
         let t = v2(&m);
+        let r = &t.remap;
         let (seeds, low, _) = t.sections();
-        let lines_at = header_len(t.level_count()) + seeds + low;
-        let last = lines_at + (t.remap.lines.len() - 1) * 64;
+        let low_at = header_len(t.level_count()) + seeds;
+        let high_at = low_at + low;
+        let stored = r.stored_high();
+        let words = stored.len();
+        let samples_at = high_at + words * 8;
+        let word_at = |w: usize| high_at + w * 8..high_at + w * 8 + 8;
+        let read =
+            |bytes: &[u8], w: usize| u64::from_le_bytes(bytes[word_at(w)].try_into().unwrap());
+        let l = u64::from(r.low_bits);
+        let moved = ((words as u64 * 64 - r.len) << l) | ((1 << l) - 1);
+        assert!(moved >= t.n, "the moved value must land past the image");
+        let last = (0..words).rev().find(|&w| stored[w] != 0).expect("a one");
         let mut bad = blob.clone();
-        bad[last..last + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        let cleared = stored[last] & !(1 << (63 - stored[last].leading_zeros()));
+        bad[word_at(last)].copy_from_slice(&cleared.to_le_bytes());
+        let top = read(&bad, words - 1) | 1 << 63;
+        bad[word_at(words - 1)].copy_from_slice(&top.to_le_bytes());
+        for bit in (r.len - 1) * l..r.len * l {
+            bad[low_at + (bit / 8) as usize] |= 1 << (bit % 8);
+        }
         assert!(
             Mphf::from_bytes(&bad).is_err(),
             "a hole past the image was accepted"
         );
-        let word = t.remap.lines[0].0[1];
+        let first = (0..words).find(|&w| stored[w] != 0).expect("a one");
+        let word = stored[first];
         for flipped in [word & (word - 1), word | (!word & (!word).wrapping_neg())] {
             let mut bad = blob.clone();
-            bad[lines_at + 8..lines_at + 16].copy_from_slice(&flipped.to_le_bytes());
+            bad[word_at(first)].copy_from_slice(&flipped.to_le_bytes());
             assert!(
                 Mphf::from_bytes(&bad).is_err(),
-                "a line with the wrong number of ones was accepted"
+                "a stream with the wrong number of ones was accepted"
             );
         }
+        let mut bad = blob.clone();
+        bad[samples_at..samples_at + 4].copy_from_slice(&(r.samples[0] + 1).to_le_bytes());
+        assert!(
+            Mphf::from_bytes(&bad).is_err(),
+            "a sample off its block's first one was accepted"
+        );
     }
 
     #[test]
@@ -4134,7 +4179,7 @@ mod spike {
             let Table::V2(v) = &m.table else {
                 unreachable!()
             };
-            let (seeds, low, lines) = v.sections();
+            let (seeds, low, high) = v.sections();
             // Lookup cost over a shuffled probe order, min of 3.
             let mut order: Vec<u32> = (0..n as u32).collect();
             let mut r = 0x2545_F491_4F6C_DD1Du64;
@@ -4306,7 +4351,7 @@ mod spike {
                 "{cfg:<28} bits {:>6.3} = seeds {:.3} + remap {:.3} (low bits {})  bumped [{}]  build {ns:>5.1} ns/key  id {id_ns:.2} ns",
                 m.bits_per_key(),
                 seeds as f64 * 8.0 / n as f64,
-                (low + lines) as f64 * 8.0 / n as f64,
+                (low + high) as f64 * 8.0 / n as f64,
                 v.remap.low_bits,
                 eps.join(" "),
             );

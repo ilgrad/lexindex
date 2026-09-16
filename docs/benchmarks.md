@@ -771,7 +771,7 @@ a table half again as large whose one probe is a seed byte with no bumped keys' 
 and regular PHast is the smallest function, 1.92 bits, 0.7 / 1.1 / 2.1 ns behind `MPH3`'s single
 lookup, at ten times the build and without a batch form. The bits column is the
 serialised table, which `MPH3` loads as it is — the rank and select counts `MPH2` derived in
-memory, 0.023 bits/key, went with the line remap. One asymmetry is in the numbers and should be
+memory, 0.023 bits/key, went with its remap. One asymmetry is in the numbers and should be
 read out of them: lexindex takes the keys as 64-bit hashes (its indexes hash the string once,
 before), while `ph` hashes each key with wyhash on build and on every lookup level and `ptr_hash`
 with one multiply — a nanosecond or two of the gap on the `ph` rows is that.

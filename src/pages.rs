@@ -25,6 +25,7 @@ pub(crate) const HUGE: usize = 1 << 21;
 pub(crate) unsafe trait Zeroed: Copy {}
 
 unsafe impl Zeroed for u8 {}
+unsafe impl Zeroed for u32 {}
 unsafe impl Zeroed for u64 {}
 
 /// A fixed-length table of `T`, on huge pages when it is long enough and the kernel offers them.
