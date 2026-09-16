@@ -1158,15 +1158,17 @@ tables, the largest `|z|` it *should* produce is near `sqrt(2 ln N) ≈ 4.6`.
 | strict avalanche, both hashes, key lengths 4–33 | an input bit that does not reach every output bit | worst 4.31 over 44 032 cells |
 | bit independence, 2 016 output pairs per input bit | two output bits that flip together | worst 4.52 over 258 048 cells |
 | two-byte differential, every position pair and bit pair | the pre-2.0 collision family: keys differing at bytes `8i+7` and `8i+11` collided in **both** hashes 13–100 % of the time through 1.1 | **0** double collisions over 17 664 combinations |
-| per-corpus distribution — slot-hash collisions, top 12 bits, low 12 bits, the 8-bit fingerprint, and the joint (slot, fingerprint) table | a family of keys the hash folds together, and any correlation between the two hashes | ten corpora, no collisions, every value under 2.4 |
+| per-corpus distribution — slot-hash collisions, top 12 bits, low 12 bits, the 8-bit fingerprint, and the joint (slot, fingerprint) table | a family of keys the hash folds together, and any correlation between the two hashes | ten corpora, no collisions, every value under 2.7 |
 
 The ten corpora are the shapes that break hashes in practice: dictionary words, word bigrams, a
 shared prefix (`https://example.com/a/b/…`), a shared suffix (`…@mail.example.com`), a dense
 numeric tail (`key_000000001`), plain decimal integers, UUIDs, Cyrillic, DNA, and filesystem paths.
 
 <sub>Committed output:
-[`bench/results/hash-quality-2026-09-16-arz-67650b3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-16-arz-67650b3.txt)
-(the 4.0 hash; the 2.0–3.x hash's run of the same battery is
+[`bench/results/hash-quality-2026-09-16-arz-166ac74.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-16-arz-166ac74.txt)
+(the 4.0 hash with its derived fingerprint; the run before the fingerprint was derived is
+[`hash-quality-2026-09-16-arz-67650b3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-16-arz-67650b3.txt),
+and the 2.0–3.x hash's run of the same battery is
 [`hash-quality-2026-09-12-arz-d82e296.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-12-arz-d82e296.txt)).
 The two hashes are deterministic and unseeded, so none of this is a statement about an adversary
 who picks the queries — see `SECURITY.md`.</sub>

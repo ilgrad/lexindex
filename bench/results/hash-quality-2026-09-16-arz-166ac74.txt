@@ -1,0 +1,41 @@
+# cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
+# lexindex 3.0.0 at 166ac74, 2026-09-16, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, clean tree
+#
+# The battery over the 4.0 hash with the fingerprint derived from the hash's own state: the two
+# lane products folded once more under the fingerprint's constants with the length rotated, one
+# multiply over the hash (src/hash.rs, 166ac74). hash_key is unchanged from 67650b3, so the slot
+# columns and the slot cells repeat that run exactly; the fingerprint columns are new. Same
+# battery, same cell counts, same bound.
+#
+# Every number is a standard-normal z (chi-square through Wilson-Hilferty). The battery runs
+# 88 064 avalanche cells, 1 806 336 bit-independence cells and 40 tables; a family-wise
+# false-alarm rate of 1e-3 over 1 894 400 cells wants |z| < 6.211, so the bound is 6.5 and the
+# realised rate is 1.5e-4. The largest |z| should sit near sqrt(2 ln N) ~ 5.4, and sits below it.
+
+lexindex hash quality — bound |z| < 6.5
+
+corpus source: /usr/share/dict/words plus generated families
+
+avalanche (strict, 8192 keys per cell, 5 lengths, both hashes)
+  worst |z|   4.31   slot len 24 in-bit 148 out-bit 2
+
+bit independence (2048 keys, lengths 8/16/24/80, both hashes, ≤128 input bits each)
+  worst |z|   4.52   slot len 80 in-bit 28 out-bits (21,62)
+
+two-byte differential (24-byte keys, 2048 bases per combo)
+  17664 combos, worst double collision 0/2048   none
+
+per corpus (n = 100 000 where the family allows it)
+  family           n   coll   z top12   z low12     z fp8   z joint
+  words       100000      0     -1.00     -0.40     -2.06      0.86
+  bigrams     100000      0      2.32     -0.58      0.92     -0.50
+  prefixed    100000      0      1.17     -1.30      0.24     -1.50
+  suffixed    100000      0      1.25      1.68     -1.21     -1.75
+  paths       100000      0      0.16     -0.10     -0.83     -1.08
+  numeric     100000      0      0.70     -0.76      0.71     -1.14
+  decimal     100000      0     -0.01     -0.03      0.42     -0.05
+  uuid        100000      0     -0.55     -0.74      0.31      2.62
+  cyrillic    100000      0     -0.07     -0.10      0.32     -0.16
+  dna         100000      0     -0.45      1.05      1.21     -0.48
+
+all cells within the bound
