@@ -1,98 +1,170 @@
-//! Deterministic, **version-stable** key hashes shared by the minimal-perfect-hash indexes.
+//! Deterministic, **version-stable** key hashes shared by the hash indexes.
 //!
 //! Stability across Rust versions and platforms is what lets a *serialised* MPH be reloaded and
 //! queried — `std`'s `DefaultHasher` is explicitly not guaranteed stable, so it cannot back
 //! persistence. Every word is read with `from_le_bytes`, so a blob written on one endianness reads
 //! the same on the other.
 //!
-//! Both hashes are the same shape — seed, one [`round`] per 8-byte word, one round for the tail,
-//! one finalizer — differing only in their constants. Eight bytes at a time rather than the byte
-//! chain that shipped before 1.0: measured 1.5× on a 9.3-byte dictionary word, 1.7× on a 10.9-byte
-//! bigram and 6.2–6.6× on an 80-byte URI-like key, A-B-A-B in one process
-//! (`local/hashbench`). The round is a 64×64→128 multiply folded to 64 bits; the `u128` is one
-//! `mul` on a 64-bit machine and a short software product on a 32-bit one, and the values are the
-//! same everywhere.
+//! Both hashes read a key the same way — its [`words`] — and differ only in the constants they mix
+//! them with, so [`hash_pair_bytes`] reads the key once. The shape is wyhash's and rapidhash's: a
+//! key of 4..=16 bytes is two words from four overlapping 4-byte loads, 17..=32 bytes are its first
+//! and last sixteen, longer keys run two multiply lanes over 32-byte blocks and end on the words of
+//! their last 32 bytes, and 1..=3 bytes fan out into one word. The words go through two 64×64→128
+//! multiplies folded to 64 bits, side by side, and one more that merges them with the length. No
+//! loop and no branch on the length inside a class, so a stream of mixed-length keys costs no branch
+//! mispredictions, where the hash 2.0–3.x shipped — one multiply per 8-byte word, in a loop, then a
+//! tail switch — lost 6 of its 9.5 ns to them. Measured A-B-A-B in one process on 2026-09-16
+//! (`local/hashbench/src/bin/newhash.rs`), the hash alone over keys read in order: dictionary words
+//! 3.9 against 7.3 ns, English titles 7.4 against 11.2, URLs 6.5 against 13.2, 8-byte keys 3.8
+//! against 2.9 — the one loss; shuffled over 100 K boxed keys, 9.3 / 11.8 / 14.9 against 11.5 / 16 /
+//! 21. The distribution battery below reads the same for both (avalanche |z| 4.62, low-bit χ²
+//! |z| ≤ 2.5, no 64-bit collision on any corpus).
+//!
+//! The fold is kept from 2.0, and it is the whole point of the multiply. A 64-bit product never
+//! carries downward, so a difference confined to the top *k* bits of a word stays confined to the
+//! top *k* bits of the product, and any fixed bijection after it only moves those bits to where
+//! the next word's own difference XORs them away — the two-word collision family 1.1 had on
+//! ordinary text (`d`↔`t` with `e`↔`o` at bytes 8i+7 and 8i+11, in *both* hashes). The high half
+//! of the product depends on every input bit through the carries, so folding it in leaves no
+//! difference with a fixed shape to cancel.
+//!
+//! The constants are consecutive 64-bit words of π's fraction — nothing up the sleeve (PARI/GP:
+//! `frac(Pi)` scaled by 2^64, the first word `0x243F6A8885A308D3`) — keeping the odd ones with 27
+//! to 35 bits set. Different constants in every position is what decorrelates the two hashes: a
+//! difference that cancels along one product does not cancel along the other's.
 
-/// The slot hash's seed and multiplier. The seed is π's first 64 bits; the multiplier is the
-/// golden-ratio odd constant.
-const SLOT_SEED: u64 = 0x243f_6a88_85a3_08d3;
-const SLOT_MUL: u64 = 0x9e37_79b9_7f4a_7c15;
-/// The fingerprint's, from π's next 64 bits and murmur3's first finalizer constant. A *different
-/// multiplier* is what decorrelates the two: a difference that cancels along one accumulator's
-/// orbit does not cancel along the other's.
-const FP_SEED: u64 = 0x1319_8a2e_0370_7344;
-const FP_MUL: u64 = 0xff51_afd7_ed55_8ccd;
+/// The slot hash's constants: seeds of the two lanes, the merge's, and the two lane states of the
+/// block loop.
+const SLOT: [u64; 8] = [
+    0x243f_6a88_85a3_08d3,
+    0x082e_fa98_ec4e_6c89,
+    0x4528_21e6_38d0_1377,
+    0xc0ac_29b7_c97c_50dd,
+    0x3f84_d5b5_b547_0917,
+    0x9216_d5d9_8979_fb1b,
+    0xba7c_9045_f12c_7f99,
+    0x24a1_9947_b391_6cf7,
+];
+/// The fingerprint's, in the same roles: the next eight such words.
+const FP: [u64; 8] = [
+    0x6369_20d8_7157_4e69,
+    0x7b54_a41d_c25a_59b5,
+    0x9c30_d539_2af2_6013,
+    0xca41_7918_b8db_38ef,
+    0xd715_77c1_bd31_4b27,
+    0xa154_86af_7c72_e993,
+    0x7a32_5381_2895_8677,
+    0x3b8f_4898_6b4b_b9af,
+];
 
-/// One 8-byte word into an accumulator: the full 128-bit product, its halves folded together.
-///
-/// The fold is the whole point. A 64-bit product never carries downward, so a difference confined
-/// to the top *k* bits of a word stays confined to the top *k* bits of the product, and any fixed
-/// bijection after it — the rotate that shipped through 1.1 — only moves those bits to where the
-/// next word's own difference XORs them away. That was a two-word collision family on ordinary
-/// text: keys differing at bytes 8i+7 and 8i+11 alone (`d`↔`t` with `e`↔`o`, or a case flip with
-/// `e`↔`i`) collided in *both* hashes with probability 13–100 %, whatever the multiplier, and
-/// `CompactHashIndex` merged them into one id. The high half of the product depends on every
-/// input bit through the carries, so folding it in leaves no difference with a fixed shape to
-/// cancel; a single-bit scan over every position pair of a 24-byte key finds no weak pair
-/// (`local/collide.rs`), where the rotate round had 35.
+/// The full 128-bit product of two words, its halves folded together. One `mul` on a 64-bit
+/// machine and a short software product on a 32-bit one, the same value everywhere.
 #[inline(always)]
-fn round(h: u64, w: u64, m: u64) -> u64 {
-    let p = (h ^ w) as u128 * m as u128;
+fn mum(a: u64, b: u64) -> u64 {
+    let p = a as u128 * b as u128;
     (p as u64) ^ ((p >> 64) as u64)
 }
 
-/// The trailing 0–7 bytes as one word, without a byte loop and without reading out of bounds: two
-/// overlapping 4-byte loads above 3 bytes, a three-way fan-out below.
-///
-/// The packing is injective at every length — 4..=7 covers every byte through the overlap, and
-/// 1..=3 places `b[0]`, `b[n / 2]` and `b[n - 1]` in separate octets — so the tail word, with the
-/// length folded into the finalizer, determines a short key completely.
 #[inline(always)]
-fn tail(b: &[u8]) -> u64 {
-    match b.len() {
-        0 => 0,
-        1..=3 => {
-            let n = b.len();
-            (b[0] as u64) | ((b[n / 2] as u64) << 16) | ((b[n - 1] as u64) << 32)
-        }
-        _ => {
-            let n = b.len();
-            let lo = u32::from_le_bytes(b[..4].try_into().unwrap()) as u64;
-            let hi = u32::from_le_bytes(b[n - 4..].try_into().unwrap()) as u64;
-            lo | (hi << 32)
-        }
+fn r4(b: &[u8], i: usize) -> u64 {
+    u32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as u64
+}
+
+#[inline(always)]
+fn r8(b: &[u8], i: usize) -> u64 {
+    u64::from_le_bytes(b[i..i + 8].try_into().unwrap())
+}
+
+/// The four words of a key of 4..=32 bytes. To 16 bytes, two words from four 4-byte loads at 0,
+/// `d`, `n - 4` and `n - 4 - d`, where `d = ⌊n / 8⌋ · 4`: below 8 bytes `d` is 0 and the first
+/// and last four bytes cover the key, to 15 it is 4 and the first and last eight do, at 16 it is
+/// 8 and the loads are the four quarters — so at every length every byte is read, and with the
+/// length the words determine the key. Above 16 bytes, the first and the last sixteen, which
+/// overlap while the key is shorter than 32.
+#[inline(always)]
+fn words(b: &[u8]) -> [u64; 4] {
+    let n = b.len();
+    if n <= 16 {
+        let d = (n >> 3) << 2;
+        [
+            r4(b, 0) | (r4(b, d) << 32),
+            r4(b, n - 4) | (r4(b, n - 4 - d) << 32),
+            0,
+            0,
+        ]
+    } else {
+        [r8(b, 0), r8(b, 8), r8(b, n - 16), r8(b, n - 8)]
     }
 }
 
-/// splitmix64's finalizer, with the key's length folded in first.
+/// The words of a key below 4 bytes: `b[0]`, `b[n / 2]` and `b[n - 1]` in separate octets of one
+/// word — injective at each length — and all zeros for the empty key, which the length folded
+/// into the merge keeps apart from `"\0"`.
+#[inline(always)]
+fn short(b: &[u8]) -> [u64; 4] {
+    let n = b.len();
+    if n == 0 {
+        return [0; 4];
+    }
+    [
+        (b[0] as u64) | ((b[n / 2] as u64) << 16) | ((b[n - 1] as u64) << 32),
+        0,
+        0,
+        0,
+    ]
+}
+
+/// Two multiplies side by side over the words, and one that merges them with the length.
 ///
-/// The length is not optional: the tail is zero-padded into a word, so without it `"a"` and
+/// The length is not optional: a short key's words are zero-padded, so without it `"a"` and
 /// `"a\0"` — both legal `&str` — would hash identically.
 #[inline(always)]
-fn fmix(mut h: u64, len: u64) -> u64 {
-    h ^= len;
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    h ^ (h >> 31)
+fn merge(w: [u64; 4], len: u64, k: &[u64; 8]) -> u64 {
+    let a = mum(w[0] ^ k[0], w[1] ^ k[1]);
+    let c = mum(w[2] ^ k[2], w[3] ^ k[3]);
+    mum(a ^ len ^ k[4], c ^ k[5])
+}
+
+/// One 32-byte block into a pair of lane states.
+#[inline(always)]
+fn block(s: (u64, u64), w: [u64; 4], k: &[u64; 8]) -> (u64, u64) {
+    (mum(w[0] ^ s.0, w[1] ^ k[0]), mum(w[2] ^ s.1, w[3] ^ k[1]))
+}
+
+/// The words of any key under one constant set: [`words`] to 32 bytes, [`short`] below 4, and
+/// above 32 the two lanes over the leading whole blocks — the last block of the key is read as
+/// part of its last 32 bytes, which the lanes are folded into. The bytes both read are hashed
+/// twice, which costs nothing and keeps every length on the one path.
+#[inline(always)]
+fn key_words(b: &[u8], k: &[u64; 8]) -> [u64; 4] {
+    let n = b.len();
+    if n <= 32 {
+        return if n >= 4 { words(b) } else { short(b) };
+    }
+    let mut s = (k[6], k[7]);
+    let mut p = 0;
+    while n - p > 32 {
+        s = block(s, [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)], k);
+        p += 32;
+    }
+    let mut w = words(&b[n - 32..]);
+    w[0] ^= s.0;
+    w[2] ^= s.1;
+    w
 }
 
 /// The **slot** hash: what the perfect hash indexes by. Structured keys like `"key_0001"` differ
-/// only in their tail bytes, which the finalizer spreads across all 64 output bits before the MPH
-/// ever sees them.
+/// only in a few bytes, which the merge spreads across all 64 output bits before the MPH ever
+/// sees them.
 #[inline]
 pub(crate) fn hash_key(s: &str) -> u64 {
     hash_key_bytes(s.as_bytes())
 }
 
 /// [`hash_key`] over the key's bytes: what a lookup reading an Arrow buffer holds.
+#[inline]
 pub fn hash_key_bytes(b: &[u8]) -> u64 {
-    let mut h = SLOT_SEED;
-    let mut c = b.chunks_exact(8);
-    for w in &mut c {
-        h = round(h, u64::from_le_bytes(w.try_into().unwrap()), SLOT_MUL);
-    }
-    h = round(h, tail(c.remainder()), SLOT_MUL);
-    fmix(h, b.len() as u64)
+    merge(key_words(b, &SLOT), b.len() as u64, &SLOT)
 }
 
 /// The **fingerprint** hash: a *separate* hash of the key, uncorrelated with [`hash_key`] for
@@ -112,20 +184,15 @@ pub(crate) fn fingerprint_full(s: &str) -> u64 {
 }
 
 /// [`fingerprint_full`] over the key's bytes: what a lookup reading an Arrow buffer holds.
+#[inline]
 pub(crate) fn fingerprint_full_bytes(b: &[u8]) -> u64 {
-    let mut h = FP_SEED;
-    let mut c = b.chunks_exact(8);
-    for w in &mut c {
-        h = round(h, u64::from_le_bytes(w.try_into().unwrap()), FP_MUL);
-    }
-    h = round(h, tail(c.remainder()), FP_MUL);
-    fmix(h, (b.len() as u64).rotate_left(32))
+    merge(key_words(b, &FP), (b.len() as u64).rotate_left(32), &FP)
 }
 
 /// `(hash_key, fingerprint_full)` in one pass over the key's bytes — bit-for-bit the two functions
-/// above, with both states advanced inside a single loop, so each word is loaded once. Every
-/// `CompactHashIndex` path needs both hashes; `PerfectHashIndex::build` keeps using [`hash_key`]
-/// alone, and `build_to_file` takes both, the second for its replay digest.
+/// above, the words read once and, above 32 bytes, both hashes' lanes run over each block as it is
+/// loaded. Every `CompactHashIndex` path needs both hashes; `PerfectHashIndex::build` keeps using
+/// [`hash_key`] alone, and `build_to_file` takes both, the second for its replay digest.
 #[inline]
 pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
     hash_pair_bytes(s.as_bytes())
@@ -133,18 +200,29 @@ pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
 
 /// [`hash_pair`] over the key's bytes: what a lookup reading an Arrow buffer holds.
 pub(crate) fn hash_pair_bytes(b: &[u8]) -> (u64, u64) {
-    let (mut slot, mut fp) = (SLOT_SEED, FP_SEED);
-    let mut c = b.chunks_exact(8);
-    for w in &mut c {
-        let w = u64::from_le_bytes(w.try_into().unwrap());
-        slot = round(slot, w, SLOT_MUL);
-        fp = round(fp, w, FP_MUL);
+    let n = b.len();
+    let len = n as u64;
+    if n <= 32 {
+        let w = if n >= 4 { words(b) } else { short(b) };
+        return (merge(w, len, &SLOT), merge(w, len.rotate_left(32), &FP));
     }
-    let t = tail(c.remainder());
-    slot = round(slot, t, SLOT_MUL);
-    fp = round(fp, t, FP_MUL);
-    let n = b.len() as u64;
-    (fmix(slot, n), fmix(fp, n.rotate_left(32)))
+    let (mut s, mut f) = ((SLOT[6], SLOT[7]), (FP[6], FP[7]));
+    let mut p = 0;
+    while n - p > 32 {
+        let w = [r8(b, p), r8(b, p + 8), r8(b, p + 16), r8(b, p + 24)];
+        s = block(s, w, &SLOT);
+        f = block(f, w, &FP);
+        p += 32;
+    }
+    let w = words(&b[n - 32..]);
+    (
+        merge([w[0] ^ s.0, w[1], w[2] ^ s.1, w[3]], len, &SLOT),
+        merge(
+            [w[0] ^ f.0, w[1], w[2] ^ f.1, w[3]],
+            len.rotate_left(32),
+            &FP,
+        ),
+    )
 }
 
 /// Partition `hashes` (parallel to some key order) into the MPH's key set and the collided
@@ -176,7 +254,7 @@ pub(crate) fn split_collisions(hashes: &[u64]) -> (Vec<u64>, Vec<(u64, u32)>) {
 /// the golden test below pins the collision itself, so a changed hash breaks loudly here before
 /// anything subtle happens in tests built on the pair.
 #[cfg(test)]
-pub(crate) const COLLIDING_PAIR: (&str, &str) = ("lgywf6nnfq3in", "sax4tnfbfpa7n");
+pub(crate) const COLLIDING_PAIR: (&str, &str) = ("2z4vqnm4rshfe", "6c6rjaoegwraa");
 
 #[cfg(test)]
 mod golden {
@@ -187,35 +265,74 @@ mod golden {
         let (a, b) = super::COLLIDING_PAIR;
         assert_ne!(a, b);
         assert_eq!(hash_key(a), hash_key(b));
-        assert_eq!(hash_key(a), 0x6e30_65fe_6c85_4ff2);
+        assert_eq!(hash_key(a), 0xf2ed_3d38_004f_7110);
         // The pair collides in the slot hash only — the independent fingerprint tells them apart.
         assert_ne!(fingerprint_full(a), fingerprint_full(b));
     }
 
+    /// `f` over every input against its pinned value, all of them reported at once when any
+    /// moved: what a deliberate change needs to repin the table in one run.
+    fn pinned(f: fn(&str) -> u64, table: &[(&str, u64)]) {
+        let actual: Vec<String> = table
+            .iter()
+            .map(|&(s, want)| format!("({s:?}, {:#018x}) wanted {want:#018x}", f(s)))
+            .collect();
+        assert!(
+            table.iter().all(|&(s, want)| f(s) == want),
+            "pinned values moved:\n{}",
+            actual.join("\n")
+        );
+    }
+
     /// Every serialised MPH blob is keyed on these hashes, so a hash that silently changed — a
-    /// tweaked constant, a reordered finalizer, a byte-order slip in a refactor — would make every
+    /// tweaked constant, a reordered merge, a byte-order slip in a refactor — would make every
     /// previously-saved index load wrong without any test failing. These pinned values turn that
     /// into a loud CI failure instead. **Do not "fix" them to match new output: changing the hash
     /// is a breaking blob-format change and must bump the format magic, not this table.** 2.0 did
-    /// exactly that — `BMP7` and `BCH7` — when the round was replaced.
+    /// exactly that — `BMP7` and `BCH7` — when the round was replaced, and 4.0 again — `BMP8`,
+    /// `BCH8`, `BCL2` — when the shape did.
     #[test]
     fn hash_key_is_stable() {
-        assert_eq!(hash_key(""), 0x6d83_15b9_dee0_feb1);
-        assert_eq!(hash_key("a"), 0xbf7c_cb3a_479f_1a5d);
-        assert_eq!(hash_key("apple"), 0xc147_ef0f_5b30_8081);
-        assert_eq!(hash_key("GET"), 0x51b7_ea28_3181_36d8);
-        assert_eq!(hash_key("é中🎉"), 0xdc3c_6a40_ff1a_bc88);
-        assert_eq!(hash_key("member-00042"), 0xb5f8_5009_b647_c12a);
+        pinned(
+            hash_key,
+            &[
+                ("", 0x6e2f_2e91_3577_6ae6),
+                ("a", 0x9fec_cfe5_8406_fd60),
+                ("GET", 0xb346_7f8a_084d_f3f9),
+                ("four", 0xbbf2_5c43_0083_4136),
+                ("apple", 0xee2b_68d3_51dd_e03d),
+                ("é中🎉", 0x44d6_b770_0550_61c8),
+                ("member-00042", 0xd36c_56af_fc50_dd99),
+                ("sixteen bytes!!!", 0xb0f4_e284_3b60_0bf7),
+                ("a key of 17 bytes", 0x8191_c4d0_71c3_a0b5),
+                ("thirty-two bytes, the class edge", 0x8de3_b04c_e9cc_c16c),
+                ("thirty-three bytes: one block in!", 0x9a78_b624_f316_ac7d),
+                (
+                    "a key long enough for the block loop to run twice over it, and then some",
+                    0xcfa9_cd68_39b9_f888,
+                ),
+            ],
+        );
     }
 
     #[test]
     fn fingerprint_is_stable() {
-        assert_eq!(fingerprint_full(""), 0x9e7e_cf5b_d57d_4fa1);
-        assert_eq!(fingerprint_full("apple"), 0x4b6a_e8cc_993f_a404);
-        assert_eq!(fingerprint_full("é中🎉"), 0x7c27_66ce_cb21_5389);
-        // The table stores the low `b` bits of that value — the widths the indexes actually write.
-        assert_eq!(fingerprint_full("GET") & 0xf, 0xf);
-        assert_eq!(fingerprint_full("member-00042") & 0xffff, 0x0b01);
+        pinned(
+            fingerprint_full,
+            &[
+                ("", 0x50a7_011a_5132_afaa),
+                ("GET", 0x2b62_d211_e028_8212),
+                ("apple", 0x8567_3f6c_e423_1e97),
+                ("é中🎉", 0xcf95_7356_4eaf_470d),
+                ("member-00042", 0x35e5_e583_590c_cfec),
+                ("a key of 17 bytes", 0x4447_7b95_328e_b27d),
+                ("thirty-three bytes: one block in!", 0xeaee_1e3a_1bcd_06a8),
+                (
+                    "a key long enough for the block loop to run twice over it, and then some",
+                    0x6f6a_9237_53f3_ee3d,
+                ),
+            ],
+        );
     }
 
     /// The fused pass is an optimisation, not a second hash function: it must agree with the two
@@ -235,9 +352,39 @@ mod golden {
             );
         }
     }
+
+    /// Every byte of every length to 100 is read by both hashes — flipping it moves them — and a
+    /// trailing zero byte moves them too: the coverage the word layout promises.
+    #[test]
+    fn every_byte_moves_both_hashes() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for len in 0..=100usize {
+            let key: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let (s, f) = super::hash_pair_bytes(&key);
+            for i in 0..len {
+                let mut k = key.clone();
+                k[i] ^= 1 << (next() % 8);
+                let (s2, f2) = super::hash_pair_bytes(&k);
+                assert!(s2 != s && f2 != f, "byte {i} of {len} does not move a hash");
+            }
+            let mut k = key.clone();
+            k.push(0);
+            let (s2, f2) = super::hash_pair_bytes(&k);
+            assert!(
+                s2 != s && f2 != f,
+                "a trailing zero does not move a hash at {len}"
+            );
+        }
+    }
 }
 
-/// The hash's own quality battery: what a change to [`round`], [`tail`] or [`fmix`] has to
+/// The hash's own quality battery: what a change to [`words`], [`merge`] or a constant has to
 /// survive before it ships, and the source of the committed `bench/results/hash-quality-*.txt`.
 ///
 /// Run it with

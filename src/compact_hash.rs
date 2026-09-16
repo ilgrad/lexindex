@@ -19,9 +19,11 @@ use crate::mphf::Mphf;
 /// loader could validate — and this index, storing no keys, could not even recompute the bound that
 /// made queries safe. 1.0 replaced the backend precisely so that a blob could be checked; the old
 /// images cannot be read without the crate that is now gone, so they are refused by name.
-const LEGACY_MAGICS: [&[u8; 4]; 6] = [b"BCH1", b"BCH2", b"BCH3", b"BCH4", b"BCH5", b"BCH6"];
+const LEGACY_MAGICS: [&[u8; 4]; 7] = [
+    b"BCH1", b"BCH2", b"BCH3", b"BCH4", b"BCH5", b"BCH6", b"BCH7",
+];
 /// `[magic 4][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64][check u32]`
-const MAGIC_V7: &[u8; 4] = b"BCH7";
+const MAGIC_V8: &[u8; 4] = b"BCH8";
 const HEADER_V7: usize = 40;
 const CHECKED_V7: usize = 36; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
@@ -1504,7 +1506,7 @@ impl CompactHashIndex {
         Ok((header, mph_buf, side_buf))
     }
 
-    /// Serialise to `[magic "BCH7"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
+    /// Serialise to `[magic "BCH8"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
     /// [check u32][MPH blob][bit-packed fingerprints][side entries]`. `check` is a hash of the
     /// preceding header bytes and `payload` a streaming hash of everything after it, verified on
     /// owned loads; the MPH region carries its own header and validates its own lengths, which is
@@ -1562,12 +1564,12 @@ impl CompactHashIndex {
             && LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes"))
         {
             return Err(IndexError::Format(
-                "compact-hash: blob written by lexindex < 2.0, keyed on a hash this version no \
+                "compact-hash: blob written by lexindex < 4.0, keyed on a hash this version no \
                  longer computes; the keys are not stored, so it cannot be converted - rebuild the \
                  index from its keys",
             ));
         }
-        if bytes.len() < HEADER_V7 || &bytes[0..4] != MAGIC_V7 {
+        if bytes.len() < HEADER_V7 || &bytes[0..4] != MAGIC_V8 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V7..HEADER_V7].try_into().unwrap());
@@ -1749,7 +1751,7 @@ impl CompactHashIndex {
     }
 }
 
-/// The `BCH7` header over its scalars and the payload hash, checksummed.
+/// The `BCH8` header over its scalars and the payload hash, checksummed.
 fn header_v7(
     n: usize,
     fp_bits: u32,
@@ -1758,7 +1760,7 @@ fn header_v7(
     payload: u64,
 ) -> [u8; HEADER_V7] {
     let mut header = [0u8; HEADER_V7];
-    header[0..4].copy_from_slice(MAGIC_V7);
+    header[0..4].copy_from_slice(MAGIC_V8);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..16].copy_from_slice(&fp_bits.to_le_bytes());
     header[16..24].copy_from_slice(&(mph_len as u64).to_le_bytes());
@@ -2017,7 +2019,7 @@ mod tests {
     fn a_blob_from_before_1_2_is_refused_by_name() {
         let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
         let good = idx.to_bytes().unwrap();
-        assert_eq!(&good[0..4], b"BCH7");
+        assert_eq!(&good[0..4], b"BCH8");
         for magic in LEGACY_MAGICS {
             let mut old = good.clone();
             old[0..4].copy_from_slice(magic);
@@ -2025,7 +2027,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 2.0"), "{err}");
+            assert!(err.contains("lexindex < 4.0"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }

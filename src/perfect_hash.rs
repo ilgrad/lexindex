@@ -25,11 +25,12 @@ use crate::mphf::Mphf;
 /// loader could validate. 1.0 replaced the backend precisely so that a blob could be checked, and
 /// the old images cannot be read without the crate that is now gone — so they are refused by name
 /// rather than half-supported.
-const LEGACY_MAGICS: [&[u8; 4]; 5] = [b"BMP2", b"BMP3", b"BMP4", b"BMP5", b"BMP6"];
+const LEGACY_MAGICS: [&[u8; 4]; 6] = [b"BMP2", b"BMP3", b"BMP4", b"BMP5", b"BMP6", b"BMP7"];
 /// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`, the framing `BMP5`
-/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marks 2.0's key hash, under which every
-/// slot of an older blob would answer wrong, so `BMP5` and `BMP6` are refused by name too.
-const MAGIC_V7: &[u8; 4] = b"BMP7";
+/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marked 2.0's key hash and `BMP8` marks
+/// 4.0's, under which every slot of an older blob would answer wrong, so `BMP5` to `BMP7` are
+/// refused by name too.
+const MAGIC_V8: &[u8; 4] = b"BMP8";
 const HEADER_V5: usize = 36;
 const CHECKED_V5: usize = 32;
 const SIDE_ENTRY: usize = 12; // hash u64 + id u32
@@ -42,7 +43,7 @@ const NO_KEY: u32 = u32::MAX;
 /// without ever holding the index — one writer of this layout, so the two cannot drift.
 fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V5] {
     let mut header = [0u8; HEADER_V5];
-    header[0..4].copy_from_slice(MAGIC_V7);
+    header[0..4].copy_from_slice(MAGIC_V8);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
@@ -805,12 +806,12 @@ impl PerfectHashIndex {
         }
         if LEGACY_MAGICS.contains(&<&[u8; 4]>::try_from(&bytes[0..4]).expect("4 bytes")) {
             return Err(IndexError::Format(
-                "perfect-hash: blob written by lexindex < 2.0, keyed on a hash this version no \
+                "perfect-hash: blob written by lexindex < 4.0, keyed on a hash this version no \
                  longer computes; rebuild the index from its keys",
             ));
         }
         let magic = &bytes[0..4];
-        if magic != MAGIC_V7 || bytes.len() < HEADER_V5 {
+        if magic != MAGIC_V8 || bytes.len() < HEADER_V5 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
@@ -1973,7 +1974,7 @@ mod tests {
                 Err(e) => e.to_string(),
                 Ok(_) => panic!("{} was accepted", std::str::from_utf8(magic).unwrap()),
             };
-            assert!(err.contains("lexindex < 2.0"), "{err}");
+            assert!(err.contains("lexindex < 4.0"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
     }

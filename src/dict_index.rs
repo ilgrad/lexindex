@@ -3509,7 +3509,7 @@ mod tests {
 
         refused(&blob[..HEADER - 1], "truncated");
         let mut b = blob.clone();
-        b[..4].copy_from_slice(b"BCL1");
+        b[..4].copy_from_slice(b"BCL2");
         refused(&b, "bad magic");
         let mut b = blob.clone();
         b[4] ^= 1;

@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The key hash is new — branch-free over the key's length, half the time on real words — and
+  every hash blob moves to `BMP8`, `BCH8` and `BCL2`.** The hash 2.0–3.x shipped read a key eight
+  bytes at a time in a loop and finished with a tail switch; on real keys 6 of its 9.5 ns were
+  branch mispredictions, and with `MPH3` at 3.8 ns a lookup the hash had become the cost of a
+  string lookup. The new hash reads a key of 4–16 bytes as four overlapping 4-byte loads, 17–32
+  as its first and last sixteen, longer keys through two multiply lanes over 32-byte blocks that
+  end on the last 32, and 1–3 bytes as one word; the words go through two 64×64→128 multiplies
+  folded to 64 bits, side by side, and one more that merges them with the length — no loop and
+  no branch on the length inside a class. The constants are consecutive words of π. Measured
+  A-B-A-B in one process on 2026-09-16, the hash alone over keys read in order: dictionary words
+  3.9 ns against 7.3, English titles 7.4 against 11.2, URLs 6.5 against 13.2; 8-byte keys are the
+  one loss, 3.8 against 2.9. The distribution battery (`bench/results/hash-quality-*`) reads the
+  same. Every blob keyed on the old hash would answer wrong ids under the new one, so `BMP7`,
+  `BCH7` and `BCL1` join the refused lists with a message naming `lexindex < 4.0` and the
+  rebuild; `BIX4`, `BDX2` and `OVL2` are untouched, and the standalone `MPH1`–`MPH3` tables
+  still load — a table is keyed on nothing but the hashes it was handed. `hash_key_bytes`
+  (feature `bench-mphf`) returns the new values. Rebuilding from the keys is the migration; the
+  `golden-4.0.0-*` fixtures pin the new bytes and the 2.0.0 ones become refused fixtures.
+
 - **The perfect hash is 6 % smaller and bumps half as many keys: its seeds gain modes, and the
   blob format moves to `MPH3`.** An `MPH2` seed was one shift: a bucket's keys sit at fixed
   offsets in their slices and the seed slides them along together, 255 positions at stride 2,
@@ -21,10 +40,9 @@ All notable changes to this project are documented here. The format follows
   search runs on one occupancy word a key per mode — a key's 64 shifts are 64 consecutive bits of
   one plane of the map, its run to the wrap and the rest before it — so the feasible shifts of a
   bucket are the zero bits of an OR, and the lowest sum is at the first free shift at or after
-  some wrap: a `trailing_zeros` a wrap. Every `BMP7`, `BCH7` and `BCL1` blob written from here on
-  carries an `MPH3` table, which 3.0 cannot read; the `MPH2` tables 1.1 to 3.0 wrote still load,
-  inside those containers and standalone, and keep their seed geometry when written back. The
-  `golden-3.1.0-*` fixtures pin the new bytes; the 2.0.0 ones stay as read fixtures.
+  some wrap: a `trailing_zeros` a wrap. Every hash blob written from here on carries an `MPH3`
+  table, which 3.0 cannot read; the `MPH2` tables 1.1 to 3.0 wrote still load standalone and
+  keep their seed geometry when written back. The `golden-4.0.0-*` fixtures pin the new bytes.
 
 - **A bumped key's remap is one cache line of Elias–Fano, read in one step.** `MPH2` sent a
   bumped key through four dependent lines after its first-level seed: the next level's seed, a

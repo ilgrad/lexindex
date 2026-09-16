@@ -251,10 +251,11 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   out-of-range ones. `load_mmap` and its `_verified` / `_untrusted` forms borrow the mapped pages,
   so the file must not change while the index is alive.
 - **Blobs move forward, not backward.** 2.0 replaced the key hash (the previous one had a two-word
-  collision family on ordinary text), so every hash blob written before it (`BMP5`, `BMP6`, `BCH6`)
-  is refused by name and rebuilt from the keys; `BIX4` crosses the versions unchanged, and an
-  `OVL2` does when its base is one — an overlay embeds its base, so one over a 1.x hash blob is
-  refused with it.
+  collision family on ordinary text) and 4.0 replaced it again (branch-free over the key's
+  length, half the time on real words), so every hash blob written before 4.0 (`BMP5`–`BMP7`,
+  `BCH6`, `BCH7`, `BCL1`) is refused by name and rebuilt from the keys; `BIX4` and `BDX2` cross
+  the versions unchanged, and an `OVL2` does when its base is one — an overlay embeds its base,
+  so one over an older hash blob is refused with it.
 - **`--no-default-features` is `fst` only** (`StringIndex`, `DictIndex`, `Overlay`); `mph` adds no
   dependency, so the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either.
 

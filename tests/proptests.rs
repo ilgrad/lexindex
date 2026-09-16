@@ -487,7 +487,7 @@ mod mph {
         ) {
             let idx = CompactHashIndex::build(&keys, fp).unwrap();
             let mut blob = idx.to_bytes().unwrap();
-            assert_eq!(&blob[0..4], b"BCH7");
+            assert_eq!(&blob[0..4], b"BCH8");
             let pos = 4 + at.index(blob.len() - 4);
             blob[pos] ^= xor;
             prop_assert!(

@@ -62,7 +62,7 @@ Because the keys themselves are never stored, size is just the MPH (0.24 B/key �
 10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.6 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.76 B/key at 4 bits
 (6.25% false positives), 1.26 at the 8-bit default (0.39%), 2.26 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH7"][n][fp_bits][mph length][side_len]
+`id → key`. The serialised blob is `[magic "BCH8"][n][fp_bits][mph length][side_len]
 [payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — it frames every section, so it is
@@ -179,7 +179,7 @@ rather than `fingerprint_bits = 0` because a membership check that always says y
 signature that lies, and because the hot path is then one call with no compare behind it — the
 `id_unchecked` of the other two hash indexes as the only method. Size is the perfect hash and a
 36-byte header: **0.24 B/key** on real words, a fifth of the smallest fingerprinted index and a
-tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL1"][n][mph length][side_len]
+tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL2"][n][mph length][side_len]
 [payload][check][MPH blob][side]`, the `CompactHashIndex` layout without its fingerprint section,
 under the same 64-bit hash collision rule: keys sharing a hash resolve through the side table on
 their full second hash, exact for members. There is no `load_mmap`: the blob is the perfect hash,
@@ -307,8 +307,11 @@ itself: `prefix_id_range` costs two order lookups whatever the number of matches
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
 gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/mphf.rs`), keyed on
-a **version-stable** 64-bit hash of each string (eight bytes at a time: one
-multiply-rotate round per word, then a splitmix64 finalizer with the length folded in — not
+a **version-stable** 64-bit hash of each string (branch-free over three length
+classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, two
+multiply lanes over 32-byte blocks beyond — mixed by 64×64→128 multiplies folded to 64 bits with
+the length; 3.9 ns a dictionary word against 7.3 for the hash 2.0–3.x shipped, whose word loop and
+tail switch mispredicted on every length change — not
 `std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
@@ -325,7 +328,7 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP7"][n][mph length]
+where membership is already guaranteed. The serialised blob is `[magic "BMP8"][n][mph length]
 [side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
 names one of four encodings.
@@ -354,7 +357,7 @@ miss instead of two: on the dictionary 166 → 74 ns, a member 163 → 171, the 
 the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
 extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 2.0's
-`BMP7`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
+`BMP8`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -556,19 +559,19 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP7` | 2.0 | `PerfectHashIndex` | `BMP1`–`BMP6` **refused by name** |
-| `BCH7` | 2.0 | `CompactHashIndex` | `BCH1`–`BCH6` **refused by name** |
-| `BCL1` | 2.0 | `ClosedHashIndex` | new in 2.0 |
+| `BMP8` | 4.0 | `PerfectHashIndex` | `BMP1`–`BMP7` **refused by name** |
+| `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
+| `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX2` | 3.0 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH3` | 3.1 | the minimal perfect hash, inside `BMP7`, `BCH7` and `BCL1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 3.1 | the minimal perfect hash, inside `BMP8`, `BCH8` and `BCL2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
-magic" sends someone hunting for disk corruption when the file is intact and merely old, so both
+magic" sends someone hunting for disk corruption when the file is intact and merely old, so all three
 hash-index loaders carry the list of magics they used to write and answer with a sentence naming
-`lexindex < 2.0` and the fix. That is worth more than a conversion path would have been, because for
-these two formats there is no conversion path to offer: every blob before 2.0 is keyed on a hash
-this version does not compute (and the pre-1.0 ones embed a `ptr_hash` image it no longer links),
+`lexindex < 4.0` and the fix. That is worth more than a conversion path would have been, because for
+these formats there is no conversion path to offer: every hash blob before 4.0 is keyed on a hash
+this version does not compute — 2.0 replaced the round, 4.0 the shape (and the pre-1.0 ones embed a `ptr_hash` image it no longer links),
 `PerfectHashIndex`'s arena survives but its slots came from that hash, and `CompactHashIndex`
 stores no keys at all. **Rebuilding from the key list is the migration.**
 

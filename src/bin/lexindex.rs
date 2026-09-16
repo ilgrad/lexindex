@@ -1700,7 +1700,7 @@ mod tests {
         let blob = dir.join("auto.bin");
         let dest = blob.to_str().unwrap();
         assert_eq!(go(&["build", keys.as_str(), dest], "").0, 0);
-        assert_ne!(&std::fs::read(&blob).unwrap()[..4], b"BCL1");
+        assert_ne!(&std::fs::read(&blob).unwrap()[..4], b"BCL2");
         let (_, out, _) = go(&["inspect", dest], "");
         assert!(out.contains("kind: DictIndex\n"), "{out}");
         if !cfg!(feature = "mph") {
@@ -1723,14 +1723,14 @@ mod tests {
             go(&["build", keys.as_str(), dest, "--closed-vocabulary"], "").0,
             0
         );
-        assert_eq!(&std::fs::read(&open).unwrap()[..4], b"BCL1");
+        assert_eq!(&std::fs::read(&open).unwrap()[..4], b"BCL2");
 
         // Asking for one by name builds it whatever the needs would have said.
         let named = dir.join("named.bin");
         let dest = named.to_str().unwrap();
         let (code, _, err) = go(&["build", keys.as_str(), dest, "--index", "closed"], "");
         assert_eq!(code, 0, "{err}");
-        assert_eq!(&std::fs::read(&named).unwrap()[..4], b"BCL1");
+        assert_eq!(&std::fs::read(&named).unwrap()[..4], b"BCL2");
         // No ladder was printed, so there is nothing to explain.
         assert!(!err.contains("excluded"), "{err}");
 

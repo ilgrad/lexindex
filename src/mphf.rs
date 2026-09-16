@@ -3166,6 +3166,20 @@ fn golden_hashes() -> Vec<u64> {
     hs
 }
 
+/// The hashes 2.0 computed for the same keys, kept as a fixture since 4.0 replaced that hash
+/// and nothing computes it any more: the input the committed `MPH2` fixture was built over,
+/// sorted the way [`golden_hashes`] was when it built it.
+#[cfg(test)]
+fn golden_hashes_2_0() -> Vec<u64> {
+    let mut hs: Vec<u64> = include_bytes!("../tests/data/golden-2.0.0-hashes.bin")
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    hs.sort_unstable();
+    hs.dedup();
+    hs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3787,19 +3801,20 @@ mod tests {
     /// only after a deliberate change, with the `write_golden_mphf` spike.
     #[test]
     fn the_current_golden_blob_is_byte_identical_to_a_fresh_build() {
-        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-3.1.0-mphf.bin");
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-4.0.0-mphf.bin");
         let mphf = Mphf::build(&golden_hashes()).expect("build");
         assert!(matches!(mphf.table, Table::V2(_)));
         assert_eq!(&GOLDEN[..4], MAGIC);
         assert_eq!(
             mphf.to_bytes(),
             GOLDEN,
-            "regenerate tests/data/golden-3.1.0-mphf.bin"
+            "regenerate tests/data/golden-4.0.0-mphf.bin"
         );
         assert_eq!(Mphf::from_bytes(GOLDEN).expect("parses"), mphf);
     }
 
-    /// The committed `MPH2` fixture — the same keys under 3.0's geometry — still parses and still
+    /// The committed `MPH2` fixture — 2.0's hashes of the golden keys under 3.0's geometry — still
+    /// parses and still
     /// answers the same bijection, through the loaded geometry rather than this version's;
     /// written again it is an `MPH3` blob naming that geometry, with the remap in this layout,
     /// which loads to the same table.
@@ -3816,7 +3831,7 @@ mod tests {
             t.levels()
                 .all(|l| l.mode_bits == 0 && l.shift == stride_for(l.slice, 0).trailing_zeros())
         );
-        let hs = golden_hashes();
+        let hs = golden_hashes_2_0();
         let mut seen = vec![false; hs.len()];
         for &h in &hs {
             let id = mphf.index(h) as usize;
@@ -3854,21 +3869,6 @@ mod tests {
         );
     }
 
-    /// Rewrite one of the eight `MPH1` header scalars and re-checksum.
-    fn with_v1_scalar(blob: &[u8], field: usize, value: u64) -> Vec<u8> {
-        let mut out = blob.to_vec();
-        out[8 + field * 8..16 + field * 8].copy_from_slice(&value.to_le_bytes());
-        let check = crate::blob::hash_bytes(&out[..CHECKED_V1]) as u32;
-        out[CHECKED_V1..HEADER_V1].copy_from_slice(&check.to_le_bytes());
-        out
-    }
-
-    /// The 1.0 loader's invariants, on the 1.0 fixture: nothing builds that format any more, so
-    /// the fixture is the only blob these checks can be driven through.
-    #[test]
-    fn each_v1_header_invariant_is_enforced() {
-        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-1.0.0-mphf.bin");
-        let at = |i: usize| u64::from_le_bytes(GOLDEN[8 + i * 8..16 + i * 8].try_into().unwrap());
     /// `value` for every seed at both extreme hashes, on a level this version built: in mode 0
     /// the offset is `h` itself, and the sum the slice mask cuts must wrap, not overflow.
     #[test]
@@ -3885,6 +3885,21 @@ mod tests {
         }
     }
 
+    /// Rewrite one of the eight `MPH1` header scalars and re-checksum.
+    fn with_v1_scalar(blob: &[u8], field: usize, value: u64) -> Vec<u8> {
+        let mut out = blob.to_vec();
+        out[8 + field * 8..16 + field * 8].copy_from_slice(&value.to_le_bytes());
+        let check = crate::blob::hash_bytes(&out[..CHECKED_V1]) as u32;
+        out[CHECKED_V1..HEADER_V1].copy_from_slice(&check.to_le_bytes());
+        out
+    }
+
+    /// The 1.0 loader's invariants, on the 1.0 fixture: nothing builds that format any more, so
+    /// the fixture is the only blob these checks can be driven through.
+    #[test]
+    fn each_v1_header_invariant_is_enforced() {
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-1.0.0-mphf.bin");
+        let at = |i: usize| u64::from_le_bytes(GOLDEN[8 + i * 8..16 + i * 8].try_into().unwrap());
         let (n, parts, stride) = (at(0), at(2), at(5));
         let (buckets_per_part, slots_per_part) = (at(3), at(4));
         assert!(parts >= 1);
@@ -4282,7 +4297,7 @@ mod spike {
         let blob = Mphf::build(&golden_hashes()).expect("build").to_bytes();
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/golden-3.1.0-mphf.bin"
+            "/tests/data/golden-4.0.0-mphf.bin"
         );
         std::fs::write(path, &blob).expect("write the fixture");
         println!("{path}: {} bytes", blob.len());
