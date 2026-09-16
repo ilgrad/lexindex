@@ -16,6 +16,8 @@
 //! `MPHF_VS_ROWS=lexindex,fast` runs only the rows whose name contains one of the substrings.
 //! `MPHF_VS_NO_THP=1` turns transparent huge pages off for the process (`prctl`): the control
 //! for lexindex's tables, which ask for them from 2 MiB up; no competitor's table asks.
+//! `MPHF_VS_PROBES=m` probes m keys drawn at random (with replacement) instead of every key once:
+//! at 1 B keys the probe order alone is another 8 GB beside a competitor's build peak.
 use lexindex::Mphf;
 use ph::phast::{
     Function, Function2, Params, SeedOnly, ShiftOnlyWrapped, bits_per_seed_to_100_bucket_size,
@@ -45,6 +47,12 @@ fn shuffled(n: usize) -> Vec<u32> {
         order.swap(i, (r % (i as u64 + 1)) as usize);
     }
     order
+}
+
+/// The probe order, and the key count the build time is per.
+struct Probe<'a> {
+    keys: usize,
+    order: &'a [u64],
 }
 
 /// The fastest and the slowest of a series of timings, in ns per key.
@@ -131,7 +139,7 @@ impl Row {
     /// `get` answers one key, `batch` the wrapping sum of the answers to a chunk.
     fn round<T: Sync>(
         &mut self,
-        probe: &[u64],
+        probe: &Probe<'_>,
         lookup_threads: usize,
         build: impl FnOnce() -> T,
         bits: impl Fn(&T) -> f64,
@@ -141,12 +149,14 @@ impl Row {
         if !self.run {
             return;
         }
+        let (keys, probe) = (probe.keys, probe.order);
         let n = probe.len() as f64;
         reset_high_water();
         let before = status_kb("VmRSS:");
         let t = Instant::now();
         let f = build();
-        self.build.add(t.elapsed().as_secs_f64() * 1e9 / n);
+        self.build
+            .add(t.elapsed().as_secs_f64() * 1e9 / keys as f64);
         self.peak_mb = self.peak_mb.max((status_kb("VmHWM:") - before) / 1024.0);
         self.bits = bits(&f);
         for _ in 0..3 {
@@ -239,7 +249,27 @@ fn main() {
     keys.sort_unstable();
     keys.dedup();
     assert_eq!(keys.len(), n, "splitmix64 collided");
-    let probe: Vec<u64> = shuffled(n).into_iter().map(|i| keys[i as usize]).collect();
+    let probes: usize = std::env::var("MPHF_VS_PROBES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(n);
+    let order: Vec<u64> = if probes < n {
+        let mut r = 0x2545_F491_4F6C_DD1Du64;
+        (0..probes)
+            .map(|_| {
+                r ^= r << 13;
+                r ^= r >> 7;
+                r ^= r << 17;
+                keys[(r % n as u64) as usize]
+            })
+            .collect()
+    } else {
+        shuffled(n).into_iter().map(|i| keys[i as usize]).collect()
+    };
+    let probe = Probe {
+        keys: n,
+        order: &order,
+    };
     let params = Params::new(Bits8, bits_per_seed_to_100_bucket_size(8));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -360,8 +390,13 @@ fn main() {
             }),
         );
     }
+    let sample = if probes < n {
+        format!(" of {probes} keys drawn at random")
+    } else {
+        String::new()
+    };
     println!(
-        "n {n}, {threads} thread(s), builds min of {rounds} rounds, lookups over one shuffled probe order, min of {} passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of {CHUNK}{}",
+        "n {n}, {threads} thread(s), builds min of {rounds} rounds, lookups over one shuffled probe order{sample}, min of {} passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of {CHUNK}{}",
         3 * rounds,
         if lookup_threads > 1 {
             format!(
