@@ -9,7 +9,7 @@
 //! lexindex takes the keys as hashes; `ph` hashes each key with its default seeded hasher
 //! (wyhash) at build and on every lookup level, `ptr_hash` with `FastIntHash` (one multiply).
 //! Threads: lexindex and `ph` take the count directly, `ptr_hash` runs inside a rayon pool of
-//! that size.
+//! that size. Every build takes the keys in generation order, as they were drawn.
 //!
 //! `cd bench/mphf_vs && cargo run --release -- [n] [rounds] [threads]`
 //!
@@ -262,10 +262,9 @@ fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
-    let mut keys: Vec<u64> = (0..n as u64).map(splitmix).collect();
-    keys.sort_unstable();
-    keys.dedup();
-    assert_eq!(keys.len(), n, "splitmix64 collided");
+    // In generation order: every function here buckets its keys in the build, and a sorted input
+    // would spare one of them that. splitmix64 is a bijection, so the keys are distinct.
+    let keys: Vec<u64> = (0..n as u64).map(splitmix).collect();
     let probes: usize = std::env::var("MPHF_VS_PROBES")
         .ok()
         .and_then(|s| s.parse().ok())
