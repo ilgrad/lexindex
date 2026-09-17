@@ -114,6 +114,24 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
     prefetch(data, i);
 }
 
+/// [`prefetch_byte`] without the range check, for a loop whose `i` is in range by construction
+/// and would pay a compare, a branch and a reload of the length on every key for it. Sound for any
+/// `i` all the same: a prefetch never faults, and the address is formed without `add`'s promise.
+#[cfg(feature = "mph")]
+#[inline(always)]
+pub(crate) fn prefetch_byte_unchecked(data: &[u8], i: usize) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch has no effect but on the cache, whatever the address, and `wrapping_add`
+    // is defined for any offset.
+    unsafe {
+        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
+            data.as_ptr().wrapping_add(i).cast(),
+        )
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (data, i);
+}
+
 /// [`prefetch_byte`] of a key's first and last bytes: the hash reads the key to its end, and a
 /// key of a few dozen bytes lies across two lines as often as not.
 #[cfg(feature = "mph")]

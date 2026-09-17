@@ -274,6 +274,22 @@ const PREFETCH_SEEDS: usize = 1 << 18;
 /// Keys between a first-level seed's prefetch and its read in [`V2::index_all`].
 const SEED_AHEAD: usize = 64;
 
+/// First-level seeds from which [`V2::index_all`] pulls a key's seed in at each of the
+/// [`RETRY_AHEAD`] leads rather than once. A level this large is past a client core's L3, so its
+/// lines come from DRAM, and with one issued every key [`SEED_AHEAD`] keys before its read more
+/// are outstanding than the core has fill buffers for: at a billion keys on a Zen 3 a fifth of the
+/// lines were still loaded on demand — a stall each — against one in fifty at 16 keys ahead, and
+/// no lead in between was right at a hundred million keys as well. Pulling a line in again at half
+/// and a quarter of the lead reissues a dropped prefetch while there is still time, and costs a
+/// hit where the line has come; below this size, where the lines are in L3, it is only the cost.
+const RETRY_SEEDS: usize = 1 << 24;
+
+/// The leads, in keys, at which [`V2::index_all`] pulls a seed in on a level of [`RETRY_SEEDS`]
+/// or more: at most [`SEED_AHEAD`], so that the ring of buckets holds the farthest.
+const RETRY_AHEAD: [usize; 3] = [56, 28, 14];
+
+const _: () = assert!(SEED_AHEAD.is_power_of_two() && RETRY_AHEAD[0] <= SEED_AHEAD);
+
 /// Keys [`V2::index_all`] takes through the first level before it answers those it bumped.
 const BATCH_BLOCK: usize = 1024;
 
@@ -1455,14 +1471,20 @@ impl V2 {
 
     /// [`Mphf::index_all`] on this table.
     fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
-        self.index_all_from(hashes, PREFETCH_SEEDS)
+        self.index_all_from(hashes, PREFETCH_SEEDS, RETRY_SEEDS)
     }
 
-    /// [`index_all`](Self::index_all) with the first-level size it prefetches from as a parameter.
-    /// Below it the batch is the single lookup in a loop. From it, a key's seed is pulled in
-    /// [`SEED_AHEAD`] keys before its turn, and the keys the first level bumps are noted and
-    /// answered once their block has been through it.
-    fn index_all_from(&self, hashes: &[u64], prefetch_seeds: usize) -> Vec<u64> {
+    /// [`index_all`](Self::index_all) with the first-level sizes it prefetches from and retries
+    /// from as parameters. Below the first the batch is the single lookup in a loop. From it, a
+    /// key's seed is pulled in [`SEED_AHEAD`] keys before its turn — from the second, at each of
+    /// the [`RETRY_AHEAD`] leads — and the keys the first level bumps are noted and answered once
+    /// their block has been through it.
+    fn index_all_from(
+        &self,
+        hashes: &[u64],
+        prefetch_seeds: usize,
+        retry_seeds: usize,
+    ) -> Vec<u64> {
         let Some(l) = self
             .first
             .as_ref()
@@ -1470,39 +1492,47 @@ impl V2 {
         else {
             return hashes.iter().map(|&h| self.index(h)).collect();
         };
-        if l.form() == Level::SHIPPED {
-            self.batch::<true>(l, hashes)
-        } else {
-            self.batch::<false>(l, hashes)
+        match (l.form() == Level::SHIPPED, l.seeds.len() >= retry_seeds) {
+            (true, false) => self.batch::<true, false>(l, hashes),
+            (true, true) => self.batch::<true, true>(l, hashes),
+            (false, false) => self.batch::<false, false>(l, hashes),
+            (false, true) => self.batch::<false, true>(l, hashes),
         }
     }
 
-    /// [`index_all_from`](Self::index_all_from) past its check, over the first level `l`:
-    /// under [`Level::SHIPPED`] when `SHIPPED`, which the loop then reads as immediates.
+    /// [`index_all_from`](Self::index_all_from) past its checks, over the first level `l`:
+    /// under [`Level::SHIPPED`] when `SHIPPED`, which the loop then reads as immediates, and with
+    /// a seed pulled in at each of the [`RETRY_AHEAD`] leads when `RETRY`.
     #[inline(always)]
-    fn batch<const SHIPPED: bool>(&self, l: &Level, hashes: &[u64]) -> Vec<u64> {
+    fn batch<const SHIPPED: bool, const RETRY: bool>(&self, l: &Level, hashes: &[u64]) -> Vec<u64> {
         let mut out = vec![0u64; hashes.len()];
         // A bumped key's offset in its block, and how far its answer has got.
         let mut bumped: Vec<(usize, u64)> = Vec::new();
-        // The buckets of the next `SEED_AHEAD` keys, found when their seeds were pulled in, so
-        // that the read does not find them again: a multiply a key fewer on the loop.
+        let lead = if RETRY { RETRY_AHEAD[0] } else { SEED_AHEAD };
+        // The buckets of the next `lead` keys, found when their seeds were pulled in, so that the
+        // read does not find them again: a multiply a key fewer on the loop.
         let mut ring = [0u64; SEED_AHEAD];
-        for (i, &h) in hashes.iter().take(SEED_AHEAD).enumerate() {
+        for (i, &h) in hashes.iter().take(lead).enumerate() {
             ring[i] = bucket_of(h, l.buckets);
-            crate::blob::prefetch_byte(&l.seeds, ring[i] as usize);
+            crate::blob::prefetch_byte_unchecked(&l.seeds, ring[i] as usize);
         }
         let blocks = hashes.chunks(BATCH_BLOCK).zip(out.chunks_mut(BATCH_BLOCK));
         for (b, (block, answers)) in blocks.enumerate() {
             let base = b * BATCH_BLOCK;
             bumped.clear();
-            // The keys `SEED_AHEAD` on from the block's, whose seeds it pulls in; the last keys
-            // of the batch have none.
-            let ahead = hashes
-                .len()
-                .saturating_sub(base + SEED_AHEAD)
-                .min(block.len());
-            let next = &hashes[(base + SEED_AHEAD).min(hashes.len())..][..ahead];
-            Self::answer_block::<SHIPPED>(l, block, next, base, &mut ring, answers, &mut bumped);
+            // The keys `lead` on from the block's, whose seeds it pulls in; the last keys of the
+            // batch have none.
+            let ahead = hashes.len().saturating_sub(base + lead).min(block.len());
+            let next = &hashes[(base + lead).min(hashes.len())..][..ahead];
+            Self::answer_block::<SHIPPED, RETRY>(
+                l,
+                block,
+                next,
+                base,
+                &mut ring,
+                answers,
+                &mut bumped,
+            );
             if !bumped.is_empty() {
                 self.resolve_bumped(block, &mut bumped, answers);
             }
@@ -1511,11 +1541,11 @@ impl V2 {
     }
 
     /// One block of [`batch`](Self::batch): the first level's answer for each key of `block`
-    /// into `answers`, the seeds of `next` — the keys [`SEED_AHEAD`] on — pulled in on the way,
-    /// and the keys the level bumped listed in `bumped` by their offset. Its own function so
-    /// that the loop's registers are its own.
+    /// into `answers`, the seeds of `next` — the keys a lead on — pulled in on the way, and the
+    /// keys the level bumped listed in `bumped` by their offset. Its own function so that the
+    /// loop's registers are its own.
     #[inline(never)]
-    fn answer_block<const SHIPPED: bool>(
+    fn answer_block<const SHIPPED: bool, const RETRY: bool>(
         l: &Level,
         block: &[u64],
         next: &[u64],
@@ -1525,17 +1555,31 @@ impl V2 {
         bumped: &mut Vec<(usize, u64)>,
     ) {
         let form = if SHIPPED { Level::SHIPPED } else { l.form() };
+        let [lead, half, quarter] = if RETRY {
+            RETRY_AHEAD
+        } else {
+            [SEED_AHEAD, 0, 0]
+        };
         let seeds: &[u8] = &l.seeds;
         let ahead = next.len();
         let (pulled, rest) = block.split_at(ahead);
         let (pulled_out, rest_out) = answers.split_at_mut(ahead);
         let keys = pulled.iter().zip(next).zip(pulled_out.iter_mut());
         for (k, ((&h, &coming), answer)) in keys.enumerate() {
-            let slot = (base + k) % SEED_AHEAD;
-            let at = ring[slot];
+            let i = base + k;
+            let at = ring[i & (SEED_AHEAD - 1)];
             let bucket = bucket_of(coming, l.buckets);
-            ring[slot] = bucket;
-            crate::blob::prefetch_byte(seeds, bucket as usize);
+            ring[(i + lead) & (SEED_AHEAD - 1)] = bucket;
+            // Every bucket in the ring is below `buckets`, the length of `seeds`.
+            crate::blob::prefetch_byte_unchecked(seeds, bucket as usize);
+            if RETRY {
+                let again = [
+                    ring[(i + half) & (SEED_AHEAD - 1)],
+                    ring[(i + quarter) & (SEED_AHEAD - 1)],
+                ];
+                crate::blob::prefetch_byte_unchecked(seeds, again[0] as usize);
+                crate::blob::prefetch_byte_unchecked(seeds, again[1] as usize);
+            }
             let seed = l.seed_at(at);
             if seed == 0 {
                 bumped.push((k, 0));
@@ -1544,7 +1588,7 @@ impl V2 {
         }
         for (k, (&h, answer)) in rest.iter().zip(rest_out.iter_mut()).enumerate() {
             let k = ahead + k;
-            let seed = l.seed_at(ring[(base + k) % SEED_AHEAD]);
+            let seed = l.seed_at(ring[(base + k) & (SEED_AHEAD - 1)]);
             if seed == 0 {
                 bumped.push((k, 0));
             }
@@ -3355,13 +3399,24 @@ mod tests {
             for probe in [&hs[..], &strangers[..]] {
                 let want: Vec<u64> = probe.iter().map(|&h| m.index(h)).collect();
                 assert_eq!(m.index_all(probe), want, "n = {n}");
-                for len in [0, 1, SEED_AHEAD + 1, BATCH_BLOCK + 3, probe.len()] {
+                let lens = [
+                    0,
+                    1,
+                    RETRY_AHEAD[2] + 1,
+                    RETRY_AHEAD[0] + 1,
+                    SEED_AHEAD + 1,
+                    BATCH_BLOCK + 3,
+                    probe.len(),
+                ];
+                for len in lens {
                     let part = &probe[..len.min(probe.len())];
-                    assert_eq!(
-                        t.index_all_from(part, 0),
-                        want[..part.len()],
-                        "n = {n}, {len} keys"
-                    );
+                    for retry in [usize::MAX, 0] {
+                        assert_eq!(
+                            t.index_all_from(part, 0, retry),
+                            want[..part.len()],
+                            "n = {n}, {len} keys, retrying from {retry} seeds"
+                        );
+                    }
                 }
             }
         }

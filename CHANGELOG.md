@@ -135,6 +135,19 @@ All notable changes to this project are documented here. The format follows
   it: 7–10 % faster at 10 M keys, 3–5 % at 100 M; below 2^18 first-level seeds the batch is the
   single lookup in a loop, as before, and unchanged.
 
+- **`index_all` pulls a seed in three times on a first level past L3, and a seed's prefetch
+  checks no range.** The batch pulled each key's seed in once, 64 keys ahead. From about 75 M
+  keys the first level outgrows a client core's 16 MB L3 and its lines come from DRAM, and with
+  one issued every key that far ahead more are outstanding than the core has fill buffers for:
+  at a billion keys a fifth of the lines were loaded on demand all the same, a stall each, against
+  one in fifty at 16 keys ahead — a lead that was 20 % slower than 64 at 100 M. A first level of
+  16 MB or more now pulls a seed in 56, 28 and 14 keys ahead, so that a dropped prefetch is issued
+  again while there is still time, at the cost of a hit where the line has come. And no seed
+  prefetch checks its range any more — a bucket is below the table's length by construction, and
+  a prefetch cannot fault — a compare and a branch a key. Measured in one process against the loop
+  before, A-B-A-B on a hot machine: 3–7 % faster from 3 M to 60 M keys, **22 % at 100 M, 19 % at
+  300 M and 17 % at a billion** (10.3 → 8.5 ns/key), 3–7 % on eight threads from 100 M up.
+
 - **Measured against PtrHash and PHast on a cool machine, with two faults in the comparison
   harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process,
   A-B-A-B: `MPH3` **1.966 / 1.953 / 1.949 bits/key**, builds **55.7 / 54.4 / 56.2 ns/key on one
