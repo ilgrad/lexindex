@@ -11,6 +11,8 @@
 
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::fmt;
+#[cfg(feature = "mph")]
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::ptr::{self, NonNull};
 
@@ -38,7 +40,7 @@ impl<T: Zeroed> Pages<T> {
     /// `len` zeros.
     #[cfg_attr(not(feature = "mph"), allow(dead_code))]
     pub(crate) fn zeroed(len: usize) -> Self {
-        let table = Self::uninit(len);
+        let table = Self::allocate(len);
         // SAFETY: `ptr` is `len` writable `T`s of the table's own allocation, and zero is a `T`.
         unsafe { ptr::write_bytes(table.ptr.as_ptr(), 0, len) };
         table
@@ -46,16 +48,40 @@ impl<T: Zeroed> Pages<T> {
 
     /// A copy of `values`.
     pub(crate) fn from_slice(values: &[T]) -> Self {
-        let table = Self::uninit(values.len());
+        let table = Self::allocate(values.len());
         // SAFETY: `ptr` is `values.len()` writable `T`s of the table's own allocation, which
         // `values` cannot overlap.
         unsafe { ptr::copy_nonoverlapping(values.as_ptr(), table.ptr.as_ptr(), values.len()) };
         table
     }
+}
 
+#[cfg(feature = "mph")]
+impl<T> Pages<MaybeUninit<T>> {
+    /// `len` values yet to be written: allocated as [`zeroed`](Pages::zeroed) allocates, without
+    /// the pass of zeros, for a table whose builder writes every value once.
+    pub(crate) fn unwritten(len: usize) -> Self {
+        Self::allocate(len)
+    }
+
+    /// The table, once every value is written.
+    ///
+    /// # Safety
+    ///
+    /// Each of the `len` values has been written.
+    pub(crate) unsafe fn assume_init(self) -> Pages<T> {
+        let table = ManuallyDrop::new(self);
+        Pages {
+            ptr: table.ptr.cast(),
+            len: table.len,
+        }
+    }
+}
+
+impl<T> Pages<T> {
     /// The allocation, advised but unwritten: the kernel sizes a page when it is first touched,
     /// so the advice has to come before the table's first write.
-    fn uninit(len: usize) -> Self {
+    fn allocate(len: usize) -> Self {
         let Some(layout) = Self::layout(len) else {
             return Self {
                 ptr: NonNull::dangling(),
@@ -72,9 +98,7 @@ impl<T: Zeroed> Pages<T> {
         }
         Self { ptr, len }
     }
-}
 
-impl<T> Pages<T> {
     /// The layout of `len` values: on a huge-page boundary from a huge page up, and `None` when
     /// there is nothing to allocate.
     fn layout(len: usize) -> Option<Layout> {
@@ -122,8 +146,8 @@ impl<T> Deref for Pages<T> {
     type Target = [T];
 
     fn deref(&self) -> &[T] {
-        // SAFETY: `len` initialised `T`s — written whole by `zeroed` or `from_slice`, or none —
-        // that live as long as `self`.
+        // SAFETY: `len` initialised `T`s — written whole by `zeroed` or `from_slice`, or none, or
+        // `MaybeUninit`s, which need not be — that live as long as `self`.
         unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 }

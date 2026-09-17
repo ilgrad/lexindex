@@ -48,6 +48,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -1260,6 +1261,327 @@ fn group_by_bucket(hs: &[u64], lv: usize, buckets: u64, threads: usize) -> Vec<u
     keys
 }
 
+/// The chunk of each bucket of a first level cut at `starts`, for keys in any order: a table of
+/// the chunk of every `1 << shift`-th bucket, `shift` the largest that keeps every chunk start on
+/// one of them — 14 bits on a level of whole chunks, a table of a few KiB.
+struct ChunkOf {
+    shift: u32,
+    table: Vec<u32>,
+}
+
+impl ChunkOf {
+    fn new(starts: &[u64], buckets: u64) -> Self {
+        let shift = starts[1..]
+            .iter()
+            .map(|s| s.trailing_zeros())
+            .min()
+            .unwrap_or(16)
+            .min(16);
+        let mut k = 0;
+        let table = (0..buckets.div_ceil(1 << shift))
+            .map(|i| {
+                while starts.get(k + 1).is_some_and(|&s| s <= i << shift) {
+                    k += 1;
+                }
+                k as u32
+            })
+            .collect();
+        Self { shift, table }
+    }
+
+    #[inline(always)]
+    fn of(&self, bucket: u64) -> usize {
+        self.table[(bucket >> self.shift) as usize] as usize
+    }
+}
+
+/// Groups of chunks a first level over keys in any order copies its keys in, one at a time.
+const GROUPS: u64 = 4;
+
+/// A first level's keys in any order, copied out a group of chunks at a time — the groups runs of
+/// chunks over equal shares of the buckets — so that no more than a group's share of the keys is
+/// copied at once, beside a quarter of a byte a key that names each key's group. Each of `threads`
+/// shards of the keys marks its keys' groups and counts them by chunk once; a group is copied when
+/// its first chunk is claimed, every shard writing its keys of the group into its own range of
+/// each chunk's, shard after shard, so that a chunk holds its keys in the order they came. A
+/// chunk's keys are grouped by bucket as they are handed out, by [`sort_chunk`] on the thread that
+/// places them: a counting sort of a few MiB about to be read, a third of what putting the keys
+/// of every 2^16 buckets in order by the buckets' two low bytes cost over the whole level first.
+struct Grouped<'a> {
+    hs: &'a [u64],
+    buckets: u64,
+    chunk: ChunkOf,
+    /// Keys a shard: a multiple of the keys a word of `ids` names.
+    per: usize,
+    /// Each key's group in two bits, from the low end of a word, 32 keys a word; none when the
+    /// level is one group.
+    ids: Pages<u64>,
+    /// How many keys of each chunk each shard holds.
+    counts: Vec<Vec<u32>>,
+    group_of: Vec<u8>,
+    /// The first chunk of each group, and the end of the last.
+    firsts: Vec<usize>,
+    claim: Mutex<Claim>,
+    /// The keys of the group being handed out, by chunk. The thread that copies the next group in
+    /// holds the claim, so no chunk is handed out meanwhile, and waits for the threads still
+    /// grouping a chunk of this one.
+    keys: std::sync::RwLock<Pages<u64>>,
+}
+
+struct Claim {
+    /// The group in the copy, and the chunk to hand out next.
+    group: usize,
+    next: usize,
+    /// Where each chunk of the group begins in the copy, and where its last one's end.
+    bounds: Vec<usize>,
+}
+
+impl<'a> Grouped<'a> {
+    fn new(hs: &'a [u64], buckets: u64, starts: &[u64], threads: usize) -> Self {
+        let chunks = starts.len();
+        let chunk = ChunkOf::new(starts, buckets);
+        let groups = GROUPS.min(chunks as u64);
+        let group_of: Vec<u8> = starts
+            .iter()
+            .map(|&s| (u128::from(s) * u128::from(groups) / u128::from(buckets)) as u8)
+            .collect();
+        let firsts = (0..=groups as usize)
+            .map(|g| group_of.partition_point(|&x| usize::from(x) < g))
+            .collect();
+        let per = hs
+            .len()
+            .div_ceil(threads.max(1))
+            .next_multiple_of(32)
+            .max(1 << 16);
+        let mut ids = Pages::<MaybeUninit<u64>>::unwritten(if groups > 1 {
+            hs.len().div_ceil(32)
+        } else {
+            0
+        });
+        let counts = std::thread::scope(|scope| {
+            let mut words = ids.chunks_mut(per / 32);
+            let markers: Vec<_> = hs
+                .chunks(per)
+                .map(|part| {
+                    let words = words.next();
+                    let (chunk, group_of) = (&chunk, &group_of);
+                    scope.spawn(move || mark(part, words, buckets, chunk, group_of, chunks))
+                })
+                .collect();
+            markers
+                .into_iter()
+                .map(|m| m.join().expect("a key marker panicked"))
+                .collect()
+        });
+        phase("group marks");
+        // SAFETY: the shards' words tile `ids` — a shard of `per` keys, `per / 32` words — and
+        // each shard wrote each of its words once, when there are groups; else there are none.
+        let ids = unsafe { ids.assume_init() };
+        let mut grouped = Self {
+            hs,
+            buckets,
+            chunk,
+            per,
+            ids,
+            counts,
+            group_of,
+            firsts,
+            claim: Mutex::new(Claim {
+                group: 0,
+                next: 0,
+                bounds: Vec::new(),
+            }),
+            keys: std::sync::RwLock::new(Pages::default()),
+        };
+        let size = |g: usize| -> usize {
+            (grouped.firsts[g]..grouped.firsts[g + 1])
+                .map(|c| grouped.counts.iter().map(|n| n[c] as usize).sum::<usize>())
+                .sum()
+        };
+        let largest = (0..groups as usize).map(size).max().unwrap_or(0);
+        let mut keys = Pages::<MaybeUninit<u64>>::unwritten(largest);
+        let bounds = grouped.copy_group(0, &mut keys, MaybeUninit::new);
+        let copied = bounds.last().copied().unwrap_or(0);
+        for v in &mut keys[copied..] {
+            v.write(0);
+        }
+        // SAFETY: the ranges `copy_group` split tile the first `copied` values, each as long as
+        // its shard's count of keys in its chunk, and each shard wrote each of its keys of the
+        // group into the next value of its chunk's range — the chunk the count gave it — so each
+        // was written once; the rest were written just now.
+        grouped.keys = std::sync::RwLock::new(unsafe { keys.assume_init() });
+        grouped.claim.get_mut().expect("not yet shared").bounds = bounds;
+        phase("group copy");
+        grouped
+    }
+
+    /// Copies group `g`'s keys into `out` by chunk, and returns where each of its chunks' begin
+    /// and its last one's end.
+    fn copy_group<T: Send>(
+        &self,
+        g: usize,
+        out: &mut [T],
+        put: impl Fn(u64) -> T + Copy + Send,
+    ) -> Vec<usize> {
+        let (c0, c1) = (self.firsts[g], self.firsts[g + 1]);
+        let mut bounds = vec![0usize; c1 - c0 + 1];
+        let mut ranges: Vec<Vec<&mut [T]>> = self
+            .counts
+            .iter()
+            .map(|_| Vec::with_capacity(c1 - c0))
+            .collect();
+        let (mut rest, mut at) = (out, 0);
+        for c in c0..c1 {
+            for (count, range) in self.counts.iter().zip(&mut ranges) {
+                let (head, tail) = std::mem::take(&mut rest).split_at_mut(count[c] as usize);
+                at += head.len();
+                range.push(head);
+                rest = tail;
+            }
+            bounds[c - c0 + 1] = at;
+        }
+        let (buckets, chunk) = (self.buckets, &self.chunk);
+        std::thread::scope(|scope| {
+            for (s, (part, mut range)) in self.hs.chunks(self.per).zip(ranges).enumerate() {
+                let words = self.ids.get(s * self.per / 32..).unwrap_or_default();
+                scope.spawn(move || {
+                    let mut next = vec![0usize; c1 - c0];
+                    let mut place = |h: u64| {
+                        let c = chunk.of(bucket_of(h, buckets)) - c0;
+                        range[c][next[c]] = put(h);
+                        next[c] += 1;
+                    };
+                    if words.is_empty() {
+                        part.iter().for_each(|&h| place(h));
+                        return;
+                    }
+                    // A key of the group has both bits of its field equal to the group's; the
+                    // fields of a last word past its keys are masked off.
+                    const EVEN: u64 = 0x5555_5555_5555_5555;
+                    let pattern = g as u64 * EVEN;
+                    for (&word, keys) in words.iter().zip(part.chunks(32)) {
+                        let x = word ^ pattern;
+                        let mut ours = !(x | x >> 1) & EVEN & (u64::MAX >> (64 - 2 * keys.len()));
+                        while ours != 0 {
+                            place(keys[ours.trailing_zeros() as usize / 2]);
+                            ours &= ours - 1;
+                        }
+                    }
+                });
+            }
+        });
+        bounds
+    }
+
+    /// [`Feed::next`] for keys in any order.
+    fn next<'b>(
+        &self,
+        starts: &[u64],
+        buf: &'b mut Vec<u64>,
+        start: &mut [u32],
+    ) -> Option<(usize, &'b [u64])> {
+        let (k, keys, range) = {
+            let mut claim = self.claim.lock().expect("a chunk placer panicked");
+            let k = claim.next;
+            if k == starts.len() {
+                return None;
+            }
+            let g = usize::from(self.group_of[k]);
+            if claim.group != g {
+                let mut keys = self.keys.write().expect("a chunk placer panicked");
+                claim.bounds = self.copy_group(g, &mut keys, |h| h);
+                claim.group = g;
+            }
+            claim.next += 1;
+            let at = k - self.firsts[g];
+            let range = claim.bounds[at]..claim.bounds[at + 1];
+            (k, self.keys.read().expect("a chunk placer panicked"), range)
+        };
+        let chunk = &keys[range];
+        if buf.len() < chunk.len() {
+            buf.resize(chunk.len(), 0);
+        }
+        let grouped = &mut buf[..chunk.len()];
+        let in_chunk = starts.get(k + 1).copied().unwrap_or(self.buckets) - starts[k];
+        sort_chunk(
+            chunk,
+            self.buckets,
+            starts[k],
+            &mut start[..in_chunk as usize + 2],
+            grouped,
+        );
+        Some((k, grouped))
+    }
+
+    /// The most keys a chunk holds.
+    fn widest(&self) -> usize {
+        (0..self.group_of.len())
+            .map(|c| self.counts.iter().map(|n| n[c] as usize).sum())
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// A shard's count of keys by chunk, and each key's group into `words` when there are groups.
+fn mark(
+    part: &[u64],
+    words: Option<&mut [MaybeUninit<u64>]>,
+    buckets: u64,
+    chunk: &ChunkOf,
+    group_of: &[u8],
+    chunks: usize,
+) -> Vec<u32> {
+    let mut count = vec![0u32; chunks];
+    let mut words = words.map(|w| w.iter_mut());
+    for keys in part.chunks(32) {
+        // The chunks computed before any is counted, so that an increment waits on no store to
+        // the same counter whose address is still unknown.
+        let mut cs = [0usize; 32];
+        for (c, &h) in cs.iter_mut().zip(keys) {
+            *c = chunk.of(bucket_of(h, buckets));
+        }
+        let mut word = 0;
+        for (j, &c) in cs[..keys.len()].iter().enumerate() {
+            count[c] += 1;
+            word |= u64::from(group_of[c]) << (2 * j);
+        }
+        if let Some(words) = &mut words {
+            words.next().expect("a word every 32 keys").write(word);
+        }
+    }
+    count
+}
+
+/// A chunk's keys in any order, grouped by bucket into `out`, and the chunk's CSR offsets into
+/// `start`, [`Run::start`]-style — one counting sort, stable, so that a bucket keeps its keys in
+/// the order they came. `start` is two longer than the chunk has buckets: each key counts two on
+/// from its bucket, so that after the running sum the entry one on from a bucket is where its keys
+/// begin, and the scatter's cursors end where they end.
+fn sort_chunk(keys: &[u64], buckets: u64, first: u64, start: &mut [u32], out: &mut [u64]) {
+    let last = start.len() - 2;
+    start.fill(0);
+    // Eight buckets computed before any is counted, as in [`bucket_ends`].
+    let mut eights = keys.chunks_exact(8);
+    for eight in &mut eights {
+        let bs: [usize; 8] =
+            std::array::from_fn(|i| (bucket_of(eight[i], buckets) - first) as usize);
+        for b in bs {
+            start[b + 2] += 1;
+        }
+    }
+    for &h in eights.remainder() {
+        start[(bucket_of(h, buckets) - first) as usize + 2] += 1;
+    }
+    for i in 2..=last {
+        start[i] += start[i - 1];
+    }
+    for &h in keys {
+        let cursor = &mut start[(bucket_of(h, buckets) - first) as usize + 1];
+        out[*cursor as usize] = h;
+        *cursor += 1;
+    }
+}
+
 /// Whether `hashes` are sorted: in parts on `threads` when there are enough of them.
 fn is_sorted(hashes: &[u64], threads: usize) -> bool {
     let part = hashes.len().div_ceil(threads.max(1));
@@ -1288,11 +1610,15 @@ enum Source<'a> {
     /// than fit in memory is built from a file. Only a first level is fed this way; the bumped
     /// keys are a few per cent and stay in memory.
     Stream(&'a mut (dyn Iterator<Item = u64> + Send)),
+    /// In any order, all in memory: copied out a group of chunks at a time as the level claims
+    /// them, and each chunk grouped by bucket as it is claimed.
+    Unsorted(&'a [u64]),
 }
 
 /// A level's chunks, claimed in order together with their keys: a subslice of the grouped keys,
-/// or what a sequential reader cut at the chunk's last bucket. Claiming and reading are one
-/// step under one lock, so the stream is only ever read in chunk order, whichever thread asks.
+/// what a sequential reader cut at the chunk's last bucket, or a chunk of a group's copy grouped
+/// on its way out. Claiming and reading are one step under one lock, so the stream is only ever
+/// read in chunk order, whichever thread asks.
 enum Feed<'a> {
     Slice {
         keys: &'a [u64],
@@ -1301,6 +1627,7 @@ enum Feed<'a> {
         next: AtomicUsize,
     },
     Stream(std::sync::Mutex<Cutter<'a>>),
+    Grouped(Grouped<'a>),
 }
 
 struct Cutter<'a> {
@@ -1312,7 +1639,7 @@ struct Cutter<'a> {
 }
 
 impl<'a> Feed<'a> {
-    fn new(source: Source<'a>, starts: &[u64], buckets: u64) -> Self {
+    fn new(source: Source<'a>, starts: &[u64], buckets: u64, threads: usize) -> Self {
         match source {
             Source::Slice(keys) => Feed::Slice {
                 keys,
@@ -1329,23 +1656,36 @@ impl<'a> Feed<'a> {
                 next: 0,
                 fed: 0,
             })),
+            Source::Unsorted(hs) => Feed::Grouped(Grouped::new(hs, buckets, starts, threads)),
         }
     }
 
-    /// The next chunk and its keys, grouped by bucket; `None` once every chunk is claimed. A
-    /// stream's chunk is read into `buf`, the caller's, so that a thread reading chunk after
-    /// chunk fills one buffer rather than growing a fresh one each time.
+    /// The next chunk and its keys, grouped by bucket, with their CSR offsets in `start`,
+    /// [`Run::start`]-style, which is two longer than the longest chunk has buckets; `None` once
+    /// every chunk is claimed. A stream's chunk is read into `buf`, the caller's, and a group's
+    /// chunk grouped into it, so that a thread taking chunk after chunk fills one buffer rather
+    /// than growing a fresh one each time.
     fn next<'b>(
         &'b self,
         starts: &[u64],
         buckets: u64,
         buf: &'b mut Vec<u64>,
+        start: &mut [u32],
     ) -> Option<(usize, &'b [u64])> {
+        let first = |k: usize| starts[k];
+        let len = |k: usize| (starts.get(k + 1).copied().unwrap_or(buckets) - starts[k]) as usize;
         match self {
             Feed::Slice { keys, bounds, next } => {
                 let k = next.fetch_add(1, Ordering::Relaxed);
-                (k + 1 < bounds.len()).then(|| (k, &keys[bounds[k]..bounds[k + 1]]))
+                if k + 1 >= bounds.len() {
+                    return None;
+                }
+                let chunk = &keys[bounds[k]..bounds[k + 1]];
+                start[..=len(k)].fill(0);
+                bucket_ends(chunk, 0, buckets, first(k), &mut start[1..=len(k)]);
+                Some((k, chunk))
             }
+            Feed::Grouped(grouped) => grouped.next(starts, buf, start),
             Feed::Stream(cutter) => {
                 let mut c = cutter.lock().expect("a chunk reader panicked");
                 let k = c.next;
@@ -1367,6 +1707,9 @@ impl<'a> Feed<'a> {
                 }
                 c.next += 1;
                 c.fed += buf.len() as u64;
+                drop(c);
+                start[..=len(k)].fill(0);
+                bucket_ends(buf, 0, buckets, first(k), &mut start[1..=len(k)]);
                 Some((k, &buf[..]))
             }
         }
@@ -1376,6 +1719,7 @@ impl<'a> Feed<'a> {
     fn fed(&self) -> u64 {
         match self {
             Feed::Slice { keys, .. } => keys.len() as u64,
+            Feed::Grouped(grouped) => grouped.hs.len() as u64,
             Feed::Stream(cutter) => cutter.lock().expect("a chunk reader panicked").fed,
         }
     }
@@ -1654,16 +1998,15 @@ impl V2 {
     fn build(hashes: &[u64], threads: usize) -> Result<Self, IndexError> {
         phase("start");
         // Both callers hand over sorted hashes, and a bucket is monotone in its hash, so sorted
-        // input is already grouped by bucket; anything else is sorted first.
-        let sorted: std::borrow::Cow<[u64]> = if is_sorted(hashes, threads) {
-            std::borrow::Cow::Borrowed(hashes)
+        // input is already grouped by bucket; anything else is grouped as the first level takes
+        // it.
+        let source = if is_sorted(hashes, threads) {
+            Source::Slice(hashes)
         } else {
-            let mut v = hashes.to_vec();
-            v.sort_unstable();
-            std::borrow::Cow::Owned(v)
+            Source::Unsorted(hashes)
         };
-        phase("sort");
-        Self::build_from(sorted.len() as u64, Source::Slice(&sorted), threads)
+        phase("sorted");
+        Self::build_from(hashes.len() as u64, source, threads)
     }
 
     /// [`build`](Self::build) over `n` sorted, distinct hashes pulled from `hashes` one chunk of
@@ -1696,8 +2039,9 @@ impl V2 {
             levels.push(level);
             maps.push(taken);
         } else {
+            // The tail takes its keys in any order.
             remaining = match source {
-                Source::Slice(keys) => keys.to_vec(),
+                Source::Slice(keys) | Source::Unsorted(keys) => keys.to_vec(),
                 Source::Stream(hashes) => hashes.collect(),
             };
             if remaining.len() as u64 != n {
@@ -1804,7 +2148,7 @@ impl V2 {
             .unwrap_or(0);
         // The smallest value a key of bucket `b` can take.
         let lo = |b: u64| ((b as u128 * n as u128) / buckets as u128) as u64;
-        let feed = Feed::new(source, &starts, buckets);
+        let feed = Feed::new(source, &starts, buckets, threads);
         // What a stream's chunk buffer holds: the longest chunk's share of the keys, and the
         // spread of a Poisson count on top.
         let expected = match feed {
@@ -1813,6 +2157,7 @@ impl V2 {
                 share + 4 * (share as f64).sqrt() as usize
             }
             Feed::Slice { .. } => 0,
+            Feed::Grouped(ref grouped) => grouped.widest(),
         };
         let shift = level.shift;
         let align = |v: u64| v & !((64 << shift) - 1);
@@ -1878,13 +2223,11 @@ impl V2 {
         std::thread::scope(|scope| {
             for _ in 0..threads.clamp(1, chunks) {
                 scope.spawn(|| {
-                    let mut start = vec![0u32; longest as usize + 1];
+                    let mut start = vec![0u32; longest as usize + 2];
                     let mut buf = Vec::with_capacity(expected);
-                    while let Some((k, chunk)) = feed.next(&starts, buckets, &mut buf) {
+                    while let Some((k, chunk)) = feed.next(&starts, buckets, &mut buf, &mut start) {
                         let (first, end, last) = (first_of(k), run_end(k), end_of(k));
                         let len = (last - first) as usize + 1;
-                        start[..len].fill(0);
-                        bucket_ends(chunk, 0, buckets, first, &mut start[1..len]);
                         let run = Run {
                             level: level_ref,
                             keys: chunk,
@@ -3581,16 +3924,85 @@ mod tests {
         assert_eq!(steps + 1, bumped);
     }
 
-    /// Sorted input is the fast path; unsorted input must build the same table.
+    /// Sorted input is the fast path; unsorted input must build the same table — below the
+    /// tail's size, on a level cut into equal chunks and on one of whole chunks and pieces, on one
+    /// thread and on several, since the shards decide the order inside a bucket.
     #[test]
     fn unsorted_input_builds_the_same_table() {
-        let hs = hashes(10_000);
-        let mut shuffled = hs.clone();
-        shuffled.reverse();
-        shuffled.swap(1, 4000);
-        let a = Mphf::build(&hs).unwrap();
-        let b = Mphf::build(&shuffled).unwrap();
-        assert_eq!(a, b);
+        for n in [200usize, 10_000, 1_300_000] {
+            let hs = hashes(n);
+            let mut shuffled = hs.clone();
+            let mut r = 0x9E37_79B9_7F4A_7C15u64;
+            for i in (1..n).rev() {
+                r = mix(r);
+                shuffled.swap(i, (r % (i as u64 + 1)) as usize);
+            }
+            let sorted = Mphf::build_with_threads(&hs, 3).unwrap();
+            for threads in [1, 3, 8] {
+                let b = Mphf::build_with_threads(&shuffled, threads).unwrap();
+                assert!(
+                    sorted == b,
+                    "n = {n}, {threads} threads: the order changed the table"
+                );
+            }
+        }
+    }
+
+    /// Keys in any order are handed out as the chunks' keys in the order they came, each chunk's
+    /// grouped by bucket with the offsets their sorted order gives — on a level cut into equal
+    /// chunks and on one of whole chunks and pieces, in groups or in one, with a last word of
+    /// group marks part full, and keys piled into one bucket too.
+    #[test]
+    fn keys_in_any_order_are_grouped_by_bucket() {
+        let piled: Vec<u64> = (0..300_003u64)
+            .map(|i| mix(i) >> (if i % 3 == 0 { 0 } else { 40 }))
+            .collect();
+        let cases = [
+            ("one chunk", hashes(5_001)),
+            ("equal", hashes(700_001)),
+            ("pieces", hashes(1_300_007)),
+            ("piled", piled),
+        ];
+        for (name, hs) in cases {
+            let buckets = Level::shape(hs.len() as u64, Geometry::Mph3).buckets;
+            let starts = chunk_starts(buckets, false);
+            let chunk = ChunkOf::new(&starts, buckets);
+            assert!(
+                (0..buckets).all(|b| chunk.of(b) == starts.partition_point(|&s| s <= b) - 1),
+                "{name}: a bucket in the wrong chunk"
+            );
+            let mut by_chunk = hs.clone();
+            by_chunk.sort_by_key(|&h| chunk.of(bucket_of(h, buckets)));
+            for threads in [1, 5] {
+                let feed = Feed::new(Source::Unsorted(&hs), &starts, buckets, threads);
+                let (mut buf, mut start) = (Vec::new(), vec![7u32; CHUNK as usize + 2]);
+                let from =
+                    |k: usize| by_chunk.partition_point(|&h| chunk.of(bucket_of(h, buckets)) < k);
+                for k in 0..starts.len() {
+                    let (got, keys) = feed
+                        .next(&starts, buckets, &mut buf, &mut start)
+                        .expect("a chunk");
+                    let first = starts[k];
+                    let buckets_in =
+                        (starts.get(k + 1).copied().unwrap_or(buckets) - first) as usize;
+                    let mut ours = by_chunk[from(k)..from(k + 1)].to_vec();
+                    ours.sort_by_key(|&h| bucket_of(h, buckets));
+                    let mut ends = vec![0u32; buckets_in];
+                    bucket_ends(&ours, 0, buckets, first, &mut ends);
+                    assert!(
+                        got == k
+                            && keys == ours
+                            && start[0] == 0
+                            && start[1..=buckets_in] == ends[..],
+                        "{name}, {threads} threads, chunk {k}: not grouped in order, or its offsets"
+                    );
+                }
+                assert!(
+                    feed.next(&starts, buckets, &mut buf, &mut start).is_none(),
+                    "{name}, {threads} threads: a chunk past the last"
+                );
+            }
+        }
     }
 
     /// The gate's determinism criterion, as a test rather than a claim: chunks are fixed and each is

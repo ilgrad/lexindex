@@ -170,6 +170,23 @@ All notable changes to this project are documented here. The format follows
   The arena gains from 480 k words and 1 M URLs up (`id` 5–10 %, `key` 5–12 %); nothing
   below 2 MiB moves — `CompactHashIndex` at 1 M keys, `ClosedHashIndex` at any size — and build
   peaks are unchanged. A mapped index reads its file's pages, as before.
+- **`Mphf::build` over hashes in any order: the serial sort is gone — 2.3–2.7× faster on eight
+  threads, and a third of the peak at 100 M.** Hashes handed over out of order were copied and the
+  copy sorted on one thread before the first level could cut them into chunks: 22–25 ns a key on
+  one thread or eight, and a construction peak the size of the keys. Now each thread marks its
+  share of the keys with their group of chunks — two bits a key, four groups over equal shares of
+  the buckets — and counts them by chunk; a group's keys are copied out by chunk when its first
+  chunk is claimed, and each chunk is put in bucket order by one counting sort on the thread that
+  places it, whose cursors end as the chunk's bucket offsets. Grouping every chunk up front by its
+  buckets' two low bytes cost three times that sort, and copying all the keys at once is within
+  2 % of four copies of a quarter. Measured on splitmix64 hashes in generation order against the
+  build before, processes alternated A-B-B-A on a hot machine, fat LTO: 10 M **84.1 → 72.2
+  ns/key** on one thread and **32.8 → 14.3** on eight, 100 M 87.1 → 71.8 and **35.3 → 12.9**; the
+  construction peak above the keys 82 → 30 MB and 84 → 48 MB at 10 M, **818 → 261 MB** and
+  820 → 280 MB at 100 M. The same hashes in ascending order build as before (61.8 / 10.6 ns at
+  10 M, 61.9 / 10.2 at 100 M), into the same table whatever the order and the thread count. Every
+  index here hands its perfect hash sorted hashes, so the gain is `Mphf`'s callers' — and the
+  comparison's with PtrHash and PHast, which bucket their keys inside the build in any order.
 
 - **Measured against PtrHash and PHast on a cool machine, with two faults in the comparison
   harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process,
