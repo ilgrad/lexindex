@@ -100,15 +100,21 @@ fn top(w: u32) -> usize {
 impl Code {
     /// The cheaper of the two codes over `runs`, the runs of one group.
     pub(crate) fn choose(runs: &[&[(usize, usize)]]) -> Self {
+        Self::choose_cost(runs).0
+    }
+
+    /// [`choose`](Self::choose) with what the winner costs in bytes: its own, its headers' and the
+    /// escapes it leaves. A caller pricing one shape of the data against another needs the number,
+    /// and it falls out of the same search.
+    pub(crate) fn choose_cost(runs: &[&[(usize, usize)]]) -> (Self, usize) {
         let frame: usize = runs
             .iter()
             .filter(|r| !r.is_empty())
             .map(|r| frame_widths(r).2)
             .sum();
-        let table = Self::best_table(runs);
-        match table {
-            Some((code, bytes)) if bytes < frame => code,
-            _ => Code::Frame,
+        match Self::best_table(runs) {
+            Some((code, bytes)) if bytes < frame => (code, bytes),
+            _ => (Code::Frame, frame),
         }
     }
 

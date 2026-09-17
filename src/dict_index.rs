@@ -26,18 +26,21 @@ use crate::blob::SharedBytes;
 use crate::extsort::{RUN_BYTES, Replay, Run, Runs};
 use crate::fsst::{self, ESCAPE, Table};
 use crate::offsets::{self, Offsets};
+use crate::packed::{self, Alphabet};
 use crate::paircode::{self, Code};
 use std::cmp::Ordering;
 
-/// `[magic 4][n u64][block u32][heads u64][data u64][tables u32][payload u64][head width u8]
+/// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
 /// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][codes u32]
-/// [check u32]`, then the symbol tables — one per `shard` blocks, each behind its own `u32` length,
-/// so a reader that knows how many there are walks them without a directory — the head keys end to
-/// end, the head ends packed ([`offsets`]), the head samples (`u64`), the block data, the header
-/// codes — two per shard, each self-delimiting ([`paircode`]) — and the block and microblock starts
-/// packed. The last three sections come after the data because none of them is known until it is
-/// encoded: the starts' width, and the code a shard's entries were written under. That is what lets
-/// a streamed build write every section once, in order.
+/// [check u32]`, then the head keys end to end, the head ends packed ([`offsets`]), the head
+/// samples (`u64`), the block data, the suffix codecs — one per `shard` blocks, each behind its own
+/// `u32` length, so a reader that knows how many there are walks them without a directory — the
+/// header codes, two per shard and each self-delimiting ([`paircode`]), and the block and
+/// microblock starts packed.
+///
+/// Everything but the keys themselves comes after the data, because none of it is known until the
+/// data is encoded: the starts' widths, the code a shard's entries were written under, and the
+/// codec its suffixes were. That is what lets a streamed build write every section once, in order.
 const MAGIC: &[u8; 4] = b"BDX3";
 /// The formats this one replaces, with what a loader says about each. A refusal names what wrote
 /// the blob, because a bare "bad magic" sends someone hunting for disk corruption when the file is
@@ -144,9 +147,9 @@ pub struct DictIndex {
     /// entry per microblock, which at the default block is one per thirty-two keys.
     micros: Offsets,
     data: SharedBytes,
-    /// One symbol table per shard of `shard` blocks; the table for block `b` is `tables[b /
-    /// shard]`, and `tables` is never empty.
-    tables: Vec<Table>,
+    /// One suffix codec per shard of `shard` blocks; the codec for block `b` is `codecs[b /
+    /// shard]`, and `codecs` is never empty.
+    codecs: Vec<Codec>,
     /// The two header codes of each shard, the microblocks' first: one shard's entries are coded
     /// once for all of its blocks, which is what pays for a code wider than a byte. As long as
     /// `tables`, and indexed the same way.
@@ -201,16 +204,16 @@ pub(crate) fn shard_blocks_for(block: usize) -> usize {
     (SHARD_KEYS / block).clamp(1, u16::MAX as usize)
 }
 
-/// Bytes the whole table section takes: every table behind its own length, so a reader that knows
-/// how many there are can walk them without a directory.
-fn tables_len(tables: &[Table]) -> usize {
-    tables.iter().map(|t| 4 + t.serialized_len()).sum()
+/// Bytes the whole codec section takes: every shard's codec behind its own length, so a reader
+/// that knows how many there are can walk them without a directory.
+fn codecs_len(codecs: &[Codec]) -> usize {
+    codecs.iter().map(|c| 4 + c.serialized_len()).sum()
 }
 
-fn write_tables(tables: &[Table], out: &mut Vec<u8>) {
-    for t in tables {
-        out.extend_from_slice(&(t.serialized_len() as u32).to_le_bytes());
-        t.write_to(out);
+fn write_codecs(codecs: &[Codec], out: &mut Vec<u8>) {
+    for c in codecs {
+        out.extend_from_slice(&(c.serialized_len() as u32).to_le_bytes());
+        c.write_to(out);
     }
 }
 
@@ -364,6 +367,109 @@ pub(crate) fn varint_at(data: &[u8], at: &mut usize) -> Option<usize> {
     Some(v)
 }
 
+/// How one shard's suffixes are coded: a symbol table, or a fixed-width code over its alphabet.
+///
+/// The two are priced against each other on the shard's own bytes — its suffixes and the headers
+/// they imply, since a packed `len` counts codes and a symbol-coded one counts bytes. A shard of
+/// DNA picks the packed code and a shard of URLs the symbol table, in the same blob if the corpus
+/// holds both.
+pub(crate) enum Codec {
+    Symbols(Table),
+    Packed(Alphabet),
+}
+
+impl Codec {
+    /// Bits one unit of a coded suffix takes, which is what a header's `len` counts in.
+    #[inline(always)]
+    fn unit(&self) -> u32 {
+        match self {
+            Codec::Symbols(_) => 8,
+            Codec::Packed(a) => a.width(),
+        }
+    }
+
+    /// Appends the bytes `piece` stands for to `out`; `false` on a stream this crate did not write.
+    #[inline]
+    fn decode_into(&self, piece: Piece<'_>, out: &mut Vec<u8>) -> bool {
+        match self {
+            Codec::Symbols(t) => t.decode_into(piece.bytes(), out),
+            Codec::Packed(a) => a.decode_into(&piece.codes(a.width()), out),
+        }
+    }
+
+    /// How many leading bytes `piece` shares with `rest`, and how it orders against it — read off
+    /// the codes, nothing decoded.
+    #[inline]
+    fn compare(&self, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
+        match self {
+            Codec::Symbols(t) => compare_symbols(t, piece.bytes(), rest),
+            Codec::Packed(a) => a.compare(&piece.codes(a.width()), rest),
+        }
+    }
+
+    /// `[kind u8][payload]`, behind the `u32` length the tables section gives every shard.
+    fn serialized_len(&self) -> usize {
+        1 + match self {
+            Codec::Symbols(t) => t.serialized_len(),
+            Codec::Packed(a) => a.serialized_len(),
+        }
+    }
+
+    fn write_to(&self, out: &mut Vec<u8>) {
+        match self {
+            Codec::Symbols(t) => {
+                out.push(0);
+                t.write_to(out);
+            }
+            Codec::Packed(a) => {
+                out.push(1);
+                a.write_to(out);
+            }
+        }
+    }
+
+    fn read(bytes: &[u8]) -> Option<Self> {
+        match bytes.split_first()? {
+            (0, rest) => Table::from_bytes(rest).map(Codec::Symbols),
+            (1, rest) => Alphabet::read(rest).map(Codec::Packed),
+            _ => None,
+        }
+    }
+}
+
+/// One entry's coded suffix inside its run's stream: where it starts, in bits, and how many units
+/// it holds. A symbol-coded run starts every entry on a byte; a packed one does not, which is the
+/// last third of a byte a key on a corpus of four characters.
+#[derive(Clone, Copy)]
+struct Piece<'a> {
+    stream: &'a [u8],
+    start: usize,
+    units: usize,
+}
+
+impl<'a> Piece<'a> {
+    /// The bytes of a symbol-coded piece, bounded by what the stream holds.
+    #[inline(always)]
+    fn bytes(self) -> &'a [u8] {
+        let at = self.start / 8;
+        let end = at.saturating_add(self.units).min(self.stream.len());
+        self.stream.get(at..end).unwrap_or_default()
+    }
+
+    #[inline(always)]
+    fn codes(self, width: u32) -> packed::Codes<'a> {
+        packed::Codes::new(self.stream, self.start, width, self.units)
+    }
+
+    /// Units the stream actually holds of this piece, which is fewer than asked for only on a
+    /// stream this crate did not write.
+    #[inline(always)]
+    fn units(self, unit: u32) -> usize {
+        let left = (self.stream.len() * 8).saturating_sub(self.start);
+        self.units.min(left / unit as usize)
+    }
+}
+
 /// One block's two streams, read in order. Every entry's header is the same number of bits, and the
 /// group's code says how many, so the entry count says where the headers end and the suffixes
 /// begin: the split is derived, not stored.
@@ -376,14 +482,18 @@ struct Entries<'a> {
     sfx: &'a [u8],
     at: usize,
     count: usize,
+    /// Where the next entry's coded suffix starts, in bits — a multiple of eight under a symbol
+    /// table, and any bit under a packed alphabet.
     off: usize,
+    unit: u32,
 }
 
 impl<'a> Entries<'a> {
-    /// The entries of a run of `count` keys — `count - 1` headers — under its group's `code`. A
-    /// run this crate did not write reads as an empty one rather than panicking.
+    /// The entries of a run of `count` keys — `count - 1` headers — under its group's `code` and
+    /// its shard's `codec`. A run this crate did not write reads as an empty one rather than
+    /// panicking.
     #[inline]
-    fn of(code: &'a Code, data: &'a [u8], count: usize) -> Self {
+    fn of(code: &'a Code, codec: &Codec, data: &'a [u8], count: usize) -> Self {
         let entries = count.saturating_sub(1);
         match paircode::Reader::of(code, data, entries) {
             Some((codes, sfx)) => Self {
@@ -392,6 +502,7 @@ impl<'a> Entries<'a> {
                 at: 0,
                 count: entries,
                 off: 0,
+                unit: codec.unit(),
             },
             None => Self::empty(),
         }
@@ -406,6 +517,7 @@ impl<'a> Entries<'a> {
             at: 0,
             count: 0,
             off: 0,
+            unit: 8,
         }
     }
 
@@ -421,8 +533,12 @@ impl<'a> Entries<'a> {
         match self.codes.pair(code) {
             Some(pair) => Some(pair),
             None => {
-                let lcp = varint_at(self.sfx, &mut self.off)?;
-                let len = varint_at(self.sfx, &mut self.off)?;
+                // A pair no code could name continues as two varints at the head of its own
+                // suffix, on a byte, so that they read the same whatever width the codes are.
+                let mut at = self.off.div_ceil(8);
+                let lcp = varint_at(self.sfx, &mut at)?;
+                let len = varint_at(self.sfx, &mut at)?;
+                self.off = at * 8;
                 Some((lcp, len))
             }
         }
@@ -431,18 +547,28 @@ impl<'a> Entries<'a> {
     /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
     /// gives a short piece rather than a panic.
     #[inline(always)]
-    fn piece(&mut self, len: usize) -> &'a [u8] {
-        let end = self.off.saturating_add(len).min(self.sfx.len());
-        let piece = &self.sfx[self.off..end];
-        self.off = end;
+    fn piece(&mut self, len: usize) -> Piece<'a> {
+        let piece = self.at_off(len);
+        self.skip(len);
         piece
+    }
+
+    /// The piece `len` units long that starts where the cursor is, without moving it.
+    #[inline(always)]
+    fn at_off(&self, len: usize) -> Piece<'a> {
+        Piece {
+            stream: self.sfx,
+            start: self.off,
+            units: len,
+        }
     }
 
     /// Past that suffix without reading it — what a scan does for every entry its header rules
     /// out, and the reason the two streams are apart.
     #[inline(always)]
     fn skip(&mut self, len: usize) {
-        self.off = self.off.saturating_add(len).min(self.sfx.len());
+        let bits = len.saturating_mul(self.unit as usize);
+        self.off = self.off.saturating_add(bits).min(self.sfx.len() * 8);
     }
 }
 
@@ -462,8 +588,8 @@ struct RunSplit {
 /// The three always sum to `data`, because the codes are what is left rather than what was walked:
 /// a stream this crate did not write ends the walk early and leaves the split approximate, not the
 /// total wrong, which is the way round an accounting tool wants it.
-fn split_run(code: &Code, data: &[u8], keys: usize) -> RunSplit {
-    let mut entries = Entries::of(code, data, keys);
+fn split_run(code: &Code, codec: &Codec, data: &[u8], keys: usize) -> RunSplit {
+    let mut entries = Entries::of(code, codec, data, keys);
     let mut split = RunSplit {
         headers: entries.codes.header_bytes() as u64,
         ..RunSplit::default()
@@ -476,7 +602,9 @@ fn split_run(code: &Code, data: &[u8], keys: usize) -> RunSplit {
         };
         split.entries += 1;
         if entries.off != before {
-            split.wide_bytes += (entries.off - before) as u64;
+            // The varints start on the byte the cursor was in and end on one, whatever bit the
+            // codes before them stopped at.
+            split.wide_bytes += (entries.off / 8 - before.div_ceil(8)) as u64;
             split.wide += 1;
         }
         entries.skip(len);
@@ -497,6 +625,8 @@ struct Part {
     data: Vec<u8>,
     /// The two header codes of each shard the range covers, microblocks' first.
     codes: Vec<(Code, Code)>,
+    /// The suffix codec each of those shards settled on.
+    codecs: Vec<Codec>,
 }
 
 /// The runs of one group — one kind of run over a whole shard — as [`Code::choose`] reads them.
@@ -509,20 +639,46 @@ type Group<'a> = Vec<&'a [(usize, usize)]>;
 /// pairs, so neither can be written while the keys are still arriving — the shard is coded once
 /// here and written once after. It holds about sixteen bytes a key plus the suffixes, one shard at
 /// a time, which is a megabyte or two on the thread that is already holding the keys.
-#[derive(Default)]
 struct Collected {
-    pairs: Vec<(usize, usize)>,
-    sfx: Vec<u8>,
-    /// Pairs in each run, a block's restart run first.
+    /// Every entry's shared-prefix length, in the order the blocks are written.
+    lcps: Vec<usize>,
+    /// Every entry's suffix as the key holds it, end to end, and where each of them ends.
+    raw: Vec<u8>,
+    raw_ends: Vec<usize>,
+    /// The same suffixes under the shard's symbol table, and where each of those ends.
+    coded: Vec<u8>,
+    coded_ends: Vec<usize>,
+    /// What the suffix bytes are, which is what a packed alphabet is chosen on.
+    freq: [u64; 256],
+    /// Entries in each run, a block's restart run first.
     runs: Vec<usize>,
     /// Runs in each block, which is its microblocks plus the restart run.
     per_block: Vec<usize>,
 }
 
+impl Default for Collected {
+    fn default() -> Self {
+        Self {
+            lcps: Vec::new(),
+            raw: Vec::new(),
+            raw_ends: Vec::new(),
+            coded: Vec::new(),
+            coded_ends: Vec::new(),
+            freq: [0; 256],
+            runs: Vec::new(),
+            per_block: Vec::new(),
+        }
+    }
+}
+
 impl Collected {
     fn clear(&mut self) {
-        self.pairs.clear();
-        self.sfx.clear();
+        self.lcps.clear();
+        self.raw.clear();
+        self.raw_ends.clear();
+        self.coded.clear();
+        self.coded_ends.clear();
+        self.freq = [0; 256];
         self.runs.clear();
         self.per_block.clear();
     }
@@ -532,30 +688,108 @@ impl Collected {
         self.runs.push(0);
     }
 
-    /// Append `key` coded against `prev`, through `encoder` and `packed` as scratch.
-    fn push(&mut self, prev: &[u8], key: &[u8], encoder: &fsst::Encoder, packed: &mut Vec<u8>) {
+    /// Append `key` coded against `prev`, through `encoder` and `scratch` as scratch.
+    fn push(&mut self, prev: &[u8], key: &[u8], encoder: &fsst::Encoder, scratch: &mut Vec<u8>) {
         let l = lcp(prev, key);
-        packed.clear();
-        encoder.encode_into(&key[l..], packed);
-        self.pairs.push((l, packed.len()));
-        self.sfx.extend_from_slice(packed);
+        let raw = &key[l..];
+        self.lcps.push(l);
+        self.raw.extend_from_slice(raw);
+        self.raw_ends.push(self.raw.len());
+        for &b in raw {
+            self.freq[b as usize] += 1;
+        }
+        scratch.clear();
+        encoder.encode_into(raw, scratch);
+        self.coded.extend_from_slice(scratch);
+        self.coded_ends.push(self.coded.len());
         *self.runs.last_mut().expect("a run is open") += 1;
     }
 
+    fn entries(&self) -> usize {
+        self.lcps.len()
+    }
+
+    /// Entry `i`'s suffix as the key holds it.
+    fn raw_at(&self, i: usize) -> &[u8] {
+        let start = if i == 0 { 0 } else { self.raw_ends[i - 1] };
+        &self.raw[start..self.raw_ends[i]]
+    }
+
+    /// Entry `i`'s suffix under the symbol table.
+    fn coded_at(&self, i: usize) -> &[u8] {
+        let start = if i == 0 { 0 } else { self.coded_ends[i - 1] };
+        &self.coded[start..self.coded_ends[i]]
+    }
+
+    /// The `(lcp, len)` pairs the shard would store under `codec`, in entry order.
+    fn pairs(&self, codec: &Codec, out: &mut Vec<(usize, usize)>) {
+        out.clear();
+        out.reserve(self.entries());
+        match codec {
+            Codec::Symbols(_) => {
+                out.extend((0..self.entries()).map(|i| (self.lcps[i], self.coded_at(i).len())))
+            }
+            Codec::Packed(a) => {
+                out.extend((0..self.entries()).map(|i| (self.lcps[i], a.codes_for(self.raw_at(i)))))
+            }
+        }
+    }
+
     /// The pairs of every run, told apart by kind: the microblocks' and the restarts'.
-    fn groups(&self) -> (Group<'_>, Group<'_>) {
+    fn groups<'a>(&self, pairs: &'a [(usize, usize)]) -> (Group<'a>, Group<'a>) {
         let (mut micro, mut restart) = (Vec::new(), Vec::new());
         let mut at = 0;
         let mut r = 0;
         for &runs in &self.per_block {
             for k in 0..runs {
-                let pairs = &self.pairs[at..at + self.runs[r]];
-                if k == 0 { &mut restart } else { &mut micro }.push(pairs);
+                let run = &pairs[at..at + self.runs[r]];
+                if k == 0 { &mut restart } else { &mut micro }.push(run);
                 at += self.runs[r];
                 r += 1;
             }
         }
         (micro, restart)
+    }
+
+    /// What the shard would take under `codec`: the two header codes' bytes, the escapes they
+    /// leave, and the coded suffixes.
+    fn price(&self, codec: &Codec, pairs: &mut Vec<(usize, usize)>) -> usize {
+        self.pairs(codec, pairs);
+        let (micro, restart) = self.groups(pairs);
+        let headers = Code::choose_cost(&micro).1 + Code::choose_cost(&restart).1;
+        let suffixes = match codec {
+            Codec::Symbols(_) => self.coded.len(),
+            // The codes of a run are continuous and every run ends on a byte, which is where the
+            // rounding goes.
+            Codec::Packed(a) => {
+                let mut at = 0;
+                let mut bytes = 0;
+                for &count in &self.runs {
+                    let codes: usize = pairs[at..at + count].iter().map(|p| p.1).sum();
+                    bytes += (codes * a.width() as usize).div_ceil(8);
+                    at += count;
+                }
+                bytes
+            }
+        };
+        headers + suffixes
+    }
+
+    /// The codec the shard is cheapest under, with its pairs and its two header codes. The symbol
+    /// table is the one already trained, and it wins unless the packed alphabet beats it outright:
+    /// a tie goes to the table, whose scan reads a byte at a time rather than a code.
+    fn settle(&self, table: Table, pairs: &mut Vec<(usize, usize)>) -> (Codec, (Code, Code)) {
+        let mut codec = Codec::Symbols(table);
+        let symbols = self.price(&codec, pairs);
+        if let Some((alphabet, _)) = Alphabet::of(&self.freq) {
+            let alternative = Codec::Packed(alphabet);
+            if self.price(&alternative, pairs) < symbols {
+                codec = alternative;
+            }
+        }
+        self.pairs(&codec, pairs);
+        let (micro, restart) = self.groups(pairs);
+        (codec, (Code::choose(&micro), Code::choose(&restart)))
     }
 }
 
@@ -563,10 +797,12 @@ impl Collected {
 /// the pair the code could not name.
 fn write_run(
     code: &Code,
+    codec: &Codec,
+    collected: &Collected,
     pairs: &[(usize, usize)],
-    sfx: &[u8],
+    first: usize,
     out: &mut Vec<u8>,
-    body: &mut Vec<u8>,
+    body: &mut packed::Bits,
 ) {
     // A block whose only microblock is itself has no restarts, and an empty run is no bytes: a
     // frame would still write its prologue, and the microblock that follows starts where the
@@ -576,14 +812,26 @@ fn write_run(
     }
     let mut writer = paircode::Writer::new(code, pairs);
     body.clear();
-    let mut off = 0;
-    for &(l, len) in pairs {
-        writer.push(l, len, body);
-        body.extend_from_slice(&sfx[off..off + len]);
-        off += len;
+    let mut escape = Vec::new();
+    for (i, &(l, len)) in pairs.iter().enumerate() {
+        escape.clear();
+        writer.push(l, len, &mut escape);
+        if !escape.is_empty() {
+            // The varints of a pair no code could name sit on a byte, so that a packed run reads
+            // them the way a symbol-coded one does.
+            body.pad();
+            body.extend_from_slice(&escape);
+        }
+        match codec {
+            Codec::Symbols(_) => body.extend_from_slice(collected.coded_at(first + i)),
+            Codec::Packed(a) => {
+                let codes = a.encode_into(collected.raw_at(first + i), body);
+                debug_assert_eq!(codes, len, "a packed suffix priced at a different width");
+            }
+        }
     }
     writer.finish(out);
-    out.extend_from_slice(body);
+    body.drain_into(out);
 }
 
 /// One block's keys, collected into `runs` in the order the block is written: its restart run
@@ -594,20 +842,20 @@ fn collect_block(
     keys: &[&[u8]],
     micro: usize,
     encoder: &fsst::Encoder,
-    packed: &mut Vec<u8>,
+    scratch: &mut Vec<u8>,
 ) {
     let mut prev_restart = keys[0];
     // The restart run opens first because it is written first, and is left empty when the block is
     // a single microblock.
     collected.open();
     for keys in keys.chunks(micro).skip(1) {
-        collected.push(prev_restart, keys[0], encoder, packed);
+        collected.push(prev_restart, keys[0], encoder, scratch);
         prev_restart = keys[0];
     }
     for keys in keys.chunks(micro) {
         collected.open();
         for w in keys.windows(2) {
-            collected.push(w[0], w[1], encoder, packed);
+            collected.push(w[0], w[1], encoder, scratch);
         }
     }
     collected.per_block.push(1 + keys.len().div_ceil(micro));
@@ -617,50 +865,64 @@ fn collect_block(
 #[derive(Default)]
 struct Scratch {
     block: Vec<u8>,
-    run: Vec<u8>,
+    run: packed::Bits,
     starts: Vec<u64>,
 }
 
-/// Write one collected shard, block by block, through `sink`, growing the two start arrays. `at`
-/// is where the shard begins in the block data and is left past its end.
-///
-/// Both builds go through this: the in-memory one sinks into its part, the streamed one into the
-/// file, and the bytes are the same either way.
-fn write_shard(
-    collected: &Collected,
-    codes: &(Code, Code),
-    at: &mut u64,
-    blocks: &mut Vec<u64>,
-    micros: &mut Vec<u64>,
-    scratch: &mut Scratch,
-    sink: &mut impl FnMut(&[u8]) -> Result<(), IndexError>,
-) -> Result<(), IndexError> {
-    let (mut pair, mut off, mut r) = (0usize, 0usize, 0usize);
-    for &runs in &collected.per_block {
-        blocks.push(*at);
-        scratch.starts.clear();
-        scratch.block.clear();
-        for k in 0..runs {
-            let count = collected.runs[r];
-            let pairs = &collected.pairs[pair..pair + count];
-            let bytes: usize = pairs.iter().map(|p| p.1).sum();
-            let sfx = &collected.sfx[off..off + bytes];
-            // A microblock's start is only known once the runs before it are written, so it is
-            // taken from the block being built and rebased onto the blob here.
-            if k > 0 {
-                scratch.starts.push(*at + scratch.block.len() as u64);
+/// One shard as it is about to be written: its entries, the pairs they code to, and the two
+/// dictionaries the shard settled on.
+struct Shard<'a> {
+    collected: &'a Collected,
+    pairs: &'a [(usize, usize)],
+    codec: &'a Codec,
+    codes: &'a (Code, Code),
+}
+
+impl Shard<'_> {
+    /// Write the shard, block by block, through `sink`, growing the two start arrays. `at` is
+    /// where it begins in the block data and is left past its end.
+    ///
+    /// Both builds go through this: the in-memory one sinks into its part, the streamed one into
+    /// the file, and the bytes are the same either way.
+    fn write(
+        &self,
+        at: &mut u64,
+        blocks: &mut Vec<u64>,
+        micros: &mut Vec<u64>,
+        scratch: &mut Scratch,
+        sink: &mut impl FnMut(&[u8]) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        let (mut first, mut r) = (0usize, 0usize);
+        for &runs in &self.collected.per_block {
+            blocks.push(*at);
+            scratch.starts.clear();
+            scratch.block.clear();
+            for k in 0..runs {
+                let count = self.collected.runs[r];
+                // A microblock's start is only known once the runs before it are written, so it is
+                // taken from the block being built and rebased onto the blob here.
+                if k > 0 {
+                    scratch.starts.push(*at + scratch.block.len() as u64);
+                }
+                let code = if k == 0 { &self.codes.1 } else { &self.codes.0 };
+                write_run(
+                    code,
+                    self.codec,
+                    self.collected,
+                    &self.pairs[first..first + count],
+                    first,
+                    &mut scratch.block,
+                    &mut scratch.run,
+                );
+                first += count;
+                r += 1;
             }
-            let code = if k == 0 { &codes.1 } else { &codes.0 };
-            write_run(code, pairs, sfx, &mut scratch.block, &mut scratch.run);
-            pair += count;
-            off += bytes;
-            r += 1;
+            micros.extend_from_slice(&scratch.starts);
+            sink(&scratch.block)?;
+            *at += scratch.block.len() as u64;
         }
-        micros.extend_from_slice(&scratch.starts);
-        sink(&scratch.block)?;
-        *at += scratch.block.len() as u64;
+        Ok(())
     }
-    Ok(())
 }
 
 /// Encode a range of whole shards. `keys` must start on a shard boundary, which is what makes the
@@ -683,8 +945,10 @@ fn encode_range<S: AsRef<str>>(
         micros: Vec::with_capacity(nb * block.div_ceil(micro)),
         data: Vec::new(),
         codes: Vec::new(),
+        codecs: Vec::new(),
     };
-    let mut packed = Vec::with_capacity(64);
+    let mut coded = Vec::with_capacity(64);
+    let mut pairs = Vec::new();
     let mut scratch = Scratch::default();
     let mut collected = Collected::default();
     let mut view: Vec<&[u8]> = Vec::with_capacity(block);
@@ -700,13 +964,16 @@ fn encode_range<S: AsRef<str>>(
             part.samples.push(sample_of(head));
             view.clear();
             view.extend(chunk.iter().map(|k| k.as_ref().as_bytes()));
-            collect_block(&mut collected, &view, micro, &encoder, &mut packed);
+            collect_block(&mut collected, &view, micro, &encoder, &mut coded);
         }
-        let (micro_runs, restart_runs) = collected.groups();
-        let codes = (Code::choose(&micro_runs), Code::choose(&restart_runs));
-        write_shard(
-            &collected,
-            &codes,
+        let (codec, codes) = collected.settle(table.clone(), &mut pairs);
+        Shard {
+            collected: &collected,
+            pairs: &pairs,
+            codec: &codec,
+            codes: &codes,
+        }
+        .write(
             &mut at,
             &mut part.blocks,
             &mut part.micros,
@@ -718,6 +985,7 @@ fn encode_range<S: AsRef<str>>(
         )
         .expect("appending to a vector cannot fail");
         part.codes.push(codes);
+        part.codecs.push(codec);
     }
     part
 }
@@ -1138,8 +1406,6 @@ impl DictIndex {
         drop(arena);
         drop(spans);
 
-        let mut table_bytes = Vec::with_capacity(tables_len(&tables));
-        write_tables(&tables, &mut table_bytes);
         let mut at_shard = 0usize;
         let mut encoder = tables[0].encoder();
         let head_width = offsets::width_of(&head_ends, offsets::SHIFT);
@@ -1151,7 +1417,6 @@ impl DictIndex {
             // The header is written last: it carries the block data's length and a hash over every
             // section, and neither is known until the encoding is done.
             w.write_all(&[0u8; HEADER])?;
-            w.write_all(&table_bytes)?;
             w.write_all(&heads)?;
             w.write_all(&head_bases)?;
             w.write_all(&head_deltas)?;
@@ -1160,12 +1425,14 @@ impl DictIndex {
             // Pass three: encode. The block and microblock starts fall out of it, which is why
             // their sections were left to the end.
             let mut data_len = 0u64;
-            let mut packed = Vec::with_capacity(64);
+            let mut coded = Vec::with_capacity(64);
             // A shard's entries are coded once, from all of its runs at once, so a shard is
             // collected before any of it is written: a couple of megabytes of pairs and coded
             // suffixes, against the key stream this build exists for. Its keys are buffered a
             // block at a time, because a block is written restarts first and they arrive last.
             let mut codes: Vec<(Code, Code)> = Vec::with_capacity(shards);
+            let mut codecs: Vec<Codec> = Vec::with_capacity(shards);
+            let mut pairs = Vec::new();
             let mut collected = Collected::default();
             let mut scratch = Scratch::default();
             let mut keys: Vec<u8> = Vec::with_capacity(block * 32);
@@ -1177,16 +1444,19 @@ impl DictIndex {
             src.each(&mut |key| {
                 if i % block == 0 && i > 0 {
                     let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
-                    collect_block(&mut collected, &view, micro, &encoder, &mut packed);
+                    collect_block(&mut collected, &view, micro, &encoder, &mut coded);
                     keys.clear();
                     ends.truncate(1);
                 }
                 if i % span == 0 && i > 0 {
-                    let (micro_runs, restart_runs) = collected.groups();
-                    let pair = (Code::choose(&micro_runs), Code::choose(&restart_runs));
-                    write_shard(
-                        &collected,
-                        &pair,
+                    let (codec, pair) = collected.settle(tables[at_shard].clone(), &mut pairs);
+                    Shard {
+                        collected: &collected,
+                        pairs: &pairs,
+                        codec: &codec,
+                        codes: &pair,
+                    }
+                    .write(
                         &mut data_len,
                         &mut blocks,
                         &mut micros,
@@ -1194,6 +1464,7 @@ impl DictIndex {
                         &mut |bytes| Ok(w.write_all(bytes)?),
                     )?;
                     codes.push(pair);
+                    codecs.push(codec);
                     collected.clear();
                     at_shard = i / span;
                     encoder = tables[at_shard].encoder();
@@ -1205,13 +1476,16 @@ impl DictIndex {
             })?;
             let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
             if !view.is_empty() {
-                collect_block(&mut collected, &view, micro, &encoder, &mut packed);
+                collect_block(&mut collected, &view, micro, &encoder, &mut coded);
             }
-            let (micro_runs, restart_runs) = collected.groups();
-            let pair = (Code::choose(&micro_runs), Code::choose(&restart_runs));
-            write_shard(
-                &collected,
-                &pair,
+            let (codec, pair) = collected.settle(tables[at_shard].clone(), &mut pairs);
+            Shard {
+                collected: &collected,
+                pairs: &pairs,
+                codec: &codec,
+                codes: &pair,
+            }
+            .write(
                 &mut data_len,
                 &mut blocks,
                 &mut micros,
@@ -1219,7 +1493,12 @@ impl DictIndex {
                 &mut |bytes| Ok(w.write_all(bytes)?),
             )?;
             codes.push(pair);
-            // The codes follow the data because a shard's is only known once the shard is coded.
+            codecs.push(codec);
+            // Both dictionaries follow the data, because neither a shard's suffix codec nor its
+            // header codes is known until the shard is coded.
+            let mut table_bytes = Vec::with_capacity(codecs_len(&codecs));
+            write_codecs(&codecs, &mut table_bytes);
+            w.write_all(&table_bytes)?;
             let mut code_bytes = Vec::with_capacity(codes_len(&codes));
             write_codes(&codes, &mut code_bytes);
             w.write_all(&code_bytes)?;
@@ -1380,6 +1659,7 @@ impl DictIndex {
         let mut micros = Vec::with_capacity(parts.iter().map(|p| p.micros.len()).sum());
         let mut data = Vec::with_capacity(parts.iter().map(|p| p.data.len()).sum());
         let mut codes = Vec::with_capacity(nb.div_ceil(shard).max(1));
+        let mut codecs = Vec::with_capacity(nb.div_ceil(shard).max(1));
         // Each part is dropped as it is appended, so the two copies never coexist whole.
         for part in parts {
             let (at_head, at_data) = (heads.len() as u64, data.len() as u64);
@@ -1390,10 +1670,13 @@ impl DictIndex {
             samples.extend_from_slice(&part.samples);
             data.extend_from_slice(&part.data);
             codes.extend(part.codes);
+            codecs.extend(part.codecs);
         }
-        // An index of no keys still holds one table and one code, the pair a reader indexes into.
+        // An index of no keys still holds one codec and one pair of codes, which is what a reader
+        // indexes into.
         if codes.is_empty() {
             codes.push((Code::Frame, Code::Frame));
+            codecs.push(Codec::Symbols(tables[0].clone()));
         }
         Ok(Self {
             block,
@@ -1410,7 +1693,7 @@ impl DictIndex {
                 &micros
             }),
             data: SharedBytes::from_owned(data),
-            tables,
+            codecs,
             codes,
             shard,
         })
@@ -1436,11 +1719,11 @@ impl DictIndex {
         self.samples.len()
     }
 
-    /// The symbol table block `b` was encoded under.
+    /// The suffix codec block `b` was encoded under.
     #[inline(always)]
-    fn table_of(&self, b: usize) -> &Table {
+    fn codec_of(&self, b: usize) -> &Codec {
         let s = b / self.shard;
-        &self.tables[if s < self.tables.len() { s } else { 0 }]
+        &self.codecs[if s < self.codecs.len() { s } else { 0 }]
     }
 
     /// The header codes block `b`'s entries were written under, the microblocks' first.
@@ -1551,9 +1834,18 @@ impl DictIndex {
     /// orders against it — read off the codes, nothing decoded. A stream this crate did not write
     /// ends the suffix where it stops making sense.
     #[inline]
-    fn compare_piece(&self, table: &Table, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
-        let mut c = 0;
-        let mut i = 0;
+    fn compare_piece(&self, codec: &Codec, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
+        codec.compare(piece, rest)
+    }
+}
+
+/// [`Codec::compare`] for a symbol table: a symbol is up to eight bytes, so the compare is a word
+/// at a time rather than a byte.
+#[inline]
+fn compare_symbols(table: &Table, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
+    let mut c = 0;
+    let mut i = 0;
+    {
         while i < packed.len() {
             let (word, len) = if packed[i] == ESCAPE {
                 let Some(&b) = packed.get(i + 1) else {
@@ -1588,7 +1880,9 @@ impl DictIndex {
         };
         (c, ord)
     }
+}
 
+impl DictIndex {
     /// The rank of the first key not below `probe`, and whether that key is `probe`.
     fn locate(&self, probe: &[u8]) -> (u64, bool) {
         if self.n == 0 {
@@ -1631,7 +1925,7 @@ impl DictIndex {
     #[inline]
     fn scan_run(
         &self,
-        table: &Table,
+        codec: &Codec,
         entries: &mut Entries<'_>,
         count: usize,
         probe: &[u8],
@@ -1648,7 +1942,7 @@ impl DictIndex {
                 entries.skip(len);
                 continue;
             }
-            let (c, ord) = self.compare_piece(table, entries.piece(len), &probe[matched..]);
+            let (c, ord) = self.compare_piece(codec, entries.piece(len), &probe[matched..]);
             match ord {
                 Ordering::Equal => return (j, matched + c, true),
                 Ordering::Greater => return (j - 1, matched, false),
@@ -1667,7 +1961,7 @@ impl DictIndex {
         }
         let b = l - 1;
         let base = b * self.block;
-        let table = self.table_of(b);
+        let codec = self.codec_of(b);
         let head = self.head(b);
         if head == probe {
             return (base as u64, true);
@@ -1676,8 +1970,8 @@ impl DictIndex {
         let matched = lcp(head, probe);
         let r = self.micros_in(b);
         let (j, matched) = if r > 1 {
-            let mut restarts = Entries::of(&self.codes_of(b).1, self.restart_data(b), r);
-            let (j, matched, hit) = self.scan_run(table, &mut restarts, r, probe, matched);
+            let mut restarts = Entries::of(&self.codes_of(b).1, codec, self.restart_data(b), r);
+            let (j, matched, hit) = self.scan_run(codec, &mut restarts, r, probe, matched);
             if hit {
                 return ((base + j * self.micro) as u64, true);
             }
@@ -1686,8 +1980,8 @@ impl DictIndex {
             (0, matched)
         };
         let count = self.micro_count(b, j);
-        let mut entries = Entries::of(&self.codes_of(b).0, self.micro_data(b, j), count);
-        let (k, _, hit) = self.scan_run(table, &mut entries, count, probe, matched);
+        let mut entries = Entries::of(&self.codes_of(b).0, codec, self.micro_data(b, j), count);
+        let (k, _, hit) = self.scan_run(codec, &mut entries, count, probe, matched);
         let rank = base + j * self.micro + k + usize::from(!hit);
         (rank as u64, hit)
     }
@@ -1890,16 +2184,16 @@ impl DictIndex {
     /// Decode the next entry of a block onto `cur`, which holds the previous one, moving `at`
     /// past it; `false` on data this crate did not write.
     #[inline]
-    fn advance(&self, table: &Table, entries: &mut Entries<'_>, cur: &mut Vec<u8>) -> bool {
+    fn advance(&self, codec: &Codec, entries: &mut Entries<'_>, cur: &mut Vec<u8>) -> bool {
         let Some((l, len)) = entries.head() else {
             return false;
         };
         let piece = entries.piece(len);
-        if l > cur.len() || piece.len() != len {
+        if l > cur.len() || piece.units(codec.unit()) != len {
             return false;
         }
         cur.truncate(l);
-        table.decode_into(piece, cur)
+        codec.decode_into(piece, cur)
     }
 
     /// Take `out`, which holds a front-coded run's first key, `steps` entries along that run.
@@ -1916,14 +2210,14 @@ impl DictIndex {
     /// any depth.
     fn climb(
         &self,
-        table: &Table,
+        codec: &Codec,
         code: &Code,
         data: &[u8],
         count: usize,
         steps: usize,
         out: &mut Vec<u8>,
     ) -> bool {
-        let mut entries = Entries::of(code, data, count);
+        let mut entries = Entries::of(code, codec, data, count);
         // Where each stair's suffix sits, not the suffix itself: most entries are popped again,
         // and a span is two words to record where a slice is two words to build and bound.
         let mut stair = [(0usize, 0usize, 0usize); STAIRS];
@@ -1934,7 +2228,7 @@ impl DictIndex {
             };
             let at = entries.off;
             entries.skip(len);
-            if entries.off - at != len {
+            if entries.off - at != len * entries.unit as usize {
                 return false;
             }
             while depth > 0 && stair[depth - 1].0 >= l {
@@ -1942,19 +2236,23 @@ impl DictIndex {
             }
             if depth == STAIRS {
                 // Nothing has been written yet, so `out` still holds the run's first key.
-                let mut entries = Entries::of(code, data, count);
-                return (0..steps).all(|_| self.advance(table, &mut entries, out));
+                let mut entries = Entries::of(code, codec, data, count);
+                return (0..steps).all(|_| self.advance(codec, &mut entries, out));
             }
             stair[depth] = (l, at, len);
             depth += 1;
         }
         for &(l, at, len) in &stair[..depth] {
-            let piece = &entries.sfx[at..at + len];
+            let piece = Piece {
+                stream: entries.sfx,
+                start: at,
+                units: len,
+            };
             if l > out.len() {
                 return false;
             }
             out.truncate(l);
-            if !table.decode_into(piece, out) {
+            if !codec.decode_into(piece, out) {
                 return false;
             }
         }
@@ -1979,11 +2277,11 @@ impl DictIndex {
         let off = id % self.block;
         let (j, steps) = (off / self.micro, off % self.micro);
         out.extend_from_slice(self.head(b));
-        let table = self.table_of(b);
+        let codec = self.codec_of(b);
         let codes = self.codes_of(b);
         if j > 0
             && !self.climb(
-                table,
+                codec,
                 &codes.1,
                 self.restart_data(b),
                 self.micros_in(b),
@@ -1994,7 +2292,7 @@ impl DictIndex {
             return false;
         }
         self.climb(
-            table,
+            codec,
             &codes.0,
             self.micro_data(b, j),
             self.micro_count(b, j),
@@ -2066,6 +2364,7 @@ impl DictIndex {
                 let (b, j) = (at / self.block, at % self.block / self.micro);
                 entries = Entries::of(
                     &self.codes_of(b).0,
+                    self.codec_of(b),
                     self.micro_data(b, j),
                     self.micro_count(b, j),
                 );
@@ -2073,7 +2372,7 @@ impl DictIndex {
             }
             let mut ok = true;
             while consumed < j && ok {
-                ok = self.advance(self.table_of(at / self.block), &mut entries, &mut buf);
+                ok = self.advance(self.codec_of(at / self.block), &mut entries, &mut buf);
                 consumed += 1;
             }
             if !ok {
@@ -2212,32 +2511,38 @@ impl DictIndex {
                 // restart run to its microblock and that microblock to the key.
                 restart.clear();
                 restart.extend_from_slice(self.head(b));
-                restarts =
-                    Entries::of(&self.codes_of(b).1, self.restart_data(b), self.micros_in(b));
+                restarts = Entries::of(
+                    &self.codes_of(b).1,
+                    self.codec_of(b),
+                    self.restart_data(b),
+                    self.micros_in(b),
+                );
                 primed = true;
                 let ok =
-                    (0..j).all(|_| self.advance(self.table_of(b), &mut restarts, &mut restart));
+                    (0..j).all(|_| self.advance(self.codec_of(b), &mut restarts, &mut restart));
                 cur.clear();
                 cur.extend_from_slice(&restart);
                 entries = Entries::of(
                     &self.codes_of(b).0,
+                    self.codec_of(b),
                     self.micro_data(b, j),
                     self.micro_count(b, j),
                 );
-                ok && (0..k).all(|_| self.advance(self.table_of(b), &mut entries, &mut cur))
+                ok && (0..k).all(|_| self.advance(self.codec_of(b), &mut entries, &mut cur))
             } else if k == 0 {
                 // The next microblock opens on the next restart, not on the key just returned.
-                let ok = self.advance(self.table_of(b), &mut restarts, &mut restart);
+                let ok = self.advance(self.codec_of(b), &mut restarts, &mut restart);
                 cur.clear();
                 cur.extend_from_slice(&restart);
                 entries = Entries::of(
                     &self.codes_of(b).0,
+                    self.codec_of(b),
                     self.micro_data(b, j),
                     self.micro_count(b, j),
                 );
                 ok
             } else {
-                self.advance(self.table_of(b), &mut entries, &mut cur)
+                self.advance(self.codec_of(b), &mut entries, &mut cur)
             };
             if !ok {
                 id = self.n; // a stream this crate did not write ends the walk
@@ -2256,9 +2561,6 @@ impl DictIndex {
         &self,
         mut f: impl FnMut(&[u8]) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
-        let mut tables = Vec::with_capacity(tables_len(&self.tables));
-        write_tables(&self.tables, &mut tables);
-        f(&tables)?;
         f(&self.heads)?;
         for section in self.head_ends.sections() {
             f(section)?;
@@ -2272,6 +2574,9 @@ impl DictIndex {
             f(&buf)?;
         }
         f(&self.data)?;
+        let mut tables = Vec::with_capacity(codecs_len(&self.codecs));
+        write_codecs(&self.codecs, &mut tables);
+        f(&tables)?;
         let mut codes = Vec::with_capacity(codes_len(&self.codes));
         write_codes(&self.codes, &mut codes);
         f(&codes)?;
@@ -2297,7 +2602,7 @@ impl DictIndex {
         h[12..16].copy_from_slice(&(self.block as u32).to_le_bytes());
         h[16..24].copy_from_slice(&(self.heads.len() as u64).to_le_bytes());
         h[24..32].copy_from_slice(&(self.data.len() as u64).to_le_bytes());
-        h[32..36].copy_from_slice(&(tables_len(&self.tables) as u32).to_le_bytes());
+        h[32..36].copy_from_slice(&(codecs_len(&self.codecs) as u32).to_le_bytes());
         h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
         h[44] = self.head_ends.width() as u8;
         h[45] = self.blocks.width() as u8;
@@ -2332,7 +2637,7 @@ impl DictIndex {
     /// [`serialized_len`](Self::serialized_len).
     pub(crate) fn section_lens(&self) -> [usize; 4] {
         [
-            tables_len(&self.tables) + codes_len(&self.codes),
+            codecs_len(&self.codecs) + codes_len(&self.codes),
             self.heads.len(),
             self.blocks_len() * 8 + self.head_ends.len() + self.blocks.len() + self.micros.len(),
             self.data.len(),
@@ -2347,7 +2652,7 @@ impl DictIndex {
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.
     pub fn serialized_len(&self) -> usize {
         HEADER
-            + tables_len(&self.tables)
+            + codecs_len(&self.codecs)
             + codes_len(&self.codes)
             + self.heads.len()
             + self.blocks_len() * 8
@@ -2373,7 +2678,7 @@ impl DictIndex {
     pub fn sections(&self) -> DictSections {
         let mut s = DictSections {
             header: HEADER as u64,
-            tables: tables_len(&self.tables) as u64,
+            tables: codecs_len(&self.codecs) as u64,
             header_codes: codes_len(&self.codes) as u64,
             heads: self.heads.len() as u64,
             samples: (self.blocks_len() * 8) as u64,
@@ -2386,7 +2691,12 @@ impl DictIndex {
             let micros = self.micros_in(b);
             // A block that is one microblock stores no restart run, and its region is empty.
             if micros > 1 {
-                let run = split_run(&self.codes_of(b).1, self.restart_data(b), micros);
+                let run = split_run(
+                    &self.codes_of(b).1,
+                    self.codec_of(b),
+                    self.restart_data(b),
+                    micros,
+                );
                 s.restart_headers += run.headers;
                 s.restart_wide += run.wide_bytes;
                 s.restart_codes += run.codes;
@@ -2396,6 +2706,7 @@ impl DictIndex {
             for j in 0..micros {
                 let run = split_run(
                     &self.codes_of(b).0,
+                    self.codec_of(b),
                     self.micro_data(b, j),
                     self.micro_count(b, j),
                 );
@@ -2506,25 +2817,6 @@ impl DictIndex {
             blob.subslice(at - len, at)
                 .expect("the sections add up to the blob")
         };
-        let tables = {
-            let section = take(table_len);
-            let bad = || IndexError::Format("dict: bad symbol table");
-            let mut tables = Vec::new();
-            let mut at = 0usize;
-            for _ in 0..shards {
-                let len = section
-                    .get(at..at + 4)
-                    .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
-                    .ok_or_else(bad)?;
-                let raw = section.get(at + 4..at + 4 + len).ok_or_else(bad)?;
-                tables.push(Table::from_bytes(raw).ok_or_else(bad)?);
-                at += 4 + len;
-            }
-            if at != section.len() {
-                return Err(bad());
-            }
-            tables
-        };
         let heads = take(heads_len);
         let head_ends = Offsets::new(
             take(offsets::bases_len(nb, shift)),
@@ -2537,6 +2829,25 @@ impl DictIndex {
             .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
             .collect();
         let data = take(data_len);
+        let codecs = {
+            let section = take(table_len);
+            let bad = || IndexError::Format("dict: bad symbol table");
+            let mut codecs = Vec::with_capacity(shards);
+            let mut at = 0usize;
+            for _ in 0..shards {
+                let len = section
+                    .get(at..at + 4)
+                    .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
+                    .ok_or_else(bad)?;
+                let raw = section.get(at + 4..at + 4 + len).ok_or_else(bad)?;
+                codecs.push(Codec::read(raw).ok_or_else(bad)?);
+                at += 4 + len;
+            }
+            if at != section.len() {
+                return Err(bad());
+            }
+            codecs
+        };
         let codes = {
             let section = take(codes_len);
             let bad = || IndexError::Format("dict: bad header code");
@@ -2576,7 +2887,7 @@ impl DictIndex {
             blocks,
             micros,
             data,
-            tables,
+            codecs,
             codes,
             shard,
         };
@@ -3437,6 +3748,68 @@ mod tests {
         }
     }
 
+    /// A corpus of four characters is what the packed alphabet exists for: it must be the codec
+    /// the build settles on, every key must still answer, and the blob must survive a round trip —
+    /// the codes of a run are continuous, so an entry starts mid-byte and a reader that assumed
+    /// bytes would read the neighbour's.
+    #[test]
+    fn a_four_letter_corpus_packs_its_suffixes_and_still_answers() {
+        let mut keys: Vec<String> = (0..4000u32)
+            .map(|i| {
+                (0..12)
+                    .map(|k| b"ACGT"[(i as usize >> (2 * k)) & 3] as char)
+                    .collect()
+            })
+            .collect();
+        keys.sort();
+        keys.dedup();
+        for block in [4usize, 32, 256] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            assert!(
+                idx.codecs.iter().all(|c| matches!(c, Codec::Packed(_))),
+                "block {block}"
+            );
+            check(&idx, &keys);
+            let blob = idx.to_bytes();
+            assert_eq!(blob.len(), idx.serialized_len(), "block {block}");
+            let back = DictIndex::from_bytes(&blob).unwrap();
+            assert_eq!(back.to_bytes(), blob, "block {block}");
+            check(&back, &keys);
+            // A packed blob is smaller than the same keys under the symbol table, which is the
+            // only reason the tier exists.
+            assert!(
+                blob.len() < keys.iter().map(String::len).sum::<usize>(),
+                "block {block}"
+            );
+        }
+    }
+
+    /// A corpus of one shape does not force the other's shards: a blob holding both must pick per
+    /// shard, and every key of both must answer.
+    #[test]
+    fn two_shapes_in_one_blob_settle_on_their_own_codecs() {
+        let _held = Shards::of(1);
+        let mut keys: Vec<String> = (0..600u32)
+            .map(|i| format!("https://example.com/a/{i:09}/index.html"))
+            .collect();
+        keys.extend((0..600u32).map(|i| {
+            (0..14)
+                .map(|k| b"ACGT"[(i as usize >> (2 * k)) & 3] as char)
+                .collect::<String>()
+        }));
+        keys.sort();
+        keys.dedup();
+        let idx = DictIndex::build_with_block(&keys, 64).unwrap();
+        let packed = idx
+            .codecs
+            .iter()
+            .filter(|c| matches!(c, Codec::Packed(_)))
+            .count();
+        assert!(packed > 0 && packed < idx.codecs.len(), "{packed} shards");
+        check(&idx, &keys);
+        check(&DictIndex::from_bytes(&idx.to_bytes()).unwrap(), &keys);
+    }
+
     #[test]
     fn a_table_a_shard_answers_every_key_and_survives_the_blob() {
         let keys = corpus();
@@ -3445,11 +3818,11 @@ mod tests {
                 let _held = Shards::of(shard);
                 let idx = DictIndex::build_with_block(&keys, block).unwrap();
                 let want = keys.len().div_ceil(block).div_ceil(shard).max(1);
-                assert_eq!(idx.tables.len(), want, "block {block}, shard {shard}");
+                assert_eq!(idx.codecs.len(), want, "block {block}, shard {shard}");
                 assert_eq!(idx.shard, shard);
                 check(&idx, &keys);
                 let back = DictIndex::from_bytes(&idx.to_bytes()).unwrap();
-                assert_eq!(back.tables.len(), want);
+                assert_eq!(back.codecs.len(), want);
                 check(&back, &keys);
             }
         }
@@ -3576,26 +3949,40 @@ mod tests {
         let mut sfx = Vec::from([b'a'; 14]);
         sfx.extend_from_slice(b"bcd");
         let code = Code::choose(&[&pairs[..]]);
-        let (mut data, mut body) = (Vec::new(), Vec::new());
-        write_run(&code, &pairs, &sfx, &mut data, &mut body);
-        let mut entries = Entries::of(&code, &data, 3);
+        // The run laid out by hand — the production writer, interleaved here rather than through
+        // a whole shard, because what is under test is the reader and its bounds.
+        let data = {
+            let mut writer = paircode::Writer::new(&code, &pairs);
+            let (mut out, mut body) = (Vec::new(), Vec::new());
+            let mut off = 0;
+            for &(l, len) in &pairs {
+                writer.push(l, len, &mut body);
+                body.extend_from_slice(&sfx[off..off + len]);
+                off += len;
+            }
+            writer.finish(&mut out);
+            out.extend_from_slice(&body);
+            out
+        };
+        let codec = Codec::Symbols(Table::default());
+        let mut entries = Entries::of(&code, &codec, &data, 3);
         assert_eq!(entries.head(), Some((14, 14)));
-        assert_eq!(entries.piece(14), &[b'a'; 14]);
+        assert_eq!(entries.piece(14).bytes(), &[b'a'; 14]);
         assert_eq!(entries.head(), Some((15, 3)));
-        assert_eq!(entries.piece(3), b"bcd");
+        assert_eq!(entries.piece(3).bytes(), b"bcd");
         assert_eq!(entries.head(), None);
         // A stream that stops mid-entry gives short answers, never a panic.
-        assert_eq!(Entries::of(&code, &[], 1).head(), None);
-        assert_eq!(Entries::of(&code, &[], 2).head(), None);
-        let mut cut = Entries::of(&code, &data[..data.len() - 2], 3);
+        assert_eq!(Entries::of(&code, &codec, &[], 1).head(), None);
+        assert_eq!(Entries::of(&code, &codec, &[], 2).head(), None);
+        let mut cut = Entries::of(&code, &codec, &data[..data.len() - 2], 3);
         assert_eq!(cut.head(), Some((14, 14)));
-        assert_eq!(cut.piece(14), &[b'a'; 14]);
+        assert_eq!(cut.piece(14).bytes(), &[b'a'; 14]);
         assert_eq!(cut.head(), Some((15, 3)));
-        assert_eq!(cut.piece(3), b"b");
-        let mut past = Entries::of(&code, &data, 3);
+        assert_eq!(cut.piece(3).bytes(), b"b");
+        let mut past = Entries::of(&code, &codec, &data, 3);
         assert_eq!(past.head(), Some((14, 14)));
         past.skip(usize::MAX);
-        assert_eq!(past.piece(1), b"");
+        assert_eq!(past.piece(1).bytes(), b"");
     }
 
     #[test]
@@ -3615,6 +4002,7 @@ mod tests {
 
     /// Where every section of a blob starts, read out of its own header.
     struct Layout {
+        codecs: usize,
         head_bases: usize,
         head_deltas: usize,
         samples: usize,
@@ -3648,11 +4036,12 @@ mod tests {
             _ if micro >= block => 0,
             nb => (nb - 1) * block.div_ceil(micro) + (n - (nb - 1) * block).div_ceil(micro),
         };
-        let head_bases = HEADER + table_len + u64_at(16);
+        let head_bases = HEADER + u64_at(16);
         let head_deltas = head_bases + offsets::bases_len(nb, shift);
         let samples = head_deltas + offsets::deltas_len(nb, head_width);
         let data = samples + nb * 8;
-        let codes = data + u64_at(24);
+        let codecs = data + u64_at(24);
+        let codes = codecs + table_len;
         let block_bases = codes + u32::from_le_bytes(blob[52..56].try_into().unwrap()) as usize;
         let block_deltas = block_bases + offsets::bases_len(nb, shift);
         let micro_bases = block_deltas + offsets::deltas_len(nb, block_width);
@@ -3662,6 +4051,7 @@ mod tests {
             blob.len()
         );
         Layout {
+            codecs,
             head_bases,
             head_deltas,
             samples,
@@ -3783,8 +4173,8 @@ mod tests {
             &|b| b[50..52].copy_from_slice(&0u16.to_le_bytes()),
             "symbol-table shard out of range",
         );
-        edited(&|b| b[HEADER] = 255, "bad symbol table");
-        edited(&|b| b[HEADER + 1] = 0, "bad symbol table");
+        edited(&|b| b[l.codecs] = 255, "bad symbol table");
+        edited(&|b| b[l.codecs + 4] = 255, "bad symbol table");
         edited(
             &|b| set_base(b, l.head_bases, 0, u64::MAX),
             "head table out of order",
@@ -3837,9 +4227,8 @@ mod tests {
 
         let empty = DictIndex::build(Vec::<String>::new()).unwrap().to_bytes();
         let mut b = empty.clone();
-        let table_len = u32::from_le_bytes(b[32..36].try_into().unwrap()) as usize;
         b[16..24].copy_from_slice(&1u64.to_le_bytes());
-        b.insert(HEADER + table_len, b'k');
+        b.insert(HEADER, b'k');
         reframe(&mut b);
         refused(&b, "empty index with key bytes");
     }
