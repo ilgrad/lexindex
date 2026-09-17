@@ -384,7 +384,7 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
         lexindex.DictIndex(words, 1025)
     di = lexindex.DictIndex(words)
     blob = di.to_bytes()
-    assert blob[:4] == b"BDX2" and len(blob) == di.serialized_len() < 4.5 * len(words)
+    assert blob[:4] == b"BDX3" and len(blob) == di.serialized_len() < 4.5 * len(words)
     back = lexindex.DictIndex.from_bytes(blob)
     assert back.ids_of(words[:100]) == list(range(100)) and back.to_bytes() == blob
     p = tmp_path / "words.bdx"  # a pathlib.Path, not a str
@@ -1405,7 +1405,7 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
         (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP8"),
         (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH8"),
         (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL2"),
-        (lexindex.DictIndex(keys), "DictIndex", "BDX2"),
+        (lexindex.DictIndex(keys), "DictIndex", "BDX3"),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)

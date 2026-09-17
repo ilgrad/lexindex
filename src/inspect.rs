@@ -170,7 +170,7 @@ fn info(kind: BlobKind, format: String, bytes: u64, keys: u64) -> BlobInfo {
 }
 
 /// `whole - parts`, or the truncation error when the parts do not fit.
-fn rest(whole: u64, parts: [u64; 3]) -> Result<u64, IndexError> {
+fn rest<const N: usize>(whole: u64, parts: [u64; N]) -> Result<u64, IndexError> {
     parts
         .iter()
         .try_fold(whole, |acc, &p| acc.checked_sub(p))
@@ -224,12 +224,19 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
-        b"BDX1" | b"BDX2" => {
-            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in both,
-            // then the offset widths and the microblock size `BDX2` added. A blob this version
-            // refuses to load still says what it is here.
+        b"BDX1" | b"BDX2" | b"BDX3" => {
+            // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in all
+            // three, then the offset widths and the microblock size `BDX2` added, and the header
+            // codes `BDX3` did. A blob this version refuses to load still says what it is here.
             let one = &magic == b"BDX1";
-            let header: u64 = if one { 48 } else { 56 };
+            let three = &magic == b"BDX3";
+            let header: u64 = if one {
+                48
+            } else if three {
+                60
+            } else {
+                56
+            };
             w.bytes(0, header as usize)?;
             let (n, block) = (w.u64(4)?, u64::from(w.u32(12)?));
             let (heads, data, table) = (w.u64(16)?, w.u64(24)?, u64::from(w.u32(32)?));
@@ -283,7 +290,9 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
                     .and_then(|s| s.checked_add(packed(micros, widths[3])?))
                     .ok_or(TRUNCATED)?
             };
-            rest(bytes, [header + table, keyed, arrays])?;
+            // One header code a shard and a kind, between the block data and the arrays.
+            let codes = if three { u64::from(w.u32(52)?) } else { 0 };
+            rest(bytes, [header + table, keyed, codes, arrays])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" | b"MPH3" => {
@@ -566,7 +575,7 @@ mod tests {
         let i = inspect(&blob).unwrap();
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.bytes),
-            (BlobKind::DictIndex, "BDX2", Some(300), blob.len() as u64)
+            (BlobKind::DictIndex, "BDX3", Some(300), blob.len() as u64)
         );
         assert_eq!(
             (i.mph_bytes, i.side_entries, i.fingerprint_bits),

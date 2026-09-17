@@ -84,6 +84,7 @@ mod fsst;
 mod inspect;
 mod offsets;
 mod overlay;
+mod paircode;
 mod string_index;
 mod subsequence;
 

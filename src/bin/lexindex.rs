@@ -826,6 +826,7 @@ fn print_sections(index: &DictIndex, out: &mut dyn Write) -> Result<(), Fail> {
     for (name, bytes) in [
         ("header", s.header),
         ("tables", s.tables),
+        ("header_codes", s.header_codes),
         ("heads", s.heads),
         ("samples", s.samples),
         ("head_ends", s.head_ends),
@@ -1765,6 +1766,7 @@ mod tests {
         let parts = [
             "header",
             "tables",
+            "header_codes",
             "heads",
             "samples",
             "head_ends",
