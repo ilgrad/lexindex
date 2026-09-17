@@ -147,6 +147,12 @@ All notable changes to this project are documented here. The format follows
   a prefetch cannot fault — a compare and a branch a key. Measured in one process against the loop
   before, A-B-A-B on a hot machine: 3–7 % faster from 3 M to 60 M keys, **22 % at 100 M, 19 % at
   300 M and 17 % at a billion** (10.3 → 8.5 ns/key), 3–7 % on eight threads from 100 M up.
+- **A lookup reads its seed's mode from a table.** A seed's top two bits pick which field of the
+  hash is a key's offset, and the lookup decoded them into a shift on every placed key: a copy of
+  the seed, a shift and a mask. A 256-byte table indexed by the seed holds the shift instead, one
+  load from lines that stay in L1. Measured against the lookup before, processes alternated A-B-B-A
+  on a hot machine, fat LTO: a single lookup **12 % faster at 10 M keys, 7 % at 100 M and 9 % at a
+  billion** (18.6 → 16.9 ns), a loop collecting ids 8 %, and `index_all` 1–5 %.
 
 - **Measured against PtrHash and PHast on a cool machine, with two faults in the comparison
   harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process,
