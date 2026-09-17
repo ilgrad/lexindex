@@ -9,10 +9,13 @@
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-/// The backing store for a [`SharedBytes`]: an owned heap buffer or a read-only memory map.
+use crate::pages::Pages;
+
+/// The backing store for a [`SharedBytes`]: an owned buffer, on huge pages from 2 MiB up, or a
+/// read-only memory map.
 #[derive(Clone)]
 enum Source {
-    Owned(Arc<[u8]>),
+    Owned(Arc<Pages<u8>>),
     #[cfg(feature = "mmap")]
     Mapped(Arc<memmap2::Mmap>),
 }
@@ -52,9 +55,22 @@ impl SharedBytes {
         Self { src, ptr, len }
     }
 
-    /// Wrap an owned buffer (one heap copy at the boundary; querying never copies again).
+    /// Wrap a table built in place, without a copy.
+    pub(crate) fn from_pages(pages: Pages<u8>) -> Self {
+        Self::whole(Source::Owned(Arc::new(pages)))
+    }
+
+    /// A copy of `bytes` (one copy at the boundary; querying never copies again), on huge pages
+    /// from 2 MiB up: an index's arrays are read at random, and on small pages each read of one
+    /// past the TLB's reach is a page walk first — 8–11 % of a `PerfectHashIndex::id` at 10 M
+    /// keys, 10–16 % of a `key`.
+    pub(crate) fn copy_of(bytes: &[u8]) -> Self {
+        Self::from_pages(Pages::from_slice(bytes))
+    }
+
+    /// [`copy_of`](Self::copy_of) an owned buffer, which is freed once copied.
     pub(crate) fn from_owned(bytes: Vec<u8>) -> Self {
-        Self::whole(Source::Owned(Arc::from(bytes.into_boxed_slice())))
+        Self::copy_of(&bytes)
     }
 
     /// Wrap a read-only memory map — the zero-copy path. The `Arc` keeps the map alive for as long as
@@ -411,6 +427,24 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"payload"); // save landed
         assert_eq!(std::fs::read(&victim).unwrap(), b"do not truncate me"); // victim untouched
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_owned_view_of_a_huge_page_or_more_starts_on_a_huge_page_boundary() {
+        use crate::pages::HUGE;
+        for len in [HUGE - 1, HUGE, 2 * HUGE + 17] {
+            // Filled and compared whole, not byte by byte: miri runs this too.
+            let mut bytes = vec![0xa5; len];
+            bytes[len - 1] = 1;
+            let owned = SharedBytes::from_owned(bytes.clone());
+            let copied = SharedBytes::copy_of(&bytes);
+            assert_eq!((owned.as_ref(), copied.as_ref()), (&bytes[..], &bytes[..]));
+            let aligned = |v: &SharedBytes| v.as_ptr() as usize % HUGE == 0;
+            assert_eq!(
+                (aligned(&owned), aligned(&copied)),
+                (len >= HUGE, len >= HUGE)
+            );
+        }
     }
 
     #[test]

@@ -2219,7 +2219,7 @@ impl DictIndex {
     /// crafted blob is at worst *wrong* — a key that is not the one built, a shorter walk —
     /// never out of bounds. The block data itself is read with every access bounded.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        Self::from_shared(SharedBytes::copy_of(bytes), true)
     }
 
     /// The loader behind every way in. The framing — magic, header checksum, block size, the
@@ -2439,7 +2439,7 @@ impl DictIndex {
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_load_and_query(bytes: &[u8]) -> bool {
         let checked = Self::from_bytes(bytes).ok();
-        let framed = Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), false).ok();
+        let framed = Self::from_shared(SharedBytes::copy_of(bytes), false).ok();
         assert!(
             checked.is_none() || framed.is_some(),
             "the framing is the checked path's"

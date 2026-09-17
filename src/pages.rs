@@ -36,6 +36,7 @@ pub(crate) struct Pages<T> {
 
 impl<T: Zeroed> Pages<T> {
     /// `len` zeros.
+    #[cfg_attr(not(feature = "mph"), allow(dead_code))]
     pub(crate) fn zeroed(len: usize) -> Self {
         let table = Self::uninit(len);
         // SAFETY: `ptr` is `len` writable `T`s of the table's own allocation, and zero is a `T`.

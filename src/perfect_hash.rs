@@ -781,7 +781,7 @@ impl PerfectHashIndex {
     /// verify a streaming checksum of the whole payload, which is what turns accidental corruption
     /// into a clean error rather than a wrong answer.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        Self::from_shared(SharedBytes::copy_of(bytes), true)
     }
 
     /// The lexindex framing of `blob`, parsed and bounds-validated — magic, header checksum, the
@@ -794,7 +794,7 @@ impl PerfectHashIndex {
     /// type). See the `lexindex::fuzzing` module.
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_parse_frame(bytes: &[u8], verify: bool) -> bool {
-        Self::parse_frame(&SharedBytes::from_owned(bytes.to_vec()), verify).is_ok()
+        Self::parse_frame(&SharedBytes::copy_of(bytes), verify).is_ok()
     }
 
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {

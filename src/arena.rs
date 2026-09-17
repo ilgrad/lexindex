@@ -450,7 +450,7 @@ impl StringArena {
     /// [`StringArena::from_shared`] (owned or memory-mapped).
     #[cfg(test)]
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()))
+        Self::from_shared(SharedBytes::copy_of(bytes))
     }
 
     /// View a shared blob without copying, validating the header (untrusted input): the tag must be

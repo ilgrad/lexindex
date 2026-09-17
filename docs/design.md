@@ -131,7 +131,10 @@ huge page or more is allocated on a 2 MiB boundary and advised `MADV_HUGEPAGE` b
 write, so a Linux kernel with transparent huge pages at `madvise` — the common default — or
 `always` backs it with 2 MiB pages from the first touch. The advice is best effort: where it is
 refused the table sits on small pages and reads the same, a table below 2 MiB is an ordinary
-allocation, and the file-backed tables of `load_mmap` are outside its reach.
+allocation, and the file-backed tables of `load_mmap` are outside its reach. The byte arrays an
+index owns around it — a `PerfectHashIndex`'s arena, a `CompactHashIndex`'s fingerprints, a
+`DictIndex`'s blocks — are allocated the same way, built or loaded from bytes: at 10 M keys a
+`PerfectHashIndex::id` reads its arena 8–11 % faster for it, and a `key` 10–16 %.
 
 **Blobs from before 2.0 are refused, by name.** Every slot in a `BMP5`, `BMP6` or `BCH6` blob is
 keyed on the 1.0 hash, a value this version does not compute — loaded under the new hash it would

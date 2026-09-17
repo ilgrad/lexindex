@@ -61,7 +61,6 @@
 mod blob;
 #[cfg(feature = "mph")]
 mod mphf;
-#[cfg(feature = "mph")]
 mod pages;
 /// The key hash the hash indexes feed it, for the same harness to hash string keys the way
 /// `ClosedHashIndex` does. A measurement export on the same terms.

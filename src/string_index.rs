@@ -652,7 +652,7 @@ impl StringIndex {
     /// with an `Err`, and this one may panic instead. Blobs from an untrusted source go through
     /// [`from_untrusted_bytes`](Self::from_untrusted_bytes), which makes that check.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        Self::from_shared(SharedBytes::copy_of(bytes), true)
     }
 
     /// Reconstruct from bytes **someone else wrote**, validating the transducer before any query
@@ -702,7 +702,7 @@ impl StringIndex {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn from_untrusted_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared_untrusted(SharedBytes::from_owned(bytes.to_vec()))
+        Self::from_shared_untrusted(SharedBytes::copy_of(bytes))
     }
 
     /// [`from_untrusted_bytes`](Self::from_untrusted_bytes) over any byte source: the owned copy

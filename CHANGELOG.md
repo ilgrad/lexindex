@@ -153,6 +153,23 @@ All notable changes to this project are documented here. The format follows
   load from lines that stay in L1. Measured against the lookup before, processes alternated A-B-B-A
   on a hot machine, fat LTO: a single lookup **12 % faster at 10 M keys, 7 % at 100 M and 9 % at a
   billion** (18.6 → 16.9 ns), a loop collecting ids 8 %, and `index_all` 1–5 %.
+- **An index's own arrays ask for huge pages too, and `from_bytes` copies a blob once.** The
+  perfect hash's tables were on 2 MiB pages, but the arrays around them sat on 4 KiB pages, and a
+  `PerfectHashIndex` arena of a few hundred megabytes read at random missed the TLB twice a
+  lookup, for the key's offset and for its bytes. Every byte array an index owns — the arena, a
+  `CompactHashIndex`'s fingerprints, a `DictIndex`'s blocks, a `StringIndex`'s transducer — is
+  now allocated as those tables are, on a 2 MiB boundary from a huge page up and advised before
+  its first write. The fingerprint table is built in place, and `from_bytes` copies the blob
+  once, where it copied it into a `Vec` and then into an `Arc`. Measured at 10 M URLs, UUIDs and
+  Wikipedia titles, processes alternated A-B-B-A against the build before on a hot machine, fat
+  LTO: `PerfectHashIndex::id` **8–11 % faster**, `ids_of` 4–14 % and `key` **10–16 %**, built or
+  loaded; its build 7–12 % faster, and `from_bytes` **4.6–4.8×** (0.86 → 0.19 s on 10 M URLs —
+  2.1× of that is the copy saved, measured with huge pages off).
+  `DictIndex::id` 2–5 % and `key_into` 2–6 % faster, its batch within 1 % with huge pages on and
+  off in one build; `CompactHashIndex::id` 1–2 %, its fingerprint table being one line a lookup.
+  The arena gains from 480 k words and 1 M URLs up (`id` 5–10 %, `key` 5–12 %); nothing
+  below 2 MiB moves — `CompactHashIndex` at 1 M keys, `ClosedHashIndex` at any size — and build
+  peaks are unchanged. A mapped index reads its file's pages, as before.
 
 - **Measured against PtrHash and PHast on a cool machine, with two faults in the comparison
   harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process,

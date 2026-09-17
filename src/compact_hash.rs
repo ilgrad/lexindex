@@ -14,6 +14,7 @@ use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::hash::{fingerprint_full, hash_key, hash_pair, hash_pair_bytes};
 use crate::mphf::Mphf;
+use crate::pages::Pages;
 
 /// Every format before this one embedded `ptr_hash`'s `epserde` image, whose private fields no
 /// loader could validate — and this index, storing no keys, could not even recompute the bound that
@@ -997,7 +998,7 @@ impl CompactHashIndex {
         }
         let mut reps = pairs.chunk_by(|a, b| a.0 == b.0).map(|run| run[0].0);
         let mph = Mphf::build_from_sorted(m as u64, &mut reps, threads)?;
-        let mut fps = vec![0u8; fp_table_len(m, fingerprint_bits)?];
+        let mut fps = Pages::zeroed(fp_table_len(m, fingerprint_bits)?);
         // One bit per slot, not one byte: this only has to catch a construction that was not
         // minimal/perfect, and at 100 M keys a `Vec<bool>` would be 100 MB of the peak.
         let mut seen = vec![0u64; m.div_ceil(64)];
@@ -1027,7 +1028,7 @@ impl CompactHashIndex {
         drop(pairs);
         Ok(Self {
             mph: Some(mph),
-            fps: SharedBytes::from_owned(fps),
+            fps: SharedBytes::from_pages(fps),
             fp_bits: fingerprint_bits,
             n,
             side,
@@ -1560,7 +1561,7 @@ impl CompactHashIndex {
     /// a streaming checksum of the whole payload, which is what turns accidental corruption into a
     /// clean error rather than a wrong answer.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
-        Self::from_shared(SharedBytes::from_owned(bytes.to_vec()), true)
+        Self::from_shared(SharedBytes::copy_of(bytes), true)
     }
 
     /// The lexindex framing of `blob`, parsed and bounds-validated — magic, header checksum, the
@@ -1573,7 +1574,7 @@ impl CompactHashIndex {
     /// type). See the `lexindex::fuzzing` module.
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_parse_frame(bytes: &[u8], verify: bool) -> bool {
-        Self::parse_frame(&SharedBytes::from_owned(bytes.to_vec()), verify).is_ok()
+        Self::parse_frame(&SharedBytes::copy_of(bytes), verify).is_ok()
     }
 
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
