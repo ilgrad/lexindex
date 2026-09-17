@@ -2774,7 +2774,7 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
     let mut live = vec![0u64; end as usize / 64 + 1];
     let lanes = LaneForm::new(level, origin);
     let mut scratch = Scratch::new();
-    let mut mates = [0u16; 64];
+    let mut lane_scratch = LaneScratch::new();
     let (mut front, mut pushed, mut cursor) = (0u32, 0u32, 0usize);
     loop {
         // The lowest bucket queued, else the first with keys among those not yet pushed.
@@ -2817,9 +2817,9 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
         live[(b / 64) as usize] &= !(1 << (b % 64));
         let ks = run.keys_of(b);
         let fast = lanes.as_ref().and_then(|form| match ks.len() {
-            1..=4 => seed_bucket_lanes::<4>(form, ks, taken, &mut mates),
-            5..=8 => seed_bucket_lanes::<8>(form, ks, taken, &mut mates),
-            9..=16 => seed_bucket_lanes::<16>(form, ks, taken, &mut mates),
+            1..=4 => seed_bucket_lanes::<4>(form, ks, taken, &mut lane_scratch),
+            5..=8 => seed_bucket_lanes::<8>(form, ks, taken, &mut lane_scratch),
+            9..=16 => seed_bucket_lanes::<16>(form, ks, taken, &mut lane_scratch),
             _ => None,
         });
         seeds[b as usize] =
@@ -2860,12 +2860,31 @@ impl LaneForm {
     }
 }
 
+/// What [`seed_bucket_lanes`] keeps across buckets.
+struct LaneScratch {
+    /// A bit of each lane, by the low six bits of its value.
+    mates: [u16; 64],
+    /// The mode that last saw each residue of a value modulo the slice, from 1 on; a pad's lane
+    /// has an entry of its own past [`SLICE`].
+    seen: [u32; 2048],
+    mode: u32,
+}
+
+impl LaneScratch {
+    fn new() -> Self {
+        Self {
+            mates: [0; 64],
+            seen: [0; 2048],
+            mode: 0,
+        }
+    }
+}
+
 /// [`seed_bucket`] for a bucket of at most `L` keys, `L` at most 16, whose slices end inside the
 /// range, on a level of two mode bits and at most [`SLICE`] values a slice: the same seed, found
 /// with every loop over all `L` lanes — those past the bucket's keys hold its first key again,
 /// which changes no window and no wrap, and are masked out of the scores. `None` for a bucket
-/// whose slices do not all end inside the range, before anything is marked. `mates` is scratch
-/// kept across buckets.
+/// whose slices do not all end inside the range, before anything is marked.
 ///
 /// A key's value under shift `t` is its value under shift 0 plus `t` strides, less the slice once
 /// it has wrapped, and the slice is a multiple of 64: two keys whose shift-0 values differ in
@@ -2882,7 +2901,7 @@ fn seed_bucket_lanes<const L: usize>(
     form: &LaneForm,
     ks: &[u64],
     taken: &mut Map,
-    mates: &mut [u16; 64],
+    scratch: &mut LaneScratch,
 ) -> Option<u8> {
     let k = ks.len();
     debug_assert!((1..=L).contains(&k) && L <= 16);
@@ -2908,29 +2927,34 @@ fn seed_bucket_lanes<const L: usize>(
         // marks shift 0 too.
         let mut wraps = 1u64;
         let mut u = u64::from(mode == 0);
-        let (mut seen, mut twice) = (0u64, 0u64);
+        // Two keys that meet under some shift are a multiple of the slice apart: equal modulo the
+        // slice, which a table of the mode each residue was last seen in finds without a branch.
+        // The low six bits alone agree in a third of the modes of eight keys.
+        let mut twice = false;
+        scratch.mode = scratch.mode.wrapping_add(1);
+        let now = scratch.mode;
         for j in 0..L {
             let o = (h[j] >> (8 * mode)) & mask;
             let c = (slice - o + (1 << shift) - 1) >> shift;
             let v = starts[j] + o;
             (offs[j], cuts[j], vals[j]) = (o, c, v);
             wraps |= 1u64 << (c & 63);
-            let low = (1u64 << (v & 63)) & real(j);
-            twice |= seen & low;
-            seen |= low;
+            let residue = ((v & mask & real(j)) | ((SLICE + j as u64) & !real(j))) as usize;
+            twice |= scratch.seen[residue & 2047] == now;
+            scratch.seen[residue & 2047] = now;
             let (plane, bit) = taken.at(v);
             u |= taken.window(plane, bit + c - 64).rotate_left(c as u32);
         }
         count!(WINDOWS, k as u64);
-        if twice != 0 {
+        if twice {
             // The keys before each that agree with it in the low six bits, as lanes: `mates`
             // by the low bits, an entry read only once this mode has written it.
             let mut written = 0u64;
             for j in 0..k {
                 let low = vals[j] & 63;
                 let mut before =
-                    mates[low as usize] & u16::from(written >> low & 1 == 1).wrapping_neg();
-                mates[low as usize] = before | 1 << j;
+                    scratch.mates[low as usize] & u16::from(written >> low & 1 == 1).wrapping_neg();
+                scratch.mates[low as usize] = before | 1 << j;
                 written |= 1 << low;
                 while before != 0 {
                     let i = before.trailing_zeros() as usize;
@@ -3943,7 +3967,7 @@ mod tests {
             state = mix(state);
             state
         };
-        let (mut scratch, mut mates) = (Scratch::new(), [0u16; 64]);
+        let (mut scratch, mut lane_scratch) = (Scratch::new(), LaneScratch::new());
         let (mut laned, mut handed_back) = (0, 0);
         for n in [3_000u64, 20_000, 300_000] {
             let level = Level::shape(n, Geometry::Mph3);
@@ -3980,9 +4004,9 @@ mod tests {
                         .collect();
                     let widths: Vec<usize> = [4, 8, 16].into_iter().filter(|&w| w >= k).collect();
                     let got = match widths[(next() % widths.len() as u64) as usize] {
-                        4 => seed_bucket_lanes::<4>(&form, &ks, &mut by_lanes, &mut mates),
-                        8 => seed_bucket_lanes::<8>(&form, &ks, &mut by_lanes, &mut mates),
-                        _ => seed_bucket_lanes::<16>(&form, &ks, &mut by_lanes, &mut mates),
+                        4 => seed_bucket_lanes::<4>(&form, &ks, &mut by_lanes, &mut lane_scratch),
+                        8 => seed_bucket_lanes::<8>(&form, &ks, &mut by_lanes, &mut lane_scratch),
+                        _ => seed_bucket_lanes::<16>(&form, &ks, &mut by_lanes, &mut lane_scratch),
                     };
                     let want = seed_bucket(&level, &ks, &mut by_bucket, origin, &mut scratch);
                     if let Some(seed) = got {
