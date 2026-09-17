@@ -3039,12 +3039,14 @@ impl DictIndex {
         out
     }
 
-    /// The four sections a size model has to tell apart: the symbol tables, the stored block
-    /// heads, the packed per-block arrays, and the front-coded data. Their sum plus [`HEADER`] is
-    /// [`serialized_len`](Self::serialized_len).
-    pub(crate) fn section_lens(&self) -> [usize; 4] {
+    /// The five sections a size model has to tell apart: the symbol tables, the phrase dictionary,
+    /// the stored block heads, the packed per-block arrays, and the front-coded data. The tables
+    /// grow with the shards and the dictionary with the keys, which is why they are counted apart.
+    /// Their sum plus [`HEADER`] is [`serialized_len`](Self::serialized_len).
+    pub(crate) fn section_lens(&self) -> [usize; 5] {
         [
-            codecs_len(&self.codecs) + codes_len(&self.codes) + self.phrases.serialized_len(),
+            codecs_len(&self.codecs) + codes_len(&self.codes),
+            self.phrases.serialized_len(),
             self.heads.len(),
             self.blocks_len() * 8 + self.head_ends.len() + self.blocks.len() + self.micros.len(),
             self.data.len(),

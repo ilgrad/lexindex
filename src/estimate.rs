@@ -30,6 +30,9 @@ use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
 
 /// Keys a sample holds. Below this the plan builds the real indexes instead of modelling them.
 const SAMPLE: usize = 100_000;
+/// How far apart the two sample sizes a rate is fitted over sit. Wide enough for the slope to be
+/// the trend and not the noise, near enough that the smaller sample is still a corpus.
+const SPREAD: usize = 4;
 
 /// The [`DictIndex`] blocks the plan prices. The block is a knob, not a constant — on an English
 /// word list the three named points of its curve span 2.79 to 3.23 bytes a key — so a ranking that
@@ -1022,12 +1025,38 @@ impl<K: AsRef<str> + Ord> HashSample<K> {
 /// block's numbers stretched over it.
 struct DictFit {
     block: usize,
-    /// Compressed suffix bytes over raw suffix bytes, from a `DictIndex` of the sample.
+    /// Compressed suffix bytes over raw suffix bytes, from a `DictIndex` of the sample, with how
+    /// far it falls per e-fold of the keys.
+    ///
+    /// It does fall: the symbol tables and the phrase dictionary are both trained on what the blob
+    /// holds, so ten times the keys buy a better vocabulary for the same bytes a shard. Carried
+    /// flat from a hundred thousand keys it reads 21 % high on a million urls; fitted between two
+    /// sample sizes, 8 %.
     ratio: f64,
+    ratio_slope: f64,
     /// The packed per-block arrays, per block.
     per_block: f64,
     /// One symbol table's serialised bytes.
     table: f64,
+    /// The phrase dictionary's bytes per key. It holds the spans the corpus repeats, so it grows
+    /// with the keys and not with the shards the tables follow.
+    phrases: f64,
+    phrases_slope: f64,
+    /// Keys the fit was taken at, which is where the two slopes are zero.
+    at: f64,
+}
+
+impl DictFit {
+    /// The two fitted rates at `n` keys, extrapolated along their slopes. Neither may cross zero:
+    /// a suffix that compresses to nothing and a dictionary of negative bytes are both the line
+    /// leaving the range it was fitted in.
+    fn rates(&self, n: usize) -> (f64, f64) {
+        let e = (n.max(1) as f64).ln() - self.at.ln();
+        (
+            (self.ratio + self.ratio_slope * e).max(0.0),
+            (self.phrases + self.phrases_slope * e).max(0.0),
+        )
+    }
 }
 
 /// What one build of the sample measures that no statistic gives.
@@ -1056,9 +1085,11 @@ impl Sample {
         let shape = Shape::of(keys);
         let fst_node =
             StringIndex::build(keys)?.serialized_len() as f64 / shape.trie_nodes().max(1.0);
+        let small = sample(keys, keys.len() / SPREAD);
+        let small_shape = Shape::of(&small);
         let mut dict = Vec::with_capacity(DICT_BLOCKS.len());
         for block in DICT_BLOCKS {
-            dict.push(DictFit::of(keys, &shape, block)?);
+            dict.push(DictFit::of(keys, &shape, &small, &small_shape, block)?);
         }
         Ok(Self {
             dict: dict
@@ -1081,16 +1112,24 @@ impl Sample {
     }
 }
 
-impl DictFit {
+/// One build's rates: the suffix ratio, the packed arrays a block, a table's bytes, and the
+/// dictionary a key.
+struct Rates {
+    ratio: f64,
+    per_block: f64,
+    table: f64,
+    phrases: f64,
+}
+
+impl Rates {
     fn of(keys: &[&str], shape: &Shape, block: usize) -> Result<Self, IndexError> {
         let dict = DictIndex::build_with_block(keys, block)?;
-        let [tables, _heads, arrays, data] = dict.section_lens();
+        let [tables, phrases, _heads, arrays, data] = dict.section_lens();
         let blocks = keys.len().div_ceil(dict.block()) as f64;
         let entries = (keys.len() - blocks as usize) as f64;
         let restarts = blocks * (dict.block().div_ceil(dict.micro()) - 1) as f64;
         let raw = suffix_bytes(shape, entries, restarts);
         Ok(Self {
-            block,
             ratio: if raw > 0.0 {
                 (data as f64 - entries) / raw
             } else {
@@ -1098,6 +1137,39 @@ impl DictFit {
             },
             per_block: arrays as f64 / blocks,
             table: tables as f64 / shards_for(keys.len(), dict.block()) as f64,
+            phrases: phrases as f64 / keys.len().max(1) as f64,
+        })
+    }
+}
+
+impl DictFit {
+    fn of(
+        keys: &[&str],
+        shape: &Shape,
+        small: &[&str],
+        small_shape: &Shape,
+        block: usize,
+    ) -> Result<Self, IndexError> {
+        let big = Rates::of(keys, shape, block)?;
+        let (a, b) = (keys.len().max(1) as f64, small.len().max(1) as f64);
+        // Two points only make a slope when they are apart; a corpus small enough that the two
+        // samples coincide gets the flat fit it would have had anyway.
+        let e = a.ln() - b.ln();
+        let (ratio_slope, phrases_slope) = if e > 0.0 {
+            let low = Rates::of(small, small_shape, block)?;
+            ((big.ratio - low.ratio) / e, (big.phrases - low.phrases) / e)
+        } else {
+            (0.0, 0.0)
+        };
+        Ok(Self {
+            block,
+            ratio: big.ratio,
+            ratio_slope,
+            per_block: big.per_block,
+            table: big.table,
+            phrases: big.phrases,
+            phrases_slope,
+            at: a,
         })
     }
 }
@@ -1487,16 +1559,22 @@ fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -
         .collect()
 }
 
-/// The format as the model: a header, the symbol tables, one head a block stored whole, one byte
-/// an entry, the suffixes the table squeezed, and the packed arrays.
+/// The format as the model: a header, the symbol tables, the phrase dictionary, one head a block
+/// stored whole, one byte an entry, the suffixes the table squeezed, and the packed arrays.
 fn dict_bytes(shape: &Shape, fit: &DictFit, block: usize) -> f64 {
     let n = shape.n as f64;
     let blocks = shape.n.div_ceil(block) as f64;
     let entries = n - blocks;
     let restarts = blocks * (block.div_ceil(dict_index::micro_for(block)) - 1) as f64;
-    let data = entries + fit.ratio * suffix_bytes(shape, entries, restarts);
+    let (ratio, phrases) = fit.rates(shape.n);
+    let data = entries + ratio * suffix_bytes(shape, entries, restarts);
     let tables = shards_for(shape.n, block) as f64 * fit.table;
-    dict_index::HEADER as f64 + tables + blocks * shape.mean_len() + data + fit.per_block * blocks
+    dict_index::HEADER as f64
+        + tables
+        + phrases * n
+        + blocks * shape.mean_len()
+        + data
+        + fit.per_block * blocks
 }
 
 #[cfg(test)]
