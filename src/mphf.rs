@@ -2734,52 +2734,6 @@ impl V2 {
     }
 }
 
-/// The best of the placement order's class heads: a winner tree over [`CLASSES`] keys, so that
-/// taking the best is one load and replacing a class's head is a compare a level.
-struct Heads {
-    key: [i64; CLASSES],
-    /// `node[i]` is the class that wins the subtree at `i`; the leaves `CLASSES..` are the classes.
-    node: [u8; 2 * CLASSES],
-}
-
-impl Heads {
-    fn new() -> Self {
-        const { assert!(CLASSES.is_power_of_two() && CLASSES <= 256) };
-        let mut node = [0u8; 2 * CLASSES];
-        for (d, n) in node[CLASSES..].iter_mut().enumerate() {
-            *n = d as u8;
-        }
-        // Every node names a class of its own subtree, so that a class's head that drops is
-        // weighed against its true siblings.
-        for i in (1..CLASSES).rev() {
-            node[i] = node[2 * i];
-        }
-        Self {
-            key: [i64::MIN; CLASSES],
-            node,
-        }
-    }
-
-    #[inline(always)]
-    fn set(&mut self, class: usize, key: i64) {
-        self.key[class] = key;
-        let mut i = (CLASSES + class) >> 1;
-        while i != 0 {
-            let (l, r) = (self.node[2 * i], self.node[2 * i + 1]);
-            // Selected without a branch: measured, fewer mispredictions than the compare and jump
-            // an `if` compiled to.
-            let right = u8::from(self.key[r as usize] > self.key[l as usize]).wrapping_neg();
-            self.node[i] = l ^ ((l ^ r) & right);
-            i >>= 1;
-        }
-    }
-
-    #[inline(always)]
-    fn best(&self) -> usize {
-        self.node[1] as usize
-    }
-}
-
 /// Seed the buckets of a run against `taken`, whose bit 0 is value `origin`. `seeds` is those
 /// buckets' slice of the level's table, one per bucket of the run.
 ///
@@ -2792,71 +2746,75 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
     debug_assert!(run.start.len() > end as usize);
     let level = run.level;
     let window = tun(6, f64::from(WINDOW)) as u32;
-    // Buckets wait in a queue per size class, each in index order, which is priority order
-    // within the class: the priority is the class's term less 1024 per bucket of index. The next
-    // bucket is the best of the class heads, kept in a winner tree over the classes.
-    let mut term = [0i64; CLASSES];
-    for (c, t) in term.iter_mut().enumerate() {
-        *t = ell(c + 1, level.slice);
-    }
-    let class = |b: u32| (run.size(b) as usize).min(CLASSES) - 1;
-    // A class's head as one key, larger first: its priority, then the lower bucket. Two heads of
-    // one priority are a multiple of 1024 apart in their terms, the lower term the lower bucket,
-    // so the second part is the class's rank by term, the lowest term largest.
-    let rank: [i64; CLASSES] = std::array::from_fn(|c| {
-        (0..CLASSES)
+    // A bucket's priority is its class's term less 1024 per bucket of index, the lower bucket
+    // first between two equal. Negated and cut at multiples of 1024 it is a slot, the index less
+    // the term's ceiling in buckets, and a place in the slot that only the class fixes: the
+    // term's remainder, then the class's rank by term, the lower term the lower bucket. So the
+    // queue is a bitmap of a bit a class a slot, and the next bucket its lowest set bit, found
+    // from a cursor no set bit is before.
+    let term: [i64; CLASSES] = std::array::from_fn(|c| ell(c + 1, level.slice));
+    let within: [(i64, usize); CLASSES] = std::array::from_fn(|c| {
+        let rank = (0..CLASSES)
             .filter(|&d| (term[d], d) < (term[c], c))
-            .count() as i64
+            .count();
+        ((-term[c]).rem_euclid(1024), rank)
     });
-    let key = |b: u32| {
-        let c = class(b);
-        (term[c] - 1024 * i64::from(b)) * CLASSES as i64 + (CLASSES as i64 - 1 - rank[c])
-    };
-    // A queue holds buckets of the window only, so a ring of the window's length never fills.
-    let cap = (window as usize).next_power_of_two();
-    let mut ring = vec![0u32; CLASSES * cap];
-    let (mut first, mut len) = ([0usize; CLASSES], [0usize; CLASSES]);
-    let mut heads = Heads::new();
+    let lag: [i64; CLASSES] = std::array::from_fn(|c| (-term[c]).div_euclid(1024));
+    let least = lag.iter().copied().min().unwrap_or(0);
+    let mut back = [0usize; CLASSES];
+    // A class's bit less `CLASSES` per bucket of index.
+    let at: [usize; CLASSES] = std::array::from_fn(|c| {
+        let place = within.iter().filter(|&&w| w < within[c]).count();
+        back[place] = (lag[c] - least) as usize;
+        back[place] * CLASSES + place
+    });
+    let lead = back.iter().copied().max().unwrap_or(0);
+    let mut queue = vec![0u64; ((end as usize + lead) * CLASSES).div_ceil(64)];
+    // The buckets queued, by index.
+    let mut live = vec![0u64; end as usize / 64 + 1];
     let lanes = LaneForm::new(level, origin);
-    let mut done = vec![0u64; (end as usize).div_ceil(64)];
     let mut scratch = Scratch::new();
     let mut mates = [0u16; 64];
-    let (mut front, mut pushed) = (0u32, 0u32);
+    let (mut front, mut pushed, mut cursor) = (0u32, 0u32, 0usize);
     loop {
-        while front < end
-            && (run.size(front) == 0 || done[(front / 64) as usize] >> (front % 64) & 1 == 1)
-        {
-            front += 1;
+        // The lowest bucket queued, else the first with keys among those not yet pushed.
+        let mut w = (front / 64) as usize;
+        let mut word = live[w] & (u64::MAX << (front % 64));
+        while word == 0 && (w + 1) * 64 < pushed as usize {
+            w += 1;
+            word = live[w];
         }
+        front = if word != 0 {
+            (w * 64) as u32 + word.trailing_zeros()
+        } else {
+            while pushed < end && run.size(pushed) == 0 {
+                pushed += 1;
+            }
+            pushed
+        };
         if front == end {
             break;
         }
         let limit = end.min(front.saturating_add(window));
         while pushed < limit {
-            if run.size(pushed) != 0 {
-                let c = class(pushed);
-                debug_assert!(len[c] < cap);
-                if len[c] == 0 {
-                    heads.set(c, key(pushed));
-                }
-                ring[c * cap + ((first[c] + len[c]) & (cap - 1))] = pushed;
-                len[c] += 1;
+            let size = run.size(pushed);
+            if size != 0 {
+                let bit = pushed as usize * CLASSES + at[(size as usize).min(CLASSES) - 1];
+                queue[bit / 64] |= 1 << (bit % 64);
+                cursor = cursor.min(bit / 64);
+                live[(pushed / 64) as usize] |= 1 << (pushed % 64);
             }
             pushed += 1;
         }
-        let c = heads.best();
-        let b = ring[c * cap + first[c]];
-        debug_assert!(len[c] > 0 && heads.key[c] == key(b));
-        first[c] = (first[c] + 1) & (cap - 1);
-        len[c] -= 1;
-        heads.set(
-            c,
-            if len[c] == 0 {
-                i64::MIN
-            } else {
-                key(ring[c * cap + first[c]])
-            },
-        );
+        while queue[cursor] == 0 {
+            cursor += 1;
+        }
+        let word = queue[cursor];
+        queue[cursor] = word & (word - 1);
+        let bit = cursor * 64 + word.trailing_zeros() as usize;
+        let b = (bit / CLASSES - back[bit % CLASSES]) as u32;
+        debug_assert!((front..limit).contains(&b) && run.size(b) != 0);
+        live[(b / 64) as usize] &= !(1 << (b % 64));
         let ks = run.keys_of(b);
         let fast = lanes.as_ref().and_then(|form| match ks.len() {
             1..=4 => seed_bucket_lanes::<4>(form, ks, taken, &mut mates),
@@ -2866,7 +2824,6 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
         });
         seeds[b as usize] =
             fast.unwrap_or_else(|| seed_bucket(level, ks, taken, origin, &mut scratch));
-        done[(b / 64) as usize] |= 1 << (b % 64);
     }
 }
 
