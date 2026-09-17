@@ -1,0 +1,35 @@
+bench/mphf_vs at 08094a1, the 1 B row: the binary and the keys in generation order of
+mphf-vs-2026-09-17-arz-08094a1.txt, 2026-09-17 16:36-16:46, one process, `MPHF_VS_PROBES=10000000
+MPHF_VS_LOOKUP_THREADS=8 mphf_vs 1000000000 1 8`: eight build threads and one round, so no build spread; the
+lookups over 10 M probe keys drawn at random with replacement, because the full probe order is another 8 GB beside
+PtrHash fast's 14 GB construction peak; x8 = wall ns a key with eight lookup threads over shares of the probe
+order. After a wait for Tctl under 60 C and a 1-minute load under 0.7 (48.1 C and 0.28 at the start, 83 C at the
+end), on mains (battery full), no browser, an editor open, Ryzen 7 5800HS (8 cores, 16 MB L3, 38 GB), Fedora 44, ph
+0.11.0 with its `wyhash` feature, ptr_hash 2.1.1.
+Against the e147b05 file: MPH3's build 12.8 -> 7.7 ns/key over the same table and its peak 2601.4 -> 2601.8 MB; the
+other rows' builds agree within 2.6 %. Every row's single lookup agrees within 0.9 ns (MPH3 14.8 -> 14.3) and its
+batch within 0.7 (MPH3 6.8 -> 7.5), but every row's x8 columns read 12-58 % slower here: MPH3 3.1 -> 4.3 single and
+2.6 -> 4.1 batch, PtrHash compact 4.0 -> 4.5 and 2.5 -> 3.2, fast 3.0 -> 4.0 and 2.9 -> 3.8, PHast+ 4.6 -> 5.4 --
+while the lookups and the tables are the same code in both commits. A second process ending at 16:50, lexindex and
+PtrHash compact only (`MPHF_VS_ROWS=lexindex,compact`), started at Tctl 59 C without the wait, read MPH3 3.2 / 2.8
+and compact 3.9 / 2.2 in the x8 columns (after RUN DONE): on this machine an x8 column at 1 B moves by up to 58 %
+between processes, PtrHash compact's x8 batch is ahead of MPH3's in all three, and the order of their x8 single
+lookups is not settled.
+
+R-3 1 B: bench/mphf_vs at 08094a1, 2026-09-17T16:36+03:00, load 0.28 1.29 1.35, Tctl 48.1 C, Ryzen 7 5800HS
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.914      7.7   +0.0%     14.3   +2.2%      7.5   +2.4%      4.3   +0.7%      4.1   +0.3%        2601.8    218.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.146     21.4   +0.0%     27.0   +1.2%        -              5.4   +0.5%        -                9679.7      4.0
+ph 0.11 PHast (SeedOnly)                 1.920    100.4   +0.0%     19.6   +0.3%        -              4.7   +0.9%        -                9656.1      4.0
+ptr_hash 2.1.1 compact                   2.143     45.5   +0.0%     24.8   +0.4%      8.4   +4.4%      4.5   +0.9%      3.2   +0.4%        8385.0      4.0
+ptr_hash 2.1.1 balanced                  2.378     26.5   +0.0%     24.7   +0.6%      8.4   +0.5%      4.6   +1.0%      3.3   +1.6%        8104.1      4.0
+ptr_hash 2.1.1 fast                      2.990    433.1   +0.0%     14.0   +0.2%      8.0   +0.4%      4.0   +1.3%      3.8   +0.1%       14379.0      4.0
+end 2026-09-17T16:46+03:00, Tctl 82.9 C
+RUN DONE
+
+second process, ended 2026-09-17T16:50+03:00, Tctl 59.0 C at the start and 89.8 C at the end, no wait: MPHF_VS_ROWS=lexindex,compact MPHF_VS_PROBES=10000000 MPHF_VS_LOOKUP_THREADS=8 mphf_vs 1000000000 1 8
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.914      7.8   +0.0%     13.8   +4.2%      6.8   +1.7%      3.2   +1.4%      2.8   +0.8%        2601.8    218.0
+ptr_hash 2.1.1 compact                   2.143     43.9   +0.0%     24.7   +0.3%      8.4   +2.1%      3.9   +2.1%      2.2   +4.6%        8415.7      4.0

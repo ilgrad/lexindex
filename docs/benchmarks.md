@@ -727,64 +727,68 @@ within 0.02 bits.
 
 | function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | **1.929** | 75.2 ns/key | **16.5 ns/key** | 1.9 ns | **2.2 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.160 | **56.7** | 18.1 | 3.5 | — |
-| `ph` PHast (`SeedOnly`) | 1.933 | 582.6 | 103.0 | 2.8 | — |
-| `ptr_hash` compact | 2.144 | 148.4 | 80.3 | 4.0 | 3.6 |
-| `ptr_hash` balanced | 2.378 | 92.1 | 47.4 | 4.1 | 3.6 |
-| `ptr_hash` fast | 2.990 | 72.3 | 63.8 | **1.8** | 2.5 |
+| **lexindex `MPH3`** | **1.929** | **42.8 ns/key** | **12.3 ns/key** | **1.9 ns** | **2.2 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.160 | 55.4 | 17.9 | 3.5 | — |
+| `ph` PHast (`SeedOnly`) | 1.933 | 581.3 | 100.5 | 2.8 | — |
+| `ptr_hash` compact | 2.144 | 148.1 | 81.5 | 4.0 | 4.2 |
+| `ptr_hash` balanced | 2.378 | 92.3 | 47.8 | 4.1 | 4.2 |
+| `ptr_hash` fast | 2.990 | 72.0 | 64.3 | **1.9** | 2.4 |
 
 **10 M keys** — 2.4 MB, inside the 16 MB L3:
 
 | function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | **1.918** | 70.6 ns/key | **13.6 ns/key** | **2.6 ns** | **2.5 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.147 | **57.2** | 13.8 | 5.4 | — |
-| `ph` PHast (`SeedOnly`) | 1.921 | 590.9 | 91.4 | 4.2 | — |
-| `ptr_hash` compact | 2.143 | 161.8 | 41.4 | 5.4 | 4.0 |
-| `ptr_hash` balanced | 2.378 | 104.2 | 25.9 | 5.4 | 4.1 |
-| `ptr_hash` fast | 2.990 | 148.0 | 134.7 | 2.9 | 2.8 |
+| **lexindex `MPH3`** | **1.918** | **37.5 ns/key** | **10.6 ns/key** | **2.6 ns** | **2.5 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.147 | 60.2 | 15.4 | 5.4 | — |
+| `ph` PHast (`SeedOnly`) | 1.921 | 589.4 | 91.6 | 4.2 | — |
+| `ptr_hash` compact | 2.143 | 162.7 | 44.2 | 5.5 | 4.7 |
+| `ptr_hash` balanced | 2.378 | 104.0 | 28.1 | 5.6 | 4.7 |
+| `ptr_hash` fast | 2.990 | 149.6 | 137.4 | 2.9 | 2.8 |
 
 **100 M keys** — 24 MB, every scalar lookup a DRAM miss:
 
 | function | bits/key | build, 1 thread | build, 8 threads | build peak | lookup | batch |
 |---|---:|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | **1.914** | 70.3 ns/key | **12.3 ns/key** | **261 MB** | **10.2 ns** | **3.6 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.146 | **68.3** | 15.6 | 1 525 | 17.6 | — |
-| `ph` PHast (`SeedOnly`) | 1.920 | 616.3 | 93.0 | 1 525 | 13.6 | — |
-| `ptr_hash` compact | 2.143 | 165.0 | 39.1 | 906 | 17.0 | 5.7 |
-| `ptr_hash` balanced | 2.378 | 105.3 | 23.0 | 844 | 17.8 | 5.8 |
-| `ptr_hash` fast | 2.990 | 194.1 | 231.3 | 1 402 | 10.8 | 4.9 |
+| **lexindex `MPH3`** | **1.914** | **37.5 ns/key** | **8.7 ns/key** | **262 MB** | **10.0 ns** | **3.5 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.146 | 67.9 | 16.5 | 1 526 | 17.1 | — |
+| `ph` PHast (`SeedOnly`) | 1.920 | 603.4 | 92.9 | 1 526 | 13.3 | — |
+| `ptr_hash` compact | 2.143 | 165.4 | 40.5 | 906 | 16.8 | 6.2 |
+| `ptr_hash` balanced | 2.378 | 105.9 | 24.3 | 886 | 17.5 | 6.2 |
+| `ptr_hash` fast | 2.990 | 247.5 | 234.0 | 1 477 | 10.7 | 5.0 |
 
 `MPH3` is the smallest function in every table — 1.929 / 1.918 / 1.914 bits against regular
 PHast's 1.933 / 1.921 / 1.920 — and its lookups lead at 10 M and 100 M, single and batch: 2.6 and
-10.2 ns against PtrHash's fast set's 2.9 and 10.8, and 2.5 and 3.6 in a batch against its 2.8 and
-4.9. At 1 M its batch leads too, 2.2 against 2.5, and fast's single lookup is a tenth of a
-nanosecond ahead, 1.8 against 1.9, inside both rows' spreads: 3 bits a key, a table half again as
-large whose one probe is a seed byte with no bumped keys' chain behind it. Among the rows near 2
-bits `MPH3`'s lookups are the fastest at every size — PtrHash compact's 4.0 / 5.4 / 17.0 ns single
-and 3.6 / 4.0 / 5.7 in a batch, PHast+'s 3.5 / 5.4 / 17.6, and regular PHast's 2.8 / 4.2 / 13.6 at
-eight to nine times the build and without a batch form. The bits column is the serialised table,
-which `MPH3` loads as it is — the rank and select counts `MPH2` derived in memory, 0.023 bits/key,
-went with its remap.
+10.0 ns against PtrHash's fast set's 2.9 and 10.7, and 2.5 and 3.5 in a batch against its 2.8 and
+5.0. At 1 M its batch leads too, 2.2 against 2.4, and its single lookup is level with fast's at
+1.9 ns, where the run before had fast a tenth of a nanosecond ahead, inside both rows' spreads:
+3 bits a key, a table half again as large whose one probe is a seed byte with no bumped keys' chain
+behind it. Among the rows near 2 bits `MPH3`'s lookups are the fastest at every size — PtrHash
+compact's 4.0 / 5.5 / 16.8 ns single and 4.2 / 4.7 / 6.2 in a batch, PHast+'s 3.5 / 5.4 / 17.1,
+and regular PHast's 2.8 / 4.2 / 13.3 at fourteen to sixteen times the build and without a batch
+form. The bits column is the serialised table, which `MPH3` loads as it is — the rank and select
+counts `MPH2` derived in memory, 0.023 bits/key, went with its remap.
 
-The build is the column it does not lead everywhere. On eight threads it is the fastest at 1 M and
-100 M, 16.5 and 12.3 ns/key against PHast+'s 18.1 and 15.6, and level at 10 M, 13.6 against 13.8;
-on one thread PHast+ is ahead at every size, 57 / 57 / 68 ns against 75 / 71 / 70 — by 3 % at
-100 M, where its build has risen and `MPH3`'s has not — and so is PtrHash's fast set at 1 M, 72.
-Against PtrHash's compact set `MPH3` builds 2.0–2.3× faster on one thread and 3.0–4.9× on eight.
-The construction peak is the column apart: 30 MB at 10 M and 261 MB at 100 M above the keys,
-against 152–156 MB and 844–1 525 MB — the table is built a chunk of buckets at a time, the keys of
-a quarter of the chunks copied out at once, and nothing the size of the key set is ever held
-beside it. Every table here before 2026-09-17 timed the builds over keys the harness had sorted
-for its dedup: `MPH3` skips its own sort on sorted hashes, and the other rows bucket their keys
-whatever the order (PtrHash's compact and fast sets read within 3 % either way, alternated), so
-those tables read `MPH3`'s build at 55–58 ns/key on one thread and 9–11 on eight with a peak of
-6 MB at 10 M and 60 MB at 100 M — the path a caller handing over sorted hashes takes, as every
-index in this crate does, but not the one the other rows were timed on. One asymmetry is in the
-numbers and should be read out of them: lexindex takes the keys as 64-bit hashes (its indexes hash
-the string once, before), while `ph` hashes each key with wyhash on build and on every lookup
-level and `ptr_hash` with one multiply — a nanosecond or two of the gap on the `ph` rows is that.
+`MPH3`'s build is the fastest at every size on either thread count: 42.8 / 37.5 / 37.5 ns/key on one
+thread against PHast+'s 55.4 / 60.2 / 67.9 and PtrHash fast's 72.0 at 1 M, and 12.3 / 10.6 / 8.7 on
+eight against PHast+'s 17.9 / 15.4 / 16.5. Against PtrHash's compact set `MPH3` builds 3.5–4.4×
+faster on one thread and 4.2–6.6× on eight. The run before, at `e147b05`, had PHast+ ahead on one
+thread at every size, 57 / 57 / 68 ns against 75 / 71 / 70, over the same tables: since then a
+bucket's seed is searched over fixed lanes, one function a bucket width from 1 to 16 keys with every
+loop's count known to the compiler, a mode's keys that could meet are found by their residues modulo
+the slice, and the buckets wait for placement in a bitmap of priority slots taken from its lowest
+set bit, not in a queue a size class under a heap. The construction peak is the column apart: 30 MB
+at 10 M and 262 MB at 100 M above the keys, against 152–156 MB and 886–1 526 MB — the table is built
+a chunk of buckets at a time, the keys of a quarter of the chunks copied out at once, and nothing
+the size of the key set is ever held beside it. Every table here before 2026-09-17 timed the builds
+over keys the harness had sorted for its dedup: `MPH3` skips its own sort on sorted hashes, and the
+other rows bucket their keys whatever the order (PtrHash's compact and fast sets read within 3 %
+either way, alternated), so those tables read `MPH3`'s build at 55–58 ns/key on one thread and 9–11
+on eight with a peak of 6 MB at 10 M and 60 MB at 100 M — the path a caller handing over sorted
+hashes takes, as every index in this crate does, but not the one the other rows were timed on. One
+asymmetry is in the numbers and should be read out of them: lexindex takes the keys as 64-bit hashes
+(its indexes hash the string once, before), while `ph` hashes each key with wyhash on build and on
+every lookup level and `ptr_hash` with one multiply — a nanosecond or two of the gap on the `ph`
+rows is that.
 
 **String keys.** The tables above take the keys as 64-bit hashes. `bench/mphf_vs`'s `strings`
 binary runs the path a user of string keys sees, end to end, on real corpora (`local/corpora`, not
@@ -826,10 +830,11 @@ one, so the hash's own gain is at least the difference shown. Results file:
 
 The lexindex row ran once more at each size in a process with transparent huge pages turned off
 (`prctl(PR_SET_THP_DISABLE)`), the control for the `MADV_HUGEPAGE` its tables ask for from 2 MiB
-up: 1.9 / 2.2 ns at 1 M, as with them (nothing to get below one huge page), 2.9 / 2.7 against
-2.6 / 2.5 at 10 M and 10.6 / 3.7 against 10.2 / 3.6 at 100 M — 12 % on the single lookup and 8 %
-on the batch at 10 M, 4 % and 3 % at 100 M — with the results file's `huge MB` column showing the
-pages granted: 20 of the table's 24 MB at 100 M.
+up: 1.9 / 2.1 ns at 1 M against 1.9 / 2.2 with them (nothing to get below one huge page), 2.9 /
+2.6 against 2.6 / 2.5 at 10 M and 10.8 / 4.1 against 10.0 / 3.5 at 100 M — 12 % on the single
+lookup and 4 % on the batch at 10 M, 8 % and 17 % at 100 M, where the control process ran last,
+near 90 °C, and the run before read 4 % and 3 % — with the results file's `huge MB` column showing
+the pages the process holds after the build, 40 MB at 100 M against none without them.
 
 How the batch got there. Before this measurement `index_all` prefetched only the first level's
 seed, sixteen keys ahead, and stopped at 13.5 ns at 100 M against `index_stream`'s 6.9: the ~3 %
@@ -875,7 +880,7 @@ above. `k` is the bucket size, ε the overhead over the bound, `-o` the query-op
 
 `MPH2`'s row is its 2026-09-13 measurement, taken beside the Consensus run and over sorted keys
 (below); `MPH3` in the tables above is 1.929 / 1.918 bits at 1.9 / 2.6 ns. The trade is 0.46 bits
-a key — on a `CompactHashIndex` at 1.24 bytes a key, 5 % of the index — for 4.2–47× the build and
+a key — on a `CompactHashIndex` at 1.24 bytes a key, 5 % of the index — for 8–89× the build and
 33–60× the lookup at 10 M. That is the right answer for an archive written once and read rarely;
 this crate's tables are read on every `id`, and 1.92 bits is where its lookup stays first.
 
@@ -883,34 +888,47 @@ What this campaign does not have. A second CPU: one Ryzen 7 5800HS, a mobile par
 L3, and the 100 M rows are where its memory system shows — a server part with a larger cache and
 more channels moves every row there. A 1 B row in the tables: one process and one round, eight
 build and eight lookup threads, the probe order sampled to 10 M keys because the full one is
-another 8 GB beside a 14 GB construction peak, started at 50.5 °C and ended at 84 °C
-([`bench/results/mphf-vs-1b-2026-09-17-arz-e147b05.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-17-arz-e147b05.txt)).
-It built `MPH3` over 10⁹ keys in 12.8 s at 1.914 bits and **2.6 GB above the keys**, against
-27–426 s and 8.1–14.4 GB for PtrHash's three sets and 21–100 s and 9.7 GB for the `ph` rows. Its
-batch is the fastest there, 6.8 ns against PtrHash fast's 7.7 and compact's 8.3, and its single
-lookup the fastest near 2 bits, 14.8 ns against PHast's 19.4 and compact's 24.6, with fast's
-0.9 ns ahead at 13.9; with eight lookup threads fast is 0.1 ns ahead on single lookups (3.0
-against 3.1) and compact and balanced 0.1 in a batch (2.5 against 2.6). The run it replaces, on a
-hot machine before the corrections above, read 30.0 and 9.9 ns for `MPH3`'s single and batch
-lookups over sorted keys, behind every PtrHash set. Confidence intervals:
-in their place, every cell's minimum with the spread of its repeats, in the results file — builds
-repeat within 4 % on one thread but for PtrHash compact at 1 M (6 %) and within 5 % on eight but
-for lexindex's 16 ms build at 1 M (22 %); lookups within 12 % at 1 M and 9 % at 10 M but for
-lexindex's (19 % and 15 %: passes of 1.9 and 26 ms), and within 3 % at 100 M; batches within 11 %
-but for PtrHash fast's at 1 M (24 %).
+another 8 GB beside a 14 GB construction peak, started at 48.1 °C and ended at 83 °C
+([`bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt)).
+It built `MPH3` over 10⁹ keys in 7.7 s at 1.914 bits and **2.6 GB above the keys**, against
+26.5–433 s and 8.1–14.4 GB for PtrHash's three sets and 21–100 s and 9.7 GB for the `ph` rows. Its
+batch is the fastest there, 7.5 ns against PtrHash fast's 8.0 and compact's 8.4, and its single
+lookup the fastest near 2 bits, 14.3 ns against PHast's 19.6 and compact's 24.8, with fast's
+0.3 ns ahead at 14.0. With eight lookup threads it is behind: fast's single lookups read 4.0 ns
+against 4.3, and PtrHash compact's and balanced's batches 3.2 and 3.3 against 4.1. Those two
+columns are the least settled here — over the same lookup code they moved by up to 58 % between
+processes: the run at `e147b05` read `MPH3` at 3.1 / 2.6 ns single / batch against fast's 3.0 and
+compact's 2.5, and a second process after this run, lexindex and compact only, 3.2 / 2.8 against
+compact's 3.9 / 2.2 — so compact's eight-thread batch is ahead in all three. The 1 B run before
+the harness corrections above, on a hot machine, read 30.0 and 9.9 ns for `MPH3`'s single and
+batch lookups over sorted keys, behind every PtrHash set. Confidence intervals: in their place,
+every cell's minimum with the spread of its repeats, in the results file — builds repeat within
+6 % on one thread and within 7 % on eight but for lexindex's 12 ms build at 1 M (38 %); lookups
+within 10 % at 1 M but for PtrHash fast's (15 %), within 6 % at 10 M but for lexindex's (19 %:
+passes of 26 ms) and within 5 % at 100 M; batches within 8 % but for lexindex's at 1 M (18 %:
+passes of 2.2 ms).
 
-<sub>The three tables were measured 2026-09-17 at `e147b05`
-([`bench/results/mphf-vs-2026-09-17-arz-e147b05.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-17-arz-e147b05.txt)),
-on mains with an editor open, after a wait for Tctl under 60 °C and a load under 0.7 (51.9 °C and
-0.29 at the start). The run before, at `ba0580b`
+<sub>The three tables were measured 2026-09-17 at `08094a1`
+([`bench/results/mphf-vs-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-17-arz-08094a1.txt)),
+on mains with an editor open, after a wait for Tctl under 60 °C and a load under 0.7 (49.0 °C and
+0.26 at the start, 52 minutes after a reboot). The run before, at `e147b05`
+([`mphf-vs-2026-09-17-arz-e147b05.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-17-arz-e147b05.txt)),
+51.9 °C and 0.29 at the start, built the same tables before the seed search's lanes: `MPH3`'s
+builds read 75.2 / 70.6 / 70.3 ns/key on one thread and 16.5 / 13.6 / 12.3 on eight, its lookups
+within 0.2 ns of these. Its other rows' builds on one thread agree with this file's within 2.3 %
+but for PHast+'s at 10 M, 57.2 against 60.2, and PtrHash fast's at 100 M, 194.1 against 247.5; on
+eight within 2.4 % at 1 M and up to 10 % faster at 10 M and 100 M; their single lookups within
+0.5 ns, and PtrHash compact's and balanced's batches 0.4–0.7 ns faster (compact's 3.6 / 4.0 / 5.7
+against 4.2 / 4.7 / 6.2). The run before that, at `ba0580b`
 ([`mphf-vs-2026-09-16-arz-ba0580b.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-16-arz-ba0580b.txt)),
 is the last over sorted keys: its `MPH3` rows read 1.966 / 1.953 / 1.949 bits, builds of
 57.7 / 55.6 / 57.6 ns/key on one thread and 11.1 / 9.2 / 9.0 on eight, and single lookups of
-2.1 / 3.1 / 12.0 ns. Its other rows' builds agree with this file's within 4 % but for PHast+'s
-16 ms build on eight threads at 1 M (11 %), the 100 M builds on eight threads, 4–8 % slower there,
-and PtrHash fast's on one, 249.7 against 194.1 ns — the same row read 233–242 in four more
-processes within the hour of this run, the keys in generation order and sorted alternated, so the
-key order does not move it — and their lookups within 0.9 ns. The morning's run at `b4544db`
+2.1 / 3.1 / 12.0 ns. Its other rows' builds agree with the `e147b05` file's within 4 % but for
+PHast+'s 16 ms build on eight threads at 1 M (11 %), the 100 M builds on eight threads, 4–8 %
+slower there, and PtrHash fast's on one, 249.7 against 194.1 ns — the same row read 233–242 in
+four more processes within the hour of the `e147b05` run, the keys in generation order and sorted
+alternated, so the key order does not move it — and their lookups within 0.9 ns. The morning's
+run at `b4544db`
 ([`mphf-vs-2026-09-16-arz-b4544db.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-16-arz-b4544db.txt)),
 two minutes after a reboot at Tctl 49 °C, read 2.6 / 3.8 / 13.7 ns for `MPH3`'s single lookup
 before the placed path was cut; its other rows agree with the `ba0580b` file's within their

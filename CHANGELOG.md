@@ -187,16 +187,35 @@ All notable changes to this project are documented here. The format follows
   10 M, 61.9 / 10.2 at 100 M), into the same table whatever the order and the thread count. Every
   index here hands its perfect hash sorted hashes, so the gain is `Mphf`'s callers' — and the
   comparison's with PtrHash and PHast, which bucket their keys inside the build in any order.
+- **`Mphf::build` searches a bucket's seed over fixed lanes: 1.8–1.9× faster on one thread, 1.3–1.4×
+  on eight, and ahead of PHast+ on both.** The seed search spent its time on loops whose trip counts
+  the branch predictor could not know — one a key a mode, a candidate loop a wrap, and a collision
+  check that struck candidates out one at a time — and its placement order was a queue a size class
+  under a binary heap, whose updates were most of the placement's instructions. Now a bucket of 1 to
+  16 keys runs through a function of its own width, every loop's count known to the compiler. Two
+  keys can meet under a mode's shifts only if their values are equal modulo the slice, so a table of
+  the mode each residue was last seen in sends a mode to the exact check only when two of its keys
+  agree, and the shifts a meeting rules out are a span of the mode's word; the first free shift at
+  or after every wrap comes out of one addition, and a seed's score and the seed are one key, so the
+  lowest needs no order. The buckets wait in a bitmap of priority slots — a bucket's index less its
+  size class's term, in whole buckets, and a place in the slot the class fixes — taken from the
+  lowest set bit behind a cursor. The seeds, and so the tables, are byte-identical, and a test holds
+  the lanes to the search they replace over 24 000 buckets. Measured with `bench/mphf_vs` on a cool
+  machine, splitmix64 keys in generation order, against the run before: **75.2 / 70.6 / 70.3 →
+  42.8 / 37.5 / 37.5 ns/key** on one thread at 1 M / 10 M / 100 M, **16.5 / 13.6 / 12.3 → 12.3 /
+  10.6 / 8.7** on eight, and 12.8 → 7.7 s for 10⁹ keys on eight; PHast+ builds the same keys in
+  55.4 / 60.2 / 67.9 ns on one thread, ahead of the old build at every size, and 17.9 / 15.4 / 16.5
+  on eight.
 
 - **Measured against PtrHash and PHast on a cool machine, with three faults in the comparison
   harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process, A-B-A-B:
-  `MPH3` **1.929 / 1.918 / 1.914 bits/key**, the smallest function in every table, builds 75.2 /
-  70.6 / 70.3 ns/key on one thread and **16.5 / 13.6 / 12.3 on eight**, single lookups **1.9 / 2.6 /
-  10.2 ns**, batches **2.2 / 2.5 / 3.6**, a construction peak of 6 / 30 / 261 MB above the keys —
-  against `ptr_hash` 2.1.1's compact set at 2.143 bits, 148–165 ns builds, 4.0 / 5.4 / 17.0 lookups,
-  3.6 / 4.0 / 5.7 batches and 16 / 156 / 906 MB; its fast set at 2.990 bits, with the fastest single
-  lookup at 1 M, 1.8; and the `ph` crate's PHast+ at 2.146–2.160 bits, whose build is ahead on one
-  thread at every size, 56.7 / 57.2 / 68.3 ns, and level or behind on eight, 18.1 / 13.8 / 15.6. The
+  `MPH3` **1.929 / 1.918 / 1.914 bits/key**, the smallest function in every table, builds **42.8 /
+  37.5 / 37.5 ns/key** on one thread and **12.3 / 10.6 / 8.7 on eight**, the fastest in every table,
+  single lookups **1.9 / 2.6 / 10.0 ns**, batches **2.2 / 2.5 / 3.5**, a construction peak of 6 /
+  30 / 262 MB above the keys — against `ptr_hash` 2.1.1's compact set at 2.143 bits, 148–165 ns
+  builds, 4.0 / 5.5 / 16.8 lookups, 4.2 / 4.7 / 6.2 batches and 16 / 156 / 906 MB; its fast set at
+  2.990 bits, level on the single lookup at 1 M, 1.9; and the `ph` crate's PHast+ at 2.146–2.160
+  bits, whose builds read 55.4 / 60.2 / 67.9 ns on one thread and 17.9 / 15.4 / 16.5 on eight. The
   harness sorted the keys for its dedup, and every build took them sorted: `Mphf` skips its own sort
   on sorted hashes, while PtrHash and PHast bucket their keys whatever the order, so every earlier
   table read `MPH3`'s build at 55–58 ns on one thread with a 60 MB peak at 100 M; the keys are built
