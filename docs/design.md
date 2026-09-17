@@ -58,8 +58,8 @@ perfect hash with **one small fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.953 bits/key at
-10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.6 % of bumped keys cost)
+Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.918 bits/key at
+10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.3 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.76 B/key at 4 bits
 (6.25% false positives), 1.26 at the 8-bit default (0.39%), 2.26 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
 `id → key`. The serialised blob is `[magic "BCH8"][n][fp_bits][mph length][side_len]

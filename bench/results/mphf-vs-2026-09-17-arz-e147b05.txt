@@ -1,0 +1,103 @@
+bench/mphf_vs at e147b05 (lexindex 3.0.0 plus the unreleased changes up to that commit: MPH3 with a bucket's seed
+chosen by the product of its keys' positions, the remap as a sampled Elias-Fano stream, huge pages, the batch's
+three seed pulls on a first level past L3, a seed's mode shift read from a table, the build over hashes in any
+order, and the 4.0 key hash, which these splitmix64 keys never touch), 2026-09-17 13:02-13:15, ph 0.11.0 with its
+`wyhash` feature, ptr_hash 2.1.1 (default features), Ryzen 7 5800HS (8 cores, 16 MB L3, 38 GB), Fedora 44, on mains
+(battery full), no browser, an editor open, after a wait for Tctl under 60 C and a 1-minute load under 0.7 (51.9 C
+and 0.29 at the start, 87 C at the end); at each size the 1-thread process ran before the 8-thread one, then the
+no-THP control process. Part 1 is 1 M and 10 M, part 2 is 100 M.
+The keys are built on in generation order from this file on. Every earlier file's harness sorted them in place for
+its dedup, so every build there took them sorted: lexindex's Mphf skips its own sort on sorted hashes, while
+PtrHash and PHast bucket their keys inside the build whatever the order, and those files' MPH3 build and peak
+columns are for sorted hashes (splitmix64 is a bijection, so the keys are distinct without the dedup). Against the
+ba0580b file: MPH3 1.966 / 1.953 / 1.949 -> 1.929 / 1.918 / 1.914 bits, its single lookup 2.1 / 3.1 / 12.0 -> 1.9 /
+2.6 / 10.2 ns and its batch 2.3 / 2.9 / 4.0 -> 2.2 / 2.5 / 3.6; its builds 57.7 / 55.6 / 57.6 -> 75.2 / 70.6 / 70.3
+ns on one thread and 11.1 / 9.2 / 9.0 -> 16.5 / 13.6 / 12.3 on eight, and its peaks 1.2 / 6.3 / 59.8 -> 5.7 / 30.2
+/ 261.3 MB on one thread; the builds and the peaks are the key order but for the 2-3 ns the product scoring adds,
+the bits and the lookups the commits between. The other rows' builds read within 4 % of that file's but for PHast+
+on eight threads at 1 M (16.3 -> 18.1, a 16 ms build that spread 20 % there), the 100 M builds on eight threads
+(4-8 % faster here) and PtrHash fast's 100 M build on one thread, 249.7 -> 194.1 ns: the same row read 233-242 ns
+in four more processes within the hour, the keys in generation order and the same keys sorted alternated A-B-B-A
+(compact 165 in all four), so the key order does not move it and this file's minimum is the low one. Their lookups
+agree within 0.9 ns.
+n distinct splitmix64 keys in generation order; one process per (n, thread count), rows built A-B-A-B for 3 rounds
+(builds: min), lookups over one shuffled probe order of all n keys (min of 9 passes). The probe keys are copied into
+an array in probe order, so the lookup column is the function alone; each row's lookup loop is a generic function of
+its own (`sweep`), so that the function is inlined into a loop and nothing else.
+spread = slowest repeat over the fastest, minus one; batch = lexindex `Mphf::index_all` / ptr_hash
+`index_stream::<32, _>` over chunks of 4096 keys (ph has no batch form).
+
+R-1 part 1: bench/mphf_vs at e147b05, 2026-09-17T13:02+03:00, load 0.29 0.74 0.96, ph 0.11.0, ptr_hash 2.1.1, Ryzen 7 5800HS
+
+n 1000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.929     75.2   +2.7%      1.9  +19.4%      2.2   +5.3%           5.7      2.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.160     56.7   +3.4%      3.5   +5.1%        -                  14.9      0.0
+ph 0.11 PHast (SeedOnly)                 1.933    582.6   +0.4%      2.8   +4.8%        -                  14.0      0.0
+ptr_hash 2.1.1 compact                   2.144    148.4   +6.3%      4.0   +9.9%      3.6   +7.7%          15.7      0.0
+ptr_hash 2.1.1 balanced                  2.378     92.1   +3.6%      4.1   +4.0%      3.6   +2.6%           7.6      0.0
+ptr_hash 2.1.1 fast                      2.990     72.3   +0.5%      1.8  +11.7%      2.5  +24.3%           0.0      0.0
+
+n 1000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.929     16.5  +22.4%      2.0   +4.6%      2.2   +2.2%          13.5      0.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.175     18.1   +4.8%      3.5  +16.6%        -                   8.4      0.0
+ph 0.11 PHast (SeedOnly)                 1.953    103.0   +3.6%      3.0  +20.0%        -                   7.7      0.0
+ptr_hash 2.1.1 compact                   2.144     80.3   +4.5%      4.0  +15.6%      3.7   +3.1%          19.2      0.0
+ptr_hash 2.1.1 balanced                  2.378     47.4   +3.1%      4.0   +7.8%      3.7  +11.7%          10.6      0.0
+ptr_hash 2.1.1 fast                      2.990     63.8   +1.8%      1.9   +5.8%      2.5   +8.8%           0.0      0.0
+
+control: the lexindex row without transparent huge pages (MPHF_VS_NO_THP=1, prctl PR_SET_THP_DISABLE), 1 thread
+n 1000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.929     78.1   +1.7%      1.9  +13.0%      2.2  +31.4%           5.7      0.0
+
+n 10000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.918     70.6   +1.2%      2.6  +14.7%      2.5  +10.6%          30.2      4.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     57.2   +1.1%      5.4   +4.3%        -                 152.3      4.0
+ph 0.11 PHast (SeedOnly)                 1.921    590.9   +0.7%      4.2   +3.3%        -                 152.2      4.0
+ptr_hash 2.1.1 compact                   2.143    161.8   +0.8%      5.4   +5.5%      4.0   +1.4%         156.0      4.0
+ptr_hash 2.1.1 balanced                  2.378    104.2   +0.4%      5.4   +4.3%      4.1   +1.5%         152.2      4.0
+ptr_hash 2.1.1 fast                      2.990    148.0   +0.6%      2.9   +9.1%      2.8   +2.0%         152.2      4.0
+
+n 10000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.918     13.6   +1.6%      2.7  +18.4%      2.7   +6.7%          48.5      4.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.149     13.8   +1.9%      5.4   +3.8%        -                 101.9      4.0
+ph 0.11 PHast (SeedOnly)                 1.925     91.4   +1.1%      4.3   +5.1%        -                  75.9      4.0
+ptr_hash 2.1.1 compact                   2.143     41.4   +3.3%      5.4   +5.4%      4.1   +3.9%         157.3      4.0
+ptr_hash 2.1.1 balanced                  2.378     25.9   +1.4%      5.5   +7.5%      4.2   +2.0%         151.8      4.0
+ptr_hash 2.1.1 fast                      2.990    134.7   +0.7%      2.9   +4.0%      2.9   +2.6%         151.9      4.0
+
+control: the lexindex row without transparent huge pages (MPHF_VS_NO_THP=1, prctl PR_SET_THP_DISABLE), 1 thread
+n 10000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.918     70.1   +4.3%      2.9   +8.3%      2.7   +5.7%          29.8      0.0
+
+R-1 part 2: bench/mphf_vs at e147b05, 2026-09-17T13:03+03:00, load 1.25 0.91 1.01, ph 0.11.0, ptr_hash 2.1.1, Ryzen 7 5800HS
+
+n 100000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.914     70.3   +2.7%     10.2   +1.7%      3.6   +3.0%         261.3     20.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.146     68.3   +0.5%     17.6   +2.0%        -                1525.4      0.0
+ph 0.11 PHast (SeedOnly)                 1.920    616.3   +0.6%     13.6   +2.3%        -                1525.3      0.0
+ptr_hash 2.1.1 compact                   2.143    165.0   +1.8%     17.0   +1.4%      5.7   +0.6%         905.9      0.0
+ptr_hash 2.1.1 balanced                  2.378    105.3   +1.0%     17.8   +1.0%      5.8   +0.7%         844.0      0.0
+ptr_hash 2.1.1 fast                      2.990    194.1   +1.3%     10.8   +0.7%      4.9   +1.5%        1402.0      0.0
+
+n 100000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.914     12.3   +2.8%     10.1   +2.7%      3.5   +3.6%         279.9     42.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     15.6   +2.1%     17.3   +3.9%        -                 956.7     10.0
+ph 0.11 PHast (SeedOnly)                 1.921     93.0   +0.5%     13.1   +5.0%        -                 932.4     10.0
+ptr_hash 2.1.1 compact                   2.143     39.1   +0.9%     16.9   +1.3%      5.8   +1.5%        1093.8      0.0
+ptr_hash 2.1.1 balanced                  2.378     23.0   +0.6%     17.6   +1.4%      5.8   +0.9%         873.9      0.0
+ptr_hash 2.1.1 fast                      2.990    231.3   +1.3%     10.7   +1.8%      4.9   +2.7%        1498.5      0.0
+
+control: the lexindex row without transparent huge pages (MPHF_VS_NO_THP=1, prctl PR_SET_THP_DISABLE), 1 thread
+n 100000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.914     69.0   +0.9%     10.6   +5.2%      3.7  +14.4%         261.2      0.0
+
+RUN DONE

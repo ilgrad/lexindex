@@ -1,0 +1,24 @@
+bench/mphf_vs at e147b05, the 1 B row: the binary and the keys in generation order of
+mphf-vs-2026-09-17-arz-e147b05.txt, 2026-09-17 13:38-13:49, one process, `MPHF_VS_PROBES=10000000
+MPHF_VS_LOOKUP_THREADS=8 mphf_vs 1000000000 1 8`: eight build threads and one round, so no build spread; the
+lookups over 10 M probe keys drawn at random with replacement, because the full probe order is another 8 GB beside
+PtrHash fast's 14 GB construction peak; x8 = wall ns a key with eight lookup threads over shares of the probe
+order. After a wait for Tctl under 60 C and a 1-minute load under 0.7 (50.5 C and 0.09 at the start, 84 C at the
+end), on mains (battery full), no browser, an editor open, Ryzen 7 5800HS (8 cores, 16 MB L3, 38 GB), Fedora 44, ph
+0.11.0 with its `wyhash` feature, ptr_hash 2.1.1. The run this replaces in docs/benchmarks.md (2026-09-16, a461a5d,
+not published) was on a hot machine (64 C at the start), over sorted keys, with the harness's lookup loops still
+inlined beside the builds and ph on its default SipHash: MPH3 1.948 bits, a 10.5 ns/key build, a 600 MB peak, 30.0
+/ 9.9 ns single / batch and 6.1 / 3.5 with eight threads; PHast+ 137.1 ns single; PtrHash's rows within 6 % of this
+file's.
+
+R-3 1 B: bench/mphf_vs at e147b05, 2026-09-17T13:38+03:00, load 0.09 0.41 0.84, Tctl 50.5 C, Ryzen 7 5800HS
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.914     12.8   +0.0%     14.8   +1.0%      6.8   +0.4%      3.1   +0.8%      2.6   +0.6%        2601.4    178.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.146     21.4   +0.0%     27.9   +0.3%        -              4.6   +1.7%        -                9679.7      4.0
+ph 0.11 PHast (SeedOnly)                 1.920    100.4   +0.0%     19.4   +0.5%        -              4.0   +1.7%        -                9657.3      4.0
+ptr_hash 2.1.1 compact                   2.143     45.4   +0.0%     24.6   +0.8%      8.3   +1.1%      4.0   +1.7%      2.5   +2.8%        8421.2      4.0
+ptr_hash 2.1.1 balanced                  2.378     27.2   +0.0%     24.5   +2.0%      8.3   +1.7%      4.1   +1.2%      2.5   +3.8%        8050.4      4.0
+ptr_hash 2.1.1 fast                      2.990    426.2   +0.0%     13.9   +6.8%      7.7   +0.7%      3.0   +1.2%      2.9   +0.5%       14435.9      4.0
+end 2026-09-17T13:49+03:00, Tctl 84.4 C
+RUN DONE

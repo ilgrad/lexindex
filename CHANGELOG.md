@@ -188,20 +188,25 @@ All notable changes to this project are documented here. The format follows
   index here hands its perfect hash sorted hashes, so the gain is `Mphf`'s callers' — and the
   comparison's with PtrHash and PHast, which bucket their keys inside the build in any order.
 
-- **Measured against PtrHash and PHast on a cool machine, with two faults in the comparison
-  harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process,
-  A-B-A-B: `MPH3` **1.966 / 1.953 / 1.949 bits/key**, builds **55.7 / 54.4 / 56.2 ns/key on one
-  thread** and 11.1 / 9.2 / 9.0 on eight, single lookups 2.6 / 3.8 / 13.7 ns, batches 2.8 / 3.0 /
-  3.8, a construction peak of 1.3 / 6.3 / 60 MB above the keys — against `ptr_hash` 2.1.1's compact
-  set at 2.143 bits, 148–165 ns builds, 4.0 / 5.5 / 16.5 lookups, 4.2 / 4.7 / 6.1 batches and 16 /
-  156 / 906 MB, and its fast set at 2.990 bits with the fastest single lookup at every size, 1.8 /
-  2.9 / 10.7. The `ph` crate's PHast+ now hashes with wyhash in the harness: its default is std's
-  SipHash-1-3, which every earlier table timed, so its rows read 2–4× slower than the crate intends
-  (PHast+ 8.8 → 3.5 ns at 1 M with the right hasher, its build 69.6 → 58.3). And the harness's
-  lookup loops were inlined into one function beside each row's build, which cost lexindex 0.7–3.6
-  ns a lookup and the other rows nothing measurable; each row's loop now stands alone. The tables
-  and the correction are in `docs/benchmarks.md`; the string-to-id path end to end, on real key
-  corpora, is `bench/mphf_vs`'s `strings` binary and `bench/results/mphf-strings-*`.
+- **Measured against PtrHash and PHast on a cool machine, with three faults in the comparison
+  harness corrected.** `bench/mphf_vs` at 1 M / 10 M / 100 M splitmix64 keys, one process, A-B-A-B:
+  `MPH3` **1.929 / 1.918 / 1.914 bits/key**, the smallest function in every table, builds 75.2 /
+  70.6 / 70.3 ns/key on one thread and **16.5 / 13.6 / 12.3 on eight**, single lookups **1.9 / 2.6 /
+  10.2 ns**, batches **2.2 / 2.5 / 3.6**, a construction peak of 6 / 30 / 261 MB above the keys —
+  against `ptr_hash` 2.1.1's compact set at 2.143 bits, 148–165 ns builds, 4.0 / 5.4 / 17.0 lookups,
+  3.6 / 4.0 / 5.7 batches and 16 / 156 / 906 MB; its fast set at 2.990 bits, with the fastest single
+  lookup at 1 M, 1.8; and the `ph` crate's PHast+ at 2.146–2.160 bits, whose build is ahead on one
+  thread at every size, 56.7 / 57.2 / 68.3 ns, and level or behind on eight, 18.1 / 13.8 / 15.6. The
+  harness sorted the keys for its dedup, and every build took them sorted: `Mphf` skips its own sort
+  on sorted hashes, while PtrHash and PHast bucket their keys whatever the order, so every earlier
+  table read `MPH3`'s build at 55–58 ns on one thread with a 60 MB peak at 100 M; the keys are built
+  on in generation order now. The `ph` crate's PHast+ hashes with wyhash in the harness: its default
+  is std's SipHash-1-3, which every earlier table timed, so its rows read 2–4× slower than the crate
+  intends (PHast+ 8.8 → 3.5 ns at 1 M with the right hasher, its build 69.6 → 58.3). And the
+  harness's lookup loops were inlined into one function beside each row's build, which cost lexindex
+  0.7–3.6 ns a lookup and the other rows nothing measurable; each row's loop now stands alone. The
+  tables and the corrections are in `docs/benchmarks.md`; the string-to-id path end to end, on real
+  key corpora, is `bench/mphf_vs`'s `strings` binary and `bench/results/mphf-strings-*`.
 
 ### Added
 
