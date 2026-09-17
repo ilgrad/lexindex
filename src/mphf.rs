@@ -47,7 +47,6 @@
 //! [PtrHash]: https://arxiv.org/abs/2502.15539
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -2735,6 +2734,52 @@ impl V2 {
     }
 }
 
+/// The best of the placement order's class heads: a winner tree over [`CLASSES`] keys, so that
+/// taking the best is one load and replacing a class's head is a compare a level.
+struct Heads {
+    key: [i64; CLASSES],
+    /// `node[i]` is the class that wins the subtree at `i`; the leaves `CLASSES..` are the classes.
+    node: [u8; 2 * CLASSES],
+}
+
+impl Heads {
+    fn new() -> Self {
+        const { assert!(CLASSES.is_power_of_two() && CLASSES <= 256) };
+        let mut node = [0u8; 2 * CLASSES];
+        for (d, n) in node[CLASSES..].iter_mut().enumerate() {
+            *n = d as u8;
+        }
+        // Every node names a class of its own subtree, so that a class's head that drops is
+        // weighed against its true siblings.
+        for i in (1..CLASSES).rev() {
+            node[i] = node[2 * i];
+        }
+        Self {
+            key: [i64::MIN; CLASSES],
+            node,
+        }
+    }
+
+    #[inline(always)]
+    fn set(&mut self, class: usize, key: i64) {
+        self.key[class] = key;
+        let mut i = (CLASSES + class) >> 1;
+        while i != 0 {
+            let (l, r) = (self.node[2 * i], self.node[2 * i + 1]);
+            // Selected without a branch: measured, fewer mispredictions than the compare and jump
+            // an `if` compiled to.
+            let right = u8::from(self.key[r as usize] > self.key[l as usize]).wrapping_neg();
+            self.node[i] = l ^ ((l ^ r) & right);
+            i >>= 1;
+        }
+    }
+
+    #[inline(always)]
+    fn best(&self) -> usize {
+        self.node[1] as usize
+    }
+}
+
 /// Seed the buckets of a run against `taken`, whose bit 0 is value `origin`. `seeds` is those
 /// buckets' slice of the level's table, one per bucket of the run.
 ///
@@ -2749,17 +2794,33 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
     let window = tun(6, f64::from(WINDOW)) as u32;
     // Buckets wait in a queue per size class, each in index order, which is priority order
     // within the class: the priority is the class's term less 1024 per bucket of index. The next
-    // bucket is the best of the class heads, kept in a heap of at most one entry per class.
+    // bucket is the best of the class heads, kept in a winner tree over the classes.
     let mut term = [0i64; CLASSES];
     for (c, t) in term.iter_mut().enumerate() {
         *t = ell(c + 1, level.slice);
     }
     let class = |b: u32| (run.size(b) as usize).min(CLASSES) - 1;
-    let priority = |b: u32| -> i64 { term[class(b)] - 1024 * i64::from(b) };
-    let mut queue: [std::collections::VecDeque<u32>; CLASSES] = Default::default();
-    let mut heads: BinaryHeap<(i64, Reverse<u32>)> = BinaryHeap::with_capacity(CLASSES);
+    // A class's head as one key, larger first: its priority, then the lower bucket. Two heads of
+    // one priority are a multiple of 1024 apart in their terms, the lower term the lower bucket,
+    // so the second part is the class's rank by term, the lowest term largest.
+    let rank: [i64; CLASSES] = std::array::from_fn(|c| {
+        (0..CLASSES)
+            .filter(|&d| (term[d], d) < (term[c], c))
+            .count() as i64
+    });
+    let key = |b: u32| {
+        let c = class(b);
+        (term[c] - 1024 * i64::from(b)) * CLASSES as i64 + (CLASSES as i64 - 1 - rank[c])
+    };
+    // A queue holds buckets of the window only, so a ring of the window's length never fills.
+    let cap = (window as usize).next_power_of_two();
+    let mut ring = vec![0u32; CLASSES * cap];
+    let (mut first, mut len) = ([0usize; CLASSES], [0usize; CLASSES]);
+    let mut heads = Heads::new();
+    let lanes = LaneForm::new(level, origin);
     let mut done = vec![0u64; (end as usize).div_ceil(64)];
     let mut scratch = Scratch::new();
+    let mut mates = [0u16; 64];
     let (mut front, mut pushed) = (0u32, 0u32);
     loop {
         while front < end
@@ -2773,25 +2834,190 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
         let limit = end.min(front.saturating_add(window));
         while pushed < limit {
             if run.size(pushed) != 0 {
-                let q = &mut queue[class(pushed)];
-                if q.is_empty() {
-                    heads.push((priority(pushed), Reverse(pushed)));
+                let c = class(pushed);
+                debug_assert!(len[c] < cap);
+                if len[c] == 0 {
+                    heads.set(c, key(pushed));
                 }
-                q.push_back(pushed);
+                ring[c * cap + ((first[c] + len[c]) & (cap - 1))] = pushed;
+                len[c] += 1;
             }
             pushed += 1;
         }
-        let (_, Reverse(b)) = heads.pop().expect("the front bucket is in a queue");
-        let q = &mut queue[class(b)];
-        let head = q.pop_front();
-        debug_assert_eq!(head, Some(b));
-        if let Some(&next) = q.front() {
-            heads.push((priority(next), Reverse(next)));
-        }
+        let c = heads.best();
+        let b = ring[c * cap + first[c]];
+        debug_assert!(len[c] > 0 && heads.key[c] == key(b));
+        first[c] = (first[c] + 1) & (cap - 1);
+        len[c] -= 1;
+        heads.set(
+            c,
+            if len[c] == 0 {
+                i64::MIN
+            } else {
+                key(ring[c * cap + first[c]])
+            },
+        );
         let ks = run.keys_of(b);
-        seeds[b as usize] = seed_bucket(level, ks, taken, origin, &mut scratch);
+        let fast = lanes.as_ref().and_then(|form| match ks.len() {
+            1..=4 => seed_bucket_lanes::<4>(form, ks, taken, &mut mates),
+            5..=8 => seed_bucket_lanes::<8>(form, ks, taken, &mut mates),
+            9..=16 => seed_bucket_lanes::<16>(form, ks, taken, &mut mates),
+            _ => None,
+        });
+        seeds[b as usize] =
+            fast.unwrap_or_else(|| seed_bucket(level, ks, taken, origin, &mut scratch));
         done[(b / 64) as usize] |= 1 << (b % 64);
     }
+}
+
+/// The geometry of a run that [`seed_bucket_lanes`] reads, fetched once a run.
+struct LaneForm {
+    n: u64,
+    origin: u64,
+    slice: u64,
+    shift: u32,
+    limit: u64,
+    /// [`LOG2`] from [`PROD_C`] on: a position's term of a seed's score.
+    log2: &'static [u32; 1024],
+}
+
+impl LaneForm {
+    /// The form of a run of `level` against a map whose bit 0 is value `origin`; `None` for a
+    /// level [`seed_bucket_lanes`] does not search: one of other than two mode bits, or of a
+    /// slice past [`SLICE`] or of other than 64 shifts a mode.
+    fn new(level: &Level, origin: u64) -> Option<Self> {
+        if level.mode_bits != 2 || level.slice > SLICE || level.slice >> level.shift != 64 {
+            return None;
+        }
+        let plus = tun(3, PROD_C as f64) as usize;
+        Some(Self {
+            n: level.n,
+            origin,
+            slice: level.slice,
+            shift: level.shift,
+            limit: level.n - origin,
+            log2: LOG2[plus..plus + 1024]
+                .try_into()
+                .expect("the table runs a slice past the constant"),
+        })
+    }
+}
+
+/// [`seed_bucket`] for a bucket of at most `L` keys, `L` at most 16, whose slices end inside the
+/// range, on a level of two mode bits and at most [`SLICE`] values a slice: the same seed, found
+/// with every loop over all `L` lanes — those past the bucket's keys hold its first key again,
+/// which changes no window and no wrap, and are masked out of the scores. `None` for a bucket
+/// whose slices do not all end inside the range, before anything is marked. `mates` is scratch
+/// kept across buckets.
+///
+/// A key's value under shift `t` is its value under shift 0 plus `t` strides, less the slice once
+/// it has wrapped, and the slice is a multiple of 64: two keys whose shift-0 values differ in
+/// their low six bits are apart under every shift, and two that agree meet at the shifts where
+/// one has wrapped and the other has not exactly when their shift-0 values are a slice apart —
+/// or everywhere, when they are equal, which rules the mode out. So the shifts a collision rules
+/// out are a span of the mode's word, marked with the ones the map rules out, and the first
+/// feasible shift at or after a wrap is where a carry from the wrap's bit stops in that word: all
+/// of a mode's candidates come out of one addition, each once. A seed's score with its seed
+/// below it is one key, so the lowest is the first lowest in [`seed_bucket`]'s order whatever
+/// the order they are scored in.
+#[inline(never)]
+fn seed_bucket_lanes<const L: usize>(
+    form: &LaneForm,
+    ks: &[u64],
+    taken: &mut Map,
+    mates: &mut [u16; 64],
+) -> Option<u8> {
+    let k = ks.len();
+    debug_assert!((1..=L).contains(&k) && L <= 16);
+    let (slice, mask, shift) = (form.slice, form.slice - 1, form.shift);
+    let h: [u64; L] = std::array::from_fn(|j| ks[if j < k { j } else { 0 }]);
+    let mut starts = [0u64; L];
+    let mut slow = false;
+    for j in 0..L {
+        starts[j] = scale(h[j], form.n) - form.origin;
+        slow |= starts[j] + slice > form.limit;
+    }
+    if slow {
+        return None;
+    }
+    count!(BUCKETS, 1);
+    let real = |j: usize| u64::from(j < k).wrapping_neg();
+    // Shifts `a..b` of a word, for `1 <= a, b <= 64`.
+    let span = |a: u64, b: u64| (u64::MAX >> (64 - b)) & !(u64::MAX >> (64 - a));
+    let mut best = u64::MAX;
+    let (mut offs, mut cuts, mut vals) = ([0u64; L], [0u64; L], [0u64; L]);
+    for mode in 0..4u32 {
+        // Shift 0 starts a run of candidates as a wrap does, and a key that never wraps, at 64,
+        // marks shift 0 too.
+        let mut wraps = 1u64;
+        let mut u = u64::from(mode == 0);
+        let (mut seen, mut twice) = (0u64, 0u64);
+        for j in 0..L {
+            let o = (h[j] >> (8 * mode)) & mask;
+            let c = (slice - o + (1 << shift) - 1) >> shift;
+            let v = starts[j] + o;
+            (offs[j], cuts[j], vals[j]) = (o, c, v);
+            wraps |= 1u64 << (c & 63);
+            let low = (1u64 << (v & 63)) & real(j);
+            twice |= seen & low;
+            seen |= low;
+            let (plane, bit) = taken.at(v);
+            u |= taken.window(plane, bit + c - 64).rotate_left(c as u32);
+        }
+        count!(WINDOWS, k as u64);
+        if twice != 0 {
+            // The keys before each that agree with it in the low six bits, as lanes: `mates`
+            // by the low bits, an entry read only once this mode has written it.
+            let mut written = 0u64;
+            for j in 0..k {
+                let low = vals[j] & 63;
+                let mut before =
+                    mates[low as usize] & u16::from(written >> low & 1 == 1).wrapping_neg();
+                mates[low as usize] = before | 1 << j;
+                written |= 1 << low;
+                while before != 0 {
+                    let i = before.trailing_zeros() as usize;
+                    before &= before - 1;
+                    let d = vals[i].wrapping_sub(vals[j]);
+                    let at = |x: u64| u64::from(d == x).wrapping_neg();
+                    u |= at(0)
+                        | (at(slice) & span(cuts[i], cuts[j]))
+                        | (at(slice.wrapping_neg()) & span(cuts[j], cuts[i]));
+                }
+            }
+        }
+        let candidates = (wraps & !u) | (u.wrapping_add(wraps & u) & !u);
+        count!(CANDIDATES, u64::from(candidates.count_ones()));
+        // A seed's score, and the seed, as one key.
+        let key = |t: u64| {
+            let mut prod = 0;
+            for (j, &o) in offs.iter().enumerate() {
+                prod += u64::from(form.log2[((o + (t << shift)) & mask) as usize & 1023]) & real(j);
+            }
+            prod << 8 | u64::from(mode) << 6 | t
+        };
+        // Most modes have at most two candidates: those two are scored whether they are there or
+        // not, which is cheaper than a loop whose count the branch predictor cannot know.
+        let (one, two) = (candidates, candidates & candidates.wrapping_sub(1));
+        let none = |c: u64| u64::from(c == 0).wrapping_neg();
+        best = best
+            .min(key(u64::from(one.trailing_zeros()) & 63) | none(one))
+            .min(key(u64::from(two.trailing_zeros()) & 63) | none(two));
+        let mut rest = two & two.wrapping_sub(1);
+        while rest != 0 {
+            best = best.min(key(u64::from(rest.trailing_zeros())));
+            rest &= rest - 1;
+        }
+    }
+    if best == u64::MAX {
+        return Some(0);
+    }
+    let (mode, t) = ((best >> 6 & 3) as u32, best & 63);
+    for j in 0..L {
+        let o = (h[j] >> (8 * mode)) & mask;
+        taken.set(starts[j] + ((o + (t << shift)) & mask));
+    }
+    Some(best as u8)
 }
 
 /// The seed that lands every key of the bucket on a distinct free value, marking those values
@@ -2811,6 +3037,7 @@ fn seed_run(run: &Run<'_>, seeds: &mut [u8], taken: &mut Map, origin: u64) {
 /// at the first feasible shift at or after some wrap, and those are the candidates: one
 /// `trailing_zeros` each, the product a log table. Levels with more shifts a mode go through
 /// [`seed_bucket_wide`].
+#[inline(never)]
 fn seed_bucket(
     level: &Level,
     ks: &[u64],
@@ -2967,6 +3194,7 @@ fn seed_bucket(
 /// values at entry already exceed the best candidate is skipped, and most are. This search
 /// scores by the sum of the values, which is what its interval bounds are made of; the product
 /// of [`seed_bucket`] is not.
+#[inline(never)]
 fn seed_bucket_wide(
     level: &Level,
     ks: &[u64],
@@ -3743,6 +3971,86 @@ mod tests {
         for n in [1usize, 2, 3, 7, 64, 1_000, 10_000, 20_000] {
             assert_bijection(&hashes(n));
         }
+    }
+
+    /// The lane search seeds a bucket as the bucket search does — the same seed, the same values
+    /// taken — for buckets of one to sixteen keys in lanes of every width that holds them, on
+    /// levels of every slice length, from the start of the range and from inside it, onto maps
+    /// that fill as they go; half the buckets with offsets drawn from a few values at either end
+    /// of the slice, so that keys meet under a mode or a slice apart. A bucket with a slice past
+    /// the range's end it hands back untouched.
+    #[test]
+    fn the_lane_search_seeds_a_bucket_as_the_bucket_search_does() {
+        let mut state = 0x243F_6A88_85A3_08D3u64;
+        let mut next = move || {
+            state = mix(state);
+            state
+        };
+        let (mut scratch, mut mates) = (Scratch::new(), [0u16; 64]);
+        let (mut laned, mut handed_back) = (0, 0);
+        for n in [3_000u64, 20_000, 300_000] {
+            let level = Level::shape(n, Geometry::Mph3);
+            let slice = level.slice;
+            for origin in [0, 3 * (64 << level.shift)] {
+                let form = LaneForm::new(&level, origin).expect("a shipped level runs in lanes");
+                let mut by_lanes = Map::new(n - origin, level.shift);
+                let mut by_bucket = Map::new(n - origin, level.shift);
+                for _ in 0..4_000 {
+                    let k = 1 + (next() % 16) as usize;
+                    // Slices starting within a few values of each other, as a bucket's do; one
+                    // bucket in eight at the range's end.
+                    let first = if next() % 8 == 0 {
+                        n - slice - 4 + next() % slice
+                    } else {
+                        origin + next() % (n - origin - slice)
+                    };
+                    let near = next() % 2 == 0;
+                    let ks: Vec<u64> = (0..k)
+                        .map(|_| {
+                            let start = (first + next() % 5).min(n - 1);
+                            let at = ((u128::from(start) << 64) / u128::from(n)) as u64
+                                + u64::MAX / n / 2;
+                            let low = if near {
+                                (0..5).fold(0, |low, byte| {
+                                    let pick = [0x00, 0x01, 0x02, 0xFD, 0xFE, 0xFF];
+                                    low | pick[(next() % 6) as usize] << (8 * byte)
+                                })
+                            } else {
+                                next()
+                            };
+                            (at & !((1 << 40) - 1)) | (low & ((1 << 40) - 1))
+                        })
+                        .collect();
+                    let widths: Vec<usize> = [4, 8, 16].into_iter().filter(|&w| w >= k).collect();
+                    let got = match widths[(next() % widths.len() as u64) as usize] {
+                        4 => seed_bucket_lanes::<4>(&form, &ks, &mut by_lanes, &mut mates),
+                        8 => seed_bucket_lanes::<8>(&form, &ks, &mut by_lanes, &mut mates),
+                        _ => seed_bucket_lanes::<16>(&form, &ks, &mut by_lanes, &mut mates),
+                    };
+                    let want = seed_bucket(&level, &ks, &mut by_bucket, origin, &mut scratch);
+                    if let Some(seed) = got {
+                        laned += 1;
+                        assert_eq!(seed, want, "n {n}, origin {origin}, keys {ks:x?}");
+                    } else {
+                        handed_back += 1;
+                        assert!(
+                            ks.iter().any(|&h| scale(h, n) + slice > n),
+                            "n {n}, origin {origin}: handed back keys {ks:x?}"
+                        );
+                        let again = seed_bucket(&level, &ks, &mut by_lanes, origin, &mut scratch);
+                        assert_eq!(again, want);
+                    }
+                }
+                assert!(
+                    by_lanes.words == by_bucket.words,
+                    "n {n}, origin {origin}: the maps parted"
+                );
+            }
+        }
+        assert!(
+            laned > 18_000 && handed_back > 1_000,
+            "{laned} laned, {handed_back} handed back"
+        );
     }
 
     /// A shipped level's value is the law written out under every seed: the seed's mode bits pick
