@@ -795,37 +795,56 @@ binary runs the path a user of string keys sees, end to end, on real corpora (`l
 in the repository: an English word list, URLs, UUIDs, English Wikipedia titles, file paths):
 `ClosedHashIndex::id` — the key hash, then `MPH3` — against PtrHash's fast set over the same key
 hash, which isolates the perfect hash, and over xxh3 of the bytes, PtrHash as one would build it
-over strings with a general-purpose string hash. One process a corpus, three rounds A-B-A-B, every
-key looked up once in a shuffled order with the key read from the corpus, the minimum of nine
-passes; batch is `ids_of` against `index_stream` in chunks of 4096; ×8 is the wall time a key with
-eight lookup threads. Each cell is lookup / batch / ×8 in ns. Measured 2026-09-16 at `7215616`,
-the first run over the key hash 4.0 ships.
+over strings with a general-purpose string hash. One process a corpus, three rounds; a round builds
+every row first and then times the rows in turn within each pass, each turn preceded by an untimed
+sweep over the first 2^20 probe keys, so that a machine warming through a round slows every row
+alike and no row holds the caches to itself for a turn of its own. Every key is looked up once in a
+shuffled order with the key read from the corpus, the minimum of nine passes; batch is `ids_of`
+against `index_stream` in chunks of 4096; ×8 is the wall time a key with eight lookup threads. Each
+cell is lookup / batch / ×8 in ns. Measured 2026-09-17 at `2a9acef`, on a machine at 53 °C and a
+load of 0.38.
 
 | corpus, keys (mean bytes) | **lexindex `ClosedHashIndex`** | `ptr_hash` fast, the same hash | `ptr_hash` fast, xxh3 |
 |---|---:|---:|---:|
-| words, 480 k (9) | 9.4 / **7.5** / 1.5 | **8.4** / 7.4 / 1.5 | 18.2 / 14.1 / 2.8 |
-| URLs, 1 M (52) | **43.0** / **28.7** / **6.7** | 42.9 / 33.4 / 6.6 | 54.9 / 58.3 / 7.9 |
-| UUIDs, 1 M (36) | 39.3 / **23.0** / 6.0 | **38.4** / 29.8 / 5.9 | 49.6 / 52.0 / 7.0 |
-| titles, 1 M (21) | 28.1 / **15.5** / 4.2 | **25.9** / 21.4 / 3.9 | 38.3 / 38.4 / 5.2 |
-| paths, 1 M (125) | 65.3 / **53.2** / **11.7** | **64.1** / 60.1 / 12.0 | 99.5 / 102.1 / 13.8 |
-| URLs, 10 M (52) | **48.1** / **30.9** / **7.4** | 48.8 / 36.5 / 7.6 | 61.9 / 63.9 / 8.9 |
-| UUIDs, 10 M (36) | 45.7 / **26.9** / **7.0** | **45.4** / 33.0 / 7.2 | 59.1 / 59.5 / 8.6 |
-| titles, 10 M (21) | 39.2 / **20.8** / **6.1** | **38.8** / 26.9 / 6.0 | 49.5 / 50.6 / 7.2 |
+| words, 480 k (9) | 8.3 / **5.9** / 1.6 | **7.6** / 6.7 / **1.5** | 17.7 / 13.5 / 3.0 |
+| URLs, 1 M (52) | **38.5** / **12.8** / **6.3** | 45.7 / 30.3 / 7.0 | 51.5 / 56.4 / 8.0 |
+| UUIDs, 1 M (36) | **36.0** / **10.9** / **5.6** | 38.9 / 28.5 / 5.9 | 48.8 / 50.5 / 7.1 |
+| titles, 1 M (21) | 26.0 / **9.7** / 3.8 | **25.2** / 19.9 / 3.8 | 38.1 / 37.6 / 5.2 |
+| paths, 1 M (125) | **60.2** / **41.2** / **11.8** | 64.0 / 55.1 / 12.2 | 99.3 / 100.8 / 14.2 |
+| URLs, 10 M (52) | **43.1** / **14.6** / **6.8** | 55.0 / 33.7 / 8.0 | 61.8 / 63.0 / 8.9 |
+| UUIDs, 10 M (36) | **40.8** / **13.4** / **6.4** | 47.9 / 32.4 / 7.2 | 59.3 / 58.8 / 8.5 |
+| titles, 10 M (21) | **35.2** / **11.4** / **5.6** | 38.4 / 24.4 / 5.9 | 49.3 / 50.1 / 7.2 |
 
-With the key read from memory the hash is the cost. Over the same hash, PtrHash's fast set and
-`ClosedHashIndex` read within 2 ns of each other on every corpus — the nanosecond `fast` has on
-the bare function is inside a 40 ns path — and the hash decides the rest: the same set over xxh3 is
-9–35 ns behind. The batch column is the crate's alone: `ids_of` hashes the next keys while the
-current ones' lines arrive, 28.7 / 23.0 / 15.5 ns on 1 M URLs / UUIDs / titles against
-`index_stream`'s 33.4 / 29.8 / 21.4 over the same hash and 58 / 52 / 38 over xxh3, which does not
-overlap the hashing. The `CompactHashIndex` row's single lookup is `id_unchecked`, the same
-perfect-hash probe without the fingerprint compare, within 1 ns of `ClosedHashIndex` on every
-corpus; its batch is `ids_of`, which does compare, and pays the fingerprint line's miss, 33–83 ns. Against the same protocol over the hash
-2.0–3.x shipped, run the same morning
-([`bench/results/mphf-strings-2026-09-16-arz-b4544db.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-16-arz-b4544db.txt)),
-every lexindex row is 10–30 % quicker — 1 M URLs 54.5 → 43.0 ns, paths 92 → 65, titles 32 → 28,
-UUIDs 46 → 39 — while the xxh3 rows, the same code in both runs, read 3–15 % slower in the new
-one, so the hash's own gain is at least the difference shown. Results file:
+With the key read from memory the hash is most of the cost, and the same hash under both perfect
+hashes is what the middle column holds fixed: `ClosedHashIndex` leads the fast set on six of the
+eight corpora, by 2.9 to 11.9 ns, and the lead grows with the corpus — at 480 k words and 1 M
+titles, where every table in the process still fits in the last level beside the others, `fast` is
+0.7 and 0.8 ns ahead; at 10 M, where they do not, `MPH3`'s 1.92 bits a key against 2.99 is 3.2 to
+11.9 ns. The hash decides the rest: the same set over xxh3 is 9 to 39 ns behind. The batch column is
+the crate's alone: `ids_of` hashes the next keys and pulls in both ends of each key while the
+current ones' lines arrive, 12.8 / 10.9 / 9.7 ns on 1 M URLs / UUIDs / titles against
+`index_stream`'s 30.3 / 28.5 / 19.9 over the same hash and 56 / 51 / 38 over xxh3, which does not
+overlap the hashing — 2.0 to 2.6× on every corpus but the word list, whose keys are 9 bytes, and
+the 125-byte paths. The `CompactHashIndex` row's single lookup is `id_unchecked`, the same
+perfect-hash probe without the fingerprint compare, within 0.4 ns of `ClosedHashIndex` on every
+corpus; its batch is `ids_of`, which does compare, and pays the fingerprint line's miss, 1.8 to
+6.3 ns above it.
+
+The table on this page before this run was measured on 2026-09-16 at `7215616`, with the protocol
+that timed each row's lookups right after that row's own build. The two files are read against each
+other through the `ptr_hash` over xxh3 rows: no code of this crate is in their path, and they read
+within 3 % across them (1 M URLs 54.9 → 51.5 ns single and 58.3 → 56.4 batch, 10 M titles
+49.5 → 49.3 and 50.6 → 50.1), so the interleave did not move the level. Against that file every
+lexindex row is quicker — 1 M URLs 43.0 → 38.5 ns single and 28.7 → 12.8 in a batch, 10 M URLs
+48.1 → 43.1 and 30.9 → 14.6 — over eighteen commits to `src/`, the batch column following the one
+that prefetches a key's last line as well as its first; and the interleave can only have cost it,
+since `MPH3`'s table now shares the last level with six others for a whole pass instead of holding
+it through a turn of its own. The key hash's own gain was measured the same way one commit earlier:
+against the `b4544db` file over the hash 2.0–3.x shipped, in the protocol both of those runs used,
+every lexindex row was 10–30 % quicker — 1 M URLs 54.5 → 43.0 ns, paths 92 → 65, titles 32 → 28,
+UUIDs 46 → 39 — while the xxh3 rows, the same code in both, read 3–15 % slower in the newer one, so
+that gain too is at least the difference shown. Results files:
+[`bench/results/mphf-strings-2026-09-17-arz-2a9acef.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-17-arz-2a9acef.txt),
 [`bench/results/mphf-strings-2026-09-16-arz-7215616.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-16-arz-7215616.txt).
 
 The lexindex row ran once more at each size in a process with transparent huge pages turned off

@@ -46,9 +46,10 @@ All notable changes to this project are documented here. The format follows
   demand miss; the hash reads a key to its end, and a key of a few dozen bytes lies across two
   lines as often as not. Naming the last byte too: on 1 M URLs `ClosedHashIndex::ids_of` 32 → 17
   ns a key and `CompactHashIndex::ids_of` 47 → 22, on 1 M titles 20 → 12 and 29 → 18, on 1 M
-  paths 54 → 48 and 91 → 79 (hot machine, ratios; the cool numbers follow in the benchmark
-  page). A single `id` cannot make that prefetch — it has no next key to look at — and does not
-  change.
+  paths 54 → 48 and 91 → 79 (hot machine, ratios). Cool, at the head of this release and with the
+  lookup work that followed, the same six read 12.8 / 14.6, 9.7 / 13.2 and 41.2 / 47.5 ns a key
+  (`bench/results/mphf-strings-2026-09-17-*`). A single `id` cannot make that prefetch — it has no
+  next key to look at — and does not change.
 - **The key hash is new — branch-free over the key's length, half the time on real words — and
   every hash blob moves to `BMP8`, `BCH8` and `BCL2`.** The hash 2.0–3.x shipped read a key eight
   bytes at a time in a loop and finished with a tail switch; on real keys 6 of its 9.5 ns were
