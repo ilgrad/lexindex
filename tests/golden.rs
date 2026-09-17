@@ -722,7 +722,7 @@ fn the_golden_dict_blobs_sections_account_for_every_byte() {
         std::fs::metadata(&path).unwrap().len(),
         "the sections do not add up to the blob"
     );
-    assert_eq!(s.header, 60);
+    assert_eq!(s.header, 64);
     // A head, a restart or an entry: every key is stored exactly once.
     let blocks = s.samples / 8;
     assert_eq!(blocks + s.restarts + s.entries, idx.len() as u64);

@@ -233,7 +233,7 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             let header: u64 = if one {
                 48
             } else if three {
-                60
+                64
             } else {
                 56
             };

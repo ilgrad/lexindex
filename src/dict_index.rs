@@ -32,7 +32,7 @@ use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
 /// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][codes u32]
-/// [check u32]`, then the head keys end to end, the head ends packed ([`offsets`]), the head
+/// [g u16][reserved u16][check u32]`, then the head keys end to end, the head ends packed ([`offsets`]), the head
 /// samples (`u64`), the block data, the suffix codecs — one per `shard` blocks, each behind its own
 /// `u32` length, so a reader that knows how many there are walks them without a directory — the
 /// header codes, two per shard and each self-delimiting ([`paircode`]), and the block and
@@ -57,8 +57,8 @@ const LEGACY_MAGIC: [(&[u8; 4], &str); 2] = [
          rebuild the index from its keys",
     ),
 ];
-pub(crate) const HEADER: usize = 60;
-const CHECKED: usize = 56; // header bytes the trailing check covers
+pub(crate) const HEADER: usize = 64;
+const CHECKED: usize = 60; // header bytes the trailing check covers
 pub(crate) const DEFAULT_BLOCK: usize = 256;
 const MAX_BLOCK: usize = 1024;
 /// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
@@ -156,12 +156,58 @@ pub struct DictIndex {
     codes: Vec<(Code, Code)>,
     /// Blocks one symbol table covers. At least one, and at most what the header's `u16` holds.
     shard: usize,
+    /// Bytes every block head shares, which the sample is taken past.
+    ///
+    /// A million URLs all begin `https://`, so a sample of their first eight bytes is the same word
+    /// for every block and the search that opens a lookup answers nothing: 3 906 of 3 907 samples
+    /// were duplicates and an `id` compared 11.95 heads. Taken at `g` the duplicates fall to 165
+    /// and the comparisons to 1.17. Two bytes a blob and none a block, and the search over the
+    /// samples is the same search — what changes is which eight bytes it reads.
+    g: usize,
 }
 
-/// The sample the search runs on: a key's first eight bytes, zero-padded, in byte order.
+/// The sample the search runs on: the eight bytes of a key at `g`, zero-padded, in byte order.
+///
+/// Every head shares its first `g` bytes, so ordering by this word is ordering by the head.
 #[inline(always)]
-fn sample_of(key: &[u8]) -> u64 {
-    fsst::word_at(key, 0).swap_bytes()
+fn sample_at(key: &[u8], g: usize) -> u64 {
+    fsst::word_at(key, g).swap_bytes()
+}
+
+/// Bytes every head in `heads` shares. They are sorted, so it is what the first and the last share
+/// and nothing else has to be read.
+fn common_head(heads: &[u8], ends: &Offsets, nb: usize) -> usize {
+    if nb == 0 {
+        return 0;
+    }
+    let (first, last) = (head_of(heads, ends, 0), head_of(heads, ends, nb - 1));
+    lcp(first, last).min(u16::MAX as usize)
+}
+
+/// [`common_head`] over the sections as a build holds them, before they are packed.
+fn common_head_raw(heads: &[u8], ends: &[u64]) -> usize {
+    let Some(&last_end) = ends.last() else {
+        return 0;
+    };
+    let first = &heads[..ends[0] as usize];
+    let start = if ends.len() == 1 {
+        0
+    } else {
+        ends[ends.len() - 2] as usize
+    };
+    lcp(first, &heads[start..last_end as usize]).min(u16::MAX as usize)
+}
+
+/// The sample of every head, in block order.
+fn samples_of(heads: &[u8], ends: &[u64], g: usize) -> Vec<u64> {
+    let mut at = 0usize;
+    ends.iter()
+        .map(|&end| {
+            let head = &heads[at..end as usize];
+            at = end as usize;
+            sample_at(head, g)
+        })
+        .collect()
 }
 
 /// Keys per microblock for a block of `block`: its largest divisor at or below 32, or the block
@@ -619,7 +665,6 @@ fn split_run(code: &Code, codec: &Codec, data: &[u8], keys: usize) -> RunSplit {
 struct Part {
     heads: Vec<u8>,
     head_ends: Vec<u64>,
-    samples: Vec<u64>,
     blocks: Vec<u64>,
     micros: Vec<u64>,
     data: Vec<u8>,
@@ -940,7 +985,6 @@ fn encode_range<S: AsRef<str>>(
     let mut part = Part {
         heads: Vec::new(),
         head_ends: Vec::with_capacity(nb),
-        samples: Vec::with_capacity(nb),
         blocks: Vec::with_capacity(nb),
         micros: Vec::with_capacity(nb * block.div_ceil(micro)),
         data: Vec::new(),
@@ -961,7 +1005,6 @@ fn encode_range<S: AsRef<str>>(
             let head = chunk[0].as_ref().as_bytes();
             part.heads.extend_from_slice(head);
             part.head_ends.push(part.heads.len() as u64);
-            part.samples.push(sample_of(head));
             view.clear();
             view.extend(chunk.iter().map(|k| k.as_ref().as_bytes()));
             collect_block(&mut collected, &view, micro, &encoder, &mut coded);
@@ -1345,16 +1388,20 @@ impl DictIndex {
         let mut n = 0usize;
         let mut heads: Vec<u8> = Vec::new();
         let mut head_ends: Vec<u64> = Vec::new();
-        let mut samples: Vec<u8> = Vec::new();
         src.each(&mut |key| {
             if n % block == 0 {
                 heads.extend_from_slice(key.as_bytes());
                 head_ends.push(heads.len() as u64);
-                samples.extend_from_slice(&sample_of(key.as_bytes()).to_le_bytes());
             }
             n += 1;
             Ok(())
         })?;
+        // Every head is in, so the prefix they share is known and the samples are taken past it.
+        let g = common_head_raw(&heads, &head_ends);
+        let samples: Vec<u8> = samples_of(&heads, &head_ends, g)
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
         let nb = n.div_ceil(block);
         let micro = micro_for(block);
         let shard = shard_blocks_for(block);
@@ -1553,6 +1600,7 @@ impl DictIndex {
             h[48..50].copy_from_slice(&(micro as u16).to_le_bytes());
             h[50..52].copy_from_slice(&(shard as u16).to_le_bytes());
             h[52..56].copy_from_slice(&(code_bytes.len() as u32).to_le_bytes());
+            h[56..58].copy_from_slice(&(g as u16).to_le_bytes());
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -1654,7 +1702,6 @@ impl DictIndex {
 
         let mut heads = Vec::with_capacity(parts.iter().map(|p| p.heads.len()).sum());
         let mut head_ends = Vec::with_capacity(nb);
-        let mut samples = Vec::with_capacity(nb);
         let mut blocks = Vec::with_capacity(nb);
         let mut micros = Vec::with_capacity(parts.iter().map(|p| p.micros.len()).sum());
         let mut data = Vec::with_capacity(parts.iter().map(|p| p.data.len()).sum());
@@ -1667,7 +1714,6 @@ impl DictIndex {
             blocks.extend(part.blocks.iter().map(|start| at_data + start));
             micros.extend(part.micros.iter().map(|start| at_data + start));
             heads.extend_from_slice(&part.heads);
-            samples.extend_from_slice(&part.samples);
             data.extend_from_slice(&part.data);
             codes.extend(part.codes);
             codecs.extend(part.codecs);
@@ -1678,6 +1724,9 @@ impl DictIndex {
             codes.push((Code::Frame, Code::Frame));
             codecs.push(Codec::Symbols(tables[0].clone()));
         }
+        // Every head is in, so the prefix they share is known and the samples are taken past it.
+        let g = common_head_raw(&heads, &head_ends);
+        let samples = samples_of(&heads, &head_ends, g);
         Ok(Self {
             block,
             micro,
@@ -1696,6 +1745,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            g,
         })
     }
 
@@ -1888,13 +1938,47 @@ impl DictIndex {
         if self.n == 0 {
             return (0, false);
         }
-        // The blocks whose heads share the probe's first eight bytes, and the one before them:
-        // the probe can only be in one of these.
-        let s = sample_of(probe);
-        let lo = self.samples.partition_point(|&x| x < s);
-        let hi = self.samples.partition_point(|&x| x <= s);
-        let l = self.head_boundary(probe, lo.saturating_sub(1), hi);
+        let l = match self.route(probe) {
+            // The blocks whose heads share the probe's eight bytes at `g`, and the one before
+            // them: the probe can only be in one of these.
+            Ok(s) => {
+                let lo = self.samples.partition_point(|&x| x < s);
+                let hi = self.samples.partition_point(|&x| x <= s);
+                self.head_boundary(probe, lo.saturating_sub(1), hi)
+            }
+            Err(l) => l,
+        };
         self.locate_in(l, probe)
+    }
+
+    /// The probe's sample, or the block boundary it lands on outright.
+    ///
+    /// The samples are taken past the `g` bytes every head shares, so they place a probe only if
+    /// it shares them too. One that does not is below every head or above every one, and that is
+    /// the answer the samples would have had to produce.
+    #[inline]
+    fn route(&self, probe: &[u8]) -> Result<u64, usize> {
+        if self.g > 0 {
+            let head = self.head(0);
+            let prefix = &head[..self.g.min(head.len())];
+            match probe.get(..prefix.len()) {
+                Some(front) => match front.cmp(prefix) {
+                    Ordering::Less => return Err(0),
+                    Ordering::Greater => return Err(self.blocks_len()),
+                    Ordering::Equal => {}
+                },
+                // Shorter than the prefix, so it is not a key: a proper prefix of it sorts below
+                // every head, and anything else is placed by the same comparison.
+                None => {
+                    return Err(if probe <= prefix {
+                        0
+                    } else {
+                        self.blocks_len()
+                    });
+                }
+            }
+        }
+        Ok(sample_at(probe, self.g))
     }
 
     /// The first block index in `[l, r)` whose head is past `probe` — the samples have already
@@ -2116,11 +2200,22 @@ impl DictIndex {
         let (mut lo_at, mut lo_len) = ([0usize; LANES], [0usize; LANES]);
         let (mut hi_at, mut hi_len) = ([0usize; LANES], [0usize; LANES]);
         let mut bound = [0usize; LANES];
+        // The boundary of a lane the samples cannot place, and `usize::MAX` for one they can.
+        let mut fixed = [0usize; LANES];
         for base in (0..n).step_by(LANES) {
             let m = LANES.min(n - base);
             for j in 0..m {
-                s[j] = sample_of(key(base + j));
-                (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, nb, 0, nb);
+                match self.route(key(base + j)) {
+                    Ok(sample) => {
+                        s[j] = sample;
+                        fixed[j] = usize::MAX;
+                        (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, nb, 0, nb);
+                    }
+                    Err(l) => {
+                        fixed[j] = l;
+                        (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, 0, 0, 0);
+                    }
+                }
             }
             // `lo` is the first sample not below the probe's, `hi` the first above it — the two
             // `partition_point`s `locate` makes, run for every lane at once.
@@ -2147,7 +2242,11 @@ impl DictIndex {
                 }
             }
             for j in 0..m {
-                bound[j] = self.head_boundary(key(base + j), lo_at[j].saturating_sub(1), hi_at[j]);
+                bound[j] = if fixed[j] == usize::MAX {
+                    self.head_boundary(key(base + j), lo_at[j].saturating_sub(1), hi_at[j])
+                } else {
+                    fixed[j]
+                };
             }
             // The block start is one load and the data it names another, so they are pulled in as
             // two passes rather than one: the second cannot be issued until the first has landed.
@@ -2611,6 +2710,7 @@ impl DictIndex {
         h[48..50].copy_from_slice(&(self.micro as u16).to_le_bytes());
         h[50..52].copy_from_slice(&(self.shard as u16).to_le_bytes());
         h[52..56].copy_from_slice(&(codes_len(&self.codes) as u32).to_le_bytes());
+        h[56..58].copy_from_slice(&(self.g as u16).to_le_bytes());
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
@@ -2788,6 +2888,7 @@ impl DictIndex {
             return Err(IndexError::Format("dict: symbol-table shard out of range"));
         }
         let codes_len = u32_at(52) as usize;
+        let g = usize::from(u16::from_le_bytes(bytes[56..58].try_into().unwrap()));
         let nb = n.div_ceil(block);
         let shards = nb.div_ceil(shard).max(1);
         // Every microblock holds at least one key, so the count is bounded by the key count and
@@ -2890,6 +2991,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            g,
         };
         if verify {
             idx.check_layout()?;
@@ -2947,7 +3049,12 @@ impl DictIndex {
         if self.block_start(0) != 0 || prev != self.data.len() as u64 {
             return Err(out_of_order);
         }
-        if (0..nb).any(|b| self.samples[b] != sample_of(self.head(b))) {
+        if self.g > common_head(&self.heads, &self.head_ends, nb) {
+            return Err(IndexError::Format(
+                "dict: the head prefix is longer than the heads share",
+            ));
+        }
+        if (0..nb).any(|b| self.samples[b] != sample_at(self.head(b), self.g)) {
             return Err(IndexError::Format(
                 "dict: head samples do not match the heads",
             ));
@@ -3808,6 +3915,64 @@ mod tests {
         assert!(packed > 0 && packed < idx.codecs.len(), "{packed} shards");
         check(&idx, &keys);
         check(&DictIndex::from_bytes(&idx.to_bytes()).unwrap(), &keys);
+    }
+
+    /// Keys that all begin the same way put nothing in a sample of their first eight bytes, so the
+    /// sample is taken past what every head shares. Every key must still answer, and so must a
+    /// stranger that falls short of that prefix, one that runs past it, and one inside it — the
+    /// three the samples cannot place at all.
+    #[test]
+    fn a_shared_head_prefix_moves_the_sample_and_still_places_every_probe() {
+        let mut keys: Vec<String> = (0..2000u32)
+            .map(|i| format!("https://example.com/articles/{i:07}"))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        for block in [4usize, 64, 256] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            assert!(
+                idx.g >= "https://example.com/articles/0".len() - 1,
+                "{}",
+                idx.g
+            );
+            check(&idx, &keys);
+            let blob = idx.to_bytes();
+            let back = DictIndex::from_bytes(&blob).unwrap();
+            assert_eq!(back.g, idx.g);
+            check(&back, &keys);
+            // The samples stop being one repeated word, which is the whole point of the offset.
+            let distinct = {
+                let mut s = idx.samples.clone();
+                s.dedup();
+                s.len()
+            };
+            assert!(
+                distinct * 2 > idx.blocks_len(),
+                "{distinct} of {}",
+                idx.blocks_len()
+            );
+            for stranger in [
+                "http",
+                "https:/",
+                "https://example.com/articl",
+                "https://example.com/articles",
+                "https://example.com/articles/",
+                "https://example.com/articles/0000000/x",
+                "https://example.com/artifacts/0000001",
+                "https://example.net/",
+                "zzz",
+                "",
+            ] {
+                let want = keys.partition_point(|k| k.as_str() < stranger) as u64;
+                assert_eq!(idx.lower_bound(stranger), want, "{stranger:?} at {block}");
+                assert_eq!(idx.id(stranger), None, "{stranger:?} at {block}");
+                assert_eq!(
+                    idx.ids_of(&[stranger.to_string()]),
+                    vec![None],
+                    "{stranger:?} at {block}"
+                );
+            }
+        }
     }
 
     #[test]
