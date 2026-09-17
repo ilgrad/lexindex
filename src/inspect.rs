@@ -227,13 +227,14 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
         b"BDX1" | b"BDX2" | b"BDX3" => {
             // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in all
             // three, then the offset widths and the microblock size `BDX2` added, and the header
-            // codes `BDX3` did. A blob this version refuses to load still says what it is here.
+            // codes and the phrase dictionary `BDX3` did. A blob this version refuses to load
+            // still says what it is here.
             let one = &magic == b"BDX1";
             let three = &magic == b"BDX3";
             let header: u64 = if one {
                 48
             } else if three {
-                64
+                72
             } else {
                 56
             };
@@ -290,9 +291,14 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
                     .and_then(|s| s.checked_add(packed(micros, widths[3])?))
                     .ok_or(TRUNCATED)?
             };
-            // One header code a shard and a kind, between the block data and the arrays.
-            let codes = if three { u64::from(w.u32(52)?) } else { 0 };
-            rest(bytes, [header + table, keyed, codes, arrays])?;
+            // One header code a shard and a kind, between the block data and the arrays, and the
+            // phrase dictionary the blob's shards share, between the samples and the data.
+            let (codes, phrases) = if three {
+                (u64::from(w.u32(52)?), u64::from(w.u32(58)?))
+            } else {
+                (0, 0)
+            };
+            rest(bytes, [header + table, keyed, codes, phrases, arrays])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" | b"MPH3" => {

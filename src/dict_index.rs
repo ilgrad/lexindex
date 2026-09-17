@@ -28,15 +28,17 @@ use crate::fsst::{self, ESCAPE, Table};
 use crate::offsets::{self, Offsets};
 use crate::packed::{self, Alphabet};
 use crate::paircode::{self, Code};
+use crate::phrase::{self, Dict, Split, Trie};
 use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
 /// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][codes u32]
-/// [g u16][reserved u16][check u32]`, then the head keys end to end, the head ends packed ([`offsets`]), the head
-/// samples (`u64`), the block data, the suffix codecs — one per `shard` blocks, each behind its own
-/// `u32` length, so a reader that knows how many there are walks them without a directory — the
-/// header codes, two per shard and each self-delimiting ([`paircode`]), and the block and
-/// microblock starts packed.
+/// [g u16][phrases u32][reserved u48][check u32]`, then the head keys end to end, the head ends
+/// packed ([`offsets`]), the head samples (`u64`), the block data, the suffix codecs — one per
+/// `shard` blocks, each behind its own `u32` length, so a reader that knows how many there are
+/// walks them without a directory — the header codes, two per shard and each self-delimiting
+/// ([`paircode`]), the phrase dictionary the whole blob shares ([`phrase`](crate::phrase)), and
+/// the block and microblock starts packed.
 ///
 /// Everything but the keys themselves comes after the data, because none of it is known until the
 /// data is encoded: the starts' widths, the code a shard's entries were written under, and the
@@ -57,8 +59,8 @@ const LEGACY_MAGIC: [(&[u8; 4], &str); 2] = [
          rebuild the index from its keys",
     ),
 ];
-pub(crate) const HEADER: usize = 64;
-const CHECKED: usize = 60; // header bytes the trailing check covers
+pub(crate) const HEADER: usize = 72;
+const CHECKED: usize = 68; // header bytes the trailing check covers
 pub(crate) const DEFAULT_BLOCK: usize = 256;
 const MAX_BLOCK: usize = 1024;
 /// How deep a key's staircase of shared prefixes may be before [`DictIndex::key_bytes_into`] gives
@@ -91,6 +93,17 @@ const SHARD_KEYS: usize = 65_536;
 /// worst rises 0.05 B/key, and the dictionary at the default block is sampled identically either
 /// way.
 const TRAIN_RUN: usize = 256;
+/// Suffixes a shard prices its candidate splits on. A split is settled on a sample rather than on
+/// the shard, because settling on one means coding every suffix of the shard a second time.
+const SETTLE_PIECES: usize = 8_192;
+/// Keys below which no phrase is mined. A phrase is stored once and named by every key that holds
+/// it, so a small index can never earn back a dictionary — and this is what keeps a build of a few
+/// thousand keys paying nothing for the miner at all.
+const MINE_MIN: usize = 1 << 14;
+/// Keys per candidate the miner carries into its last round, which is what the vocabulary is
+/// chosen out of rather than the vocabulary itself. The dictionary is paid once and named by every
+/// key, so ten times the keys afford roughly ten times the candidates.
+const KEYS_PER_PHRASE: usize = 8;
 /// Samples serialised at a time, so writing does not copy the array whole.
 const CHUNK: usize = 4096;
 /// Blocks a thread must be given before the encoding is worth splitting across threads at all.
@@ -156,6 +169,10 @@ pub struct DictIndex {
     codes: Vec<(Code, Code)>,
     /// Blocks one symbol table covers. At least one, and at most what the header's `u16` holds.
     shard: usize,
+    /// The phrases the blob's shards name, shared by all of them: empty on a corpus whose shards
+    /// all settled on their tables alone, which is what [`phrase::mine`] returns when nothing
+    /// repeats often enough to earn its dictionary bytes.
+    phrases: Dict,
     /// Bytes every block head shares, which the sample is taken past.
     ///
     /// A million URLs all begin `https://`, so a sample of their first eight bytes is the same word
@@ -413,14 +430,15 @@ pub(crate) fn varint_at(data: &[u8], at: &mut usize) -> Option<usize> {
     Some(v)
 }
 
-/// How one shard's suffixes are coded: a symbol table, or a fixed-width code over its alphabet.
+/// How one shard's suffixes are coded: a symbol table, with or without a share of its byte codes
+/// given to the blob's [phrases](crate::phrase), or a fixed-width code over its alphabet.
 ///
-/// The two are priced against each other on the shard's own bytes — its suffixes and the headers
+/// The three are priced against each other on the shard's own bytes — its suffixes and the headers
 /// they imply, since a packed `len` counts codes and a symbol-coded one counts bytes. A shard of
-/// DNA picks the packed code and a shard of URLs the symbol table, in the same blob if the corpus
-/// holds both.
+/// DNA picks the packed code, a shard of UUIDs the table alone and a shard of URLs the table with
+/// phrases, in the same blob if the corpus holds all three.
 pub(crate) enum Codec {
-    Symbols(Table),
+    Symbols { table: Table, split: Option<Split> },
     Packed(Alphabet),
 }
 
@@ -429,16 +447,20 @@ impl Codec {
     #[inline(always)]
     fn unit(&self) -> u32 {
         match self {
-            Codec::Symbols(_) => 8,
+            Codec::Symbols { .. } => 8,
             Codec::Packed(a) => a.width(),
         }
     }
 
     /// Appends the bytes `piece` stands for to `out`; `false` on a stream this crate did not write.
     #[inline]
-    fn decode_into(&self, piece: Piece<'_>, out: &mut Vec<u8>) -> bool {
+    fn decode_into(&self, dict: &Dict, piece: Piece<'_>, out: &mut Vec<u8>) -> bool {
         match self {
-            Codec::Symbols(t) => t.decode_into(piece.bytes(), out),
+            Codec::Symbols {
+                table,
+                split: Some(split),
+            } => decode_tiered(table, *split, dict, piece.bytes(), out),
+            Codec::Symbols { table, .. } => table.decode_into(piece.bytes(), out),
             Codec::Packed(a) => a.decode_into(&piece.codes(a.width()), out),
         }
     }
@@ -446,26 +468,40 @@ impl Codec {
     /// How many leading bytes `piece` shares with `rest`, and how it orders against it — read off
     /// the codes, nothing decoded.
     #[inline]
-    fn compare(&self, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
+    fn compare(&self, dict: &Dict, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
         match self {
-            Codec::Symbols(t) => compare_symbols(t, piece.bytes(), rest),
+            Codec::Symbols {
+                table,
+                split: Some(split),
+            } => compare_tiered(table, *split, dict, piece.bytes(), rest),
+            Codec::Symbols { table, .. } => compare_symbols(table, piece.bytes(), rest),
             Codec::Packed(a) => a.compare(&piece.codes(a.width()), rest),
         }
     }
 
-    /// `[kind u8][payload]`, behind the `u32` length the tables section gives every shard.
+    /// `[kind u8][payload]`, behind the `u32` length the tables section gives every shard. A split
+    /// is two more bytes at the head of the payload, and a kind of its own so that a shard which
+    /// bought no phrases pays nothing for the ones that did.
     fn serialized_len(&self) -> usize {
         1 + match self {
-            Codec::Symbols(t) => t.serialized_len(),
+            Codec::Symbols { table, split } => {
+                table.serialized_len() + 2 * usize::from(split.is_some())
+            }
             Codec::Packed(a) => a.serialized_len(),
         }
     }
 
     fn write_to(&self, out: &mut Vec<u8>) {
         match self {
-            Codec::Symbols(t) => {
-                out.push(0);
-                t.write_to(out);
+            Codec::Symbols { table, split } => {
+                match split {
+                    Some(split) => {
+                        out.push(2);
+                        split.write_to(out);
+                    }
+                    None => out.push(0),
+                }
+                table.write_to(out);
             }
             Codec::Packed(a) => {
                 out.push(1);
@@ -474,10 +510,24 @@ impl Codec {
         }
     }
 
+    /// Whether the shard gave any of its byte codes to the blob's phrases.
+    fn has_phrases(&self) -> bool {
+        matches!(self, Codec::Symbols { split: Some(_), .. })
+    }
+
     fn read(bytes: &[u8]) -> Option<Self> {
         match bytes.split_first()? {
-            (0, rest) => Table::from_bytes(rest).map(Codec::Symbols),
+            (0, rest) => Table::from_bytes(rest).map(|table| Codec::Symbols { table, split: None }),
             (1, rest) => Alphabet::read(rest).map(Codec::Packed),
+            (2, rest) => {
+                let (split, rest) = Split::read(rest)?;
+                let table = Table::from_bytes(rest)?;
+                // A symbol code past the split would be read as a phrase prefix.
+                (table.len() <= usize::from(split.symbols())).then_some(Codec::Symbols {
+                    table,
+                    split: Some(split),
+                })
+            }
             _ => None,
         }
     }
@@ -693,6 +743,10 @@ struct Collected {
     /// The same suffixes under the shard's symbol table, and where each of those ends.
     coded: Vec<u8>,
     coded_ends: Vec<usize>,
+    /// The same again with a share of the byte codes given to the blob's phrases — filled only
+    /// when a sample of the shard says a split is worth pricing, and left empty otherwise.
+    tier: Vec<u8>,
+    tier_ends: Vec<usize>,
     /// What the suffix bytes are, which is what a packed alphabet is chosen on.
     freq: [u64; 256],
     /// Entries in each run, a block's restart run first.
@@ -709,6 +763,8 @@ impl Default for Collected {
             raw_ends: Vec::new(),
             coded: Vec::new(),
             coded_ends: Vec::new(),
+            tier: Vec::new(),
+            tier_ends: Vec::new(),
             freq: [0; 256],
             runs: Vec::new(),
             per_block: Vec::new(),
@@ -723,6 +779,8 @@ impl Collected {
         self.raw_ends.clear();
         self.coded.clear();
         self.coded_ends.clear();
+        self.tier.clear();
+        self.tier_ends.clear();
         self.freq = [0; 256];
         self.runs.clear();
         self.per_block.clear();
@@ -766,12 +824,37 @@ impl Collected {
         &self.coded[start..self.coded_ends[i]]
     }
 
+    /// Entry `i`'s suffix under the symbol table and the phrases together.
+    fn tier_at(&self, i: usize) -> &[u8] {
+        let start = if i == 0 { 0 } else { self.tier_ends[i - 1] };
+        &self.tier[start..self.tier_ends[i]]
+    }
+
+    /// Code every entry again under `split`, filling [`tier`](Self::tier).
+    fn recode(&mut self, enc: &fsst::Encoder, trie: &Trie, split: Split, w: &mut phrase::Scratch) {
+        let (mut tier, mut ends) = (
+            std::mem::take(&mut self.tier),
+            std::mem::take(&mut self.tier_ends),
+        );
+        tier.clear();
+        ends.clear();
+        for i in 0..self.entries() {
+            phrase::encode_into(self.raw_at(i), enc, trie, Some(split), w, &mut tier);
+            ends.push(tier.len());
+        }
+        self.tier = tier;
+        self.tier_ends = ends;
+    }
+
     /// The `(lcp, len)` pairs the shard would store under `codec`, in entry order.
     fn pairs(&self, codec: &Codec, out: &mut Vec<(usize, usize)>) {
         out.clear();
         out.reserve(self.entries());
         match codec {
-            Codec::Symbols(_) => {
+            Codec::Symbols { split: Some(_), .. } => {
+                out.extend((0..self.entries()).map(|i| (self.lcps[i], self.tier_at(i).len())))
+            }
+            Codec::Symbols { .. } => {
                 out.extend((0..self.entries()).map(|i| (self.lcps[i], self.coded_at(i).len())))
             }
             Codec::Packed(a) => {
@@ -803,7 +886,8 @@ impl Collected {
         let (micro, restart) = self.groups(pairs);
         let headers = Code::choose_cost(&micro).1 + Code::choose_cost(&restart).1;
         let suffixes = match codec {
-            Codec::Symbols(_) => self.coded.len(),
+            Codec::Symbols { split: Some(_), .. } => self.tier.len(),
+            Codec::Symbols { .. } => self.coded.len(),
             // The codes of a run are continuous and every run ends on a byte, which is where the
             // rounding goes.
             Codec::Packed(a) => {
@@ -821,20 +905,75 @@ impl Collected {
     }
 
     /// The codec the shard is cheapest under, with its pairs and its two header codes. The symbol
-    /// table is the one already trained, and it wins unless the packed alphabet beats it outright:
-    /// a tie goes to the table, whose scan reads a byte at a time rather than a code.
-    fn settle(&self, table: Table, pairs: &mut Vec<(usize, usize)>) -> (Codec, (Code, Code)) {
-        let mut codec = Codec::Symbols(table);
-        let symbols = self.price(&codec, pairs);
+    /// table is the one already trained, and it wins unless another beats it outright: a tie goes
+    /// to the table, whose scan reads a byte at a time rather than a code.
+    fn settle(
+        &mut self,
+        table: Table,
+        phrases: &Phrases,
+        pairs: &mut Vec<(usize, usize)>,
+        w: &mut phrase::Scratch,
+    ) -> (Codec, (Code, Code)) {
+        let mut best = Codec::Symbols {
+            table: table.clone(),
+            split: None,
+        };
+        let mut bytes = self.price(&best, pairs);
         if let Some((alphabet, _)) = Alphabet::of(&self.freq) {
             let alternative = Codec::Packed(alphabet);
-            if self.price(&alternative, pairs) < symbols {
-                codec = alternative;
+            let packed = self.price(&alternative, pairs);
+            if packed < bytes {
+                best = alternative;
+                bytes = packed;
             }
         }
-        self.pairs(&codec, pairs);
+        if phrases.dict.len() > 0 && self.entries() > 0 {
+            // The split is chosen on a sample: settling on one means coding every suffix of the
+            // shard a second time, and there are whole corpora where none of them ever wins.
+            let step = (self.entries() / SETTLE_PIECES).max(1);
+            let sample: Vec<&[u8]> = (0..self.entries())
+                .step_by(step)
+                .map(|i| self.raw_at(i))
+                .collect();
+            let (split, cut) =
+                phrase::settle(&sample, &table, &phrases.trie, phrases.dict.len(), w);
+            if let Some(split) = split {
+                self.recode(&cut.encoder(), &phrases.trie, split, w);
+                let tier = Codec::Symbols {
+                    table: cut,
+                    split: Some(split),
+                };
+                if self.price(&tier, pairs) < bytes {
+                    best = tier;
+                }
+            }
+        }
+        self.pairs(&best, pairs);
         let (micro, restart) = self.groups(pairs);
-        (codec, (Code::choose(&micro), Code::choose(&restart)))
+        (best, (Code::choose(&micro), Code::choose(&restart)))
+    }
+}
+
+/// The blob's phrases as a build holds them: the dictionary every shard names and the walk a parse
+/// takes through it. One of each for the whole build, shared by every encoding thread.
+struct Phrases {
+    dict: Dict,
+    trie: Trie,
+}
+
+impl Phrases {
+    fn none() -> Self {
+        Self {
+            dict: Dict::empty(),
+            trie: Trie::empty(),
+        }
+    }
+
+    fn of(phrases: Vec<Vec<u8>>) -> Self {
+        Self {
+            trie: Trie::of(phrases.iter().map(Vec::as_slice)),
+            dict: Dict::of(&phrases),
+        }
     }
 }
 
@@ -868,7 +1007,10 @@ fn write_run(
             body.extend_from_slice(&escape);
         }
         match codec {
-            Codec::Symbols(_) => body.extend_from_slice(collected.coded_at(first + i)),
+            Codec::Symbols { split: Some(_), .. } => {
+                body.extend_from_slice(collected.tier_at(first + i))
+            }
+            Codec::Symbols { .. } => body.extend_from_slice(collected.coded_at(first + i)),
             Codec::Packed(a) => {
                 let codes = a.encode_into(collected.raw_at(first + i), body);
                 debug_assert_eq!(codes, len, "a packed suffix priced at a different width");
@@ -970,6 +1112,15 @@ impl Shard<'_> {
     }
 }
 
+/// The blob's phrases, mined from the samples the shard tables were trained on.
+fn mine_phrases(samples: &[Vec<&[u8]>], tables: &[Table], n: usize, threads: usize) -> Phrases {
+    if n < MINE_MIN {
+        return Phrases::none();
+    }
+    let pool = (n / KEYS_PER_PHRASE).clamp(1 << 12, 1 << 19);
+    Phrases::of(phrase::mine(samples, tables, n, pool, threads))
+}
+
 /// Encode a range of whole shards. `keys` must start on a shard boundary, which is what makes the
 /// parts concatenate into the blob a single pass would have written — and what lets a shard's
 /// header codes be chosen from all of its runs.
@@ -978,6 +1129,7 @@ fn encode_range<S: AsRef<str>>(
     block: usize,
     micro: usize,
     tables: &[Table],
+    phrases: &Phrases,
     shard: usize,
     first_block: usize,
 ) -> Part {
@@ -995,6 +1147,7 @@ fn encode_range<S: AsRef<str>>(
     let mut pairs = Vec::new();
     let mut scratch = Scratch::default();
     let mut collected = Collected::default();
+    let mut parsed = phrase::Scratch::default();
     let mut view: Vec<&[u8]> = Vec::with_capacity(block);
     let mut at = 0u64;
     for (s, span) in keys.chunks(shard * block).enumerate() {
@@ -1009,7 +1162,7 @@ fn encode_range<S: AsRef<str>>(
             view.extend(chunk.iter().map(|k| k.as_ref().as_bytes()));
             collect_block(&mut collected, &view, micro, &encoder, &mut coded);
         }
-        let (codec, codes) = collected.settle(table.clone(), &mut pairs);
+        let (codec, codes) = collected.settle(table.clone(), phrases, &mut pairs, &mut parsed);
         Shard {
             collected: &collected,
             pairs: &pairs,
@@ -1060,6 +1213,8 @@ pub struct DictSections {
     pub tables: u64,
     /// The header codes, two per shard of blocks: what an entry's `(lcp, len)` pair is written as.
     pub header_codes: u64,
+    /// The phrase dictionary the whole blob shares, zero where no shard bought phrases.
+    pub phrases: u64,
     /// Every block's first key, stored whole.
     pub heads: u64,
     /// Eight bytes a block — the first eight of its head — which the opening search reads.
@@ -1096,6 +1251,7 @@ impl DictSections {
         self.header
             + self.tables
             + self.header_codes
+            + self.phrases
             + self.heads
             + self.samples
             + self.head_ends
@@ -1442,13 +1598,16 @@ impl DictIndex {
             i += 1;
             Ok(())
         })?;
-        let tables = {
+        let (tables, phrases) = {
             let samples: Vec<Vec<&[u8]>> = spans
                 .iter()
                 .map(|s| s.iter().map(|&(a, b)| &arena[a..b]).collect())
                 .collect();
             let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-            train_shards(&samples, train_threads(threads.min(shards)))
+            let threads = train_threads(threads.min(shards));
+            let tables = train_shards(&samples, threads);
+            let phrases = mine_phrases(&samples, &tables, n, threads);
+            (tables, phrases)
         };
         drop(arena);
         drop(spans);
@@ -1481,6 +1640,7 @@ impl DictIndex {
             let mut codecs: Vec<Codec> = Vec::with_capacity(shards);
             let mut pairs = Vec::new();
             let mut collected = Collected::default();
+            let mut parsed = phrase::Scratch::default();
             let mut scratch = Scratch::default();
             let mut keys: Vec<u8> = Vec::with_capacity(block * 32);
             // `ends[k]` closes the k-th buffered key, so the first entry is where the first
@@ -1496,7 +1656,12 @@ impl DictIndex {
                     ends.truncate(1);
                 }
                 if i % span == 0 && i > 0 {
-                    let (codec, pair) = collected.settle(tables[at_shard].clone(), &mut pairs);
+                    let (codec, pair) = collected.settle(
+                        tables[at_shard].clone(),
+                        &phrases,
+                        &mut pairs,
+                        &mut parsed,
+                    );
                     Shard {
                         collected: &collected,
                         pairs: &pairs,
@@ -1525,7 +1690,8 @@ impl DictIndex {
             if !view.is_empty() {
                 collect_block(&mut collected, &view, micro, &encoder, &mut coded);
             }
-            let (codec, pair) = collected.settle(tables[at_shard].clone(), &mut pairs);
+            let (codec, pair) =
+                collected.settle(tables[at_shard].clone(), &phrases, &mut pairs, &mut parsed);
             Shard {
                 collected: &collected,
                 pairs: &pairs,
@@ -1549,6 +1715,15 @@ impl DictIndex {
             let mut code_bytes = Vec::with_capacity(codes_len(&codes));
             write_codes(&codes, &mut code_bytes);
             w.write_all(&code_bytes)?;
+            // A dictionary no shard bought is bytes the blob carries and nothing names.
+            let kept = if codecs.iter().any(Codec::has_phrases) {
+                &phrases.dict
+            } else {
+                &Dict::empty()
+            };
+            let mut dictionary = Vec::with_capacity(kept.serialized_len());
+            kept.write_to(&mut dictionary);
+            w.write_all(&dictionary)?;
             if i != n {
                 return Err(IndexError::Format(
                     "dict: the key stream changed between passes",
@@ -1601,6 +1776,7 @@ impl DictIndex {
             h[50..52].copy_from_slice(&(shard as u16).to_le_bytes());
             h[52..56].copy_from_slice(&(code_bytes.len() as u32).to_le_bytes());
             h[56..58].copy_from_slice(&(g as u16).to_le_bytes());
+            h[58..62].copy_from_slice(&(dictionary.len() as u32).to_le_bytes());
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -1662,6 +1838,7 @@ impl DictIndex {
             prev = key;
         }
         let tables = train_shards(&pieces, train_threads(threads));
+        let phrases = mine_phrases(&pieces, &tables, n, train_threads(threads));
         drop(pieces);
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
@@ -1677,7 +1854,15 @@ impl DictIndex {
             keys.chunks(run)
                 .enumerate()
                 .map(|(c, range)| {
-                    encode_range(range, block, micro, &tables, shard, c * run / block)
+                    encode_range(
+                        range,
+                        block,
+                        micro,
+                        &tables,
+                        &phrases,
+                        shard,
+                        c * run / block,
+                    )
                 })
                 .collect()
         } else {
@@ -1687,9 +1872,17 @@ impl DictIndex {
                     .chunks(run)
                     .enumerate()
                     .map(|(c, range)| {
-                        let tables = &tables;
+                        let (tables, phrases) = (&tables, &phrases);
                         scope.spawn(move || {
-                            encode_range(range, block, micro, tables, shard, c * run / block)
+                            encode_range(
+                                range,
+                                block,
+                                micro,
+                                tables,
+                                phrases,
+                                shard,
+                                c * run / block,
+                            )
                         })
                     })
                     .collect();
@@ -1722,8 +1915,18 @@ impl DictIndex {
         // indexes into.
         if codes.is_empty() {
             codes.push((Code::Frame, Code::Frame));
-            codecs.push(Codec::Symbols(tables[0].clone()));
+            codecs.push(Codec::Symbols {
+                table: tables[0].clone(),
+                split: None,
+            });
         }
+        // A dictionary no shard bought is bytes the blob carries and nothing names — which is the
+        // answer on a corpus where the miner found spans that repeat but none that pay.
+        let phrases = if codecs.iter().any(Codec::has_phrases) {
+            phrases.dict
+        } else {
+            Dict::empty()
+        };
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let samples = samples_of(&heads, &head_ends, g);
@@ -1745,6 +1948,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            phrases,
             g,
         })
     }
@@ -1885,8 +2089,35 @@ impl DictIndex {
     /// ends the suffix where it stops making sense.
     #[inline]
     fn compare_piece(&self, codec: &Codec, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
-        codec.compare(piece, rest)
+        codec.compare(&self.phrases, piece, rest)
     }
+}
+
+/// The stored suffix's next `len` bytes, as a little-endian word, against `rest` from `c`: `None`
+/// while they agree, and the answer as soon as they do not or the suffix outruns `rest`.
+#[inline(always)]
+fn compare_word(word: u64, len: usize, rest: &[u8], c: &mut usize) -> Option<(usize, Ordering)> {
+    let m = len.min(rest.len() - *c);
+    let theirs = fsst::word_at(rest, *c);
+    let x = (word ^ theirs) & fsst::low_mask(m);
+    if x != 0 {
+        let d = (x.trailing_zeros() / 8) as usize;
+        let (a, b) = ((word >> (8 * d)) as u8, (theirs >> (8 * d)) as u8);
+        return Some((*c + d, a.cmp(&b)));
+    }
+    *c += m;
+    (m < len).then_some((*c, Ordering::Greater))
+}
+
+/// How a suffix that ran out against `rest` orders: equal only if `rest` ran out with it.
+#[inline(always)]
+fn ended(c: usize, rest: &[u8]) -> (usize, Ordering) {
+    let ord = if c == rest.len() {
+        Ordering::Equal
+    } else {
+        Ordering::Less
+    };
+    (c, ord)
 }
 
 /// [`Codec::compare`] for a symbol table: a symbol is up to eight bytes, so the compare is a word
@@ -1895,41 +2126,112 @@ impl DictIndex {
 fn compare_symbols(table: &Table, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
     let mut c = 0;
     let mut i = 0;
-    {
-        while i < packed.len() {
-            let (word, len) = if packed[i] == ESCAPE {
-                let Some(&b) = packed.get(i + 1) else {
-                    break;
-                };
-                i += 2;
-                (u64::from(b), 1)
-            } else {
-                let Some(sym) = table.symbol(packed[i]) else {
-                    break;
-                };
-                i += 1;
-                sym
+    while i < packed.len() {
+        let (word, len) = if packed[i] == ESCAPE {
+            let Some(&b) = packed.get(i + 1) else {
+                break;
             };
-            let m = len.min(rest.len() - c);
-            let theirs = fsst::word_at(rest, c);
-            let x = (word ^ theirs) & fsst::low_mask(m);
-            if x != 0 {
-                let d = (x.trailing_zeros() / 8) as usize;
-                let (a, b) = ((word >> (8 * d)) as u8, (theirs >> (8 * d)) as u8);
-                return (c + d, a.cmp(&b));
-            }
-            c += m;
-            if m < len {
-                return (c, Ordering::Greater);
-            }
-        }
-        let ord = if c == rest.len() {
-            Ordering::Equal
+            i += 2;
+            (u64::from(b), 1)
         } else {
-            Ordering::Less
+            let Some(sym) = table.symbol(packed[i]) else {
+                break;
+            };
+            i += 1;
+            sym
         };
-        (c, ord)
+        if let Some(answer) = compare_word(word, len, rest, &mut c) {
+            return answer;
+        }
     }
+    ended(c, rest)
+}
+
+/// [`compare_symbols`] where some of the byte codes name phrases instead: the same walk, with the
+/// phrase's bytes compared eight at a time. Kept apart from the plain loop rather than branching
+/// inside it — a shard that bought no phrases is the common one, and this is the inner loop of
+/// every lookup.
+#[inline]
+fn compare_tiered(
+    table: &Table,
+    split: Split,
+    dict: &Dict,
+    packed: &[u8],
+    rest: &[u8],
+) -> (usize, Ordering) {
+    let mut c = 0;
+    let mut i = 0;
+    while i < packed.len() {
+        if let Some((id, took)) = split.read_at(packed, i) {
+            let Some(phrase) = dict.at(id) else {
+                break;
+            };
+            i += took;
+            for k in (0..phrase.len()).step_by(8) {
+                let answer = compare_word(
+                    fsst::word_at(phrase, k),
+                    (phrase.len() - k).min(8),
+                    rest,
+                    &mut c,
+                );
+                if let Some(answer) = answer {
+                    return answer;
+                }
+            }
+            continue;
+        }
+        let (word, len) = if packed[i] == ESCAPE {
+            let Some(&b) = packed.get(i + 1) else {
+                break;
+            };
+            i += 2;
+            (u64::from(b), 1)
+        } else {
+            let Some(sym) = table.symbol(packed[i]) else {
+                break;
+            };
+            i += 1;
+            sym
+        };
+        if let Some(answer) = compare_word(word, len, rest, &mut c) {
+            return answer;
+        }
+    }
+    ended(c, rest)
+}
+
+/// [`Codec::decode_into`] where some of the byte codes name phrases.
+#[inline]
+fn decode_tiered(
+    table: &Table,
+    split: Split,
+    dict: &Dict,
+    packed: &[u8],
+    out: &mut Vec<u8>,
+) -> bool {
+    let mut i = 0;
+    while i < packed.len() {
+        if let Some((id, took)) = split.read_at(packed, i) {
+            let Some(phrase) = dict.at(id) else {
+                return false;
+            };
+            out.extend_from_slice(phrase);
+            i += took;
+        } else if packed[i] == ESCAPE {
+            let Some(&b) = packed.get(i + 1) else {
+                return false;
+            };
+            out.push(b);
+            i += 2;
+        } else {
+            let Some((word, len)) = table.symbol(packed[i]) else {
+                return false;
+            };
+            out.extend_from_slice(&word.to_le_bytes()[..len]);
+            i += 1;
+        }
+    }
+    true
 }
 
 impl DictIndex {
@@ -2292,7 +2594,7 @@ impl DictIndex {
             return false;
         }
         cur.truncate(l);
-        codec.decode_into(piece, cur)
+        codec.decode_into(&self.phrases, piece, cur)
     }
 
     /// Take `out`, which holds a front-coded run's first key, `steps` entries along that run.
@@ -2351,7 +2653,7 @@ impl DictIndex {
                 return false;
             }
             out.truncate(l);
-            if !codec.decode_into(piece, out) {
+            if !codec.decode_into(&self.phrases, piece, out) {
                 return false;
             }
         }
@@ -2679,6 +2981,10 @@ impl DictIndex {
         let mut codes = Vec::with_capacity(codes_len(&self.codes));
         write_codes(&self.codes, &mut codes);
         f(&codes)?;
+        buf.clear();
+        buf.reserve(self.phrases.serialized_len());
+        self.phrases.write_to(&mut buf);
+        f(&buf)?;
         for section in self.blocks.sections() {
             f(section)?;
         }
@@ -2711,6 +3017,7 @@ impl DictIndex {
         h[50..52].copy_from_slice(&(self.shard as u16).to_le_bytes());
         h[52..56].copy_from_slice(&(codes_len(&self.codes) as u32).to_le_bytes());
         h[56..58].copy_from_slice(&(self.g as u16).to_le_bytes());
+        h[58..62].copy_from_slice(&(self.phrases.serialized_len() as u32).to_le_bytes());
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
@@ -2737,7 +3044,7 @@ impl DictIndex {
     /// [`serialized_len`](Self::serialized_len).
     pub(crate) fn section_lens(&self) -> [usize; 4] {
         [
-            codecs_len(&self.codecs) + codes_len(&self.codes),
+            codecs_len(&self.codecs) + codes_len(&self.codes) + self.phrases.serialized_len(),
             self.heads.len(),
             self.blocks_len() * 8 + self.head_ends.len() + self.blocks.len() + self.micros.len(),
             self.data.len(),
@@ -2754,6 +3061,7 @@ impl DictIndex {
         HEADER
             + codecs_len(&self.codecs)
             + codes_len(&self.codes)
+            + self.phrases.serialized_len()
             + self.heads.len()
             + self.blocks_len() * 8
             + self.head_ends.len()
@@ -2780,6 +3088,7 @@ impl DictIndex {
             header: HEADER as u64,
             tables: codecs_len(&self.codecs) as u64,
             header_codes: codes_len(&self.codes) as u64,
+            phrases: self.phrases.serialized_len() as u64,
             heads: self.heads.len() as u64,
             samples: (self.blocks_len() * 8) as u64,
             head_ends: self.head_ends.len() as u64,
@@ -2889,6 +3198,7 @@ impl DictIndex {
         }
         let codes_len = u32_at(52) as usize;
         let g = usize::from(u16::from_le_bytes(bytes[56..58].try_into().unwrap()));
+        let phrase_len = u32_at(58) as usize;
         let nb = n.div_ceil(block);
         let shards = nb.div_ceil(shard).max(1);
         // Every microblock holds at least one key, so the count is bounded by the key count and
@@ -2906,7 +3216,8 @@ impl DictIndex {
             .and_then(|t| t.checked_add(heads_len))
             .and_then(|t| t.checked_add(arrays))
             .and_then(|t| t.checked_add(data_len))
-            .and_then(|t| t.checked_add(codes_len));
+            .and_then(|t| t.checked_add(codes_len))
+            .and_then(|t| t.checked_add(phrase_len));
         if total != Some(bytes.len()) {
             return Err(IndexError::Format(
                 "dict: the section lengths do not add up to the blob",
@@ -2965,6 +3276,8 @@ impl DictIndex {
             }
             codes
         };
+        let phrases = Dict::read(&take(phrase_len))
+            .ok_or(IndexError::Format("dict: bad phrase dictionary"))?;
         let blocks = Offsets::new(
             take(offsets::bases_len(nb, shift)),
             take(offsets::deltas_len(nb, block_width)),
@@ -2991,6 +3304,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            phrases,
             g,
         };
         if verify {
@@ -3993,6 +4307,42 @@ mod tests {
         }
     }
 
+    /// A corpus whose keys repeat a handful of long spans *after* the point where they diverge is
+    /// what the phrase section exists for — front coding has already taken the shared head, so
+    /// what is left is the same few spans over and over. The shards buy it, every key still
+    /// answers, and both builds write it alike.
+    #[test]
+    fn a_corpus_of_repeated_spans_buys_phrases() {
+        let hosts = ["example.com", "example.org", "archive.example.net"];
+        let paths = ["wiki/article", "blog/post", "docs/reference/manual"];
+        let mut keys: Vec<String> = (0..MINE_MIN + 1000)
+            .map(|i| {
+                let (h, p) = (hosts[i % 3], paths[i % 7 % 3]);
+                format!("{i:07}-https://{h}/{p}/index.html")
+            })
+            .collect();
+        keys.sort();
+        let idx = DictIndex::build(&keys).unwrap();
+        assert!(idx.sections().phrases > 0, "no phrase earned its bytes");
+        assert!(
+            idx.codecs
+                .iter()
+                .any(|c| matches!(c, Codec::Symbols { split: Some(_), .. })),
+            "no shard bought the phrases it mined"
+        );
+        check(&idx, &keys);
+        let back = DictIndex::from_bytes(&idx.to_bytes()).unwrap();
+        assert_eq!(back.phrases.len(), idx.phrases.len());
+        check(&back, &keys);
+
+        let dir = scratch("dictphrases");
+        let path = dir.join("idx.bdx");
+        let feed: Vec<&str> = keys.iter().map(String::as_str).collect();
+        DictIndex::build_to_file(&feed, &path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), idx.to_bytes());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_streamed_build_shards_its_tables_the_way_the_sorting_one_does() {
         let keys = corpus();
@@ -4129,7 +4479,10 @@ mod tests {
             out.extend_from_slice(&body);
             out
         };
-        let codec = Codec::Symbols(Table::default());
+        let codec = Codec::Symbols {
+            table: Table::default(),
+            split: None,
+        };
         let mut entries = Entries::of(&code, &codec, &data, 3);
         assert_eq!(entries.head(), Some((14, 14)));
         assert_eq!(entries.piece(14).bytes(), &[b'a'; 14]);
@@ -4168,6 +4521,7 @@ mod tests {
     /// Where every section of a blob starts, read out of its own header.
     struct Layout {
         codecs: usize,
+        phrases: usize,
         head_bases: usize,
         head_deltas: usize,
         samples: usize,
@@ -4207,7 +4561,8 @@ mod tests {
         let data = samples + nb * 8;
         let codecs = data + u64_at(24);
         let codes = codecs + table_len;
-        let block_bases = codes + u32::from_le_bytes(blob[52..56].try_into().unwrap()) as usize;
+        let phrases = codes + u32::from_le_bytes(blob[52..56].try_into().unwrap()) as usize;
+        let block_bases = phrases + u32::from_le_bytes(blob[58..62].try_into().unwrap()) as usize;
         let block_deltas = block_bases + offsets::bases_len(nb, shift);
         let micro_bases = block_deltas + offsets::deltas_len(nb, block_width);
         let micro_deltas = micro_bases + offsets::bases_len(nm, shift);
@@ -4217,6 +4572,7 @@ mod tests {
         );
         Layout {
             codecs,
+            phrases,
             head_bases,
             head_deltas,
             samples,
@@ -4338,6 +4694,7 @@ mod tests {
             &|b| b[50..52].copy_from_slice(&0u16.to_le_bytes()),
             "symbol-table shard out of range",
         );
+        edited(&|b| b[l.phrases] = 1, "bad phrase dictionary");
         edited(&|b| b[l.codecs] = 255, "bad symbol table");
         edited(&|b| b[l.codecs + 4] = 255, "bad symbol table");
         edited(

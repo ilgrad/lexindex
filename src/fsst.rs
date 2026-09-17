@@ -113,8 +113,27 @@ impl Table {
         Some((*self.words.get(i)?, self.lens[i] as usize))
     }
 
+    /// The first `k` symbols, which the trainer ranked highest. What a shard prices its candidate
+    /// splits under before it knows which one it will keep: dropping a symbol only frees encoder
+    /// slots, never takes one from a symbol that outranks it, so the prefix is a table.
+    pub(crate) fn head(&self, k: usize) -> Table {
+        let k = k.min(self.words.len());
+        Table {
+            words: self.words[..k].to_vec(),
+            lens: self.lens[..k].to_vec(),
+        }
+    }
+
     /// Train over `sample`, the pieces the index will store.
     pub(crate) fn train(sample: &[&[u8]]) -> Table {
+        Table::train_to(sample, MAX_SYMBOLS)
+    }
+
+    /// Train a table of at most `max` symbols. A shard that gives byte codes to the blob's
+    /// [phrases](crate::phrase) has fewer than 255 to spend and trains for the ones it kept: which
+    /// symbols earn most is not the same question once the repeated spans are named elsewhere, and
+    /// truncating a table trained for 255 answers the wrong one.
+    pub(crate) fn train_to(sample: &[&[u8]], max: usize) -> Table {
         let mut table = Table::default();
         for _ in 0..ROUNDS {
             let enc = table.encoder();
@@ -181,18 +200,19 @@ impl Table {
             }
             let mut ranked: Vec<(u64, Vec<u8>)> = gain.into_iter().map(|(s, g)| (g, s)).collect();
             ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
-            table = Table::reachable(ranked.iter().map(|(_, s)| s.as_slice()));
+            table = Table::reachable(ranked.iter().map(|(_, s)| s.as_slice()), max);
         }
         table
     }
 
-    /// The first 255 of `ranked` the encoder can reach: a symbol of three bytes or more only if
+    /// The first `max` of `ranked` the encoder can reach: a symbol of three bytes or more only if
     /// its slot is still free.
-    fn reachable<'a>(ranked: impl Iterator<Item = &'a [u8]>) -> Table {
+    fn reachable<'a>(ranked: impl Iterator<Item = &'a [u8]>, max: usize) -> Table {
+        let max = max.min(MAX_SYMBOLS);
         let mut taken = vec![false; SLOTS];
-        let mut syms: Vec<&[u8]> = Vec::with_capacity(MAX_SYMBOLS);
+        let mut syms: Vec<&[u8]> = Vec::with_capacity(max);
         for s in ranked {
-            if syms.len() == MAX_SYMBOLS {
+            if syms.len() == max {
                 break;
             }
             if s.len() >= 3 && std::mem::replace(&mut taken[slot_of(word_of(s))], true) {
@@ -314,7 +334,7 @@ impl Encoder {
     /// What the encoder emits at a position: (code, bytes covered), for the word there and the
     /// `rem` bytes left in the string. The code is `ESCAPE` for a byte nothing covers.
     #[inline(always)]
-    fn step(&self, word: u64, rem: usize) -> (u8, usize) {
+    pub(crate) fn step(&self, word: u64, rem: usize) -> (u8, usize) {
         let e = &self.slots[slot_of(word)];
         if e.len != 0 && e.len as usize <= rem && word & e.mask == e.word {
             return (e.code, e.len as usize);
