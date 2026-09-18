@@ -64,15 +64,29 @@ All notable changes to this project are documented here. The format follows
   → **9.96**, article titles 9.37 → **7.34** in English, 11.36 → **7.70** in Russian and 8.28 →
   **6.22** in Chinese, DNA 7.70 → **4.34**, opaque ids 13.80 → **10.36**, numeric 2.13 → **0.98**,
   identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
-  479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
-  million keys the CLI's wall clock is 1.7× (urls 0.65 → 1.11 s, paths 0.85 → 1.41) and its peak
-  1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and 1.3×. It is a *fixed* cost — the
-  miner reads a bounded sample of the suffixes and holds a bounded pool of candidates — so it
-  amortises where a blob that size is actually built: on urls, 1.4× the time and 1.3× the peak at
-  three million keys, and **1.19× and 1.09×** at ten million (8.41 → 10.0 s, 1.28 → 1.39 GB) while
-  the blob falls from 0.67 to 0.62 of `BDX2`'s. Ten million English article titles read the same:
-  7.60 → 9.23 s, 0.96 → 1.09 GB, 76.5 → 56.8 MB.
+  479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
+
+  **What it costs to build.** At a million keys the CLI's wall clock is 1.7× (urls 0.65 → 1.11 s,
+  paths 0.85 → 1.41) and its peak 1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and
+  1.3×. The miner's own cost is *fixed* — it reads a bounded sample of the suffixes and holds a
+  bounded pool of candidates — so the wall clock amortises where a blob that size is actually built:
+  on urls, 1.4× the time and 1.3× the peak at three million keys, and **1.19× and 1.09×** at ten
+  million (8.41 → 10.0 s, 1.28 → 1.39 GB) while the blob falls from 0.67 to 0.62 of `BDX2`'s. Ten
+  million English article titles read the same: 7.60 → 9.23 s, 0.96 → 1.09 GB, 76.5 → 56.8 MB. Most
+  of that wall clock is reading the file and sorting it, which the format does not touch: the build
+  call on its own is 2.3–4.3× at a million keys (numeric 1.4×, the word list 1.5×, paths 4.0×, DNA
+  4.3×) and 2.3× at ten million. About 60 % of it is the phrase machinery — the cheapest-coding
+  parse 24 %, the miner's rounds 19 % — which is what buys a quarter to a half of the bytes.
+
+  **What it costs to read.** Against `BDX2` over a million keys at block 256, two `BDX2` builds
+  alternated with the `BDX3` one so that code layout is not mistaken for the format: `id` runs 0.89×
+  to 1.18× and `key_into` 1.01× to 1.74×. The two lanes are ahead on urls (`id` 0.89×) and level on
+  uuid, Russian titles, paths and urls (`key_into` 1.01–1.02×); what is behind is decimal ids
+  (1.18× / 1.74×), where the blob is 0.46× and a `BDX2` lookup is the fastest of any corpus, and the
+  word list and domains (1.33× / 1.28×), whose short keys make the coded header the whole cost. A
+  header that is coded rather than a byte is read with a shift and a mask, and that is the price of
+  the bytes it saves.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
   before 4.0 has to be rebuilt from its keys — `lexindex dump` on 3.x into `lexindex build` on 4.0
