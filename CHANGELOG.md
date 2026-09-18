@@ -66,7 +66,12 @@ All notable changes to this project are documented here. The format follows
   identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
   479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
   million keys the CLI's wall clock is 1.7× (urls 0.65 → 1.11 s, paths 0.85 → 1.41) and its peak
-  1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and 1.3×.
+  1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and 1.3×. It is a *fixed* cost — the
+  miner reads a bounded sample of the suffixes and holds a bounded pool of candidates — so it
+  amortises where a blob that size is actually built: on urls, 1.4× the time and 1.3× the peak at
+  three million keys, and **1.19× and 1.09×** at ten million (8.41 → 10.0 s, 1.28 → 1.39 GB) while
+  the blob falls from 0.67 to 0.62 of `BDX2`'s. Ten million English article titles read the same:
+  7.60 → 9.23 s, 0.96 → 1.09 GB, 76.5 → 56.8 MB.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
