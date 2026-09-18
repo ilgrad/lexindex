@@ -58,25 +58,61 @@ fn varint_len(mut v: usize) -> usize {
 
 /// The widths a run's pairs are cheapest under, and what that costs in bytes — the header bits,
 /// the escapes it leaves and the prologue.
+///
+/// Every width pair is priced, but the escapes are summed from a histogram rather than re-walked
+/// for each: a pair escapes under `(wl, wn)` when either offset needs more bits than its width
+/// gives, or when both offsets are the all-ones values that spell the escape. The first is a
+/// suffix sum over the bits each offset needs; the second is a corner one pair can hit at one
+/// width pair only, where its offsets are each a power of two less one. So the run is walked once
+/// and the 256 width pairs are priced from a 17 × 17 table — where the search walked the run 256
+/// times, which was half of a build. The answer is the search's, tie for tie.
 fn frame_widths(pairs: &[(usize, usize)]) -> (u32, u32, usize) {
+    const W: usize = FRAME_MAX as usize + 1;
     let (bl, bn) = bases(pairs);
     let base = 1 + varint_len(bl) + varint_len(bn);
+    // `esc[hl][hn]`: the escape bytes of the pairs whose offsets need exactly `hl` and `hn`
+    // bits; an offset past the widest frame counts under `W`, where no width reaches it.
+    let mut esc = [[0usize; W + 1]; W + 1];
+    let mut corner = [[0usize; W]; W];
+    let mut total = 0usize;
+    for &(lcp, len) in pairs {
+        let (dl, dn) = (lcp - bl, len - bn);
+        let e = escape_len(lcp, len);
+        let (hl, hn) = (bits_of(dl).min(W), bits_of(dn).min(W));
+        esc[hl][hn] += e;
+        total += e;
+        if hl < W && hn < W && (dl + 1).is_power_of_two() && (dn + 1).is_power_of_two() {
+            corner[hl][hn] += e;
+        }
+    }
+    // `fit[wl][wn]`: the escape bytes of every pair both of whose offsets fit those widths by
+    // range — the prefix sum of `esc` over `0..=wl` × `0..=wn`.
+    let mut fit = [[0usize; W]; W];
+    for wl in 0..W {
+        let mut row = 0;
+        for wn in 0..W {
+            row += esc[wl][wn];
+            fit[wl][wn] = row + if wl > 0 { fit[wl - 1][wn] } else { 0 };
+        }
+    }
     let mut best = (0, 0, usize::MAX);
     for wl in 0..=FRAME_MAX {
         for wn in 0..=FRAME_MAX {
             let bits = pairs.len() * (wl + wn) as usize;
-            let mut cost = bits.div_ceil(8) + base;
-            for &(lcp, len) in pairs {
-                if !frame_fits(lcp - bl, len - bn, wl, wn) {
-                    cost += escape_len(lcp, len);
-                }
-            }
+            let (l, n) = (wl as usize, wn as usize);
+            let cost = bits.div_ceil(8) + base + (total - fit[l][n]) + corner[l][n];
             if cost < best.2 {
                 best = (wl, wn, cost);
             }
         }
     }
     best
+}
+
+/// Bits an offset needs: none for zero, `floor(log2 d) + 1` otherwise.
+#[inline(always)]
+fn bits_of(d: usize) -> usize {
+    (usize::BITS - d.leading_zeros()) as usize
 }
 
 /// The smallest `lcp` and the smallest `len` in a run, which are what its codes are offsets from.
