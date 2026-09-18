@@ -2288,28 +2288,49 @@ fn decode_tiered(
     packed: &[u8],
     out: &mut Vec<u8>,
 ) -> bool {
+    // Room for the widest reading of every code, so that each one is a store of a width the
+    // compiler knows rather than a `memcpy` call with a length it learns at run time -- which is
+    // what a symbol-only decode has always done, and what this one did not: on a million urls the
+    // key lane spent 69 ns a lookup inside `memmove` and `BDX2` spent none.
+    //
+    // A phrase is at most `phrase::MAX` bytes for the two codes that name it, a symbol eight for
+    // one and an escape one for two, so `MAX / 2` a byte is exactly enough: before a phrase's
+    // store at least two bytes of input are left and `2 * MAX / 2` is the `MAX` it writes.
+    let start = out.len();
+    let Some(room) = packed.len().checked_mul(phrase::MAX / 2) else {
+        return false;
+    };
+    out.resize(start + room, 0);
+    let mut o = start;
     let mut i = 0;
     while i < packed.len() {
         if let Some((id, took)) = split.read_at(packed, i) {
-            let Some(phrase) = dict.at(id) else {
+            let Some((phrase, len)) = dict.chunk(id) else {
+                out.truncate(start);
                 return false;
             };
-            out.extend_from_slice(phrase);
+            out[o..o + phrase::MAX].copy_from_slice(phrase);
+            o += len;
             i += took;
         } else if packed[i] == ESCAPE {
             let Some(&b) = packed.get(i + 1) else {
+                out.truncate(start);
                 return false;
             };
-            out.push(b);
+            out[o] = b;
+            o += 1;
             i += 2;
         } else {
             let Some((word, len)) = table.symbol(packed[i]) else {
+                out.truncate(start);
                 return false;
             };
-            out.extend_from_slice(&word.to_le_bytes()[..len]);
+            out[o..o + 8].copy_from_slice(&word.to_le_bytes());
+            o += len;
             i += 1;
         }
     }
+    out.truncate(o);
     true
 }
 

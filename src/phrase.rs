@@ -284,7 +284,12 @@ impl Prices {
 /// Stored whole rather than front-coded against its neighbour — rank order is not lexicographic, so
 /// there is nothing to share.
 pub(crate) struct Dict {
+    /// The phrases end to end, then [`MAX`] zero bytes: a decoder reads a fixed [`MAX`] from any
+    /// phrase's start, which is one store where a copy of a length known only at run time is a
+    /// `memcpy` call, and the padding is what keeps the widest of those reads in bounds.
     bytes: Vec<u8>,
+    /// Bytes of `bytes` that are phrases, which is what is written and read back.
+    used: usize,
     /// Where each group of [`GROUP`] phrases starts.
     bases: Vec<u32>,
     /// Where each phrase ends inside its group, with the opening zero of every group, so group `g`
@@ -299,7 +304,8 @@ const ENDS: usize = GROUP + 1;
 impl Dict {
     pub(crate) fn empty() -> Self {
         Self {
-            bytes: Vec::new(),
+            bytes: vec![0; MAX],
+            used: 0,
             bases: Vec::new(),
             ends: Vec::new(),
             count: 0,
@@ -308,6 +314,7 @@ impl Dict {
 
     pub(crate) fn of(phrases: &[Vec<u8>]) -> Self {
         let mut dict = Self::empty();
+        dict.bytes.clear();
         for group in phrases.chunks(GROUP) {
             dict.bases.push(dict.bytes.len() as u32);
             dict.ends.push(0);
@@ -323,6 +330,8 @@ impl Dict {
                 .resize(dict.ends.len() + ENDS - (group.len() + 1), 0);
         }
         dict.count = phrases.len();
+        dict.used = dict.bytes.len();
+        dict.bytes.resize(dict.used + MAX, 0);
         dict
     }
 
@@ -341,12 +350,34 @@ impl Dict {
         let base = *self.bases.get(g)? as usize;
         let start = base + usize::from(*self.ends.get(ENDS * g + k)?);
         let end = base + usize::from(*self.ends.get(ENDS * g + k + 1)?);
-        self.bytes.get(start..end)
+        // Bounded by the phrases rather than by the padding behind them, so that a dictionary cut
+        // short is still a dictionary whose last phrase runs off the end.
+        self.bytes.get(..self.used)?.get(start..end)
+    }
+
+    /// Phrase `id` as a fixed [`MAX`] bytes from where it starts, with how many of them are its
+    /// own: what a decoder stores in one go rather than calling `memcpy` with a length it learns
+    /// at run time. `None` past the dictionary or on one this crate did not write.
+    ///
+    /// The length is in `1..=MAX` — [`Dict::of`] writes no longer phrase and [`Dict::read`]
+    /// refuses a dictionary that claims one, which is what lets a caller size its output by the
+    /// stream rather than by the phrases.
+    #[inline(always)]
+    pub(crate) fn chunk(&self, id: usize) -> Option<(&[u8; MAX], usize)> {
+        if id >= self.count {
+            return None;
+        }
+        let (g, k) = (id / GROUP, id % GROUP);
+        let base = *self.bases.get(g)? as usize;
+        let from = usize::from(*self.ends.get(ENDS * g + k)?);
+        let to = usize::from(*self.ends.get(ENDS * g + k + 1)?);
+        let len = to.checked_sub(from)?;
+        Some((self.bytes.get(base + from..)?.first_chunk::<MAX>()?, len))
     }
 
     /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count.
     pub(crate) fn serialized_len(&self) -> usize {
-        4 + 4 * self.bases.len() + 2 * self.ends.len() + self.bytes.len()
+        4 + 4 * self.bases.len() + 2 * self.ends.len() + self.used
     }
 
     pub(crate) fn write_to(&self, out: &mut Vec<u8>) {
@@ -357,7 +388,7 @@ impl Dict {
         for &e in &self.ends {
             out.extend_from_slice(&e.to_le_bytes());
         }
-        out.extend_from_slice(&self.bytes);
+        out.extend_from_slice(&self.bytes[..self.used]);
     }
 
     pub(crate) fn read(bytes: &[u8]) -> Option<Self> {
@@ -366,8 +397,12 @@ impl Dict {
         let groups = count.div_ceil(GROUP);
         let (bases, rest) = rest.split_at_checked(4 * groups)?;
         let (ends, bytes) = rest.split_at_checked(2 * ENDS * groups)?;
+        let mut padded = Vec::with_capacity(bytes.len() + MAX);
+        padded.extend_from_slice(bytes);
+        padded.resize(bytes.len() + MAX, 0);
         let dict = Self {
-            bytes: bytes.to_vec(),
+            bytes: padded,
+            used: bytes.len(),
             bases: bases
                 .chunks_exact(4)
                 .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
