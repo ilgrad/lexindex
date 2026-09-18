@@ -686,16 +686,33 @@ impl<'a> Entries<'a> {
         }
     }
 
+    /// Whether the run's pairs are a frame's offsets rather than a table's indices — what a walk
+    /// asks once so that [`head_as`](Self::head_as) does not ask it a header at a time.
+    #[inline(always)]
+    fn is_frame(&self) -> bool {
+        self.codes.is_frame()
+    }
+
     /// The next entry's shared-prefix length and suffix length, leaving the suffix itself for
     /// [`piece`](Self::piece) or [`skip`](Self::skip); `None` past the last header.
     #[inline(always)]
     fn head(&mut self) -> Option<(usize, usize)> {
+        if self.is_frame() {
+            self.head_as::<true>()
+        } else {
+            self.head_as::<false>()
+        }
+    }
+
+    /// [`head`](Self::head) for a run whose code kind the caller already knows.
+    #[inline(always)]
+    fn head_as<const FRAME: bool>(&mut self) -> Option<(usize, usize)> {
         if self.at >= self.count {
             return None;
         }
         let code = self.codes.next_code();
         self.at += 1;
-        let (lcp, len) = match self.codes.pair(code) {
+        let (lcp, len) = match self.codes.pair_as::<FRAME>(code) {
             Some(pair) => pair,
             None => {
                 // A pair no code could name continues as two varints at the head of its own
@@ -2738,10 +2755,28 @@ impl DictIndex {
         out: &mut Vec<u8>,
         stair: &mut Stairs,
     ) -> bool {
+        // Off the group's code, not off a reader opened to ask: opening one parses a run's
+        // prologue, which is what the walk is about to do anyway.
+        if matches!(run.code, Code::Frame) {
+            self.climb_as::<true>(run, steps, out, stair)
+        } else {
+            self.climb_as::<false>(run, steps, out, stair)
+        }
+    }
+
+    /// [`climb`](Self::climb) for a run whose code kind is known, so that the header loop branches
+    /// on it once rather than once an entry.
+    fn climb_as<const FRAME: bool>(
+        &self,
+        run: CodedRun<'_>,
+        steps: usize,
+        out: &mut Vec<u8>,
+        stair: &mut Stairs,
+    ) -> bool {
         let mut entries = run.entries();
         let mut depth = 0usize;
         for _ in 0..steps {
-            let Some((l, len)) = entries.head() else {
+            let Some((l, len)) = entries.head_as::<FRAME>() else {
                 return false;
             };
             // Unclamped: the one check after the walk refuses a run that ever passed its end, so

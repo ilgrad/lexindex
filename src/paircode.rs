@@ -386,7 +386,10 @@ pub(crate) struct Reader<'a> {
     width: u32,
     /// The all-ones code at `width`: the mask a code is read under, and the escape.
     mask: u64,
-    frame: Option<Frame>,
+    /// Flat rather than an `Option`, so that a walk told which kind it is reading at compile time
+    /// carries neither the discriminant nor a branch on it; zero under a table.
+    frame: Frame,
+    is_frame: bool,
     table: &'a [u16],
 }
 
@@ -400,6 +403,15 @@ struct Frame {
     mask_n: usize,
 }
 
+impl Frame {
+    const NONE: Self = Self {
+        bl: 0,
+        bn: 0,
+        wn: 0,
+        mask_n: 0,
+    };
+}
+
 impl<'a> Reader<'a> {
     /// A reader over nothing, for a walk that has not opened a run yet.
     pub(crate) fn none() -> Self {
@@ -411,7 +423,8 @@ impl<'a> Reader<'a> {
             left: 0,
             width: 0,
             mask: 0,
-            frame: None,
+            frame: Frame::NONE,
+            is_frame: false,
             table: &[],
         }
     }
@@ -442,6 +455,8 @@ impl<'a> Reader<'a> {
             }
             Code::Table { w, .. } => (0, *w, None),
         };
+        let is_frame = frame.is_some();
+        let frame = frame.unwrap_or(Frame::NONE);
         let end = at + (count * width as usize).div_ceil(8);
         let sfx = data.get(end..)?;
         let table = match code {
@@ -458,6 +473,7 @@ impl<'a> Reader<'a> {
                 width,
                 mask: (1u64 << width) - 1,
                 frame,
+                is_frame,
                 table,
             },
             sfx,
@@ -491,24 +507,43 @@ impl<'a> Reader<'a> {
         self.left = 64 - shift;
     }
 
-    /// The pair `code` stands for, or `None` when it is the escape.
+    /// The pair `code` stands for, or `None` when it is the escape. Only a caller that does not
+    /// already know the kind — a test, or a walk of one header — asks this way.
+    #[cfg(test)]
     ///
     /// A frame's escape is its two all-ones offsets side by side, which is the all-ones code at
     /// the width — the mask the code was read under — so the test is one comparison against a
     /// value the read already had, whatever the two field widths are.
     #[inline(always)]
-    pub(crate) fn pair(&self, code: usize) -> Option<(usize, usize)> {
-        match self.frame {
-            Some(f) => {
-                if code == self.mask as usize {
-                    return None;
-                }
-                Some((f.bl + (code >> f.wn), f.bn + (code & f.mask_n)))
+    fn pair(&self, code: usize) -> Option<(usize, usize)> {
+        if self.is_frame {
+            self.pair_as::<true>(code)
+        } else {
+            self.pair_as::<false>(code)
+        }
+    }
+
+    /// Whether the codes are a frame's offsets rather than a table's indices, which is one answer
+    /// for the whole run and therefore one a walk asks before it starts.
+    #[inline(always)]
+    pub(crate) fn is_frame(&self) -> bool {
+        self.is_frame
+    }
+
+    /// [`pair`](Self::pair) with the kind known at compile time. A table's walk then holds none of
+    /// the frame's four words and a frame's walk none of the table's two, which is what the header
+    /// loop had no registers for.
+    #[inline(always)]
+    pub(crate) fn pair_as<const FRAME: bool>(&self, code: usize) -> Option<(usize, usize)> {
+        if FRAME {
+            if code == self.mask as usize {
+                return None;
             }
-            None => {
-                let p = *self.table.get(code)?;
-                Some((usize::from(p >> 8), usize::from(p & 0xFF)))
-            }
+            let f = self.frame;
+            Some((f.bl + (code >> f.wn), f.bn + (code & f.mask_n)))
+        } else {
+            let p = *self.table.get(code)?;
+            Some((usize::from(p >> 8), usize::from(p & 0xFF)))
         }
     }
 
