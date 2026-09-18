@@ -68,6 +68,9 @@ const MAX_BLOCK: usize = 1024;
 /// and a path list 18, so the bound is slack; a block holding a chain like `a`, `aa`, `aaa` is what
 /// reaches it, which is legal input and merely slow, not wrong.
 const STAIRS: usize = 32;
+/// Where each stair's suffix sits, not the suffix itself: most entries are popped again, and a
+/// span is two words to record where a slice is two words to build and bound.
+type Stairs = [(usize, usize, usize); STAIRS];
 /// About how many suffixes a symbol table is trained on, from runs of keys spread evenly over the
 /// shard it covers — so an index of `n` keys trains a sample this size `n / SHARD_KEYS` times, and
 /// that product is what a shard costs to build. The pair sits at the flat bottom of that trade:
@@ -606,17 +609,32 @@ struct Entries<'a> {
     count: usize,
     /// The bit the next header's code starts at.
     bit: usize,
-    /// Where the suffixes of the entries since the last escape start, in bits, and the units the
-    /// entries since have taken: the cursor is the two combined, so that ruling an entry out by
-    /// its header costs one add, and the multiply and the clamp are paid by the few that are read.
-    base: usize,
-    sum: usize,
+    /// Where the suffixes read so far end, in bits and unbounded by the stream: ruling an entry
+    /// out by its header moves it, and the clamp is paid by the few entries that are read.
+    reach: usize,
     /// The suffixes' length in bits, which the cursor is clamped to, and in units, which no
     /// entry's length may pass: checked once where a header is decoded, so the cursor's own
     /// arithmetic cannot leave the run and needs no saturating step of its own.
     end_bits: usize,
     max_units: usize,
     unit: u32,
+}
+
+/// One front-coded run as a climb addresses it: its group's code, its shard's codec, its bytes
+/// and how many keys it holds.
+#[derive(Clone, Copy)]
+struct CodedRun<'a> {
+    codec: &'a Codec,
+    code: &'a Code,
+    data: &'a [u8],
+    count: usize,
+}
+
+impl<'a> CodedRun<'a> {
+    #[inline]
+    fn entries(&self) -> Entries<'a> {
+        Entries::of(self.code, self.codec, self.data, self.count)
+    }
 }
 
 impl<'a> Entries<'a> {
@@ -633,8 +651,7 @@ impl<'a> Entries<'a> {
                 sfx,
                 at: 0,
                 count: entries,
-                base: 0,
-                sum: 0,
+                reach: 0,
                 end_bits: sfx.len().saturating_mul(8),
                 max_units: match codec.unit() {
                     8 => sfx.len(),
@@ -655,8 +672,7 @@ impl<'a> Entries<'a> {
             at: 0,
             count: 0,
             bit: 0,
-            base: 0,
-            sum: 0,
+            reach: 0,
             end_bits: 0,
             max_units: 0,
             unit: 8,
@@ -681,8 +697,7 @@ impl<'a> Entries<'a> {
                 let mut at = self.off().div_ceil(8);
                 let lcp = varint_at(self.sfx, &mut at)?;
                 let len = varint_at(self.sfx, &mut at)?;
-                self.base = at * 8;
-                self.sum = 0;
+                self.reach = at * 8;
                 (lcp, len)
             }
         };
@@ -706,8 +721,7 @@ impl<'a> Entries<'a> {
     /// would have stopped at any entry past the stream stops on this one bound at the end of it.
     #[inline(always)]
     fn reach(&self) -> usize {
-        self.base
-            .wrapping_add(self.sum.wrapping_mul(self.unit as usize))
+        self.reach
     }
 
     /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
@@ -733,7 +747,9 @@ impl<'a> Entries<'a> {
     /// out, and the reason the two streams are apart.
     #[inline(always)]
     fn skip(&mut self, len: usize) {
-        self.sum = self.sum.wrapping_add(len);
+        self.reach = self
+            .reach
+            .wrapping_add(len.wrapping_mul(self.unit as usize));
     }
 }
 
@@ -2711,31 +2727,28 @@ impl DictIndex {
     /// any depth.
     fn climb(
         &self,
-        codec: &Codec,
-        code: &Code,
-        data: &[u8],
-        count: usize,
+        run: CodedRun<'_>,
         steps: usize,
         out: &mut Vec<u8>,
+        stair: &mut Stairs,
     ) -> bool {
-        let mut entries = Entries::of(code, codec, data, count);
-        // Where each stair's suffix sits, not the suffix itself: most entries are popped again,
-        // and a span is two words to record where a slice is two words to build and bound.
-        let mut stair = [(0usize, 0usize, 0usize); STAIRS];
+        let mut entries = run.entries();
         let mut depth = 0usize;
         for _ in 0..steps {
             let Some((l, len)) = entries.head() else {
                 return false;
             };
-            let at = entries.off();
+            // Unclamped: the one check after the walk refuses a run that ever passed its end, so
+            // every stair kept is one the clamp would not have moved.
+            let at = entries.reach();
             entries.skip(len);
             while depth > 0 && stair[depth - 1].0 >= l {
                 depth -= 1;
             }
             if depth == STAIRS {
                 // Nothing has been written yet, so `out` still holds the run's first key.
-                let mut entries = Entries::of(code, codec, data, count);
-                return (0..steps).all(|_| self.advance(codec, &mut entries, out));
+                let mut entries = run.entries();
+                return (0..steps).all(|_| self.advance(run.codec, &mut entries, out));
             }
             stair[depth] = (l, at, len);
             depth += 1;
@@ -2753,7 +2766,7 @@ impl DictIndex {
                 return false;
             }
             out.truncate(l);
-            if !codec.decode_into(&self.phrases, piece, out) {
+            if !run.codec.decode_into(&self.phrases, piece, out) {
                 return false;
             }
         }
@@ -2780,26 +2793,25 @@ impl DictIndex {
         out.extend_from_slice(self.head(b));
         let codec = self.codec_of(b);
         let codes = self.codes_of(b);
-        if j > 0
-            && !self.climb(
-                codec,
-                &codes.1,
-                self.restart_data(b),
-                self.micros_in(b),
-                j,
-                out,
-            )
-        {
+        // One buffer for both climbs: a fresh array a climb owns is 768 bytes a walk clears
+        // before it writes the handful of stairs it keeps, and the walk is a few hundred.
+        let mut stair: Stairs = [(0, 0, 0); STAIRS];
+        let restarts = CodedRun {
+            codec,
+            code: &codes.1,
+            data: self.restart_data(b),
+            count: self.micros_in(b),
+        };
+        if j > 0 && !self.climb(restarts, j, out, &mut stair) {
             return false;
         }
-        self.climb(
+        let micro = CodedRun {
             codec,
-            &codes.0,
-            self.micro_data(b, j),
-            self.micro_count(b, j),
-            steps,
-            out,
-        )
+            code: &codes.0,
+            data: self.micro_data(b, j),
+            count: self.micro_count(b, j),
+        };
+        self.climb(micro, steps, out, &mut stair)
     }
 
     /// The key at rank `id`; `None` at or past `len()`.

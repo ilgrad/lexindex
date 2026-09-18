@@ -375,8 +375,18 @@ pub(crate) struct Reader<'a> {
     /// Where the codes start, past the frame's prologue.
     at: usize,
     width: u32,
-    frame: Option<(usize, u32, usize, u32)>,
+    frame: Option<Frame>,
     table: &'a [u16],
+}
+
+/// A frame's two bases and what splits a code into their offsets, arranged the way a header reads
+/// them: the field width is the shift, and the escape is the all-ones code the mask already holds.
+#[derive(Clone, Copy)]
+struct Frame {
+    bl: usize,
+    bn: usize,
+    wn: u32,
+    mask_n: usize,
 }
 
 impl<'a> Reader<'a> {
@@ -403,7 +413,13 @@ impl<'a> Reader<'a> {
                 let &widths = data.get(at)?;
                 at += 1;
                 let (wl, wn) = (u32::from(widths >> 4), u32::from(widths & 0xF));
-                (at, wl + wn, Some((bl, wl, bn, wn)))
+                let frame = Frame {
+                    bl,
+                    bn,
+                    wn,
+                    mask_n: top(wn),
+                };
+                (at, wl + wn, Some(frame))
             }
             Code::Table { w, .. } => (0, *w, None),
         };
@@ -439,23 +455,26 @@ impl<'a> Reader<'a> {
     #[inline(always)]
     pub(crate) fn code_at(&self, bit: usize) -> usize {
         let (byte, shift) = (bit / 8, bit % 8);
-        let word = match self.data.get(byte..).and_then(|t| t.first_chunk::<8>()) {
-            Some(w) => u64::from_le_bytes(*w),
+        let word = match self.data.get(byte..byte + 8) {
+            Some(w) => u64::from_le_bytes(w.try_into().expect("eight bytes")),
             None => tail_word(self.data, byte),
         };
         ((word >> shift) & ((1u64 << self.width) - 1)) as usize
     }
 
     /// The pair `code` stands for, or `None` when it is the escape.
+    ///
+    /// A frame's escape is its two all-ones offsets side by side, which is the all-ones code at
+    /// the width — the mask the code was read under — so the test is one comparison against a
+    /// value the read already had, whatever the two field widths are.
     #[inline(always)]
     pub(crate) fn pair(&self, code: usize) -> Option<(usize, usize)> {
         match self.frame {
-            Some((bl, wl, bn, wn)) => {
-                let (dl, dn) = (code >> wn, code & top(wn));
-                if (dl, dn) == (top(wl), top(wn)) {
+            Some(f) => {
+                if code == top(self.width) {
                     return None;
                 }
-                Some((bl + dl, bn + dn))
+                Some((f.bl + (code >> f.wn), f.bn + (code & f.mask_n)))
             }
             None => {
                 let p = *self.table.get(code)?;
