@@ -57,6 +57,10 @@ use crate::pages::Pages;
 /// The one error every overflow check below reports; naming it keeps the arithmetic readable.
 const SIZE: IndexError = IndexError::Format("mphf: blob sections do not fit in memory");
 
+/// A remap whose blocks run further above their super-samples than a `u16` holds. Unreachable on
+/// a table this crate builds — see [`SUPER`] for the margin — and refused rather than wrapped.
+const SPAN: IndexError = IndexError::Format("mphf: a remap block outruns its super-sample");
+
 /// Keys per bucket on every bumping level. Seeds are `8/λ` bits per key, and every bucket that no
 /// seed places is bumped, so a larger `λ` is fewer seeds but more bumped keys, each of which
 /// costs its own level's seed share and ~8.5 bits of remap. Measured on 10 M word-bigram hashes,
@@ -903,6 +907,16 @@ impl Tail {
 /// is a quarter of a bit a value, 0.003 bits a key.
 const BLOCK: usize = 64;
 
+/// Values a super-sample covers. A block's sample is stored as a `u16` above its super-block's
+/// `u32`, which is 32/2048 + 16/64 = 0.27 bits a value against 0.5 for a `u32` a block, and the
+/// two loads are independent — both tables are small enough to sit in L1, and only their sum
+/// feeds the window's address. 2048 is where the curve flattens: the `u32` term is already
+/// 0.016 bits a value, and the offset it has to hold stays far inside a `u16`. The offset spans
+/// ~2 positions a value (the stream holds one one a value and the low bits leave the high part
+/// about as dense as it is sparse), so ~4 096 over a super-block; measured at 1 M / 10 M / 50 M
+/// real tables the worst was 4 414 / 4 710 / 4 789, a fourteenth of what a `u16` holds.
+const SUPER: usize = 2048;
+
 /// Words of the high-part stream a lookup counts through from its sample, all at once. The
 /// stream is held with as many zero words past its end, so the window is always inside it; a
 /// blob stores none of them.
@@ -913,11 +927,12 @@ const SELECT_WORDS: usize = 4;
 /// a hash that was never built in — takes its predecessor's, so over every value the holes are
 /// a non-decreasing sequence, and it is Elias–Fano: the low bits packed, the high parts as unary
 /// gaps in one stream, the `j`-th value's one at its high part plus `j`. A sample a [`BLOCK`] of
-/// values holds the position of the block's first one, so a value's high part is a count of ones
-/// from its sample: over a window of [`SELECT_WORDS`] words compared at once, and past the
-/// window — under one lookup in ten thousand on a real table — word by word. A lookup is the
-/// sample, which at four bytes a block stays in cache, then the window and the low word, which
-/// depend on nothing but the value.
+/// values holds the position of the block's first one — as a `u16` above its super-block's `u32`,
+/// [`SUPER`] values apart — so a value's high part is a count of ones from its sample: over a
+/// window of [`SELECT_WORDS`] words compared at once, and past the window — under one lookup in
+/// ten thousand on a real table — word by word. A lookup is the two samples, whose tables are
+/// small enough to stay in cache and whose addresses both come from `j` alone, then the window
+/// and the low word, which depend on nothing but the value.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Remap {
     /// Values of the levels below the first and of the tail, together: the sequence's length.
@@ -928,8 +943,10 @@ struct Remap {
     /// The high parts in unary, [`high_words`](Self::high_words) of them, then [`SELECT_WORDS`]
     /// zero words; nothing at all for an empty sequence.
     high: Pages<u64>,
-    /// The position of each block's first one.
-    samples: Pages<u32>,
+    /// The position of each super-block's first one.
+    supers: Pages<u32>,
+    /// The position of each block's first one, above its super-block's.
+    subs: Pages<u16>,
 }
 
 impl Remap {
@@ -962,8 +979,20 @@ impl Remap {
         &self.high[..self.high.len().saturating_sub(SELECT_WORDS)]
     }
 
-    fn sample_count(len: u64) -> usize {
+    fn super_count(len: u64) -> usize {
+        (len as usize).div_ceil(SUPER)
+    }
+
+    fn sub_count(len: u64) -> usize {
         (len as usize).div_ceil(BLOCK)
+    }
+
+    /// Bytes the two sample tables take for `len` values, `None` where that does not fit in
+    /// memory — `len` comes from a header a blob wrote, so the product is the loader's to check.
+    fn sample_bytes(len: u64) -> Option<usize> {
+        Self::super_count(len)
+            .checked_mul(4)?
+            .checked_add(Self::sub_count(len).checked_mul(2)?)
     }
 
     /// Low bits for `len` values below `u` from the density alone: what leaves the high part
@@ -984,7 +1013,8 @@ impl Remap {
             low_bits,
             low: Pages::zeroed(Self::low_words(len, low_bits)),
             high: Pages::zeroed(high_words),
-            samples: Pages::zeroed(Self::sample_count(len)),
+            supers: Pages::zeroed(Self::super_count(len)),
+            subs: Pages::zeroed(Self::sub_count(len)),
         };
         for (j, &v) in values.iter().enumerate() {
             debug_assert!(v < u && (j == 0 || values[j - 1] <= v));
@@ -999,8 +1029,12 @@ impl Remap {
             }
             let p = (v >> low_bits) as usize + j;
             remap.high[p / 64] |= 1 << (p % 64);
+            if j % SUPER == 0 {
+                remap.supers[j / SUPER] = u32::try_from(p).map_err(|_| SIZE)?;
+            }
             if j % BLOCK == 0 {
-                remap.samples[j / BLOCK] = u32::try_from(p).map_err(|_| SIZE)?;
+                let base = remap.supers[j / SUPER] as usize;
+                remap.subs[j / BLOCK] = u16::try_from(p - base).map_err(|_| SPAN)?;
             }
         }
         Ok(remap)
@@ -1015,10 +1049,14 @@ impl Remap {
     /// ones and zeros run past the window goes on word by word.
     #[inline(always)]
     fn get(&self, j: u64) -> u64 {
-        let Some(&s) = self.samples.get(j as usize / BLOCK) else {
+        let (Some(&hi), Some(&lo)) = (
+            self.supers.get(j as usize / SUPER),
+            self.subs.get(j as usize / BLOCK),
+        ) else {
             return 0;
         };
-        let (w0, o) = (s as usize / 64, s % 64);
+        let s = hi as usize + lo as usize;
+        let (w0, o) = (s / 64, s % 64);
         let Some(words) = self.high.get(w0..w0 + SELECT_WORDS) else {
             return 0;
         };
@@ -1072,12 +1110,15 @@ impl Remap {
     }
 
     /// Pulls in what [`get`](Self::get) reads for `j`: the lines its window starts and ends on,
-    /// and its low word. The sample is read rather than pulled in: at four bytes a block the
-    /// samples of a billion keys' remap are under a megabyte, in cache.
+    /// and its low word. The samples are read rather than pulled in: under three bits a value,
+    /// those of a billion keys' remap are under half a megabyte, in cache.
     #[inline(always)]
     fn prefetch(&self, j: u64) {
-        if let Some(&s) = self.samples.get(j as usize / BLOCK) {
-            let w0 = s as usize / 64;
+        if let (Some(&hi), Some(&lo)) = (
+            self.supers.get(j as usize / SUPER),
+            self.subs.get(j as usize / BLOCK),
+        ) {
+            let w0 = (hi as usize + lo as usize) / 64;
             crate::blob::prefetch(&self.high, w0);
             crate::blob::prefetch(&self.high, w0 + SELECT_WORDS - 1);
         }
@@ -1093,7 +1134,8 @@ impl Remap {
             || Some(self.high.len())
                 != Self::high_words(self.len, u, self.low_bits)
                     .and_then(|stored| Self::held_words(self.len, stored))
-            || self.samples.len() != Self::sample_count(self.len)
+            || self.supers.len() != Self::super_count(self.len)
+            || self.subs.len() != Self::sub_count(self.len)
             || self.high[self.stored_high().len()..]
                 .iter()
                 .any(|&w| w != 0)
@@ -1109,8 +1151,15 @@ impl Remap {
                 if j >= self.len || p < j {
                     return false;
                 }
-                if j % BLOCK as u64 == 0 && u64::from(self.samples[j as usize / BLOCK]) != p {
-                    return false;
+                if j % BLOCK as u64 == 0 {
+                    let base = u64::from(self.supers[j as usize / SUPER]);
+                    // Canonical, not merely decodable: a super-sample sits on its own block's
+                    // one, so the blob a table writes is the only blob that reads back as it.
+                    if (j % SUPER as u64 == 0 && base != p)
+                        || base + u64::from(self.subs[j as usize / BLOCK]) != p
+                    {
+                        return false;
+                    }
                 }
                 j += 1;
             }
@@ -2417,7 +2466,9 @@ impl V2 {
         (
             self.levels().map(|l| l.seeds.len()).sum::<usize>() + self.tail.seeds.len() * 2,
             Remap::low_words(m, l) * 8,
-            self.remap.stored_high().len() * 8 + self.remap.samples.len() * 4,
+            self.remap.stored_high().len() * 8
+                + self.remap.supers.len() * 4
+                + self.remap.subs.len() * 2,
         )
     }
 
@@ -2472,7 +2523,10 @@ impl V2 {
         for &word in self.remap.stored_high() {
             w.write_all(&word.to_le_bytes())?;
         }
-        for &sample in &self.remap.samples {
+        for &sample in &self.remap.supers {
+            w.write_all(&sample.to_le_bytes())?;
+        }
+        for &sample in &self.remap.subs {
             w.write_all(&sample.to_le_bytes())?;
         }
         Ok(())
@@ -2646,7 +2700,7 @@ impl V2 {
             want = want
                 .checked_add(low_words.checked_mul(8).ok_or(SIZE)?)
                 .and_then(|v| v.checked_add(high_words.checked_mul(8)?))
-                .and_then(|v| v.checked_add(entries.div_ceil(BLOCK).checked_mul(4)?))
+                .and_then(|v| v.checked_add(Remap::sample_bytes(entries as u64)?))
                 .ok_or(SIZE)?;
             (low_bits, 0)
         };
@@ -2700,13 +2754,16 @@ impl V2 {
                 Remap::held_words(entries as u64, high_words).ok_or(SIZE)?,
                 0,
             );
-            let samples = take(bytes, &mut p, entries.div_ceil(BLOCK), u32::from_le_bytes);
+            let len = entries as u64;
+            let supers = take(bytes, &mut p, Remap::super_count(len), u32::from_le_bytes);
+            let subs = take(bytes, &mut p, Remap::sub_count(len), u16::from_le_bytes);
             Remap {
-                len: entries as u64,
+                len,
                 low_bits,
                 low: Pages::from_slice(&low),
                 high: Pages::from_slice(&high),
-                samples: Pages::from_slice(&samples),
+                supers: Pages::from_slice(&supers),
+                subs: Pages::from_slice(&subs),
             }
         };
         debug_assert_eq!(p, bytes.len());
@@ -4206,7 +4263,7 @@ mod tests {
         let first = t.first.as_ref().expect("a first level");
         let entries = t.rest.iter().map(|l| l.n).sum::<u64>() + t.tail.range;
         assert_eq!(t.remap.len, entries);
-        assert!(t.remap.samples.len() > 4, "a few blocks prove little");
+        assert!(t.remap.subs.len() > 4, "a few blocks prove little");
         let bumped = hs
             .iter()
             .filter(|&&h| first.seeds[bucket_of(h, first.buckets) as usize] == 0)
@@ -4447,6 +4504,32 @@ mod tests {
         with_scalar(blob, 7 + i * 3 + j, value)
     }
 
+    /// A block's sample is a `u16` above its super-block's, which is sound because the low bits
+    /// hold the stream at about two positions a value — so a super-block spans about twice
+    /// [`SUPER`], and the widest measured on a real table was 4 789. A sequence that defies that,
+    /// one block at the bottom of the image and the rest at the top, is the shape where the
+    /// offset does not fit, and it must be refused rather than wrapped: `index` would otherwise
+    /// count ones from the wrong word and answer some other value.
+    #[test]
+    fn a_remap_block_too_far_above_its_super_sample_is_refused() {
+        let len = 70_000usize;
+        let u = 2 * len as u64;
+        let mut values = vec![0u64; BLOCK];
+        values.resize(len, u - 1);
+        assert_eq!(Remap::natural_low_bits(len as u64, u), 1);
+        assert_eq!(
+            Remap::encode(&values, u).unwrap_err().to_string(),
+            SPAN.to_string()
+        );
+        // The same sequence one super-block later fits: the jump is then inside its own block's
+        // offset, which is what the width is there to hold.
+        let mut ok = vec![0u64; SUPER];
+        ok.resize(len, u - 1);
+        let remap = Remap::encode(&ok, u).expect("a jump on a super-block boundary fits");
+        assert!(remap.validate(u));
+        assert_eq!(remap.get(SUPER as u64), u - 1);
+    }
+
     #[test]
     fn a_blob_round_trips_to_the_same_table() {
         for n in [0usize, 1, 2, 63, 64, 65, 1000, 100_000] {
@@ -4630,7 +4713,8 @@ mod tests {
         let high_at = low_at + low;
         let stored = r.stored_high();
         let words = stored.len();
-        let samples_at = high_at + words * 8;
+        let supers_at = high_at + words * 8;
+        let subs_at = supers_at + Remap::super_count(r.len) * 4;
         let word_at = |w: usize| high_at + w * 8..high_at + w * 8 + 8;
         let read =
             |bytes: &[u8], w: usize| u64::from_le_bytes(bytes[word_at(w)].try_into().unwrap());
@@ -4660,12 +4744,17 @@ mod tests {
                 "a stream with the wrong number of ones was accepted"
             );
         }
-        let mut bad = blob.clone();
-        bad[samples_at..samples_at + 4].copy_from_slice(&(r.samples[0] + 1).to_le_bytes());
-        assert!(
-            Mphf::from_bytes(&bad).is_err(),
-            "a sample off its block's first one was accepted"
-        );
+        for (at, bump) in [
+            (supers_at, (r.supers[0] + 1).to_le_bytes().to_vec()),
+            (subs_at, (r.subs[0] + 1).to_le_bytes().to_vec()),
+        ] {
+            let mut bad = blob.clone();
+            bad[at..at + bump.len()].copy_from_slice(&bump);
+            assert!(
+                Mphf::from_bytes(&bad).is_err(),
+                "a sample off its block's first one was accepted"
+            );
+        }
     }
 
     #[test]

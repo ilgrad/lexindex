@@ -88,6 +88,20 @@ All notable changes to this project are documented here. The format follows
   vocabulary keeps earning past what a hundred-thousand-key sample can see. `docs/usage.md` carries
   the numbers and says which way the estimate errs.
 
+- **The remap's samples are two levels, and cost half of what they did.** Every 64 values of the
+  remap carried the position of their block's first one in a `u32`, half a bit a value. The
+  position is what a lookup adds to nothing else, so what it actually needs is the *offset* from a
+  coarser mark: a `u32` every 2 048 values and a `u16` every 64 above it is 0.27 bits a value
+  against 0.5, and the two loads are independent — both tables are small enough to stay in L1 and
+  only their sum feeds the window's address, so the lookup gains an add and no dependent read. The
+  width is safe by construction rather than by luck: the low bits are chosen to leave the high
+  stream about as dense as it is sparse, so it holds about two positions a value and a super-block
+  spans about 4 096; measured on real tables of 1 M, 10 M and 50 M keys the widest block offset was
+  4 414, 4 710 and 4 789, a fourteenth of what a `u16` holds, and a sequence that would defy that
+  is refused by name rather than wrapped. The remap's samples fall from 0.0071 / 0.0067 / 0.0065
+  bits a key to 0.0038 / 0.0035 / 0.0035 at those three sizes — **0.0033 / 0.0032 / 0.0030 off the
+  whole function**, which is where `MPH3`'s last third of a hundredth of a bit was hiding.
+
 - **The perfect hash is 1 % smaller again and bumps a sixth fewer keys: a seed is chosen by the
   product of its keys' positions, not their sum.** Of the seeds that place a bucket, `MPH3` took
   the one whose keys' in-slice positions summed lowest, since low positions are what the buckets

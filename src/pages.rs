@@ -27,6 +27,7 @@ pub(crate) const HUGE: usize = 1 << 21;
 pub(crate) unsafe trait Zeroed: Copy {}
 
 unsafe impl Zeroed for u8 {}
+unsafe impl Zeroed for u16 {}
 unsafe impl Zeroed for u32 {}
 unsafe impl Zeroed for u64 {}
 
