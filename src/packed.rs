@@ -15,6 +15,7 @@
 //! mid-byte — which is what the last 0.3 bytes a key are: padding each suffix to a byte instead
 //! costs 4.66 on DNA against 4.34.
 
+use crate::room::{Room, commit};
 use std::cmp::Ordering;
 
 /// The widths a code may take. One bit is a two-letter alphabet and eight is a byte, past which
@@ -181,35 +182,123 @@ impl Alphabet {
     /// Sized once at a byte a code, which no reading can exceed, so that the loop stores a byte
     /// rather than growing a vector.
     pub(crate) fn decode_into(&self, codes: &Codes<'_>, out: &mut Vec<u8>, cap: usize) -> bool {
-        let start = out.len();
         let want = codes.len.min(cap);
-        out.resize(start + want, 0);
         if self.two.is_empty() {
-            // An alphabet that fits its width spends one code a byte, so how far the next code
-            // starts does not wait on this one's table read. Written as its own loop because that
-            // is what tells the compiler so: the shared one carries `at` through a load and reads
-            // a byte every four or five cycles however wide the machine is.
-            for i in 0..want {
-                let Some(b) = codes.at(i).and_then(|c| self.one.get(c)) else {
-                    out.truncate(start);
-                    return false;
-                };
-                out[start + i] = *b;
-            }
-            return true;
+            return self.spread(codes, want, out);
         }
-        let mut o = start;
+        let mut room = Room::of(out, want);
+        let mut o = 0;
         let mut at = 0;
-        while at < codes.len && o - start < want {
+        while at < codes.len && o < want {
             let Some((b, took)) = self.byte_at(codes, at) else {
-                out.truncate(start);
                 return false;
             };
-            out[o] = b;
+            room.byte(o, b);
             o += 1;
             at += took;
         }
-        out.truncate(o);
+        // SAFETY: the loop wrote every byte below `o`, and a failed one commits nothing.
+        unsafe { commit(out, o) };
+        true
+    }
+
+    /// [`compare`](Self::compare) for an alphabet that fits its width, over the same word of codes
+    /// [`spread`](Self::spread) decodes through: a scan reads a header and then these bytes, so
+    /// the load a code used to carry was as much of a lookup as the header walk itself.
+    fn spread_cmp(&self, codes: &Codes<'_>, rest: &[u8]) -> (usize, Ordering) {
+        let (width, mask) = (self.width, top(self.width) as u64);
+        let mut c = 0usize;
+        'walk: while c < codes.len {
+            let bit = codes.start + c * width as usize;
+            let (byte, shift) = (bit / 8, (bit % 8) as u32);
+            let Some(tail) = codes.bytes.get(byte..) else {
+                break;
+            };
+            let (mut word, have) = match tail.first_chunk::<8>() {
+                Some(word) => (u64::from_le_bytes(*word), 64 - shift),
+                None => {
+                    let mut buf = [0u8; 8];
+                    buf[..tail.len()].copy_from_slice(tail);
+                    let bits = (tail.len() as u32 * 8).saturating_sub(shift);
+                    (u64::from_le_bytes(buf), bits)
+                }
+            };
+            word >>= shift;
+            let take = ((have / width) as usize).min(codes.len - c);
+            if take == 0 {
+                break;
+            }
+            // Bounded by what is left of `rest` as well, so the compare itself needs no check:
+            // running out of it is the one case the loop does not answer.
+            let n = take.min(rest.len() - c);
+            for &theirs in &rest[c..c + n] {
+                let Some(&b) = self.one.get((word & mask) as usize) else {
+                    break 'walk;
+                };
+                word >>= width;
+                if b != theirs {
+                    return (c, b.cmp(&theirs));
+                }
+                c += 1;
+            }
+            if n < take {
+                if self.one.get((word & mask) as usize).is_none() {
+                    break;
+                }
+                return (c, Ordering::Greater);
+            }
+        }
+        let ord = if c == rest.len() {
+            Ordering::Equal
+        } else {
+            Ordering::Less
+        };
+        (c, ord)
+    }
+
+    /// `want` bytes of an alphabet that fits its width — one code a byte, a machine word of codes
+    /// at a time.
+    ///
+    /// A code straddles a byte, so reading one is a word load, a bounds check, a shift and a mask.
+    /// Taken a code at a time those four were most of what a byte cost, and on a two-bit alphabet
+    /// a key is hundreds of bytes: a word holds thirty-two of its codes, so the load and its check
+    /// are paid once for all of them and a byte costs a shift, a mask, a table read and a store.
+    fn spread(&self, codes: &Codes<'_>, want: usize, out: &mut Vec<u8>) -> bool {
+        let mut room = Room::of(out, want);
+        let (width, mask) = (self.width, top(self.width) as u64);
+        let mut done = 0usize;
+        while done < want {
+            let bit = codes.start + done * width as usize;
+            let (byte, shift) = (bit / 8, (bit % 8) as u32);
+            let Some(tail) = codes.bytes.get(byte..) else {
+                return false;
+            };
+            // Every bit of a whole word is the stream's; a short tail has only the bytes it holds.
+            let (mut word, have) = match tail.first_chunk::<8>() {
+                Some(word) => (u64::from_le_bytes(*word), 64 - shift),
+                None => {
+                    let mut buf = [0u8; 8];
+                    buf[..tail.len()].copy_from_slice(tail);
+                    let bits = (tail.len() as u32 * 8).saturating_sub(shift);
+                    (u64::from_le_bytes(buf), bits)
+                }
+            };
+            word >>= shift;
+            let take = ((have / width) as usize).min(want - done);
+            if take == 0 {
+                return false;
+            }
+            for slot in room.slots(done, take) {
+                let Some(&b) = self.one.get((word & mask) as usize) else {
+                    return false;
+                };
+                slot.write(b);
+                word >>= width;
+            }
+            done += take;
+        }
+        // SAFETY: the loop wrote every byte below `want`, and a failed one commits nothing.
+        unsafe { commit(out, want) };
         true
     }
 
@@ -217,6 +306,9 @@ impl Alphabet {
     /// byte at a time, which is what a scan needs and no more.
     #[inline]
     pub(crate) fn compare(&self, codes: &Codes<'_>, rest: &[u8]) -> (usize, Ordering) {
+        if self.two.is_empty() {
+            return self.spread_cmp(codes, rest);
+        }
         let mut at = 0;
         let mut c = 0;
         while at < codes.len {

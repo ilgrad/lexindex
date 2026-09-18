@@ -14,6 +14,7 @@
 //! load and at most two lookups. Decoding is one eight-byte store per code.
 
 use crate::phrase::Map;
+use crate::room::{Room, commit};
 
 pub(crate) const ESCAPE: u8 = 255;
 const MAX_SYMBOLS: usize = 255;
@@ -273,34 +274,34 @@ impl Table {
     /// `out` cut back to where it was, for a stream this table did not write — a code past the
     /// table, or an escape with nothing after it.
     pub(crate) fn decode_into(&self, packed: &[u8], out: &mut Vec<u8>, cap: usize) -> bool {
-        let start = out.len();
         // Every code becomes one eight-byte store and advances by its length, so the slack past
         // the decoded end is at most seven bytes per code — and past a cap, seven bytes in all.
-        let room = packed.len().saturating_mul(8).min(cap.saturating_add(7));
-        out.resize(start + room, 0);
-        let mut o = start;
+        let mut room = Room::of(
+            out,
+            packed.len().saturating_mul(8).min(cap.saturating_add(7)),
+        );
+        let mut o = 0;
         let mut i = 0;
-        while i < packed.len() && o - start < cap {
+        while i < packed.len() && o < cap {
             let code = packed[i];
             if code == ESCAPE {
                 let Some(&b) = packed.get(i + 1) else {
-                    out.truncate(start);
                     return false;
                 };
-                out[o] = b;
+                room.byte(o, b);
                 o += 1;
                 i += 2;
             } else {
                 let Some((word, len)) = self.symbol(code) else {
-                    out.truncate(start);
                     return false;
                 };
-                out[o..o + 8].copy_from_slice(&word.to_le_bytes());
+                room.put(o, &word.to_le_bytes());
                 o += len;
                 i += 1;
             }
         }
-        out.truncate(o);
+        // SAFETY: the loop wrote every byte below `o`, and a failed one commits nothing.
+        unsafe { commit(out, o) };
         true
     }
 

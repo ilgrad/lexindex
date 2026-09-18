@@ -88,6 +88,7 @@ mod overlay;
 mod packed;
 mod paircode;
 mod phrase;
+mod room;
 mod string_index;
 mod subsequence;
 

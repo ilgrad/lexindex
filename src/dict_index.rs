@@ -29,6 +29,7 @@ use crate::offsets::{self, Offsets};
 use crate::packed::{self, Alphabet};
 use crate::paircode::{self, Code};
 use crate::phrase::{self, Dict, Split, Trie};
+use crate::room::{Room, commit};
 use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
@@ -70,7 +71,11 @@ const MAX_BLOCK: usize = 1024;
 const STAIRS: usize = 32;
 /// Where each stair's suffix sits, not the suffix itself: most entries are popped again, and a
 /// span is two words to record where a slice is two words to build and bound.
-type Stairs = [(usize, usize, usize); STAIRS];
+///
+/// Left uninitialised because a walk keeps a handful of stairs and clearing the array cost sixty
+/// instructions of every lookup — a fifth of what a lookup that reads no header at all costs.
+type Stairs = [std::mem::MaybeUninit<(usize, usize, usize)>; STAIRS];
+
 /// About how many suffixes a symbol table is trained on, from runs of keys spread evenly over the
 /// shard it covers — so an index of `n` keys trains a sample this size `n / SHARD_KEYS` times, and
 /// that product is what a shard costs to build. The pair sits at the flat bottom of that trade:
@@ -613,8 +618,6 @@ struct Entries<'a> {
     sfx: &'a [u8],
     at: usize,
     count: usize,
-    /// The bit the next header's code starts at.
-    bit: usize,
     /// Where the suffixes read so far end, in bits and unbounded by the stream: ruling an entry
     /// out by its header moves it, and the clamp is paid by the few entries that are read.
     reach: usize,
@@ -647,12 +650,11 @@ impl<'a> Entries<'a> {
     /// The entries of a run of `count` keys — `count - 1` headers — under its group's `code` and
     /// its shard's `codec`. A run this crate did not write reads as an empty one rather than
     /// panicking.
-    #[inline]
+    #[inline(always)]
     fn of(code: &'a Code, codec: &Codec, data: &'a [u8], count: usize) -> Self {
         let entries = count.saturating_sub(1);
         match paircode::Reader::of(code, data, entries) {
             Some((codes, sfx)) => Self {
-                bit: codes.first_bit(),
                 codes,
                 sfx,
                 at: 0,
@@ -677,7 +679,6 @@ impl<'a> Entries<'a> {
             sfx: &[],
             at: 0,
             count: 0,
-            bit: 0,
             reach: 0,
             end_bits: 0,
             max_units: 0,
@@ -692,8 +693,7 @@ impl<'a> Entries<'a> {
         if self.at >= self.count {
             return None;
         }
-        let code = self.codes.code_at(self.bit);
-        self.bit += self.codes.width() as usize;
+        let code = self.codes.next_code();
         self.at += 1;
         let (lcp, len) = match self.codes.pair(code) {
             Some(pair) => pair,
@@ -2264,20 +2264,22 @@ fn compare_tiered(
     let mut i = 0;
     while i < packed.len() {
         if let Some((id, took)) = split.read_at(packed, i) {
-            let Some(phrase) = dict.at(id) else {
+            // The padded chunk, not the phrase's own bytes: its last word is a whole load off the
+            // padding, where a slice of its length would have been assembled a byte at a time.
+            let Some((phrase, plen)) = dict.chunk(id) else {
                 break;
             };
             i += took;
-            for k in (0..phrase.len()).step_by(8) {
-                let answer = compare_word(
-                    fsst::word_at(phrase, k),
-                    (phrase.len() - k).min(8),
-                    rest,
-                    &mut c,
-                );
-                if let Some(answer) = answer {
+            let mut k = 0;
+            for word in phrase.chunks_exact(8) {
+                if k >= plen {
+                    break;
+                }
+                let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+                if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
                     return answer;
                 }
+                k += 8;
             }
             continue;
         }
@@ -2319,41 +2321,38 @@ fn decode_tiered(
     // A phrase is at most `phrase::MAX` bytes for the two codes that name it, a symbol eight for
     // one and an escape one for two, so `MAX / 2` a byte is exactly enough: before a phrase's
     // store at least two bytes of input are left and `2 * MAX / 2` is the `MAX` it writes.
-    let start = out.len();
     let Some(room) = packed.len().checked_mul(phrase::MAX / 2) else {
         return false;
     };
-    out.resize(start + room.min(cap.saturating_add(phrase::MAX)), 0);
-    let mut o = start;
+    let mut room = Room::of(out, room.min(cap.saturating_add(phrase::MAX)));
+    let mut o = 0;
     let mut i = 0;
-    while i < packed.len() && o - start < cap {
+    while i < packed.len() && o < cap {
         if let Some((id, took)) = split.read_at(packed, i) {
             let Some((phrase, len)) = dict.chunk(id) else {
-                out.truncate(start);
                 return false;
             };
-            out[o..o + phrase::MAX].copy_from_slice(phrase);
+            room.put(o, phrase);
             o += len;
             i += took;
         } else if packed[i] == ESCAPE {
             let Some(&b) = packed.get(i + 1) else {
-                out.truncate(start);
                 return false;
             };
-            out[o] = b;
+            room.byte(o, b);
             o += 1;
             i += 2;
         } else {
             let Some((word, len)) = table.symbol(packed[i]) else {
-                out.truncate(start);
                 return false;
             };
-            out[o..o + 8].copy_from_slice(&word.to_le_bytes());
+            room.put(o, &word.to_le_bytes());
             o += len;
             i += 1;
         }
     }
-    out.truncate(o);
+    // SAFETY: the loop wrote every byte below `o`, and a failed one commits nothing.
+    unsafe { commit(out, o) };
     true
 }
 
@@ -2749,7 +2748,8 @@ impl DictIndex {
             // every stair kept is one the clamp would not have moved.
             let at = entries.reach();
             entries.skip(len);
-            while depth > 0 && stair[depth - 1].0 >= l {
+            // SAFETY: every slot below `depth` was written by the loop before this reads it.
+            while depth > 0 && unsafe { stair[depth - 1].assume_init() }.0 >= l {
                 depth -= 1;
             }
             if depth == STAIRS {
@@ -2757,7 +2757,7 @@ impl DictIndex {
                 let mut entries = run.entries();
                 return (0..steps).all(|_| self.advance(run.codec, &mut entries, out));
             }
-            stair[depth] = (l, at, len);
+            stair[depth].write((l, at, len));
             depth += 1;
         }
         if entries.reach() > entries.end_bits {
@@ -2781,16 +2781,18 @@ impl DictIndex {
         // it cannot underflow because a stair is kept only where its prefix is the shorter. The
         // last stair is the key's own tail, and asks for all of it — so that call, alone, carries
         // no cap at all.
-        let kept = &stair[..depth];
-        for w in kept.windows(2) {
-            if !emit(w[0], w[1].0 - w[0].0, out) {
+        // SAFETY: as above -- the walk wrote every slot below `depth`.
+        let kept = |i: usize| unsafe { stair[i].assume_init() };
+        let Some(last) = depth.checked_sub(1) else {
+            return true;
+        };
+        for i in 0..last {
+            let (a, b) = (kept(i), kept(i + 1));
+            if !emit(a, b.0 - a.0, out) {
                 return false;
             }
         }
-        match kept.last() {
-            Some(&last) => emit(last, usize::MAX, out),
-            None => true,
-        }
+        emit(kept(last), usize::MAX, out)
     }
 
     /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
@@ -2815,7 +2817,7 @@ impl DictIndex {
         let codes = self.codes_of(b);
         // One buffer for both climbs: a fresh array a climb owns is 768 bytes a walk clears
         // before it writes the handful of stairs it keeps, and the walk is a few hundred.
-        let mut stair: Stairs = [(0, 0, 0); STAIRS];
+        let mut stair: Stairs = [const { std::mem::MaybeUninit::uninit() }; STAIRS];
         let restarts = CodedRun {
             codec,
             code: &codes.1,

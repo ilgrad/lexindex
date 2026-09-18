@@ -363,18 +363,29 @@ impl<'a> Writer<'a> {
     }
 }
 
-/// One run's header stream as it is read: the pair at any index, at the cost of the one load its
-/// bits span.
+/// One run's header stream as it is read: a cursor over its codes, refilled a machine word at a
+/// time.
+///
+/// A word holds eight or so codes at the widths a frame takes, so the load, its bounds check and
+/// the shift that aligns it are paid once for all of them rather than once a code. That is most of
+/// what a walk over a microblock's headers costs beyond splitting the pairs themselves.
 pub(crate) struct Reader<'a> {
-    /// The run's whole data — the headers, and past `hdr_end` the suffixes. A header's eight-byte
+    /// The run's whole data — the headers, and past `hdr_end` the suffixes. A refill's eight-byte
     /// load may run on into the suffixes, and the mask drops what it took: that keeps it one
     /// unaligned load everywhere but the run's last seven bytes, where a copy of what is left is
     /// the price of not reading past the run.
     data: &'a [u8],
     hdr_end: usize,
-    /// Where the codes start, past the frame's prologue.
-    at: usize,
+    /// The bit the next code starts at.
+    bit: usize,
+    /// `data` from `bit` on as far as the last load reached, the next code at the bottom.
+    word: u64,
+    /// How many of `word`'s bits the cursor has not passed. A refill leaves at least fifty-seven,
+    /// and a code is at most thirty wide, so one load always answers the code that asked for it.
+    left: u32,
     width: u32,
+    /// The all-ones code at `width`: the mask a code is read under, and the escape.
+    mask: u64,
     frame: Option<Frame>,
     table: &'a [u16],
 }
@@ -395,8 +406,11 @@ impl<'a> Reader<'a> {
         Self {
             data: &[],
             hdr_end: 0,
-            at: 0,
+            bit: 0,
+            word: 0,
+            left: 0,
             width: 0,
+            mask: 0,
             frame: None,
             table: &[],
         }
@@ -404,6 +418,11 @@ impl<'a> Reader<'a> {
 
     /// A reader over a run of `count` pairs coded under `code`, and where its suffixes begin. A
     /// stream this crate did not write gives `None` rather than a panic.
+    ///
+    /// Inlined on purpose: a climb opens two runs and a scan one, so the prologue's varints are
+    /// paid once a lookup, and out of line they were a call through the got with the code's kind
+    /// unknown to the walk that followed.
+    #[inline]
     pub(crate) fn of(code: &'a Code, data: &'a [u8], count: usize) -> Option<(Self, &'a [u8])> {
         let (at, width, frame) = match code {
             Code::Frame => {
@@ -433,8 +452,11 @@ impl<'a> Reader<'a> {
             Self {
                 data,
                 hdr_end: end,
-                at,
+                bit: at * 8,
+                word: 0,
+                left: 0,
                 width,
+                mask: (1u64 << width) - 1,
                 frame,
                 table,
             },
@@ -442,24 +464,31 @@ impl<'a> Reader<'a> {
         ))
     }
 
-    /// The bit the first code starts at.
-    pub(crate) fn first_bit(&self) -> usize {
-        self.at * 8
-    }
-
-    pub(crate) fn width(&self) -> u32 {
-        self.width
-    }
-
-    /// The code whose bits start at `bit`, which a walk keeps under the headers' end.
+    /// The next code. A walk keeps the cursor under the headers' end by counting entries, and a
+    /// code past it reads whatever the suffixes hold rather than failing — which is the same
+    /// answer a wrong count gave when every code was addressed on its own.
     #[inline(always)]
-    pub(crate) fn code_at(&self, bit: usize) -> usize {
-        let (byte, shift) = (bit / 8, bit % 8);
+    pub(crate) fn next_code(&mut self) -> usize {
+        if self.left < self.width {
+            self.refill();
+        }
+        let code = (self.word & self.mask) as usize;
+        self.word >>= self.width;
+        self.left -= self.width;
+        self.bit += self.width as usize;
+        code
+    }
+
+    /// The bits from the cursor on, as one load.
+    #[inline(always)]
+    fn refill(&mut self) {
+        let (byte, shift) = (self.bit / 8, (self.bit % 8) as u32);
         let word = match self.data.get(byte..byte + 8) {
             Some(w) => u64::from_le_bytes(w.try_into().expect("eight bytes")),
             None => tail_word(self.data, byte),
         };
-        ((word >> shift) & ((1u64 << self.width) - 1)) as usize
+        self.word = word >> shift;
+        self.left = 64 - shift;
     }
 
     /// The pair `code` stands for, or `None` when it is the escape.
@@ -471,7 +500,7 @@ impl<'a> Reader<'a> {
     pub(crate) fn pair(&self, code: usize) -> Option<(usize, usize)> {
         match self.frame {
             Some(f) => {
-                if code == top(self.width) {
+                if code == self.mask as usize {
                     return None;
                 }
                 Some((f.bl + (code >> f.wn), f.bn + (code & f.mask_n)))
@@ -525,11 +554,11 @@ mod tests {
             writer.finish(&mut data);
             let headers = data.len();
             data.extend_from_slice(&sfx);
-            let (reader, tail) = Reader::of(&code, &data, pairs.len()).expect("our own run");
+            let (mut reader, tail) = Reader::of(&code, &data, pairs.len()).expect("our own run");
             assert_eq!(reader.header_bytes(), headers);
             let mut at = 0;
             for (i, &(lcp, len)) in pairs.iter().enumerate() {
-                let c = reader.code_at(reader.first_bit() + i * reader.width() as usize);
+                let c = reader.next_code();
                 let got = match reader.pair(c) {
                     Some(pair) => pair,
                     None => {
