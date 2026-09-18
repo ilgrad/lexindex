@@ -854,13 +854,19 @@ fn worth(samples: &[(&[&[u8]], &Table)], phrases: &[Vec<u8>]) -> bool {
     samples.iter().step_by(step).any(|&(sample, table)| {
         let take = sample.len().div_ceil(PROBE_PIECES).max(1);
         let probe: Vec<&[u8]> = sample.iter().copied().step_by(take).collect();
-        let (Some(split), cut) = settle(&probe, table, &trie, phrases.len(), &mut w) else {
+        // Chosen on one half of the probe and priced on the other, alternately so that the two
+        // halves cover the same span of the keys: `settle` picks the split that fits the pieces it
+        // is given, and asking it about those same pieces is what let a word list clear a bar its
+        // own shards then refused -- the miner ran and nothing took a phrase.
+        let fit: Vec<&[u8]> = probe.iter().copied().step_by(2).collect();
+        let held: Vec<&[u8]> = probe.iter().copied().skip(1).step_by(2).collect();
+        let (Some(split), cut) = settle(&fit, table, &trie, phrases.len(), &mut w) else {
             return false;
         };
-        // By a margin, not by a byte: the probe is a sample, and a split that only just wins on it
-        // is one the shard itself refuses once its whole stream is on the bill.
-        let with = price(&probe, &cut.encoder(), &trie, Some(split), &mut w);
-        let alone = price(&probe, &table.encoder(), &trie, None, &mut w);
+        // By a margin, not by a byte: a split that only just wins on a sample is one the shard
+        // itself refuses once its whole stream is on the bill.
+        let with = price(&held, &cut.encoder(), &trie, Some(split), &mut w);
+        let alone = price(&held, &table.encoder(), &trie, None, &mut w);
         with * 100 < alone * (100 - MARGIN)
     })
 }
