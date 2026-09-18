@@ -62,8 +62,9 @@ All notable changes to this project are documented here. The format follows
   → **9.96**, article titles 9.37 → **7.34** in English, 11.36 → **7.70** in Russian and 8.28 →
   **6.22** in Chinese, DNA 7.70 → **4.34**, opaque ids 13.80 → **10.36**, numeric 2.13 → **0.98**,
   identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
-  479 823 words 2.84 → **2.56** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
-  million keys the CLI's wall clock roughly doubles to triples and its peak roughly doubles.
+  479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
+  million keys the CLI's wall clock is 1.7–1.8× (urls 0.65 → 1.17 s, paths 0.85 → 1.46) and its peak
+  1.8–1.9×; the word list, whose shards buy no phrases, is 1.3× and 1.4×.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
