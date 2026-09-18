@@ -56,10 +56,17 @@ const CAP: usize = 32_768;
 /// sample is the same failure as no cap at all: every suffix parses as itself, and a phrase used
 /// once is a phrase the dictionary pays for and nothing names twice.
 const PIECES_PER_PHRASE: usize = 4;
-/// Candidate spans one thread holds at once. A corpus of long keys offers millions of them and
+/// Candidate spans one pool holds at once. A corpus of long keys offers millions of them and
 /// almost all are seen once: past this the map drops everything at or below a rising floor, which
 /// is what keeps a build of a million paths inside a gigabyte.
 const GAIN_CAP: usize = 1 << 18;
+/// Pools the shards are mined in, which is what [`GAIN_CAP`] applies to and therefore what decides
+/// the vocabulary. A constant, and deliberately not the thread count: a pool keeps the candidates
+/// above its own median, so a pool that held twice as many shards kept a different half of them,
+/// and the blob came out different on a machine with fewer cores -- measured before this was a
+/// constant, one to sixteen cores gave three blobs of a million urls and six of a million paths.
+/// Sixteen is the number that leaves every blob this crate has published unchanged.
+const POOLS: usize = 16;
 /// Suffixes the miner reads, spread over the shard samples. The vocabulary is the corpus's, not one
 /// shard's, but it converges long before every sample is in: this bounds the miner's map rather
 /// than its answer.
@@ -1110,28 +1117,39 @@ pub(crate) fn mine(
     let (pool, cap) = (pool.min(room), CAP.min(room));
     // A gain counted on the sample is one key in `scale` of the blob's.
     let scale = (keys / taken_pieces.max(1)).max(1) as u64;
-    let share = pairs.len().div_ceil(threads.max(1)).max(1);
-    // As many merge partitions as mining threads: each thread's gains are kept in one map a
-    // partition, so the merge is one thread a partition over maps nobody else touches.
-    let parts = pairs.len().div_ceil(share);
+    let share = pairs.len().div_ceil(POOLS).max(1);
+    let pools = pairs.len().div_ceil(share);
+    // As many merge partitions as mining threads: a pool's gains are kept in one map a partition,
+    // so the merge is one thread a partition over maps nobody else touches. The partitioning does
+    // not reach the answer -- [`rank`] is a total order over distinct spans, so a partition's own
+    // first `take` are the union's first `take` that fell in it -- which is why this one may
+    // follow the machine where the pools may not.
+    let parts = pools.min(threads.max(1)).max(1);
+    let per_thread = pools.div_ceil(threads.max(1)).max(1);
     let mut phrases: Vec<Vec<u8>> = Vec::new();
     for r in 0..ROUNDS {
         let trie = Trie::of(phrases.iter().map(Vec::as_slice));
         let maps: Vec<Vec<Gains<'_>>> = std::thread::scope(|scope| {
             let running: Vec<_> = pairs
-                .chunks(share)
-                .map(|chunk| {
+                .chunks(share * per_thread)
+                .map(|group| {
                     let (trie, phrases) = (&trie, &phrases);
                     scope.spawn(move || {
-                        let mut gain: Vec<Gains<'_>> = (0..parts).map(|_| Map::default()).collect();
-                        round(chunk, trie, phrases, &mut gain);
-                        gain
+                        group
+                            .chunks(share)
+                            .map(|chunk| {
+                                let mut gain: Vec<Gains<'_>> =
+                                    (0..parts).map(|_| Map::default()).collect();
+                                round(chunk, trie, phrases, &mut gain);
+                                gain
+                            })
+                            .collect::<Vec<_>>()
                     })
                 })
                 .collect();
             running
                 .into_iter()
-                .map(|h| h.join().expect("mining a share cannot panic"))
+                .flat_map(|h| h.join().expect("mining a pool cannot panic"))
                 .collect()
         });
         // Every round but the last carries the cap, because a round that parses under a vocabulary
