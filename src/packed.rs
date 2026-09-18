@@ -176,15 +176,38 @@ impl Alphabet {
     }
 
     /// Appends the bytes `codes` stands for to `out`; `false` on codes this crate did not write.
+    ///
+    /// Sized once at a byte a code, which no reading can exceed, so that the loop stores a byte
+    /// rather than growing a vector.
     pub(crate) fn decode_into(&self, codes: &Codes<'_>, out: &mut Vec<u8>) -> bool {
+        let start = out.len();
+        out.resize(start + codes.len, 0);
+        if self.two.is_empty() {
+            // An alphabet that fits its width spends one code a byte, so how far the next code
+            // starts does not wait on this one's table read. Written as its own loop because that
+            // is what tells the compiler so: the shared one carries `at` through a load and reads
+            // a byte every four or five cycles however wide the machine is.
+            for i in 0..codes.len {
+                let Some(b) = codes.at(i).and_then(|c| self.one.get(c)) else {
+                    out.truncate(start);
+                    return false;
+                };
+                out[start + i] = *b;
+            }
+            return true;
+        }
+        let mut o = start;
         let mut at = 0;
         while at < codes.len {
             let Some((b, took)) = self.byte_at(codes, at) else {
+                out.truncate(start);
                 return false;
             };
-            out.push(b);
+            out[o] = b;
+            o += 1;
             at += took;
         }
+        out.truncate(o);
         true
     }
 
@@ -351,6 +374,11 @@ impl<'a> Codes<'a> {
 
     /// The `i`th code, or `None` past the stream — a run this crate did not write ends the walk
     /// rather than reading somebody else's bytes.
+    ///
+    /// Eight bytes at once wherever eight are left, which is every code but the handful in the
+    /// last word: a code straddles a byte, so a stream read a code at a time is read a word at a
+    /// time anyway, and assembling that word from a slice whose length is only known at run time
+    /// is a `memcpy` call for every byte of every key.
     #[inline(always)]
     fn at(&self, i: usize) -> Option<usize> {
         if i >= self.len {
@@ -358,14 +386,21 @@ impl<'a> Codes<'a> {
         }
         let bit = self.start + i * self.width as usize;
         let (byte, shift) = (bit / 8, bit % 8);
-        if bit + self.width as usize > self.bytes.len() * 8 {
-            return None;
-        }
-        let take = self.bytes.get(byte..)?;
-        let n = take.len().min(8);
-        let mut buf = [0u8; 8];
-        buf[..n].copy_from_slice(&take[..n]);
-        Some(((u64::from_le_bytes(buf) >> shift) as usize) & top(self.width))
+        let tail = self.bytes.get(byte..)?;
+        let word = match tail.first_chunk::<8>() {
+            // `bit + width` is inside the stream whenever eight bytes open at `byte`: a shift is
+            // under eight and a width is at most eight.
+            Some(word) => u64::from_le_bytes(*word),
+            None => {
+                if bit + self.width as usize > self.bytes.len() * 8 {
+                    return None;
+                }
+                let mut buf = [0u8; 8];
+                buf[..tail.len()].copy_from_slice(tail);
+                u64::from_le_bytes(buf)
+            }
+        };
+        Some(((word >> shift) as usize) & top(self.width))
     }
 }
 
