@@ -710,8 +710,27 @@ impl<'a> Entries<'a> {
         if self.at >= self.count {
             return None;
         }
-        let code = self.codes.next_code();
         self.at += 1;
+        self.head_within::<FRAME>()
+    }
+
+    /// [`head`](Self::head) without the entry count, for a walk whose own loop is already bounded
+    /// by it — which is both of the walks that matter, and five instructions a header between them.
+    #[inline(always)]
+    fn head_next(&mut self) -> Option<(usize, usize)> {
+        if self.is_frame() {
+            self.head_within::<true>()
+        } else {
+            self.head_within::<false>()
+        }
+    }
+
+    /// The next header, counted by the caller. Reading past a run's headers reads its suffixes,
+    /// which is a wrong pair rather than a wrong address: the codes are bounded by the run's data
+    /// and the walk that took them is refused by the one cursor check that follows it.
+    #[inline(always)]
+    fn head_within<const FRAME: bool>(&mut self) -> Option<(usize, usize)> {
+        let code = self.codes.next_code();
         let (lcp, len) = match self.codes.pair_as::<FRAME>(code) {
             Some(pair) => pair,
             None => {
@@ -2456,8 +2475,12 @@ impl DictIndex {
         probe: &[u8],
         mut matched: usize,
     ) -> (usize, usize, bool) {
+        // What the loop's own bound then stands in for, so that no header pays for it again.
+        if entries.count + 1 != count {
+            return (0, matched, false);
+        }
         for j in 1..count {
-            let Some((l, len)) = entries.head() else {
+            let Some((l, len)) = entries.head_next() else {
                 return (j - 1, matched, false);
             };
             if l < matched {
@@ -2774,9 +2797,12 @@ impl DictIndex {
         stair: &mut Stairs,
     ) -> bool {
         let mut entries = run.entries();
+        if steps > entries.count {
+            return false;
+        }
         let mut depth = 0usize;
         for _ in 0..steps {
-            let Some((l, len)) = entries.head_as::<FRAME>() else {
+            let Some((l, len)) = entries.head_within::<FRAME>() else {
                 return false;
             };
             // Unclamped: the one check after the walk refuses a run that ever passed its end, so
