@@ -37,8 +37,15 @@ const ROUNDS: usize = 4;
 /// Shards the miner asks before spending its remaining rounds, and suffixes it asks them about.
 const PROBE_SHARDS: usize = 3;
 const PROBE_PIECES: usize = 2_048;
-/// Per cent a probed shard's split has to win by for the miner to spend its remaining rounds.
-const PROBE_MARGIN: u64 = 2;
+/// Per cent a shard's split has to win by before it is worth taking -- asked of a probe here,
+/// before the miner spends its remaining rounds, and of the shard itself in `Collected::settle`.
+///
+/// Not a byte, because a shard that names phrases pays for them at every lookup: every code of
+/// its suffixes is asked whether it is a phrase before it is read as a symbol. Measured at block
+/// 256 -- on a word list the phrases took 0.9 % of the blob for 2 % of an `id`, 5 % of a
+/// `key_into` and twice the build; on a million URLs they took 21 % for 4 % and 12 %. Every
+/// corpus measured falls on one side or the other: 0 or 0.9 % against 5.7 to 27.6 %.
+pub(crate) const MARGIN: u64 = 3;
 /// Passes of the pruning fixed point. Two: the first drops the candidates nothing picks, the
 /// second what is left once they are gone, and the loop stops early when nothing moved.
 const PRUNE_ROUNDS: usize = 2;
@@ -854,7 +861,7 @@ fn worth(samples: &[(&[&[u8]], &Table)], phrases: &[Vec<u8>]) -> bool {
         // is one the shard itself refuses once its whole stream is on the bill.
         let with = price(&probe, &cut.encoder(), &trie, Some(split), &mut w);
         let alone = price(&probe, &table.encoder(), &trie, None, &mut w);
-        with * 100 < alone * (100 - PROBE_MARGIN)
+        with * 100 < alone * (100 - MARGIN)
     })
 }
 

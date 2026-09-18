@@ -997,7 +997,7 @@ impl Collected {
                     split: Some(split),
                 };
                 let (tiered, tiered_codes) = self.price(&tier, pairs);
-                if tiered < bytes {
+                if (tiered as u64) * 100 < (bytes as u64) * (100 - phrase::MARGIN) {
                     best = tier;
                     codes = tiered_codes;
                 }
