@@ -1225,13 +1225,13 @@ pub struct DictSections {
     pub block_offsets: u64,
     /// Packed: where each microblock's entries start. Empty when a block is one microblock.
     pub micro_offsets: u64,
-    /// One header byte per restart.
+    /// The restarts' coded `(lcp, len)` pairs.
     pub restart_headers: u64,
     /// The `(lcp, len)` varints of the restarts too wide for a one-byte header.
     pub restart_wide: u64,
     /// The restarts' symbol-coded suffixes.
     pub restart_codes: u64,
-    /// One header byte per front-coded entry.
+    /// The front-coded entries' coded `(lcp, len)` pairs, under whichever code the shard took.
     pub entry_headers: u64,
     /// The `(lcp, len)` varints of the entries too wide for a one-byte header.
     pub entry_wide: u64,
@@ -3023,11 +3023,11 @@ impl DictIndex {
         h
     }
 
-    /// Serialise to `[magic "BDX3"][n][block][head bytes][data bytes][table bytes][payload]
-    /// [offset widths][micro][shard][codes][check]`, then the symbol tables, the head keys, the
-    /// per-block arrays, the block data, the header codes and the two start arrays. `check` is a
-    /// hash of the preceding header bytes and `payload` a hash of everything after it, both
-    /// verified on load.
+    /// Serialise to `[magic "BDX3"][n][block][head bytes][data bytes][codec bytes][payload]
+    /// [offset widths][micro][shard][header-code bytes][g][dictionary bytes][check]`, then the
+    /// head keys, the packed head ends, the samples, the block data, the suffix codecs, the header
+    /// codes, the phrase dictionary and the two start arrays. `check` is a hash of the preceding
+    /// header bytes and `payload` a hash of everything after it, both verified on load.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
         out.extend_from_slice(&self.header());
@@ -3037,25 +3037,6 @@ impl DictIndex {
         })
         .expect("appending the sections cannot fail");
         out
-    }
-
-    /// The five sections a size model has to tell apart: the symbol tables, the phrase dictionary,
-    /// the stored block heads, the packed per-block arrays, and the front-coded data. The tables
-    /// grow with the shards and the dictionary with the keys, which is why they are counted apart.
-    /// Their sum plus [`HEADER`] is [`serialized_len`](Self::serialized_len).
-    pub(crate) fn section_lens(&self) -> [usize; 5] {
-        [
-            codecs_len(&self.codecs) + codes_len(&self.codes),
-            self.phrases.serialized_len(),
-            self.heads.len(),
-            self.blocks_len() * 8 + self.head_ends.len() + self.blocks.len() + self.micros.len(),
-            self.data.len(),
-        ]
-    }
-
-    /// Keys per microblock, which the block chooses: [`micro_for`].
-    pub(crate) fn micro(&self) -> usize {
-        self.micro
     }
 
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.
@@ -4311,10 +4292,8 @@ mod tests {
 
     /// A corpus whose keys repeat a handful of long spans *after* the point where they diverge is
     /// what the phrase section exists for — front coding has already taken the shared head, so
-    /// what is left is the same few spans over and over. The shards buy it, every key still
-    /// answers, and both builds write it alike.
-    #[test]
-    fn a_corpus_of_repeated_spans_buys_phrases() {
+    /// what is left is the same few spans over and over.
+    fn phrase_corpus() -> Vec<String> {
         let hosts = ["example.com", "example.org", "archive.example.net"];
         let paths = ["wiki/article", "blog/post", "docs/reference/manual"];
         let mut keys: Vec<String> = (0..MINE_MIN + 1000)
@@ -4324,6 +4303,14 @@ mod tests {
             })
             .collect();
         keys.sort();
+        keys
+    }
+
+    /// The shards buy what such a corpus repeats, every key still answers, and both builds write
+    /// it alike.
+    #[test]
+    fn a_corpus_of_repeated_spans_buys_phrases() {
+        let keys = phrase_corpus();
         let idx = DictIndex::build(&keys).unwrap();
         assert!(idx.sections().phrases > 0, "no phrase earned its bytes");
         assert!(
@@ -4343,6 +4330,72 @@ mod tests {
         DictIndex::build_to_file(&feed, &path).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), idx.to_bytes());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `blob` is either refused or answers everything it is asked without panicking. Nothing is
+    /// claimed about *what* it answers: the bytes behind it are an attacker's.
+    fn answers_or_is_refused(blob: &[u8], keys: &[String], probes: &[String], walk: bool) -> bool {
+        let Ok(idx) = DictIndex::from_bytes(blob) else {
+            return false;
+        };
+        let mut buf = String::new();
+        for p in keys.iter().step_by(37).chain(probes) {
+            let _ = (idx.id(p), idx.lower_bound(p), idx.contains(p));
+        }
+        for id in (0..keys.len() as u64).step_by(37) {
+            let _ = (idx.key(id), idx.key_into(id, &mut buf));
+        }
+        if walk {
+            assert!(idx.iter().count() <= keys.len());
+        }
+        true
+    }
+
+    /// A shard that bought phrases reads the dictionary as if it were its own bytes, so every
+    /// reference into it is checked where it is read. A dictionary that does not parse is refused
+    /// at the load; one that parses still answers — with somebody else's spans, which is what the
+    /// bound on each reference is for, not a claim about the content.
+    #[test]
+    fn a_corrupted_phrase_dictionary_never_panics() {
+        let keys = phrase_corpus();
+        let blob = DictIndex::build(&keys).unwrap().to_bytes();
+        let at = layout(&blob, DEFAULT_BLOCK).phrases;
+        let len = u32::from_le_bytes(blob[58..62].try_into().unwrap()) as usize;
+        assert!(len > 0, "no dictionary to corrupt");
+        let probes: Vec<String> = probes(&keys).into_iter().step_by(101).collect();
+        let (mut loaded, mut refused) = (0, 0);
+        for fill in [0x00u8, 0x01, 0x7F, 0xFE, 0xFF] {
+            let mut b = blob.clone();
+            b[at..at + len].fill(fill);
+            reframe(&mut b);
+            if answers_or_is_refused(&b, &keys, &probes, true) {
+                loaded += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        // The count and the per-group tables sit at the front, the phrase bytes behind them; a
+        // stride reaches both, and flipping the top bit of an end is what puts a phrase past its
+        // group.
+        for i in (0..len).step_by(len / 32 + 1) {
+            for xor in [0x01u8, 0x80] {
+                let mut b = blob.clone();
+                b[at + i] ^= xor;
+                reframe(&mut b);
+                if answers_or_is_refused(&b, &keys, &probes, false) {
+                    loaded += 1;
+                } else {
+                    refused += 1;
+                }
+            }
+        }
+        // Neither half of the check is allowed to go quiet: a dictionary nothing can corrupt into
+        // loading would leave the decode untested, and one nothing can corrupt into a refusal
+        // would say `Dict::read` validates nothing.
+        assert!(
+            loaded > 0 && refused > 0,
+            "loaded {loaded}, refused {refused}"
+        );
     }
 
     #[test]

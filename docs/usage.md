@@ -28,14 +28,24 @@ keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key
 `prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes, which is where
 their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five.
 
-Past 100 000 keys the three numbers no statistic gives — what the symbol table squeezes a suffix
-into, the bytes an fst spends per trie node, the bits the perfect hash spends per key — come from
-one build of a sample of that size, and each estimate says so in `measured`. Scored against the
-built blob on 23 corpora of half a million to ten million keys, at each of the three priced
-blocks, `DictIndex` lands within **1.3 % median, 3.9 % at the 90th percentile and 5.1 % at
+Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
+bytes an fst spends per trie node, the bits the perfect hash spends per key — come from one build of
+a sample of that size and one of an eighth of it, and each estimate says so in `measured`. Scored
+against the built blob on 23 corpora of half a million to ten million keys, at each of the three
+priced blocks, `DictIndex` lands within **9.5 % median, 14.6 % at the 90th percentile and 23.2 % at
 worst**; `StringIndex` within 3.0 / 7.6 / 31.5, because an fst merges equal suffixes and how much it
 merges is a property of the whole key set rather than of a sample of it. Below the sample size
 nothing is modelled: the candidates are built and reported at what they weigh.
+
+**What the `DictIndex` estimate cannot see is how good the vocabulary gets.** A shard's symbol table
+and the blob-wide phrase dictionary are trained on the keys the blob holds, so ten million keys buy
+a better vocabulary than a hundred thousand for the same bytes; the sample is also a *sparse* draw,
+so its suffixes are longer and more varied than any the real blob stores. The rate is therefore
+fitted between two sample sizes and carried along its slope, which is what takes the error from 21 %
+to 10 % on a million urls — and what is left is a slope read over three e-folds and used over five.
+The estimate reads high, and it reads highest where the vocabulary keeps earning: article titles,
+urls and path lists are the 15–23 % end of that spread, while corpora whose suffixes repeat nothing
+— DNA, UUIDs, opaque ids, a word list — land inside 1 %.
 
 The sample is drawn **by hash**: a key is kept while its hash is under a cutoff, and the cutoff
 falls as the draw fills. That is a uniform sample of the distinct keys, it is the same sample on
@@ -774,32 +784,32 @@ computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1322343 bytes   2.76 B/key    346 ns  estimated at block 1024
-  DictIndex              1345575 bytes   2.80 B/key    318 ns  estimated at block 256
-  DictIndex              1530283 bytes   3.19 B/key    284 ns  estimated at block 32
+* DictIndex              1224794 bytes   2.55 B/key    343 ns  estimated at block 1024
+  DictIndex              1250089 bytes   2.61 B/key    314 ns  estimated at block 256
+  DictIndex              1437873 bytes   3.00 B/key    280 ns  estimated at block 32
   StringIndex            2744604 bytes   5.72 B/key    311 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1322343 bytes   2.76 B/key    346 ns  estimated at block 1024
-  DictIndex              1345575 bytes   2.80 B/key    318 ns  estimated at block 256
-  DictIndex              1530283 bytes   3.19 B/key    284 ns  estimated at block 32
+* DictIndex              1224794 bytes   2.55 B/key    343 ns  estimated at block 1024
+  DictIndex              1250089 bytes   2.61 B/key    314 ns  estimated at block 256
+  DictIndex              1437873 bytes   3.00 B/key    280 ns  estimated at block 32
   StringIndex            2744604 bytes   5.72 B/key    311 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
-wrote words.bin: DictIndex over 479823 keys, 1338541 bytes (2.79 B/key)
+wrote words.bin: DictIndex over 479823 keys, 1202008 bytes (2.51 B/key)
 
 $ lexindex inspect words.bin
 kind: DictIndex
-format: BDX2
-bytes: 1338541
+format: BDX3
+bytes: 1202008
 keys: 479823
-arena_bytes: 1299482
+arena_bytes: 1160722
 
 $ lexindex dump words.bin | head -3
-A
-A's
-AMD
+&c
+'d
+'em
 ```
 
 `inspect --sections` reads a `DictIndex` whole and says where its bytes went. The sections always
@@ -809,35 +819,40 @@ and as a share:
 ```console
 $ lexindex inspect words.bin --sections
 kind: DictIndex
-format: BDX2
-bytes: 1338541
+format: BDX3
+bytes: 1202008
 keys: 479823
-arena_bytes: 1299482
-sections.header: 56 (0.0001 B/key, 0.00 %)
-sections.tables: 7209 (0.0150 B/key, 0.54 %)
-sections.heads: 4282 (0.0089 B/key, 0.32 %)
-sections.samples: 3752 (0.0078 B/key, 0.28 %)
+arena_bytes: 1160722
+sections.header: 72 (0.0002 B/key, 0.01 %)
+sections.tables: 7256 (0.0151 B/key, 0.60 %)
+sections.header_codes: 1056 (0.0022 B/key, 0.09 %)
+sections.phrases: 1108 (0.0023 B/key, 0.09 %)
+sections.heads: 4282 (0.0089 B/key, 0.36 %)
+sections.samples: 3752 (0.0078 B/key, 0.31 %)
 sections.head_ends: 659 (0.0014 B/key, 0.05 %)
-sections.block_offsets: 1128 (0.0024 B/key, 0.08 %)
-sections.micro_offsets: 26255 (0.0547 B/key, 1.96 %)
-sections.restart_headers: 14526 (0.0303 B/key, 1.09 %)
-sections.restart_wide: 0 (0.0000 B/key, 0.00 %)
-sections.restart_codes: 47075 (0.0981 B/key, 3.52 %)
-sections.entry_headers: 464828 (0.9687 B/key, 34.73 %)
-sections.entry_wide: 5794 (0.0121 B/key, 0.43 %)
-sections.entry_codes: 762977 (1.5901 B/key, 57.00 %)
-sections.total: 1338541 (2.7897 B/key, 100.00 %)
+sections.block_offsets: 1128 (0.0024 B/key, 0.09 %)
+sections.micro_offsets: 26255 (0.0547 B/key, 2.18 %)
+sections.restart_headers: 9372 (0.0195 B/key, 0.78 %)
+sections.restart_wide: 1206 (0.0025 B/key, 0.10 %)
+sections.restart_codes: 46489 (0.0969 B/key, 3.87 %)
+sections.entry_headers: 299889 (0.6250 B/key, 24.95 %)
+sections.entry_wide: 46086 (0.0960 B/key, 3.83 %)
+sections.entry_codes: 753398 (1.5702 B/key, 62.68 %)
+sections.total: 1202008 (2.5051 B/key, 100.00 %)
 sections.restarts: 14526
 sections.entries: 464828
-sections.wide: 2897
+sections.wide: 23646
 ```
 
-Read it as three groups. The **codes** are the front-coded suffixes under the symbol table, which is
-what the index is for. The **headers** are one byte an entry — a flat 0.97 bytes a key here, which
-on this corpus is a third of the blob and on dense decimal ids is near half of it, since there is
-almost nothing else to store. The **directory** — samples, the three packed offset arrays, the
-block heads — is 2.7 % at this block and never more than a few per cent, which is worth knowing
-before optimising it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
+Read it as four groups. The **codes** are the front-coded suffixes under whichever codec the shard
+settled on, which is what the index is for. The **headers** are the `(lcp, len)` stream and the
+varints of the pairs no code could name — 0.72 bytes a key here against the flat 0.97 `BDX2` spent,
+a quarter of the blob on this corpus and near half of it on dense decimal ids, since there is almost
+nothing else to store. The **vocabulary** — the symbol tables, the code each shard's headers took
+and the phrase dictionary — is 0.78 % here, and is the part that grows with the shards rather than
+with the keys. The **directory** — samples, the three packed offset arrays, the block heads — is
+3.0 % at this block and never more than a few per cent, which is worth knowing before optimising
+it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
 The same numbers are on [`DictSections`](https://docs.rs/lexindex/latest/lexindex/struct.DictSections.html)
 for a program that would rather not parse text.
 

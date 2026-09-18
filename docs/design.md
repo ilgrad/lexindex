@@ -192,11 +192,20 @@ which every loader reads into memory whichever way it is opened, so there is not
 
 The sorted keys front-coded in blocks, so that an id is a rank and a rank is a place. A block of
 `block` keys (256 by default, `1..=1024`) stores its first key whole and every other as the length
-of the prefix it shares with its predecessor and the suffix after it — one header byte
-`lcp << 4 | len` when both are below fifteen, else a marker and two varints at the head of that
-entry's own suffix — with the suffix
-under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB 2020): up to 255 symbols of one
-to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
+of the prefix it shares with its predecessor and the suffix after it.
+
+**The headers are one stream a shard wide, not a byte an entry.** `BDX2` spent a byte on each
+`(lcp, len)` pair, four bits each, and two varints on every pair that did not fit; the distribution
+inside a single shard is far narrower than that byte. A run is coded either as a frame of reference
+— `min lcp`, `min len` and a width for each, all-ones escaping to the varints at the head of that
+entry's suffix — or against a learned table of the `2^w - 1` costliest pairs at one to ten bits
+each. Which of the two wins is a property of the shard, not of the format, so one byte a group
+picks it from every run of that shard at once. That is why a shard is collected before any of it is
+written: the code cannot be chosen from a block. At block 1024 it is worth paths 14.34 → 12.46 bytes
+a key, urls 11.25 → 9.28 and dna 7.70 → 7.27.
+
+The suffix goes under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB
+2020): up to 255 symbols of one to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
 parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
 kilobyte. **One table covers a shard of 65 536 keys**, not the whole index: a shard is a whole
 number of blocks, each table is trained on 10 000 pieces sampled inside its own shard, the tables
@@ -205,8 +214,38 @@ a million paths under `/usr/share` and of a million under `/home` are different 
 table over both is a compromise — a table a shard is worth 1.25 bytes a key on a path list, 0.23 on
 ten million article titles and 0.01 on the dictionary, against 0.015 for the tables themselves. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
-so a `BDX2` neither reads nor writes a reference FSST table — and the training is deterministic, so a
+so a `BDX3` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other.
+
+**A shard whose alphabet is narrow skips the symbols.** A symbol table spends eight bits on a code
+and earns them back by naming runs of bytes; on a shard drawn from four characters, or sixteen, or
+sixty-four, that is the wrong trade twice over — two bits already meet the order-0 bound, and no run
+of bases is frequent enough to pay for a symbol. Each shard prices a fixed-width code of its own
+alphabet, one to eight bits, against its table on its own bytes — the suffixes and the headers they
+imply, since a packed `len` counts codes where a symbol-coded one counts bytes — and takes the
+winner, so a blob holding both shapes gets both. The codes of a run are continuous: an entry's
+suffix starts where the one before it ended, mid-byte, and padding each to a byte instead costs 0.32
+bytes a key on DNA, which is the whole margin. At block 256: dna 7.36 → 4.34 bytes a key, opaque
+13.24 → 10.36, numeric 1.39 → 0.98. `uuid` keeps its tables — seventeen characters do not fit a
+nibble — and is unchanged.
+
+**What the whole blob repeats is named once.** Front coding takes the head a key shares with the key
+before it; what is left still repeats across blocks — `/index.html`, `.example.com/`, ` - Wikipedia`
+— and no symbol reaches past eight bytes. A dictionary of such spans is mined over the blob's own
+suffixes and stored once, and a shard that buys it gives up symbols for phrase codes: a split at `s`
+symbols leaves `255 - s` byte codes, each naming 256 phrases in one further byte or 65 536 in two,
+with 255 still the escape. A suffix is parsed by dynamic programming in one backward pass over the
+cheapest coding in bits — a symbol eight, an escaped byte sixteen, a phrase eight times the bytes
+its id takes — and the miner is four rounds of that parse and a count of windows of up to three
+adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain clears six
+times what they cost to store. Mining stops after the first round unless one of three sampled
+shards would take a split by 2 % on its own bytes: what the miner ranks is what coding a span once
+would save, and what decides the format is whether a shard would rather spend those byte codes on
+symbols — on a million opaque keys 40 000 spans clear the first bar and no shard takes one. Each
+shard then decides for itself and has its table retrained on the spans its phrases did not cover,
+and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls 9.44 →
+7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61; dna, opaque and numeric buy
+nothing.
 
 **A block is not what a lookup scans.** It is cut into microblocks of `micro` keys — the largest
 divisor of `block` at or below 32, so 32 at the default and at every power of two from 64 up — and
@@ -225,8 +264,15 @@ fewer, or a prime one, is a single microblock — the layout of one level, and s
 microblock starts, since the one microblock starts where the block does.
 
 Beside the blocks sit four flat arrays: an eight-byte sample of each head in byte order (`u64`),
-where each head ends, where each block's restart run starts, and where each microblock's entries
-start. The last three are not one word an entry. Each only ever grows, so each keeps one `u64` base
+taken at `g` — the bytes every head in the blob shares, two bytes of header and none per block —
+because a million URLs all begin `https://example.com/` and the sample would otherwise be the same
+word for 3 899 of 3 907 blocks, leaving the binary search that opens every lookup with nothing to
+say. Measured there: 165 samples duplicate their neighbour against 3 899, a probe's run of candidate
+blocks is 2.02 against 3 271, and an `id` compares 1.13 heads against 11.54. Sorting is unchanged,
+since every head shares those bytes; a probe that does not share them cannot be placed by the
+samples at all and does not need to be — it is below every head or above every one, and the routing
+answers with that boundary rather than a search. Then come the arrays saying where each head ends,
+where each block's restart run starts, and where each microblock's entries start. The last three are not one word an entry. Each only ever grows, so each keeps one `u64` base
 every 64 entries and a delta of the width the corpus asks for — ten, sixteen and thirteen bits on
 the dictionary at the default block. That is 11.5 bytes a block and 1.8 a microblock, **0.100 bytes
 a key and 3.5 % of the blob**, where the block the default used to be spent 0.348 and 11 %; and it is
@@ -234,14 +280,13 @@ also why none of the three has a four-gigabyte ceiling: the base is a full word.
 entries, and neighbours share a base and the word their deltas are cut from, so the pair costs what
 one entry costs.
 
-**Inside a run the headers come first and the suffixes after**, rather than each header before
-its own suffix. The headers are one byte an entry, so the entry count says where they end and the
-split costs nothing to store: the same bytes in a different order, and a blob of exactly the same
-size. It is worth the reordering because a scan rules most entries out by the shared-prefix length
-alone, which lives in the header — 127 headers are two cache lines here and were spread over the
-seven of a 128-key block before. Measured on the dictionary when the split landed, `id` fell 9 % at
-128 keys a block and 15 % at 256, with `key_into` unchanged and the file byte for byte the same
-length.
+**A run's headers come first and its suffixes after**, rather than each header before its own
+suffix — and since `BDX3` the headers of a whole shard are one stream of their own, ahead of every
+suffix in it. The split is worth its bookkeeping because a scan rules most entries out by the
+shared-prefix length alone, which lives in the header: 127 headers are two cache lines here and were
+spread over the seven of a 128-key block before. Measured on the dictionary when the split landed —
+then still a byte an entry, so the file was byte for byte the same length — `id` fell 9 % at 128
+keys a block and 15 % at 256, with `key_into` unchanged.
 
 `id` is a binary search over the samples — a flat array, eight bytes a block — then over the
 heads of the few blocks whose sample equals the probe's, then the block's restarts and one of its
@@ -287,14 +332,17 @@ the first eight steps of a binary search re-read the same 2 KB for every probe, 
 selects branchlessly, and its two searches are independent chains where a descent is strictly
 serial.
 
-The serialised blob is `[magic "BDX2"][n][block][head bytes][data bytes][table bytes][payload]
-[offset widths][micro][check]`, then the table, the heads, the packed head ends, the samples, the
-data, the packed block starts and the packed microblock starts; the loader checks every length, both
-checksums, the table and the arrays' order before anything is trusted, and the block data — bounded
-on every read rather than validated up front — is what the fuzz target queries after loading. The
-two start arrays come last because their widths are known only once the data is encoded, which is
-what lets a streamed build write every section once and in order. One delta width serves a whole
-array, and a width per superblock was measured rather than assumed: over thirteen corpora at three
+The serialised blob is a 72-byte header — `[magic "BDX3"][n][block][head bytes][data bytes]
+[codec bytes][payload][offset widths][micro][shard][header-code bytes][g][dictionary bytes][check]`
+— then the heads, the packed head ends, the samples, the block data, the suffix codecs, the header
+codes, the phrase dictionary, the packed block starts and the packed microblock starts; the loader
+checks every length, both checksums, the codecs, the dictionary and the arrays' order before
+anything is trusted, and the block data — bounded on every read rather than validated up front — is
+what the fuzz target queries after loading. Everything from the codecs on comes after the data
+because nothing decides it until the data is encoded: which codec each shard settled on, which code
+its headers took, whether any shard bought the dictionary, and how wide the two start arrays are.
+That is what lets a streamed build write every section once and in order. One delta width serves a
+whole array, and a width per superblock was measured rather than assumed: over thirteen corpora at three
 blocks each it is worth at best **0.10 % of the blob** (`pypi` at 32 keys a block), and it is
 *negative* on six of the thirteen, the table of widths costing about what the narrowing saves. A
 third of the arrays clear the obvious gate — 5 % of their superblocks could drop two bits or more —
@@ -535,8 +583,10 @@ catches the half that lives in bytes.
 major wrote, and each cost every user of that format a rebuild. The rule from 3.0 on: a writer
 change lands as a *minor* release whose loader still reads the format the previous one wrote, so
 upgrading never fails on a file; dropping a reader is reserved for a major, and only once
-`lexindex dump` can turn the old blob back into the key list that rebuilds it. `BDX2` is frozen
-under that rule — a `BDX3` would be written by a 3.x that still loads `BDX2`.
+`lexindex dump` can turn the old blob back into the key list that rebuilds it. `BDX3` is the first
+format written under it: it is a third smaller than `BDX2` on the corpora the dictionary is aimed at
+and shares no section layout with it, so 4.0 refuses `BDX2` by name rather than carry a second
+reader, and the migration is `lexindex dump` on 3.x into `lexindex build` on 4.0.
 
 The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
@@ -565,7 +615,7 @@ or — never — read it wrong.
 | `BMP8` | 4.0 | `PerfectHashIndex` | `BMP1`–`BMP7` **refused by name** |
 | `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
-| `BDX2` | 3.0 | `DictIndex` | `BDX1` (2.0) **refused by name** — no microblocks, and its per-block arrays were unpacked |
+| `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH3` | 3.1 | the minimal perfect hash, inside `BMP8`, `BCH8` and `BCL2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 

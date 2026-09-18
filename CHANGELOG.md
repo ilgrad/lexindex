@@ -8,6 +8,86 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` is a quarter to a half smaller, and the format is `BDX3`.** Four changes, each
+  priced on its own:
+
+  *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
+  `(lcp, len)` pair, four bits each, and two varints on every pair that did not fit. The pair
+  distribution inside one shard is far narrower than that byte: a frame of reference over a run
+  (`min lcp`, `min len`, two widths, all-ones escaping to the varints at the head of that entry's
+  suffix) or a learned table of the `2^w - 1` costliest pairs at one to ten bits each carries almost
+  all of them, and which of the two wins is a property of the shard, so one byte a group chooses it
+  from every run at once. That is why a shard is now collected before any of it is written — the
+  code cannot be chosen from a block — and both builds go through the same collection, so a streamed
+  blob is still byte-identical to one held in memory. At block 1024: paths 14.34 → 12.46 bytes a
+  key, urls 11.25 → 9.28, dna 7.70 → 7.27.
+
+  *A shard whose alphabet is narrow skips the symbols.* A symbol table spends eight bits on a code
+  and earns them back by naming runs of bytes; on a shard drawn from four characters, or sixteen, or
+  sixty-four, that is the wrong trade twice over — two bits already meet the order-0 bound, and no
+  run of bases is frequent enough to pay for a symbol. The two are priced against each other on the
+  shard's own bytes, and each shard takes the winner, so a blob holding both shapes gets both. The
+  codes of a run are continuous — an entry's suffix starts where the one before it ended, mid-byte —
+  because padding each to a byte costs 0.32 bytes a key on DNA, the whole margin. At block 256: dna
+  7.36 → 4.34 bytes a key, opaque 13.24 → 10.36, numeric 1.39 → 0.98. `uuid` keeps its tables on
+  every shard; seventeen characters do not fit a nibble.
+
+  *The block sample is taken past the prefix every head shares.* A million URLs all begin
+  `https://example.com/`, so the eight bytes a block's sample held were the same word for 3 899 of
+  3 907 blocks and the binary search that opens every lookup answered nothing. The sample is taken
+  at `g`, the bytes every head in the blob shares — two bytes of header, none per block. Measured on
+  a million URLs: 165 samples duplicate their neighbour against 3 899, a probe's run of candidate
+  blocks is 2.02 against 3 271, and an `id` compares 1.13 heads against 11.54. Sorting is unchanged,
+  since every head shares those bytes, and a probe that does not share them is answered by the
+  boundary rather than a search.
+
+  *What the whole blob repeats is named once.* Front coding takes the head a key shares with the key
+  before it; what is left still repeats across blocks — `/index.html`, `.example.com/`,
+  ` - Wikipedia` — and no symbol reaches past eight bytes. A dictionary of such spans is mined over
+  the blob's own suffixes and stored once; a shard that buys it gives up symbols for phrase codes,
+  a split at `s` symbols leaving `255 - s` byte codes that name 256 phrases in one further byte or
+  65 536 in two, with 255 still the escape. A suffix is parsed by dynamic programming over the
+  cheapest coding in bits, and the miner is four rounds of that parse and a count of windows of up
+  to three adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain
+  clears six times what they cost to store. Mining stops after the first round unless one of three
+  sampled shards would take a split by 2 % on its own bytes — what the miner ranks is what coding a
+  span once would save, and what decides the format is whether a shard would rather spend those byte
+  codes on symbols; on a million opaque keys 40 000 spans clear the first bar and no shard takes
+  one. Each shard then decides for itself and has its table retrained on what its phrases did not
+  cover, and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls
+  9.44 → 7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61.
+
+  End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
+  --index dict`, sizes being a function of the keys): urls 11.25 → **7.48** bytes a key, paths 14.67
+  → **9.96**, article titles 9.37 → **7.34** in English, 11.36 → **7.70** in Russian and 8.28 →
+  **6.22** in Chinese, DNA 7.70 → **4.34**, opaque ids 13.80 → **10.36**, numeric 2.13 → **0.98**,
+  identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
+  479 823 words 2.84 → **2.56** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
+  million keys the CLI's wall clock roughly doubles to triples and its peak roughly doubles.
+  `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
+
+  `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
+  before 4.0 has to be rebuilt from its keys — `lexindex dump` on 3.x into `lexindex build` on 4.0
+  is the path. `golden-2.2.0-dict.bdx` joins the refused fixtures and `golden-4.0.0-dict.bdx` pins
+  the new bytes.
+
+- **`plan()` prices `BDX3`, and says honestly how close it gets.** The old model read a blob as one
+  byte an entry plus a compressed suffix, which is what `BDX2` wrote; `BDX3` codes the headers and
+  can spend well under a byte on one, so the plan was charging for a byte that is not there and
+  discounting the suffix to match. The two are now measured apart — the sample blob is walked rather
+  than added up by section — and the phrase dictionary is priced as its own term, per key, since it
+  grows with the corpus and not with the shards the tables follow. The suffix rate and the
+  dictionary's bytes a key are fitted between two sample sizes an **eighth** apart rather than a
+  quarter, which is the leverage a slope carried over five e-folds needs; what a header costs is
+  carried flat, because it is coded against its shard's own distribution and wanders rather than
+  trends — fitted a slope of its own it reads 0.75 bytes where the blob spends 0.34 on ten million
+  decimal ids. Scored against the built blob over 23 corpora at each of the three priced blocks, 69
+  cells: **9.5 % median, 14.6 % at the 90th percentile, 23.2 % at worst**, against 8.8 / 23.8 / 33.3
+  for the model `BDX3` inherited. Corpora whose suffixes repeat nothing — DNA, UUIDs, opaque ids, a
+  word list — land inside 1 %; the spread is article titles, urls and path lists, where the
+  vocabulary keeps earning past what a hundred-thousand-key sample can see. `docs/usage.md` carries
+  the numbers and says which way the estimate errs.
+
 - **The perfect hash is 1 % smaller again and bumps a sixth fewer keys: a seed is chosen by the
   product of its keys' positions, not their sum.** Of the seeds that place a bucket, `MPH3` took
   the one whose keys' in-slice positions summed lowest, since low positions are what the buckets
@@ -74,7 +154,7 @@ All notable changes to this project are documented here. The format follows
   includes the key's own cache miss (`bench/results/mphf-strings-2026-09-16-*`); PtrHash's fast
   set over xxh3 of the same strings reads 55 / 50 / 38 / 100. Every blob keyed on the old hash would answer wrong ids under the new one, so `BMP7`,
   `BCH7` and `BCL1` join the refused lists with a message naming `lexindex < 4.0` and the
-  rebuild; `BIX4`, `BDX2` and `OVL2` are untouched, and the standalone `MPH1`–`MPH3` tables
+  rebuild; `BIX4` and `OVL2` are untouched, and the standalone `MPH1`–`MPH3` tables
   still load — a table is keyed on nothing but the hashes it was handed. `hash_key_bytes`
   (feature `bench-mphf`) returns the new values. Rebuilding from the keys is the migration; the
   `golden-4.0.0-*` fixtures pin the new bytes and the 2.0.0 ones become refused fixtures.
