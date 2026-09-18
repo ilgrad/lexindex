@@ -611,8 +611,11 @@ struct Entries<'a> {
     /// its header costs one add, and the multiply and the clamp are paid by the few that are read.
     base: usize,
     sum: usize,
-    /// The suffixes' length in bits, which the cursor is clamped to.
+    /// The suffixes' length in bits, which the cursor is clamped to, and in units, which no
+    /// entry's length may pass: checked once where a header is decoded, so the cursor's own
+    /// arithmetic cannot leave the run and needs no saturating step of its own.
     end_bits: usize,
+    max_units: usize,
     unit: u32,
 }
 
@@ -633,6 +636,7 @@ impl<'a> Entries<'a> {
                 base: 0,
                 sum: 0,
                 end_bits: sfx.len().saturating_mul(8),
+                max_units: sfx.len().saturating_mul(8) / codec.unit() as usize,
                 unit: codec.unit(),
             },
             None => Self::empty(),
@@ -651,6 +655,7 @@ impl<'a> Entries<'a> {
             base: 0,
             sum: 0,
             end_bits: 0,
+            max_units: 0,
             unit: 8,
         }
     }
@@ -665,8 +670,8 @@ impl<'a> Entries<'a> {
         let code = self.codes.code_at(self.bit);
         self.bit += self.codes.width() as usize;
         self.at += 1;
-        match self.codes.pair(code) {
-            Some(pair) => Some(pair),
+        let (lcp, len) = match self.codes.pair(code) {
+            Some(pair) => pair,
             None => {
                 // A pair no code could name continues as two varints at the head of its own
                 // suffix, on a byte, so that they read the same whatever width the codes are.
@@ -675,9 +680,10 @@ impl<'a> Entries<'a> {
                 let len = varint_at(self.sfx, &mut at)?;
                 self.base = at * 8;
                 self.sum = 0;
-                Some((lcp, len))
+                (lcp, len)
             }
-        }
+        };
+        (len <= self.max_units).then_some((lcp, len))
     }
 
     /// Where the next entry's coded suffix starts, in bits — a multiple of eight under a symbol
@@ -685,8 +691,13 @@ impl<'a> Entries<'a> {
     /// the end of the suffixes.
     #[inline(always)]
     fn off(&self) -> usize {
+        // `head` refuses a length the run cannot hold, so one entry's bits are within the
+        // suffixes and a run's worth of them within a thousand times that; the clamp is what a
+        // run this crate did not write runs into, and the wrapping is so that a blob claiming a
+        // run longer than the address space gives a wrong piece on a 32-bit target rather than a
+        // panic -- which is what every other bound here does.
         self.base
-            .saturating_add(self.sum.saturating_mul(self.unit as usize))
+            .wrapping_add(self.sum.wrapping_mul(self.unit as usize))
             .min(self.end_bits)
     }
 
@@ -713,7 +724,7 @@ impl<'a> Entries<'a> {
     /// out, and the reason the two streams are apart.
     #[inline(always)]
     fn skip(&mut self, len: usize) {
-        self.sum = self.sum.saturating_add(len);
+        self.sum = self.sum.wrapping_add(len);
     }
 }
 
@@ -2687,7 +2698,7 @@ impl DictIndex {
                 return false;
             };
             let at = entries.off();
-            if len.saturating_mul(entries.unit as usize) > entries.end_bits - at {
+            if len * entries.unit as usize > entries.end_bits - at {
                 return false;
             }
             entries.skip(len);
