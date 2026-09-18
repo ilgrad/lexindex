@@ -254,24 +254,36 @@ fn samples_of(heads: &[u8], ends: &[u64], g: usize) -> Vec<u64> {
         .collect()
 }
 
-/// Keys per microblock for a block of `block`: its largest divisor at or below 32, or the block
-/// itself when it has none above 1.
+/// Keys per microblock for a block of `block`: its smallest divisor at or above the square root of
+/// the block, between 16 and 32, or the block itself when it has none.
 ///
 /// A lookup scans one restart an earlier microblock plus one entry of its own, `block / micro +
-/// micro − 2` in all, and the square root of the block minimises that count — but a restart entry
-/// costs about four ordinary ones, its suffix being coded against a key a microblock away rather
-/// than its neighbour, so the count is the wrong thing to minimise. Measured over block ∈ {128,
-/// 256, 512} × micro ∈ {8, 16, 32, 64} on real words (`local/dictbench`, 2026-09-12): 32 stores
-/// 0.08 B/key less than 16 at every block for 0–7 ns on `id`, and 64 saves 0.05 more for 35–50 ns.
-/// Confirmed over four corpora from 9 to 52 bytes a key: 8 is smaller *and* slower than 16
-/// nowhere — it is dominated everywhere — 16 → 32 buys bytes at 1.0–1.9 mB/ns against `id` and
-/// `key_into` together, the rate at which the default block itself was chosen, and 32 → 64 at
-/// 0.2–0.5, which is why the cap is 32 and not a function of the keys.
+/// micro − 2` in all, and the square root of the block minimises that count. Under `BDX2` that was
+/// the wrong thing to minimise: a restart entry costs about four ordinary ones, its suffix being
+/// coded against a key a microblock away rather than its neighbour, and a nibble header was cheap
+/// enough that the bytes won — measured over block ∈ {128, 256, 512} × micro ∈ {8, 16, 32, 64} on
+/// real words (`local/dictbench`, 2026-09-12), 32 stored 0.08 B/key less than 16 at every block
+/// for 0–7 ns on `id`, buying bytes at 1.0–1.9 mB/ns.
+///
+/// A coded header is dearer to read than a nibble and the balance moves with it. Measured over
+/// twelve corpora at block 256 (`local/dictprof`, 2026-09-19): 16 is faster than 32 on **both**
+/// lanes of **all twelve**, by 1–10 % on `id` and 2–19 % on `key`, for 1–4 % more bytes — and the
+/// bytes are still under `BDX2`'s everywhere, 0.50 to 0.95 of them. That is 0.1–0.4 mB/ns, an
+/// order of magnitude below the rate the cap of 32 was set at, so the rule now follows the count.
+///
 /// A divisor keeps every microblock of a block full but the last, which is what makes a restart's
-/// rank `j * micro` rather than a running sum. A block of 32 or fewer, or a prime one, is a single
-/// microblock, the layout of one level.
+/// rank `j * micro` rather than a running sum. The floor of 16 is what keeps a small block from
+/// paying a run's prologue every few keys: a block of 32 holds 96 bytes of words and each run
+/// opens with about four, so the square root's micro of 8 would have added 17 % where the same
+/// step at 256 adds 4 — enough to put a block of 32 *above* `BDX2`, which is the one thing the
+/// format may not do. A block of 16 or fewer, or a prime one, is a single microblock, the layout
+/// of one level.
 pub(crate) fn micro_for(block: usize) -> usize {
-    (2..=32).rev().find(|d| block % d == 0).unwrap_or(block)
+    let from = block.isqrt().clamp(16, 32);
+    (from..=32)
+        .find(|d| block % d == 0)
+        .or_else(|| (2..=32).rev().find(|d| block % d == 0))
+        .unwrap_or(block)
 }
 
 #[cfg(test)]
@@ -3919,8 +3931,8 @@ mod tests {
     #[test]
     fn a_block_that_is_one_microblock_stores_no_restarts() {
         let keys = corpus();
-        // `micro_for(32)` is 32, so a block of 32 is one microblock and has no restart run.
-        let whole = DictIndex::build_with_block(&keys, 32).unwrap();
+        // `micro_for(16)` is 16, so a block of 16 is one microblock and has no restart run.
+        let whole = DictIndex::build_with_block(&keys, 16).unwrap();
         let s = whole.sections();
         assert_eq!(
             (
@@ -3936,7 +3948,7 @@ mod tests {
             "no array is stored for a single microblock"
         );
         assert_eq!(s.total() as usize, whole.serialized_len());
-        // A block of 256 is eight microblocks, and the restarts that reach them are paid for.
+        // A block of 256 is sixteen microblocks, and the restarts that reach them are paid for.
         let cut = DictIndex::build_with_block(&keys, 256).unwrap();
         let t = cut.sections();
         assert!(t.restarts > 0 && t.micro_offsets > 0);
@@ -4422,6 +4434,10 @@ mod tests {
 
     /// A corpus of one shape does not force the other's shards: a blob holding both must pick per
     /// shard, and every key of both must answer.
+    ///
+    /// One block per shard, and the default block: over 64 keys the alphabet beat the table by
+    /// two bytes in a hundred and seventy, which is inside what five run prologues round away —
+    /// the test then measured the microblock size rather than the shape of the keys.
     #[test]
     fn two_shapes_in_one_blob_settle_on_their_own_codecs() {
         let _held = Shards::of(1);
@@ -4435,7 +4451,7 @@ mod tests {
         }));
         keys.sort();
         keys.dedup();
-        let idx = DictIndex::build_with_block(&keys, 64).unwrap();
+        let idx = DictIndex::build_with_block(&keys, 256).unwrap();
         let packed = idx
             .codecs
             .iter()
