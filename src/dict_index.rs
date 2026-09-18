@@ -441,9 +441,16 @@ fn get_varint(mut data: &[u8]) -> Option<(usize, &[u8])> {
     }
 }
 
-/// The varint at `*at` in `data`, advancing `*at` past it.
+/// The varint at `*at` in `data`, advancing `*at` past it. The one-byte case is the run of a
+/// front-coded block -- a base under 128, a length under 128 -- and it is the one a scan pays for.
 #[inline(always)]
 pub(crate) fn varint_at(data: &[u8], at: &mut usize) -> Option<usize> {
+    if let Some(&b) = data.get(*at) {
+        if b < 0x80 {
+            *at += 1;
+            return Some(usize::from(b));
+        }
+    }
     let (v, rest) = get_varint(data.get(*at..)?)?;
     *at = data.len() - rest.len();
     Some(v)
@@ -604,6 +611,8 @@ struct Entries<'a> {
     /// its header costs one add, and the multiply and the clamp are paid by the few that are read.
     base: usize,
     sum: usize,
+    /// The suffixes' length in bits, which the cursor is clamped to.
+    end_bits: usize,
     unit: u32,
 }
 
@@ -623,6 +632,7 @@ impl<'a> Entries<'a> {
                 count: entries,
                 base: 0,
                 sum: 0,
+                end_bits: sfx.len().saturating_mul(8),
                 unit: codec.unit(),
             },
             None => Self::empty(),
@@ -640,6 +650,7 @@ impl<'a> Entries<'a> {
             bit: 0,
             base: 0,
             sum: 0,
+            end_bits: 0,
             unit: 8,
         }
     }
@@ -676,7 +687,7 @@ impl<'a> Entries<'a> {
     fn off(&self) -> usize {
         self.base
             .saturating_add(self.sum.saturating_mul(self.unit as usize))
-            .min(self.sfx.len() * 8)
+            .min(self.end_bits)
     }
 
     /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
@@ -2676,7 +2687,7 @@ impl DictIndex {
                 return false;
             };
             let at = entries.off();
-            if len.saturating_mul(entries.unit as usize) > entries.sfx.len() * 8 - at {
+            if len.saturating_mul(entries.unit as usize) > entries.end_bits - at {
                 return false;
             }
             entries.skip(len);
