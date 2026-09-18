@@ -269,17 +269,18 @@ impl Table {
         }
     }
 
-    /// `packed` decoded onto the end of `out`; `false`, with `out` cut back to where it was, for
-    /// a stream this table did not write — a code past the table, or an escape with nothing after
-    /// it.
-    pub(crate) fn decode_into(&self, packed: &[u8], out: &mut Vec<u8>) -> bool {
+    /// `packed` decoded onto the end of `out`, stopping once `cap` bytes are there; `false`, with
+    /// `out` cut back to where it was, for a stream this table did not write — a code past the
+    /// table, or an escape with nothing after it.
+    pub(crate) fn decode_into(&self, packed: &[u8], out: &mut Vec<u8>, cap: usize) -> bool {
         let start = out.len();
         // Every code becomes one eight-byte store and advances by its length, so the slack past
-        // the decoded end is at most seven bytes per code.
-        out.resize(start + packed.len() * 8, 0);
+        // the decoded end is at most seven bytes per code — and past a cap, seven bytes in all.
+        let room = packed.len().saturating_mul(8).min(cap.saturating_add(7));
+        out.resize(start + room, 0);
         let mut o = start;
         let mut i = 0;
-        while i < packed.len() {
+        while i < packed.len() && o - start < cap {
             let code = packed[i];
             if code == ESCAPE {
                 let Some(&b) = packed.get(i + 1) else {
@@ -389,7 +390,7 @@ mod tests {
             total += packed.len();
             back.clear();
             back.extend_from_slice(b"prefix-");
-            assert!(table.decode_into(&packed, &mut back), "{k:?}");
+            assert!(table.decode_into(&packed, &mut back, usize::MAX), "{k:?}");
             assert_eq!(&back[7..], k, "{k:?}");
         }
         total
@@ -420,7 +421,7 @@ mod tests {
         table.encoder().encode_into(b"ab", &mut packed);
         assert_eq!(packed, [ESCAPE, b'a', ESCAPE, b'b']);
         let mut back = Vec::new();
-        assert!(table.decode_into(&packed, &mut back));
+        assert!(table.decode_into(&packed, &mut back, usize::MAX));
         assert_eq!(back, b"ab");
         let mut bytes = Vec::new();
         table.write_to(&mut bytes);
@@ -438,9 +439,9 @@ mod tests {
     fn a_stream_the_table_did_not_write_is_refused_and_leaves_out_as_it_was() {
         let table = Table::train(&[b"abc".as_slice()]);
         let mut out = b"keep".to_vec();
-        assert!(!table.decode_into(&[ESCAPE], &mut out));
+        assert!(!table.decode_into(&[ESCAPE], &mut out, usize::MAX));
         assert_eq!(out, b"keep");
-        assert!(!table.decode_into(&[254], &mut out));
+        assert!(!table.decode_into(&[254], &mut out, usize::MAX));
         assert_eq!(out, b"keep");
     }
 

@@ -175,19 +175,21 @@ impl Alphabet {
         Some((byte as u8, 2 + per))
     }
 
-    /// Appends the bytes `codes` stands for to `out`; `false` on codes this crate did not write.
+    /// Appends the bytes `codes` stands for to `out`, stopping once `cap` of them are there;
+    /// `false` on codes this crate did not write.
     ///
     /// Sized once at a byte a code, which no reading can exceed, so that the loop stores a byte
     /// rather than growing a vector.
-    pub(crate) fn decode_into(&self, codes: &Codes<'_>, out: &mut Vec<u8>) -> bool {
+    pub(crate) fn decode_into(&self, codes: &Codes<'_>, out: &mut Vec<u8>, cap: usize) -> bool {
         let start = out.len();
-        out.resize(start + codes.len, 0);
+        let want = codes.len.min(cap);
+        out.resize(start + want, 0);
         if self.two.is_empty() {
             // An alphabet that fits its width spends one code a byte, so how far the next code
             // starts does not wait on this one's table read. Written as its own loop because that
             // is what tells the compiler so: the shared one carries `at` through a load and reads
             // a byte every four or five cycles however wide the machine is.
-            for i in 0..codes.len {
+            for i in 0..want {
                 let Some(b) = codes.at(i).and_then(|c| self.one.get(c)) else {
                     out.truncate(start);
                     return false;
@@ -198,7 +200,7 @@ impl Alphabet {
         }
         let mut o = start;
         let mut at = 0;
-        while at < codes.len {
+        while at < codes.len && o - start < want {
             let Some((b, took)) = self.byte_at(codes, at) else {
                 out.truncate(start);
                 return false;
@@ -440,7 +442,10 @@ mod tests {
             assert_eq!(alphabet.codes_for(piece), len, "{piece:?}");
             let codes = Codes::new(&data, start, alphabet.width(), len);
             let mut out = Vec::new();
-            assert!(alphabet.decode_into(&codes, &mut out), "{piece:?}");
+            assert!(
+                alphabet.decode_into(&codes, &mut out, usize::MAX),
+                "{piece:?}"
+            );
             assert_eq!(&out, piece);
             assert_eq!(
                 alphabet.compare(&codes, piece),
@@ -526,7 +531,7 @@ mod tests {
         stream.drain_into(&mut data);
         let cut = Codes::new(&data[..1], 0, a.width(), len);
         let mut out = Vec::new();
-        assert!(!a.decode_into(&cut, &mut out));
+        assert!(!a.decode_into(&cut, &mut out, usize::MAX));
         assert!(out.len() < 8);
         assert!(a.compare(&cut, b"ACGTACGT").0 < 8);
     }

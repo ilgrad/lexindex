@@ -481,16 +481,22 @@ impl Codec {
         }
     }
 
-    /// Appends the bytes `piece` stands for to `out`; `false` on a stream this crate did not write.
+    /// Appends the bytes `piece` stands for to `out`, stopping once `cap` of them are there;
+    /// `false` on a stream this crate did not write.
+    ///
+    /// A climb wants a whole suffix only from the last stair it kept: every earlier one is
+    /// truncated again at the next stair's shared prefix, so the bytes past it are decoded and
+    /// thrown away. Handing the cap down is what keeps them undecoded — and keeps the room the
+    /// fixed-width stores need from being sized by the coded suffix rather than by the answer.
     #[inline]
-    fn decode_into(&self, dict: &Dict, piece: Piece<'_>, out: &mut Vec<u8>) -> bool {
+    fn decode_into(&self, dict: &Dict, piece: Piece<'_>, out: &mut Vec<u8>, cap: usize) -> bool {
         match self {
             Codec::Symbols {
                 table,
                 split: Some(split),
-            } => decode_tiered(table, *split, dict, piece.bytes(), out),
-            Codec::Symbols { table, .. } => table.decode_into(piece.bytes(), out),
-            Codec::Packed(a) => a.decode_into(&piece.codes(a.width()), out),
+            } => decode_tiered(table, *split, dict, piece.bytes(), out, cap),
+            Codec::Symbols { table, .. } => table.decode_into(piece.bytes(), out, cap),
+            Codec::Packed(a) => a.decode_into(&piece.codes(a.width()), out, cap),
         }
     }
 
@@ -2303,6 +2309,7 @@ fn decode_tiered(
     dict: &Dict,
     packed: &[u8],
     out: &mut Vec<u8>,
+    cap: usize,
 ) -> bool {
     // Room for the widest reading of every code, so that each one is a store of a width the
     // compiler knows rather than a `memcpy` call with a length it learns at run time -- which is
@@ -2316,10 +2323,10 @@ fn decode_tiered(
     let Some(room) = packed.len().checked_mul(phrase::MAX / 2) else {
         return false;
     };
-    out.resize(start + room, 0);
+    out.resize(start + room.min(cap.saturating_add(phrase::MAX)), 0);
     let mut o = start;
     let mut i = 0;
-    while i < packed.len() {
+    while i < packed.len() && o - start < cap {
         if let Some((id, took)) = split.read_at(packed, i) {
             let Some((phrase, len)) = dict.chunk(id) else {
                 out.truncate(start);
@@ -2710,7 +2717,7 @@ impl DictIndex {
             return false;
         }
         cur.truncate(l);
-        codec.decode_into(&self.phrases, piece, cur)
+        codec.decode_into(&self.phrases, piece, cur, usize::MAX)
     }
 
     /// Take `out`, which holds a front-coded run's first key, `steps` entries along that run.
@@ -2756,21 +2763,34 @@ impl DictIndex {
         if entries.reach() > entries.end_bits {
             return false;
         }
-        for &(l, at, len) in &stair[..depth] {
-            let piece = Piece {
-                stream: entries.sfx,
-                start: at,
-                units: len,
-            };
+        let sfx = entries.sfx;
+        let emit = |(l, at, len): (usize, usize, usize), cap: usize, out: &mut Vec<u8>| {
             if l > out.len() {
                 return false;
             }
             out.truncate(l);
-            if !run.codec.decode_into(&self.phrases, piece, out) {
+            let piece = Piece {
+                stream: sfx,
+                start: at,
+                units: len,
+            };
+            run.codec.decode_into(&self.phrases, piece, out, cap)
+        };
+        // A stair keeps only the bytes the next one does not overwrite, since that one truncates
+        // back to its own shared prefix; paired with its successor, the difference is the cap, and
+        // it cannot underflow because a stair is kept only where its prefix is the shorter. The
+        // last stair is the key's own tail, and asks for all of it — so that call, alone, carries
+        // no cap at all.
+        let kept = &stair[..depth];
+        for w in kept.windows(2) {
+            if !emit(w[0], w[1].0 - w[0].0, out) {
                 return false;
             }
         }
-        true
+        match kept.last() {
+            Some(&last) => emit(last, usize::MAX, out),
+            None => true,
+        }
     }
 
     /// The key at rank `id` into `out`, cleared first; `false`, with `out` empty, past the last
