@@ -636,7 +636,10 @@ impl<'a> Entries<'a> {
                 base: 0,
                 sum: 0,
                 end_bits: sfx.len().saturating_mul(8),
-                max_units: sfx.len().saturating_mul(8) / codec.unit() as usize,
+                max_units: match codec.unit() {
+                    8 => sfx.len(),
+                    unit => sfx.len().saturating_mul(8) / unit as usize,
+                },
                 unit: codec.unit(),
             },
             None => Self::empty(),
@@ -696,9 +699,15 @@ impl<'a> Entries<'a> {
         // run this crate did not write runs into, and the wrapping is so that a blob claiming a
         // run longer than the address space gives a wrong piece on a 32-bit target rather than a
         // panic -- which is what every other bound here does.
+        self.reach().min(self.end_bits)
+    }
+
+    /// Where the suffixes read so far end, unbounded by the stream. It only grows, so a walk that
+    /// would have stopped at any entry past the stream stops on this one bound at the end of it.
+    #[inline(always)]
+    fn reach(&self) -> usize {
         self.base
             .wrapping_add(self.sum.wrapping_mul(self.unit as usize))
-            .min(self.end_bits)
     }
 
     /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
@@ -2698,9 +2707,6 @@ impl DictIndex {
                 return false;
             };
             let at = entries.off();
-            if len * entries.unit as usize > entries.end_bits - at {
-                return false;
-            }
             entries.skip(len);
             while depth > 0 && stair[depth - 1].0 >= l {
                 depth -= 1;
@@ -2712,6 +2718,9 @@ impl DictIndex {
             }
             stair[depth] = (l, at, len);
             depth += 1;
+        }
+        if entries.reach() > entries.end_bits {
+            return false;
         }
         for &(l, at, len) in &stair[..depth] {
             let piece = Piece {
