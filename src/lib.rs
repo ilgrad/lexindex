@@ -81,6 +81,7 @@ mod dict_index;
 mod estimate;
 mod extsort;
 mod fsst;
+mod fst_bounds;
 mod inspect;
 mod offsets;
 mod overlay;

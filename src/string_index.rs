@@ -9,6 +9,7 @@
 use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::extsort::{RUN_BYTES, Run, Runs};
+use crate::fst_bounds;
 use fst::automaton::{Automaton, Levenshtein, Str};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
@@ -679,13 +680,17 @@ impl StringIndex {
     /// does not spell, is refused here and accepted by [`from_bytes`](Self::from_bytes), which
     /// only samples both ends.
     ///
-    /// And it **catches the panic**, at the load boundary, turning it into
-    /// [`IndexError::Format`]. Two consequences worth knowing before relying on it: under
-    /// `panic = "abort"` there is no unwinding to catch, so a crafted blob aborts the process
-    /// instead — still not undefined behaviour, but not an `Err` either; and the panic runs the
-    /// process-wide hook on its way out, so the rejection normally prints a panic message to
-    /// stderr. Nothing is suppressed, because the hook is global and another thread's panic is not
-    /// this loader's to silence.
+    /// And it **measures every node before `fst` decodes it**. The root address the footer names,
+    /// and every transition target the walk reaches, are checked against the blob first — from the
+    /// fields that decide how many bytes a node occupies, so a node claiming more than sit below
+    /// it, or a transition whose delta would be subtracted past the blob's start, is refused
+    /// before `fst` is handed the address. The refusal is therefore an [`IndexError::Format`] and
+    /// not a caught panic, and it stays one under `panic = "abort"`, where there is nothing to
+    /// catch with. A [`catch_unwind`](std::panic::catch_unwind) remains around the walk as a
+    /// backstop for a decode this crate has not modelled; should it ever fire the caller still
+    /// gets an `Err`, but the process-wide panic hook runs on the way out and prints to stderr.
+    /// Nothing is suppressed, because the hook is global and another thread's panic is not this
+    /// loader's to silence.
     ///
     /// What it costs is two decodes of every node and the checksum: 22.9 ms against
     /// 0.7 ms for the owned load, on the 479 823-word `/usr/share/dict/words`, or
@@ -749,10 +754,17 @@ impl StringIndex {
     /// `0, 1, 2, …`, every key decodes as a `str`, and `len` is honest — without streaming it.
     fn validate(&self) -> Result<(), IndexError> {
         let fst = self.map.as_fst();
-        let root = fst.root().addr();
-        if root >= fst.as_bytes().len() {
-            return Err(IndexError::Format("fst node address is outside the blob"));
-        }
+        // Before `fst` decodes anything: the root address it will decode *from*. `Fst::new` reads
+        // the same footer bytes and then checks them only when the address is zero -- its
+        // `(root == EMPTY && len != 36) && root + 21 != len` short-circuits on the first conjunct
+        // -- so a blob naming a root past its own end is accepted there, and `Fst::root` indexes
+        // the blob with it. That is the panic `panicking-1.0.0-string.bix` carries: address 881
+        // into 107 bytes, raised by `fst.root()` itself, which is why the bound cannot be read off
+        // the node.
+        let bytes = fst.as_bytes();
+        let version = fst_bounds::version(bytes);
+        let root = fst_bounds::root_addr(bytes)
+            .ok_or(IndexError::Format("fst node address is outside the blob"))?;
         // One byte per blob byte up to the root: the UTF-8 states a node is reachable in, zero
         // where no node is reachable. State 0 is a character boundary, so bit 0 alone is "at a
         // boundary, only".
@@ -762,6 +774,11 @@ impl StringIndex {
             let reached = states[addr];
             if reached == 0 {
                 continue;
+            }
+            // Every address `fst` is handed is checked first: the root above, and each
+            // transition's target where the walk reaches it.
+            if !fst_bounds::node_fits(bytes, version, addr) {
+                return Err(IndexError::Format("fst node does not fit the blob"));
             }
             let node = fst.node(addr);
             if node.is_final() && reached != 1 {
@@ -809,6 +826,7 @@ impl StringIndex {
             while word != 0 {
                 let addr = w * 64 + word.trailing_zeros() as usize;
                 word &= word - 1;
+                debug_assert!(fst_bounds::node_fits(bytes, version, addr), "checked above");
                 let node = fst.node(addr);
                 if node.is_final() && node.final_output().value() != 0 {
                     return Err(IndexError::Format("fst value is not the key's rank"));
@@ -1335,6 +1353,25 @@ mod tests {
                 .id("key-001"),
             Some(1)
         );
+    }
+
+    /// The wide shapes a handful of keys never compile: a node of more than thirty-two
+    /// transitions, which `fst` puts behind a 256-byte index from version 2 on, and addresses too
+    /// large to pack in one byte. Both are branches of the bounds check that runs ahead of the
+    /// decoder, and one too strict on either would refuse a blob this crate wrote.
+    #[test]
+    fn the_untrusted_loader_accepts_the_wide_shapes_too() {
+        let mut keys: Vec<String> = (0x21u8..=0x7e)
+            .map(|b| format!("{}root", b as char))
+            .collect();
+        keys.extend((0..20_000).map(|i| format!("body-{i:05}-{}", "z".repeat(i % 29))));
+        keys.sort();
+        let blob = StringIndex::build(&keys).unwrap().to_bytes();
+        let back = StringIndex::from_untrusted_bytes(&blob).expect("refused its own blob");
+        assert_eq!(back.len(), keys.len());
+        for (rank, k) in keys.iter().enumerate() {
+            assert_eq!(back.id(k), Some(rank as u64), "{k}");
+        }
     }
 
     /// No false rejections: whatever `to_bytes` writes, the strict loader takes — including the

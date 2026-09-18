@@ -47,11 +47,17 @@ unwinds, or aborts the process under `panic = "abort"` — but it is a denial of
 that loads ordered blobs supplied by a stranger. For those, use `StringIndex::from_untrusted_bytes`:
 it checks the transducer as a graph before answering — every reachable node once, in time
 proportional to nodes and transitions rather than to the keys they spell, so that its values are
-ranks and its keys are UTF-8 — and catches the decoder's panic at the load boundary, returning it as
-an `IndexError`. It cannot *prevent* the panic — checking a node means decoding it, and `fst`'s
-decoder is the only one there is — so under `panic = "abort"` a crafted blob still aborts, and the
-rejection runs the process-wide panic hook on its way out. `from_bytes` stays the loader for blobs
-you produced yourself.
+ranks and its keys are UTF-8 — and it measures every node *before* `fst` decodes it. The root
+address the footer names and every transition target the walk reaches are checked against the blob
+first, from the fields that decide a node's size: one claiming more bytes than sit below it, or a
+transition whose delta would be subtracted past the blob's start, is refused before `fst` is handed
+the address. The refusal is an `IndexError`, not a caught panic, and it stays one under
+`panic = "abort"`, where there is nothing to catch with. A `catch_unwind` remains around the walk
+as a backstop for a decode this crate has not modelled; should it fire the caller still gets an
+`Err`, but the process-wide panic hook runs on the way out. The evidence is a libFuzzer run of the
+`parse_string` target built with `panic = "abort"`, so that any panic still reached is a crash
+rather than a caught error: 3.8 billion executions over 24 CPU-hours found none. `from_bytes` stays
+the loader for blobs you produced yourself.
 
 The guarantee is **soundness, not correctness**. A blob crafted by someone else can answer *wrong*
 ids for keys it does not hold. It cannot answer ids outside `[0, n)`, allocate from a number it

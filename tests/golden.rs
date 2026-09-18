@@ -615,6 +615,34 @@ fn the_1_0_overlay_blob_is_byte_identical_to_a_fresh_build() {
 /// fails the day `fst` gains a total decoder — which is a fix, and should be noticed as one. The
 /// second is the contract [`StringIndex::from_untrusted_bytes`] exists to provide, checked on a
 /// real crafted blob rather than on bytes invented to be rejected.
+/// A transducer `fst`'s decoder cannot read without leaving the blob, refused by the bounds check
+/// that runs *before* the decoder rather than by the `catch_unwind` behind it.
+///
+/// The distinction is the whole of the guarantee. A caught panic is still a panic: under
+/// `panic = "abort"` -- an embedded profile, a size-tuned wasm build -- there is nothing to catch
+/// it with, and the loader that exists to contain a hostile blob would abort the process instead.
+/// So the assertion is not that these are refused, which they were before, but *how*: with a
+/// structural error, from a walk that never handed `fst` an address it could not decode.
+///
+/// `unfitting-4.0.0-string.bix` came out of `local/fuzz-abort.sh` in its first seconds and is 40
+/// bytes: a node whose packed sizes claim more bytes than sit below it, so `fst` computes the
+/// address of its transition by subtracting past zero.
+#[test]
+fn the_untrusted_loader_refuses_a_bad_transducer_before_the_decoder_sees_it() {
+    for name in ["panicking-1.0.0-string.bix", "unfitting-4.0.0-string.bix"] {
+        let bytes = std::fs::read(data(name)).expect("the specimen");
+        let Err(err) = lexindex::StringIndex::from_untrusted_bytes(&bytes) else {
+            panic!("{name} loaded");
+        };
+        let err = err.to_string();
+        assert!(err.contains("fst node"), "{name}: {err}");
+        assert!(
+            !err.contains("panicked"),
+            "{name}: the decoder was reached and panicked: {err}"
+        );
+    }
+}
+
 #[test]
 fn the_untrusted_loader_refuses_the_blob_the_owned_one_panics_on() {
     let bytes = std::fs::read(data("panicking-1.0.0-string.bix")).expect("the panic specimen");

@@ -559,6 +559,27 @@ All notable changes to this project are documented here. The format follows
   stand-in word made it one key repeated a hundred thousand times. The families that need words
   are built only where the words exist now, and every family is checked for a repeated key before
   its collisions are counted. Every number the battery prints is unchanged.
+- **`StringIndex::from_untrusted_bytes` refuses a hostile transducer structurally, so it no longer
+  depends on unwinding.** The loader caught `fst`'s decoder panic and returned it as an
+  `IndexError`, which is not a defence under `panic = "abort"` — an embedded profile, a size-tuned
+  wasm build — where the same blob aborted the process. The cause was upstream and specific:
+  `fst::raw::Fst::new` reads the root address out of the footer and then checks it only when it is
+  zero, its `(root == EMPTY && len != empty_total) && root + addr_offset != len` short-circuiting
+  on the first conjunct, so a blob naming a root past its own end is accepted and `Fst::root`
+  indexes the blob with it — address 881 into 107 bytes for the committed
+  `tests/data/panicking-1.0.0-string.bix`, raised inside `fst` before this crate sees a node. Every
+  address the walk hands to `fst` is now measured against the blob first, from the fields that
+  decide how many bytes a node occupies — the state byte, the pack sizes, the transition count and
+  the packed deltas — and a node claiming more than sit below it, or a transition whose delta would
+  be subtracted past the blob's start, is refused before the decoder is called. It is a bounds
+  check and not a second decoder: it reads no input byte, no output and no transition index,
+  because none of those can move a read. The `catch_unwind` stays as a backstop for a decode this
+  crate has not modelled. `tests/data/unfitting-4.0.0-string.bix` pins the second shape, 40 bytes
+  whose pack sizes underflow the node's end address, found in the first seconds of a fuzz run
+  against an aborting build; both specimens now come back as `Format`, and `SECURITY.md` no longer
+  carries the exception. What the claim rests on: the same target rebuilt with `panic = "abort"`,
+  where a panic is a crash and not a caught error, ran 3 832 487 116 executions over 24 CPU-hours
+  without producing one.
 - **The weekly 32-bit Miri job stopped at the first overlay test that streams a perfect hash into
   a file.** The arena is written through a file mapping, which Miri cannot interpret, so that test
   and every overlay test after it went unchecked on a 32-bit target. The mapping half of the two
