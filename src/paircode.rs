@@ -301,10 +301,15 @@ impl Writer {
     }
 }
 
-/// One run's header stream as it is read: the pair at any index, at the cost of the two loads its
+/// One run's header stream as it is read: the pair at any index, at the cost of the one load its
 /// bits span.
 pub(crate) struct Reader<'a> {
-    hdrs: &'a [u8],
+    /// The run's whole data — the headers, and past `hdr_end` the suffixes. A header's eight-byte
+    /// load may run on into the suffixes, and the mask drops what it took: that keeps it one
+    /// unaligned load everywhere but the run's last seven bytes, where a copy of what is left is
+    /// the price of not reading past the run.
+    data: &'a [u8],
+    hdr_end: usize,
     /// Where the codes start, past the frame's prologue.
     at: usize,
     width: u32,
@@ -316,7 +321,8 @@ impl<'a> Reader<'a> {
     /// A reader over nothing, for a walk that has not opened a run yet.
     pub(crate) fn none() -> Self {
         Self {
-            hdrs: &[],
+            data: &[],
+            hdr_end: 0,
             at: 0,
             width: 0,
             frame: None,
@@ -340,14 +346,15 @@ impl<'a> Reader<'a> {
             Code::Table { w, .. } => (0, *w, None),
         };
         let end = at + (count * width as usize).div_ceil(8);
-        let (hdrs, sfx) = data.split_at_checked(end)?;
+        let sfx = data.get(end..)?;
         let table = match code {
             Code::Table { pairs, .. } => pairs.as_slice(),
             Code::Frame => &[],
         };
         Some((
             Self {
-                hdrs,
+                data,
+                hdr_end: end,
                 at,
                 width,
                 frame,
@@ -363,14 +370,13 @@ impl<'a> Reader<'a> {
     pub(crate) fn code(&self, i: usize) -> Option<usize> {
         let bit = self.at * 8 + i * self.width as usize;
         let (byte, shift) = (bit / 8, bit % 8);
-        let mut word = 0u64;
-        let take = self.hdrs.get(byte..)?;
-        let n = take.len().min(8);
-        word |= u64::from_le_bytes({
-            let mut buf = [0u8; 8];
-            buf[..n].copy_from_slice(&take[..n]);
-            buf
-        });
+        if byte >= self.hdr_end {
+            return None;
+        }
+        let word = match self.data.get(byte..).and_then(|t| t.first_chunk::<8>()) {
+            Some(w) => u64::from_le_bytes(*w),
+            None => tail_word(self.data, byte),
+        };
         Some(((word >> shift) & ((1u64 << self.width) - 1)) as usize)
     }
 
@@ -394,8 +400,20 @@ impl<'a> Reader<'a> {
 
     /// Where this run's suffixes start inside its data.
     pub(crate) fn header_bytes(&self) -> usize {
-        self.hdrs.len()
+        self.hdr_end
     }
+}
+
+/// The last bytes of a run as a word, zero-padded: the load a header takes when eight bytes do
+/// not remain. `byte` is inside `data`.
+#[cold]
+#[inline(never)]
+fn tail_word(data: &[u8], byte: usize) -> u64 {
+    let mut buf = [0u8; 8];
+    let take = &data[byte.min(data.len())..];
+    let n = take.len().min(8);
+    buf[..n].copy_from_slice(&take[..n]);
+    u64::from_le_bytes(buf)
 }
 
 #[cfg(test)]
