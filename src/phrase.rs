@@ -705,27 +705,134 @@ pub(crate) fn settle(
     phrases: usize,
     w: &mut Scratch,
 ) -> (Option<Split>, Table) {
-    let alone = table.encoder();
-    let mut best = (None, table.clone(), price(pieces, &alone, trie, None, w));
     if phrases == 0 {
-        return (best.0, best.1);
+        return (None, table.clone());
     }
-    for split in Split::family(phrases) {
-        let cut = table.head(split.symbols as usize);
-        let bytes = price(pieces, &cut.encoder(), trie, Some(split), w);
-        if bytes < best.2 {
-            best = (Some(split), cut, bytes);
+    let family = Split::family(phrases);
+    let mut heads: Vec<u8> = Vec::with_capacity(family.len());
+    for split in &family {
+        if !heads.contains(&split.symbols) {
+            heads.push(split.symbols);
         }
     }
-    if let Some(split) = best.0 {
-        let mut left = Vec::new();
-        residue(pieces, &best.1.encoder(), trie, split, w, &mut left);
-        let refit = Table::train_to(&left, usize::from(split.symbols));
-        if price(pieces, &refit.encoder(), trie, Some(split), w) < best.2 {
-            best.1 = refit;
+    // Row zero is the shard's whole table with no phrases to spend on; the rest are the prefixes
+    // the family asks for, one row each rather than one a split.
+    let mut encs = Vec::with_capacity(heads.len() + 1);
+    encs.push(table.encoder());
+    encs.extend(heads.iter().map(|&k| table.head(usize::from(k)).encoder()));
+    let rows: Vec<usize> = family
+        .iter()
+        .map(|s| 1 + heads.iter().position(|&k| k == s.symbols).unwrap_or(0))
+        .collect();
+    let mut bytes = vec![0u64; family.len() + 1];
+    let mut memo = Memo::default();
+    for &piece in pieces {
+        memo.fill(piece, &encs, trie);
+        bytes[0] += u64::from(memo.price(0, None, &mut w.cost)) / 8;
+        for (j, split) in family.iter().enumerate() {
+            bytes[j + 1] += u64::from(memo.price(rows[j], Some(split.prices()), &mut w.cost)) / 8;
         }
     }
-    (best.0, best.1)
+    let mut low = bytes[0];
+    let mut won = None;
+    for (j, split) in family.iter().enumerate() {
+        if bytes[j + 1] < low {
+            low = bytes[j + 1];
+            won = Some(*split);
+        }
+    }
+    let Some(split) = won else {
+        return (None, table.clone());
+    };
+    let mut cut = table.head(usize::from(split.symbols));
+    let mut left = Vec::new();
+    residue(pieces, &cut.encoder(), trie, split, w, &mut left);
+    let refit = Table::train_to(&left, usize::from(split.symbols));
+    if price(pieces, &refit.encoder(), trie, Some(split), w) < low {
+        cut = refit;
+    }
+    (Some(split), cut)
+}
+
+/// One piece's parse inputs, kept while every candidate of a [`family`](Split::family) is priced
+/// on it: what each candidate's symbols answer at every position, and every phrase the trie
+/// matches there.
+///
+/// The ten splits of a family name five symbol prefixes between them and one trie, and a price
+/// reads only the cost array a parse leaves — so the walk that fills these runs once a piece
+/// rather than once a piece a split. The trie walk is the half that pays: it probes up to
+/// [`MAX`] nodes at every position where the encoder answers once.
+#[derive(Default)]
+struct Memo {
+    /// `(code, len)` at every position, one row an encoder, the rows end to end.
+    steps: Vec<(u8, u8)>,
+    /// `(length, one-based id)` of every phrase the trie matches, by where it starts.
+    hits: Vec<(u8, u32)>,
+    /// `hits[at[i]..at[i + 1]]` are the phrases that start at `i`.
+    at: Vec<u32>,
+    len: usize,
+}
+
+impl Memo {
+    fn fill(&mut self, s: &[u8], encs: &[fsst::Encoder], trie: &Trie) {
+        let n = s.len();
+        self.len = n;
+        self.steps.clear();
+        self.steps.reserve(encs.len() * n);
+        for enc in encs {
+            self.steps.extend((0..n).map(|i| {
+                let (code, len) = enc.step(fsst::word_at(s, i), n - i);
+                (code, len as u8)
+            }));
+        }
+        self.hits.clear();
+        self.at.clear();
+        self.at.push(0);
+        for i in 0..n {
+            let mut node = 0u32;
+            for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
+                let Some((c, phrase)) = trie.step(node, b) else {
+                    break;
+                };
+                node = c;
+                if phrase != 0 {
+                    self.hits.push((k as u8 + 1, phrase));
+                }
+            }
+            self.at.push(self.hits.len() as u32);
+        }
+    }
+
+    /// The cheapest coding of the memoised piece, in bits, under the symbols of `row` and the
+    /// phrase prices of `prices` — [`parse`](parse)'s recurrence over what is already walked.
+    fn price(&self, row: usize, prices: Option<Prices>, cost: &mut Vec<u32>) -> u32 {
+        let n = self.len;
+        cost.clear();
+        cost.resize(n + 1, 0);
+        let steps = &self.steps[row * n..row * n + n];
+        for i in (0..n).rev() {
+            let (code, len) = steps[i];
+            let mut best = if code == ESCAPE {
+                16 + cost[i + 1]
+            } else {
+                8 + cost[i + usize::from(len)]
+            };
+            if let Some(prices) = prices {
+                for &(k, id) in &self.hits[self.at[i] as usize..self.at[i + 1] as usize] {
+                    let id = id as usize;
+                    if id > prices.limit {
+                        continue;
+                    }
+                    let at = 8 * prices.bytes_for(id - 1) as u32 + cost[i + usize::from(k)];
+                    if at < best {
+                        best = at;
+                    }
+                }
+            }
+            cost[i] = best;
+        }
+        cost[0]
+    }
 }
 
 /// One round's gains over one thread's share of the samples, in bytes saved, into `gain` — one
