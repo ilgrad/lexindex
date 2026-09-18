@@ -392,33 +392,132 @@ type Gains<'a> = Map<u128, (u64, &'a [u8])>;
 
 /// The phrases, as a parse walks them: one edge a byte, so a position that starts no phrase costs
 /// one lookup and stops.
+///
+/// A double array: a node is a slot, and its child on byte `b` is slot `base + b`, which holds one
+/// when its `check` names the node. A step is two dependent loads whatever the fan-out, where the
+/// hash probe it replaced was most of the parse and a scan of a node's children was no better —
+/// the nodes a walk meets second and third have twenty and five children apiece on URLs.
 pub(crate) struct Trie {
-    edges: Map<u64, u32>,
-    /// The phrase a node ends, plus one; zero for a node that ends none.
-    phrase: Vec<u32>,
+    slots: Vec<Slot>,
 }
+
+/// One slot of the double array, the three fields together so that a step reads one record for
+/// the node and one for the child.
+#[derive(Clone, Copy)]
+struct Slot {
+    base: u32,
+    /// The parent of the node in this slot.
+    check: u32,
+    /// The phrase the node in this slot ends, plus one; zero for a node that ends none.
+    phrase: u32,
+}
+
+/// A slot no node occupies. Its `check` is the root's too: no node has that id, so no step lands
+/// on either.
+const VACANT: Slot = Slot {
+    base: 0,
+    check: u32::MAX,
+    phrase: 0,
+};
 
 impl Trie {
     pub(crate) fn of<'a>(phrases: impl IntoIterator<Item = &'a [u8]>) -> Self {
-        let mut trie = Self {
-            edges: Map::default(),
-            phrase: vec![0],
-        };
+        // Inserted through a map in phrase order, then laid out breadth first, so that the wide
+        // nodes near the root take their slots before the narrow ones that fill the gaps between.
+        let mut edges: Map<u64, u32> = Map::default();
+        let mut ends = vec![0u32];
+        let mut links: Vec<(u32, u8, u32)> = Vec::new();
         for (id, p) in phrases.into_iter().enumerate() {
             let mut node = 0u32;
             for &b in p {
                 let key = u64::from(node) << 8 | u64::from(b);
-                node = match trie.edges.get(&key) {
+                node = match edges.get(&key) {
                     Some(&c) => c,
                     None => {
-                        trie.phrase.push(0);
-                        let c = (trie.phrase.len() - 1) as u32;
-                        trie.edges.insert(key, c);
+                        let c = ends.len() as u32;
+                        ends.push(0);
+                        edges.insert(key, c);
+                        links.push((node, b, c));
                         c
                     }
                 };
             }
-            trie.phrase[node as usize] = id as u32 + 1;
+            ends[node as usize] = id as u32 + 1;
+        }
+        links.sort_unstable();
+        let mut off = vec![0u32; ends.len() + 1];
+        for &(parent, _, _) in &links {
+            off[parent as usize + 1] += 1;
+        }
+        for i in 0..ends.len() {
+            off[i + 1] += off[i];
+        }
+        let mut trie = Self {
+            slots: vec![Slot {
+                phrase: ends[0],
+                ..VACANT
+            }],
+        };
+        // One bit a slot, so that a run of taken slots is skipped a word at a time; a slot past
+        // the end is free.
+        let mut taken = vec![1u64];
+        let free_from = |taken: &[u64], mut slot: usize| {
+            while let Some(&word) = taken.get(slot / 64) {
+                let rest = !word >> (slot % 64);
+                if rest != 0 {
+                    return slot + rest.trailing_zeros() as usize;
+                }
+                slot = (slot / 64 + 1) * 64;
+            }
+            slot
+        };
+        let is_free = |taken: &[u64], slot: usize| {
+            taken
+                .get(slot / 64)
+                .is_none_or(|w| (w >> (slot % 64)) & 1 == 0)
+        };
+        // The nodes in the order they are laid out, each with its slot: the root, then children
+        // as their parents place them.
+        let mut order = vec![(0u32, 0u32)];
+        // The lowest free slot, where every search starts. It skips the first 256: a slot below
+        // `b` cannot hold a child on byte `b`, so a hole left there would stall it under the whole
+        // taken run, and every node's search would rescan that run.
+        let mut lowest = 256;
+        let mut i = 0;
+        while i < order.len() {
+            let (old, parent) = order[i];
+            let old = old as usize;
+            i += 1;
+            let kids = &links[off[old] as usize..off[old + 1] as usize];
+            let Some(&(_, first, _)) = kids.first() else {
+                continue;
+            };
+            // First fit: the lowest free slot the first child can take whose siblings' slots are
+            // free too.
+            let mut f = free_from(&taken, lowest);
+            let base = loop {
+                let base = f - usize::from(first);
+                if kids
+                    .iter()
+                    .all(|&(_, b, _)| is_free(&taken, base + usize::from(b)))
+                {
+                    break base;
+                }
+                f = free_from(&taken, f + 1);
+            };
+            trie.slots[parent as usize].base = base as u32;
+            for &(_, b, c) in kids {
+                let s = base + usize::from(b);
+                if s >= trie.slots.len() {
+                    trie.slots.resize(s + 1, VACANT);
+                    taken.resize(s / 64 + 1, 0);
+                }
+                taken[s / 64] |= 1 << (s % 64);
+                trie.slots[s].check = parent;
+                trie.slots[s].phrase = ends[c as usize];
+                order.push((c, s as u32));
+            }
+            lowest = free_from(&taken, lowest);
         }
         trie
     }
@@ -427,11 +526,12 @@ impl Trie {
         Self::of(std::iter::empty())
     }
 
+    /// The child of `node` on `b`, with the phrase it ends plus one.
     #[inline(always)]
-    fn step(&self, node: u32, b: u8) -> Option<u32> {
-        self.edges
-            .get(&(u64::from(node) << 8 | u64::from(b)))
-            .copied()
+    fn step(&self, node: u32, b: u8) -> Option<(u32, u32)> {
+        let slot = self.slots[node as usize].base as usize + usize::from(b);
+        let child = self.slots.get(slot)?;
+        (child.check == node).then_some((slot as u32, child.phrase))
     }
 }
 
@@ -480,11 +580,11 @@ fn parse(
         if let Some(prices) = prices {
             let mut node = 0u32;
             for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
-                let Some(c) = trie.step(node, b) else {
+                let Some((c, phrase)) = trie.step(node, b) else {
                     break;
                 };
                 node = c;
-                let id = trie.phrase[node as usize] as usize;
+                let id = phrase as usize;
                 if id == 0 || id > prices.limit {
                     continue;
                 }
