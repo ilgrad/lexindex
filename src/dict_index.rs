@@ -4231,6 +4231,43 @@ mod tests {
         }
     }
 
+    /// `README.md` and `docs/design.md` both promise that the same keys give the same blob on any
+    /// thread count, and the phrase miner broke it: its candidate prune keeps what is above a
+    /// pool's own median, so a pool that held twice the shards kept a different half and the
+    /// vocabulary -- and every coded suffix under it -- came out different. Measured before the
+    /// fix, one to sixteen cores gave three blobs of a million urls and six of a million paths.
+    ///
+    /// The prune is what has to fire for the promise to be tested at all, which is why the pool is
+    /// held down to a size a test can reach: keys drawn from a handful of spans so the miner has
+    /// candidates, one block a shard so there are pools to split, and every thread count from one
+    /// to more than there are pools.
+    #[test]
+    fn the_same_keys_give_the_same_blob_on_any_thread_count() {
+        let _shards = Shards::of(1);
+        let _pool = crate::phrase::Pool::of(48);
+        let spans = [
+            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
+        ];
+        let mut keys: Vec<String> = (0..2048u32)
+            .map(|i| {
+                let (a, b, c) = (i as usize % 7, (i as usize / 7) % 7, (i as usize / 49) % 7);
+                format!("{}/{}/{}/{i:06}", spans[a], spans[b], spans[c])
+            })
+            .collect();
+        keys.sort();
+        keys.dedup();
+        let one = DictIndex::from_sorted_on(&keys, 32, micro_for(32), 1)
+            .expect("a build of distinct sorted keys cannot fail")
+            .to_bytes();
+        for threads in [2usize, 3, 5, 8, 24] {
+            let many = DictIndex::from_sorted_on(&keys, 32, micro_for(32), threads)
+                .expect("a build of distinct sorted keys cannot fail")
+                .to_bytes();
+            assert_eq!(many.len(), one.len(), "{threads} threads");
+            assert!(many == one, "{threads} threads");
+        }
+    }
+
     /// A corpus of four characters is what the packed alphabet exists for: it must be the codec
     /// the build settles on, every key must still answer, and the blob must survive a round trip —
     /// the codes of a run are continuous, so an entry starts mid-byte and a reader that assumed

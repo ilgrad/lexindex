@@ -54,8 +54,10 @@ All notable changes to this project are documented here. The format follows
   span once would save, and what decides the format is whether a shard would rather spend those byte
   codes on symbols; on a million opaque keys 40 000 spans clear the first bar and no shard takes
   one. Each shard then decides for itself and has its table retrained on what its phrases did not
-  cover, and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls
-  9.44 → 7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61.
+  cover, and a blob no shard bought stores no dictionary. The vocabulary is a function of the keys
+  alone — the miner's candidate pools are a constant rather than the thread count, so the same keys
+  give byte-identical blobs on machines with one core and sixteen. At block 1024 over a million
+  keys: urls 9.44 → 7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61.
 
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
   --index dict`, sizes being a function of the keys): urls 11.25 → **7.48** bytes a key, paths 14.67
@@ -63,8 +65,8 @@ All notable changes to this project are documented here. The format follows
   **6.22** in Chinese, DNA 7.70 → **4.34**, opaque ids 13.80 → **10.36**, numeric 2.13 → **0.98**,
   identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
   479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**. The build pays for it: at a
-  million keys the CLI's wall clock is 1.7–1.8× (urls 0.65 → 1.17 s, paths 0.85 → 1.46) and its peak
-  1.8–1.9×; the word list, whose shards buy no phrases, is 1.3× and 1.4×.
+  million keys the CLI's wall clock is 1.7× (urls 0.65 → 1.11 s, paths 0.85 → 1.41) and its peak
+  1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and 1.3×.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written

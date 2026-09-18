@@ -60,6 +60,46 @@ const PIECES_PER_PHRASE: usize = 4;
 /// almost all are seen once: past this the map drops everything at or below a rising floor, which
 /// is what keeps a build of a million paths inside a gigabyte.
 const GAIN_CAP: usize = 1 << 18;
+
+#[cfg(test)]
+thread_local! {
+    /// Candidates a pool holds while a test is running; zero is the real rule. Read on the thread
+    /// that builds, since the prune itself runs on the mining threads.
+    static GAIN_OVERRIDE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Holds the pool size for as long as it is alive, and puts the real rule back after. What the
+/// prune keeps is what the vocabulary is, so a test that wants the prune at all needs it to fire
+/// on a corpus a test can afford.
+#[cfg(test)]
+pub(crate) struct Pool;
+
+#[cfg(test)]
+impl Pool {
+    pub(crate) fn of(candidates: usize) -> Self {
+        GAIN_OVERRIDE.with(|c| c.set(candidates));
+        Pool
+    }
+}
+
+#[cfg(test)]
+impl Drop for Pool {
+    fn drop(&mut self) {
+        GAIN_OVERRIDE.with(|c| c.set(0));
+    }
+}
+
+/// [`GAIN_CAP`], or what a test asked for instead. Read on the thread that builds.
+fn gain_cap() -> usize {
+    #[cfg(test)]
+    {
+        let over = GAIN_OVERRIDE.with(std::cell::Cell::get);
+        if over != 0 {
+            return over;
+        }
+    }
+    GAIN_CAP
+}
 /// Pools the shards are mined in, which is what [`GAIN_CAP`] applies to and therefore what decides
 /// the vocabulary. A constant, and deliberately not the thread count: a pool keeps the candidates
 /// above its own median, so a pool that held twice as many shards kept a different half of them,
@@ -849,6 +889,7 @@ fn round<'a>(
     share: &[(&[&'a [u8]], &Table)],
     trie: &Trie,
     phrases: &[Vec<u8>],
+    cap: usize,
     gain: &mut [Gains<'a>],
 ) {
     let (mut w, mut alone) = (Scratch::default(), Scratch::default());
@@ -899,7 +940,7 @@ fn round<'a>(
                     }
                 }
             }
-            if gain.iter().map(Map::len).sum::<usize>() > GAIN_CAP {
+            if gain.iter().map(Map::len).sum::<usize>() > cap {
                 // Half by gain, not everything under a rising floor: on a corpus where most spans
                 // are seen twice a floor of one takes almost all of them, and once it has risen a
                 // span first met late can never clear it.
@@ -1126,6 +1167,7 @@ pub(crate) fn mine(
     // follow the machine where the pools may not.
     let parts = pools.min(threads.max(1)).max(1);
     let per_thread = pools.div_ceil(threads.max(1)).max(1);
+    let held = gain_cap();
     let mut phrases: Vec<Vec<u8>> = Vec::new();
     for r in 0..ROUNDS {
         let trie = Trie::of(phrases.iter().map(Vec::as_slice));
@@ -1140,7 +1182,7 @@ pub(crate) fn mine(
                             .map(|chunk| {
                                 let mut gain: Vec<Gains<'_>> =
                                     (0..parts).map(|_| Map::default()).collect();
-                                round(chunk, trie, phrases, &mut gain);
+                                round(chunk, trie, phrases, held, &mut gain);
                                 gain
                             })
                             .collect::<Vec<_>>()
