@@ -134,14 +134,9 @@ fn top(w: u32) -> usize {
 }
 
 impl Code {
-    /// The cheaper of the two codes over `runs`, the runs of one group.
-    pub(crate) fn choose(runs: &[&[(usize, usize)]]) -> Self {
-        Self::choose_cost(runs).0
-    }
-
-    /// [`choose`](Self::choose) with what the winner costs in bytes: its own, its headers' and the
-    /// escapes it leaves. A caller pricing one shape of the data against another needs the number,
-    /// and it falls out of the same search.
+    /// The cheaper of the two codes over `runs`, the runs of one group, with what the winner costs
+    /// in bytes: its own, its headers' and the escapes it leaves. A caller pricing one shape of the
+    /// data against another needs the number, and it falls out of the same search.
     pub(crate) fn choose_cost(runs: &[&[(usize, usize)]]) -> (Self, usize) {
         let frame: usize = runs
             .iter()
@@ -157,13 +152,15 @@ impl Code {
     /// The learned table at the width that codes `runs` smallest, with what it costs including its
     /// own bytes; `None` when no width beats naming nothing.
     pub(crate) fn best_table(runs: &[&[(usize, usize)]]) -> Option<(Self, usize)> {
-        let mut counts: std::collections::HashMap<(usize, usize), usize> =
-            std::collections::HashMap::new();
+        // A pair the table can name is two bytes, so its count lives in an array over the key the
+        // table stores: the pairs are counted once for every codec priced, and hashing them into a
+        // map was most of the count.
+        let mut counts = vec![0u32; 1 << 16];
         let mut entries = 0usize;
         for pair in runs.iter().copied().flatten() {
             entries += 1;
             if pair.0 <= FIELD_MAX && pair.1 <= FIELD_MAX {
-                *counts.entry(*pair).or_default() += 1;
+                counts[(pair.0 << 8) | pair.1] += 1;
             }
         }
         if entries == 0 {
@@ -172,8 +169,13 @@ impl Code {
         // A pair is worth a table slot for what its escapes would have cost, so the slots go to the
         // pairs whose frequency times escape length is largest, not to the commonest pairs.
         let mut ranked: Vec<((usize, usize), usize)> = counts
-            .into_iter()
-            .map(|(pair, n)| (pair, n * escape_len(pair.0, pair.1)))
+            .iter()
+            .enumerate()
+            .filter(|&(_, &n)| n > 0)
+            .map(|(key, &n)| {
+                let pair = (key >> 8, key & 0xFF);
+                (pair, n as usize * escape_len(pair.0, pair.1))
+            })
             .collect();
         ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         let escaped_all: usize = ranked.iter().map(|&(_, saved)| saved).sum();
@@ -249,22 +251,45 @@ impl Code {
     }
 }
 
+/// A code as its writers need it: under a table, the slot for every pair the table could name —
+/// `(lcp << 8) | len` to slot, `u16::MAX` where it names none. Built once for a group, because a
+/// writer is made for every run, and the map of the table each one built cost more than writing
+/// the run.
+pub(crate) struct Inverse<'a> {
+    code: &'a Code,
+    slots: Vec<u16>,
+}
+
+impl<'a> Inverse<'a> {
+    pub(crate) fn of(code: &'a Code) -> Self {
+        let mut slots = Vec::new();
+        if let Code::Table { pairs, .. } = code {
+            slots = vec![u16::MAX; 1 << 16];
+            for (i, &p) in pairs.iter().enumerate() {
+                slots[usize::from(p)] = i as u16;
+            }
+        }
+        Self { code, slots }
+    }
+}
+
 /// One run's header stream as it is written: the prologue the frame needs, then `count` codes at a
 /// fixed width.
-pub(crate) struct Writer {
+pub(crate) struct Writer<'a> {
     bits: u64,
     used: u32,
     out: Vec<u8>,
     width: u32,
     /// `Some((base_lcp, wl, base_len, wn))` under a frame, `None` under a table.
     frame: Option<(usize, u32, usize, u32)>,
-    table: std::collections::HashMap<u16, usize>,
+    /// The table's slots by pair under a table, empty under a frame.
+    slots: &'a [u16],
 }
 
-impl Writer {
+impl<'a> Writer<'a> {
     /// A writer for one run of `pairs` under `code`, its prologue already in the stream.
-    pub(crate) fn new(code: &Code, pairs: &[(usize, usize)]) -> Self {
-        match code {
+    pub(crate) fn new(code: &'a Inverse<'_>, pairs: &[(usize, usize)]) -> Self {
+        match code.code {
             Code::Frame => {
                 let (wl, wn, _) = frame_widths(pairs);
                 let (bl, bn) = bases(pairs);
@@ -278,16 +303,16 @@ impl Writer {
                     out,
                     width: wl + wn,
                     frame: Some((bl, wl, bn, wn)),
-                    table: std::collections::HashMap::new(),
+                    slots: &[],
                 }
             }
-            Code::Table { w, pairs } => Self {
+            Code::Table { w, .. } => Self {
                 bits: 0,
                 used: 0,
                 out: Vec::new(),
                 width: *w,
                 frame: None,
-                table: pairs.iter().enumerate().map(|(i, &p)| (p, i)).collect(),
+                slots: &code.slots,
             },
         }
     }
@@ -306,16 +331,17 @@ impl Writer {
                 }
             }
             None => {
-                let named = (lcp <= FIELD_MAX && len <= FIELD_MAX)
-                    .then(|| self.table.get(&(((lcp as u16) << 8) | len as u16)).copied())
-                    .flatten();
-                match named {
-                    Some(i) => i,
-                    None => {
-                        put_varint(sfx, lcp);
-                        put_varint(sfx, len);
-                        top(self.width)
-                    }
+                let slot = if lcp <= FIELD_MAX && len <= FIELD_MAX {
+                    self.slots[(lcp << 8) | len]
+                } else {
+                    u16::MAX
+                };
+                if slot == u16::MAX {
+                    put_varint(sfx, lcp);
+                    put_varint(sfx, len);
+                    top(self.width)
+                } else {
+                    usize::from(slot)
                 }
             }
         };
@@ -463,14 +489,15 @@ mod tests {
     /// Codes a group's runs and reads every pair back.
     fn round_trip(runs: &[Vec<(usize, usize)>]) -> Code {
         let borrowed: Vec<&[(usize, usize)]> = runs.iter().map(Vec::as_slice).collect();
-        let code = Code::choose(&borrowed);
+        let code = Code::choose_cost(&borrowed).0;
         let mut bytes = Vec::new();
         code.write_to(&mut bytes);
         let (read, rest) = Code::read(&bytes).expect("a group this crate wrote");
         assert!(rest.is_empty());
         assert_eq!(read, code);
+        let inverse = Inverse::of(&code);
         for pairs in runs.iter().filter(|r| !r.is_empty()) {
-            let mut writer = Writer::new(&code, pairs);
+            let mut writer = Writer::new(&inverse, pairs);
             let mut sfx = Vec::new();
             for &(lcp, len) in pairs {
                 writer.push(lcp, len, &mut sfx);
@@ -528,7 +555,7 @@ mod tests {
 
     #[test]
     fn a_group_of_empty_runs_has_no_table() {
-        assert_eq!(Code::choose(&[&[][..], &[][..]]), Code::Frame);
+        assert_eq!(Code::choose_cost(&[&[][..], &[][..]]).0, Code::Frame);
     }
 
     #[test]

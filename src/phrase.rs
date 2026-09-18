@@ -15,6 +15,7 @@
 //! never earn their dictionary there.
 
 use crate::fsst::{self, ESCAPE, Table};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -356,10 +357,10 @@ impl Span {
     }
 }
 
-/// A hasher for keys that are already hashes: one multiply, since the map is keyed on
-/// [`span_hash`] and on trie edges.
+/// A hasher for keys that are already hashes, or are a word: one multiply, since the map is keyed
+/// on [`span_hash`], on trie edges, and on the symbol trainer's symbols packed in a word.
 #[derive(Default)]
-struct Mix(u64);
+pub(crate) struct Mix(u64);
 
 impl Hasher for Mix {
     fn write(&mut self, bytes: &[u8]) {
@@ -384,7 +385,10 @@ impl Hasher for Mix {
     }
 }
 
-type Map<K, V> = HashMap<K, V, BuildHasherDefault<Mix>>;
+pub(crate) type Map<K, V> = HashMap<K, V, BuildHasherDefault<Mix>>;
+
+/// One thread's gains in one merge partition: what a span saves, and one place it occurs.
+type Gains<'a> = Map<u128, (u64, &'a [u8])>;
 
 /// The phrases, as a parse walks them: one edge a byte, so a position that starts no phrase costs
 /// one lookup and stops.
@@ -617,12 +621,14 @@ pub(crate) fn settle(
     (best.0, best.1)
 }
 
-/// One round's gains over one thread's share of the samples, in bytes saved.
+/// One round's gains over one thread's share of the samples, in bytes saved, into `gain` — one
+/// map a merge partition, by [`part_of`], so that the partitions can be merged across threads
+/// without a thread's map being walked or copied.
 fn round<'a>(
     share: &[(&[&'a [u8]], &Table)],
     trie: &Trie,
     phrases: &[Vec<u8>],
-    gain: &mut Map<u128, (u64, &'a [u8])>,
+    gain: &mut [Gains<'a>],
 ) {
     let (mut w, mut alone) = (Scratch::default(), Scratch::default());
     for &(sample, table) in share {
@@ -664,22 +670,67 @@ fn round<'a>(
                         0
                     };
                     if saving > 0 {
-                        gain.entry(hash.key(bytes)).or_insert((0, span)).0 += saving;
+                        let key = hash.key(bytes);
+                        gain[part_of(key, gain.len())]
+                            .entry(key)
+                            .or_insert((0, span))
+                            .0 += saving;
                     }
                 }
             }
-            if gain.len() > GAIN_CAP {
+            if gain.iter().map(Map::len).sum::<usize>() > GAIN_CAP {
                 // Half by gain, not everything under a rising floor: on a corpus where most spans
                 // are seen twice a floor of one takes almost all of them, and once it has risen a
                 // span first met late can never clear it.
-                let mut gains: Vec<u64> = gain.values().map(|(g, _)| *g).collect();
+                let mut gains: Vec<u64> = gain
+                    .iter()
+                    .flat_map(|part| part.values().map(|(g, _)| *g))
+                    .collect();
                 let half = gains.len() / 2;
                 let (_, &mut median, _) = gains.select_nth_unstable(half);
-                gain.retain(|_, (g, _)| *g > median);
-                gain.shrink_to_fit();
+                for part in gain.iter_mut() {
+                    part.retain(|_, (g, _)| *g > median);
+                    part.shrink_to_fit();
+                }
             }
         }
     }
+}
+
+/// The merge partition a candidate's key falls in, out of `parts`: the top bits of its second
+/// lane, which is a multiply-rotate hash, scaled.
+fn part_of(key: u128, parts: usize) -> usize {
+    ((((key as u64) >> 32) * parts as u64) >> 32) as usize
+}
+
+/// How the candidates rank: by what one saves, then by its bytes, so that a tie falls the same
+/// way on every run.
+fn rank(x: &(u64, &[u8]), y: &(u64, &[u8])) -> Ordering {
+    y.0.cmp(&x.0).then_with(|| x.1.cmp(y.1))
+}
+
+/// Keeps the `take` candidates that rank first, in no particular order: the ranking is total, so
+/// they are the same `take` a sort would have put first, found in one pass instead of a sort.
+fn cut(ranked: &mut Vec<(u64, &[u8])>, take: usize) {
+    if ranked.len() > take {
+        ranked.select_nth_unstable_by(take, rank);
+        ranked.truncate(take);
+    }
+}
+
+/// One partition's candidates summed over every thread's map of it, cut to the `take` that rank
+/// first — which is all a partition can contribute to the round's first `take`.
+fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, &[u8])> {
+    let mut maps = maps.into_iter();
+    let mut gain = maps.next().unwrap_or_default();
+    for map in maps {
+        for (k, (g, s)) in map {
+            gain.entry(k).or_insert((0, s)).0 += g;
+        }
+    }
+    let mut ranked: Vec<(u64, &[u8])> = gain.into_values().collect();
+    cut(&mut ranked, take);
+    ranked
 }
 
 /// Whether any of a spread of shards would buy `phrases` — asked after the first round, because
@@ -840,16 +891,19 @@ pub(crate) fn mine(
     // A gain counted on the sample is one key in `scale` of the blob's.
     let scale = (keys / taken_pieces.max(1)).max(1) as u64;
     let share = pairs.len().div_ceil(threads.max(1)).max(1);
+    // As many merge partitions as mining threads: each thread's gains are kept in one map a
+    // partition, so the merge is one thread a partition over maps nobody else touches.
+    let parts = pairs.len().div_ceil(share);
     let mut phrases: Vec<Vec<u8>> = Vec::new();
     for r in 0..ROUNDS {
         let trie = Trie::of(phrases.iter().map(Vec::as_slice));
-        let mut maps: Vec<Map<u128, (u64, &[u8])>> = std::thread::scope(|scope| {
+        let maps: Vec<Vec<Gains<'_>>> = std::thread::scope(|scope| {
             let running: Vec<_> = pairs
                 .chunks(share)
                 .map(|chunk| {
                     let (trie, phrases) = (&trie, &phrases);
                     scope.spawn(move || {
-                        let mut gain = Map::default();
+                        let mut gain: Vec<Gains<'_>> = (0..parts).map(|_| Map::default()).collect();
                         round(chunk, trie, phrases, &mut gain);
                         gain
                     })
@@ -860,17 +914,34 @@ pub(crate) fn mine(
                 .map(|h| h.join().expect("mining a share cannot panic"))
                 .collect()
         });
-        let mut gain = maps.pop().unwrap_or_default();
-        for map in maps.drain(..) {
-            for (k, (g, s)) in map {
-                gain.entry(k).or_insert((0, s)).0 += g;
-            }
-        }
-        let mut ranked: Vec<(u64, &[u8])> = gain.into_values().collect();
-        ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(y.1)));
         // Every round but the last carries the cap, because a round that parses under a vocabulary
         // of millions scores whole rare spans as one phrase and ranks length above reuse.
         let take = if r + 1 == ROUNDS { pool } else { cap };
+        // The union is never built and never sorted whole: each partition is merged on its own
+        // thread and cut to `take`, the cuts are cut again, and only those are ranked. The ranking
+        // is total, so the survivors are the union's first `take`. Merging every map into one and
+        // sorting the union was most of the miner's wall clock — the sort's tie-break reads the
+        // span's bytes, a cache miss a compare, and ties on the gain are the common case.
+        let mut by_part: Vec<Vec<Gains<'_>>> =
+            (0..parts).map(|_| Vec::with_capacity(maps.len())).collect();
+        for thread in maps {
+            for (p, part) in thread.into_iter().enumerate() {
+                by_part[p].push(part);
+            }
+        }
+        let tops: Vec<Vec<(u64, &[u8])>> = std::thread::scope(|scope| {
+            let running: Vec<_> = by_part
+                .into_iter()
+                .map(|part| scope.spawn(move || merge(part, take)))
+                .collect();
+            running
+                .into_iter()
+                .map(|h| h.join().expect("merging a partition cannot panic"))
+                .collect()
+        });
+        let mut ranked = tops.concat();
+        cut(&mut ranked, take);
+        ranked.sort_unstable_by(rank);
         phrases = ranked
             .iter()
             .take(take)

@@ -13,7 +13,7 @@
 //! a hash of the first three bytes to at most one longer symbol, so a position costs one eight-byte
 //! load and at most two lookups. Decoding is one eight-byte store per code.
 
-use std::collections::HashMap;
+use crate::phrase::Map;
 
 pub(crate) const ESCAPE: u8 = 255;
 const MAX_SYMBOLS: usize = 255;
@@ -177,11 +177,14 @@ impl Table {
                     i += len;
                 }
             }
-            let mut gain: HashMap<Vec<u8>, u64> = HashMap::new();
+            // A candidate is at most eight bytes, so its gain is keyed on its word and its
+            // length: keyed on a `Vec` of its bytes, the allocations were a third of the trainer.
+            let mut gain: Map<(u64, u8), u64> = Map::default();
             for (code, &c) in count1.iter().enumerate() {
                 if c > 0 {
                     let (w, len) = bytes_of(code);
-                    *gain.entry(w[..len].to_vec()).or_default() += u64::from(c) * len as u64;
+                    *gain.entry((u64::from_le_bytes(w), len as u8)).or_default() +=
+                        u64::from(c) * len as u64;
                 }
             }
             for a in 0..space {
@@ -192,15 +195,18 @@ impl Table {
                     }
                     let ((wa, la), (wb, lb)) = (bytes_of(a), bytes_of(b));
                     if la + lb <= MAX_LEN {
-                        let mut s = wa[..la].to_vec();
-                        s.extend_from_slice(&wb[..lb]);
-                        *gain.entry(s).or_default() += u64::from(c) * (la + lb) as u64;
+                        let word = u64::from_le_bytes(wa) | u64::from_le_bytes(wb) << (8 * la);
+                        *gain.entry((word, (la + lb) as u8)).or_default() +=
+                            u64::from(c) * (la + lb) as u64;
                     }
                 }
             }
-            let mut ranked: Vec<(u64, Vec<u8>)> = gain.into_iter().map(|(s, g)| (g, s)).collect();
-            ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
-            table = Table::reachable(ranked.iter().map(|(_, s)| s.as_slice()), max);
+            let mut ranked: Vec<(u64, [u8; 8], usize)> = gain
+                .into_iter()
+                .map(|((word, len), g)| (g, word.to_le_bytes(), usize::from(len)))
+                .collect();
+            ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1[..x.2].cmp(&y.1[..y.2])));
+            table = Table::reachable(ranked.iter().map(|(_, s, len)| &s[..*len]), max);
         }
         table
     }

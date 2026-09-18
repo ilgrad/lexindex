@@ -762,7 +762,8 @@ struct Part {
     codecs: Vec<Codec>,
 }
 
-/// The runs of one group — one kind of run over a whole shard — as [`Code::choose`] reads them.
+/// The runs of one group — one kind of run over a whole shard — as [`Code::choose_cost`] reads
+/// them.
 type Group<'a> = Vec<&'a [(usize, usize)]>;
 
 /// One shard's runs as they are collected: every entry's `(lcp, len)` and coded suffix, end to end
@@ -918,11 +919,13 @@ impl Collected {
     }
 
     /// What the shard would take under `codec`: the two header codes' bytes, the escapes they
-    /// leave, and the coded suffixes.
-    fn price(&self, codec: &Codec, pairs: &mut Vec<(usize, usize)>) -> usize {
+    /// leave, and the coded suffixes — with the two codes, the microblocks' first, so that the
+    /// codec that wins is written under the codes it was priced with rather than chosen again.
+    fn price(&self, codec: &Codec, pairs: &mut Vec<(usize, usize)>) -> (usize, (Code, Code)) {
         self.pairs(codec, pairs);
         let (micro, restart) = self.groups(pairs);
-        let headers = Code::choose_cost(&micro).1 + Code::choose_cost(&restart).1;
+        let (micro, restart) = (Code::choose_cost(&micro), Code::choose_cost(&restart));
+        let headers = micro.1 + restart.1;
         let suffixes = match codec {
             Codec::Symbols { split: Some(_), .. } => self.tier.len(),
             Codec::Symbols { .. } => self.coded.len(),
@@ -939,7 +942,7 @@ impl Collected {
                 bytes
             }
         };
-        headers + suffixes
+        (headers + suffixes, (micro.0, restart.0))
     }
 
     /// The codec the shard is cheapest under, with its pairs and its two header codes. The symbol
@@ -956,13 +959,14 @@ impl Collected {
             table: table.clone(),
             split: None,
         };
-        let mut bytes = self.price(&best, pairs);
+        let (mut bytes, mut codes) = self.price(&best, pairs);
         if let Some((alphabet, _)) = Alphabet::of(&self.freq) {
             let alternative = Codec::Packed(alphabet);
-            let packed = self.price(&alternative, pairs);
+            let (packed, packed_codes) = self.price(&alternative, pairs);
             if packed < bytes {
                 best = alternative;
                 bytes = packed;
+                codes = packed_codes;
             }
         }
         if phrases.dict.len() > 0 && self.entries() > 0 {
@@ -981,14 +985,16 @@ impl Collected {
                     table: cut,
                     split: Some(split),
                 };
-                if self.price(&tier, pairs) < bytes {
+                let (tiered, tiered_codes) = self.price(&tier, pairs);
+                if tiered < bytes {
                     best = tier;
+                    codes = tiered_codes;
                 }
             }
         }
+        // The pairs are left as the winner's: the codec priced last is not always the one kept.
         self.pairs(&best, pairs);
-        let (micro, restart) = self.groups(pairs);
-        (best, (Code::choose(&micro), Code::choose(&restart)))
+        (best, codes)
     }
 }
 
@@ -1018,7 +1024,7 @@ impl Phrases {
 /// Write one run: its headers under `code`, then its suffixes, each preceded by the two varints of
 /// the pair the code could not name.
 fn write_run(
-    code: &Code,
+    code: &paircode::Inverse,
     codec: &Codec,
     collected: &Collected,
     pairs: &[(usize, usize)],
@@ -1118,6 +1124,10 @@ impl Shard<'_> {
         sink: &mut impl FnMut(&[u8]) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
         let (mut first, mut r) = (0usize, 0usize);
+        let codes = (
+            paircode::Inverse::of(&self.codes.0),
+            paircode::Inverse::of(&self.codes.1),
+        );
         for &runs in &self.collected.per_block {
             blocks.push(*at);
             scratch.starts.clear();
@@ -1129,7 +1139,7 @@ impl Shard<'_> {
                 if k > 0 {
                     scratch.starts.push(*at + scratch.block.len() as u64);
                 }
-                let code = if k == 0 { &self.codes.1 } else { &self.codes.0 };
+                let code = if k == 0 { &codes.1 } else { &codes.0 };
                 write_run(
                     code,
                     self.codec,
@@ -4556,11 +4566,12 @@ mod tests {
         let pairs = [(14usize, 14usize), (15, 3)];
         let mut sfx = Vec::from([b'a'; 14]);
         sfx.extend_from_slice(b"bcd");
-        let code = Code::choose(&[&pairs[..]]);
+        let code = Code::choose_cost(&[&pairs[..]]).0;
         // The run laid out by hand — the production writer, interleaved here rather than through
         // a whole shard, because what is under test is the reader and its bounds.
         let data = {
-            let mut writer = paircode::Writer::new(&code, &pairs);
+            let inverse = paircode::Inverse::of(&code);
+            let mut writer = paircode::Writer::new(&inverse, &pairs);
             let (mut out, mut body) = (Vec::new(), Vec::new());
             let mut off = 0;
             for &(l, len) in &pairs {
