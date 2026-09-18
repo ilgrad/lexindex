@@ -191,6 +191,25 @@ fn sample_at(key: &[u8], g: usize) -> u64 {
     fsst::word_at(key, g).swap_bytes()
 }
 
+/// The end of the run of samples equal to `s` that starts at `lo`, the first sample not below it.
+/// A second binary search over all the samples would pay their dependent loads again for a run
+/// that is empty on most probes; this pays one compare for that case and gallops through a run,
+/// so it is logarithmic in the run's length rather than in the samples'.
+#[inline]
+fn past_equal(samples: &[u64], lo: usize, s: u64) -> usize {
+    if samples.get(lo) != Some(&s) {
+        return lo;
+    }
+    let mut hi = lo + 1;
+    let mut step = 1;
+    while samples.get(hi + step - 1) == Some(&s) {
+        hi += step;
+        step *= 2;
+    }
+    let end = (hi + step - 1).min(samples.len());
+    hi + samples[hi..end].partition_point(|&x| x <= s)
+}
+
 /// Bytes every head in `heads` shares. They are sorted, so it is what the first and the last share
 /// and nothing else has to be read.
 fn common_head(heads: &[u8], ends: &Offsets, nb: usize) -> usize {
@@ -578,9 +597,13 @@ struct Entries<'a> {
     sfx: &'a [u8],
     at: usize,
     count: usize,
-    /// Where the next entry's coded suffix starts, in bits — a multiple of eight under a symbol
-    /// table, and any bit under a packed alphabet.
-    off: usize,
+    /// The bit the next header's code starts at.
+    bit: usize,
+    /// Where the suffixes of the entries since the last escape start, in bits, and the units the
+    /// entries since have taken: the cursor is the two combined, so that ruling an entry out by
+    /// its header costs one add, and the multiply and the clamp are paid by the few that are read.
+    base: usize,
+    sum: usize,
     unit: u32,
 }
 
@@ -593,11 +616,13 @@ impl<'a> Entries<'a> {
         let entries = count.saturating_sub(1);
         match paircode::Reader::of(code, data, entries) {
             Some((codes, sfx)) => Self {
+                bit: codes.first_bit(),
                 codes,
                 sfx,
                 at: 0,
                 count: entries,
-                off: 0,
+                base: 0,
+                sum: 0,
                 unit: codec.unit(),
             },
             None => Self::empty(),
@@ -612,7 +637,9 @@ impl<'a> Entries<'a> {
             sfx: &[],
             at: 0,
             count: 0,
-            off: 0,
+            bit: 0,
+            base: 0,
+            sum: 0,
             unit: 8,
         }
     }
@@ -624,20 +651,32 @@ impl<'a> Entries<'a> {
         if self.at >= self.count {
             return None;
         }
-        let code = self.codes.code(self.at)?;
+        let code = self.codes.code_at(self.bit);
+        self.bit += self.codes.width() as usize;
         self.at += 1;
         match self.codes.pair(code) {
             Some(pair) => Some(pair),
             None => {
                 // A pair no code could name continues as two varints at the head of its own
                 // suffix, on a byte, so that they read the same whatever width the codes are.
-                let mut at = self.off.div_ceil(8);
+                let mut at = self.off().div_ceil(8);
                 let lcp = varint_at(self.sfx, &mut at)?;
                 let len = varint_at(self.sfx, &mut at)?;
-                self.off = at * 8;
+                self.base = at * 8;
+                self.sum = 0;
                 Some((lcp, len))
             }
         }
+    }
+
+    /// Where the next entry's coded suffix starts, in bits — a multiple of eight under a symbol
+    /// table, and any bit under a packed alphabet. A stream this crate did not write ends it at
+    /// the end of the suffixes.
+    #[inline(always)]
+    fn off(&self) -> usize {
+        self.base
+            .saturating_add(self.sum.saturating_mul(self.unit as usize))
+            .min(self.sfx.len() * 8)
     }
 
     /// The suffix of the entry [`head`](Self::head) just read. A stream this crate did not write
@@ -654,7 +693,7 @@ impl<'a> Entries<'a> {
     fn at_off(&self, len: usize) -> Piece<'a> {
         Piece {
             stream: self.sfx,
-            start: self.off,
+            start: self.off(),
             units: len,
         }
     }
@@ -663,8 +702,7 @@ impl<'a> Entries<'a> {
     /// out, and the reason the two streams are apart.
     #[inline(always)]
     fn skip(&mut self, len: usize) {
-        let bits = len.saturating_mul(self.unit as usize);
-        self.off = self.off.saturating_add(bits).min(self.sfx.len() * 8);
+        self.sum = self.sum.saturating_add(len);
     }
 }
 
@@ -692,15 +730,15 @@ fn split_run(code: &Code, codec: &Codec, data: &[u8], keys: usize) -> RunSplit {
     };
     let suffixes = entries.sfx.len() as u64;
     loop {
-        let before = entries.off;
+        let before = entries.off();
         let Some((_, len)) = entries.head() else {
             break;
         };
         split.entries += 1;
-        if entries.off != before {
+        if entries.off() != before {
             // The varints start on the byte the cursor was in and end on one, whatever bit the
             // codes before them stopped at.
-            split.wide_bytes += (entries.off / 8 - before.div_ceil(8)) as u64;
+            split.wide_bytes += (entries.off() / 8 - before.div_ceil(8)) as u64;
             split.wide += 1;
         }
         entries.skip(len);
@@ -2245,7 +2283,7 @@ impl DictIndex {
             // them: the probe can only be in one of these.
             Ok(s) => {
                 let lo = self.samples.partition_point(|&x| x < s);
-                let hi = self.samples.partition_point(|&x| x <= s);
+                let hi = past_equal(&self.samples, lo, s);
                 self.head_boundary(probe, lo.saturating_sub(1), hi)
             }
             Err(l) => l,
@@ -2627,11 +2665,11 @@ impl DictIndex {
             let Some((l, len)) = entries.head() else {
                 return false;
             };
-            let at = entries.off;
-            entries.skip(len);
-            if entries.off - at != len * entries.unit as usize {
+            let at = entries.off();
+            if len.saturating_mul(entries.unit as usize) > entries.sfx.len() * 8 - at {
                 return false;
             }
+            entries.skip(len);
             while depth > 0 && stair[depth - 1].0 >= l {
                 depth -= 1;
             }

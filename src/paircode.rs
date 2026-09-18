@@ -400,20 +400,24 @@ impl<'a> Reader<'a> {
         ))
     }
 
-    /// The `i`th pair, and whether it escaped — an escaped pair's two varints sit at the head of
-    /// its own suffix, so only a walk in order can read them.
+    /// The bit the first code starts at.
+    pub(crate) fn first_bit(&self) -> usize {
+        self.at * 8
+    }
+
+    pub(crate) fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// The code whose bits start at `bit`, which a walk keeps under the headers' end.
     #[inline(always)]
-    pub(crate) fn code(&self, i: usize) -> Option<usize> {
-        let bit = self.at * 8 + i * self.width as usize;
+    pub(crate) fn code_at(&self, bit: usize) -> usize {
         let (byte, shift) = (bit / 8, bit % 8);
-        if byte >= self.hdr_end {
-            return None;
-        }
         let word = match self.data.get(byte..).and_then(|t| t.first_chunk::<8>()) {
             Some(w) => u64::from_le_bytes(*w),
             None => tail_word(self.data, byte),
         };
-        Some(((word >> shift) & ((1u64 << self.width) - 1)) as usize)
+        ((word >> shift) & ((1u64 << self.width) - 1)) as usize
     }
 
     /// The pair `code` stands for, or `None` when it is the escape.
@@ -479,7 +483,7 @@ mod tests {
             assert_eq!(reader.header_bytes(), headers);
             let mut at = 0;
             for (i, &(lcp, len)) in pairs.iter().enumerate() {
-                let c = reader.code(i).expect("a code in our own run");
+                let c = reader.code_at(reader.first_bit() + i * reader.width() as usize);
                 let got = match reader.pair(c) {
                     Some(pair) => pair,
                     None => {
