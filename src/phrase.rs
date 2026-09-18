@@ -15,6 +15,7 @@
 //! never earn their dictionary there.
 
 use crate::fsst::{self, ESCAPE, Table};
+use crate::packed::Alphabet;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -111,6 +112,10 @@ const POOLS: usize = 16;
 /// shard's, but it converges long before every sample is in: this bounds the miner's map rather
 /// than its answer.
 const PIECES: usize = 400_000;
+/// Pieces the scout round reads before the miner commits to the real ones. A sixteenth of
+/// [`PIECES`], because a span worth a dictionary entry is one the corpus repeats often enough that
+/// a sixty-fourth of a sample still holds it many times over.
+const SCOUT_PIECES: usize = 6_250;
 /// Phrases a dictionary group holds, which is what a two-byte end inside the group is enough for.
 const GROUP: usize = 256;
 /// The symbol counts a shard may keep for itself; the rest of the byte space goes to phrases. The
@@ -1037,6 +1042,91 @@ fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, &[u8])> {
     ranked
 }
 
+/// Whether every shard of a spread would rather pack its bytes than name them with symbols.
+///
+/// A phrase layer is built on the symbol table, so a shard already cheaper under a packed alphabet
+/// is one the miner's rounds are spent for nothing — and the rounds are most of the build: on a
+/// million opaque keys the first of them and the map it fills are 58 % of it, and every shard then
+/// keeps its alphabet. Asked of a spread rather than of one shard, because a corpus can hold both
+/// kinds and a blob is mined once for all of them.
+pub(crate) fn packed_only(samples: &[Vec<&[u8]>], tables: &[Table]) -> bool {
+    let step = samples.len().div_ceil(PROBE_SHARDS).max(1);
+    let trie = Trie::empty();
+    let mut w = Scratch::default();
+    let mut asked = false;
+    for (sample, table) in samples
+        .iter()
+        .step_by(step)
+        .zip(tables.iter().step_by(step))
+    {
+        let take = sample.len().div_ceil(PROBE_PIECES).max(1);
+        let probe: Vec<&[u8]> = sample.iter().copied().step_by(take).collect();
+        if probe.is_empty() {
+            continue;
+        }
+        let mut freq = [0u64; 256];
+        for piece in &probe {
+            for &b in *piece {
+                freq[b as usize] += 1;
+            }
+        }
+        let Some((_, bits)) = Alphabet::of(&freq) else {
+            return false;
+        };
+        if bits / 8 >= price(&probe, &table.encoder(), &trie, None, &mut w) {
+            return false;
+        }
+        asked = true;
+    }
+    asked
+}
+
+/// Whether a round over a fraction of the pieces finds phrases any shard would buy.
+///
+/// The rounds are the build's cost, and the first of them is most of it on a corpus that then
+/// takes no phrase at all: on a million opaque keys the miner's round and the map it fills are
+/// 58 % of the build, and [`worth`] refuses the answer. Which way that refusal goes is a question
+/// a sixteenth of the pieces answers the same way, so it is asked there first and the round over
+/// all of them is never run.
+fn scout(pairs: &[(&[&[u8]], &Table)], keys: usize, take: usize, held: usize) -> bool {
+    let total: usize = pairs.iter().map(|(s, _)| s.len()).sum();
+    let step = total.div_ceil(SCOUT_PIECES.max(1)).max(1);
+    if step == 1 {
+        // The sample is already this small, so the round it would scout costs what the scout does.
+        return true;
+    }
+    let taken: Vec<Vec<&[u8]>> = pairs
+        .iter()
+        .map(|(s, _)| s.iter().copied().step_by(step).collect())
+        .collect();
+    let small: Vec<(&[&[u8]], &Table)> = taken
+        .iter()
+        .map(Vec::as_slice)
+        .zip(pairs.iter().map(|&(_, table)| table))
+        .filter(|(s, _)| !s.is_empty())
+        .collect();
+    let pieces: usize = small.iter().map(|(s, _)| s.len()).sum();
+    if pieces == 0 {
+        return true;
+    }
+    let scale = (keys / pieces).max(1) as u64;
+    let mut gain = vec![Gains::default()];
+    round(&small, &Trie::empty(), &[], held, &mut gain);
+    let mut ranked = merge(gain, take);
+    ranked.sort_unstable_by(rank);
+    let phrases: Vec<Vec<u8>> = ranked
+        .iter()
+        .take(take)
+        .filter(|(gain, s)| gain * scale > (s.len() as u64 + 3) * STRICT)
+        .map(|(_, s)| s.to_vec())
+        .collect();
+    // Priced over the spread of shards the real round is priced over, not over the scout's own
+    // pieces: what the sample may fairly answer is which spans are worth offering, and a shard
+    // asked about a handful of its own keys answers the buying question differently than one
+    // asked about the spread -- on a million opaque keys, the wrong way round.
+    !phrases.is_empty() && worth(pairs, &phrases)
+}
+
 /// Whether any of a spread of shards would buy `phrases` — asked after the first round, because
 /// the rounds are the build's cost and a corpus can repeat spans without any of them paying.
 ///
@@ -1210,6 +1300,9 @@ pub(crate) fn mine(
     let parts = pools.min(threads.max(1)).max(1);
     let per_thread = pools.div_ceil(threads.max(1)).max(1);
     let held = gain_cap();
+    if !scout(&pairs, keys, cap, held) {
+        return Vec::new();
+    }
     let mut phrases: Vec<Vec<u8>> = Vec::new();
     for r in 0..ROUNDS {
         let trie = Trie::of(phrases.iter().map(Vec::as_slice));

@@ -1215,7 +1215,7 @@ impl Shard<'_> {
 
 /// The blob's phrases, mined from the samples the shard tables were trained on.
 fn mine_phrases(samples: &[Vec<&[u8]>], tables: &[Table], n: usize, threads: usize) -> Phrases {
-    if n < MINE_MIN {
+    if n < MINE_MIN || phrase::packed_only(samples, tables) {
         return Phrases::none();
     }
     let pool = (n / KEYS_PER_PHRASE).clamp(1 << 12, 1 << 19);
