@@ -654,10 +654,17 @@ fn parse(
     w: &mut Scratch,
 ) -> u32 {
     let n = s.len();
-    w.cost.clear();
-    w.cost.resize(n + 1, 0);
-    w.pick.clear();
-    w.pick.resize(n, (RAW, 0, 1));
+    // Grown to a high-water mark and never cleared: the walk writes `cost[i]` and `pick[i]` for
+    // every `i` below `n` before anything reads them, and reads only above `i`, so the one cell
+    // that has to start at a value is the empty tail's. Clearing the rest wrote twelve bytes a
+    // byte of every suffix the build encodes.
+    if w.cost.len() < n + 1 {
+        w.cost.resize(n + 1, 0);
+    }
+    w.cost[n] = 0;
+    if w.pick.len() < n {
+        w.pick.resize(n, (RAW, 0, 1));
+    }
     for i in (0..n).rev() {
         // The symbol table's own answer at this position, which is the longest it can match.
         let (code, len) = enc.step(fsst::word_at(s, i), n - i);
