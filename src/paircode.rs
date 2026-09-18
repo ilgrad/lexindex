@@ -370,7 +370,7 @@ impl<'a> Writer<'a> {
 /// the shift that aligns it are paid once for all of them rather than once a code. That is most of
 /// what a walk over a microblock's headers costs beyond splitting the pairs themselves.
 pub(crate) struct Reader<'a> {
-    /// The run's whole data — the headers, and past `hdr_end` the suffixes. A refill's eight-byte
+    /// The run's whole data — the headers, and past `hdr_end` the suffixes. A header's eight-byte
     /// load may run on into the suffixes, and the mask drops what it took: that keeps it one
     /// unaligned load everywhere but the run's last seven bytes, where a copy of what is left is
     /// the price of not reading past the run.
@@ -378,11 +378,6 @@ pub(crate) struct Reader<'a> {
     hdr_end: usize,
     /// The bit the next code starts at.
     bit: usize,
-    /// `data` from `bit` on as far as the last load reached, the next code at the bottom.
-    word: u64,
-    /// How many of `word`'s bits the cursor has not passed. A refill leaves at least fifty-seven,
-    /// and a code is at most thirty wide, so one load always answers the code that asked for it.
-    left: u32,
     width: u32,
     /// The all-ones code at `width`: the mask a code is read under, and the escape.
     mask: u64,
@@ -419,8 +414,6 @@ impl<'a> Reader<'a> {
             data: &[],
             hdr_end: 0,
             bit: 0,
-            word: 0,
-            left: 0,
             width: 0,
             mask: 0,
             frame: Frame::NONE,
@@ -468,8 +461,6 @@ impl<'a> Reader<'a> {
                 data,
                 hdr_end: end,
                 bit: at * 8,
-                word: 0,
-                left: 0,
                 width,
                 mask: (1u64 << width) - 1,
                 frame,
@@ -485,26 +476,14 @@ impl<'a> Reader<'a> {
     /// answer a wrong count gave when every code was addressed on its own.
     #[inline(always)]
     pub(crate) fn next_code(&mut self) -> usize {
-        if self.left < self.width {
-            self.refill();
-        }
-        let code = (self.word & self.mask) as usize;
-        self.word >>= self.width;
-        self.left -= self.width;
-        self.bit += self.width as usize;
-        code
-    }
-
-    /// The bits from the cursor on, as one load.
-    #[inline(always)]
-    fn refill(&mut self) {
-        let (byte, shift) = (self.bit / 8, (self.bit % 8) as u32);
+        let bit = self.bit;
+        self.bit = bit + self.width as usize;
+        let (byte, shift) = (bit / 8, (bit % 8) as u32);
         let word = match self.data.get(byte..byte + 8) {
             Some(w) => u64::from_le_bytes(w.try_into().expect("eight bytes")),
             None => tail_word(self.data, byte),
         };
-        self.word = word >> shift;
-        self.left = 64 - shift;
+        ((word >> shift) & self.mask) as usize
     }
 
     /// The pair `code` stands for, or `None` when it is the escape. Only a caller that does not
