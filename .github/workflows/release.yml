@@ -143,6 +143,73 @@ jobs:
           name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
           path: dist
 
+  # Free-threaded CPython has no stable ABI before 3.15 -- PEP 803 puts `abi3t` there -- so the abi3
+  # wheel above cannot load on a `3.14t` interpreter at all and `pip` falls back to the sdist.
+  # maturin sees the free-threaded interpreter, drops abi3 with a warning and builds version-specific
+  # off the same `python` feature, so no manifest changes. Its own job rather than extra cells above:
+  # the platform list differs (no cross-built macOS x86_64 -- a version-specific wheel needs the
+  # interpreter maturin is building against), and the abi3 leg that serves almost every install stays
+  # untouched.
+  wheels-freethreaded:
+    name: wheels cp314t ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest, target: x86_64, smoke: true }
+          - { runner: ubuntu-latest, target: aarch64 }
+          - { runner: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2 }
+          - { runner: ubuntu-latest, target: aarch64, manylinux: musllinux_1_2 }
+          - { runner: macos-14, target: aarch64, smoke: true }
+          - { runner: windows-latest, target: x64, smoke: true }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The manylinux/musllinux legs build inside a PyPA container that already ships
+      # /opt/python/cp314-cp314t; macOS and Windows run maturin natively and need the interpreter.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14t"
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --interpreter python3.14t
+          manylinux: ${{ matrix.platform.manylinux || 'auto' }}
+          sccache: "true"
+      # The same exercise the abi3 smoke test runs, plus the one assertion only this wheel can make:
+      # if the module ever stopped declaring `Py_MOD_GIL_NOT_USED`, CPython would switch the GIL back
+      # on at import and warn, and a green job would hide it.
+      - name: smoke test the wheel
+        if: matrix.platform.smoke
+        shell: bash
+        env:
+          PYTHON_GIL: "0"
+        run: |
+          python3.14t -m pip install --no-index --find-links dist lexindex
+          cd "$RUNNER_TEMP"
+          python3.14t - <<'EOF'
+          import sys, lexindex
+          assert not sys._is_gil_enabled(), "importing lexindex re-enabled the GIL"
+          idx = lexindex.StringIndex(["banana", "apple"])
+          assert idx.id("apple") == 0 and idx.key(1) == "banana"
+          idx.save("smoke.bix")
+          assert lexindex.StringIndex.load("smoke.bix").prefix("b") == [("banana", 1)]
+          c = lexindex.CompactHashIndex(["a", "b"])
+          assert c.contains("a")
+          assert lexindex.CompactHashIndex.from_bytes(c.to_bytes()).id("b") == c.id("b")
+          p = lexindex.PerfectHashIndex(["x", "y"])
+          p.save("smoke.bmp")
+          assert lexindex.PerfectHashIndex.load_mmap("smoke.bmp").key(p.id("y")) == "y"
+          print("smoke ok:", lexindex.__version__)
+          EOF
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-ft-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
+          path: dist
+
   sdist:
     name: sdist
     runs-on: ubuntu-latest
@@ -163,7 +230,7 @@ jobs:
   publish:
     name: publish to PyPI
     runs-on: ubuntu-latest
-    needs: [ci, asan, wheels, sdist]
+    needs: [ci, asan, wheels, wheels-freethreaded, sdist]
     if: startsWith(github.ref, 'refs/tags/')
     environment: pypi
     permissions:

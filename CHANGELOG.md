@@ -324,6 +324,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A wheel for free-threaded CPython 3.14.** The module has told CPython it does not need the GIL
+  since 0.12, and CI has run the suite on `3.14t` since then — but the published wheels are `abi3`,
+  and free-threading has no stable ABI before 3.15 (PEP 803 puts `abi3t` there), so `pip install`
+  on a `3.14t` interpreter fell through to the sdist and compiled the extension itself. It now finds
+  `lexindex-<version>-cp314-cp314t-<platform>.whl` for the same six platforms the abi3 wheel covers,
+  minus the cross-built macOS x86_64 one — a version-specific build needs the interpreter it is
+  built against, which a cross build does not have. The wheel is the same source with the same
+  guarantees, and its smoke test asserts `sys._is_gil_enabled()` is false after the import, so a
+  release cannot quietly ship a module that switches the GIL back on.
 
 - **[`Kind::answers`](https://docs.rs/lexindex/latest/lexindex/enum.Kind.html#method.answers)** is
   public: whether an index of that kind answers everything a `Needs` asks for, which is what `plan`

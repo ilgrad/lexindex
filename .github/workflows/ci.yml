@@ -201,7 +201,8 @@ jobs:
         run: |
           wheels=(dist-ft/*.whl)
           wheel="${wheels[0]}"
-          uv run --python 3.14t --no-project --with pytest --with numpy --with "$wheel" \
+          uv run --python 3.14t --no-project --with pytest --with numpy --with pyarrow \
+            --with "$wheel" \
             pytest tests/test_python.py -q
 
   # The whole library builds on 32-bit since 1.0, `mph` included, and the README says so. `check`,

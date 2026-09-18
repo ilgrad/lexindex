@@ -527,9 +527,10 @@ Verified on CPython 3.14t with eight threads. Without the lock, PyO3's borrow fl
 iterator or overlay into `RuntimeError: Already borrowed` on a free-threaded build — seven of eight
 threads failed before the fix, which is what `tests/test_python.py` now pins.
 
-The published wheels are `abi3` and free-threaded CPython has no stable ABI before 3.15, so on a
-`3.13t` / `3.14t` interpreter today the extension is built from the sdist. That build is
-version-specific, and everything above holds for it.
+Free-threaded CPython has no stable ABI before 3.15 — PEP 803 puts `abi3t` there — so the `abi3`
+wheel that serves every other interpreter cannot load on a free-threaded one. `3.14t` therefore gets
+a wheel of its own, `cp314-cp314t`, built from the same source with the same guarantees; `pip` picks
+it over the sdist. Older free-threaded builds have no wheel: PyO3 supports `3.14t` and not `3.13t`.
 
 ## Rust
 
