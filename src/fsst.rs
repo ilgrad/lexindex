@@ -38,19 +38,25 @@ fn word_of(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(w)
 }
 
-/// The eight bytes at `s[i..]` as a little-endian word, zero-padded past the end. The tail is
-/// gathered a byte at a time: a copy of a run-time length is a `memcpy` call, and this runs once
-/// per entry compared.
+/// The eight bytes at `s[i..]` as a little-endian word, zero-padded past the end.
+///
+/// The last eight bytes of a long enough slice hold every byte from `i` on, so the tail is that
+/// load shifted down rather than a gather: this runs once per entry compared, and on a short key
+/// most of the compares are in the tail. Only a slice under eight bytes long is gathered, a byte
+/// at a time — a copy of a run-time length is a `memcpy` call.
 #[inline(always)]
 pub(crate) fn word_at(s: &[u8], i: usize) -> u64 {
     match s.get(i..i + 8) {
         Some(w) => u64::from_le_bytes(w.try_into().unwrap()),
-        None => s
-            .get(i..)
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-            .fold(0, |w, (k, &b)| w | u64::from(b) << (8 * k)),
+        None => match (s.last_chunk::<8>(), i < s.len()) {
+            (Some(w), true) => u64::from_le_bytes(*w) >> (8 * (i + 8 - s.len())),
+            _ => s
+                .get(i..)
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .fold(0, |w, (k, &b)| w | u64::from(b) << (8 * k)),
+        },
     }
 }
 
