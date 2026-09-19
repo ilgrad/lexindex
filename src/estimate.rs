@@ -7,17 +7,19 @@
 //!
 //! **What is measured and what is modelled.** The sort makes `n`, the mean key length and the LCP
 //! structure exact; everything a format does with them is arithmetic. The one input no statistic
-//! gives is what the symbol table squeezes a suffix into, and that can only be read off a build —
-//! so one build of a 100 000-key sample supplies it, along with the bytes an fst spends per trie
-//! node and the bits the perfect hash spends per key. Scored against the built blob on 23 corpora
-//! of half a million to ten million keys, at each of the three priced blocks, the [`DictIndex`]
-//! estimate lands within **1.3 % median, 3.9 % at the 90th percentile and 5.1 % at worst**.
+//! gives is what the symbol table and the phrase dictionary squeeze a suffix into, and that can only
+//! be read off a build — so two 100 000-key draws supply it, both coded under the vocabulary the
+//! *corpus* would buy, along with the bytes an fst spends per trie node and the bits the perfect
+//! hash spends per key. Scored against the built blob on 23 corpora of half a million to ten
+//! million keys, at each of the three priced blocks, the [`DictIndex`] estimate lands within
+//! **1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**.
 //! [`StringIndex`] is looser — 3.0 % median, 7.6 % at the 90th percentile, and 32 % on a corpus of
 //! file paths — because an fst merges equal
 //! suffixes, and how much it merges is a property of the whole key set rather than of a sample of
-//! it. The one family past both is corpora whose mean suffix is about a byte, where the ratio read
-//! from a sample does not carry to full density, and [`Plan`] says so rather than quoting a number
-//! it does not have.
+//! it. The family the ratio carries to worst is corpora whose mean suffix is about a byte — ten
+//! million decimal ids read 4.1 % high, which is where the `DictIndex` estimate spends its 90th
+//! percentile — and [`Plan`] flags them rather than letting a ranking rest on the number it trusts
+//! least.
 //!
 //! Below the sample size there is nothing to model: the plan builds all the candidates and reports
 //! what they weigh.
@@ -30,11 +32,14 @@ use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
 
 /// Keys a sample holds. Below this the plan builds the real indexes instead of modelling them.
 const SAMPLE: usize = 100_000;
-/// How far apart the two sample sizes a rate is fitted over sit. Wide enough for the slope to be
-/// the trend and not the noise, near enough that the smaller sample is still a corpus. Measured
-/// over 23 corpora at three blocks each: at 4 the plan's worst blob is 30.5 % out, at 8 it is
-/// 23.2 % and the 90th percentile falls from 19.7 to 14.6.
-const SPREAD: usize = 8;
+/// Keys a run of the sample holds: consecutive keys of the sorted corpus, so that what the sample
+/// shares between neighbours — the `(lcp, len)` pairs a header code is learned on, the 32-back
+/// distance a restart is coded against — is the corpus's own. A uniform draw put every sampled key
+/// about `n / SAMPLE` positions from the next and read the header rate 0.51 where a million decimal
+/// ids spend 0.34, a third of that blob. Measured over run lengths 256 to 16 384 on eight corpora
+/// at three blocks: 256 leaks 1 % through the 32-back pairs that cross a run boundary, 1 024 and
+/// 4 096 price alike, and 4 096 has the better median and worst case of the two.
+const RUN: usize = 4096;
 
 /// The [`DictIndex`] blocks the plan prices. The block is a knob, not a constant — on an English
 /// word list the three named points of its curve span 2.79 to 3.23 bytes a key — so a ranking that
@@ -969,9 +974,12 @@ impl ShapeWalk {
 /// twice the sample, whatever the corpus, so the same draw serves [`plan`], which holds the sorted
 /// keys, and [`plan_file`], which never holds them at all.
 ///
-/// It is also the more accurate draw, which is not obvious: a stride over sorted keys takes one
-/// key from every prefix group whatever the group's size, and a `StringIndex` estimate read off
-/// such a sample runs 5 % low on a corpus of shared prefixes where this one lands within 0.4 %.
+/// It is the draw for everything that is a property of the whole key set: what an fst spends on
+/// a node — a stride over sorted keys takes one key from every prefix group whatever the group's
+/// size, and a `StringIndex` estimate read off such a sample runs 5 % low on a corpus of shared
+/// prefixes where this one lands within 0.4 % — and what vocabulary a corpus is worth, which a
+/// draw of consecutive keys overstates: built for the corpus's economy, [`RunSample`] read the
+/// suffix ratio 0.34 on a million paths where this draw and the blob read 0.39.
 struct HashSample<K> {
     want: usize,
     cutoff: u64,
@@ -1028,50 +1036,110 @@ impl<K: AsRef<str> + Ord> HashSample<K> {
     }
 }
 
-/// What one build of the sample at one [`DICT_BLOCKS`] entry measures. All three constants move
-/// with the block -- a block of 32 restarts eight times as often as one of 256 and carries eight
-/// times the per-block arrays -- so each priced block gets its own build rather than the default
-/// block's numbers stretched over it.
-struct DictFit {
-    block: usize,
-    /// Compressed suffix bytes over raw suffix bytes, from a `DictIndex` of the sample, with how
-    /// far it falls per e-fold of the keys.
-    ///
-    /// It does fall: the symbol tables and the phrase dictionary are both trained on what the blob
-    /// holds, so ten times the keys buy a better vocabulary for the same bytes a shard. Carried
-    /// flat from a hundred thousand keys it reads 21 % high on a million urls; fitted between two
-    /// sample sizes, 8 %.
-    ratio: f64,
-    ratio_slope: f64,
-    /// Bytes a stored entry's `(lcp, len)` pair costs, escapes included. Carried flat, unlike the
-    /// other two: a pair is coded against its shard's own distribution rather than a vocabulary the
-    /// keys keep improving, so what it costs does not trend with the corpus — it wanders. Fitted a
-    /// slope of its own it reads 0.75 bytes where the blob spends 0.34 on ten million decimal ids,
-    /// which is 42 % of that blob.
-    header: f64,
-    /// The packed per-block arrays, per block.
-    per_block: f64,
-    /// One shard's symbol table and header code, serialised.
-    table: f64,
-    /// The phrase dictionary's bytes per key. It holds the spans the corpus repeats, so it grows
-    /// with the keys and not with the shards the tables follow.
-    phrases: f64,
-    phrases_slope: f64,
-    /// Keys the fit was taken at, which is where the two slopes are zero.
-    at: f64,
+/// At most `want` keys of a stream, in `want / RUN` runs of consecutive keys.
+///
+/// A run may start at every [`RUN`]th key of the stream, and does while the key's hash is under a
+/// cutoff; when twice the wanted number of runs has opened, the cutoff drops to the median start
+/// hash and the half above it goes. The hash decides which of the aligned positions start a run,
+/// not where in the corpus they fall, so the draw is the same over the sorted keys [`plan`] holds
+/// and the merged stream [`plan_file`] walks, the same on every run over the same keys, and its
+/// resident cost is bounded by twice the sample whatever the corpus. Aligned starts never overlap,
+/// so at most one run is filling at a time.
+///
+/// It is the draw for what a blob pays per stored entry and per block, which is a property of the
+/// neighbours a key is coded against: see [`RUN`].
+struct RunSample<K> {
+    runs: usize,
+    len: usize,
+    cutoff: u64,
+    /// Keys offered so far, which is the position of the next one.
+    at: usize,
+    /// The start hash of the run the next kept key opens, decided by [`wanted`](Self::wanted).
+    opens: Option<u64>,
+    /// Every run opened and not yet dropped: its start's hash, and the keys it holds.
+    kept: Vec<(u64, Vec<K>)>,
+    /// The run still filling, as an index into `kept`.
+    open: Option<usize>,
 }
 
-impl DictFit {
-    /// The two fitted rates at `n` keys, carried along their slopes. Neither may cross zero: a
-    /// suffix that compresses to nothing and a dictionary of negative bytes are both the line
-    /// leaving the range it was fitted in.
-    fn rates(&self, n: usize) -> (f64, f64) {
-        let e = (n.max(1) as f64).ln() - self.at.ln();
-        (
-            (self.ratio + self.ratio_slope * e).max(0.0),
-            (self.phrases + self.phrases_slope * e).max(0.0),
-        )
+impl<K: AsRef<str> + Ord> RunSample<K> {
+    fn new(want: usize) -> Self {
+        let len = RUN.min(want).max(1);
+        Self {
+            runs: (want / len).max(1),
+            len,
+            cutoff: u64::MAX,
+            at: 0,
+            opens: None,
+            kept: Vec::new(),
+            open: None,
+        }
     }
+
+    /// Whether the draw keeps the next key of the stream: as the start of a run, when its position
+    /// is a multiple of the run length and its hash is under the cutoff, or as the next key of the
+    /// run still filling. Every key is offered, in order, and one this says `true` to is then
+    /// handed to [`keep`](Self::keep) — so a caller that has to copy a key to hand it over copies
+    /// only the ones that survive.
+    fn wanted(&mut self, key: &str) -> bool {
+        let at = self.at;
+        self.at += 1;
+        if at % self.len == 0 {
+            self.open = None;
+            let hash = crate::blob::hash_bytes(key.as_bytes());
+            self.opens = (hash <= self.cutoff).then_some(hash);
+            return self.opens.is_some();
+        }
+        self.open.is_some()
+    }
+
+    fn keep(&mut self, key: K) {
+        if let Some(hash) = self.opens.take() {
+            self.kept.push((hash, vec![key]));
+            self.open = Some(self.kept.len() - 1);
+            if self.kept.len() >= 2 * self.runs {
+                self.trim();
+            }
+        } else if let Some(i) = self.open {
+            self.kept[i].1.push(key);
+        }
+    }
+
+    fn push(&mut self, key: K) {
+        if self.wanted(key.as_ref()) {
+            self.keep(key);
+        }
+    }
+
+    fn trim(&mut self) {
+        if self.kept.len() <= self.runs {
+            return;
+        }
+        let filling = self.open.map(|i| self.kept[i].0);
+        self.kept
+            .select_nth_unstable_by_key(self.runs - 1, |(h, _)| *h);
+        self.kept.truncate(self.runs);
+        self.cutoff = self.kept.iter().map(|(h, _)| *h).max().unwrap_or(u64::MAX);
+        // The selection moved the runs about, and may have dropped the one still filling.
+        self.open = filling.and_then(|h| self.kept.iter().position(|(k, _)| *k == h));
+    }
+
+    /// The sample, ascending — the order every model constant is read in.
+    fn finish(mut self) -> Vec<K> {
+        self.trim();
+        let mut keys: Vec<K> = self.kept.into_iter().flat_map(|(_, run)| run).collect();
+        keys.sort_unstable();
+        keys
+    }
+}
+
+/// What one build of the sample at one [`DICT_BLOCKS`] entry measures. Every rate moves with the
+/// block -- a block of 32 restarts eight times as often as one of 256 and carries eight times the
+/// per-block arrays -- so each priced block gets its own build rather than the default block's
+/// numbers stretched over it.
+struct DictFit {
+    block: usize,
+    rates: Rates,
 }
 
 /// What one build of the sample measures that no statistic gives.
@@ -1096,15 +1164,17 @@ struct Sample {
 }
 
 impl Sample {
-    fn of(keys: &[&str]) -> Result<Self, IndexError> {
-        let shape = Shape::of(keys);
-        let fst_node =
-            StringIndex::build(keys)?.serialized_len() as f64 / shape.trie_nodes().max(1.0);
-        let small = sample(keys, keys.len() / SPREAD);
-        let small_shape = Shape::of(&small);
+    /// The constants the two draws measure for a corpus of `corpus` keys.
+    fn of(spread: &[&str], runs: &[&str], corpus: usize) -> Result<Self, IndexError> {
+        let draws = Draws::of(spread, runs, corpus);
+        let fst_node = StringIndex::build(spread)?.serialized_len() as f64
+            / draws.spread_shape.trie_nodes().max(1.0);
+        // One build of the sample a priced block, all three under the one vocabulary the corpus
+        // buys: what a block costs is the block's, what a suffix compresses to is the corpus's.
+        let (spread_blob, runs_blobs) = DictIndex::plan_builds(spread, runs, &DICT_BLOCKS, corpus)?;
         let mut dict = Vec::with_capacity(DICT_BLOCKS.len());
-        for block in DICT_BLOCKS {
-            dict.push(DictFit::of(keys, &shape, &small, &small_shape, block)?);
+        for (block, runs_blob) in DICT_BLOCKS.into_iter().zip(&runs_blobs) {
+            dict.push(DictFit::of(&draws, block, &spread_blob, runs_blob));
         }
         Ok(Self {
             dict: dict
@@ -1112,7 +1182,7 @@ impl Sample {
                 .unwrap_or_else(|_| unreachable!("one fit a priced block")),
             fst_node,
             #[cfg(feature = "mph")]
-            hash_fit: hash_fits(keys)?,
+            hash_fit: hash_fits(spread)?,
         })
     }
 
@@ -1128,27 +1198,64 @@ impl Sample {
 }
 
 /// One build's rates: the suffix ratio, what a stored entry's header costs, the packed arrays a
-/// block, a shard's vocabulary, and the dictionary a key.
+/// block, a shard's vocabulary, and the dictionary a key of the corpus.
 ///
 /// The blob is walked rather than measured by section, because the two rates that matter most share
 /// one: `BDX3` writes a run's coded `(lcp, len)` pairs and its coded suffixes into the same block
 /// data, and they neither cost the same nor move together with the keys.
+///
+/// Two draws feed one set of rates, each read off the build that can see it. The vocabulary is a
+/// property of the whole key set, so `ratio` and `phrases` come from the uniform [`HashSample`],
+/// built as a sample of `corpus` keys rather than as an index of its own: its phrases mined at the
+/// corpus's economy, so the dictionary it holds is the one the plan prices, per key of the corpus,
+/// and its suffixes coded under that vocabulary. What a stored entry and a block cost is a property
+/// of the neighbours a key is coded against, so `header`, `per_block` and `table` come from the
+/// [`RunSample`], which keeps its own symbol tables — a table is a neighbourhood's — and is coded
+/// under the same dictionary.
 struct Rates {
+    /// Compressed suffix bytes over raw suffix bytes. Read off a build of the sample as an index of
+    /// its own it was 0.71 where the million-key blob spends 0.53 on article titles: the miner buys
+    /// a phrase against what it saves over the whole blob, and a hundred thousand keys afford a
+    /// tenth of the dictionary a million do. No slope fitted below the sample reaches the corpus
+    /// either -- the vocabulary is flat below a hundred thousand keys and falls faster the further
+    /// it goes -- so the sample is built with the corpus's economics instead, and the rate is
+    /// carried flat.
     ratio: f64,
+    /// Bytes a stored entry's `(lcp, len)` pair costs, escapes included. A pair is coded against
+    /// its shard's own distribution, which a run of consecutive keys carries unchanged; a uniform
+    /// draw of the keys put its neighbours further apart and read 0.51 where a million decimal ids
+    /// spend 0.34.
     header: f64,
+    /// The packed per-block arrays, per block.
     per_block: f64,
+    /// One shard's symbol table and header code, serialised.
     table: f64,
+    /// The phrase dictionary's bytes per key of the corpus: the dictionary the sample bought for
+    /// the corpus, over the keys that will name it.
     phrases: f64,
 }
 
 impl Rates {
-    fn of(keys: &[&str], shape: &Shape, block: usize) -> Result<Self, IndexError> {
-        let dict = DictIndex::build_with_block(keys, block)?;
+    /// The rates of both draws, combined — read off the two blobs
+    /// [`plan_builds`](DictIndex::plan_builds) wrote, and building nothing itself.
+    fn of(draws: &Draws, spread: &DictIndex, runs: &DictIndex) -> Self {
+        let spread = Self::read(spread, &draws.spread_shape, draws.corpus);
+        let runs = Self::read(runs, &draws.runs_shape, draws.runs_shape.n);
+        Self {
+            ratio: spread.ratio,
+            phrases: spread.phrases,
+            ..runs
+        }
+    }
+
+    /// Every rate of one build, its dictionary priced over `corpus` keys.
+    fn read(dict: &DictIndex, shape: &Shape, corpus: usize) -> Self {
+        let keys = shape.n;
         let s = dict.sections();
-        let blocks = keys.len().div_ceil(dict.block()) as f64;
+        let blocks = keys.div_ceil(dict.block()) as f64;
         let (entries, restarts) = ((s.entries + s.restarts) as f64, s.restarts as f64);
         let raw = suffix_bytes(shape, entries, restarts);
-        Ok(Self {
+        Self {
             ratio: if raw > 0.0 {
                 (s.entry_codes + s.restart_codes) as f64 / raw
             } else {
@@ -1161,42 +1268,37 @@ impl Rates {
                 0.0
             },
             per_block: (s.head_ends + s.block_offsets + s.micro_offsets) as f64 / blocks,
-            table: (s.tables + s.header_codes) as f64 / shards_for(keys.len(), dict.block()) as f64,
-            phrases: s.phrases as f64 / keys.len().max(1) as f64,
-        })
+            table: (s.tables + s.header_codes) as f64 / shards_for(keys, dict.block()) as f64,
+            phrases: s.phrases as f64 / corpus.max(1) as f64,
+        }
     }
 }
 
 impl DictFit {
-    fn of(
-        keys: &[&str],
-        shape: &Shape,
-        small: &[&str],
-        small_shape: &Shape,
-        block: usize,
-    ) -> Result<Self, IndexError> {
-        let big = Rates::of(keys, shape, block)?;
-        let (a, b) = (keys.len().max(1) as f64, small.len().max(1) as f64);
-        // Two points only make a slope when they are apart; a corpus small enough that the two
-        // samples coincide gets the flat fit it would have had anyway.
-        let e = a.ln() - b.ln();
-        let (ratio_slope, phrases_slope) = if e > 0.0 {
-            let low = Rates::of(small, small_shape, block)?;
-            ((big.ratio - low.ratio) / e, (big.phrases - low.phrases) / e)
-        } else {
-            (0.0, 0.0)
-        };
-        Ok(Self {
+    fn of(draws: &Draws, block: usize, spread: &DictIndex, runs: &DictIndex) -> Self {
+        Self {
             block,
-            ratio: big.ratio,
-            ratio_slope,
-            header: big.header,
-            per_block: big.per_block,
-            table: big.table,
-            phrases: big.phrases,
-            phrases_slope,
-            at: a,
-        })
+            rates: Rates::of(draws, spread, runs),
+        }
+    }
+}
+
+/// The two draws of a corpus of `corpus` keys, each ascending and distinct, with their shapes.
+struct Draws {
+    /// The shape of the uniform draw, by [`HashSample`].
+    spread_shape: Shape,
+    /// The shape of the draw of consecutive runs, by [`RunSample`].
+    runs_shape: Shape,
+    corpus: usize,
+}
+
+impl Draws {
+    fn of(spread: &[&str], runs: &[&str], corpus: usize) -> Self {
+        Self {
+            spread_shape: Shape::of(spread),
+            runs_shape: Shape::of(runs),
+            corpus,
+        }
     }
 }
 
@@ -1290,8 +1392,12 @@ pub fn plan_for<S: AsRef<str>>(
     let mut estimates = if sorted.len() <= sample_size() {
         weigh(&sorted, &candidates)?
     } else {
-        let drawn = sample(&sorted, sample_size());
-        model(&shape, &Sample::of(&drawn)?, &candidates)
+        let (spread, runs) = draws(&sorted, sample_size());
+        model(
+            &shape,
+            &Sample::of(&spread, &runs, sorted.len())?,
+            &candidates,
+        )
     };
     rank(&mut estimates, objective, sorted.len(), shape.mean_len());
     Ok(Plan {
@@ -1313,10 +1419,10 @@ pub fn plan_for<S: AsRef<str>>(
 /// The file is sorted externally — runs in memory, spilled beside it, merged back — and the merge
 /// is where `n`, the mean key length and both shared-prefix distances are counted, exactly and not
 /// from a sample. What a sample is still needed for is the three numbers no statistic gives, and
-/// those come from 100 000 keys drawn **by hash**: a uniform draw over the distinct keys that costs
-/// one pass and no ordering, where [`plan`] can afford to take its sample by position because it
-/// has the sorted corpus in hand. So the two agree on the shape to the byte and differ on the
-/// constants by whatever separates two samples of one corpus.
+/// those come from two draws of 100 000 keys, both decided **by hash** in the one pass over the
+/// merge: a uniform draw of the distinct keys, and runs of [`RUN`] consecutive keys each started by
+/// the hash of its first — the draws [`plan`] makes over the sorted keys it holds. So the two agree
+/// on the shape to the byte and read their constants off the same samples.
 ///
 /// The resident cost is the run budget plus the sample, not the corpus: on a 925 MB, 7 343 721-line
 /// path list this peaks at a third of a gigabyte where [`plan`] on the loaded keys peaks at 1.4.
@@ -1363,15 +1469,19 @@ fn plan_file_with(
 
     let want = sample_size();
     let mut walk = ShapeWalk::default();
-    let mut sample: HashSample<String> = HashSample::new(want);
+    let mut spread: HashSample<String> = HashSample::new(want);
+    let mut adjacent: RunSample<String> = RunSample::new(want);
     // A corpus no larger than the sample is weighed rather than modelled, exactly as `plan` weighs
     // one, so the two answer a small file identically. Kept only while it stays small enough to be
     // the sample itself.
     let mut all: Option<Vec<String>> = Some(Vec::new());
     let mut each = |key: &str| {
         walk.push(key);
-        if let Some(hash) = sample.wanted(key) {
-            sample.keep(hash, key.to_owned());
+        if let Some(hash) = spread.wanted(key) {
+            spread.keep(hash, key.to_owned());
+        }
+        if adjacent.wanted(key) {
+            adjacent.keep(key.to_owned());
         }
         if let Some(keys) = &mut all {
             keys.push(key.to_owned());
@@ -1400,9 +1510,14 @@ fn plan_file_with(
             weigh(&keys, &candidates)?
         }
         None => {
-            let drawn = sample.finish();
-            let drawn: Vec<&str> = drawn.iter().map(String::as_str).collect();
-            model(&shape, &Sample::of(&drawn)?, &candidates)
+            let (spread, adjacent) = (spread.finish(), adjacent.finish());
+            let spread: Vec<&str> = spread.iter().map(String::as_str).collect();
+            let adjacent: Vec<&str> = adjacent.iter().map(String::as_str).collect();
+            model(
+                &shape,
+                &Sample::of(&spread, &adjacent, shape.n)?,
+                &candidates,
+            )
         }
     };
     rank(&mut estimates, objective, shape.n, shape.mean_len());
@@ -1497,20 +1612,23 @@ fn candidates(needs: Needs) -> Vec<(Kind, Option<usize>)> {
     out
 }
 
-/// `want` keys of the sorted corpus, in order, drawn by [`HashSample`].
+/// The two draws of the sorted corpus, at most `want` keys each and in order: the uniform one by
+/// [`HashSample`], the runs by [`RunSample`].
 ///
 /// Not `step_by(n / want)`, which was neither a sample nor `want` keys: integer division gives a
 /// step of one at 150 001 keys, so "the sample" was the whole corpus and every constant was read
 /// off a build the size of the real index.
-fn sample<'a>(sorted: &[&'a str], want: usize) -> Vec<&'a str> {
+fn draws<'a>(sorted: &[&'a str], want: usize) -> (Vec<&'a str>, Vec<&'a str>) {
     if sorted.len() <= want || want == 0 {
-        return sorted.to_vec();
+        return (sorted.to_vec(), sorted.to_vec());
     }
-    let mut draw = HashSample::new(want);
+    let mut spread = HashSample::new(want);
+    let mut runs = RunSample::new(want);
     for key in sorted {
-        draw.push(*key);
+        spread.push(*key);
+        runs.push(*key);
     }
-    draw.finish()
+    (spread.finish(), runs.finish())
 }
 
 /// Build every candidate and report what it weighs. What a corpus no larger than the sample gets,
@@ -1592,15 +1710,15 @@ fn dict_bytes(shape: &Shape, fit: &DictFit, block: usize) -> f64 {
     let blocks = shape.n.div_ceil(block) as f64;
     let entries = n - blocks;
     let restarts = blocks * (block.div_ceil(dict_index::micro_for(block)) - 1) as f64;
-    let (ratio, phrases) = fit.rates(shape.n);
-    let tables = shards_for(shape.n, block) as f64 * fit.table;
+    let r = &fit.rates;
+    let tables = shards_for(shape.n, block) as f64 * r.table;
     dict_index::HEADER as f64
         + tables
-        + phrases * n
+        + r.phrases * n
         + blocks * shape.mean_len()
-        + fit.header * entries
-        + ratio * suffix_bytes(shape, entries, restarts)
-        + fit.per_block * blocks
+        + r.header * entries
+        + r.ratio * suffix_bytes(shape, entries, restarts)
+        + r.per_block * blocks
 }
 
 #[cfg(test)]
@@ -2103,18 +2221,39 @@ mod tests {
     /// of one just past `want` -- 150 001 keys would "sample" all 150 001 of them -- and the
     /// fractional stride is what fixes it.
     #[test]
-    fn the_sample_is_the_size_it_asked_for() {
+    fn the_sample_is_runs_of_consecutive_keys() {
         let keys = corpus(150_001);
         let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), 150_001, "the corpus is distinct");
 
-        let drawn = sample(&sorted, SAMPLE);
-        assert_eq!(drawn.len(), SAMPLE);
+        let (spread, drawn) = draws(&sorted, SAMPLE);
+        assert_eq!(
+            spread.len(),
+            SAMPLE,
+            "the uniform draw is the size it asked for"
+        );
+        assert!(spread.windows(2).all(|w| w[0] < w[1]), "in order, distinct");
         assert!(drawn.windows(2).all(|w| w[0] < w[1]), "in order, distinct");
-        // Same keys, same draw: a plan over one corpus is reproducible.
-        assert_eq!(drawn, sample(&sorted, SAMPLE));
+        // `SAMPLE / RUN` runs, each starting at a multiple of `RUN` and holding the `RUN` keys from
+        // there -- fewer only for a run that starts within `RUN` of the corpus's end.
+        let starts: Vec<usize> = drawn
+            .iter()
+            .map(|k| sorted.binary_search(k).unwrap())
+            .filter(|at| at % RUN == 0)
+            .collect();
+        assert_eq!(starts.len(), SAMPLE / RUN);
+        let held: usize = starts.iter().map(|&s| RUN.min(sorted.len() - s)).sum();
+        assert_eq!(drawn.len(), held);
+        for (i, k) in drawn.iter().enumerate() {
+            let at = sorted.binary_search(k).unwrap();
+            if (at + 1) % RUN != 0 && at + 1 < sorted.len() {
+                assert_eq!(drawn[i + 1], sorted[at + 1], "a run is consecutive keys");
+            }
+        }
+        // Same keys, same draws: a plan over one corpus is reproducible.
+        assert_eq!((spread.clone(), drawn.clone()), draws(&sorted, SAMPLE));
         // And the phase is the corpus's, so two corpora of the same size do not draw alike.
         let other = corpus(150_001)
             .iter()
@@ -2122,20 +2261,20 @@ mod tests {
             .collect::<Vec<_>>();
         let mut theirs: Vec<&str> = other.iter().map(String::as_str).collect();
         theirs.sort_unstable();
-        let offsets = |ks: &[&str], drawn: &[&str]| -> Vec<usize> {
+        let starts_of = |ks: &[&str], drawn: &[&str]| -> Vec<usize> {
             drawn
                 .iter()
                 .map(|k| ks.binary_search(k).unwrap())
-                .take(16)
+                .filter(|at| at % RUN == 0)
                 .collect()
         };
         assert_ne!(
-            offsets(&sorted, &drawn),
-            offsets(&theirs, &sample(&theirs, SAMPLE))
+            starts_of(&sorted, &drawn),
+            starts_of(&theirs, &draws(&theirs, SAMPLE).1)
         );
 
         // A corpus no larger than the draw is the draw.
-        assert_eq!(sample(&sorted[..SAMPLE], SAMPLE).len(), SAMPLE);
+        assert_eq!(draws(&sorted[..SAMPLE], SAMPLE).1.len(), SAMPLE);
     }
 
     /// Two dictionary blocks are always within a per cent or two of each other, and warning about
@@ -2272,6 +2411,34 @@ mod tests {
 
     /// The draw is the hash's, not the position's, so it is the same draw every time and it is
     /// spread over the corpus rather than over its start.
+    #[test]
+    fn the_stream_draw_is_the_in_memory_draw() {
+        let keys = corpus(50_000);
+        let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        let want = 3 * RUN;
+        let mut stream: RunSample<String> = RunSample::new(want);
+        for k in &sorted {
+            if stream.wanted(k) {
+                stream.keep((*k).to_owned());
+            }
+        }
+        let streamed = stream.finish();
+        let drawn = draws(&sorted, want).1;
+        assert!(
+            drawn.len() <= want && drawn.len() > want - RUN,
+            "{}",
+            drawn.len()
+        );
+        assert_eq!(streamed, drawn, "plan_file draws what plan draws");
+        let starts: Vec<usize> = drawn
+            .iter()
+            .map(|k| sorted.binary_search(k).unwrap())
+            .filter(|at| at % RUN == 0)
+            .collect();
+        assert_eq!(starts.len(), 3);
+    }
+
     #[test]
     fn the_hash_sample_is_uniform_and_reproducible() {
         let keys = corpus(50_000);

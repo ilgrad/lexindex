@@ -108,22 +108,45 @@ All notable changes to this project are documented here. The format follows
   is the path. `golden-2.2.0-dict.bdx` joins the refused fixtures and `golden-4.0.0-dict.bdx` pins
   the new bytes.
 
-- **`plan()` prices `BDX3`, and says honestly how close it gets.** The old model read a blob as one
-  byte an entry plus a compressed suffix, which is what `BDX2` wrote; `BDX3` codes the headers and
-  can spend well under a byte on one, so the plan was charging for a byte that is not there and
-  discounting the suffix to match. The two are now measured apart — the sample blob is walked rather
-  than added up by section — and the phrase dictionary is priced as its own term, per key, since it
-  grows with the corpus and not with the shards the tables follow. The suffix rate and the
-  dictionary's bytes a key are fitted between two sample sizes an **eighth** apart rather than a
-  quarter, which is the leverage a slope carried over five e-folds needs; what a header costs is
-  carried flat, because it is coded against its shard's own distribution and wanders rather than
-  trends — fitted a slope of its own it reads 0.75 bytes where the blob spends 0.34 on ten million
-  decimal ids. Scored against the built blob over 23 corpora at each of the three priced blocks, 69
-  cells: **9.5 % median, 14.6 % at the 90th percentile, 23.2 % at worst**, against 8.8 / 23.8 / 33.3
-  for the model `BDX3` inherited. Corpora whose suffixes repeat nothing — DNA, UUIDs, opaque ids, a
-  word list — land inside 1 %; the spread is article titles, urls and path lists, where the
-  vocabulary keeps earning past what a hundred-thousand-key sample can see. `docs/usage.md` carries
-  the numbers and says which way the estimate errs.
+- **`plan()` prices `BDX3`, and the `DictIndex` estimate lands within 1.0 % of the built blob at the
+  median.** Three changes, each scored on the same 69 cells — 23 corpora at each of the three priced
+  blocks.
+
+  *The old model read a blob as one byte an entry plus a compressed suffix*, which is what `BDX2`
+  wrote; `BDX3` codes the headers and can spend well under a byte on one, so the plan was charging
+  for a byte that is not there and discounting the suffix to match. The two are now measured apart —
+  the sample blob is walked rather than added up by section — and the phrase dictionary is priced as
+  its own term, per key, since it grows with the corpus and not with the shards the tables follow.
+
+  *The sample is built with the corpus's economics, not its own.* The miner admits a phrase on what
+  it saves over the whole blob against what storing it costs once, so a hundred thousand keys afford
+  a tenth of the dictionary a million do: built as an index of its own, the sample reads the suffix
+  ratio 0.71 where the million-key blob spends 0.53 on article titles. No slope fitted below the
+  sample reaches the corpus either — the vocabulary is flat below a hundred thousand keys and falls
+  convexly above them — so the sample is mined at the corpus's key count instead, over every suffix
+  it holds, and the rate is carried flat. A million urls goes from 14 % high to 0.9 % low, three
+  million article titles from 24 % to 1.4 %. That vocabulary is bought **once a plan**, not once a
+  block: the three priced blocks read the ratio within 0.4 % of each other, and mining at each of
+  them was both two thirds of what a plan spends and less accurate — the smallest block's own draw
+  reads the ratio 21 % high on decimal ids.
+
+  *And what a stored entry costs comes off a second draw.* A `(lcp, len)` pair is coded against its
+  shard's own distribution, which is a property of the neighbours a key is coded against; a uniform
+  draw puts those `n / 100 000` positions apart and read a million decimal ids 0.51 bytes a header
+  where that blob spends 0.34, a third of it. So the plan draws twice — uniformly for what a suffix
+  compresses to and what an fst spends on a node, and in runs of 4 096 consecutive keys for what an
+  entry and a block cost — both decided by hash, so `plan_file` makes the same two draws over a
+  merged stream that `plan` makes over the sorted keys, and the two still print the same ladder to
+  the byte on a 7 343 721-line path list.
+
+  **1.0 % median, 4.5 % at the 90th percentile, 6.5 % at worst**, against 9.0 / 14.2 / 23.9 for the
+  same model reading one flat-rate sample and 8.8 / 23.8 / 33.3 for the model `BDX3` inherited.
+  Corpora whose suffixes repeat nothing — DNA, UUIDs, opaque ids — land inside 0.5 %; the spread is
+  a PyPI name list at 6.5 % low and a 7.3-million-line path list at 5.1 % high. The second draw and
+  the corpus-economy mine cost a fixed 0.4 s and 70 MB a plan, so the ratio is worst on the cheapest
+  plan and vanishes on the largest: 1.31× the wall time and 1.94× the peak on a million Chinese
+  titles, 1.08× and 1.21× on ten million English ones, 1.05× at no change in peak on the streamed
+  path list. `docs/usage.md` carries the numbers and says which way the estimate errs.
 
 - **The latency model is re-fitted to `BDX3`, and the fit is worse where it should be.** The
   constants in `src/estimate.rs` were fitted to `BDX2` lanes, so on `BDX3` they under-priced every

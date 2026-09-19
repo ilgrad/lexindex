@@ -2968,8 +2968,8 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 ///
 /// The keys are sorted once and priced from the statistics the formats are actually paid in. The
 /// three numbers no statistic gives -- what the symbol table squeezes a suffix into, the bytes an
-/// fst spends per trie node, the bits the perfect hash spends per key -- come from one build of a
-/// 100 000-key sample, so past that size every entry is a model and `measured` is `False`; below it
+/// fst spends per trie node, the bits the perfect hash spends per key -- come from builds of two
+/// 100 000-key draws, so past that size every entry is a model and `measured` is `False`; below it
 /// the candidates are built and `bytes` is what they weigh.
 ///
 /// The keyword arguments say what the index has to be able to do. One that cannot is left out of

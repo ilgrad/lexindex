@@ -29,36 +29,40 @@ keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key
 their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five.
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
-bytes an fst spends per trie node, the bits the perfect hash spends per key — come from one build of
-a sample of that size and one of an eighth of it, and each estimate says so in `measured`. Scored
-against the built blob on 23 corpora of half a million to ten million keys, at each of the three
-priced blocks, `DictIndex` lands within **9.5 % median, 14.6 % at the 90th percentile and 23.2 % at
-worst**; `StringIndex` within 3.0 / 7.6 / 31.5, because an fst merges equal suffixes and how much it
-merges is a property of the whole key set rather than of a sample of it. Below the sample size
-nothing is modelled: the candidates are built and reported at what they weigh.
+bytes an fst spends per trie node, the bits the perfect hash spends per key — come from two draws of
+that size, and each estimate says so in `measured`. Scored against the built blob on 23 corpora of
+half a million to ten million keys, at each of the three priced blocks, `DictIndex` lands within
+**1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**; `StringIndex` within 3.0 / 7.6 /
+31.5, because an fst merges equal suffixes and how much it merges is a property of the whole key set
+rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
+and reported at what they weigh.
 
-**What the `DictIndex` estimate cannot see is how good the vocabulary gets.** A shard's symbol table
-and the blob-wide phrase dictionary are trained on the keys the blob holds, so ten million keys buy
-a better vocabulary than a hundred thousand for the same bytes; the sample is also a *sparse* draw,
-so its suffixes are longer and more varied than any the real blob stores. The rate is therefore
-fitted between two sample sizes and carried along its slope, which is what takes the error from 21 %
-to 10 % on a million urls — and what is left is a slope read over three e-folds and used over five.
-The estimate reads high, and it reads highest where the vocabulary keeps earning: article titles,
-urls and path lists are the 15–23 % end of that spread, while corpora whose suffixes repeat nothing
-— DNA, UUIDs, opaque ids, a word list — land inside 1 %.
+**What a sample cannot see by itself is how good the vocabulary gets.** A shard's symbol table and
+the blob-wide phrase dictionary are trained on the keys the blob holds, and the miner buys a phrase
+against what it saves over the whole blob — so a hundred thousand keys afford a tenth of the
+dictionary a million do, and a sample built as an index of its own reads the suffix ratio 0.71 where
+the million-key blob spends 0.53 on article titles. The sample is therefore built **with the
+corpus's economics**: its phrases mined at the corpus's key count, over every suffix it holds, once
+for the plan and not once a block. That takes a million urls from 14 % high to 0.9 % low and three
+million article titles from 24 % to 1.4 %.
 
-The sample is drawn **by hash**: a key is kept while its hash is under a cutoff, and the cutoff
-falls as the draw fills. That is a uniform sample of the distinct keys, it is the same sample on
-every run over the same keys, and it needs neither the corpus's size in advance nor the corpus in
-memory — which is what lets `plan_file` give the same answer as `plan` without holding the keys. It
-is also the more accurate draw: a stride over sorted keys takes one key from every prefix group
-whatever the group's size, and a `StringIndex` estimate read off such a sample runs 5 % low on a
-corpus of shared prefixes where this one lands within 0.4 %.
+There are two draws because the blob is paid in two currencies. What a suffix compresses to is a
+property of the whole key set, so it is read off a **uniform** draw: a key is kept while its hash is
+under a cutoff, and the cutoff falls as the draw fills — the same sample on every run over the same
+keys, needing neither the corpus's size in advance nor the corpus in memory, which is what lets
+`plan_file` answer as `plan` does. It is also the more accurate draw for an fst: a stride over sorted
+keys takes one key from every prefix group whatever the group's size, and a `StringIndex` estimate
+read off such a sample runs 5 % low on a corpus of shared prefixes where this one lands within
+0.4 %. But what a stored `(lcp, len)` pair and a block's arrays cost is a property of the
+*neighbours* a key is coded against, which a uniform draw destroys — it read a million decimal ids
+0.51 bytes a header where that blob spends 0.34, a third of it. So those come off a second draw, of
+**runs of 4 096 consecutive keys** each started by the hash of its first, coded under the same
+dictionary.
 
 Two flags say when not to trust the ranking. `close` means the two cheapest are within 1.3× of each
 other, which is inside what an estimate can separate; `thin` means the mean suffix is under two
-bytes, where a compression ratio read from a sample stops carrying to full density — ten million
-numbers land 20 % off. Either one means build both and measure.
+bytes, where a compression ratio read from a sample carries least well — ten million decimal numbers
+are the worst cell in the score, at 4.1 % high. Either one means build both and measure.
 
 `plan_file(path, needs, objective)` prices a keys file the same way **without ever holding it**.
 The file is sorted externally — runs in memory, spilled beside it, merged back — and the merge is

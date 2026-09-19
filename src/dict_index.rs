@@ -357,6 +357,68 @@ fn train_threads(threads: usize) -> usize {
     threads.clamp(1, TRAIN_BUDGET / TRAIN_BYTES)
 }
 
+/// Threads a build of `n` keys encodes on: one per [`PARALLEL_BLOCKS`] blocks, at most the
+/// machine's.
+fn build_threads(n: usize, block: usize) -> usize {
+    (n.div_ceil(block) / PARALLEL_BLOCKS)
+        .min(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
+        .max(1)
+}
+
+/// The suffixes a build trains and mines on, one list a shard: what a spread of runs would store,
+/// in key order — a restart is coded against the restart before it, every other key against its
+/// predecessor. Each shard is sampled inside itself, by the rule that samples the whole index when
+/// there is one shard.
+///
+/// `dense` takes every suffix rather than [`TRAIN_PIECES`] a shard. That is what the estimator's
+/// sample does: a hundred thousand keys standing in for a million hold a tenth of the evidence, and
+/// the miner prices a span on the pieces it is shown — at a sixth of them it reads a span seen twice
+/// as a hundred uses of the blob rather than ten.
+fn build_pieces<S: AsRef<str>>(
+    keys: &[S],
+    block: usize,
+    micro: usize,
+    dense: usize,
+) -> Vec<Vec<&[u8]>> {
+    let n = keys.len();
+    let nb = n.div_ceil(block);
+    let shard = shard_blocks_for(block);
+    let span = shard * block;
+    let mut pieces: Vec<Vec<&[u8]>> = vec![Vec::new(); nb.div_ceil(shard).max(1)];
+    let mut restart: &[u8] = keys.first().map_or(&[][..], |k| k.as_ref().as_bytes());
+    let mut prev: &[u8] = restart;
+    let step_over = |left: usize| {
+        if dense > 0 {
+            dense
+        } else {
+            (left / TRAIN_PIECES).max(1)
+        }
+    };
+    let mut step = step_over(span.min(n));
+    for (i, key) in keys.iter().enumerate().skip(1) {
+        let key = key.as_ref().as_bytes();
+        let off = i % block;
+        if off == 0 {
+            if i % span == 0 {
+                step = step_over((n - i).min(span));
+            }
+            restart = key;
+            prev = key;
+            continue;
+        }
+        let starts = off % micro == 0;
+        if (i % span / TRAIN_RUN) % step == 0 {
+            let against = if starts { restart } else { prev };
+            pieces[i / span].push(&key[lcp(against, key)..]);
+        }
+        if starts {
+            restart = key;
+        }
+        prev = key;
+    }
+    pieces
+}
+
 /// One symbol table a shard, trained in parallel: the shards are independent, and training is
 /// linear in the sample, so a table a shard costs the whole budget again on every one of them.
 fn train_shards(samples: &[Vec<&[u8]>], threads: usize) -> Vec<Table> {
@@ -1941,10 +2003,64 @@ impl DictIndex {
         block: usize,
         micro: usize,
     ) -> Result<Self, IndexError> {
-        let threads = (keys.len().div_ceil(block) / PARALLEL_BLOCKS)
-            .min(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
-            .max(1);
-        Self::from_sorted_on(keys, block, micro, threads)
+        Self::from_sorted_on(keys, block, micro, build_threads(keys.len(), block))
+    }
+
+    /// The builds a plan prices a `DictIndex` from: a uniform draw of the corpus at the default
+    /// block, and a draw of consecutive runs at each of `blocks` — every one of them coded under
+    /// the one vocabulary the corpus buys.
+    ///
+    /// A sample of a hundred thousand keys standing in for a million has to buy the vocabulary the
+    /// million would: the miner admits a span on what it saves over the whole blob against what
+    /// storing it costs once, so at the sample's own count it buys a tenth of the dictionary and
+    /// reads the suffix ratio 0.71 where the million-key blob spends 0.53 on article titles. So the
+    /// sample is mined at `corpus` keys, over every suffix it holds rather than [`TRAIN_PIECES`] a
+    /// shard — at a third of them the plan's worst blob goes from 5.9 % out to 21.9 % — and in as
+    /// many pools as the corpus's own build would fill.
+    ///
+    /// **That vocabulary is bought once for the plan**, not once a draw and not once a block. It is
+    /// a property of the corpus rather than of the block: over eleven corpora the three priced
+    /// blocks read the suffix ratio within 0.4 % of each other and the dictionary within 3 %, and
+    /// pricing each block off its own mined sample was both two thirds of what a plan spends and
+    /// *less* accurate — the smallest block's own draw reads the ratio 21 % high on decimal ids.
+    /// Every priced block shards the keys the same way — a shard is [`SHARD_KEYS`] keys whatever
+    /// the block — so one set of tables covers the same ranges in all three.
+    pub(crate) fn plan_builds<S: AsRef<str>>(
+        spread: &[S],
+        runs: &[S],
+        blocks: &[usize],
+        corpus: usize,
+    ) -> Result<(Self, Vec<Self>), IndexError> {
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let micro = micro_for(DEFAULT_BLOCK);
+        let pieces = build_pieces(spread, DEFAULT_BLOCK, micro, 1);
+        let tables = train_shards(&pieces, train_threads(threads));
+        let phrases = mine_phrases(&pieces, &tables, corpus, train_threads(threads));
+        drop(pieces);
+        let spread = Self::from_vocabulary(
+            spread,
+            DEFAULT_BLOCK,
+            micro,
+            build_threads(spread.len(), DEFAULT_BLOCK),
+            &tables,
+            &phrases,
+        )?;
+        // The run draw keeps its own tables — a symbol table is a neighbourhood's, and runs of
+        // consecutive keys are what carries one — but not its own dictionary: it would mine the
+        // vocabulary of a hundred thousand keys, and what a block costs is read off a blob the
+        // corpus's vocabulary coded.
+        let runs = blocks
+            .iter()
+            .map(|&block| {
+                let micro = micro_for(block);
+                let threads = build_threads(runs.len(), block);
+                let pieces = build_pieces(runs, block, micro, 0);
+                let tables = train_shards(&pieces, train_threads(threads));
+                drop(pieces);
+                Self::from_vocabulary(runs, block, micro, threads, &tables, &phrases)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((spread, runs))
     }
 
     /// [`from_sorted`](Self::from_sorted) with the thread count fixed, so a test can hold the
@@ -1955,41 +2071,46 @@ impl DictIndex {
         micro: usize,
         threads: usize,
     ) -> Result<Self, IndexError> {
+        Self::from_sorted_as(keys, block, micro, threads, keys.len())
+    }
+
+    /// The build, with the phrase dictionary bought for a corpus of `corpus` keys. That is the
+    /// index's own count for every build but the estimator's. A sample of a hundred thousand keys
+    /// standing in for a million has to buy the vocabulary the million would: the miner admits a
+    /// span on what it saves over the whole blob against what storing it costs once, so at the
+    /// sample's own count it buys a tenth of the dictionary and reads the suffix ratio 0.71 where
+    /// the million-key blob spends 0.53 on article titles. Such a build also trains and mines on
+    /// every suffix it has rather than [`TRAIN_PIECES`] a shard, since its evidence is already an
+    /// eighth of the real build's.
+    fn from_sorted_as<S: AsRef<str>>(
+        keys: &[S],
+        block: usize,
+        micro: usize,
+        threads: usize,
+        corpus: usize,
+    ) -> Result<Self, IndexError> {
+        let pieces = build_pieces(keys, block, micro, usize::from(corpus != keys.len()));
+        let tables = train_shards(&pieces, train_threads(threads));
+        let phrases = mine_phrases(&pieces, &tables, corpus, train_threads(threads));
+        drop(pieces);
+        Self::from_vocabulary(keys, block, micro, threads, &tables, &phrases)
+    }
+
+    /// The encoding half of a build: the keys coded under a vocabulary already chosen. Split out
+    /// because the estimator prices three blocks off one sample and the vocabulary is the corpus's
+    /// rather than the block's — see [`plan_builds`](Self::plan_builds).
+    fn from_vocabulary<S: AsRef<str>>(
+        keys: &[S],
+        block: usize,
+        micro: usize,
+        threads: usize,
+        tables: &[Table],
+        phrases: &Phrases,
+    ) -> Result<Self, IndexError> {
         let n = keys.len();
         let nb = n.div_ceil(block);
         let shard = shard_blocks_for(block);
         let span = shard * block;
-        // Train on the suffixes a spread of runs would store, in key order: a restart is coded
-        // against the restart before it, every other key against its predecessor. Each shard is
-        // sampled inside itself, by the rule that samples the whole index when there is one shard.
-        let mut pieces: Vec<Vec<&[u8]>> = vec![Vec::new(); nb.div_ceil(shard).max(1)];
-        let mut restart: &[u8] = keys.first().map_or(&[][..], |k| k.as_ref().as_bytes());
-        let mut prev: &[u8] = restart;
-        let mut step = (span.min(n) / TRAIN_PIECES).max(1);
-        for (i, key) in keys.iter().enumerate().skip(1) {
-            let key = key.as_ref().as_bytes();
-            let off = i % block;
-            if off == 0 {
-                if i % span == 0 {
-                    step = ((n - i).min(span) / TRAIN_PIECES).max(1);
-                }
-                restart = key;
-                prev = key;
-                continue;
-            }
-            let starts = off % micro == 0;
-            if (i % span / TRAIN_RUN) % step == 0 {
-                let against = if starts { restart } else { prev };
-                pieces[i / span].push(&key[lcp(against, key)..]);
-            }
-            if starts {
-                restart = key;
-            }
-            prev = key;
-        }
-        let tables = train_shards(&pieces, train_threads(threads));
-        let phrases = mine_phrases(&pieces, &tables, n, train_threads(threads));
-        drop(pieces);
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
         // of blocks encode on their own threads and the parts are concatenated in order — the bytes
@@ -2004,15 +2125,7 @@ impl DictIndex {
             keys.chunks(run)
                 .enumerate()
                 .map(|(c, range)| {
-                    encode_range(
-                        range,
-                        block,
-                        micro,
-                        &tables,
-                        &phrases,
-                        shard,
-                        c * run / block,
-                    )
+                    encode_range(range, block, micro, tables, phrases, shard, c * run / block)
                 })
                 .collect()
         } else {
@@ -2022,7 +2135,6 @@ impl DictIndex {
                     .chunks(run)
                     .enumerate()
                     .map(|(c, range)| {
-                        let (tables, phrases) = (&tables, &phrases);
                         scope.spawn(move || {
                             encode_range(
                                 range,
@@ -2076,7 +2188,7 @@ impl DictIndex {
         // A dictionary no shard bought is bytes the blob carries and nothing names — which is the
         // answer on a corpus where the miner found spans that repeat but none that pay.
         let phrases = if codecs.iter().any(Codec::has_phrases) {
-            phrases.dict
+            phrases.dict.clone()
         } else {
             Dict::empty()
         };

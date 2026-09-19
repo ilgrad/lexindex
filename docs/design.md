@@ -560,18 +560,41 @@ by keys `k` apart is linear in `ln k`, and a random 1-in-`step` sample reads tha
 
 What no statistic gives is what a *compressor* will do: the ratio the FSST symbol table squeezes a
 suffix into, the bytes an fst actually spends per trie node once it has merged what it can, and the
-bits the perfect hash spends per key. Those are read off one build of a 100 000-key sample, and
-below that size there is nothing to model — the candidates are built and reported at what they
-weigh. Scored against the built blob on 23 corpora of half a million to ten million keys, at each
-of the three priced blocks, the `DictIndex` estimate lands within **1.3 % median, 3.9 % at the 90th
-percentile and 5.1 % at worst**.
+bits the perfect hash spends per key. Those are read off builds of two 100 000-key draws — one
+uniform over the corpus, one of runs of consecutive keys — and below that size there is nothing to
+model: the candidates are built and reported at what they weigh. Scored against the built blob on
+23 corpora of half a million to ten million keys, at each of the three priced blocks, the
+`DictIndex` estimate lands within **1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**.
+
+The two draws answer two different questions, and one draw answering both was the estimate's largest
+error. What a suffix compresses to is a property of the whole key set, so the uniform draw reads it;
+what a stored `(lcp, len)` pair costs is a property of the neighbours a key is coded against, and a
+uniform draw puts those `n / 100 000` positions apart — it read a million decimal ids 0.51 bytes a
+header where the blob spends 0.34. Both draws are decided by hash, so `plan_file` makes them over a
+merged stream exactly as `plan` makes them over the sorted keys.
+
+**The sample is built with the corpus's economics, not its own.** The miner admits a phrase on what
+it saves over the whole blob against what storing it costs once, so a hundred thousand keys afford a
+tenth of the dictionary a million do: built as an index of its own the sample read the suffix ratio
+0.71 where the million-key blob spends 0.53 on article titles, and no slope fitted below the sample
+reaches the corpus — the vocabulary is flat below a hundred thousand keys and falls convexly above
+them. So the sample is mined at the corpus's key count and over every suffix it holds, which took a
+million urls from 14 % high to 0.9 % low. That vocabulary is bought **once for the plan**, not once a
+block and not once a draw: over eleven corpora the three priced blocks read the ratio within 0.4 % of
+each other, mining at each of them was two thirds of what a plan spends, and it was also *less*
+accurate — the smallest block's own draw reads the ratio 21 % high on decimal ids. What the whole
+channel costs is a fixed 0.4 s and 70 MB a plan, whatever the corpus, so the ratio is worst on the
+cheapest plan and disappears on the largest: 1.31× the wall time and 1.94× the peak on a million
+Chinese titles, 1.08× and 1.21× on ten million English ones, and 1.05× at **no change in peak** on
+the streamed 7 343 721-line path list, where the sort's own run budget is already higher than the
+miner ever reaches.
 
 The two places it does not hold are reported rather than papered over. `StringIndex` is looser —
 3.0 % median, 7.6 % at the 90th percentile, 32 % on a corpus of file paths — because an fst merges
 equal suffixes and how much it merges is a property of the whole key set, not of a sample of it: the
 sample sees fewer sharable tails than the corpus has, so the estimate runs high exactly where the
 corpus is most repetitive. And a corpus whose mean suffix is under two bytes — ten million decimal
-numbers, where a sampled compression ratio lands 19 % off — is flagged, not quoted. So is a pair of
+numbers, the worst cell in the `DictIndex` score at 4.1 % high — is flagged, not quoted. So is a pair of
 candidates within 1.3× of each other, which is inside what an estimate can separate. In both cases
 the plan says to build both and measure, which is the same advice this document gives everywhere
 else.

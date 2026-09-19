@@ -289,6 +289,7 @@ impl Prices {
 /// and each phrase in it ends at a `u16` inside that group, so a phrase is two loads and no walk.
 /// Stored whole rather than front-coded against its neighbour — rank order is not lexicographic, so
 /// there is nothing to share.
+#[derive(Clone)]
 pub(crate) struct Dict {
     /// The phrases end to end, then [`MAX`] zero bytes: a decoder reads a fixed [`MAX`] from any
     /// phrase's start, which is one store where a copy of a length known only at run time is a
