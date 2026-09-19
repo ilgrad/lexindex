@@ -519,41 +519,42 @@ three cache levels against three `DictIndex` block sizes, 64, 256 and 512, on ev
 
 | corpus | rsmarisa smallest | `DictIndex` 512 | rsmarisa build | `DictIndex` build | rsmarisa fastest | `DictIndex` fastest (block) |
 |---|---:|---:|---:|---:|---:|---:|
-| `dna` | 7.61 | 7.65 | 1 308 ms | 64 ms | 608 ns | 238 ns (512) |
-| `domains` | 4.87 | 5.03 | 680 ms | 57 ms | 466 ns | 267 ns (64) |
-| `idents` | 5.50 | 6.62 | 652 ms | 61 ms | 609 ns | 342 ns (256) |
-| `numeric` | 1.64 | 2.10 | 98 ms | 46 ms | 161 ns | 190 ns (64) |
-| `opaque` | 18.27 | 13.77 | 1 177 ms | 82 ms | 1 047 ns | 299 ns (512) |
-| `paths` | 10.09 | 14.46 | 5 642 ms | 95 ms | 1 710 ns | 664 ns (512) |
-| `titles-en` | 7.85 | 9.33 | 975 ms | 68 ms | 827 ns | 348 ns (256) |
-| `titles-ru` | 8.22 | 11.30 | 1 489 ms | 68 ms | 1 102 ns | 447 ns (256) |
-| `titles-zh` | 6.40 | 8.25 | 759 ms | 71 ms | 683 ns | 344 ns (256) |
-| `urls` | 8.38 | 11.15 | 2 011 ms | 73 ms | 855 ns | 542 ns (512) |
-| `uuid` | 33.01 | 20.40 | 1 508 ms | 115 ms | 1 155 ns | 391 ns (512) |
+| `dna` | 7.61 | **4.26** | 1 669 ms | 119 ms | 834 ns | 326 ns (512) |
+| `domains` | 4.87 | **4.60** | 903 ms | 248 ms | 578 ns | 413 ns (64) |
+| `idents` | 5.50 | **5.14** | 800 ms | 283 ms | 828 ns | 459 ns (512) |
+| `numeric` | 1.64 | **0.93** | 115 ms | 90 ms | **208 ns** | 325 ns (512) |
+| `opaque` | 18.27 | **10.31** | 1 894 ms | 137 ms | 1 477 ns | 344 ns (512) |
+| `paths` | 10.07 | **9.73** | 6 550 ms | 589 ms | 2 243 ns | 831 ns (512) |
+| `titles-en` | 7.85 | **7.25** | 1 287 ms | 458 ms | 1 009 ns | 460 ns (512) |
+| `titles-ru` | 8.22 | **7.60** | 1 873 ms | 522 ms | 1 339 ns | 508 ns (512) |
+| `titles-zh` | 6.40 | **6.13** | 989 ms | 352 ms | 869 ns | 466 ns (512) |
+| `urls` | 8.38 | **7.32** | 2 489 ms | 460 ms | 1 134 ns | 539 ns (512) |
+| `uuid` | 33.01 | **17.93** | 2 387 ms | 238 ms | 1 583 ns | 502 ns (512) |
 
-The shape is the one the C++ library gives: `rsmarisa` is smaller on the corpora whose keys share
-structure and larger on the ones whose keys do not, while `DictIndex` builds **11–59× faster** and
-answers **1.6–3.5× faster** on ten of the eleven. `numeric` is the exception on every axis:
-`rsmarisa` is smaller there, quicker to answer, and only 2.1× slower to build. One thing the
-right-hand column shows that the word list cannot: on the corpora whose keys are long — `dna`,
-`opaque`, `paths`, `urls`, `uuid` — the *largest* block is the fastest, because there the
+`BDX3` changed the shape of this table. Through 3.0.0 `rsmarisa` was the smaller structure on
+**nine** of these eleven corpora — everything but `opaque` and `uuid`, the two whose keys share
+nothing for a trie to fold. It is now **larger on all eleven**: 3.5 % on `paths` and 4.4 % on
+`titles-zh` at the narrow end, and 77–84 % on `dna`, `opaque`, decimal ids and UUIDs at the wide
+one, while `DictIndex` builds
+**1.3–14× faster** and answers **1.4–4.3× faster** on ten of the eleven. `numeric` is the one
+exception left, and only on latency: `rsmarisa` answers it in 208 ns against 325, having lost the
+size there (1.64 against 0.93) and the build (115 ms against 90). One thing the right-hand column shows that
+the word list cannot: on ten of eleven corpora the *largest* block is now the fastest, because the
 eight-byte samples stop settling the binary search over the block heads and every step of it reads
-a head, so fewer blocks are fewer dependent misses, and that outweighs a scan ten entries longer. At
+a head, so fewer blocks are fewer dependent misses, and that outweighs a scan ten entries longer.
+`domains`, whose keys are short enough for the samples to keep deciding, is the one that still
+wants 64. At
 nominally the same configuration `rsmarisa` is larger than the C++ marisa measured above — on
-`words`, 0.2 % at the smallest setting, 3.1 % at the default and 12 % at the fastest — so the flag
+`words`, 1.6 % at the smallest setting, 6.4 % at the default and 24 % at the fastest — so the flag
 words evidently do not mean quite the same thing, and each library's own curve is what to read.
 **"Smallest" here is the smallest of its three cache levels at the default number of tries, not its
 floor**: the sweep above shows the C++ library bottoming out at eight or sixteen tries on nine of
 these corpora, by 30 % on `uuid`, and this harness does not turn that knob. Read the left column as
 one point on a curve whose other end is not measured.
 
-<sub>Measured 2026-09-12 on a clean tree
-([`bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt)),
-`rsmarisa` 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. The
-`DictIndex` size column is `68f5336`'s, where the symbol table went one per shard of 65 536 keys;
-its build column predates that and the change costs 17–23 % of it, while the same tree's A-B leaves
-the lookups where they were
-([`dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt)). It is
+<sub>Measured 2026-09-19 on a clean tree at `0b42720`
+([`bench/results/rsmarisa-corpora-2026-09-19-arz-0b42720.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-corpora-2026-09-19-arz-0b42720.txt)),
+`rsmarisa` 0.4.2, in one process per corpus, six lanes alternating within each of five rounds. It is
 a throwaway crate under `local/`: `rsmarisa` is not a lexindex dependency and is not proposed as
 one. The Rust build times are not comparable with the Python ones above — that harness copies every
 key across the language boundary and this one does not.</sub>
