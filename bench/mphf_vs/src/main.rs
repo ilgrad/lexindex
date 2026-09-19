@@ -22,6 +22,12 @@
 //! for lexindex's tables, which ask for them from 2 MiB up; no competitor's table asks.
 //! `MPHF_VS_PROBES=m` probes m keys drawn at random (with replacement) instead of every key once:
 //! at 1 B keys the probe order alone is another 8 GB beside a competitor's build peak.
+//! `MPHF_VS_MISSES=1` adds a last-level-cache-misses-per-lookup column, counted over the same
+//! single-lookup passes through `perf_event_open(2)` on the timing thread. It is off by default
+//! because it puts an `ioctl` either side of a timed pass, and it is what separates a row that is
+//! slow because it touches another cache line from one that is slow because it does more work:
+//! at ten million keys `ptr_hash` compact takes 0.712 misses a lookup against lexindex's 0.862 and
+//! is still twice the nanoseconds. A kernel that refuses the event leaves the column out.
 //! `MPHF_VS_COPIES=k` looks each function up through k copies of its table, made one after
 //! another after its build, and reports each lookup column as the median over the copies of a
 //! copy's fastest pass, the spread then the slowest copy over the fastest: where a table lands
@@ -92,6 +98,18 @@ impl Stat {
             (self.max / self.min - 1.0) * 100.0
         )
     }
+
+    /// The same cell for a count a lookup rather than a nanosecond, which is under ten.
+    fn cell3(self) -> String {
+        if self.min.is_infinite() {
+            return format!("{:>8} {:>7}", "-", "");
+        }
+        format!(
+            "{:>8.3} {:>+6.1}%",
+            self.min,
+            (self.max / self.min - 1.0) * 100.0
+        )
+    }
 }
 
 /// A lookup column over the copies of a table: with one copy its fastest pass and the spread of
@@ -128,6 +146,9 @@ struct Row {
     /// A column a copy of the table.
     lookup: Vec<Stat>,
     batch: Vec<Stat>,
+    /// Last-level cache misses a single lookup, over the same passes, when `MPHF_VS_MISSES` is
+    /// set. Empty otherwise.
+    misses: Stat,
     /// Wall time a key with `lookup_threads` threads each taking a share of the probe order.
     lookup_mt: Vec<Stat>,
     batch_mt: Vec<Stat>,
@@ -216,6 +237,7 @@ impl Row {
             bits: 0.0,
             lookup: vec![Stat::NONE; copies],
             batch: vec![Stat::NONE; copies],
+            misses: Stat::NONE,
             lookup_mt: vec![Stat::NONE; copies],
             batch_mt: vec![Stat::NONE; copies],
         }
@@ -275,7 +297,13 @@ impl Row {
 /// single and batch lookups on one thread, then as many passes with `threads` threads, each
 /// taking a share of the probe order. Every turn starts with an untimed sweep over the first
 /// [`WARM`] probe keys, whose answers an exact copy must agree with the row's first table on.
-fn lookups(rows: &mut [Row], tables: &[Table], probe: &[u64], threads: usize) {
+fn lookups(
+    rows: &mut [Row],
+    tables: &[Table],
+    probe: &[u64],
+    threads: usize,
+    misses: Option<&Counter>,
+) {
     let n = probe.len() as f64;
     let warm = &probe[..probe.len().min(WARM)];
     let ns = |t: Instant| t.elapsed().as_secs_f64() * 1e9 / n;
@@ -294,9 +322,15 @@ fn lookups(rows: &mut [Row], tables: &[Table], probe: &[u64], threads: usize) {
     for _ in 0..3 {
         for t in tables {
             warm_up(t);
+            if let Some(c) = misses {
+                c.start();
+            }
             let s = Instant::now();
             std::hint::black_box((t.single)(probe));
             rows[t.row].lookup[t.copy].add(ns(s));
+            if let Some(c) = misses {
+                rows[t.row].misses.add(c.stop() / n);
+            }
             if let Some(batch) = &t.batch {
                 let s = Instant::now();
                 std::hint::black_box(batch(probe));
@@ -328,6 +362,83 @@ fn lookups(rows: &mut [Row], tables: &[Table], probe: &[u64], threads: usize) {
                 rows[t.row].batch_mt[t.copy].add(ns(s));
             }
         }
+    }
+}
+
+/// A hardware counter over the calling thread, opened through `perf_event_open(2)`.
+///
+/// There is no `/proc` file for cache misses, and the column that says *why* one row's lookup is
+/// slower than another's cannot come from the clock: two functions that touch the same number of
+/// cache lines and differ by a multiply are a different finding from two that differ by a miss.
+/// Reset and read around one pass, so the count is that pass's and not the round's. A kernel that
+/// refuses the event -- `perf_event_paranoid` above 2, a container without the capability --
+/// leaves the column empty rather than failing the run, and the counter is off unless
+/// `MPHF_VS_MISSES` asks for it, so a published timing is never taken with a syscall either side
+/// of it.
+struct Counter(i32);
+
+/// `PERF_TYPE_HARDWARE` / `PERF_COUNT_HW_CACHE_MISSES`: the last level, which is the one a table
+/// larger than the cache pays for.
+const HW_CACHE_MISSES: u64 = 3;
+
+impl Counter {
+    fn open(config: u64) -> Option<Counter> {
+        unsafe extern "C" {
+            fn syscall(num: std::ffi::c_long, ...) -> std::ffi::c_long;
+        }
+        // `struct perf_event_attr` as bytes, so that none of its bitfields has to be spelled as a
+        // Rust type: type at 0, size at 4, config at 8, and the flag word at 40, where bit 0 is
+        // `disabled`, bit 5 `exclude_kernel` and bit 6 `exclude_hv`.
+        const ATTR_LEN: usize = 136;
+        let mut attr = [0u8; ATTR_LEN];
+        attr[0..4].copy_from_slice(&0u32.to_le_bytes());
+        attr[4..8].copy_from_slice(&(ATTR_LEN as u32).to_le_bytes());
+        attr[8..16].copy_from_slice(&config.to_le_bytes());
+        attr[40..48].copy_from_slice(&((1u64 << 0) | (1 << 5) | (1 << 6)).to_le_bytes());
+        // SAFETY: `perf_event_open(attr, pid = 0, cpu = -1, group = -1, flags = 0)` reads
+        // `attr.size` bytes from a buffer of exactly that length and returns a file descriptor.
+        let fd = unsafe { syscall(298, attr.as_mut_ptr(), 0i32, -1i32, -1i32, 0u64) };
+        (fd >= 0).then_some(Counter(fd as i32))
+    }
+
+    fn ioctl(&self, request: u64) {
+        unsafe extern "C" {
+            fn ioctl(fd: i32, request: u64, ...) -> i32;
+        }
+        // SAFETY: the three `PERF_EVENT_IOC_*` below take no argument the kernel dereferences.
+        unsafe { ioctl(self.0, request, 0u64) };
+    }
+
+    /// Zero the count and start it.
+    fn start(&self) {
+        self.ioctl(0x2403); // PERF_EVENT_IOC_RESET
+        self.ioctl(0x2400); // PERF_EVENT_IOC_ENABLE
+    }
+
+    /// Stop the count and read it.
+    fn stop(&self) -> f64 {
+        self.ioctl(0x2401); // PERF_EVENT_IOC_DISABLE
+        unsafe extern "C" {
+            fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+        }
+        let mut got = [0u8; 8];
+        // SAFETY: the descriptor reads one `u64` into a buffer of exactly eight bytes.
+        let n = unsafe { read(self.0, got.as_mut_ptr(), 8) };
+        if n == 8 {
+            u64::from_le_bytes(got) as f64
+        } else {
+            0.0
+        }
+    }
+}
+
+impl Drop for Counter {
+    fn drop(&mut self) {
+        unsafe extern "C" {
+            fn close(fd: i32) -> i32;
+        }
+        // SAFETY: a descriptor this type opened and owns.
+        unsafe { close(self.0) };
     }
 }
 
@@ -393,6 +504,12 @@ fn main() {
     } else {
         shuffled(n).into_iter().map(|i| keys[i as usize]).collect()
     };
+    // Off unless asked: every ioctl is a syscall either side of a timed pass, and a published
+    // timing is taken without one.
+    let counter = std::env::var_os("MPHF_VS_MISSES").and_then(|_| Counter::open(HW_CACHE_MISSES));
+    if std::env::var_os("MPHF_VS_MISSES").is_some() && counter.is_none() {
+        eprintln!("perf_event_open refused; no miss column");
+    }
     let params = Params::new(Bits8, bits_per_seed_to_100_bucket_size(8));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -533,7 +650,7 @@ fn main() {
                     .fold(0usize, usize::wrapping_add) as u64
             }),
         );
-        lookups(&mut rows, &tables, &order, lookup_threads);
+        lookups(&mut rows, &tables, &order, lookup_threads, counter.as_ref());
     }
     let sample = if probes < n {
         format!(" of {probes} keys drawn at random")
@@ -576,7 +693,16 @@ fn main() {
             String::new()
         },
         if single {
-            format!("{:>14}{:>9}", "build peak MB", "huge MB")
+            format!(
+                "{}{:>14}{:>9}",
+                if counter.is_some() {
+                    format!("{:>17}", "LLC miss/lookup")
+                } else {
+                    String::new()
+                },
+                "build peak MB",
+                "huge MB"
+            )
         } else {
             String::new()
         }
@@ -595,7 +721,16 @@ fn main() {
                 String::new()
             },
             if single {
-                format!("{:>14.1}{:>9.1}", r.peak_mb, r.huge_mb)
+                format!(
+                    "{}{:>14.1}{:>9.1}",
+                    if counter.is_some() {
+                        format!(" {}", r.misses.cell3())
+                    } else {
+                        String::new()
+                    },
+                    r.peak_mb,
+                    r.huge_mb
+                )
             } else {
                 String::new()
             }
