@@ -2,7 +2,7 @@
 
 A generated table lives between two markers and is not written by hand:
 
-    <!-- table: compare bench/results/compare-2026-09-14-arz-8aaa0af.json columns=prefix,range -->
+    <!-- table: compare bench/results/compare-2026-09-19-arz-999e933.json columns=prefix,range -->
     | library | prefix | range | **bytes/key** | **ns/lookup** |
     ...
     <!-- /table -->
