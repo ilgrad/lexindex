@@ -2063,7 +2063,10 @@ impl DictIndex {
         // An index of no keys still holds one codec and one pair of codes, which is what a reader
         // indexes into.
         if codes.is_empty() {
-            codes.push((Code::Frame, Code::Frame));
+            codes.push((
+                Code::Frame(paircode::Frames::NONE),
+                Code::Frame(paircode::Frames::NONE),
+            ));
             codecs.push(Codec::Symbols {
                 table: tables[0].clone(),
                 split: None,
@@ -2792,7 +2795,7 @@ impl DictIndex {
     ) -> bool {
         // Off the group's code, not off a reader opened to ask: opening one parses a run's
         // prologue, which is what the walk is about to do anyway.
-        if matches!(run.code, Code::Frame) {
+        if matches!(run.code, Code::Frame(_)) {
             self.climb_as::<true>(run, steps, out, stair)
         } else {
             self.climb_as::<false>(run, steps, out, stair)

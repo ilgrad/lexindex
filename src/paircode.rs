@@ -36,10 +36,175 @@ const FIELD_MAX: usize = u8::MAX as usize;
 /// entries does not repay a prologue that a run of thirty-one does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Code {
-    /// Every run carries its own bases and widths.
-    Frame,
+    /// Every run's own bases and widths, as offsets from the group's.
+    Frame(Frames),
     /// The group carries one table; `pairs[i]` is `(lcp << 8) | len`.
     Table { w: u32, pairs: Vec<u16> },
+}
+
+/// How every run of a frame group writes its prologue.
+///
+/// A run's frame is its own — two bases and two field widths fitted to its fifteen or thirty-one
+/// pairs — and spelling all four out cost two varints and a byte, three bytes a run against the
+/// six its codes take. Measured over nine corpora at block 256, the prologue was **exactly**
+/// three bytes on every run of all but one (`paths`, 3.116): `lcp` and `len` bases under 128
+/// everywhere, so neither varint ever reached a second byte.
+///
+/// Across a group those four numbers barely move — on real words the `lcp` base spans 0 to 14 and
+/// the `len` base 1 to 3 — so the group states the four minima once and every run carries four
+/// offsets, `p` bits wide in all: 0.70 to 2.39 bytes a run, 23 to 77 % less.
+///
+/// The offsets are what is stored, so a field too narrow for a run is a *bigger* run and never a
+/// wrong one: a clamped base leaves more pairs outside the frame and each of those escapes, which
+/// is the path a pair that does not fit already takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Frames {
+    /// The smallest `lcp` base, `len` base, `lcp` width and `len` width in the group.
+    bl: usize,
+    bn: usize,
+    wl: u32,
+    wn: u32,
+    /// The mask each of the four offsets is read under, in the order a run writes them. Stored
+    /// rather than the widths they were built from: a run decodes its prologue twice a lookup,
+    /// and `(1 << w) - 1` four times over cost more than the shifts and the ands together.
+    m: [u32; 4],
+    /// The bit each offset starts at, and in `sh[4]` the bit the codes do.
+    sh: [u8; 5],
+}
+
+/// Bits a run's prologue may take, and the widest either base offset may be. One eight-byte load
+/// off the run's first byte answers the whole of it, and a base offset that wants more than
+/// thirty-two bits — a four-gigabyte spread of shared prefixes across one shard — leaves the group
+/// to the table instead.
+const PROLOGUE_MAX: u32 = 56;
+const OFFSET_MAX: u32 = 32;
+
+/// One run's own frame as the group is fitted over it, with what the pairs it cannot name cost.
+#[derive(Clone, Copy)]
+struct Fit {
+    bl: usize,
+    bn: usize,
+    wl: u32,
+    wn: u32,
+    esc: usize,
+    n: usize,
+}
+
+fn fit_run(pairs: &[(usize, usize)]) -> Fit {
+    let (wl, wn, esc) = frame_widths(pairs);
+    let (bl, bn) = bases(pairs);
+    Fit {
+        bl,
+        bn,
+        wl,
+        wn,
+        esc,
+        n: pairs.len(),
+    }
+}
+
+impl Frames {
+    /// The layout a group with no runs carries, which no reader ever decodes a prologue under.
+    pub(crate) const NONE: Self = Self {
+        bl: 0,
+        bn: 0,
+        wl: 0,
+        wn: 0,
+        m: [0; 4],
+        sh: [0; 5],
+    };
+
+    /// The layout of four offsets `p` bits wide over the four bases `lo`, or `None` when they want
+    /// more bits than one load can answer.
+    fn new(lo: [usize; 4], p: [u32; 4]) -> Option<Self> {
+        if p.iter().sum::<u32>() > PROLOGUE_MAX || p[0] > OFFSET_MAX || p[1] > OFFSET_MAX {
+            return None;
+        }
+        let mut sh = [0u8; 5];
+        for k in 0..4 {
+            sh[k + 1] = sh[k] + p[k] as u8;
+        }
+        Some(Self {
+            bl: lo[0],
+            bn: lo[1],
+            wl: lo[2] as u32,
+            wn: lo[3] as u32,
+            m: p.map(|w| ((1u64 << w) - 1) as u32),
+            sh,
+        })
+    }
+
+    /// The layout that covers every run of a group.
+    fn over(fits: &[Fit]) -> Option<Self> {
+        let first = fits.first()?;
+        let mut lo = [first.bl, first.bn, first.wl as usize, first.wn as usize];
+        let mut hi = lo;
+        for f in fits {
+            for (k, v) in [f.bl, f.bn, f.wl as usize, f.wn as usize]
+                .into_iter()
+                .enumerate()
+            {
+                lo[k] = lo[k].min(v);
+                hi[k] = hi[k].max(v);
+            }
+        }
+        Self::new(lo, [0, 1, 2, 3].map(|k| bits_of(hi[k] - lo[k]) as u32))
+    }
+
+    /// Bits every run of the group spends on its prologue.
+    #[inline(always)]
+    fn bits(&self) -> u32 {
+        u32::from(self.sh[4])
+    }
+
+    /// The width of each offset, as the group states it in the blob.
+    fn widths(&self) -> [u32; 4] {
+        self.m.map(u32::count_ones)
+    }
+
+    /// What the group costs under this layout: its own bytes, and every run's prologue, codes and
+    /// escapes. The prologue and the codes share one rounding because they share the run's bytes.
+    fn cost(&self, fits: &[Fit]) -> usize {
+        let pro = self.bits() as usize;
+        self.serialized_len()
+            + fits
+                .iter()
+                .map(|f| (pro + f.n * (f.wl + f.wn) as usize).div_ceil(8) + f.esc)
+                .sum::<usize>()
+    }
+
+    fn serialized_len(&self) -> usize {
+        varint_len(self.bl) + varint_len(self.bn) + 4
+    }
+
+    fn write_to(&self, out: &mut Vec<u8>) {
+        let p = self.widths();
+        put_varint(out, self.bl);
+        put_varint(out, self.bn);
+        out.push(((self.wl as u8) << 4) | self.wn as u8);
+        out.push(p[0] as u8);
+        out.push(p[1] as u8);
+        out.push(((p[2] as u8) << 4) | p[3] as u8);
+    }
+
+    fn read(bytes: &[u8]) -> Option<(Self, &[u8])> {
+        let mut at = 0;
+        let bl = varint_at(bytes, &mut at)?;
+        let bn = varint_at(bytes, &mut at)?;
+        let &[widths, p0, p1, pw] = bytes.get(at..at + 4)? else {
+            return None;
+        };
+        let f = Self::new(
+            [bl, bn, usize::from(widths >> 4), usize::from(widths & 0xF)],
+            [
+                u32::from(p0),
+                u32::from(p1),
+                u32::from(pw >> 4),
+                u32::from(pw & 0xF),
+            ],
+        )?;
+        Some((f, bytes.get(at + 4..)?))
+    }
 }
 
 /// Bytes the two varints of an escaped pair take.
@@ -56,8 +221,9 @@ fn varint_len(mut v: usize) -> usize {
     n
 }
 
-/// The widths a run's pairs are cheapest under, and what that costs in bytes — the header bits,
-/// the escapes it leaves and the prologue.
+/// The widths a run's pairs are cheapest under, and what the pairs they leave outside the frame
+/// cost in escape bytes. The prologue is the group's and the header bits fall out of the widths,
+/// so neither is the run's to report; both are constant in the search and neither moves its answer.
 ///
 /// Every width pair is priced, but the escapes are summed from a histogram rather than re-walked
 /// for each: a pair escapes under `(wl, wn)` when either offset needs more bits than its width
@@ -69,7 +235,6 @@ fn varint_len(mut v: usize) -> usize {
 fn frame_widths(pairs: &[(usize, usize)]) -> (u32, u32, usize) {
     const W: usize = FRAME_MAX as usize + 1;
     let (bl, bn) = bases(pairs);
-    let base = 1 + varint_len(bl) + varint_len(bn);
     // `esc[hl][hn]`: the escape bytes of the pairs whose offsets need exactly `hl` and `hn`
     // bits; an offset past the widest frame counts under `W`, where no width reaches it.
     let mut esc = [[0usize; W + 1]; W + 1];
@@ -95,14 +260,15 @@ fn frame_widths(pairs: &[(usize, usize)]) -> (u32, u32, usize) {
             fit[wl][wn] = row + if wl > 0 { fit[wl - 1][wn] } else { 0 };
         }
     }
-    let mut best = (0, 0, usize::MAX);
+    let (mut best, mut cheapest) = ((0, 0, 0), usize::MAX);
     for wl in 0..=FRAME_MAX {
         for wn in 0..=FRAME_MAX {
             let bits = pairs.len() * (wl + wn) as usize;
             let (l, n) = (wl as usize, wn as usize);
-            let cost = bits.div_ceil(8) + base + (total - fit[l][n]) + corner[l][n];
-            if cost < best.2 {
-                best = (wl, wn, cost);
+            let esc = (total - fit[l][n]) + corner[l][n];
+            let cost = bits.div_ceil(8) + esc;
+            if cost < cheapest {
+                (best, cheapest) = ((wl, wn, esc), cost);
             }
         }
     }
@@ -138,14 +304,17 @@ impl Code {
     /// in bytes: its own, its headers' and the escapes it leaves. A caller pricing one shape of the
     /// data against another needs the number, and it falls out of the same search.
     pub(crate) fn choose_cost(runs: &[&[(usize, usize)]]) -> (Self, usize) {
-        let frame: usize = runs
+        let fits: Vec<Fit> = runs
             .iter()
             .filter(|r| !r.is_empty())
-            .map(|r| frame_widths(r).2)
-            .sum();
-        match Self::best_table(runs) {
-            Some((code, bytes)) if bytes < frame => (code, bytes),
-            _ => (Code::Frame, frame),
+            .map(|r| fit_run(r))
+            .collect();
+        let frame = Frames::over(&fits).map(|f| (f, f.cost(&fits)));
+        match (Self::best_table(runs), frame) {
+            (Some((code, bytes)), Some((_, frame))) if bytes < frame => (code, bytes),
+            (Some((code, bytes)), None) => (code, bytes),
+            (_, Some((f, cost))) => (Code::Frame(f), cost),
+            (None, None) => (Code::Frame(Frames::NONE), 0),
         }
     }
 
@@ -206,7 +375,10 @@ impl Code {
     /// The code as the group's bytes in the blob.
     pub(crate) fn write_to(&self, out: &mut Vec<u8>) {
         match self {
-            Code::Frame => out.push(0),
+            Code::Frame(f) => {
+                out.push(0);
+                f.write_to(out);
+            }
             Code::Table { w, pairs } => {
                 out.push(1);
                 out.push(*w as u8);
@@ -223,7 +395,7 @@ impl Code {
     pub(crate) fn read(bytes: &[u8]) -> Option<(Self, &[u8])> {
         let (&tag, rest) = bytes.split_first()?;
         match tag {
-            0 => Some((Code::Frame, rest)),
+            0 => Frames::read(rest).map(|(f, rest)| (Code::Frame(f), rest)),
             1 => {
                 let (&w, rest) = rest.split_first()?;
                 let (count, rest) = rest.split_first_chunk::<2>()?;
@@ -245,7 +417,7 @@ impl Code {
     /// Bytes [`write_to`](Self::write_to) appends.
     pub(crate) fn serialized_len(&self) -> usize {
         match self {
-            Code::Frame => 1,
+            Code::Frame(f) => 1 + f.serialized_len(),
             Code::Table { pairs, .. } => TABLE_HEADER + 2 * pairs.len(),
         }
     }
@@ -290,16 +462,38 @@ impl<'a> Writer<'a> {
     /// A writer for one run of `pairs` under `code`, its prologue already in the stream.
     pub(crate) fn new(code: &'a Inverse<'_>, pairs: &[(usize, usize)]) -> Self {
         match code.code {
-            Code::Frame => {
-                let (wl, wn, _) = frame_widths(pairs);
-                let (bl, bn) = bases(pairs);
+            Code::Frame(f) => {
+                let run = fit_run(pairs);
+                // What the group's fields hold. They were sized over this very run, so the clamp
+                // is unreachable on a blob this crate wrote and correct on one it did not: a base
+                // cut short leaves pairs outside the frame, and those escape.
+                let mut d = [
+                    run.bl.saturating_sub(f.bl) as u64,
+                    run.bn.saturating_sub(f.bn) as u64,
+                    u64::from(run.wl.saturating_sub(f.wl)),
+                    u64::from(run.wn.saturating_sub(f.wn)),
+                ];
+                for (v, m) in d.iter_mut().zip(f.m) {
+                    *v = (*v).min(u64::from(m));
+                }
+                let (bl, bn) = (f.bl + d[0] as usize, f.bn + d[1] as usize);
+                let (wl, wn) = (f.wl + d[2] as u32, f.wn + d[3] as u32);
+                // The codes carry on in the bit the prologue stopped at, so a group whose runs
+                // agree on all four spends nothing at all here.
+                let mut acc = 0u64;
+                for (k, v) in d.into_iter().enumerate() {
+                    acc |= v << f.sh[k];
+                }
+                let mut used = f.bits();
                 let mut out = Vec::with_capacity(8);
-                put_varint(&mut out, bl);
-                put_varint(&mut out, bn);
-                out.push(((wl as u8) << 4) | wn as u8);
+                while used >= 8 {
+                    out.push(acc as u8);
+                    acc >>= 8;
+                    used -= 8;
+                }
                 Self {
-                    bits: 0,
-                    used: 0,
+                    bits: acc,
+                    used,
                     out,
                     width: wl + wn,
                     frame: Some((bl, wl, bn, wn)),
@@ -425,42 +619,50 @@ impl<'a> Reader<'a> {
     /// A reader over a run of `count` pairs coded under `code`, and where its suffixes begin. A
     /// stream this crate did not write gives `None` rather than a panic.
     ///
-    /// Inlined on purpose: a climb opens two runs and a scan one, so the prologue's varints are
-    /// paid once a lookup, and out of line they were a call through the got with the code's kind
-    /// unknown to the walk that followed.
+    /// Inlined on purpose: a climb opens two runs and a scan one, so the prologue is paid once a
+    /// lookup, and out of line it was a call through the got with the code's kind unknown to the
+    /// walk that followed.
     #[inline]
     pub(crate) fn of(code: &'a Code, data: &'a [u8], count: usize) -> Option<(Self, &'a [u8])> {
         let (at, width, frame) = match code {
-            Code::Frame => {
-                let mut at = 0;
-                let bl = varint_at(data, &mut at)?;
-                let bn = varint_at(data, &mut at)?;
-                let &widths = data.get(at)?;
-                at += 1;
-                let (wl, wn) = (u32::from(widths >> 4), u32::from(widths & 0xF));
+            Code::Frame(f) => {
+                let bits = f.bits();
+                if data.len() * 8 < bits as usize {
+                    return None;
+                }
+                let word = match data.first_chunk::<8>() {
+                    Some(w) => u64::from_le_bytes(*w),
+                    None => tail_word(data, 0),
+                };
+                let take = |k: usize| (word >> f.sh[k]) & u64::from(f.m[k]);
+                let (dbl, dbn) = (take(0) as usize, take(1) as usize);
+                let (wl, wn) = (f.wl + take(2) as u32, f.wn + take(3) as u32);
+                if wl > FRAME_MAX || wn > FRAME_MAX {
+                    return None;
+                }
                 let frame = Frame {
-                    bl,
-                    bn,
+                    bl: f.bl + dbl,
+                    bn: f.bn + dbn,
                     wn,
                     mask_n: top(wn),
                 };
-                (at, wl + wn, Some(frame))
+                (bits as usize, wl + wn, Some(frame))
             }
             Code::Table { w, .. } => (0, *w, None),
         };
         let is_frame = frame.is_some();
         let frame = frame.unwrap_or(Frame::NONE);
-        let end = at + (count * width as usize).div_ceil(8);
+        let end = (at + count * width as usize).div_ceil(8);
         let sfx = data.get(end..)?;
         let table = match code {
             Code::Table { pairs, .. } => pairs.as_slice(),
-            Code::Frame => &[],
+            Code::Frame(_) => &[],
         };
         Some((
             Self {
                 data,
                 hdr_end: end,
-                bit: at * 8,
+                bit: at,
                 width,
                 mask: (1u64 << width) - 1,
                 frame,
@@ -591,7 +793,7 @@ mod tests {
     fn a_run_of_deep_shared_prefixes_takes_the_frame_and_escapes_nothing() {
         let runs = vec![(0..31).map(|i| (100 + i % 4, 7 + i % 3)).collect()];
         let code = round_trip(&runs);
-        assert_eq!(code, Code::Frame);
+        assert!(matches!(code, Code::Frame(_)), "{code:?}");
     }
 
     #[test]
@@ -617,7 +819,77 @@ mod tests {
 
     #[test]
     fn a_group_of_empty_runs_has_no_table() {
-        assert_eq!(Code::choose_cost(&[&[][..], &[][..]]).0, Code::Frame);
+        assert_eq!(
+            Code::choose_cost(&[&[][..], &[][..]]).0,
+            Code::Frame(Frames::NONE)
+        );
+    }
+
+    #[test]
+    fn a_group_whose_runs_agree_spends_no_prologue() {
+        let fits: Vec<Fit> = (0..8)
+            .map(|_| fit_run(&[(9, 4), (9, 5), (10, 4)]))
+            .collect();
+        let f = Frames::over(&fits).expect("eight runs of the same shape");
+        assert_eq!(f.bits(), 0, "{f:?}");
+        assert_eq!(f.widths(), [0; 4]);
+        // Every run's prologue is then the run's first code, and the codes start at bit zero.
+        assert_eq!(f.cost(&fits), f.serialized_len() + 8 * fits[0].esc + 8);
+    }
+
+    #[test]
+    fn a_layout_wider_than_one_load_is_refused() {
+        // A base offset past `OFFSET_MAX`, and four offsets past `PROLOGUE_MAX` together.
+        assert!(Frames::new([0; 4], [OFFSET_MAX + 1, 0, 0, 0]).is_none());
+        assert!(Frames::new([0; 4], [30, 30, 4, 4]).is_none());
+        let f = Frames::new([7, 2, 1, 1], [5, 3, 2, 2]).expect("a layout one load answers");
+        assert_eq!(f.bits(), 12);
+        assert_eq!(f.widths(), [5, 3, 2, 2]);
+        let mut bytes = Vec::new();
+        Code::Frame(f).write_to(&mut bytes);
+        assert_eq!(Code::read(&bytes).expect("our own group").0, Code::Frame(f));
+        // The same bytes with a base offset of forty bits: refused where they are read, so a blob
+        // claiming it never reaches a run.
+        let at = bytes.len() - 3;
+        bytes[at] = 40;
+        assert!(Code::read(&bytes).is_none());
+    }
+
+    #[test]
+    fn a_run_claiming_a_width_no_frame_has_is_refused() {
+        // `wl` is at the cap and the run's offset is all ones, so the two add past it.
+        let f = Frames::new([0, 0, FRAME_MAX as usize, 0], [0, 0, 4, 0]).expect("a layout");
+        assert!(Reader::of(&Code::Frame(f), &[0xFF; 8], 4).is_none());
+    }
+
+    #[test]
+    fn a_run_outside_its_group_escapes_rather_than_lying() {
+        // The group is fitted over short prefixes; the run written under it starts far past them,
+        // so its base clamps to what the field holds and every pair falls outside the frame.
+        let code = Code::Frame(Frames::new([1, 2, 1, 1], [2, 2, 2, 2]).expect("a layout"));
+        let stranger = [(900, 40), (901, 41), (902, 42)];
+        let inverse = Inverse::of(&code);
+        let mut writer = Writer::new(&inverse, &stranger);
+        let mut sfx = Vec::new();
+        for &(lcp, len) in &stranger {
+            writer.push(lcp, len, &mut sfx);
+        }
+        let mut data = Vec::new();
+        writer.finish(&mut data);
+        data.extend_from_slice(&sfx);
+        let (mut reader, tail) = Reader::of(&code, &data, stranger.len()).expect("our own run");
+        let mut at = 0;
+        for &(lcp, len) in &stranger {
+            let c = reader.next_code();
+            assert!(reader.pair(c).is_none(), "a stranger's pair was named");
+            assert_eq!(
+                (
+                    varint_at(tail, &mut at).expect("lcp"),
+                    varint_at(tail, &mut at).expect("len")
+                ),
+                (lcp, len)
+            );
+        }
     }
 
     #[test]
