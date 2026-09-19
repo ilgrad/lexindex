@@ -617,6 +617,14 @@ format written under it: it is a third smaller than `BDX2` on the corpora the di
 and shares no section layout with it, so 4.0 refuses `BDX2` by name rather than carry a second
 reader, and the migration is `lexindex dump` on 3.x into `lexindex build` on 4.0.
 
+**The key hash moved in 4.0 as well, and that is where the rule stops.** `BMP7`, `BCH7` and `BCL1`
+are keyed on a hash this version no longer computes, so every id they would answer is wrong; all
+three are refused by name. For `BMP7` the way back is the rule's — `lexindex dump` under 3.x writes
+the keys and `lexindex build` under 4.0 reads them — but `BCH7` and `BCL1` store no keys in any
+version, so no dump exists for them and the way back is the corpus they were built from. A hash
+change is a heavier break than a format change for exactly that reason, which is why it waits for a
+major rather than riding one.
+
 The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
 release, not a patch.
