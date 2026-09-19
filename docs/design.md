@@ -301,9 +301,9 @@ entry whose prefix is at least a later entry's writes nothing that survives, so 
 over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
 a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
 decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
-**2.84 B/key** (`StringIndex` 5.95), `id` 298–302 ns against 265–272, `key_into` 207 against
-`key`'s 278; 128 and 512 give 2.90 and 2.81 B/key at 285–288 and 316–322 ns, and 1024 gives 2.79
-at 344–347. Against one level at the same size the reverse lookup halves and `id` does not move:
+**2.65 B/key** (`StringIndex` 5.95), `id` 346–353 ns against 262–280, `key_into` 198–200 against
+`key`'s 260–266; 128 and 512 give 2.69 and 2.53 B/key at 325–353 and 386–412 ns, and 1024 gives
+2.52 at 426–436. Against one level at the same size the reverse lookup halves and `id` does not move:
 244–246 ns and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for
 460–464 and 393. The one-level format still reaches further down — 2.701 at 1024 keys a block —
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level

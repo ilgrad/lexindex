@@ -1,0 +1,15 @@
+# local/prefixbench.py -- prefix queries against the tries a Python project can install
+# lexindex 3.0.0 at 999e933, 2026-09-19, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, marisa-trie 1.4.1,
+# dawg2 0.13.3, datrie 0.8.3; tree differing from the commit in documentation only.
+
+=== prefixbench, 2026-09-19T17:18:09+03:00, load 0.48 0.61 0.70
+Installed 3 packages in 3ms
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 256      2.65        483        2213      106493       78211 
+DictIndex 512      2.53        511        2347      104242       75428 
+StringIndex        5.95        567        4325      160970      321626 
+marisa-trie        2.98     119840        2525       94630       94624 
+datrie            30.69     727644      730578      731963      729360 
+dawg2             23.96      68261        1456       49240       49271 
+rc=0 at 2026-09-19T17:25:23+03:00, load 1.00 0.93 0.83

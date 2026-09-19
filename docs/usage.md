@@ -358,8 +358,8 @@ tokenizer over its own vocabulary, a join on a key column the index was built fr
 ```python
 from lexindex import DictIndex
 
-# Exact string <-> rank both ways, about 2.84 B/key: the sorted keys front-coded in blocks of 256,
-# each cut into microblocks of 32, with the suffixes under a symbol table trained on the index
+# Exact string <-> rank both ways, about 2.65 B/key: the sorted keys front-coded in blocks of 256,
+# each cut into microblocks of 16, with the suffixes under a symbol table trained on the index
 # itself. Ordered, so ranges of keys
 # are ranges of ids, and prefix and range fall out of that -- only fuzzy needs an automaton and
 # stays with StringIndex.
@@ -378,7 +378,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 3.03 B/key against 2.84; id 272–284 ns against 298–302
+faster = DictIndex(words_list, block=64)    # 2.75 B/key against 2.65; id 307–312 ns against 346–353
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
 words.save("words.bdx")
@@ -393,14 +393,14 @@ words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; heade
 and compares the stored suffixes there against the query without decoding them; `key` climbs the
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
-entries — 38 at the default, where a block of 256 keys holds 255. On the dictionary: 2.84 bytes
-per key, `id` 298–302 ns and `key_into` 207, against 5.95 / 265–272 / 466–473 for
+entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.65 bytes
+per key, `id` 346–353 ns and `key_into` 198–200, against 5.95 / 262–280 / 438–494 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
-At `block=512` the same index stores **2.81 bytes per key, well under `marisa-trie`'s 2.98 on this
+At `block=512` the same index stores **2.53 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 227–232 ns
-against 207 at the default, and `id` 316–322 against 298–302.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 256 ns
+against 198–200 at the default, and `id` 386–412 against 346–353.
 
 ## `Overlay` — edits without a rebuild
 
@@ -562,7 +562,7 @@ assert!(small.contains("POST"));
 let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key
 assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
-let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.84 B/key
+let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.65 B/key
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
@@ -877,7 +877,7 @@ probabilistic indexes are allowed:
 ```
 
 **The command line assumes an open vocabulary, and so implies `--exact`.** Asked to rank with no
-needs at all, the honest answer on size is `ClosedHashIndex` at 0.26 bytes a key — and it answers a
+needs at all, the honest answer on size is `ClosedHashIndex` at 0.24 bytes a key — and it answers a
 key it has never seen with some member's id, because it stores nothing to check against. That is the
 right index for a fixed vocabulary and a trap for anything else, and a ranking is read by someone
 who has not yet decided. So `plan` and `--index auto` leave the two probabilistic indexes out and

@@ -1,0 +1,32 @@
+# local/cpbench.py -- common_prefix and longest_prefix against marisa-trie, dawg2 and datrie
+# lexindex 3.0.0 at 999e933, 2026-09-19, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, marisa-trie 1.4.1,
+# dawg2 0.13.3, datrie 0.8.3; tree differing from the commit in documentation only.
+# Three runs, 90 s apart, each waiting for load < 0.6/0.7/0.8; the tables quote the minimum.
+
+=== cpbench run 1, 2026-09-19T17:30:07+03:00, load 0.28 0.63 0.74
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2945            1147 
+DictIndex 512             3252            1265 
+StringIndex                646             357 
+marisa-trie               1104             861 
+dawg2                      688             607 
+datrie                     575             299 
+=== cpbench run 2, 2026-09-19T17:31:40+03:00, load 0.14 0.49 0.67
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2960            1163 
+DictIndex 512             3284            1277 
+StringIndex                643             364 
+marisa-trie               1128             872 
+dawg2                      691             625 
+datrie                     572             271 
+=== cpbench run 3, 2026-09-19T17:33:14+03:00, load 0.04 0.36 0.61
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2925            1143 
+DictIndex 512             3285            1286 
+StringIndex                636             359 
+marisa-trie               1117             865 
+dawg2                      688             608 
+datrie                     546             273 

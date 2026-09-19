@@ -469,9 +469,9 @@ class DictIndex:
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
     sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-    2.84 bytes per key on real words, 52 % below ``StringIndex``. Prefix and range are order
+    2.65 bytes per key on real words, 55 % below ``StringIndex``. Prefix and range are order
     lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
-    ``StringIndex``. ``block=512`` stores 2.81 bytes per key, well under ``marisa-trie``, for a
+    ``StringIndex``. ``block=512`` stores 2.53 bytes per key, well under ``marisa-trie``, for a
     slower reverse lookup.
     """
 
@@ -481,11 +481,11 @@ class DictIndex:
         block: int | Literal["fast", "balanced", "compact"] = 256,
     ) -> DictIndex:
         """``block`` keys per block, ``1..=1024``. The block is what a stored head and its arrays
-        are shared over; it is split into microblocks of 32 (one microblock below that), and a
-        lookup scans one restart a microblock plus one microblock -- ``block / 32 + 30`` entries
-        from 64 up, not ``block - 1``.
-        32 / 64 / 128 / 256 / 512 / 1024 gave 3.23 / 3.03 / 2.90 / 2.84 / 2.81 / 2.79 bytes per key
-        on the dictionary, and 256 is under ``marisa-trie``'s 2.955 floor there. A name stands for
+        are shared over; it is split into microblocks of 16 to 32 -- the smallest divisor of the
+        block at or above its square root -- and a lookup scans one restart a microblock plus one
+        microblock, ``block / micro + micro - 2`` entries rather than ``block - 1``.
+        32 / 64 / 128 / 256 / 512 / 1024 gave 2.90 / 2.75 / 2.69 / 2.65 / 2.53 / 2.52 bytes per key
+        on the dictionary, every one under ``marisa-trie``'s 2.955 floor there. A name stands for
         a point on that curve: ``"fast"`` is 32, ``"balanced"`` 256 and ``"compact"`` 1024."""
 
     @staticmethod

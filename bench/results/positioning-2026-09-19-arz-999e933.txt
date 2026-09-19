@@ -1,0 +1,51 @@
+# local/positioning.py -- what each structure costs per key on three corpora from one word list
+# lexindex 3.0.0 at 999e933, 2026-09-19, arz (Ryzen 7 5800HS, Zen 3), rustc 1.98.1, marisa-trie 1.4.1,
+# dawg2 0.13.3, datrie 0.8.3; tree differing from the commit in documentation only.
+# blob B/key is the serialised index, peak MB the process high-water mark, build adds B/key
+# what the build costs above the keys themselves. `dict` is the built-in, with no serialised form.
+
+=== positioning corpus words n=479823, 2026-09-19T17:34:47+03:00, load 0.03 0.28 0.55
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+    479823  dict                         —      52.4      98.4               95.9
+    479823  marisa                    2.98      52.7     100.3               99.2
+    479823  StringIndex               5.95      52.4      88.8               75.8
+    479823  PerfectHashIndex         10.88      52.5      90.1               78.4
+    479823  CompactHashIndex          1.24      52.7      72.7               41.6
+    479823  DictIndex                 2.65      52.5     116.0              132.4
+=== positioning corpus random n=1000000, 2026-09-19T17:34:50+03:00, load 0.11 0.29 0.56
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+   1000000  dict                         —     146.5     217.3               70.8
+   1000000  marisa                    6.21     146.7     269.0              122.2
+   1000000  StringIndex              15.19     146.5     199.9               53.4
+   1000000  PerfectHashIndex         21.91     146.5     229.4               82.9
+   1000000  CompactHashIndex          1.24     146.7     161.4               14.7
+   1000000  DictIndex                 6.84     146.6     321.3              174.7
+=== positioning corpus grid n=1000000, 2026-09-19T17:35:01+03:00, load 0.25 0.31 0.56
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+   1000000  dict                         —     119.5     212.8               93.3
+   1000000  marisa                    2.12     119.8     200.0               80.2
+   1000000  StringIndex               0.68     120.0     163.5               43.5
+   1000000  PerfectHashIndex         12.49     119.9     194.0               74.1
+   1000000  CompactHashIndex          1.24     119.7     153.5               33.8
+   1000000  DictIndex                 1.95     119.7     274.3              154.5
+done 2026-09-19T17:35:05+03:00, load 0.31 0.33 0.56
+=== positioning random n=10000000, 2026-09-19T17:35:43+03:00
+         n  structure           blob B/key   keys MB   peak MB   build adds B/key
+  10000000  dict                         —     831.5    1429.6               59.8
+  10000000  marisa                    4.14     831.5    1863.3              103.2
+  10000000  StringIndex              12.44     831.2    1418.0               58.7
+  10000000  PerfectHashIndex         21.91     831.4    1639.5               80.8
+  10000000  CompactHashIndex          1.24     831.4    1043.5               21.2
+  10000000  DictIndex                 5.51     831.7    1598.0               76.6
+=== ClosedHashIndex bytes/key at the three n
+words n=479823: 0.2419 B/key
+random pairs n=1000000: 0.2406 B/key
+grid n=1000000: 0.2401 B/key
+done 2026-09-19T17:37:35+03:00
+# grid at 10 M, from the same session:
+  10000000  dict                         —     786.0    1368.6               58.3
+  10000000  marisa                    2.36     785.9    1576.7               79.1
+  10000000  StringIndex               2.00     785.9    1163.1               37.7
+  10000000  PerfectHashIndex         15.74     785.9    1470.6               68.5
+  10000000  CompactHashIndex          1.24     785.9     999.3               21.3
+  10000000  DictIndex                 2.58     785.7    1391.0               60.5

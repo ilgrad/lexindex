@@ -10,7 +10,7 @@ many times:
 - :class:`ClosedHashIndex` — the perfect hash and nothing else, a fifth of that: ``id`` never
   says absent, for a vocabulary known to be closed.
 - :class:`DictIndex` — ordered dictionary with the key stored for every id: exact
-  ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.84 B/key on
+  ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.65 B/key on
   real words, 52 % below ``StringIndex``.
 
 All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge

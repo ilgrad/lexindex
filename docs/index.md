@@ -8,7 +8,7 @@ Build once over a set of strings (entity names, cluster labels, vocabulary terms
 then query many times: exact `string ↔ id` both ways, plus **prefix**, **range**, **fuzzy**
 (Levenshtein) and **subsequence** iteration — all automaton-driven over the FST (exact, prefix and
 range seek directly; a broad fuzzy or subsequence pattern may still traverse most of the automaton).
-The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.26 bytes/key, 2.4× below
+The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.24 bytes/key, 2.4× below
 `marisa-trie`**, and `StringIndex` 5.95 — and each can be **memory-mapped and borrowed zero-copy**, so
 a multi-gigabyte index is ready instantly and its pages are shared across processes.
 
@@ -37,7 +37,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
   both ways, `lower_bound`, `prefix`, `range`, in-order iteration, no automata so no fuzzy. The
   sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-  2.84 bytes/key, 52 % below `StringIndex`. Use it where the queries are exact and every id has
+  2.65 bytes/key, 55 % below `StringIndex`. Use it where the queries are exact and every id has
   to map back to its key.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map (a minimal perfect hash plus a
   fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no
@@ -45,7 +45,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   Use it when a fixed vocabulary's footprint is paramount.
 - **`ClosedHashIndex`** — the perfect hash **and nothing else**: `id(key) -> u32`, no `Option`, for
   a vocabulary known to be closed. A member's id, and for anything else some id in `[0, n)`.
-  0.26 bytes/key, a fifth of `CompactHashIndex`. Use it as a token → id map where every query is a
+  0.24 bytes/key, a fifth of `CompactHashIndex`. Use it as a token → id map where every query is a
   member by construction.
 - **`PerfectHashIndex`** — a **minimal-perfect-hash** dictionary with verified membership and reverse
   lookup; exact `string → dense id`, and `id_unchecked` is the fastest lookup here for a vocabulary
