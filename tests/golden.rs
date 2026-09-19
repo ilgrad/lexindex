@@ -752,7 +752,7 @@ fn the_golden_dict_blobs_sections_account_for_every_byte() {
     );
     assert_eq!(s.header, 72);
     // A head, a restart or an entry: every key is stored exactly once.
-    let blocks = s.samples / 8;
+    let blocks = (idx.len() as u64).div_ceil(idx.block() as u64);
     assert_eq!(blocks + s.restarts + s.entries, idx.len() as u64);
     // The headers are a stream a shard wide now, so they cost less than the byte an entry `BDX2`
     // spent -- which is the change the blob was re-pinned for.

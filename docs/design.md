@@ -288,7 +288,7 @@ spread over the seven of a 128-key block before. Measured on the dictionary when
 then still a byte an entry, so the file was byte for byte the same length — `id` fell 9 % at 128
 keys a block and 15 % at 256, with `key_into` unchanged.
 
-`id` is a binary search over the samples — a flat array, eight bytes a block — then over the
+`id` is a binary search over the samples — a flat array, eight bytes a block, built at load — then over the
 heads of the few blocks whose sample equals the probe's, then the block's restarts and one of its
 microblocks, neither decoding anything: an entry's stored suffix is compared against the probe
 symbol by symbol, eight bytes at a time, and the shared-prefix length alone decides most entries —
@@ -334,7 +334,7 @@ serial.
 
 The serialised blob is a 72-byte header — `[magic "BDX3"][n][block][head bytes][data bytes]
 [codec bytes][payload][offset widths][micro][shard][header-code bytes][g][dictionary bytes][check]`
-— then the heads, the packed head ends, the samples, the block data, the suffix codecs, the header
+— then the heads, the packed head ends, the block data, the suffix codecs, the header
 codes, the phrase dictionary, the packed block starts and the packed microblock starts; the loader
 checks every length, both checksums, the codecs, the dictionary and the arrays' order before
 anything is trusted, and the block data — bounded on every read rather than validated up front — is
@@ -349,7 +349,11 @@ third of the arrays clear the obvious gate — 5 % of their superblocks could dr
 and they are the block-level arrays, which have between two and fifty superblocks in the first
 place; `micro_offsets`, thirty times as many entries, clears it twice in twenty-six, microblock
 spans being uniform by construction. The distribution says yes and the bytes say no. `load_mmap` borrows
-every section but the per-block samples, which two binary searches read on every lookup (below);
+every section; the per-block samples that two binary searches read on every lookup (below) are not
+a section at all — a sample is eight bytes of a head, and the load reads them out of the heads
+rather than out of a copy the blob carried, which is eight bytes a block off every blob for a load
+and a lookup that did not move (2.682 bytes a key to 2.651 on words at the default block, 1.131 to
+1.068 on a million numeric keys at 128);
 there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them
 itself: `prefix_id_range` costs two order lookups whatever the number of matches.
@@ -471,8 +475,9 @@ self-referential borrow and no `unsafe` beyond the single `Mmap::map`. Every fie
 `CompactHashIndex`, `load_mmap` borrows the arena / fingerprint table (the bulk of the blob) zero-copy
 and reads only the small MPH structure into memory. `DictIndex` is the same shape: the keys, the block
 data and the three offset arrays are read where they lie, an array entry decoded where it is read, and
-what the load reads is the header, the symbol tables and the per-block samples — eight bytes a block,
-one byte per thirty-two keys at the default block. The samples are read rather than borrowed because two
+what the load reads is the header, the symbol tables and the heads, out of which it builds the
+per-block samples — eight bytes a block, one byte per thirty-two keys at the default block, and not
+a section of the blob. The samples are held rather than borrowed because two
 binary searches over them open every lookup, and the only form of that search that keeps its steps
 out of the branch predictor is the standard library's, which selects with `hint::select_unpredictable`
 over a `u64` slice; a section of a blob is not aligned, and searching the bytes measured 110 ns against

@@ -284,15 +284,13 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
                     }
                     _ => 0,
                 };
-                blocks
-                    .checked_mul(8)
-                    .and_then(|s| s.checked_add(packed(blocks, widths[0])?))
+                packed(blocks, widths[0])
                     .and_then(|s| s.checked_add(packed(blocks, widths[1])?))
                     .and_then(|s| s.checked_add(packed(micros, widths[3])?))
                     .ok_or(TRUNCATED)?
             };
             // One header code a shard and a kind, between the block data and the arrays, and the
-            // phrase dictionary the blob's shards share, between the samples and the data.
+            // phrase dictionary the blob's shards share, between the codes and the arrays.
             let (codes, phrases) = if three {
                 (u64::from(w.u32(52)?), u64::from(w.u32(58)?))
             } else {

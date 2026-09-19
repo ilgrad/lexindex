@@ -1153,8 +1153,7 @@ impl Rates {
             } else {
                 0.0
             },
-            per_block: (s.samples + s.head_ends + s.block_offsets + s.micro_offsets) as f64
-                / blocks,
+            per_block: (s.head_ends + s.block_offsets + s.micro_offsets) as f64 / blocks,
             table: (s.tables + s.header_codes) as f64 / shards_for(keys.len(), dict.block()) as f64,
             phrases: s.phrases as f64 / keys.len().max(1) as f64,
         })

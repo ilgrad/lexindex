@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`DictIndex` is a quarter to a half smaller, and the format is `BDX3`.** Four changes, each
+- **`DictIndex` is a quarter to a half smaller, and the format is `BDX3`.** Five changes, each
   priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
@@ -58,6 +58,14 @@ All notable changes to this project are documented here. The format follows
   alone — the miner's candidate pools are a constant rather than the thread count, so the same keys
   give byte-identical blobs on machines with one core and sixteen. At block 1024 over a million
   keys: urls 9.44 → 7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61.
+
+  *The per-block samples are derived, not stored.* The binary search that opens a lookup runs over
+  eight bytes of every block's head, and `BDX2` carried those bytes a second time in a section of
+  their own. They are built from the heads at load instead: the same array, in the same place, for
+  eight bytes a block off every blob — 2.682 bytes a key to 2.651 on the word list at the default
+  block, 1.131 to 1.068 on a million numeric keys at 128 — and neither the load nor a lookup moved
+  (five corpora, load within 0.9 % and `id` and `key` within 3 %, both directions). `load_mmap`
+  borrows every section there now is.
 
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
   --index dict`, sizes being a function of the keys): urls 11.25 → **7.48** bytes a key, paths 14.67

@@ -829,7 +829,6 @@ fn print_sections(index: &DictIndex, out: &mut dyn Write) -> Result<(), Fail> {
         ("header_codes", s.header_codes),
         ("phrases", s.phrases),
         ("heads", s.heads),
-        ("samples", s.samples),
         ("head_ends", s.head_ends),
         ("block_offsets", s.block_offsets),
         ("micro_offsets", s.micro_offsets),
@@ -1770,7 +1769,6 @@ mod tests {
             "header_codes",
             "phrases",
             "heads",
-            "samples",
             "head_ends",
             "block_offsets",
             "micro_offsets",
@@ -1790,7 +1788,7 @@ mod tests {
             let rest = &out[at + 6..];
             rest[..rest.find('\n').unwrap()].parse().unwrap()
         };
-        let blocks = of("samples") / 8;
+        let blocks = keys_held.div_ceil(256);
         assert_eq!(blocks + of("restarts") + of("entries"), keys_held, "{out}");
         assert!(out.contains(" B/key, "), "the split is read per key: {out}");
         std::fs::remove_dir_all(&dir).unwrap();

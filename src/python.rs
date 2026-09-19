@@ -2096,7 +2096,7 @@ impl PyDictIndex {
 
     /// Zero-copy load: memory-map the file and borrow the keys, the block data and the two offset
     /// arrays from it — the header, the symbol table and the per-block samples (eight bytes a
-    /// block) are what the load reads.
+    /// block, built from the heads rather than stored) are what the load holds.
     ///
     /// The mapped file must not be modified or truncated by any process while the index is
     /// alive — the bytes are borrowed, so a concurrent write is undefined behaviour. See

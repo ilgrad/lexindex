@@ -821,39 +821,39 @@ and as a share:
 $ lexindex inspect words.bin --sections
 kind: DictIndex
 format: BDX3
-bytes: 1202008
+bytes: 1209739
 keys: 479823
-arena_bytes: 1160722
+arena_bytes: 1173645
 sections.header: 72 (0.0002 B/key, 0.01 %)
-sections.tables: 7256 (0.0151 B/key, 0.60 %)
-sections.header_codes: 1056 (0.0022 B/key, 0.09 %)
-sections.phrases: 1108 (0.0023 B/key, 0.09 %)
-sections.heads: 4282 (0.0089 B/key, 0.36 %)
-sections.samples: 3752 (0.0078 B/key, 0.31 %)
+sections.tables: 7215 (0.0150 B/key, 0.60 %)
+sections.header_codes: 761 (0.0016 B/key, 0.06 %)
+sections.phrases: 4 (0.0000 B/key, 0.00 %)
+sections.heads: 4282 (0.0089 B/key, 0.35 %)
 sections.head_ends: 659 (0.0014 B/key, 0.05 %)
 sections.block_offsets: 1128 (0.0024 B/key, 0.09 %)
-sections.micro_offsets: 26255 (0.0547 B/key, 2.18 %)
-sections.restart_headers: 9372 (0.0195 B/key, 0.78 %)
-sections.restart_wide: 1206 (0.0025 B/key, 0.10 %)
-sections.restart_codes: 46489 (0.0969 B/key, 3.87 %)
-sections.entry_headers: 299889 (0.6250 B/key, 24.95 %)
-sections.entry_wide: 46086 (0.0960 B/key, 3.83 %)
-sections.entry_codes: 753398 (1.5702 B/key, 62.68 %)
-sections.total: 1202008 (2.5051 B/key, 100.00 %)
+sections.micro_offsets: 26255 (0.0547 B/key, 2.17 %)
+sections.restart_headers: 9845 (0.0205 B/key, 0.81 %)
+sections.restart_wide: 794 (0.0017 B/key, 0.07 %)
+sections.restart_codes: 47107 (0.0982 B/key, 3.89 %)
+sections.entry_headers: 299889 (0.6250 B/key, 24.79 %)
+sections.entry_wide: 48282 (0.1006 B/key, 3.99 %)
+sections.entry_codes: 763446 (1.5911 B/key, 63.11 %)
+sections.total: 1209739 (2.5212 B/key, 100.00 %)
 sections.restarts: 14526
 sections.entries: 464828
-sections.wide: 23646
+sections.wide: 24538
 ```
 
 Read it as four groups. The **codes** are the front-coded suffixes under whichever codec the shard
 settled on, which is what the index is for. The **headers** are the `(lcp, len)` stream and the
-varints of the pairs no code could name — 0.72 bytes a key here against the flat 0.97 `BDX2` spent,
+varints of the pairs no code could name — 0.75 bytes a key here against the flat 0.97 `BDX2` spent,
 a quarter of the blob on this corpus and near half of it on dense decimal ids, since there is almost
 nothing else to store. The **vocabulary** — the symbol tables, the code each shard's headers took
-and the phrase dictionary — is 0.78 % here, and is the part that grows with the shards rather than
-with the keys. The **directory** — samples, the three packed offset arrays, the block heads — is
-3.0 % at this block and never more than a few per cent, which is worth knowing before optimising
-it. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
+and the phrase dictionary — is 0.66 % here, and is the part that grows with the shards rather than
+with the keys. The **directory** — the three packed offset arrays and the block heads — is 2.7 % at
+this block and never more than a few per cent, which is worth knowing before optimising it. The
+per-block samples the opening search reads are not in the list because they are not in the blob:
+eight bytes of a head each, built from the heads at load. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
 The same numbers are on [`DictSections`](https://docs.rs/lexindex/latest/lexindex/struct.DictSections.html)
 for a program that would rather not parse text.
 
