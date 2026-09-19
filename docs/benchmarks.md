@@ -420,54 +420,54 @@ Ten million English Wikipedia titles, bytes per key except the latencies:
 
 | structure | file | mapped | after 1 k | after 1 M | cold ns | warm ns |
 |---|---:|---:|---:|---:|---:|---:|
-| `DictIndex` 32 | 8.21 | 0.28 | 5.22 | 8.21 | 47 129 | 815 |
-| `DictIndex` 32, `MADV_RANDOM` | 8.21 | 0.28 | **1.81** | 8.21 | 89 971 | 1 975 |
-| `DictIndex` 256 | 7.65 | 0.06 | 4.57 | 7.65 | 45 477 | 719 |
-| `DictIndex` 256, `MADV_RANDOM` | 7.65 | 0.06 | **0.83** | 7.65 | 96 360 | 1 997 |
-| `DictIndex` 1024 | 7.59 | 0.03 | 4.60 | 7.59 | 46 612 | 695 |
-| `CompactHashIndex` | 1.26 | 0.26 | 1.25 | 1.26 | **6 799** | **75** |
-| `CompactHashIndex`, `MADV_RANDOM` | 1.26 | 0.26 | 0.70 | 1.26 | 51 651 | 177 |
-| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 94 367 | 1 039 |
-| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 335 430 | 3 067 |
+| `DictIndex` 32 | 6.22 | 0.79 | 4.67 | 6.22 | 30 960 | 613 |
+| `DictIndex` 32, `MADV_RANDOM` | 6.22 | 0.79 | **1.84** | 6.22 | 72 762 | 1 480 |
+| `DictIndex` 256 | 5.82 | 0.16 | 4.12 | 5.82 | 32 469 | 595 |
+| `DictIndex` 256, `MADV_RANDOM` | 5.82 | 0.16 | **1.03** | 5.82 | 81 794 | 1 544 |
+| `DictIndex` 1024 | 5.64 | 0.10 | 4.05 | 5.64 | 31 936 | 631 |
+| `DictIndex` 1024, `MADV_RANDOM` | 5.64 | 0.10 | **1.14** | 5.64 | 112 548 | 1 514 |
+| `CompactHashIndex` | 1.24 | 0.24 | 1.24 | 1.24 | **6 202** | **29** |
+| `CompactHashIndex`, `MADV_RANDOM` | 1.24 | 0.24 | 0.70 | 1.24 | 52 507 | 134 |
+| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 88 960 | 855 |
+| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 373 187 | 3 099 |
 
-**`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.26 bytes a key
+**`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.79 bytes a key
 resident before the first query, which is the header and the little the loader validates. Nothing
-else is read until something asks for it.
+else is read until something asks for it. The figure rises as the block shrinks because a smaller
+block means more per-block arrays, and `BDX3` validates their framing at load.
 
 **The first thousand queries cost far more pages than they need.** `DictIndex` at 256 ends them with
-4.57 of its 7.65 bytes a key resident — 60 % of an index nobody has finished reading — while the
-same thousand queries under `MADV_RANDOM` leave **0.83**, which is what they actually touch: about
-two pages a lookup, the sample array and the block. The 5.5× between those two numbers is the
-kernel's readahead, and it is buying latency with memory: turning it off costs 2.1× on the cold
-lookups and **2.8× on the warm ones**, because the advice outlives the warm-up. The warm column is
-also where the microblock shows on ten million keys: 1024 a block answers in 695 ns where the
+4.12 of its 5.82 bytes a key resident — 71 % of an index nobody has finished reading — while the
+same thousand queries under `MADV_RANDOM` leave **1.03**, which is what they actually touch: about
+two pages a lookup, the sample array and the block. The 4.0× between those two numbers is the
+kernel's readahead, and it is buying latency with memory: turning it off costs 2.5× on the cold
+lookups and **2.6× on the warm ones**, because the advice outlives the warm-up. The warm column is
+also where the microblock shows on ten million keys: 1024 a block answers in 631 ns where the
 one-level format took 2 108, in a session that read 30 % faster than this one. Readahead is the
 right default here; `MADV_RANDOM` is for the case where a container limit, and not a latency budget,
 is what binds.
 
 **Cold start is where the smallest structure wins outright, and the mechanism is pages.**
-`CompactHashIndex` answers its first thousand queries at **6.8 µs** against `DictIndex`'s 45.5 and
-`StringIndex`'s 94.4 — 7× and 14× — because its whole file is 12.6 MB and a fault brings in a
-useful fraction of it. On `uuid`, where its 1.26 bytes a key sit against `DictIndex`'s 20.06 and
-`StringIndex`'s 36.07, the gap is 21× and 39× (5.9 µs against 125.3 and 231.0). A structure that
+`CompactHashIndex` answers its first thousand queries at **6.2 µs** against `DictIndex`'s 32.5 and
+`StringIndex`'s 89.0 — 5.2× and 14× — because its whole file is 12.4 MB and a fault brings in a
+useful fraction of it. On `uuid`, where its 1.24 bytes a key sit against `DictIndex`'s 17.58 and
+`StringIndex`'s 36.07, the gap is 16× and 38× (6.2 µs against 101.8 and 234.3). A structure that
 stores no keys has no keys to fault in.
 
-**After a million queries every structure is fully resident**, to the last hundredth of a byte. The
+**After a million queries every structure is fully resident**, to within a hundredth of a byte. The
 distinctive answer to "how much memory does this index need" only exists during warm-up: past it,
 against a workload that touches every key, the resident set *is* the file, and the size table above
 is the steady-state RSS.
 
-<sub>Measured 2026-09-12 on a clean tree, NVMe under LUKS on btrfs, 38 GB RAM — so "cold" means
-this file's page cache was dropped and not that the machine was short of memory
-([`bench/results/dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt),
-which re-measured the table after the symbol table went one per shard and reads within 2 % of the
-[run before it](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-40ca73d.txt)
-on both controls, and about 30 % slower than the one before that, so its latency column is read
-within itself;
-the million-key run and the `uuid` one are in the earlier
-[`coldmmap-2026-09-12-arz-bb1473c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-12-arz-bb1473c.txt),
-on the one-level format). `MADV_RANDOM` is applied by the harness
-through `/proc/self/maps`; `load_mmap` does not set it, and on this evidence should not.</sub>
+<sub>Measured 2026-09-19 on a clean tree at `c4db4c4`, NVMe under LUKS on btrfs, 38 GB RAM — so
+"cold" means this file's page cache was dropped and not that the machine was short of memory
+([`bench/results/coldmmap-2026-09-19-arz-c4db4c4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-19-arz-c4db4c4.txt),
+which carries the `uuid` run as well). `StringIndex` is the control and its resident columns are
+identical to 3.0.0's to the hundredth (0.01 mapped, 10.10 after a thousand, 13.25 after a million);
+its latencies read 6 % and 18 % quicker, which is the session. Against that, `DictIndex` at 256 is
+the row that moved for a reason: 7.65 → 5.82 bytes a key on disk and 4.57 → 4.12 resident after a
+thousand queries. `MADV_RANDOM` is applied by the harness through `/proc/self/maps`; `load_mmap`
+does not set it, and on this evidence should not.</sub>
 
 ### One mapping, many readers
 

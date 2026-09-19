@@ -1,0 +1,31 @@
+# local/coldmmap on ten million English Wikipedia titles
+# commit c4db4c4, clean worktree, 2026-09-19T21:04:15+03:00
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.5-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   6.22      0.79      4.67      6.22   30959.5    612.8     yes
+DictIndex 32 (random)          6.22      0.79      1.84      6.22   72761.7   1480.0     yes
+DictIndex 256                  5.82      0.16      4.12      5.82   32469.2    595.4     yes
+DictIndex 256 (random)         5.82      0.16      1.03      5.82   81793.8   1544.3     yes
+DictIndex 1024                 5.64      0.10      4.05      5.64   31935.9    630.8     yes
+DictIndex 1024 (random)        5.64      0.10      1.14      5.64  112547.9   1513.7     yes
+CompactHashIndex               1.24      0.24      1.24      1.24    6202.0     29.0     yes
+CompactHashIndex (random)      1.24      0.24      0.70      1.24   52506.9    133.7     yes
+StringIndex                   13.25      0.01     10.10     13.25   88960.1    854.8     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  373187.2   3099.2     yes
+
+uuid, ten million:
+
+uuid-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                  18.20      1.20      6.63     18.20  101244.6    675.3     yes
+DictIndex 32 (random)         18.20      1.20      2.04     18.20   79496.7   3900.1     yes
+DictIndex 256                 17.58      0.17      5.84     17.58  101826.3    587.0     yes
+DictIndex 256 (random)        17.58      0.17      1.08     17.58  118571.4   3887.0     yes
+DictIndex 1024                17.42      0.06      6.03     17.43  100630.2    596.3     yes
+DictIndex 1024 (random)       17.42      0.06      1.12     17.43  147235.0   3855.3     yes
+CompactHashIndex               1.24      0.24      1.23      1.24    6192.7     38.2     yes
+CompactHashIndex (random)      1.24      0.24      0.68      1.24   51401.1    139.7     yes
+StringIndex                   36.07      0.01     15.16     36.07  234308.5    775.9     yes
+StringIndex (random)          36.07      0.01      9.98     36.07 1199000.0   4469.5     yes
