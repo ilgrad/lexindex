@@ -51,10 +51,10 @@ therefore read into memory rather than borrowed.</sub>
   198–200 against its `key` at 438–494. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **483 ns where `marisa-trie` must enumerate every match to
   count it (119 840)**. Every block from 32 to 1024 comes in **under every `marisa-trie` setting
-  measured on this corpus** — 2.90 down to 2.52 against its 2.96–3.07. Over the thirteen-corpus set
-  the ranking goes both ways, marisa smaller
-  wherever the keys share deep structure and `DictIndex` smaller where they do not, while
-  `DictIndex` answers faster on all but `numeric`, 1.7–2.9× at a million keys. Exact queries,
+  measured on this corpus** — 2.90 down to 2.52 against its 2.96–3.07. Over the eleven-corpus sweep
+  at a million keys it is the smaller of the two on **ten**, against marisa's *best* setting on each
+  and not its default: 0.5 % on `titles-ru` up to 77 % on `dna`, with `paths` the one it loses, by
+  9 %. It also answers faster on all but `numeric`, 1.5–2.9× at a million keys. Exact queries,
   every id back to its key, small.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
   hash plus a fingerprint per key, *no keys stored*. **1.24 bytes/key** on real words — **2.4× below

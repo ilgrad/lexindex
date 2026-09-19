@@ -368,39 +368,43 @@ lookups 1–15 % higher on every structure, controls included.</sub>
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.26 | 1.26 | 7.13 | 7.02 | 6.94 | 15.98 | 6.69 | 6.69 | 6.69 | 6.75 | 6.99 |
-| `numeric` | 6.9 | 0.26 | 1.26 | 2.19 | 2.13 | 2.08 | 0.00 | 1.63 | 1.63 | 1.63 | 1.66 | 1.77 |
-| `opaque` | 16.0 | 0.26 | 1.26 | 13.42 | 13.37 | 13.33 | 21.47 | 15.19 | 14.72 | 14.72 | 18.33 | 18.68 |
-| `titles-en` | 21.0 | 0.26 | 1.26 | 7.74 | 7.65 | 7.59 | 13.25 | 5.57 | 5.49 | 5.48 | 5.71 | 5.87 |
-| `urls` | 52.4 | 0.26 | 1.26 | 9.59 | 9.38 | 9.23 | 13.10 | 5.66 | 5.56 | 5.55 | 5.83 | 5.99 |
-| `uuid` | 36.0 | 0.26 | 1.26 | 20.08 | 19.98 | 19.90 | 36.07 | 29.97 | 20.62 | 20.62 | 33.21 | 33.56 |
+| `dna` | 24.0 | 0.24 | 1.24 | 4.06 | 3.97 | **3.82** | 15.98 | 6.69 | 6.69 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.24 | 1.24 | 1.07 | 1.04 | **0.93** | 0.00 | 1.63 | 1.63 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.24 | 1.24 | 10.11 | 10.07 | **9.96** | 21.47 | 15.19 | 14.72 | 14.72 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.24 | 1.24 | 5.89 | 5.82 | 5.64 | 13.25 | 5.57 | 5.49 | **5.48** | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.24 | 1.24 | 6.06 | 5.86 | 5.59 | 13.10 | 5.66 | 5.56 | **5.55** | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.24 | 1.24 | 17.67 | 17.58 | **17.42** | 36.07 | 29.97 | 20.62 | 20.62 | 33.21 | 33.56 |
 
 Ten times the keys moves every trie and neither hash: at its floor `marisa` goes 7.49 → 5.48 on
 `titles-en` and 7.57 → 5.55 on `urls` as the sharing deepens, `DictIndex` at its default block
-9.37 → 7.65 and 11.25 → 9.38, and the two keyless rows do not move at all. The ranking is the same
-one the million-key table gives, so the answer to "which is smallest" is decided by the corpus and
-not by the scale.
+7.40 → 5.82 and 7.53 → 5.86, and the two keyless rows do not move at all. Here the ranking is
+*not* the million-key table's: `titles-en` and `urls` are two of the ten corpora `DictIndex` is
+smallest on at a million, and at ten million the trie takes both back — by 2.8 % and 0.7 %. Which
+is smallest is decided by the corpus *and* by the scale, and the two corpora it turns on are the
+ones whose keys share long fragments across the whole set rather than with their neighbours.
 
-**Scale closes the one gap this page leans on.** `DictIndex` is still the smaller structure on
-`uuid` and `opaque` at ten million, but barely: 19.90 against marisa's tuned 20.62 is 3.5 % smaller,
-where a million keys gave 11 % and where four tries alone would have it at 34 %. The reason is the trie's, not ours — ten
-times the random identifiers share ten times more three- and four-character fragments, and a
-recursive trie is built to find exactly that, while a block of front-coded keys shares only with its
-own block. Read `uuid` as a gap that closes with n, and do not build a claim on it.
+**Scale narrows every gap in the trie's favour.** `DictIndex` keeps four of the six at ten
+million — `dna` 3.82 against marisa's tuned 6.69 and `numeric` 0.93 against 1.63, both 43 %,
+`opaque` 9.96 against 14.72 and `uuid` 17.42 against 20.62, 32 % and 16 % — but every one of those
+margins is narrower than the same corpus gives at a million, `uuid` most of all, 22 % there against
+16 % here. The reason is the trie's, not ours: ten times the random identifiers share ten times more
+three- and four-character fragments, and a recursive trie is built to find exactly that, while a
+block of front-coded keys shares only with its own block. Read the margins as gaps that narrow with
+n, and do not build a claim on a single one of them.
 
-**The block buys less here.** 128 → 1024 keys a block is 0.09–0.36 bytes a key over these six,
-against 0.09–0.77 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
+**The block buys less here.** 128 → 1024 keys a block is 0.14–0.47 bytes a key over these six,
+against 0.14–1.02 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
 a bigger block saves were already a smaller share of the index; what is left is the coded suffixes,
 and those are the symbol table's business, not the block's — which is why the table is trained on
-runs of a constant length and per shard, and why `titles-en` at 1024 reads 7.59 where whole-block
-training over one table left it at 7.93, above its own 256.
+runs of a constant length and per shard. With whole-block training over one table a bigger block
+bought fewer neighbourhoods to train on, and `titles-en` at 1024 came out above its own 256.
 
-<sub>Measured 2026-09-13 at `4128d6a`
-([`bench/results/sweep10m-2026-09-13-arz-4128d6a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-13-arz-4128d6a.json)),
+<sub>Measured 2026-09-19 at `31375b3`
+([`bench/results/sweep10m-2026-09-19-arz-31375b3.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-19-arz-31375b3.json)),
 `marisa-trie` 1.4.1, one build per cell at this size and three rounds of 20 000 lookups, started at
-a load average of 0.07 / 0.42 / 0.66. Every non-marisa cell reads to the hundredth what the
-2026-09-12 run read — a size is exact, so the two runs agree wherever the builder did not move, and
-what moved is marisa's two new columns.</sub>
+a load average of 0.04 / 0.45 / 0.69. Every marisa cell reads to the hundredth what the 2026-09-13
+run read — a size is exact, so the two runs agree wherever the builder did not move, and what moved
+is ours.</sub>
 
 ### A cold mapping, and what is actually resident
 

@@ -201,8 +201,9 @@ inside a single shard is far narrower than that byte. A run is coded either as a
 entry's suffix — or against a learned table of the `2^w - 1` costliest pairs at one to ten bits
 each. Which of the two wins is a property of the shard, not of the format, so one byte a group
 picks it from every run of that shard at once. That is why a shard is collected before any of it is
-written: the code cannot be chosen from a block. At block 1024 it is worth paths 14.34 → 12.46 bytes
-a key, urls 11.25 → 9.28 and dna 7.70 → 7.27.
+written: the code cannot be chosen from a block. At block 1024 the A-B that justified it read paths
+14.34 → 12.46 bytes a key, urls 11.25 → 9.28 and dna 7.70 → 7.27 — the codec's own share, measured
+when it landed, not the format's current size; the sweep in `docs/benchmarks.md` has that.
 
 The suffix goes under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB
 2020): up to 255 symbols of one to eight bytes, one-byte codes, an escape for what no symbol covers, trained in four rounds of
