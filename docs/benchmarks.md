@@ -70,7 +70,7 @@ three differ by 10.7 %, 5.5 % and 3.7 %, and are the cells nearest the call boun
 nanoseconds is a few per cent.
 
 Two costs are named rather than assumed. The Python call boundary — the same loop calling a function
-that does nothing — is **48 ns** in this run, which every row pays and no *difference* between
+that does nothing — is **51 ns** in this run, which every row pays and no *difference* between
 rows contains.
 And `.get` on a miss is each library's own miss path, not `try: t[key] except KeyError: default`:
 timed apart, a miss costs *less* than a hit everywhere (0.85–0.91×), while that wrapper written out
@@ -80,7 +80,7 @@ Half the probes are misses, so a library that paid for exceptions would have bee
 rather than for its own structure.
 
 **The smallest rows are also the fastest, which is not a paradox.** `ClosedHashIndex` and the three
-`CompactHashIndex` widths answer in 89–97 ns against a builtin `dict`'s 240, because they store no
+`CompactHashIndex` widths answer in 85–98 ns against a builtin `dict`'s 241, because they store no
 keys at all: one hash, one probe, at most a fingerprint to compare. What they cannot do is tell a
 stranger from a member with certainty, or give a key back for an id. Among the structures that do
 keep their keys, `DictIndex` is **both smaller and faster than every `marisa-trie` setting measured
