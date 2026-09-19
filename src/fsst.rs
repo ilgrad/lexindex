@@ -148,15 +148,17 @@ impl Table {
             // Pieces are symbols or single bytes, so a piece is a code: the symbols first, then
             // the 256 bytes. Counted in flat arrays instead of hashing strings.
             let space = codes + 256;
-            let bytes_of = |code: usize| -> ([u8; 8], usize) {
-                if code < codes {
-                    (table.words[code].to_le_bytes(), table.lens[code] as usize)
-                } else {
-                    let mut w = [0u8; 8];
-                    w[0] = (code - codes) as u8;
-                    (w, 1)
-                }
-            };
+            // What every code stands for, once a round: the inner pair loop asked for this
+            // 261 121 times a round, and all but 511 of the answers were the row's own.
+            let piece: Vec<(u64, usize)> = (0..space)
+                .map(|code| {
+                    if code < codes {
+                        (table.words[code], table.lens[code] as usize)
+                    } else {
+                        (u64::from((code - codes) as u8), 1)
+                    }
+                })
+                .collect();
             let mut count1 = vec![0u32; space];
             let mut count2 = vec![0u32; space * space];
             for &s in sample {
@@ -187,33 +189,34 @@ impl Table {
             // A candidate is at most eight bytes, so its gain is keyed on its word and its
             // length: keyed on a `Vec` of its bytes, the allocations were a third of the trainer.
             let mut gain: Map<(u64, u8), u64> = Map::default();
-            for (code, &c) in count1.iter().enumerate() {
+            for (&c, &(word, len)) in count1.iter().zip(&piece) {
                 if c > 0 {
-                    let (w, len) = bytes_of(code);
-                    *gain.entry((u64::from_le_bytes(w), len as u8)).or_default() +=
-                        u64::from(c) * len as u64;
+                    *gain.entry((word, len as u8)).or_default() += u64::from(c) * len as u64;
                 }
             }
-            for a in 0..space {
-                for b in 0..space {
-                    let c = count2[a * space + b];
-                    if c == 0 {
+            for (&(wa, la), row) in piece.iter().zip(count2.chunks_exact(space)) {
+                // A row already at the length cap concatenates with nothing.
+                if la == MAX_LEN {
+                    continue;
+                }
+                for (&c, &(wb, lb)) in row.iter().zip(&piece) {
+                    if c == 0 || la + lb > MAX_LEN {
                         continue;
                     }
-                    let ((wa, la), (wb, lb)) = (bytes_of(a), bytes_of(b));
-                    if la + lb <= MAX_LEN {
-                        let word = u64::from_le_bytes(wa) | u64::from_le_bytes(wb) << (8 * la);
-                        *gain.entry((word, (la + lb) as u8)).or_default() +=
-                            u64::from(c) * (la + lb) as u64;
-                    }
+                    *gain
+                        .entry((wa | wb << (8 * la), (la + lb) as u8))
+                        .or_default() += u64::from(c) * (la + lb) as u64;
                 }
             }
-            let mut ranked: Vec<(u64, [u8; 8], usize)> = gain
-                .into_iter()
-                .map(|((word, len), g)| (g, word.to_le_bytes(), usize::from(len)))
-                .collect();
-            ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1[..x.2].cmp(&y.1[..y.2])));
-            table = Table::reachable(ranked.iter().map(|(_, s, len)| &s[..*len]), max);
+            // The rank is (gain down, bytes up); comparing the bytes as one big-endian word and
+            // then the length orders them the same way without a slice compare a step.
+            let mut ranked: Vec<(u64, u64, usize, [u8; 8])> = Vec::with_capacity(gain.len());
+            ranked.extend(gain.into_iter().map(|((word, len), g)| {
+                let bytes = word.to_le_bytes();
+                (!g, u64::from_be_bytes(bytes), usize::from(len), bytes)
+            }));
+            ranked.sort_unstable_by_key(|&(g, be, len, _)| (g, be, len));
+            table = Table::reachable(ranked.iter().map(|(_, _, len, s)| &s[..*len]), max);
         }
         table
     }

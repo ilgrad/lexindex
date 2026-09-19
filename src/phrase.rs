@@ -1012,15 +1012,30 @@ fn part_of(key: u128, parts: usize) -> usize {
     ((((key as u64) >> 32) * parts as u64) >> 32) as usize
 }
 
+/// A candidate's first eight bytes as one big-endian word, zero-padded — the order this gives is
+/// the order the bytes give, because a span shorter than eight pads with the byte that loses.
+fn head(s: &[u8]) -> u64 {
+    let mut w = [0u8; 8];
+    let n = s.len().min(8);
+    w[..n].copy_from_slice(&s[..n]);
+    u64::from_be_bytes(w)
+}
+
 /// How the candidates rank: by what one saves, then by its bytes, so that a tie falls the same
 /// way on every run.
-fn rank(x: &(u64, &[u8]), y: &(u64, &[u8])) -> Ordering {
-    y.0.cmp(&x.0).then_with(|| x.1.cmp(y.1))
+///
+/// The bytes are compared as the [`head`] word first and only then as the span, so a sort's
+/// compares read the array they are sorting rather than chasing a pointer into the sample: the
+/// tie-break is the common case here, and a span lives wherever the arena put it.
+fn rank(x: &(u64, u64, &[u8]), y: &(u64, u64, &[u8])) -> Ordering {
+    y.0.cmp(&x.0)
+        .then_with(|| x.1.cmp(&y.1))
+        .then_with(|| x.2.cmp(y.2))
 }
 
 /// Keeps the `take` candidates that rank first, in no particular order: the ranking is total, so
 /// they are the same `take` a sort would have put first, found in one pass instead of a sort.
-fn cut(ranked: &mut Vec<(u64, &[u8])>, take: usize) {
+fn cut(ranked: &mut Vec<(u64, u64, &[u8])>, take: usize) {
     if ranked.len() > take {
         ranked.select_nth_unstable_by(take, rank);
         ranked.truncate(take);
@@ -1029,7 +1044,7 @@ fn cut(ranked: &mut Vec<(u64, &[u8])>, take: usize) {
 
 /// One partition's candidates summed over every thread's map of it, cut to the `take` that rank
 /// first — which is all a partition can contribute to the round's first `take`.
-fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, &[u8])> {
+fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, u64, &[u8])> {
     let mut maps = maps.into_iter();
     let mut gain = maps.next().unwrap_or_default();
     for map in maps {
@@ -1037,7 +1052,8 @@ fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, &[u8])> {
             gain.entry(k).or_insert((0, s)).0 += g;
         }
     }
-    let mut ranked: Vec<(u64, &[u8])> = gain.into_values().collect();
+    let mut ranked: Vec<(u64, u64, &[u8])> =
+        gain.into_values().map(|(g, s)| (g, head(s), s)).collect();
     cut(&mut ranked, take);
     ranked
 }
@@ -1117,8 +1133,8 @@ fn scout(pairs: &[(&[&[u8]], &Table)], keys: usize, take: usize, held: usize) ->
     let phrases: Vec<Vec<u8>> = ranked
         .iter()
         .take(take)
-        .filter(|(gain, s)| gain * scale > (s.len() as u64 + 3) * STRICT)
-        .map(|(_, s)| s.to_vec())
+        .filter(|(gain, _, s)| gain * scale > (s.len() as u64 + 3) * STRICT)
+        .map(|(_, _, s)| s.to_vec())
         .collect();
     // Priced over the spread of shards the real round is priced over, not over the scout's own
     // pieces: what the sample may fairly answer is which spans are worth offering, and a shard
@@ -1344,7 +1360,7 @@ pub(crate) fn mine(
                 by_part[p].push(part);
             }
         }
-        let tops: Vec<Vec<(u64, &[u8])>> = std::thread::scope(|scope| {
+        let tops: Vec<Vec<(u64, u64, &[u8])>> = std::thread::scope(|scope| {
             let running: Vec<_> = by_part
                 .into_iter()
                 .map(|part| scope.spawn(move || merge(part, take)))
@@ -1364,8 +1380,8 @@ pub(crate) fn mine(
             // group's `u32` base — against what it saves over the whole blob rather than over the
             // sample the gain was counted on. Applied every round, not only the last, so that a
             // corpus with nothing to repeat is answered after one of them instead of five.
-            .filter(|(gain, s)| gain * scale > (s.len() as u64 + 3) * STRICT)
-            .map(|(_, s)| s.to_vec())
+            .filter(|(gain, _, s)| gain * scale > (s.len() as u64 + 3) * STRICT)
+            .map(|(_, _, s)| s.to_vec())
             .collect();
         if phrases.is_empty() || (r == 0 && !worth(&pairs, &phrases)) {
             return Vec::new();
