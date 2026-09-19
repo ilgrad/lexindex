@@ -1009,3 +1009,30 @@ fn the_pinned_tiered_blob_answers_every_key_through_the_phrase_codec() {
     sorted.sort();
     assert_eq!(walked, sorted, "the walk is not in key order");
 }
+
+/// `panicking-3.0.0-mphf-slice.bin` is libFuzzer's too, from the run that followed the fix above:
+/// an `MPH3` blob whose first level claims a slice of one. A level's stride is its slice shifted
+/// down by the geometry's mode bits, so a slice narrower than one shift leaves a stride of zero
+/// and a shift of 64 — `stride_for`'s `debug_assert!` caught it in the fuzz build, and a release
+/// build would have addressed the level with whatever that arithmetic wraps to. `slice_for` never
+/// returns under 256, so the shape cannot come out of a build.
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
+#[test]
+fn the_mphf_loader_refuses_a_level_whose_slice_is_narrower_than_its_stride() {
+    let bytes = std::fs::read(data("panicking-3.0.0-mphf-slice.bin")).expect("the specimen");
+    assert_eq!(&bytes[..4], b"MPH3", "the specimen is a v3 blob");
+    assert_eq!(
+        u64::from_le_bytes(bytes[64..72].try_into().unwrap()),
+        1000,
+        "the first level's key count"
+    );
+    assert_eq!(
+        u64::from_le_bytes(bytes[80..88].try_into().unwrap()),
+        1,
+        "the slice that does it"
+    );
+    assert!(
+        !lexindex::fuzzing::parse_mphf(&bytes),
+        "the blob loaded; it must be refused"
+    );
+}

@@ -667,6 +667,14 @@ All notable changes to this project are documented here. The format follows
   error at the boundary, where the range check already was. Found by the nightly fuzz job's
   `parse_mphf` target, which had been red since 2026-09-16; the specimen is
   `tests/data/panicking-3.0.0-mphf.bin`.
+- **An `MPH3` blob whose level claimed a one-value slice panicked the loader.** A level's stride is
+  its slice shifted down by the geometry's mode bits, so a slice narrower than one shift leaves a
+  stride of zero and a shift of 64 — an address the level is then read at with whatever the
+  arithmetic wraps to. The loader checked that the slice is a power of two and fits the level, but
+  not that it is wide enough for the stride it implies; `slice_for` never returns under 256, so no
+  build writes one. Now refused as a `Format` error beside the other three shape checks. Found by
+  the same `parse_mphf` target on the run that followed the fix above; the specimen is
+  `tests/data/panicking-3.0.0-mphf-slice.bin`.
 
 ## [3.0.0] — 2026-09-13
 

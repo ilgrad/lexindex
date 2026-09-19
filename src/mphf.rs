@@ -2620,6 +2620,16 @@ impl V2 {
             if ln == 0 || buckets == 0 || !slice.is_power_of_two() || slice > ln {
                 return Err(IndexError::Format("mphf: a level's shape is inconsistent"));
             }
+            // A level's stride is its slice shifted down by the mode bits, so a slice narrower
+            // than one shift leaves a stride of zero and a shift of 64 — an address that reads
+            // whatever the arithmetic wraps to. `slice_for` never returns under 256, so no build
+            // writes one; a blob can claim it.
+            let mode_bits = geometry.mode_bits();
+            if mode_bits > 0 && slice >> (8 - mode_bits) == 0 {
+                return Err(IndexError::Format(
+                    "mphf: a level's slice is too narrow for its mode bits",
+                ));
+            }
             if i == 0 && ln != n {
                 return Err(IndexError::Format(
                     "mphf: the first level does not cover the table",
@@ -2634,8 +2644,8 @@ impl V2 {
                 n: ln,
                 buckets,
                 slice,
-                shift: stride_for(slice, geometry.mode_bits()).trailing_zeros(),
-                mode_bits: geometry.mode_bits(),
+                shift: stride_for(slice, mode_bits).trailing_zeros(),
+                mode_bits,
                 seeds: Pages::default(),
             });
         }
