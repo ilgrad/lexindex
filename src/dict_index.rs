@@ -586,14 +586,14 @@ impl Codec {
     /// How many leading bytes `piece` shares with `rest`, and how it orders against it — read off
     /// the codes, nothing decoded.
     #[inline]
-    fn compare(&self, dict: &Dict, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
+    fn compare(&self, dict: &Dict, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
         match self {
             Codec::Symbols {
                 table,
                 split: Some(split),
             } => compare_tiered(table, *split, dict, piece.bytes(), rest),
             Codec::Symbols { table, .. } => compare_symbols(table, piece.bytes(), rest),
-            Codec::Packed(a) => a.compare(&piece.codes(a.width()), rest),
+            Codec::Packed(a) => a.compare(&piece.codes(a.width()), rest.bytes()),
         }
     }
 
@@ -2353,17 +2353,52 @@ impl DictIndex {
     /// orders against it — read off the codes, nothing decoded. A stream this crate did not write
     /// ends the suffix where it stops making sense.
     #[inline]
-    fn compare_piece(&self, codec: &Codec, piece: Piece<'_>, rest: &[u8]) -> (usize, Ordering) {
+    fn compare_piece(&self, codec: &Codec, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
         codec.compare(&self.phrases, piece, rest)
+    }
+}
+
+/// What a compare has left of the probe: the whole key, and the byte the compare starts at.
+///
+/// A suffix slice would name the same bytes, and [`fsst::word_at`] reads the two differently: the
+/// last eight bytes of a key eight bytes long are one load shifted down, the last three bytes of a
+/// three-byte slice are a fold a byte at a time. A compare starts where the probe already agrees
+/// with the key before it -- 6.3 bytes into a 9.3-byte word on the dictionary -- so the slice is
+/// under eight bytes for most compares and the key it came from never is.
+#[derive(Clone, Copy)]
+struct Rest<'a> {
+    key: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Rest<'a> {
+    /// Bytes of the probe still to compare. `at` never passes the key: it starts at what the run's
+    /// head shares with the probe and grows only by what a compare matched.
+    #[inline(always)]
+    fn len(self) -> usize {
+        self.key.len() - self.at
+    }
+
+    /// The eight bytes at `at + c`, zero-padded past the key.
+    #[inline(always)]
+    fn word(self, c: usize) -> u64 {
+        fsst::word_at(self.key, self.at + c)
+    }
+
+    /// The suffix itself, for a codec that compares a byte at a time and gains nothing by the
+    /// whole key.
+    #[inline(always)]
+    fn bytes(self) -> &'a [u8] {
+        &self.key[self.at..]
     }
 }
 
 /// The stored suffix's next `len` bytes, as a little-endian word, against `rest` from `c`: `None`
 /// while they agree, and the answer as soon as they do not or the suffix outruns `rest`.
 #[inline(always)]
-fn compare_word(word: u64, len: usize, rest: &[u8], c: &mut usize) -> Option<(usize, Ordering)> {
+fn compare_word(word: u64, len: usize, rest: Rest<'_>, c: &mut usize) -> Option<(usize, Ordering)> {
     let m = len.min(rest.len() - *c);
-    let theirs = fsst::word_at(rest, *c);
+    let theirs = rest.word(*c);
     let x = (word ^ theirs) & fsst::low_mask(m);
     if x != 0 {
         let d = (x.trailing_zeros() / 8) as usize;
@@ -2376,7 +2411,7 @@ fn compare_word(word: u64, len: usize, rest: &[u8], c: &mut usize) -> Option<(us
 
 /// How a suffix that ran out against `rest` orders: equal only if `rest` ran out with it.
 #[inline(always)]
-fn ended(c: usize, rest: &[u8]) -> (usize, Ordering) {
+fn ended(c: usize, rest: Rest<'_>) -> (usize, Ordering) {
     let ord = if c == rest.len() {
         Ordering::Equal
     } else {
@@ -2388,7 +2423,7 @@ fn ended(c: usize, rest: &[u8]) -> (usize, Ordering) {
 /// [`Codec::compare`] for a symbol table: a symbol is up to eight bytes, so the compare is a word
 /// at a time rather than a byte.
 #[inline]
-fn compare_symbols(table: &Table, packed: &[u8], rest: &[u8]) -> (usize, Ordering) {
+fn compare_symbols(table: &Table, packed: &[u8], rest: Rest<'_>) -> (usize, Ordering) {
     let mut c = 0;
     let mut i = 0;
     while i < packed.len() {
@@ -2422,7 +2457,7 @@ fn compare_tiered(
     split: Split,
     dict: &Dict,
     packed: &[u8],
-    rest: &[u8],
+    rest: Rest<'_>,
 ) -> (usize, Ordering) {
     let mut c = 0;
     let mut i = 0;
@@ -2618,7 +2653,11 @@ impl DictIndex {
                 entries.skip(len);
                 continue;
             }
-            let (c, ord) = self.compare_piece(codec, entries.piece(len), &probe[matched..]);
+            let rest = Rest {
+                key: probe,
+                at: matched,
+            };
+            let (c, ord) = self.compare_piece(codec, entries.piece(len), rest);
             match ord {
                 Ordering::Equal => return (j, matched + c, true),
                 Ordering::Greater => return (j - 1, matched, false),
