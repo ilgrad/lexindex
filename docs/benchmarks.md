@@ -118,12 +118,13 @@ words, one process:
 
 | Rust structure | bytes/key | vs C++ marisa | `id` member | build |
 |---|---:|---:|---:|---:|
-| **lexindex `DictIndex`** (512 per block) | **2.806** | 0.94× | 272 ns | 26 ms |
-| **lexindex `DictIndex`** (256 per block, default) | **2.838** | 0.95× | 253 ns | 26 ms |
+| **lexindex `DictIndex`** (512 per block) | **2.531** | 0.85× | 344 ns | 30 ms |
+| **lexindex `DictIndex`** (256 per block, default) | **2.651** | 0.89× | 310 ns | 31 ms |
+| **lexindex `DictIndex`** (64 per block) | **2.752** | 0.92× | **269 ns** | **34 ms** |
 | `marisa-trie` (C++ reference, default) | 2.978 | 1.00× | — | — |
-| `rsmarisa` (4 tries, tiny cache — its smallest) | 3.003 | 1.01× | 322 ns | 137 ms |
-| **lexindex `DictIndex`** (64 per block) | 3.029 | 1.02× | **227 ns** | **26 ms** |
-| `rsmarisa` 0.4.2 (default) | 3.168 | 1.06× | 301 ns | 148 ms |
+| `rsmarisa` (4 tries, tiny cache — its smallest) | 3.003 | 1.01× | 326 ns | 138 ms |
+| `rsmarisa` 0.4.2 (default) | 3.168 | 1.06× | 300 ns | 148 ms |
+| `rsmarisa` (3 tries, huge cache — its fastest) | 3.823 | 1.28× | 284 ns | 169 ms |
 | `fst::Set` (membership only — no ids, no reverse) | 4.85 | 1.63× | — | — |
 | **lexindex `StringIndex`** (ordered + fuzzy + reverse) | 5.95 | 2.00× | — | — |
 | `yada` (double-array) | 15.98 | 5.4× | — | — |
@@ -131,22 +132,23 @@ words, one process:
 | `crawdad::Trie` (double-array) | 26.22 | 8.8× | — | — |
 
 <sub>`rsmarisa` and `DictIndex` from
-[`bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-12-arz-386b2e6.txt)
+[`bench/results/rsmarisa-2026-09-19-arz-30638ba.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rsmarisa-2026-09-19-arz-30638ba.txt)
 — one process, every key probed as a member and with a digit appended as a miss, shuffled with a
-fixed seed, seven rounds alternating in both directions, minimum of the last five. The other rows
-are the older sweep with `crawdad` 0.4, `yada` 0.5, `fst` 0.4; size is serialised bytes ÷ keys
-throughout, and `rsmarisa`'s `io_size()` is asserted equal to the file it saves. The three
-`DictIndex` sizes are `68f5336`'s, where the symbol table went one per shard of 65 536 keys — a size
-is exact — and the same tree's A-B leaves the `id` column where it was
-([`dict-shard-2026-09-12-arz-68f5336.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-shard-2026-09-12-arz-68f5336.txt));
-the build column predates it and the change costs 17–23 % of it. None of them is a
-lexindex dependency — the harness is a throwaway crate.</sub>
+fixed seed, seven rounds alternating in both directions, minimum of the last five; three such
+processes, the table quoting the minimum of the three, which agree within 4 %. The other rows are
+the older sweep with `crawdad` 0.4, `yada` 0.5, `fst` 0.4; size is serialised bytes ÷ keys
+throughout, and `rsmarisa`'s `io_size()` is asserted equal to the file it saves. A fourth process,
+run seconds after a `git commit`, read 8–20 % slower on **every** row including `rsmarisa`'s and was
+discarded on that evidence rather than on its shape — which is the whole reason this page insists on
+a control that the change under test cannot touch. None of these crates is a lexindex dependency:
+the harness is a throwaway.</sub>
 
 So the statement is a crown after all, with the frontier behind it. **`DictIndex` at its default
-block dominates `rsmarisa` at its most compact setting outright** — 2.838 against 3.003 B/key, 253
-against 322 ns, 5.3× faster to build — and at 64 per block it is the fastest structure here at 227
-ns for 3.029, still under `rsmarisa`'s default; every `rsmarisa` setting has a `DictIndex` block
-that is both smaller and faster. The block size picks the axis.
+block dominates `rsmarisa` at its most compact setting outright** — 2.651 against 3.003 B/key, 310
+against 326 ns, 4.5× faster to build — and at 64 per block it is the fastest structure here at 269
+ns for 2.752, under `rsmarisa`'s *smallest* setting on both axes at once. Since `BDX3` every block
+from 64 to 512 is smaller than every `rsmarisa` setting, so the block size now picks only the
+latency axis, not the size one.
 
 Two further things the table settles. The Rust port is *larger* than the C++ original on this corpus
 (+6.4 % at the default, +1.6 % at its smallest), so a pure-Rust project pays for the port. And

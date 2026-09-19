@@ -1,0 +1,42 @@
+# rsmarisa 0.4.2 against DictIndex on /usr/share/dict/words, one process per run
+# commit 30638ba, clean worktree, three runs back to back; the table quotes the minimum of the three
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.5-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+=== run 1 2026-09-19T20:43:47+03:00 load 0.51 0.80 1.06 1/1327 2049988
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        141        327
+rsmarisa (3 tries, Normal = default)       3.168        150        302
+rsmarisa (3 tries, Huge = fastest)         3.823        173        285
+lexindex DictIndex block 64                2.752         34        280
+lexindex DictIndex block 256               2.651         32        321
+lexindex DictIndex block 512               2.531         31        355
+=== run 2 2026-09-19T20:43:48+03:00 load 0.51 0.80 1.06 2/1323 2050040
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        139        326
+rsmarisa (3 tries, Normal = default)       3.168        148        303
+rsmarisa (3 tries, Huge = fastest)         3.823        169        286
+lexindex DictIndex block 64                2.752         34        270
+lexindex DictIndex block 256               2.651         31        311
+lexindex DictIndex block 512               2.531         31        350
+=== run 3 2026-09-19T20:43:49+03:00 load 0.51 0.80 1.06 1/1323 2050092
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        138        328
+rsmarisa (3 tries, Normal = default)       3.168        149        300
+rsmarisa (3 tries, Huge = fastest)         3.823        171        284
+lexindex DictIndex block 64                2.752         34        269
+lexindex DictIndex block 256               2.651         32        310
+lexindex DictIndex block 512               2.531         30        344
+done 2026-09-19T20:43:49+03:00
+
+minimum of the three:
+rsmarisa (4 tries, Tiny = smallest)         3.003  build  138 ms  lookup  326 ns
+rsmarisa (3 tries, Normal = default)        3.168  build  148 ms  lookup  300 ns
+rsmarisa (3 tries, Huge = fastest)          3.823  build  169 ms  lookup  284 ns
+lexindex DictIndex block 64                 2.752  build   34 ms  lookup  269 ns
+lexindex DictIndex block 256                2.651  build   31 ms  lookup  310 ns
+lexindex DictIndex block 512                2.531  build   30 ms  lookup  344 ns
