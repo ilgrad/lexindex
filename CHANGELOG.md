@@ -412,6 +412,99 @@ All notable changes to this project are documented here. The format follows
   tables and the corrections are in `docs/benchmarks.md`; the string-to-id path end to end, on real
   key corpora, is `bench/mphf_vs`'s `strings` binary and `bench/results/mphf-strings-*`.
 
+- **`Mphf::index_all` answers the keys the first level bumps in staged prefetches, and the single
+  lookup ranks and selects off derived counts.** The batch used to pull in only the first level's
+  seed, sixteen keys ahead, so each of the ~3 % of keys that level bumps made four more dependent
+  misses in turn — its next level's seed, the rank words, the select sample, the high words — and
+  at 100 M keys the batch stopped at 13.5 ns a key against 6.9 for PtrHash's `index_stream`. The
+  keys now go through the first level in blocks of 1024 with each seed pulled in 64 keys ahead,
+  and a block's bumped keys are answered after it in five stages that run eight keys apart, each
+  stage pulling in what the next one reads; below 2^18 first-level seeds (about 1.2 M keys) the
+  level sits in L2 and the batch is the single lookup in a loop. The single lookup gains too: the
+  remap's rank reads a 16-bit count per word instead of counting its block's words in a loop, and
+  the Elias–Fano select compares a window of counts at once and finds the bit inside its word
+  without a loop, where the old scan's mispredicted exits were most of a bumped key's cost. Both
+  count directories are derived on build and on load and never written — **the blob format is
+  unchanged** — and cost 0.023 bits a key in memory. In `bench/mphf_vs` at 1 M / 10 M / 100 M keys:
+  the batch 4.3 / 5.3 / 13.5 → **3.2 / 4.2 / 5.8 ns**, ahead of PtrHash compact and balanced
+  (4.6 / 4.9 / 6.3) at every size and never above the single lookup; the single lookup 3.7 / 5.8 /
+  20.1 → **3.2 / 4.9 / 15.8 ns** (compact 4.2 / 6.0 / 17.6). PtrHash's fast set, at 2.99 bits,
+  still leads both lookup columns outright. `docs/benchmarks.md` carries the re-measured tables.
+- **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
+  2.79 against 3.23 bytes a key on an English word list — a spread wider than the gap between some
+  whole indexes — and the ranking hid it by pricing the default, 256, and nothing else. `Fast`
+  (32), `Balanced` (256) and `Compact` (1024) are three rows on the ladder now, each with its own
+  size and modelled latency, `Plan::best` may name any of them, and `lexindex build --index auto`
+  builds the block on the line it marked rather than the default one. On an English word list the
+  three are modelled at 3.19, 2.80 and 2.76 bytes a key against built blobs of 3.23, 2.84 and 2.79
+  — every one of them within 1.3 %. Two consequences inside. The
+  sample is fitted per block — the compression ratio, the packed per-block arrays and the symbol
+  table all move with the block, and carrying the default block's constants across read 9.5 % high
+  at 32. And `Plan::close` compares the two cheapest candidates *of different kinds*: two blocks of
+  one index are always within a per cent or two of each other, and warning about that would be
+  warning about every plan. `--block` is still refused alongside `--index auto`, now because
+  naming one would ask the planner to rank the three and then overrule its answer.
+- **The planner draws its sample by hash instead of by position.** `step_by(n / 100_000)` was
+  neither a sample nor 100 000 keys: integer division gives a step of one at 150 001 keys, so "the
+  sample" was the whole corpus and every constant was read off a build the size of the real index —
+  and above that, a stride over sorted keys takes one key from every prefix group whatever the
+  group's size. A key is kept now while its hash is under a cutoff that falls as the draw fills:
+  a uniform sample of the distinct keys, the same one on every run over the same keys, needing
+  neither the corpus's size in advance nor the corpus in memory — which is what lets `plan_file`
+  answer exactly as `plan` does. It is also the more accurate draw. Measured over 23 corpora at all
+  three blocks, the modelled `DictIndex` size is within **1.3 % of the build at the median and
+  5.1 % at worst** outside the two corpora the plan flags as thin (from 1.4 % and 5.4 % for a
+  stride), and the `StringIndex` estimate from 3.4 / 9.8 % median and 90th percentile to 3.0 / 7.6.
+  Against the `step_by` draw this replaces, on the corpora it read worst: `idents-full` 12.3 % →
+  2.5 %, `titles-zh` at a million keys 15.5 % → 3.0 %, `titles-zh` whole 26.3 % → 7.1 %.
+- **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
+  they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
+  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
+  it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
+  a reader who has not decided yet. The two probabilistic indexes are put back by
+  **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
+  for them; that line is printed only when the default is what excluded them, since any other need
+  rules them out anyway. Naming one with `--index closed` still builds it. **The library is
+  unchanged**: `Needs::default()` asks only for `id(key)` in Rust and Python, because `plan`'s
+  caller there has already decided and a command line's has not.
+- **A new blob format now ships beside a reader for the old one.** 1.0 and 3.0 each refused what
+  the previous major wrote; from 3.0 on a writer change lands in a *minor* release whose loader
+  still reads the previous format, and dropping a reader is reserved for a major with `lexindex
+  dump` as the published way back. `BDX2` is frozen under that rule. `docs/design.md § Versioning`
+  carries it.
+- **`SECURITY.md` names the supported version.** Its table still said 2.1.x, and promised that 2.1
+  blobs load — 3.0 refuses the `BDX1` dictionary. Now: 3.0.x supported, and the 2.1/2.0 rows say
+  which blob needs a rebuild and which six formats load unchanged.
+- **Stale figures in the docs and the source comments, corrected to what the code does.** The
+  `DictIndex` example in the README quoted 3.2 B/key (the block-32 figure) and `docs/usage.md`
+  2.9, where the default block measures 2.84; `src/offsets.rs` described two packed arrays where
+  there are three, and priced them at the old block; `docs/design.md` gave the per-block
+  directory as 0.147 B/key and 5 % of the blob, the `micro = 16` figure, against 0.100 and 3.5 %
+  measured at 32; the microblock was documented as one per sixteen keys and the symbol table as
+  one per index rather than one per shard; `BDX2` was attributed to 2.2. The README's capability
+  table now carries what `load_mmap` does not borrow — the per-block samples, eight bytes a block.
+- **The research frontier is cited, not just named.** `docs/benchmarks.md` tables PDT, SuRF/FST,
+  XCDAT, CoCo-trie, C² and the front-coding line this index descends from (libCSD, IBiS) with
+  their papers, repositories and licences, and the README and `bench/compare.py` point at it.
+- **`bench/sweep.py` prices marisa at eight and sixteen tries as well.** Four tries is its floor on
+  an English word list and was taken for its floor everywhere; on keys with long shared prefixes,
+  and on random identifiers, the deeper recursion is smaller.
+- **`bench/mphf_vs` measures the function, not the caller's key array.** Its lookup pass read
+  each probe key through `keys[order[i]]` — a random 8-byte fetch from an 80 MB array per query,
+  one DRAM miss charged to every row alike — and the perfect hash's lookup was published as 29 ns
+  at 10 M; with the keys copied into an array in probe order it is 5.8 (PtrHash compact 6.6,
+  PHast+ 14.2), the builds unchanged. The harness now prints every minimum's spread and a batch
+  column (`index_all` against `index_stream`), and `docs/benchmarks.md` carries the re-measured
+  comparison at 1 M, 10 M and 100 M keys — where the 100 M batch is the one column PtrHash leads,
+  6.9 against 13.5 ns — with ConsensusRecSplit on the authors' harness in its own process:
+  1.46–1.58 bits a key at 7–49× the build and 15–27× the lookup. The 2026-09-10 results file stays
+  as measured.
+- **The fuzzers run daily, on four processes for thirty minutes a target.** They had ten minutes a
+  week on one core inside `sanitize.yml`; `fuzz.yml` gives each target two CPU-hours a day,
+  starting from the corpus the last run left and minimising it with `cargo fuzz cmin` before it is
+  kept, so what the cache carries is the smallest set that reaches the same coverage rather than
+  every file a month of runs ever wrote.
+
 ### Added
 
 - **A wheel for free-threaded CPython 3.14.** The module has told CPython it does not need the GIL
@@ -560,101 +653,6 @@ All notable changes to this project are documented here. The format follows
   smaller and faster on URLs and on the Russian and Chinese titles. Nothing of the competitors is
   vendored — CoCo-trie is GPLv3, PDT non-commercial — and `bench/tables.py` renders the published
   frontier tables from their artifacts and checks them like the rest.
-
-### Changed
-
-- **`Mphf::index_all` answers the keys the first level bumps in staged prefetches, and the single
-  lookup ranks and selects off derived counts.** The batch used to pull in only the first level's
-  seed, sixteen keys ahead, so each of the ~3 % of keys that level bumps made four more dependent
-  misses in turn — its next level's seed, the rank words, the select sample, the high words — and
-  at 100 M keys the batch stopped at 13.5 ns a key against 6.9 for PtrHash's `index_stream`. The
-  keys now go through the first level in blocks of 1024 with each seed pulled in 64 keys ahead,
-  and a block's bumped keys are answered after it in five stages that run eight keys apart, each
-  stage pulling in what the next one reads; below 2^18 first-level seeds (about 1.2 M keys) the
-  level sits in L2 and the batch is the single lookup in a loop. The single lookup gains too: the
-  remap's rank reads a 16-bit count per word instead of counting its block's words in a loop, and
-  the Elias–Fano select compares a window of counts at once and finds the bit inside its word
-  without a loop, where the old scan's mispredicted exits were most of a bumped key's cost. Both
-  count directories are derived on build and on load and never written — **the blob format is
-  unchanged** — and cost 0.023 bits a key in memory. In `bench/mphf_vs` at 1 M / 10 M / 100 M keys:
-  the batch 4.3 / 5.3 / 13.5 → **3.2 / 4.2 / 5.8 ns**, ahead of PtrHash compact and balanced
-  (4.6 / 4.9 / 6.3) at every size and never above the single lookup; the single lookup 3.7 / 5.8 /
-  20.1 → **3.2 / 4.9 / 15.8 ns** (compact 4.2 / 6.0 / 17.6). PtrHash's fast set, at 2.99 bits,
-  still leads both lookup columns outright. `docs/benchmarks.md` carries the re-measured tables.
-- **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
-  2.79 against 3.23 bytes a key on an English word list — a spread wider than the gap between some
-  whole indexes — and the ranking hid it by pricing the default, 256, and nothing else. `Fast`
-  (32), `Balanced` (256) and `Compact` (1024) are three rows on the ladder now, each with its own
-  size and modelled latency, `Plan::best` may name any of them, and `lexindex build --index auto`
-  builds the block on the line it marked rather than the default one. On an English word list the
-  three are modelled at 3.19, 2.80 and 2.76 bytes a key against built blobs of 3.23, 2.84 and 2.79
-  — every one of them within 1.3 %. Two consequences inside. The
-  sample is fitted per block — the compression ratio, the packed per-block arrays and the symbol
-  table all move with the block, and carrying the default block's constants across read 9.5 % high
-  at 32. And `Plan::close` compares the two cheapest candidates *of different kinds*: two blocks of
-  one index are always within a per cent or two of each other, and warning about that would be
-  warning about every plan. `--block` is still refused alongside `--index auto`, now because
-  naming one would ask the planner to rank the three and then overrule its answer.
-- **The planner draws its sample by hash instead of by position.** `step_by(n / 100_000)` was
-  neither a sample nor 100 000 keys: integer division gives a step of one at 150 001 keys, so "the
-  sample" was the whole corpus and every constant was read off a build the size of the real index —
-  and above that, a stride over sorted keys takes one key from every prefix group whatever the
-  group's size. A key is kept now while its hash is under a cutoff that falls as the draw fills:
-  a uniform sample of the distinct keys, the same one on every run over the same keys, needing
-  neither the corpus's size in advance nor the corpus in memory — which is what lets `plan_file`
-  answer exactly as `plan` does. It is also the more accurate draw. Measured over 23 corpora at all
-  three blocks, the modelled `DictIndex` size is within **1.3 % of the build at the median and
-  5.1 % at worst** outside the two corpora the plan flags as thin (from 1.4 % and 5.4 % for a
-  stride), and the `StringIndex` estimate from 3.4 / 9.8 % median and 90th percentile to 3.0 / 7.6.
-  Against the `step_by` draw this replaces, on the corpora it read worst: `idents-full` 12.3 % →
-  2.5 %, `titles-zh` at a million keys 15.5 % → 3.0 %, `titles-zh` whole 26.3 % → 7.1 %.
-- **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
-  they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
-  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
-  it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
-  a reader who has not decided yet. The two probabilistic indexes are put back by
-  **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
-  for them; that line is printed only when the default is what excluded them, since any other need
-  rules them out anyway. Naming one with `--index closed` still builds it. **The library is
-  unchanged**: `Needs::default()` asks only for `id(key)` in Rust and Python, because `plan`'s
-  caller there has already decided and a command line's has not.
-- **A new blob format now ships beside a reader for the old one.** 1.0 and 3.0 each refused what
-  the previous major wrote; from 3.0 on a writer change lands in a *minor* release whose loader
-  still reads the previous format, and dropping a reader is reserved for a major with `lexindex
-  dump` as the published way back. `BDX2` is frozen under that rule. `docs/design.md § Versioning`
-  carries it.
-- **`SECURITY.md` names the supported version.** Its table still said 2.1.x, and promised that 2.1
-  blobs load — 3.0 refuses the `BDX1` dictionary. Now: 3.0.x supported, and the 2.1/2.0 rows say
-  which blob needs a rebuild and which six formats load unchanged.
-- **Stale figures in the docs and the source comments, corrected to what the code does.** The
-  `DictIndex` example in the README quoted 3.2 B/key (the block-32 figure) and `docs/usage.md`
-  2.9, where the default block measures 2.84; `src/offsets.rs` described two packed arrays where
-  there are three, and priced them at the old block; `docs/design.md` gave the per-block
-  directory as 0.147 B/key and 5 % of the blob, the `micro = 16` figure, against 0.100 and 3.5 %
-  measured at 32; the microblock was documented as one per sixteen keys and the symbol table as
-  one per index rather than one per shard; `BDX2` was attributed to 2.2. The README's capability
-  table now carries what `load_mmap` does not borrow — the per-block samples, eight bytes a block.
-- **The research frontier is cited, not just named.** `docs/benchmarks.md` tables PDT, SuRF/FST,
-  XCDAT, CoCo-trie, C² and the front-coding line this index descends from (libCSD, IBiS) with
-  their papers, repositories and licences, and the README and `bench/compare.py` point at it.
-- **`bench/sweep.py` prices marisa at eight and sixteen tries as well.** Four tries is its floor on
-  an English word list and was taken for its floor everywhere; on keys with long shared prefixes,
-  and on random identifiers, the deeper recursion is smaller.
-- **`bench/mphf_vs` measures the function, not the caller's key array.** Its lookup pass read
-  each probe key through `keys[order[i]]` — a random 8-byte fetch from an 80 MB array per query,
-  one DRAM miss charged to every row alike — and the perfect hash's lookup was published as 29 ns
-  at 10 M; with the keys copied into an array in probe order it is 5.8 (PtrHash compact 6.6,
-  PHast+ 14.2), the builds unchanged. The harness now prints every minimum's spread and a batch
-  column (`index_all` against `index_stream`), and `docs/benchmarks.md` carries the re-measured
-  comparison at 1 M, 10 M and 100 M keys — where the 100 M batch is the one column PtrHash leads,
-  6.9 against 13.5 ns — with ConsensusRecSplit on the authors' harness in its own process:
-  1.46–1.58 bits a key at 7–49× the build and 15–27× the lookup. The 2026-09-10 results file stays
-  as measured.
-- **The fuzzers run daily, on four processes for thirty minutes a target.** They had ten minutes a
-  week on one core inside `sanitize.yml`; `fuzz.yml` gives each target two CPU-hours a day,
-  starting from the corpus the last run left and minimising it with `cargo fuzz cmin` before it is
-  kept, so what the cache carries is the smallest set that reaches the same coverage rather than
-  every file a month of runs ever wrote.
 
 ### Fixed
 
