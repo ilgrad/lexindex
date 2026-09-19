@@ -205,7 +205,7 @@ written: the code cannot be chosen from a block. At block 1024 it is worth paths
 a key, urls 11.25 → 9.28 and dna 7.70 → 7.27.
 
 The suffix goes under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB
-2020): up to 255 symbols of one to eight bytes, one-byte codes, an escape for what no symbol covers, trained in five rounds of
+2020): up to 255 symbols of one to eight bytes, one-byte codes, an escape for what no symbol covers, trained in four rounds of
 parse-and-count over a sample of the index's own suffixes and stored in the blob, about a
 kilobyte. **One table covers a shard of 65 536 keys**, not the whole index: a shard is a whole
 number of blocks, each table is trained on 10 000 pieces sampled inside its own shard, the tables
@@ -236,7 +236,7 @@ suffixes and stored once, and a shard that buys it gives up symbols for phrase c
 symbols leaves `255 - s` byte codes, each naming 256 phrases in one further byte or 65 536 in two,
 with 255 still the escape. A suffix is parsed by dynamic programming in one backward pass over the
 cheapest coding in bits — a symbol eight, an escaped byte sixteen, a phrase eight times the bytes
-its id takes — and the miner is four rounds of that parse and a count of windows of up to three
+its id takes — and the miner is three rounds of that parse and a count of windows of up to three
 adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain clears six
 times what they cost to store. Mining stops after the first round unless one of three sampled
 shards would take a split by 2 % on its own bytes: what the miner ranks is what coding a span once

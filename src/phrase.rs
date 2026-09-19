@@ -32,9 +32,10 @@ pub(crate) const MAX: usize = 32;
 const WINDOW: usize = 3;
 /// Rounds of parse-and-count. Each one parses under the candidates the last kept, so a phrase is
 /// scored against the phrases it competes with rather than against the symbols alone, and each one
-/// can merge what the last kept into something longer. Four is the knee: the fifth was worth
-/// 0.001 bytes a key on a million URLs and a fifth of the build.
-const ROUNDS: usize = 4;
+/// can merge what the last kept into something longer. The fifth was worth 0.001 bytes a key on a
+/// million URLs and a fifth of the build; the fourth is worth 0.09 % of the blob over the twelve
+/// corpora for 6.4 % of the build, and the build is the column this format is behind on.
+const ROUNDS: usize = 3;
 /// Shards the miner asks before spending its remaining rounds, and suffixes it asks them about.
 const PROBE_SHARDS: usize = 3;
 const PROBE_PIECES: usize = 2_048;

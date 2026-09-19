@@ -19,8 +19,10 @@ use crate::room::{Room, commit};
 pub(crate) const ESCAPE: u8 = 255;
 const MAX_SYMBOLS: usize = 255;
 const MAX_LEN: usize = 8;
-/// Three rounds gave 5.204 bytes per key on the dictionary, five 5.185, eight 5.184.
-const ROUNDS: usize = 5;
+/// Three rounds gave 5.204 bytes per key on the dictionary, five 5.185, eight 5.184. Four is what
+/// is kept: over the twelve corpora the fifth was worth 0.06 % of the blob for 3.5 % of the build,
+/// and the trainer runs once a shard and again on what each shard's phrases leave behind.
+const ROUNDS: usize = 4;
 const SLOTS: usize = 1024;
 
 /// The symbols in code order, each as the little-endian word of its bytes and its length.
