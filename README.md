@@ -361,32 +361,32 @@ list, and the same ladder to the byte. By hand, in decision order:
 
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, mean
 key 10.9 bytes; never a synthetic `entity-000…N` sequence, which arrives pre-sorted and
-hash-degenerate). Measured 2026-09-13 at the v3.0.0 tag, six runs back to back, each lookup cell
-the minimum of five passes after a warm-up; the table quotes the four that ran at the machine's
-settled clock, since the first two — minutes after a reboot — read 18–44 % quicker on every row,
-both controls included
-([`latency-rs-2026-09-13-arz-8aaa0af.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-13-arz-8aaa0af.txt)).
-Absolute numbers are one machine on one day — the `std::HashMap` control reads 285 ns here against
-295 on the 2.1.0 table, 289 on 2.0.0 and 245 on 1.1.0, and `StringIndex`, unchanged since 0.5.1, is
-1.47× of it against 1.32×, 1.47× and 1.30× there — so read the **ratios within a column**, and a
-shift under ~15 % between tables as the session.
+hash-degenerate). Measured 2026-09-19 at `b9d84e8` in a clean worktree, six runs back to back, each
+lookup cell the minimum of five passes after a warm-up; the table quotes the minimum over the six,
+which agree within 1 % on every row but `StringIndex` — it alternates between 318 and 373 ns from
+run to run, a 17 % spread no other row shows
+([`latency-rs-2026-09-19-arz-b9d84e8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-19-arz-b9d84e8.txt)).
+Absolute numbers are one machine on one day — the `std::HashMap` control reads 241 ns here against
+285 on the 3.0.0 table, 295 on 2.1.0, 289 on 2.0.0 and 245 on 1.1.0, and `StringIndex`, unchanged
+since 0.5.1, is 1.32× of it against 1.47×, 1.32×, 1.47× and 1.30× there — so read the **ratios
+within a column**, and a shift under ~15 % between tables as the session.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `CompactHashIndex::id` (fp=1) | **~48 ms** | ~128 ns | fingerprint-verified, `2^-8` false-positive rate |
-| lexindex `PerfectHashIndex::id_unchecked` | ~289 ms | **~75 ns** | closed vocabulary, no membership check |
-| `std::HashMap<String, u32>` | ~209 ms | ~285 ns | in-RAM, not serialisable |
-| lexindex `PerfectHashIndex::id` (verified) | ~284 ms | ~293 ns | one extra cache line + full key compare |
-| lexindex `StringIndex` (FST) | ~272 ms | ~420 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~174 ms | ~541 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.95 here; on the dictionary 2.65 against 5.95, 346–353 ns against 262–280) |
-| `std::BTreeMap<String, u32>` | ~229 ms | ~924 ns | in-RAM |
+| lexindex `PerfectHashIndex::id_unchecked` | ~248 ms | **~51 ns** | closed vocabulary, no membership check |
+| lexindex `CompactHashIndex::id` (fp=1) | **~36 ms** | ~61 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id` (verified) | ~243 ms | ~122 ns | one extra cache line + full key compare |
+| `std::HashMap<String, u32>` | ~185 ms | ~241 ns | in-RAM, not serialisable |
+| lexindex `StringIndex` (FST) | ~252 ms | ~318 ns | *and* prefix / range / fuzzy |
+| lexindex `DictIndex` (256 per block) | ~202 ms | ~465 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.95 here; on the dictionary 2.65 against 5.95, 346–353 ns against 262–280) |
+| `std::BTreeMap<String, u32>` | ~200 ms | ~725 ns | in-RAM |
 
 **Reading it:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the fastest
-structure in the table — 3.8× as quick as the SipHash `HashMap` and 2.3× an FxHash one — *and*
+structure in the table — 4.7× as quick as the SipHash `HashMap` and 2.8× an FxHash one — *and*
 compact and serialisable. `CompactHashIndex::id` keeps a probabilistic membership check and still
-beats the `HashMap` 2.2× on lookup, and builds in under a quarter of its time. Verified `id` pays
-one extra cache line and a key compare; `StringIndex` trades latency for the queries a hash map cannot answer
-at all. The other Rust string indexes, the three-corpus table, the Python-level table against `dict`
+beats the `HashMap` 4.0× on lookup, and builds in under a fifth of its time. Verified `id` pays one
+extra cache line and a key compare and is still twice as quick as the `HashMap`; `StringIndex`
+trades latency for the queries a hash map cannot answer at all. The other Rust string indexes, the three-corpus table, the Python-level table against `dict`
 and `marisa-trie`, the 1 M / 10 M scale table and the protocol behind every number are in
 [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/).
 
