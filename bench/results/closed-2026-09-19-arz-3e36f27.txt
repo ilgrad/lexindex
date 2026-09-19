@@ -1,0 +1,32 @@
+# local/closedbench on /usr/share/dict/words, three processes back to back
+# commit 3e36f27, clean worktree, 2026-09-19T20:49:04+03:00
+=== run 1 load 0.98 0.98 1.06 2/1463 2054951
+n 479823  closed 0.242 B/key (116084 B)  compact fp=1 1.242 B/key (595911 B)
+round 0: closed.id 30.0  compact.id_unchecked 27.4  compact.id 35.0  closed.ids_of 7.6  compact.ids_of 19.1
+round 1: closed.id 22.0  compact.id_unchecked 21.7  compact.id 31.6  closed.ids_of 15.9  compact.ids_of 25.6
+round 2: closed.id 24.4  compact.id_unchecked 20.2  compact.id 24.8  closed.ids_of 7.5  compact.ids_of 17.5
+round 3: closed.id 21.8  compact.id_unchecked 21.7  compact.id 29.7  closed.ids_of 16.3  compact.ids_of 25.7
+round 4: closed.id 28.2  compact.id_unchecked 23.5  compact.id 27.3  closed.ids_of 7.8  compact.ids_of 17.6
+round 5: closed.id 21.1  compact.id_unchecked 22.5  compact.id 29.4  closed.ids_of 15.9  compact.ids_of 26.0
+round 6: closed.id 24.3  compact.id_unchecked 19.8  compact.id 28.7  closed.ids_of 8.8  compact.ids_of 18.9
+min: closed.id 21.1 ns  compact.id_unchecked 19.8 ns  compact.id 24.8 ns  closed.ids_of 7.5 ns  compact.ids_of 17.5 ns
+=== run 2 load 0.98 0.98 1.06 1/1463 2055033
+n 479823  closed 0.242 B/key (116084 B)  compact fp=1 1.242 B/key (595911 B)
+round 0: closed.id 21.0  compact.id_unchecked 21.4  compact.id 24.9  closed.ids_of 7.8  compact.ids_of 17.5
+round 1: closed.id 31.6  compact.id_unchecked 25.5  compact.id 29.7  closed.ids_of 15.4  compact.ids_of 26.0
+round 2: closed.id 24.9  compact.id_unchecked 21.2  compact.id 25.0  closed.ids_of 7.7  compact.ids_of 17.6
+round 3: closed.id 20.9  compact.id_unchecked 20.8  compact.id 29.9  closed.ids_of 15.7  compact.ids_of 25.7
+round 4: closed.id 24.4  compact.id_unchecked 20.3  compact.id 27.5  closed.ids_of 7.6  compact.ids_of 17.5
+round 5: closed.id 22.5  compact.id_unchecked 21.4  compact.id 32.1  closed.ids_of 15.5  compact.ids_of 25.7
+round 6: closed.id 24.4  compact.id_unchecked 20.4  compact.id 25.1  closed.ids_of 7.5  compact.ids_of 17.4
+min: closed.id 20.9 ns  compact.id_unchecked 20.3 ns  compact.id 24.9 ns  closed.ids_of 7.5 ns  compact.ids_of 17.4 ns
+=== run 3 load 0.98 0.98 1.06 1/1463 2055115
+n 479823  closed 0.242 B/key (116084 B)  compact fp=1 1.242 B/key (595911 B)
+round 0: closed.id 25.8  compact.id_unchecked 23.8  compact.id 28.6  closed.ids_of 7.6  compact.ids_of 18.8
+round 1: closed.id 20.9  compact.id_unchecked 22.0  compact.id 30.3  closed.ids_of 15.3  compact.ids_of 26.3
+round 2: closed.id 24.5  compact.id_unchecked 20.0  compact.id 24.7  closed.ids_of 7.5  compact.ids_of 17.3
+round 3: closed.id 19.8  compact.id_unchecked 21.3  compact.id 29.7  closed.ids_of 15.4  compact.ids_of 26.3
+round 4: closed.id 25.5  compact.id_unchecked 20.4  compact.id 27.2  closed.ids_of 7.5  compact.ids_of 17.2
+round 5: closed.id 24.1  compact.id_unchecked 21.0  compact.id 30.1  closed.ids_of 15.5  compact.ids_of 26.0
+round 6: closed.id 24.5  compact.id_unchecked 20.6  compact.id 24.8  closed.ids_of 7.4  compact.ids_of 17.6
+min: closed.id 19.8 ns  compact.id_unchecked 20.0 ns  compact.id 24.7 ns  closed.ids_of 7.4 ns  compact.ids_of 17.2 ns

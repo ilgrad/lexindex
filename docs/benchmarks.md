@@ -481,35 +481,42 @@ Ten million English Wikipedia titles, nanoseconds a lookup with the speedup over
 
 | threads | `DictIndex` 128 | `CompactHashIndex` | `StringIndex` |
 |---|---:|---:|---:|
-| 1 | 589 | 35.3 | 855 |
-| 2 | 299 (1.97×) | 19.0 (1.86×) | 419 (2.04×) |
-| 4 | 149 (3.96×) | 9.7 (3.65×) | 206 (4.14×) |
-| 8 | 76 (7.75×) | 5.2 (6.74×) | 106 (8.10×) |
-| 16 | 48 (12.18×) | 3.7 (9.43×) | 63 (13.50×) |
-| **M lookups/s at 16** | **20.7** | **267.5** | **15.8** |
+| 1 | 614 | 18.1 | 852 |
+| 2 | 310 (1.98×) | 11.2 (1.62×) | 407 (2.09×) |
+| 4 | 153 (4.00×) | 5.5 (3.29×) | 203 (4.20×) |
+| 8 | 78 (7.87×) | 3.2 (5.66×) | 105 (8.14×) |
+| 16 | 48 (12.78×) | 2.6 (6.96×) | 63 (13.52×) |
+| **M lookups/s at 16** | **20.8** | **385** | **15.9** |
 
-**Eight cores give 6.7–8.1×**, 84–101 % of them, on a mobile part whose clock falls as cores light
+**Eight cores give 5.7–8.1×**, 71–102 % of them, on a mobile part whose clock falls as cores light
 up — the number already carries that, so a machine with a flatter boost curve can only do better.
 
-**The sixteen-thread row is SMT and it is worth having.** 9.4–13.5× over one thread, well past the
+**The sixteen-thread row is SMT and it is worth having.** 7.0–13.5× over one thread, well past the
 eight physical cores, because a point lookup is a chain of dependent loads and a core spends most of
 it waiting. A second thread on the same core fills those stalls with someone else's work.
 
-**`StringIndex` scales best because it stalls most** — 2.04× on two threads and 13.50× on sixteen.
+**`StringIndex` scales best because it stalls most** — 2.09× on two threads and 13.52× on sixteen.
 One core can only keep a handful of cache misses in flight; two cores have twice the
 memory-level parallelism, and a transducer walk is nothing but dependent misses. At a million keys,
-where a 17 MB transducer is nearly cache-resident, the same effect is weaker (1.91× and 10.59×).
+where a 17 MB transducer is nearly cache-resident, the same effect is weaker (1.93× and 10.72×).
 
-**`CompactHashIndex` saturates first**, at 9.43×, and it is the one structure that has run out of
-something other than cores: 268 M lookups a second over a 12.6 MB index that fits this machine's
-16 MB L3, at 3.7 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
-this one does not.
+**`CompactHashIndex` saturates first**, at 6.96×, and it is the one structure that has run out of
+something other than cores: 385 M lookups a second over a 12.4 MB index that fits this machine's
+16 MB L3, at 2.6 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
+this one does not. It saturates **earlier** than it did on 3.0.0 — 9.43× then, 6.96× now — for the
+good reason that its single-thread lane got 49 % quicker while its sixteen-thread lane, already
+bandwidth-bound, moved 3.7 → 2.6 ns.
 
-<sub>Measured 2026-09-12 at `386b2e6`, the tree differing from it in documentation only
-([`bench/results/readscale-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-09-12-arz-386b2e6.txt),
+<sub>Measured 2026-09-19 at `3e36f27`, the tree differing from it in documentation only
+([`bench/results/readscale-2026-09-19-arz-3e36f27.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-09-19-arz-3e36f27.txt),
 which carries the million-key ladder as well), Ryzen 7 5800HS, 8 cores and 16 hardware threads.
-Shared by `&index` across `std::thread::scope`; no index is cloned and none is rebuilt per
-thread.</sub>
+Shared by `&index` across `std::thread::scope`; no index is cloned and none is rebuilt per thread.
+Three processes, the minimum per cell; `CompactHashIndex`'s single-thread cell is the one that
+needed them, reading 26.3 / 23.2 / 18.1 ns across the three where every other cell held within 7 %.
+**`StringIndex` is the control here and it did not move**: 855 ns on 3.0.0's run against 852 now, and
+1.91× / 10.59× against 1.93× / 10.72× at a million. Against that, `DictIndex` 128 went 589 → 614 ns
+(+4.2 %, which is `BDX3`'s cost at ten million — a quarter of what it is at one) and
+`CompactHashIndex` 35.3 → 18.1 (−49 %, the new key hash).</sub>
 
 ### `rsmarisa`, the pure-Rust port
 
@@ -1036,13 +1043,19 @@ the batched `ids_of` loses the fingerprint line's prefetch and compare.
 
 | | `ClosedHashIndex` | `CompactHashIndex` (fp=1) |
 |---|---:|---:|
-| `id`, member | **40 ns** | 68 ns (`id`), 40 ns (`id_unchecked`) |
-| `ids_of`, member | **14 ns** | 28 ns |
-| bytes per key | **0.263** | 1.263 |
+| `id`, member | **19.8 ns** | 24.7 ns (`id`), 19.8 ns (`id_unchecked`) |
+| `ids_of`, member | **7.4 ns** | 17.2 ns |
+| bytes per key | **0.242** | 1.242 |
 
-<sub>Measured 2026-09-10 on the tree that adds the type
-([`bench/results/closed-2026-09-10-arz-50f240c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/closed-2026-09-10-arz-50f240c.txt)),
-Ryzen 7 5800HS, load about 0.9 with an editor open.</sub>
+<sub>Measured 2026-09-19 at `3e36f27` on a clean tree, three processes back to back and the minimum
+of the three, which agree within 7 %
+([`bench/results/closed-2026-09-19-arz-3e36f27.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/closed-2026-09-19-arz-3e36f27.txt)),
+Ryzen 7 5800HS, load about 1.0 with an editor open. Both `id` rows halved against the 2.0.0 table
+that first published them (40 → 19.8 and 68 → 24.7), which is the new key hash and the `MPH3` seed
+layout, and both sizes fell 0.021 B/key with the hash. Within a process the rows alternate by about
+9 ns between the two mode orders the harness reverses on alternate rounds — whichever lane runs
+second finds the key array warm — so the minimum is the warm one, in this table as in the one it
+replaces.</sub>
 
 ## `DictIndex`: the ordered dictionary against `StringIndex`
 
