@@ -1529,7 +1529,7 @@ front.
 ## Scaling to millions of keys
 
 `python bench/scale.py` on real high-entropy keys (dictionary-word bigrams). Build time and memory grow
-linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.26 bytes/key holds constant** as
+linearly, lookups stay sub-microsecond, and `CompactHashIndex`'s **1.24 bytes/key holds constant** as
 `n` grows. Each row is measured twice: handing the constructor a **list** of keys, and handing it a
 **generator**. The second is what `CompactHashIndex`'s streaming build exists for — it keeps a
 16-byte pair per key and drops the string — and it is the only way to see the index's own footprint
@@ -1537,25 +1537,25 @@ rather than the corpus's:
 
 | n | structure | keys | build | bytes/key | peak RSS | lookup |
 |---|---|---|---:|---:|---:|---:|
-| 1 M | `StringIndex` | list | 0.33 s | 0.68\* | 155 MB | 188 ns |
-| 1 M | `StringIndex` | generator | 0.48 s | 0.68\* | 147 MB | 187 ns |
-| 1 M | `CompactHashIndex` | list | 0.09 s | 1.26 | 145 MB | 78 ns |
-| 1 M | `CompactHashIndex` | **generator** | 0.20 s | 1.26 | **78 MB** | 79 ns |
-| 10 M | `StringIndex` | list | 4.4 s | 2.00\* | 1108 MB | 703 ns |
-| 10 M | `StringIndex` | generator | 6.0 s | 2.00\* | 1032 MB | 637 ns |
-| 10 M | `CompactHashIndex` | list | 0.66 s | 1.26 | 952 MB | 242 ns |
-| 10 M | `CompactHashIndex` | **generator** | 1.9 s | 1.26 | **264 MB** | 244 ns |
+| 1 M | `StringIndex` | list | 0.33 s | 0.68\* | 155 MB | 189 ns |
+| 1 M | `StringIndex` | generator | 0.48 s | 0.68\* | 148 MB | 191 ns |
+| 1 M | `CompactHashIndex` | list | 0.08 s | 1.24 | 146 MB | 72 ns |
+| 1 M | `CompactHashIndex` | **generator** | 0.20 s | 1.24 | **79 MB** | 76 ns |
+| 10 M | `StringIndex` | list | 4.3 s | 2.00\* | 1109 MB | 661 ns |
+| 10 M | `StringIndex` | generator | 5.9 s | 2.00\* | 1033 MB | 593 ns |
+| 10 M | `CompactHashIndex` | list | 0.58 s | 1.24 | 956 MB | 210 ns |
+| 10 M | `CompactHashIndex` | **generator** | 1.8 s | 1.24 | **268 MB** | 228 ns |
 
-<sub>Measured on 2.0.0
-([`bench/results/scale-2026-09-10-arz-16c7abe-dirty.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-09-10-arz-16c7abe-dirty.json)
-— the tree of 16c7abe plus the release's own edits, none of them in a measured path), one process
-per cell and the **minimum of five** per cell, on a machine idle throughout (load 0.4–1.0 at both
-ends). `StringIndex`, whose build and lookup code has not changed since 0.5.1 and is therefore
-the control, reads the 1.1.0 table back within its noise: 0.34 → 0.33 s and 0.47 → 0.48 at 1 M,
-4.4 and 6.0 s at 10 M unchanged, lookups 195 → 188 and 655 → 703 ns. Against that flat control,
-`CompactHashIndex`'s builds fell — 0.11 → 0.09 s and 0.22 → 0.20 at 1 M, **0.91 → 0.66 s** and
-2.1 → 1.9 at 10 M — and the generator build's peak at 10 M fell 297 → 264 MB: the slots computed on
-every thread, a fingerprint written as one store, and the spill in slabs, which are 2.0's build
-changes. Its blob stays 1.26 B/key at both sizes, and its lookups hold (75 → 78 and 271 → 242 ns,
-inside what a per-call Python loop resolves).</sub>
+<sub>Measured at `4ee80d2`
+([`bench/results/scale-2026-09-19-arz-4ee80d2.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-09-19-arz-4ee80d2.json)),
+one process per cell and the **minimum of five** per cell, on a machine at load 0.88–0.99 at both
+ends. `StringIndex`, whose build and lookup code has not changed since 0.5.1 and is therefore the
+control, reads the 2.0.0 table back within its noise: 0.33 and 0.48 s at 1 M unchanged, 4.4 → 4.3
+and 6.0 → 5.9 at 10 M, lookups 188 → 189 and 703 → 661 ns. Against that flat control,
+`CompactHashIndex`'s builds fell again — 0.09 → 0.08 s at 1 M and **0.66 → 0.58 s** at 10 M — and
+its blob is **1.24 B/key** at both sizes, where 2.0.0 wrote 1.26: the same key-hash and `MPH3` work
+that halved the Rust-level lookup table above. Its lookups here move far less (78 → 72 and 242 →
+210 ns) because a per-call Python loop is most of what they measure. The generator build's peak at
+10 M is 268 MB against the corpus-holding build's 956 — that gap, not the blob, is what the
+streaming constructor exists for.</sub>
 
