@@ -39,8 +39,8 @@ better; the capability columns are why you would still pick a larger one.
 | builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 241 |
 <!-- /table -->
 
-<sub>Every cell above is one run of the v3.0.0 tag, `8aaa0af`, in a clean worktree on a machine
-rebooted minutes earlier
+<sub>Every cell above is one run at `999e933` in a clean worktree, on a machine whose load
+average went 0.11 into the run and 0.91 out of it
 ([`bench/results/compare-2026-09-19-arz-999e933.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-19-arz-999e933.json))
 — every cell's build and lookup samples, the false-positive measurement, the CPU, kernel, rustc,
 Python and the load average at both ends of the run. **Its Python call floor is 51 ns against the

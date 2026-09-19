@@ -983,3 +983,29 @@ fn the_mphf_loader_refuses_a_remap_that_runs_backwards() {
         "the blob loaded; it must be refused"
     );
 }
+
+/// `tiered-4.0.0-dict.bdx` is the one pinned blob whose shard bought phrases, so it is the only
+/// fixture that reaches `decode_tiered` and `compare_tiered`. It is **not** regenerable from this
+/// test's corpus: the miner only runs past `MINE_MIN` keys, and a blob built from that many is
+/// eighteen times this one's size — too large to keep as a fuzz seed, which is the other job this
+/// file does. It was written by a build with that threshold lowered, and nothing but the
+/// threshold; the loader neither knows nor cares how many keys the builder saw.
+#[test]
+fn the_pinned_tiered_blob_answers_every_key_through_the_phrase_codec() {
+    let path = data("tiered-4.0.0-dict.bdx");
+    let idx =
+        lexindex::DictIndex::load(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(idx.len(), 1024);
+    assert!(
+        idx.sections().phrases > 0,
+        "the fixture no longer carries a phrase dictionary, so it no longer covers the codec"
+    );
+    for rank in 0..idx.len() as u64 {
+        let key = idx.key(rank).unwrap_or_else(|| panic!("{rank}"));
+        assert_eq!(idx.id(&key), Some(rank), "{key:?}");
+    }
+    let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+    let mut sorted = walked.clone();
+    sorted.sort();
+    assert_eq!(walked, sorted, "the walk is not in key order");
+}

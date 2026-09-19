@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`DictIndex` is a quarter to a half smaller, and the format is `BDX3`.** Five changes, each
+- **`DictIndex` is 6 % to 52 % smaller, and the format is `BDX3`.** Five changes, each
   priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
@@ -68,33 +68,40 @@ All notable changes to this project are documented here. The format follows
   borrows every section there now is.
 
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
-  --index dict`, sizes being a function of the keys): urls 11.25 → **7.48** bytes a key, paths 14.67
-  → **9.96**, article titles 9.37 → **7.34** in English, 11.36 → **7.70** in Russian and 8.28 →
-  **6.22** in Chinese, DNA 7.70 → **4.34**, opaque ids 13.80 → **10.36**, numeric 2.13 → **0.98**,
-  identifiers 6.66 → **5.22**, domains 5.07 → **4.70**, UUIDs 20.45 → **18.00**; the dictionary's
-  479 823 words 2.84 → **2.58** and 889 864 PyPI names 4.91 → **4.33**.
+  --index dict`, sizes being a function of the keys): urls 11.25 → **7.53** bytes a key, paths 14.67
+  → **10.18**, article titles 9.37 → **7.40** in English, 11.36 → **7.81** in Russian and 8.28 →
+  **6.29** in Chinese, DNA 7.70 → **4.40**, opaque ids 13.80 → **10.42**, numeric 2.13 → **1.03**,
+  identifiers 6.66 → **5.31**, domains 5.07 → **4.75**, UUIDs 20.45 → **18.06**; the dictionary's
+  479 823 words 2.84 → **2.65** and 889 864 PyPI names 4.91 → **4.37**. That is 6.2 % off domains
+  and 6.7 % off the word list at one end and 51.5 % off decimal ids at the other.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
-  **What it costs to build.** At a million keys the CLI's wall clock is 1.7× (urls 0.65 → 1.11 s,
-  paths 0.85 → 1.41) and its peak 1.7–1.9×; the word list, whose shards buy no phrases, is 1.2× and
-  1.3×. The miner's own cost is *fixed* — it reads a bounded sample of the suffixes and holds a
-  bounded pool of candidates — so the wall clock amortises where a blob that size is actually built:
-  on urls, 1.4× the time and 1.3× the peak at three million keys, and **1.19× and 1.09×** at ten
-  million (8.41 → 10.0 s, 1.28 → 1.39 GB) while the blob falls from 0.67 to 0.62 of `BDX2`'s. Ten
-  million English article titles read the same: 7.60 → 9.23 s, 0.96 → 1.09 GB, 76.5 → 56.8 MB. Most
-  of that wall clock is reading the file and sorting it, which the format does not touch: the build
-  call on its own is 2.3–4.3× at a million keys (numeric 1.4×, the word list 1.5×, paths 4.0×, DNA
-  4.3×) and 2.3× at ten million. About 60 % of it is the phrase machinery — the cheapest-coding
-  parse 24 %, the miner's rounds 19 % — which is what buys a quarter to a half of the bytes.
+  **What it costs to build.** The price is the phrase machinery and nothing else, so it is paid only
+  by the corpora that buy phrases. `lexindex build --index dict` end to end, the two binaries
+  alternated X-2-2-X-X-2-2-X and the minimum of four taken: the word list 0.12 → 0.13 s at 1.29× the
+  peak, DNA 0.52 → 0.54 s at 1.51×, urls 0.53 → 0.86 s at 1.82×, paths 0.70 → 1.13 s at 1.69×. Most
+  of that wall clock is reading the file and sorting it, which the format does not touch; the build
+  call on its own is **1.04× on DNA, 1.31× on decimal ids, 1.42× on the word list, 2.30× on domains
+  and 3.20–3.75× on titles, urls and paths** at a million keys. The miner's own cost is *fixed* — it
+  reads a bounded sample of the suffixes and holds a bounded pool of candidates — so it amortises
+  where a blob that size is actually built: at ten million keys the CLI is 1.20× on urls (6.77 →
+  8.15 s, peak unchanged at 977 MB) and 1.21× on English article titles (6.14 → 7.42 s, 937 →
+  977 MB), and the build call 2.42× and 2.09×. Turning the miner off outright is what names its
+  share: −70 % of the build's retired instructions on urls, −63 % on domains, and **−3.1 % on the
+  word list**, where the scout refuses after one round over a sixteenth of the pieces and the blob
+  comes out byte-identical either way — the 3.1 % is the scout's own price for a decision that saves
+  the other two thirds. That is what buys the wide end of the size range above; a corpus the scout
+  turns away keeps only what the other four changes give it.
 
-  **What it costs to read.** Against `BDX2` over a million keys at block 256, two `BDX2` builds
-  alternated with the `BDX3` one so that code layout is not mistaken for the format: `id` runs 0.89×
-  to 1.18× and `key_into` 1.01× to 1.74×. The two lanes are ahead on urls (`id` 0.89×) and level on
-  uuid, Russian titles, paths and urls (`key_into` 1.01–1.02×); what is behind is decimal ids
-  (1.18× / 1.74×), where the blob is 0.46× and a `BDX2` lookup is the fastest of any corpus, and the
-  word list and domains (1.33× / 1.28×), whose short keys make the coded header the whole cost. A
-  header that is coded rather than a byte is read with a shift and a mask, and that is the price of
-  the bytes it saves.
+  **What it costs to read.** Against `BDX2` over a million keys at block 256, the two binaries
+  alternated X-2-2-X-X-2-2-X so that code layout is not mistaken for the format: `id` runs **0.80×
+  to 1.24×** and `key_into` **0.77× to 1.46×**. `key_into` is the lane that came out ahead — nine
+  corpora of twelve, by 23 % on UUIDs, 17 % on urls, 16 % on paths and 14 % on Russian titles — and
+  `id` is the one that did not: three of twelve, urls 0.80×, opaque ids 0.95×, UUIDs 0.95×. Behind
+  on both are decimal ids (1.24× / 1.46×), where the blob is 0.49× and a `BDX2` lookup is the
+  fastest of any corpus, and the word list (1.20× / 1.00×) and domains (1.13× / 1.02×), whose short
+  keys make the coded header the whole cost. A header that is coded rather than a byte is read with
+  a shift and a mask, and that is the price of the bytes it saves.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
   before 4.0 has to be rebuilt from its keys — `lexindex dump` on 3.x into `lexindex build` on 4.0
