@@ -62,14 +62,27 @@ pub(crate) fn word_at(s: &[u8], i: usize) -> u64 {
     }
 }
 
-/// The low `len` bytes of a word.
+/// The low `len` bytes of a word, read off a table rather than shifted.
+///
+/// A symbol is one to eight bytes, so the shift form needs its own branch for the eight that
+/// would shift a word out of itself -- and this runs once per symbol compared, where the length
+/// alternates with the data and the branch does not predict. Nine words of a cache line the
+/// compare loop is already in cost the load and nothing else.
+const LOW_MASK: [u64; 9] = [
+    0,
+    0xff,
+    0xffff,
+    0x00ff_ffff,
+    0xffff_ffff,
+    0x00ff_ffff_ffff,
+    0xffff_ffff_ffff,
+    0x00ff_ffff_ffff_ffff,
+    u64::MAX,
+];
+
 #[inline(always)]
 pub(crate) fn low_mask(len: usize) -> u64 {
-    if len >= 8 {
-        u64::MAX
-    } else {
-        (1u64 << (8 * len)) - 1
-    }
+    LOW_MASK[len.min(8)]
 }
 
 /// The encoder's slot for a symbol of three bytes or more: a hash of its first three bytes.

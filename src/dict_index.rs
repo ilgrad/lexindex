@@ -663,10 +663,13 @@ struct Piece<'a> {
 
 impl<'a> Piece<'a> {
     /// The bytes of a symbol-coded piece, bounded by what the stream holds.
+    ///
+    /// `start` is a bit inside the stream and `units` no more than the stream is long, so the sum
+    /// is under twice an address and the saturating form only cost the compare that proves it.
     #[inline(always)]
     fn bytes(self) -> &'a [u8] {
         let at = self.start / 8;
-        let end = at.saturating_add(self.units).min(self.stream.len());
+        let end = (at + self.units).min(self.stream.len());
         self.stream.get(at..end).unwrap_or_default()
     }
 
