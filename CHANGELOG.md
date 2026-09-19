@@ -125,6 +125,20 @@ All notable changes to this project are documented here. The format follows
   vocabulary keeps earning past what a hundred-thousand-key sample can see. `docs/usage.md` carries
   the numbers and says which way the estimate errs.
 
+- **The latency model is re-fitted to `BDX3`, and the fit is worse where it should be.** The
+  constants in `src/estimate.rs` were fitted to `BDX2` lanes, so on `BDX3` they under-priced every
+  `DictIndex` lookup by about a third — `plan(.., Objective::Latency)` was ranking the dictionary
+  with a number the format no longer produces. Re-measured over the same 240 cells (four blocks ×
+  three sizes × the corpus set, one process, `bench/latency_model.py measure`) and re-fitted from
+  that artifact. Mean absolute error on `id(key)` is 6–13 %; held out a corpus at a time the model
+  still names the fastest `id(key)` in 30 of 30 cells, the fastest `key(id)` in 30 and the fastest
+  under a `common_prefix`-heavy workload in 30. **Where it got worse is the one place the format
+  moved**: picking between `DictIndex` and `StringIndex` held out falls to 16 of 30 with a worst
+  case of 1.75×, from 24 and 1.24×, because `BDX3` raised the dictionary's `id` lane by about a
+  sixth while the transducer's stayed where it was and the two now cross inside the corpus set
+  rather than outside it. `prefix_count` is fitted at 26–46 % mean error and is quoted as such: its
+  cost is dominated by how many keys the prefix matches, and the model has no term for that.
+
 - **The remap's samples are two levels, and cost half of what they did.** Every 64 values of the
   remap carried the position of their block's first one in a `u32`, half a bit a value. The
   position is what a lookup adds to nothing else, so what it actually needs is the *offset* from a

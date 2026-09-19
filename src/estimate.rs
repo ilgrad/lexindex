@@ -498,12 +498,19 @@ impl Ops {
 /// counts.
 ///
 /// **Far too coarse to quote and quite enough to rank.** Fitted with a corpus left out, the model
-/// names the fastest `id(key)` on that corpus in 30 of 30 corpus-size cells and the fastest ordered
-/// index in 24, where its worst pick costs 1.24× the fastest; over ten workloads, from batched
-/// lookups to `common_prefix`, no pick costs more than 1.49×. Against the *published* sweep, which
-/// it was not fitted to, it names the fastest of every lane in 30 of 30 cells, the faster of
-/// `DictIndex` and `StringIndex` in 24 — never picking one more than 1.20× slower — and the fastest
-/// `DictIndex` block in 22, never more than 1.07× slower.
+/// names the fastest `id(key)` on that corpus in 30 of 30 corpus-size cells, and the same for
+/// `key(id)` and for a `common_prefix`-heavy workload; over ten workloads the mean pick costs
+/// 1.000–1.047× the fastest. Against the *published* sweep, which it was not fitted to, it names
+/// the fastest of every lane in 28 of 30 cells — never more than 1.10× slower — the faster of
+/// `DictIndex` and `StringIndex` in 24, and the fastest `DictIndex` block in 19, never more than
+/// 1.08× slower.
+///
+/// **Choosing between `DictIndex` and `StringIndex` got harder in 4.0, and the scores say so**:
+/// ordered picks held out fall to 16 of 30 with a worst case of 1.75×, against 24 and 1.24× on the
+/// `BDX2` constants. `BDX3` moved the dictionary's `id` lane up by about a sixth and left the
+/// transducer's where it was, so the two now cross inside the corpus set rather than outside it —
+/// `numeric` at a hundred thousand keys is where the model gets it wrong by the most. The block
+/// choice is the same story one level down: 19 of 30 here against 22 before.
 ///
 /// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
 /// through the Python binding so that every one of them carries that call. Nothing here rescales
@@ -513,11 +520,11 @@ const COST: [(Kind, Ops); 4] = [
         Kind::Closed,
         Ops {
             floor: 0.00,
-            mixed: cost(51.3, 9.65, 0.159, 0.007),
-            hit: cost(51.3, 9.38, 0.152, 0.008),
-            miss: cost(48.6, 9.68, 0.158, 0.015),
-            batch16: cost(39.1, 3.50, 0.134, 0.000),
-            batch1024: cost(38.6, 1.63, 0.136, 0.000),
+            mixed: cost(51.1, 9.97, 0.151, 0.000),
+            hit: cost(51.6, 9.95, 0.149, 0.000),
+            miss: cost(48.5, 9.78, 0.108, 0.000),
+            batch16: cost(37.5, 1.82, 0.116, 0.000),
+            batch1024: cost(33.7, 0.80, 0.152, 0.000),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -527,12 +534,12 @@ const COST: [(Kind, Ops); 4] = [
     (
         Kind::Compact,
         Ops {
-            floor: 0.95,
-            mixed: cost(46.7, 18.27, 0.185, 0.000),
-            hit: cost(44.0, 18.52, 0.155, 0.000),
-            miss: cost(30.0, 17.44, 0.200, 0.006),
-            batch16: cost(44.2, 5.17, 0.179, 0.000),
-            batch1024: cost(42.2, 2.55, 0.154, 0.000),
+            floor: 0.92,
+            mixed: cost(46.4, 18.41, 0.111, 0.010),
+            hit: cost(43.6, 18.05, 0.057, 0.026),
+            miss: cost(30.6, 18.33, 0.102, 0.000),
+            batch16: cost(44.0, 2.86, 0.095, 0.000),
+            batch1024: cost(37.3, 1.46, 0.057, 0.001),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -543,12 +550,12 @@ const COST: [(Kind, Ops); 4] = [
         Kind::Perfect,
         Ops {
             floor: 3.30,
-            mixed: cost(-24.8, 32.65, 0.000, 0.000),
-            hit: cost(-35.7, 33.27, 0.000, 0.000),
-            miss: cost(-57.6, 34.74, 0.000, 0.000),
-            batch16: cost(37.3, 10.14, 0.203, 0.000),
-            batch1024: cost(49.3, 4.27, 0.026, 0.021),
-            key: Some(cost(-30.6, 27.61, 0.000, 0.000)),
+            mixed: cost(-4.4, 24.41, 0.000, 0.000),
+            hit: cost(-7.3, 28.71, 0.000, 0.000),
+            miss: cost(-19.8, 18.23, 0.000, 0.000),
+            batch16: cost(47.1, 5.05, 0.042, 0.000),
+            batch1024: cost(40.8, 2.52, 0.047, 0.005),
+            key: Some(cost(26.0, 20.67, 0.025, 0.000)),
             prefix: None,
             common_prefix: None,
             longest_prefix: None,
@@ -558,15 +565,15 @@ const COST: [(Kind, Ops); 4] = [
         Kind::String,
         Ops {
             floor: 0.00,
-            mixed: cost(146.7, 19.15, 0.000, 1.221),
-            hit: cost(145.0, 21.28, 0.000, 1.205),
-            miss: cost(137.3, 19.46, 0.000, 1.190),
-            batch16: cost(140.2, 21.80, 0.000, 1.197),
-            batch1024: cost(139.6, 21.84, 0.000, 1.204),
-            key: Some(cost(251.4, 27.14, 9.766, 1.903)),
-            prefix: Some(cost(354.1, 95.69, 1.058, 0.000)),
-            common_prefix: Some(cost(361.2, 0.00, 0.000, 1.389)),
-            longest_prefix: Some(cost(203.6, 21.52, 0.000, 1.119)),
+            mixed: cost(164.7, 26.97, 0.000, 1.251),
+            hit: cost(165.7, 28.39, 0.126, 1.227),
+            miss: cost(157.5, 24.54, 0.000, 1.237),
+            batch16: cost(156.1, 26.73, 0.000, 1.263),
+            batch1024: cost(149.2, 27.23, 0.000, 1.216),
+            key: Some(cost(234.1, 35.92, 14.978, 1.280)),
+            prefix: Some(cost(392.8, 103.75, 0.323, 0.000)),
+            common_prefix: Some(cost(441.9, 6.87, 0.000, 1.134)),
+            longest_prefix: Some(cost(217.4, 33.42, 4.416, 0.354)),
         },
     ),
 ];
@@ -577,61 +584,61 @@ const DICT_COST: [(usize, Ops); 4] = [
     (
         32,
         Ops {
-            floor: 1.89,
-            mixed: cost(85.2, 39.35, 0.000, 0.472),
-            hit: cost(64.6, 46.07, 0.000, 0.433),
-            miss: cost(63.5, 45.35, 0.000, 0.445),
-            batch16: cost(188.7, 21.34, 0.125, 0.445),
-            batch1024: cost(181.5, 21.52, 0.000, 0.450),
-            key: Some(cost(105.9, 31.84, 2.493, 0.000)),
-            prefix: Some(cost(232.6, 14.48, 0.000, 0.000)),
-            common_prefix: Some(cost(586.6, 0.00, 64.963, 10.489)),
-            longest_prefix: Some(cost(352.1, 53.28, 1.221, 0.799)),
+            floor: 0.92,
+            mixed: cost(134.5, 47.48, 0.000, 0.386),
+            hit: cost(127.0, 50.97, 0.000, 0.348),
+            miss: cost(131.4, 48.26, 0.000, 0.370),
+            batch16: cost(233.7, 29.49, 0.000, 0.333),
+            batch1024: cost(212.1, 30.03, 0.000, 0.321),
+            key: Some(cost(162.4, 26.86, 0.033, 0.326)),
+            prefix: Some(cost(289.4, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1163.5, 92.31, 53.263, 5.478)),
+            longest_prefix: Some(cost(536.8, 62.71, 0.000, 0.468)),
         },
     ),
     (
         128,
         Ops {
-            floor: 1.73,
-            mixed: cost(127.1, 36.46, 0.000, 0.507),
-            hit: cost(110.9, 41.84, 0.000, 0.481),
-            miss: cost(108.1, 41.20, 0.000, 0.489),
-            batch16: cost(205.7, 24.56, 0.000, 0.487),
-            batch1024: cost(193.4, 25.69, 0.000, 0.477),
-            key: Some(cost(131.5, 35.51, 3.157, 0.011)),
-            prefix: Some(cost(279.4, 10.43, 0.000, 0.000)),
-            common_prefix: Some(cost(626.8, 0.00, 88.646, 9.279)),
-            longest_prefix: Some(cost(462.3, 44.13, 1.088, 0.883)),
+            floor: 0.70,
+            mixed: cost(194.0, 39.78, 0.000, 0.405),
+            hit: cost(187.3, 41.67, 0.000, 0.411),
+            miss: cost(186.8, 39.86, 0.000, 0.404),
+            batch16: cost(254.5, 30.38, 0.000, 0.385),
+            batch1024: cost(232.2, 31.74, 0.000, 0.367),
+            key: Some(cost(194.9, 27.08, 0.116, 0.410)),
+            prefix: Some(cost(290.2, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1245.5, 75.76, 65.581, 4.972)),
+            longest_prefix: Some(cost(631.4, 48.14, 0.000, 0.502)),
         },
     ),
     (
         256,
         Ops {
-            floor: 1.70,
-            mixed: cost(149.6, 34.05, 0.000, 0.481),
-            hit: cost(136.2, 37.85, 0.000, 0.466),
-            miss: cost(132.0, 37.51, 0.000, 0.469),
-            batch16: cost(216.9, 25.87, 0.000, 0.465),
-            batch1024: cost(203.2, 26.70, 0.000, 0.458),
-            key: Some(cost(156.3, 35.31, 3.145, 0.000)),
-            prefix: Some(cost(298.7, 8.89, 0.000, 0.000)),
-            common_prefix: Some(cost(636.8, 0.00, 97.227, 8.682)),
-            longest_prefix: Some(cost(480.3, 43.25, 2.265, 0.714)),
+            floor: 0.66,
+            mixed: cost(226.2, 34.33, 0.000, 0.419),
+            hit: cost(224.6, 35.81, 0.000, 0.413),
+            miss: cost(221.4, 33.80, 0.000, 0.413),
+            batch16: cost(274.4, 30.00, 0.000, 0.393),
+            batch1024: cost(253.6, 31.09, 0.000, 0.369),
+            key: Some(cost(213.7, 25.74, 0.713, 0.352)),
+            prefix: Some(cost(296.0, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1232.3, 77.98, 77.137, 4.421)),
+            longest_prefix: Some(cost(686.5, 41.43, 0.000, 0.544)),
         },
     ),
     (
         1024,
         Ops {
-            floor: 1.67,
-            mixed: cost(210.6, 25.92, 0.128, 0.543),
-            hit: cost(198.9, 29.17, 0.235, 0.506),
-            miss: cost(192.7, 29.11, 0.390, 0.484),
-            batch16: cost(254.2, 25.59, 0.339, 0.442),
-            batch1024: cost(241.8, 25.54, 0.427, 0.427),
-            key: Some(cost(216.7, 32.60, 4.246, 0.000)),
-            prefix: Some(cost(344.2, 10.31, 0.000, 0.000)),
-            common_prefix: Some(cost(652.5, 0.00, 125.207, 7.933)),
-            longest_prefix: Some(cost(591.4, 30.62, 2.942, 0.812)),
+            floor: 0.50,
+            mixed: cost(292.2, 28.83, 0.000, 0.452),
+            hit: cost(288.5, 31.15, 0.000, 0.441),
+            miss: cost(288.8, 27.38, 0.000, 0.448),
+            batch16: cost(340.5, 27.57, 0.000, 0.412),
+            batch1024: cost(317.0, 28.18, 0.000, 0.388),
+            key: Some(cost(273.9, 27.40, 1.228, 0.383)),
+            prefix: Some(cost(377.2, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1303.2, 95.91, 108.704, 2.733)),
+            longest_prefix: Some(cost(805.2, 36.56, 0.171, 0.586)),
         },
     ),
 ];

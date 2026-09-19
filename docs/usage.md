@@ -937,17 +937,21 @@ operation and `DictIndex` block, where `len` is the mean key length and `s` is `
 over 64 KiB -- what a lookup waits on is how far its bytes are from the CPU, which the key count
 alone does not say. The constants are fitted to 240 cells timed on this crate's own hardware -- a
 Ryzen 7 5800HS with 16 MB of L3 -- by `bench/latency_model.py`, whose `fit` re-derives the tables in
-`src/estimate.rs` from the artifact under `bench/results/`. Mean absolute error is 5-13 % on
-`id(key)` and 23-28 % at worst on prefix counts. Two things follow. It is an *ordering*: fitted with
-a corpus left out, it names the fastest `id(key)` on that corpus in 30 of 30 corpus-size cells and
-the fastest ordered index in 24, where its worst pick costs 1.24× the fastest; over ten workloads no
-pick costs more than 1.49×. Against the published sweep, which it was not fitted to, it picks
-between `DictIndex` and `StringIndex` the way the measurement does in 24 of 30 cells, never choosing
-one more than 1.20× slower. And it is *high*: the cells were timed through the Python binding, so
-every number carries that call, and the model reads 311 and 318 ns for `StringIndex` and `DictIndex`
-on the word list where the Rust harness in `docs/benchmarks.md` measures 234 and 266. The overhead
-falls on every candidate, so it moves the numbers and not the ranking -- but do not quote them as
-your own.
+`src/estimate.rs` from the artifact under `bench/results/`. Mean absolute error is 6-13 % on
+`id(key)`; on `prefix_count` it is 26-46 %, because that operation's cost is dominated by how many
+keys the prefix actually matches and the model has no term for it. Two things follow. It is an
+*ordering*: fitted with a corpus left out, it names the fastest `id(key)` on that corpus in 30 of 30
+corpus-size cells, and the same for `key(id)` and for a `common_prefix`-heavy workload; over ten
+workloads the mean pick costs 1.000-1.047× the fastest. Against the published sweep, which it was
+not fitted to, it names the fastest of every lane in 28 of 30 cells and picks between `DictIndex`
+and `StringIndex` the way the measurement does in 24, never choosing one more than 1.22× slower.
+**Held out, that ordered pick is the model's weakest column** -- 16 of 30, worst case 1.75× -- and
+it got weaker in 4.0: `BDX3` moved the dictionary's `id` lane up by about a sixth while the
+transducer's stayed put, so the two now cross inside the corpus set. And it is *high*: the cells
+were timed through the Python binding, so every number carries that call, and the model reads 373
+and 390 ns for `StringIndex` and `DictIndex` on the word list where the Rust harness in
+`docs/benchmarks.md` measures 262-280 and 346-353. The overhead falls on every candidate, so it
+moves the numbers and not the ranking -- but do not quote them as your own.
 
 `--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
 1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices all
