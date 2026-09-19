@@ -618,7 +618,7 @@ the same keys handed to `build` as a list; the streamed `StringIndex` build peak
 721.9. The perfect hash's number includes the output file, which it fills through a mapping — its
 anonymous memory is 20.6 bytes per key and does not grow with `n`.
 
-The streamed `DictIndex` build peaks at 27.1 MB against 51.6 over 479 823 real words, for the same
+The streamed `DictIndex` build peaks at 29.4 MB against 66.6 over 479 823 real words, for the same
 bytes on disk. What it still holds is the block heads, the per-block arrays and one start a
 microblock, about `(mean head length + 20) / block + 8 / micro` bytes per key — 0.36 at the
 default on the dictionary — so a larger block holds less as well as storing less; the block data,
@@ -627,7 +627,7 @@ one trains per shard of 65 536 keys and they train in parallel, so a build holds
 training thread, about 2.9 MB each and **at most 64 MB between them**: past 21 trainers they queue
 rather than multiply, which is what keeps the peak a property of the work and not of the core
 count. It is never a function of `n` — on one
-thread the same two builds peak at 15.3 MB and 31.2, against 12.7 and 32.1 when a single table
+thread the same two builds peak at 17.2 MB and 34.3, against 12.7 and 32.1 when a single table
 covered the whole index. It reads the sorted keys three times, and pays about 26 % in build time
 for it.
 

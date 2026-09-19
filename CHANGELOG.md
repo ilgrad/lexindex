@@ -143,10 +143,26 @@ All notable changes to this project are documented here. The format follows
   same model reading one flat-rate sample and 8.8 / 23.8 / 33.3 for the model `BDX3` inherited.
   Corpora whose suffixes repeat nothing — DNA, UUIDs, opaque ids — land inside 0.5 %; the spread is
   a PyPI name list at 6.5 % low and a 7.3-million-line path list at 5.1 % high. The second draw and
-  the corpus-economy mine cost a fixed 0.4 s and 70 MB a plan, so the ratio is worst on the cheapest
-  plan and vanishes on the largest: 1.31× the wall time and 1.94× the peak on a million Chinese
-  titles, 1.08× and 1.21× on ten million English ones, 1.05× at no change in peak on the streamed
-  path list. `docs/usage.md` carries the numbers and says which way the estimate errs.
+  the corpus-economy mine cost a fixed 0.35 s and 44 MB a plan, so the ratio is worst on the
+  cheapest plan and vanishes on the largest: 1.30× the wall time and 1.39× the peak on a million
+  urls, 1.22× and 1.62× on a million Chinese titles, 1.06× and 1.12× on ten million English ones,
+  and **no change either way** on the streamed 7 343 721-line path list, where the external sort's
+  run budget is already higher than the miner ever reaches. `docs/usage.md` carries the numbers and
+  says which way the estimate errs.
+
+- **The miner's gain maps are a third smaller, and the build spends 6–9 % fewer cycles for the same
+  instructions.** A candidate span was keyed by a `u128` — two 64-bit rolling hashes carrying its
+  length — and a `u128` aligns a map entry to sixteen, so `(key, (gain, span))` was padded from 40
+  bytes to **48**. Folding both lanes into one word takes it to 32. Nothing else moved: over fifteen
+  corpus-block cells the blob is byte-identical, and the instruction count falls 0.6–0.9 % while the
+  cycles fall 6.0–9.3 % — these maps were never the build's work, they were its misses.
+  `reserve_rehash` over them is **8.5 % of the build's cycles against under 1.5 % of its
+  instructions, and 39 % of its page faults**, which is what the earlier profile could not explain.
+  A million urls, alternated A-B-A-B: 18.7 → 17.0 G cycles, 0.904 → 0.863 s, 115 k → 96 k faults,
+  peak 293 → 252 MB; a million paths 21.5 → 20.2 G cycles and 121 k → 108 k faults; `plan`, which
+  mines densely, 187 → 158 MB on the same urls. A sixty-four-bit key can collide, which credits one
+  span with another's gain and drops the loser from the dictionary — bytes, not correctness, at
+  about one run in forty million.
 
 - **The latency model is re-fitted to `BDX3`, and the fit is worse where it should be.** The
   constants in `src/estimate.rs` were fitted to `BDX2` lanes, so on `BDX3` they under-priced every

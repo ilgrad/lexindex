@@ -583,11 +583,11 @@ million urls from 14 % high to 0.9 % low. That vocabulary is bought **once for t
 block and not once a draw: over eleven corpora the three priced blocks read the ratio within 0.4 % of
 each other, mining at each of them was two thirds of what a plan spends, and it was also *less*
 accurate — the smallest block's own draw reads the ratio 21 % high on decimal ids. What the whole
-channel costs is a fixed 0.4 s and 70 MB a plan, whatever the corpus, so the ratio is worst on the
-cheapest plan and disappears on the largest: 1.31× the wall time and 1.94× the peak on a million
-Chinese titles, 1.08× and 1.21× on ten million English ones, and 1.05× at **no change in peak** on
-the streamed 7 343 721-line path list, where the sort's own run budget is already higher than the
-miner ever reaches.
+channel costs is a fixed 0.35 s and 44 MB a plan, whatever the corpus, so the ratio is worst on the
+cheapest plan and disappears on the largest: 1.30× the wall time and 1.39× the peak on a million
+urls, 1.22× and 1.62× on a million Chinese titles, 1.06× and 1.12× on ten million English ones, and
+**no change either way** on the streamed 7 343 721-line path list, where the sort's own run budget
+is already higher than the miner ever reaches.
 
 The two places it does not hold are reported rather than papered over. `StringIndex` is looser —
 3.0 % median, 7.6 % at the 90th percentile, 32 % on a corpus of file paths — because an fst merges

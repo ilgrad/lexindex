@@ -447,9 +447,16 @@ impl Span {
         }
     }
 
+    /// The span's key: both lanes and its length folded into one word.
+    ///
+    /// Sixty-four bits rather than a hundred and twenty-eight, because a `u128` aligns a map entry
+    /// to sixteen and pads `(key, (gain, span))` from 40 bytes to 48 — and the gain maps are where
+    /// this build spends its misses, not its instructions. A collision credits one span with
+    /// another's gain and drops the loser from the dictionary, which costs bytes rather than
+    /// correctness; at a million distinct spans in a pool it is about one run in forty million.
     #[inline(always)]
-    fn key(self, len: usize) -> u128 {
-        (u128::from(self.0) << 64 | u128::from(self.1)) ^ len as u128
+    fn key(self, len: usize) -> u64 {
+        (self.0 ^ self.1.rotate_left(32) ^ len as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
     }
 }
 
@@ -484,7 +491,7 @@ impl Hasher for Mix {
 pub(crate) type Map<K, V> = HashMap<K, V, BuildHasherDefault<Mix>>;
 
 /// One thread's gains in one merge partition: what a span saves, and one place it occurs.
-type Gains<'a> = Map<u128, (u64, &'a [u8])>;
+type Gains<'a> = Map<u64, (u64, &'a [u8])>;
 
 /// The phrases, as a parse walks them: one edge a byte, so a position that starts no phrase costs
 /// one lookup and stops.
@@ -1008,10 +1015,10 @@ fn round<'a>(
     }
 }
 
-/// The merge partition a candidate's key falls in, out of `parts`: the top bits of its second
-/// lane, which is a multiply-rotate hash, scaled.
-fn part_of(key: u128, parts: usize) -> usize {
-    ((((key as u64) >> 32) * parts as u64) >> 32) as usize
+/// The merge partition a candidate's key falls in, out of `parts`: the top half of the key,
+/// which is already a multiply-mixed word, scaled.
+fn part_of(key: u64, parts: usize) -> usize {
+    (((key >> 32) * parts as u64) >> 32) as usize
 }
 
 /// A candidate's first eight bytes as one big-endian word, zero-padded — the order this gives is
