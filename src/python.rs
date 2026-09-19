@@ -1736,7 +1736,7 @@ impl BlockArg {
     }
 }
 
-/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, 2.65 B/key on real
+/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, 2.64 B/key on real
 /// words.
 #[pyclass(name = "DictIndex", module = "lexindex._core", frozen)]
 pub struct PyDictIndex {
@@ -1750,7 +1750,7 @@ impl PyDictIndex {
     /// `1..=1024`; the block is split into microblocks of 16 to 32 and a lookup scans one restart
     /// a microblock plus one microblock, so smaller blocks are faster and
     /// larger ones smaller -- 32 / 64 / 128 / 256 /
-    /// 512 / 1024 gave 2.90 / 2.75 / 2.69 / 2.65 / 2.53 / 2.52 bytes per key on the dictionary,
+    /// 512 / 1024 gave 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51 bytes per key on the dictionary,
     /// every one under `marisa-trie`'s 2.955 floor. `block` also takes the name of a point on that
     /// curve instead of a number: `"fast"` (32), `"balanced"` (256, the default) or `"compact"`
     /// (1024).

@@ -28,7 +28,7 @@ but stands on its own.
 | membership | exact | exact | `2^-bits` false positives | none: closed vocabulary | exact |
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
 | zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ | — | ✅ |
-| **bytes/key**, 480 k English words | 5.95 | **2.65** | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 |
+| **bytes/key**, 480 k English words | 5.95 | **2.64** | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 |
 | `id`, 1 M word bigrams | 420 ns | 541 ns | 128 ns | the bare perfect hash | 293 ns · `id_unchecked` 75 |
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
 
@@ -47,11 +47,11 @@ therefore read into memory rather than borrowed.</sub>
   fuzzy. The sorted
   keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes under a symbol
   table trained on the 65 536 keys around them:
-  **2.65 bytes/key**, 55 % below `StringIndex`, `id` 346–353 ns against its 262–280, `key_into`
+  **2.64 bytes/key**, 56 % below `StringIndex`, `id` 346–353 ns against its 262–280, `key_into`
   198–200 against its `key` at 438–494. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **483 ns where `marisa-trie` must enumerate every match to
   count it (119 840)**. Every block from 32 to 1024 comes in **under every `marisa-trie` setting
-  measured on this corpus** — 2.90 down to 2.52 against its 2.96–3.07. Over the eleven-corpus sweep
+  measured on this corpus** — 2.85 down to 2.51 against its 2.96–3.07. Over the eleven-corpus sweep
   at a million keys it is the smaller of the two on **ten**, against marisa's *best* setting on each
   and not its default: 0.5 % on `titles-ru` up to 77 % on `dna`, with `paths` the one it loses, by
   9 %. It also answers faster on all but `numeric`, 1.5–2.9× at a million keys. Exact queries,
@@ -117,7 +117,7 @@ c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 z = ClosedHashIndex(["GET", "POST", "PUT", "DELETE"])   # the perfect hash alone, ~0.24 B/key
 z.id("POST")                 # a member's id; any other string gets *some* id in [0, n)
 
-w = DictIndex(["GET", "POST", "PUT", "DELETE"])         # ordered, keys stored, ~2.65 B/key
+w = DictIndex(["GET", "POST", "PUT", "DELETE"])         # ordered, keys stored, ~2.64 B/key
 w.id("POST")                 # 2  (sorted rank); w.key(2) == "POST"; w.lower_bound("P") == 2
 
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])  # verified membership and id → key
@@ -188,7 +188,7 @@ assert_eq!(exact.id("PATCH"), None);
 exact.save("verbs.bmp")?;
 assert_eq!(PerfectHashIndex::load("verbs.bmp")?.id("POST"), Some(id));
 
-// Ordered, the key stored for every id, ~2.65 B/key; prefix and range, no fuzzy.
+// Ordered, the key stored for every id, ~2.64 B/key; prefix and range, no fuzzy.
 let dict = DictIndex::build(verbs)?;
 assert_eq!(dict.id("POST"), Some(2));                  // the sorted rank
 assert_eq!(dict.key(2).as_deref(), Some("POST"));
@@ -302,7 +302,7 @@ comparable within itself. The builtin `dict` is in the table because it is the t
 replaced. The four smallest rows are also the fastest, and for the same
 reason: they store no keys, so a miss is only probably detected and there is no `id → key` on offer.
 The two `DictIndex` rows are one type at two block sizes; it builds in 142–143 ms against
-`marisa-trie`'s 232–233, and the larger block trades reverse-lookup latency for the bytes. `marisa-trie` appears three times for the same reason it has tuning parameters: its
+`marisa-trie`'s 232–233, and the larger block trades reverse-lookup latency for the bytes. **The two `DictIndex` rows predate the microblock-start change in 4.0.0 and are 0.6 % high: the same build now writes 2.64 and 2.52 bytes a key.** Sizes are a function of the keys and were re-measured directly; the table itself waits for a run whose call floor is back at the 47 ns this machine gives when nothing else is on it, since every latency cell moves with that floor and a half-refreshed table is worse than a dated one. `marisa-trie` appears three times for the same reason it has tuning parameters: its
 own documentation says the right setting depends on the data, so the table carries its compact end,
 its default and its fast end rather than one point somebody could fairly call untuned.
 [The benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md) table the
@@ -378,7 +378,7 @@ within a column**, and a shift under ~15 % between tables as the session.
 | lexindex `PerfectHashIndex::id` (verified) | ~243 ms | ~122 ns | one extra cache line + full key compare |
 | `std::HashMap<String, u32>` | ~185 ms | ~241 ns | in-RAM, not serialisable |
 | lexindex `StringIndex` (FST) | ~252 ms | ~318 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~202 ms | ~465 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.95 here; on the dictionary 2.65 against 5.95, 346–353 ns against 262–280) |
+| lexindex `DictIndex` (256 per block) | ~202 ms | ~465 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.93 here; on the dictionary 2.64 against 5.95, 346–353 ns against 262–280) |
 | `std::BTreeMap<String, u32>` | ~200 ms | ~725 ns | in-RAM |
 
 **Reading it:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the fastest
