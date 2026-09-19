@@ -1006,6 +1006,41 @@ compact — because that harness read each probe key through `keys[order[i]]`, a
 from an 80 MB array per query, and so charged every row one DRAM miss that was the caller's, not
 the function's; the builds agree within 7 %.</sub>
 
+### Misses a lookup, not only nanoseconds
+
+A lookup column says a row is slower. It does not say whether the row touches another cache line or
+merely does more work between two loads, and those are different findings with different fixes. With
+`MPHF_VS_MISSES=1` the harness opens a `PERF_COUNT_HW_CACHE_MISSES` counter on the timing thread
+through `perf_event_open(2)` -- there is no `/proc` file for it -- and resets and reads it around
+each single-lookup pass. It is off by default: an `ioctl` either side of a timed pass is a syscall
+this page's nanoseconds are not taken with.
+
+The probe order is read sequentially at eight keys a 64-byte line, so **0.125 of every count below
+is the key fetch, not the function**. Net of it, over 300 million keys, where no table is resident:
+
+| function | bits/key | LLC misses a lookup | net of the key fetch | lookup ns | batch ns |
+|---|---:|---:|---:|---:|---:|
+| **lexindex `MPH3`** | **1.911** | **1.071** | **0.946** | 16.3 | **8.2** |
+| `ptr_hash` 2.1.1 compact | 2.143 | 1.225 | 1.100 | 27.9 | 8.8 |
+| `ptr_hash` 2.1.1 fast | 2.990 | 1.232 | 1.107 | **16.2** | 8.6 |
+| `ptr_hash` 2.1.1 balanced | 2.378 | 1.242 | 1.117 | 28.2 | 8.9 |
+| `ph` 0.11 PHast (SeedOnly) | 1.921 | 1.266 | 1.141 | 22.2 | — |
+| `ph` 0.11 PHast+ (ShiftOnlyWrapped) | 2.147 | 1.454 | 1.329 | 30.1 | — |
+
+<sub>[`mphf-misses-2026-09-20-arz-1a9003e.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-misses-2026-09-20-arz-1a9003e.txt)
+— the same three sizes in one file, 10 M, 100 M and 300 M, one process each, eight build threads and
+one round; the cell is the fastest of three passes and the spread over them is 0.0–1.1 %. The
+nanoseconds in this table are taken with the counter running and are not the ones the tables above
+publish.</sub>
+
+The survey's figures for the same quantity are PtrHash 1.0 lines a query and PHast 1.1, and these
+agree with them. **`MPH3` is the only row under one line**, and that is the reading of its
+single-lookup tie with `ptr_hash` fast at this size — 16.3 ns against 16.2, on 15 % fewer misses,
+36 % fewer bits and a build 47 times faster. What is left of that 0.1 ns is compute, not memory,
+which is where to look for it. At 100 million keys the tables are 24–37 MB against a 16 MB L3 and
+partly resident, and the six rows sit between 1.031 and 1.054 with PHast at 1.084 — the ordering
+there says nothing, and the gap only opens once nothing is resident.
+
 ## A fingerprinted `PerfectHashIndex` on mostly-absent keys
 
 `local/negfp`, a throwaway harness beside the crate, builds the dictionary twice — plain and with
