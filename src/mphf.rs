@@ -1181,6 +1181,7 @@ impl Remap {
         u: u64,
     ) -> Result<Self, IndexError> {
         const BAD: IndexError = IndexError::Format("mphf: a remap entry points outside the image");
+        const BACKWARDS: IndexError = IndexError::Format("mphf: a remap's entries run backwards");
         let mut hole_at = Vec::with_capacity(holes as usize);
         let mut j = 0u64;
         for (w, &word) in high.iter().enumerate() {
@@ -1205,6 +1206,12 @@ impl Remap {
                 let hole = ((p - j) << low_bits) | lo;
                 if hole >= u {
                     return Err(BAD);
+                }
+                // The high parts arrive in order because the bitmap is walked in order, but the
+                // low part under a repeated high part is whatever the blob says, so the sequence
+                // can still run backwards. `encode` takes a non-decreasing one by contract.
+                if hole_at.last().is_some_and(|&prev| hole < prev) {
+                    return Err(BACKWARDS);
                 }
                 hole_at.push(hole);
                 j += 1;

@@ -961,3 +961,25 @@ fn every_golden_blob_inspects_from_its_header() {
         );
     }
 }
+
+/// `panicking-3.0.0-mphf.bin` is libFuzzer's, from the `parse_mphf` target on 2026-09-16: an `MPH2`
+/// blob whose remap, once the v2 upgrade path had decoded it, ran backwards. Every value was inside
+/// the image, so the range check passed; what the check missed is that a low part under a repeated
+/// high part is whatever the blob says, and `Remap::encode` takes a non-decreasing sequence by
+/// contract. The assertion here is that the blob is refused with a structural error rather than
+/// reaching that contract -- `from_bytes` is a safe fn on this format, panics included.
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
+#[test]
+fn the_mphf_loader_refuses_a_remap_that_runs_backwards() {
+    let bytes = std::fs::read(data("panicking-3.0.0-mphf.bin")).expect("the specimen");
+    assert_eq!(bytes.len(), 441);
+    assert_eq!(
+        &bytes[..4],
+        b"MPH2",
+        "the specimen is a v2 blob, which is the path it broke"
+    );
+    assert!(
+        !lexindex::fuzzing::parse_mphf(&bytes),
+        "the blob loaded; it must be refused"
+    );
+}

@@ -637,6 +637,15 @@ All notable changes to this project are documented here. The format follows
   a file.** The arena is written through a file mapping, which Miri cannot interpret, so that test
   and every overlay test after it went unchecked on a 32-bit target. The mapping half of the two
   tests that reach it is compiled out under Miri; the rest of both still runs there.
+- **An `MPH2` blob whose remap ran backwards panicked the loader.** The v2 upgrade path decodes the
+  older remap and re-encodes it as the sampled Elias–Fano stream, and it checked that every decoded
+  value lands inside the image but not that the sequence is non-decreasing. The high parts arrive
+  in order because the bitmap is walked in order; the low part under a repeated high part is
+  whatever the blob says, so two entries sharing a high part could come back out of order and reach
+  `Remap::encode`, which takes a non-decreasing sequence by contract. Now refused as a `Format`
+  error at the boundary, where the range check already was. Found by the nightly fuzz job's
+  `parse_mphf` target, which had been red since 2026-09-16; the specimen is
+  `tests/data/panicking-3.0.0-mphf.bin`.
 
 ## [3.0.0] — 2026-09-13
 
