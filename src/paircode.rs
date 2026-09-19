@@ -90,8 +90,8 @@ struct Fit {
     n: usize,
 }
 
-fn fit_run(pairs: &[(usize, usize)]) -> Fit {
-    let (wl, wn, esc) = frame_widths(pairs);
+fn fit_run(pairs: &[(usize, usize)], w: &mut Widths) -> Fit {
+    let (wl, wn, esc) = frame_widths(pairs, w);
     let (bl, bn) = bases(pairs);
     Fit {
         bl,
@@ -232,47 +232,83 @@ fn varint_len(mut v: usize) -> usize {
 /// width pair only, where its offsets are each a power of two less one. So the run is walked once
 /// and the 256 width pairs are priced from a 17 × 17 table — where the search walked the run 256
 /// times, which was half of a build. The answer is the search's, tie for tie.
-fn frame_widths(pairs: &[(usize, usize)]) -> (u32, u32, usize) {
+fn frame_widths(pairs: &[(usize, usize)], w: &mut Widths) -> (u32, u32, usize) {
     const W: usize = FRAME_MAX as usize + 1;
     let (bl, bn) = bases(pairs);
+    // The bits the run's own offsets need. A width past them fits every pair by range and lands
+    // none on the escape, so it costs the same escapes as the width one below and more bits —
+    // pricing `hl_max + 1` prices every wider frame with it. Fifteen entries of words reach four
+    // bits, so this is six rows of a possible seventeen, and clearing all seventeen of the three
+    // tables a run was six kilobytes a run and a twentieth of a build.
+    let (mut hl_max, mut hn_max) = (0usize, 0usize);
+    for &(lcp, len) in pairs {
+        hl_max = hl_max.max(bits_of(lcp - bl).min(W));
+        hn_max = hn_max.max(bits_of(len - bn).min(W));
+    }
+    let lh = (hl_max + 1).min(FRAME_MAX as usize);
+    let nh = (hn_max + 1).min(FRAME_MAX as usize);
+    let (rows, cols) = (lh.max(hl_max), nh.max(hn_max));
+    for (esc, corner) in w.esc[..=rows].iter_mut().zip(w.corner[..=rows].iter_mut()) {
+        esc[..=cols].fill(0);
+        corner[..=cols].fill(0);
+    }
     // `esc[hl][hn]`: the escape bytes of the pairs whose offsets need exactly `hl` and `hn`
     // bits; an offset past the widest frame counts under `W`, where no width reaches it.
-    let mut esc = [[0usize; W + 1]; W + 1];
-    let mut corner = [[0usize; W]; W];
     let mut total = 0usize;
     for &(lcp, len) in pairs {
         let (dl, dn) = (lcp - bl, len - bn);
         let e = escape_len(lcp, len);
         let (hl, hn) = (bits_of(dl).min(W), bits_of(dn).min(W));
-        esc[hl][hn] += e;
+        w.esc[hl][hn] += e;
         total += e;
         if hl < W && hn < W && (dl + 1).is_power_of_two() && (dn + 1).is_power_of_two() {
-            corner[hl][hn] += e;
+            w.corner[hl][hn] += e;
         }
     }
     // `fit[wl][wn]`: the escape bytes of every pair both of whose offsets fit those widths by
     // range — the prefix sum of `esc` over `0..=wl` × `0..=wn`.
-    let mut fit = [[0usize; W]; W];
-    for wl in 0..W {
+    for wl in 0..=lh {
         let mut row = 0;
-        for wn in 0..W {
-            row += esc[wl][wn];
-            fit[wl][wn] = row + if wl > 0 { fit[wl - 1][wn] } else { 0 };
+        for wn in 0..=nh {
+            row += w.esc[wl][wn];
+            w.fit[wl][wn] = row + if wl > 0 { w.fit[wl - 1][wn] } else { 0 };
         }
     }
     let (mut best, mut cheapest) = ((0, 0, 0), usize::MAX);
-    for wl in 0..=FRAME_MAX {
-        for wn in 0..=FRAME_MAX {
-            let bits = pairs.len() * (wl + wn) as usize;
-            let (l, n) = (wl as usize, wn as usize);
-            let esc = (total - fit[l][n]) + corner[l][n];
+    for wl in 0..=lh {
+        for wn in 0..=nh {
+            let bits = pairs.len() * (wl + wn);
+            let esc = (total - w.fit[wl][wn]) + w.corner[wl][wn];
             let cost = bits.div_ceil(8) + esc;
             if cost < cheapest {
-                (best, cheapest) = ((wl, wn, esc), cost);
+                (best, cheapest) = ((wl as u32, wn as u32, esc), cost);
             }
         }
     }
     best
+}
+
+/// The three tables [`frame_widths`] prices a run's widths over, indexed by the bits an offset
+/// needs. The caller owns them because only the rectangle a run reaches is cleared, and a run of
+/// fifteen entries reaches a small corner of them.
+pub(crate) struct Widths {
+    esc: [[usize; GRID]; GRID],
+    corner: [[usize; GRID]; GRID],
+    fit: [[usize; GRID]; GRID],
+}
+
+/// Rows and columns the three tables need: a width from zero to [`FRAME_MAX`], and one past it for
+/// the offsets no frame reaches.
+const GRID: usize = FRAME_MAX as usize + 2;
+
+impl Default for Widths {
+    fn default() -> Self {
+        Self {
+            esc: [[0; GRID]; GRID],
+            corner: [[0; GRID]; GRID],
+            fit: [[0; GRID]; GRID],
+        }
+    }
 }
 
 /// Bits an offset needs: none for zero, `floor(log2 d) + 1` otherwise.
@@ -304,10 +340,11 @@ impl Code {
     /// in bytes: its own, its headers' and the escapes it leaves. A caller pricing one shape of the
     /// data against another needs the number, and it falls out of the same search.
     pub(crate) fn choose_cost(runs: &[&[(usize, usize)]]) -> (Self, usize) {
+        let mut w = Widths::default();
         let fits: Vec<Fit> = runs
             .iter()
             .filter(|r| !r.is_empty())
-            .map(|r| fit_run(r))
+            .map(|r| fit_run(r, &mut w))
             .collect();
         let frame = Frames::over(&fits).map(|f| (f, f.cost(&fits)));
         match (Self::best_table(runs), frame) {
@@ -460,10 +497,10 @@ pub(crate) struct Writer<'a> {
 
 impl<'a> Writer<'a> {
     /// A writer for one run of `pairs` under `code`, its prologue already in the stream.
-    pub(crate) fn new(code: &'a Inverse<'_>, pairs: &[(usize, usize)]) -> Self {
+    pub(crate) fn new(code: &'a Inverse<'_>, pairs: &[(usize, usize)], w: &mut Widths) -> Self {
         match code.code {
             Code::Frame(f) => {
-                let run = fit_run(pairs);
+                let run = fit_run(pairs, w);
                 // What the group's fields hold. They were sized over this very run, so the clamp
                 // is unreachable on a blob this crate wrote and correct on one it did not: a base
                 // cut short leaves pairs outside the frame, and those escape.
@@ -761,7 +798,7 @@ mod tests {
         assert_eq!(read, code);
         let inverse = Inverse::of(&code);
         for pairs in runs.iter().filter(|r| !r.is_empty()) {
-            let mut writer = Writer::new(&inverse, pairs);
+            let mut writer = Writer::new(&inverse, pairs, &mut Widths::default());
             let mut sfx = Vec::new();
             for &(lcp, len) in pairs {
                 writer.push(lcp, len, &mut sfx);
@@ -828,7 +865,7 @@ mod tests {
     #[test]
     fn a_group_whose_runs_agree_spends_no_prologue() {
         let fits: Vec<Fit> = (0..8)
-            .map(|_| fit_run(&[(9, 4), (9, 5), (10, 4)]))
+            .map(|_| fit_run(&[(9, 4), (9, 5), (10, 4)], &mut Widths::default()))
             .collect();
         let f = Frames::over(&fits).expect("eight runs of the same shape");
         assert_eq!(f.bits(), 0, "{f:?}");
@@ -869,7 +906,7 @@ mod tests {
         let code = Code::Frame(Frames::new([1, 2, 1, 1], [2, 2, 2, 2]).expect("a layout"));
         let stranger = [(900, 40), (901, 41), (902, 42)];
         let inverse = Inverse::of(&code);
-        let mut writer = Writer::new(&inverse, &stranger);
+        let mut writer = Writer::new(&inverse, &stranger, &mut Widths::default());
         let mut sfx = Vec::new();
         for &(lcp, len) in &stranger {
             writer.push(lcp, len, &mut sfx);

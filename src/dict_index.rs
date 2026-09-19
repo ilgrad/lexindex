@@ -1130,16 +1130,21 @@ fn write_run(
     collected: &Collected,
     pairs: &[(usize, usize)],
     first: usize,
-    out: &mut Vec<u8>,
-    body: &mut packed::Bits,
+    scratch: &mut Scratch,
 ) {
+    let Scratch {
+        block: out,
+        run: body,
+        widths,
+        ..
+    } = scratch;
     // A block whose only microblock is itself has no restarts, and an empty run is no bytes: a
     // frame would still write its prologue, and the microblock that follows starts where the
     // block does.
     if pairs.is_empty() {
         return;
     }
-    let mut writer = paircode::Writer::new(code, pairs);
+    let mut writer = paircode::Writer::new(code, pairs, widths);
     body.clear();
     let mut escape = Vec::new();
     for (i, &(l, len)) in pairs.iter().enumerate() {
@@ -1199,6 +1204,7 @@ struct Scratch {
     block: Vec<u8>,
     run: packed::Bits,
     starts: Vec<u64>,
+    widths: paircode::Widths,
 }
 
 /// One shard as it is about to be written: its entries, the pairs they code to, and the two
@@ -1247,8 +1253,7 @@ impl Shard<'_> {
                     self.collected,
                     &self.pairs[first..first + count],
                     first,
-                    &mut scratch.block,
-                    &mut scratch.run,
+                    scratch,
                 );
                 first += count;
                 r += 1;
@@ -4774,7 +4779,8 @@ mod tests {
         // a whole shard, because what is under test is the reader and its bounds.
         let data = {
             let inverse = paircode::Inverse::of(&code);
-            let mut writer = paircode::Writer::new(&inverse, &pairs);
+            let mut writer =
+                paircode::Writer::new(&inverse, &pairs, &mut paircode::Widths::default());
             let (mut out, mut body) = (Vec::new(), Vec::new());
             let mut off = 0;
             for &(l, len) in &pairs {
