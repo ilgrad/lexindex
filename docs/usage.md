@@ -789,27 +789,27 @@ computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1224794 bytes   2.55 B/key    343 ns  estimated at block 1024
-  DictIndex              1250089 bytes   2.61 B/key    314 ns  estimated at block 256
-  DictIndex              1437873 bytes   3.00 B/key    280 ns  estimated at block 32
-  StringIndex            2744604 bytes   5.72 B/key    311 ns  estimated
+* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
+  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
+  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1224794 bytes   2.55 B/key    343 ns  estimated at block 1024
-  DictIndex              1250089 bytes   2.61 B/key    314 ns  estimated at block 256
-  DictIndex              1437873 bytes   3.00 B/key    280 ns  estimated at block 32
-  StringIndex            2744604 bytes   5.72 B/key    311 ns  estimated
+* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
+  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
+  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
-wrote words.bin: DictIndex over 479823 keys, 1202008 bytes (2.51 B/key)
+wrote words.bin: DictIndex over 479823 keys, 1209739 bytes (2.52 B/key)
 
 $ lexindex inspect words.bin
 kind: DictIndex
 format: BDX3
-bytes: 1202008
+bytes: 1209739
 keys: 479823
-arena_bytes: 1160722
+arena_bytes: 1173645
 
 $ lexindex dump words.bin | head -3
 &c
@@ -890,11 +890,11 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1322343 bytes   2.76 B/key    346 ns  estimated at block 1024
-  DictIndex              1345575 bytes   2.80 B/key    318 ns  estimated at block 256
-  DictIndex              1530283 bytes   3.19 B/key    284 ns  estimated at block 32
-  StringIndex            2744604 bytes   5.72 B/key    311 ns  estimated
-  PerfectHashIndex       5230704 bytes  10.90 B/key    182 ns  estimated
+* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
+  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
+  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+  StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
+  PerfectHashIndex       5218708 bytes  10.88 B/key    150 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
@@ -911,8 +911,8 @@ needs narrow a *choice*, and naming one is not a choice to narrow. The library i
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect` names one instead and skips the plan entirely.
-On the 479 823-word dictionary that is 307-335 ms against 111-119 over nine alternating runs --
-`--index auto` pays for the planner's 100 000-key sample, which builds every candidate the needs
+On the 479 823-word dictionary that is 468-490 ms against 127-135 over nine alternating runs --
+`--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes
 rather than modelling them, so an auto build there builds every candidate and then the winner again;
 naming the index is how not to.
@@ -921,9 +921,9 @@ naming the index is how not to.
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at block 1024 and 2.76 B/key, `latency` answers `PerfectHashIndex`, four times
-the size and half the wait, and `balanced` answers the same dictionary at block 32 -- 18 % faster
-for 16 % more space. The block is a candidate of its own, so an objective picks one of those too.
+answers `DictIndex` at block 1024 and 2.49 B/key, `latency` answers `PerfectHashIndex`, four times
+the size and a third of the wait, and `balanced` answers the same dictionary at block 32 -- 17 %
+faster for 16 % more space. The block is a candidate of its own, so an objective picks one of those too.
 
 `--objective` also takes a workload: `op=weight` pairs between commas, ranked by the workload's mean
 operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stranger), `reverse`
@@ -932,9 +932,9 @@ operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stran
 read off a log serve as they are. An op is also a question the index has to answer: `reverse` rules
 out the two indexes that store no keys and a prefix query asks for an ordered one, whatever the
 flags said. The ordered pair is where this decides something. On the same word list
-`--objective common_prefix=9,hits=1` answers `StringIndex` at 420 ns against 1502 for the fastest
-dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 298 ns against 824 -- and
-`hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 74 ns a key.
+`--objective common_prefix=9,hits=1` answers `StringIndex` at 520 ns against 2098 for the fastest
+dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 297 ns against 897 -- and
+`hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 64 ns a key.
 
 **The nanoseconds are modelled, and of one machine.** `a + b·s + c·len + d·s·len` per structure,
 operation and `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the blob
@@ -953,7 +953,7 @@ and `StringIndex` the way the measurement does in 24, never choosing one more th
 it got weaker in 4.0: `BDX3` moved the dictionary's `id` lane up by about a sixth while the
 transducer's stayed put, so the two now cross inside the corpus set. And it is *high*: the cells
 were timed through the Python binding, so every number carries that call, and the model reads 373
-and 390 ns for `StringIndex` and `DictIndex` on the word list where the Rust harness in
+and 389 ns for `StringIndex` and `DictIndex` on the word list where the Rust harness in
 `docs/benchmarks.md` measures 262-280 and 346-353. The overhead falls on every candidate, so it
 moves the numbers and not the ranking -- but do not quote them as your own.
 
