@@ -679,17 +679,21 @@ fn parse(
     if w.pick.len() < n {
         w.pick.resize(n, (RAW, 0, 1));
     }
+    // Both arrays are grown past the string above; the slices say so to the bounds checks, which
+    // are otherwise a twentieth of a build -- every read below is at most `n`.
+    let cost = &mut w.cost[..n + 1];
+    let pick = &mut w.pick[..n];
     for i in (0..n).rev() {
         // The symbol table's own answer at this position, which is the longest it can match.
         let (code, len) = enc.step(fsst::word_at(s, i), n - i);
         let (mut best, mut choice) = if code == ESCAPE {
-            (16 + w.cost[i + 1], (RAW, 0, 1))
+            (16 + cost[i + 1], (RAW, 0, 1))
         } else {
-            (8 + w.cost[i + len], (SYMBOL, u32::from(code), len as u32))
+            (8 + cost[i + len], (SYMBOL, u32::from(code), len as u32))
         };
         if let Some(prices) = prices {
             let mut node = 0u32;
-            for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
+            for (k, (&b, &tail)) in s[i..n.min(i + MAX)].iter().zip(&cost[i + 1..]).enumerate() {
                 let Some((c, phrase)) = trie.step(node, b) else {
                     break;
                 };
@@ -698,15 +702,15 @@ fn parse(
                 if id == 0 || id > prices.limit {
                     continue;
                 }
-                let cost = 8 * prices.bytes_for(id - 1) as u32 + w.cost[i + k + 1];
-                if cost < best {
-                    best = cost;
+                let c = 8 * prices.bytes_for(id - 1) as u32 + tail;
+                if c < best {
+                    best = c;
                     choice = (PHRASE, (id - 1) as u32, k as u32 + 1);
                 }
             }
         }
-        w.cost[i] = best;
-        w.pick[i] = choice;
+        cost[i] = best;
+        pick[i] = choice;
     }
     w.cost[0]
 }
@@ -910,9 +914,16 @@ impl Memo {
     /// phrase prices of `prices` — [`parse`](parse)'s recurrence over what is already walked.
     fn price(&self, row: usize, prices: Option<Prices>, cost: &mut Vec<u32>) -> u32 {
         let n = self.len;
-        cost.clear();
-        cost.resize(n + 1, 0);
+        // Grown to a high-water mark and never cleared, for the reason [`parse`] gives: the walk
+        // writes every cell below `n` before it is read, and the tail's is the only one that has
+        // to start at a value.
+        if cost.len() < n + 1 {
+            cost.resize(n + 1, 0);
+        }
+        let cost = &mut cost[..n + 1];
+        cost[n] = 0;
         let steps = &self.steps[row * n..row * n + n];
+        let at = &self.at[..n + 1];
         for i in (0..n).rev() {
             let (code, len) = steps[i];
             let mut best = if code == ESCAPE {
@@ -921,14 +932,14 @@ impl Memo {
                 8 + cost[i + usize::from(len)]
             };
             if let Some(prices) = prices {
-                for &(k, id) in &self.hits[self.at[i] as usize..self.at[i + 1] as usize] {
+                for &(k, id) in &self.hits[at[i] as usize..at[i + 1] as usize] {
                     let id = id as usize;
                     if id > prices.limit {
                         continue;
                     }
-                    let at = 8 * prices.bytes_for(id - 1) as u32 + cost[i + usize::from(k)];
-                    if at < best {
-                        best = at;
+                    let c = 8 * prices.bytes_for(id - 1) as u32 + cost[i + usize::from(k)];
+                    if c < best {
+                        best = c;
                     }
                 }
             }
@@ -1054,6 +1065,12 @@ fn cut(ranked: &mut Vec<(u64, u64, &[u8])>, take: usize) {
 /// One partition's candidates summed over every thread's map of it, cut to the `take` that rank
 /// first — which is all a partition can contribute to the round's first `take`.
 fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, u64, &[u8])> {
+    // Merge into the largest rather than into the first: the union is at least that size, so the
+    // base that needs the fewest rehashes to reach it is the one already there.
+    let mut maps = maps;
+    if let Some(at) = (0..maps.len()).max_by_key(|&i| maps[i].len()) {
+        maps.swap(0, at);
+    }
     let mut maps = maps.into_iter();
     let mut gain = maps.next().unwrap_or_default();
     for map in maps {
