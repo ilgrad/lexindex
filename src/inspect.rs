@@ -284,9 +284,21 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
                     }
                     _ => 0,
                 };
+                // `BDX3` stores a microblock start inside its own block, so that array carries
+                // deltas and no bases; `BDX2` measured them from the blob and carried both.
+                let micro_section = |count: u64, width: u8| -> Option<u64> {
+                    match count {
+                        0 => Some(0),
+                        _ if !three => packed(count, width),
+                        count => count
+                            .checked_mul(u64::from(width))?
+                            .div_ceil(8)
+                            .checked_add(8),
+                    }
+                };
                 packed(blocks, widths[0])
                     .and_then(|s| s.checked_add(packed(blocks, widths[1])?))
-                    .and_then(|s| s.checked_add(packed(micros, widths[3])?))
+                    .and_then(|s| s.checked_add(micro_section(micros, widths[3])?))
                     .ok_or(TRUNCATED)?
             };
             // One header code a shard and a kind, between the block data and the arrays, and the

@@ -273,13 +273,17 @@ blocks is 2.02 against 3 271, and an `id` compares 1.13 heads against 11.54. Sor
 since every head shares those bytes; a probe that does not share them cannot be placed by the
 samples at all and does not need to be — it is below every head or above every one, and the routing
 answers with that boundary rather than a search. Then come the arrays saying where each head ends,
-where each block's restart run starts, and where each microblock's entries start. The last three are not one word an entry. Each only ever grows, so each keeps one `u64` base
-every 64 entries and a delta of the width the corpus asks for — ten, sixteen and thirteen bits on
-the dictionary at the default block. That is 11.5 bytes a block and 1.8 a microblock, **0.100 bytes
-a key and 3.5 % of the blob**, where the block the default used to be spent 0.348 and 11 %; and it is
-also why none of the three has a four-gigabyte ceiling: the base is a full word. A head, a restart run or a microblock is read as the span between two
-entries, and neighbours share a base and the word their deltas are cut from, so the pair costs what
-one entry costs.
+where each block's restart run starts, and where each microblock's entries start. The last three are not one word an entry. The two block-level ones only ever grow, so each keeps
+one `u64` base every 64 entries and a delta of the width the corpus asks for — ten and sixteen bits
+on the dictionary at the default block, 3.5 bytes a block against the eight the sample spends. The
+microblock starts keep **no base at all**: each is an offset inside its own block, and the block's
+start is a word the lookup reads before it needs them, so a base of their own would be a load and a
+bit an entry for nothing. Eleven bits there, 1.375 bytes a microblock. The three together are
+**0.0997 bytes a key and 3.8 % of the blob**, where the block the default used to be spent 0.348
+and 11 %; and it is also why none of the three has a four-gigabyte ceiling — the two bases are full
+words, and a microblock start is measured from one of them. A head, a restart run or a microblock is
+read as the span between two entries, and neighbours share the word their deltas are cut from, and a
+base where there is one, so the pair costs what one entry costs.
 
 **A run's headers come first and its suffixes after**, rather than each header before its own
 suffix — and since `BDX3` the headers of a whole shard are one stream of their own, ahead of every
@@ -348,12 +352,13 @@ blocks each it is worth at best **0.10 % of the blob** (`pypi` at 32 keys a bloc
 *negative* on six of the thirteen, the table of widths costing about what the narrowing saves. A
 third of the arrays clear the obvious gate — 5 % of their superblocks could drop two bits or more —
 and they are the block-level arrays, which have between two and fifty superblocks in the first
-place; `micro_offsets`, thirty times as many entries, clears it twice in twenty-six, microblock
-spans being uniform by construction. The distribution says yes and the bytes say no. `load_mmap` borrows
+place; `micro_offsets`, thirty times as many entries, cleared it twice in twenty-six, microblock
+spans being uniform by construction, and it has no superblocks left to narrow. The distribution says
+yes and the bytes say no. `load_mmap` borrows
 every section; the per-block samples that two binary searches read on every lookup (below) are not
 a section at all — a sample is eight bytes of a head, and the load reads them out of the heads
 rather than out of a copy the blob carried, which is eight bytes a block off every blob for a load
-and a lookup that did not move (2.682 bytes a key to 2.651 on words at the default block, 1.131 to
+and a lookup that did not move (2.666 bytes a key to 2.635 on words at the default block, 1.131 to
 1.068 on a million numeric keys at 128);
 there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them

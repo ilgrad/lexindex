@@ -789,25 +789,25 @@ computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
-  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
-  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+* DictIndex              1190567 bytes   2.48 B/key    430 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    389 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    358 ns  estimated at block 32
   StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
-  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
-  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+* DictIndex              1190567 bytes   2.48 B/key    430 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    389 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    358 ns  estimated at block 32
   StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
-wrote words.bin: DictIndex over 479823 keys, 1209739 bytes (2.52 B/key)
+wrote words.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
 
 $ lexindex inspect words.bin
 kind: DictIndex
 format: BDX3
-bytes: 1209739
+bytes: 1205985
 keys: 479823
 arena_bytes: 1173645
 
@@ -825,24 +825,24 @@ and as a share:
 $ lexindex inspect words.bin --sections
 kind: DictIndex
 format: BDX3
-bytes: 1209739
+bytes: 1205985
 keys: 479823
 arena_bytes: 1173645
 sections.header: 72 (0.0002 B/key, 0.01 %)
 sections.tables: 7215 (0.0150 B/key, 0.60 %)
 sections.header_codes: 761 (0.0016 B/key, 0.06 %)
 sections.phrases: 4 (0.0000 B/key, 0.00 %)
-sections.heads: 4282 (0.0089 B/key, 0.35 %)
+sections.heads: 4282 (0.0089 B/key, 0.36 %)
 sections.head_ends: 659 (0.0014 B/key, 0.05 %)
 sections.block_offsets: 1128 (0.0024 B/key, 0.09 %)
-sections.micro_offsets: 26255 (0.0547 B/key, 2.17 %)
-sections.restart_headers: 9845 (0.0205 B/key, 0.81 %)
+sections.micro_offsets: 22501 (0.0469 B/key, 1.87 %)
+sections.restart_headers: 9845 (0.0205 B/key, 0.82 %)
 sections.restart_wide: 794 (0.0017 B/key, 0.07 %)
-sections.restart_codes: 47107 (0.0982 B/key, 3.89 %)
-sections.entry_headers: 299889 (0.6250 B/key, 24.79 %)
-sections.entry_wide: 48282 (0.1006 B/key, 3.99 %)
-sections.entry_codes: 763446 (1.5911 B/key, 63.11 %)
-sections.total: 1209739 (2.5212 B/key, 100.00 %)
+sections.restart_codes: 47107 (0.0982 B/key, 3.91 %)
+sections.entry_headers: 299889 (0.6250 B/key, 24.87 %)
+sections.entry_wide: 48282 (0.1006 B/key, 4.00 %)
+sections.entry_codes: 763446 (1.5911 B/key, 63.30 %)
+sections.total: 1205985 (2.5134 B/key, 100.00 %)
 sections.restarts: 14526
 sections.entries: 464828
 sections.wide: 24538
@@ -890,9 +890,9 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1194329 bytes   2.49 B/key    431 ns  estimated at block 1024
-  DictIndex              1264197 bytes   2.63 B/key    389 ns  estimated at block 256
-  DictIndex              1379680 bytes   2.88 B/key    359 ns  estimated at block 32
+* DictIndex              1190567 bytes   2.48 B/key    430 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    389 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    358 ns  estimated at block 32
   StringIndex            2744604 bytes   5.72 B/key    373 ns  estimated
   PerfectHashIndex       5218708 bytes  10.88 B/key    150 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
@@ -921,9 +921,9 @@ naming the index is how not to.
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at block 1024 and 2.49 B/key, `latency` answers `PerfectHashIndex`, four times
+answers `DictIndex` at block 1024 and 2.48 B/key, `latency` answers `PerfectHashIndex`, four times
 the size and a third of the wait, and `balanced` answers the same dictionary at block 32 -- 17 %
-faster for 16 % more space. The block is a candidate of its own, so an objective picks one of those too.
+faster for 14 % more space. The block is a candidate of its own, so an objective picks one of those too.
 
 `--objective` also takes a workload: `op=weight` pairs between commas, ranked by the workload's mean
 operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stranger), `reverse`

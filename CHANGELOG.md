@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`DictIndex` is 6 % to 52 % smaller, and the format is `BDX3`.** Five changes, each
+- **`DictIndex` is 7 % to 53 % smaller, and the format is `BDX3`.** Six changes, each
   priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
@@ -62,18 +62,29 @@ All notable changes to this project are documented here. The format follows
   *The per-block samples are derived, not stored.* The binary search that opens a lookup runs over
   eight bytes of every block's head, and `BDX2` carried those bytes a second time in a section of
   their own. They are built from the heads at load instead: the same array, in the same place, for
-  eight bytes a block off every blob — 2.682 bytes a key to 2.651 on the word list at the default
-  block, 1.131 to 1.068 on a million numeric keys at 128 — and neither the load nor a lookup moved
+  eight bytes a block off every blob — 2.666 bytes a key to 2.635 on the word list at the default
+  block, 1.099 to 1.037 on a million numeric keys at 128 — and neither the load nor a lookup moved
   (five corpora, load within 0.9 % and `id` and `key` within 3 %, both directions). `load_mmap`
   borrows every section there now is.
 
+  *A microblock's start is an offset inside its own block.* `BDX2` measured every microblock start
+  from the start of the blob, which needed a `u64` base every 64 of them and a delta wide enough to
+  cross four blocks — thirteen bits an entry on the word list at the default block, and the third
+  largest section of a dictionary of decimal ids. A block's own start is a word the lookup reads
+  before it needs any of them, so the array is stored relative to it: no bases at all and eleven
+  bits an entry, 41 243 bytes against 52 493. It is smaller on every corpus and block measured
+  (twenty-four cells, eight corpora at 32, 256 and 1024): **−0.04 % to −3.7 %**, the small blocks
+  gaining most because they hold the most microblocks — numeric ids −3.7 % at 32 and −2.3 % at the
+  default, the word list −1.6 % and −0.6 %. It is also one load fewer on the search path, worth
+  −0.7 % to −1.3 % of the instructions an `id` retires and the same off `key_into`.
+
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
-  --index dict`, sizes being a function of the keys): urls 11.25 → **7.53** bytes a key, paths 14.67
-  → **10.18**, article titles 9.37 → **7.40** in English, 11.36 → **7.81** in Russian and 8.28 →
-  **6.29** in Chinese, DNA 7.70 → **4.40**, opaque ids 13.80 → **10.42**, numeric 2.13 → **1.03**,
-  identifiers 6.66 → **5.31**, domains 5.07 → **4.75**, UUIDs 20.45 → **18.06**; the dictionary's
-  479 823 words 2.84 → **2.65** and 889 864 PyPI names 4.91 → **4.37**. That is 6.2 % off domains
-  and 6.7 % off the word list at one end and 51.5 % off decimal ids at the other.
+  --index dict`, sizes being a function of the keys): urls 11.25 → **7.51** bytes a key, paths 14.67
+  → **10.16**, article titles 9.37 → **7.39** in English, 11.36 → **7.79** in Russian and 8.28 →
+  **6.27** in Chinese, DNA 7.70 → **4.37**, opaque ids 13.80 → **10.40**, numeric 2.13 → **1.01**,
+  identifiers 6.66 → **5.29**, domains 5.07 → **4.73**, UUIDs 20.45 → **18.04**; the dictionary's
+  479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.35**. That is 6.7 % off domains
+  and 7.2 % off the word list at one end and 52.5 % off decimal ids at the other.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   **What it costs to build.** The price is the phrase machinery and nothing else, so it is paid only
@@ -575,9 +586,9 @@ All notable changes to this project are documented here. The format follows
   moved. `Latency` ranks by the modelled cost of one `id(key)`; `Balanced` picks whichever
   candidate gives up least on the axis it does worse on. The candidates and their sizes do not
   change with the objective, only the order and so `Plan::best`. On an English word list asked for
-  a reverse lookup, `Memory` answers `DictIndex` at 2.76 bytes a key and block 1024, `Latency`
-  answers `PerfectHashIndex`, four times the size and half the wait, and `Balanced` answers the
-  same dictionary at block 32 — 18 % faster for 16 % more space. `lexindex plan|build
+  a reverse lookup, `Memory` answers `DictIndex` at 2.48 bytes a key and block 1024, `Latency`
+  answers `PerfectHashIndex`, four times the size and a third of the wait, and `Balanced` answers
+  the same dictionary at block 32 — 17 % faster for 14 % more space. `lexindex plan|build
   --objective memory|latency|balanced` and Python's `plan(..., objective=...)` reach it, and every
   estimate now carries `nanos`.
 

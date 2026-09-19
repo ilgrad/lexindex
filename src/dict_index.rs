@@ -171,7 +171,7 @@ pub struct DictIndex {
     blocks: Offsets,
     /// Where each microblock's own front-coded entries start in `data`, packed the same way. One
     /// entry per microblock, which at the default block is one per thirty-two keys.
-    micros: Offsets,
+    micros: offsets::Packed,
     data: SharedBytes,
     /// One suffix codec per shard of `shard` blocks; the codec for block `b` is `codecs[b /
     /// shard]`, and `codecs` is never empty.
@@ -451,7 +451,15 @@ fn arrays_len(
 ) -> Option<usize> {
     offsets::section_len(nb, head_width, shift)?
         .checked_add(offsets::section_len(nb, block_width, shift)?)?
-        .checked_add(offsets::section_len(nm, micro_width, shift)?)
+        .checked_add(if nm == 0 {
+            0
+        } else {
+            (nm as u64)
+                .checked_mul(u64::from(micro_width))?
+                .div_ceil(8)
+                .checked_add(8)
+                .and_then(|v| usize::try_from(v).ok())?
+        })
 }
 
 /// A monotone array of block offsets as the two sections a blob stores, under the width the
@@ -464,6 +472,16 @@ fn packed_offsets(values: &[u64]) -> Offsets {
         SharedBytes::from_owned(deltas),
         width,
         offsets::SHIFT,
+    )
+}
+
+/// The microblock starts as the one section a blob stores them in: offsets inside their own
+/// block, so no base of their own — see [`rebase_micros`].
+fn packed_micros(values: &[u64]) -> offsets::Packed {
+    let width = offsets::packed_width_of(values);
+    offsets::Packed::new(
+        SharedBytes::from_owned(offsets::packed_pack(values, width)),
+        width,
     )
 }
 
@@ -1335,6 +1353,21 @@ impl Shard<'_> {
     }
 }
 
+/// Micro starts as offsets inside their own block, which is how the blob stores them.
+///
+/// Packed absolutely, one superblock of sixty-four microblocks spans four blocks of data, so its
+/// deltas need twelve bits and a base of its own — 13.0 bits an entry on the dictionary, and
+/// `micro_offsets` is 3.8 % of that blob and 8.3 % of a blob of decimal ids. Against `blocks[b]`
+/// the delta is one block's span and the base is nothing, and the base costs a reader no load it
+/// was not already making: `restart_data` reads `blocks[b]` before the scan starts.
+///
+/// Every microblock starts at or after its block, so no entry goes negative.
+fn rebase_micros(micros: &mut [u64], blocks: &[u64], per: usize) {
+    for (i, m) in micros.iter_mut().enumerate() {
+        *m -= blocks[i / per];
+    }
+}
+
 /// The blob's phrases, mined from the samples the shard tables were trained on.
 fn mine_phrases(samples: &[Vec<&[u8]>], tables: &[Table], n: usize, threads: usize) -> Phrases {
     if n < MINE_MIN || phrase::packed_only(samples, tables) {
@@ -1950,16 +1983,16 @@ impl DictIndex {
             let block_width = offsets::width_of(&blocks, offsets::SHIFT);
             let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
             // A block that is one microblock starts its only microblock where the block starts.
+            rebase_micros(&mut micros, &blocks, block.div_ceil(micro));
             let micros: &[u64] = if block.div_ceil(micro) == 1 {
                 &[]
             } else {
                 &micros
             };
-            let micro_width = offsets::width_of(micros, offsets::SHIFT);
-            let (micro_bases, micro_deltas) = offsets::pack(micros, offsets::SHIFT, micro_width);
+            let micro_width = offsets::packed_width_of(micros);
+            let micro_deltas = offsets::packed_pack(micros, micro_width);
             w.write_all(&block_bases)?;
             w.write_all(&block_deltas)?;
-            w.write_all(&micro_bases)?;
             w.write_all(&micro_deltas)?;
             w.flush()?;
             // The payload hash runs over the sections in blob order, so it is taken from the file
@@ -2176,6 +2209,7 @@ impl DictIndex {
             codes.extend(part.codes);
             codecs.extend(part.codecs);
         }
+        rebase_micros(&mut micros, &blocks, block.div_ceil(micro));
         // An index of no keys still holds one codec and one pair of codes, which is what a reader
         // indexes into.
         if codes.is_empty() {
@@ -2207,7 +2241,7 @@ impl DictIndex {
             head_ends: packed_offsets(&head_ends),
             samples,
             blocks: packed_offsets(&blocks),
-            micros: packed_offsets(if block.div_ceil(micro) == 1 {
+            micros: packed_micros(if block.div_ceil(micro) == 1 {
                 &[]
             } else {
                 &micros
@@ -2307,12 +2341,17 @@ impl DictIndex {
     /// Where microblock `j` of block `b` starts in `data`. A block that is one microblock has no
     /// restart run, so its only microblock starts where the block does and the blob stores no
     /// array for it.
+    ///
+    /// The array holds offsets inside the block — see [`rebase_micros`] — so the block's own start
+    /// is the base every read adds.
     #[inline(always)]
     fn micro_start(&self, b: usize, j: usize) -> u64 {
         if self.per == 1 {
             self.blocks.at(b)
         } else {
-            self.micros.at(b * self.per + j)
+            self.blocks
+                .at(b)
+                .wrapping_add(self.micros.at(b * self.per + j))
         }
     }
 
@@ -2331,9 +2370,21 @@ impl DictIndex {
     /// against the one before it. Bounded the way [`head`](Self::head) is.
     #[inline(always)]
     fn restart_data(&self, b: usize) -> &[u8] {
+        self.restart_data_at(b, self.blocks.at(b))
+    }
+
+    /// [`restart_data`](Self::restart_data) with the block's start already in hand, for the lookup
+    /// path, which reads it once and hands it to both this and [`micro_data_at`](Self::micro_data_at).
+    #[inline(always)]
+    fn restart_data_at(&self, b: usize, base: u64) -> &[u8] {
         let data: &[u8] = &self.data;
         let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
-        let (start, end) = (at(self.blocks.at(b)), at(self.micro_start(b, 0)));
+        let end = if self.per == 1 {
+            base
+        } else {
+            base.wrapping_add(self.micros.at(b * self.per))
+        };
+        let (start, end) = (at(base), at(end));
         data.get(start..end).unwrap_or_default()
     }
 
@@ -2341,13 +2392,24 @@ impl DictIndex {
     /// the block does, not where the next block's restarts start.
     #[inline(always)]
     fn micro_data(&self, b: usize, j: usize) -> &[u8] {
+        self.micro_data_at(b, j, self.blocks.at(b))
+    }
+
+    /// [`micro_data`](Self::micro_data) with the block's start already in hand.
+    #[inline(always)]
+    fn micro_data_at(&self, b: usize, j: usize, base: u64) -> &[u8] {
         let data: &[u8] = &self.data;
         let at = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
         let (start, end) = if j + 1 < self.micros_in(b) {
             let (start, end) = self.micros.pair(b * self.per + j);
-            (at(start), at(end))
+            (at(base.wrapping_add(start)), at(base.wrapping_add(end)))
         } else {
-            (at(self.micro_start(b, j)), self.block_end(b))
+            let start = if self.per == 1 {
+                base
+            } else {
+                base.wrapping_add(self.micros.at(b * self.per + j))
+            };
+            (at(start), self.block_end(b))
         };
         data.get(start..end).unwrap_or_default()
     }
@@ -2687,8 +2749,14 @@ impl DictIndex {
         // The probe is above the run's first key and shares `matched` bytes with it.
         let matched = lcp(head, probe);
         let r = self.micros_in(b);
+        let block_base = self.blocks.at(b);
         let (j, matched) = if r > 1 {
-            let mut restarts = Entries::of(&self.codes_of(b).1, codec, self.restart_data(b), r);
+            let mut restarts = Entries::of(
+                &self.codes_of(b).1,
+                codec,
+                self.restart_data_at(b, block_base),
+                r,
+            );
             let (j, matched, hit) = self.scan_run(codec, &mut restarts, r, probe, matched);
             if hit {
                 return ((base + j * self.micro) as u64, true);
@@ -2698,7 +2766,12 @@ impl DictIndex {
             (0, matched)
         };
         let count = self.micro_count(b, j);
-        let mut entries = Entries::of(&self.codes_of(b).0, codec, self.micro_data(b, j), count);
+        let mut entries = Entries::of(
+            &self.codes_of(b).0,
+            codec,
+            self.micro_data_at(b, j, block_base),
+            count,
+        );
         let (k, _, hit) = self.scan_run(codec, &mut entries, count, probe, matched);
         let rank = base + j * self.micro + k + usize::from(!hit);
         (rank as u64, hit)
@@ -3344,9 +3417,7 @@ impl DictIndex {
         for section in self.blocks.sections() {
             f(section)?;
         }
-        for section in self.micros.sections() {
-            f(section)?;
-        }
+        f(self.micros.section())?;
         Ok(())
     }
 
@@ -3620,12 +3691,7 @@ impl DictIndex {
             block_width,
             shift,
         );
-        let micros = Offsets::new(
-            take(offsets::bases_len(nm, shift)),
-            take(offsets::deltas_len(nm, micro_width)),
-            micro_width,
-            shift,
-        );
+        let micros = offsets::Packed::new(take(offsets::deltas_len(nm, micro_width)), micro_width);
         let idx = Self {
             block,
             micro,
@@ -4973,7 +5039,6 @@ mod tests {
         data: usize,
         block_bases: usize,
         block_deltas: usize,
-        micro_bases: usize,
         micro_deltas: usize,
         head_width: u32,
         block_width: u32,
@@ -5008,8 +5073,7 @@ mod tests {
         let phrases = codes + u32::from_le_bytes(blob[52..56].try_into().unwrap()) as usize;
         let block_bases = phrases + u32::from_le_bytes(blob[58..62].try_into().unwrap()) as usize;
         let block_deltas = block_bases + offsets::bases_len(nb, shift);
-        let micro_bases = block_deltas + offsets::deltas_len(nb, block_width);
-        let micro_deltas = micro_bases + offsets::bases_len(nm, shift);
+        let micro_deltas = block_deltas + offsets::deltas_len(nb, block_width);
         assert_eq!(
             micro_deltas + offsets::deltas_len(nm, micro_width),
             blob.len()
@@ -5022,7 +5086,6 @@ mod tests {
             data,
             block_bases,
             block_deltas,
-            micro_bases,
             micro_deltas,
             head_width,
             block_width,
@@ -5164,14 +5227,14 @@ mod tests {
         // A block of two is one microblock, so this blob stores no microblock starts; the two
         // edits to that array need a block that has one.
         assert_eq!(
-            l.micro_bases,
+            l.micro_deltas,
             blob.len(),
             "no microblock starts at one microblock a block"
         );
         let blob = DictIndex::build_with_block(&keys, 64).unwrap().to_bytes();
         let l = layout(&blob, 64);
         assert!(
-            l.micro_bases < blob.len(),
+            l.micro_deltas < blob.len(),
             "two microblocks a block store their starts"
         );
         let edited = |edit: &dyn Fn(&mut Vec<u8>), what: &str| {
@@ -5181,7 +5244,7 @@ mod tests {
             refused(&b, what);
         };
         edited(
-            &|b| set_base(b, l.micro_bases, 0, u64::MAX),
+            &|b| set_delta(b, l.micro_deltas, l.micro_width, 0, u64::MAX),
             "block table out of order",
         );
         edited(

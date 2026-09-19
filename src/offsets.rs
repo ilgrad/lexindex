@@ -1,12 +1,13 @@
 //! A non-decreasing `u64` array as one base every `1 << SHIFT` entries and a narrow delta from it
 //! for each entry, so that reading entry `i` stays two loads and no branch.
 //!
-//! [`DictIndex`](crate::DictIndex) keeps three of these — where each block's head key ends, where
-//! its restart stream starts, and where each microblock's entries start. Each grows by one block's
-//! or one microblock's worth at a time, so a superblock's entries sit within a few kilobytes of its
-//! base and the delta needs a dozen bits rather than sixty-four. On the dictionary at the default
-//! block the three together are 0.068 bytes a key where one word an entry would be 0.31, and that
-//! is also why none of them has a four-gigabyte ceiling: the base is a full word.
+//! [`DictIndex`](crate::DictIndex) keeps two of these — where each block's head key ends and where
+//! its restart stream starts — and a [`Packed`] for where each microblock's entries start. The two
+//! grow by one block's worth at a time, so a superblock's entries sit within a few kilobytes of its
+//! base and the delta needs a dozen bits rather than sixty-four; the third is an offset inside its
+//! own block and needs no base at all. On the dictionary at the default block the three together
+//! are 0.100 bytes a key where one word an entry would be 0.562, and a full-word base is also why
+//! neither of the first two has a four-gigabyte ceiling.
 
 use crate::blob::SharedBytes;
 
@@ -53,7 +54,7 @@ pub(crate) fn section_len(n: usize, width: u32, shift: u32) -> Option<usize> {
     usize::try_from(bases.checked_add(deltas)?).ok()
 }
 
-/// The narrowest delta width that covers `values`, which must not decrease.
+/// The narrowest delta width that covers `values`.
 pub(crate) fn width_of(values: &[u64], shift: u32) -> u32 {
     let span = values
         .chunks(1 << shift)
@@ -79,6 +80,80 @@ pub(crate) fn pack(values: &[u64], shift: u32, width: u32) -> (Vec<u8>, Vec<u8>)
         deltas[at..at + 8].copy_from_slice(&word.to_le_bytes());
     }
     (bases, deltas)
+}
+
+/// The narrowest width that covers `values` with no base at all.
+pub(crate) fn packed_width_of(values: &[u64]) -> u32 {
+    let max = values.iter().copied().max().unwrap_or(0);
+    64 - max.leading_zeros()
+}
+
+/// `values` at that width, one section and no bases.
+pub(crate) fn packed_pack(values: &[u64], width: u32) -> Vec<u8> {
+    let mut deltas = vec![0u8; deltas_len(values.len(), width)];
+    for (i, &v) in values.iter().enumerate() {
+        let bit = i * width as usize;
+        let at = bit / 8;
+        let word =
+            u64::from_le_bytes(deltas[at..at + 8].try_into().expect("8 bytes")) | v << (bit % 8);
+        deltas[at..at + 8].copy_from_slice(&word.to_le_bytes());
+    }
+    deltas
+}
+
+/// One array packed at a fixed width and no base of its own, for values a caller already holds
+/// the base of. [`DictIndex`](crate::DictIndex) stores the microblock starts this way: each is an
+/// offset inside its own block, and the block's start is a word the lookup has read before it
+/// needs them, so a base of their own would be a load and a bit an entry for nothing.
+pub(crate) struct Packed {
+    deltas: SharedBytes,
+    width: u32,
+}
+
+impl Packed {
+    pub(crate) fn new(deltas: SharedBytes, width: u32) -> Packed {
+        Packed { deltas, width }
+    }
+
+    /// Entry `i`, which must be one of the entries packed.
+    #[inline(always)]
+    pub(crate) fn at(&self, i: usize) -> u64 {
+        let bit = i * self.width as usize;
+        let word = u64::from_le_bytes(
+            self.deltas[bit / 8..bit / 8 + 8]
+                .try_into()
+                .expect("8 bytes"),
+        );
+        (word >> (bit % 8)) & ((1u64 << self.width) - 1)
+    }
+
+    /// Entries `i` and `i + 1`, which come out of one word unless two of them cannot meet in one.
+    #[inline(always)]
+    pub(crate) fn pair(&self, i: usize) -> (u64, u64) {
+        if 2 * self.width as usize + 7 > 64 {
+            return (self.at(i), self.at(i + 1));
+        }
+        let bit = i * self.width as usize;
+        let word = u64::from_le_bytes(
+            self.deltas[bit / 8..bit / 8 + 8]
+                .try_into()
+                .expect("8 bytes"),
+        ) >> (bit % 8);
+        let mask = (1u64 << self.width) - 1;
+        (word & mask, (word >> self.width) & mask)
+    }
+
+    pub(crate) fn section(&self) -> &SharedBytes {
+        &self.deltas
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.deltas.len()
+    }
+
+    pub(crate) fn width(&self) -> u32 {
+        self.width
+    }
 }
 
 /// One packed array, as the two sections it was read from.
