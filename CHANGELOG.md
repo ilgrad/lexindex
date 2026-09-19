@@ -473,8 +473,14 @@ All notable changes to this project are documented here. The format follows
   dump` as the published way back. `BDX2` is frozen under that rule. `docs/design.md § Versioning`
   carries it.
 - **`SECURITY.md` names the supported version.** Its table still said 2.1.x, and promised that 2.1
-  blobs load — 3.0 refuses the `BDX1` dictionary. Now: 3.0.x supported, and the 2.1/2.0 rows say
-  which blob needs a rebuild and which six formats load unchanged.
+  blobs load — 3.0 refuses the `BDX1` dictionary. Now: 4.0.x supported, and every row below it says
+  which of its blobs this version refuses and which two still load — the new key hash retires
+  `BMP7`, `BCH7` and `BCL1` alongside `BDX2`, so a 3.x install has four of five indexes to rebuild.
+  Its `unsafe` inventory was recounted with it: thirteen `unsafe fn`s and thirty-eight blocks in
+  the library, not the nine and eleven it still claimed. Four of the functions and twenty-seven of
+  the blocks are this release's own — the key hash's unchecked loads, the huge-page allocator, and
+  writing into a `Vec`'s spare capacity before extending it — and the document had described
+  `unsafe` as confined to memory mapping and one prefetch, which stopped being true in 4.0.
 - **Stale figures in the docs and the source comments, corrected to what the code does.** The
   `DictIndex` example in the README quoted 3.2 B/key (the block-32 figure) and `docs/usage.md`
   2.9, where the default block measures 2.84; `src/offsets.rs` described two packed arrays where

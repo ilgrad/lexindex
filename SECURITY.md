@@ -8,10 +8,11 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 3.0.x | yes |
-| 2.1.x | no, and the upgrade is not quite drop-in: 3.0 refuses the `BDX1` dictionary 2.1 wrote and says so by name, so that one blob has to be rebuilt; `BIX4`, `BMP7`, `BCH7`, `BCL1`, `OVL2` and `MPH2` load unchanged |
-| 2.0.x | no — the same as 2.1: only its `BDX1` dictionaries need rebuilding |
-| 1.x | no — 2.0 refuses the hash blobs 1.x wrote (the key hash changed), so the fix is to upgrade and rebuild them; `BIX4` loads as it is, and so does an `OVL2` over a `BIX4` base; an `OVL2` over a 1.x hash base is refused with that base |
+| 4.0.x | yes |
+| 3.0.x | no, and the upgrade is the least drop-in one so far: 4.0 computes a different key hash, so it refuses `BMP7`, `BCH7` and `BCL1` by name, and the `BDX2` dictionary with them. Four of the five indexes have to be rebuilt from their keys — the hash ones never stored any, and the dictionary's come out of `lexindex dump` run under 3.x, before the upgrade. `BIX4` loads unchanged, and so does an `OVL2` over a `BIX4` base |
+| 2.1.x | no — everything in the row above, and the `BDX1` dictionary 2.1 wrote on top of it |
+| 2.0.x | no — the same as 2.1 |
+| 1.x | no — 2.0 already refused the hash blobs 1.x wrote, for the same reason 4.0 refuses 3.x's; `BIX4` loads as it is, and so does an `OVL2` over a `BIX4` base, but an `OVL2` over any hash base is refused with that base |
 | 0.x | no — its blob formats are refused by 1.0 anyway, and the fix is to rebuild |
 
 ## Reporting a vulnerability
@@ -87,12 +88,19 @@ costs a side-table probe, and construction cannot be made to fail by one — but
 HashDoS defence and must not be used as one. If your keys come from an adversary and lookup latency
 is a resource you are protecting, put a keyed hash in front.
 
-**`unsafe` is confined to memory mapping and one prefetch.** The whole crate contains nine
-`unsafe fn`s — `load_mmap` and `load_mmap_verified` on the four indexes that have anything to
+**`unsafe` is mapping, page allocation, and reads whose bound is an invariant rather than a
+check.** The library contains thirteen `unsafe fn`s. Nine carry an obligation a caller outside the
+crate has to meet: `load_mmap` and `load_mmap_verified` on the four indexes that have anything to
 map (`ClosedHashIndex` is the perfect hash and nothing else), plus `load_mmap_untrusted` on
-`StringIndex` — and eleven `unsafe` blocks in the library: ten memory maps, counting the writable
-one `build_to_file` uses on a temporary file it created itself, and a cache prefetch that is
-bounds-checked before it runs. The `python` feature adds nine more, each a one-line call from a
+`StringIndex`. The other four are internal and their caller is this crate — `hash::r4` and
+`hash::r8`, the key hash's unchecked loads; `room::commit`, which extends a `Vec` over bytes just
+written into its spare capacity; and `Pages::assume_init`. There are thirty-eight `unsafe` blocks:
+ten memory maps, counting the writable one `build_to_file` uses on a temporary file it created
+itself; seven in the huge-page allocator; six that write into a `Vec`'s spare capacity and then
+extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
+class that chose the load; four in `SharedBytes`, two of them cache prefetches; and six
+`get_unchecked` or `assume_init` reads across the perfect hash and the dictionary's stair. The
+`python` feature adds nine more, each a one-line call from a
 `load_mmap*` binding into the `unsafe fn` of the same name, forwarding the same obligation to the
 Python caller. The `capi` feature adds the eleven `unsafe extern "C"` functions that take a
 pointer and twenty-two `unsafe` blocks under them, each reading or writing memory the C caller
