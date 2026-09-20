@@ -8,9 +8,9 @@
 //!   map), plus **prefix**, **range**, **fuzzy** (Levenshtein), and **subsequence** iteration
 //!   (automaton-driven; no separate key list to scan). Use it for autocomplete / fuzzy search /
 //!   ordered scans.
-//! - [`CompactHashIndex`] — the **smallest** `string → dense id` map: a minimal perfect hash
-//!   (in-crate, the `mph` feature) plus a small fingerprint per key, storing no keys. ~1.3 B/key
-//!   at the default 8-bit fingerprint (~0.8 at 4 bits), at the cost of probabilistic membership and
+//! - [`CompactHashIndex`] — the **smallest** `string → dense id` map that can reject a non-member:
+//!   a minimal perfect hash (in-crate, the `mph` feature) plus a small fingerprint per key, storing
+//!   no keys. 1.24 B/key at the default 8-bit fingerprint (0.74 at 4 bits), at the cost of probabilistic membership and
 //!   no reverse lookup. Use it when footprint is paramount.
 //! - [`ClosedHashIndex`] — the perfect hash **and nothing else**: `id(key) -> u32`, no
 //!   `Option`, for a vocabulary known to be closed. A member's id, and for anything else some id

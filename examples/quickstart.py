@@ -68,7 +68,7 @@ def compact_hash_demo() -> None:
 
     # Per-key size is only meaningful at scale (MPH overhead dominates 10 keys): on the 479k-word
     # system dictionary this is ~2.3 B/key at fp=2, 1.3 at fp=1 — below marisa-trie's 2.98.
-    print("CompactHashIndex:  id('grape') ->", ids["grape"], "(dense [0, n); ~1.3 B/key)")
+    print("CompactHashIndex:  id('grape') ->", ids["grape"], "(dense [0, n); 1.24 B/key)")
 
 
 def closed_hash_demo() -> None:

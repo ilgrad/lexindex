@@ -1,4 +1,5 @@
-//! Fingerprint minimal-perfect-hash dictionary: the smallest `string → dense id` map.
+//! Fingerprint minimal-perfect-hash dictionary: the smallest `string → dense id` map that can
+//! reject a non-member.
 //!
 //! Like [`PerfectHashIndex`](crate::PerfectHashIndex) but it stores only a small **fingerprint** per
 //! key instead of the key itself, so it costs a byte-ish per key rather than tens. Two trade-offs:

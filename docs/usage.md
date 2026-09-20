@@ -295,7 +295,7 @@ it returns an arbitrary (but valid) slot for an unknown key. Use `id` everywhere
 from lexindex import CompactHashIndex
 
 # fingerprint_bytes ∈ {1, 2, 4}; or a keyword-only fingerprint_bits ∈ 1..=64 for finer control.
-# 8 bits (the default) is ~1.3 B/key with a ~0.4% membership false-positive
+# 8 bits (the default) is 1.24 B/key with a ~0.4% membership false-positive
 # rate; 2 → ~0.0015%; 4 → effectively exact. No keys are stored, so there is no id → key.
 dict_ = CompactHashIndex(["GET", "POST", "PUT", "DELETE"], fingerprint_bytes=1)
 i = dict_.id("POST")           # dense id in [0, n); a non-member may rarely read as present
@@ -336,7 +336,7 @@ index costs 2.98 B/key on this corpus — `CompactHashIndex` is below it at *eve
 21 bits (rate 2⁻²¹ ≈ 5×10⁻⁵%).
 
 ```python
-tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.76 B/key, 1-in-16 false positives
+tiny = CompactHashIndex(keys, fingerprint_bits=4)   # 0.74 B/key, 1-in-16 false positives
 tiny.fingerprint_bits                               # -> 4
 ```
 
@@ -568,8 +568,8 @@ let idx = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into 
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
 assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
 
-let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // ~1.3 B/key, no reverse
-let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // ~0.8 B/key, 6.25% FP rate
+let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // 1.24 B/key, no reverse
+let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // 0.74 B/key, 6.25% FP rate
 assert!(small.contains("POST"));
 
 let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key

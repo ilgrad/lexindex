@@ -110,7 +110,7 @@ idx.successor("ba")          # ("banana", 2)   — nearest key >= query
 idx.ids_of(["apple", "x"])   # [0, None]  — batched: one FFI call, not one per key
 idx.save("catalog.bix")      # StringIndex.load("catalog.bix") reloads it; load_mmap borrows it zero-copy
 
-c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # ~1.3 B/key at scale; fingerprint_bits=4 → ~0.8
+c = CompactHashIndex(["GET", "POST", "PUT", "DELETE"])  # 1.24 B/key at scale; fingerprint_bits=4 → 0.74
 c.id("POST")                 # dense id in [0, n); probabilistic membership, no id → key
 c.id_unchecked("POST")       # fastest lookup for a known-closed vocabulary
 
@@ -171,7 +171,8 @@ use lexindex::{ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex};
 
 let verbs = ["GET", "POST", "PUT", "DELETE"];
 
-// The smallest string → id map: an 8-bit fingerprint per key, ~1.3 B/key, ~0.4 % false positives.
+// The smallest string → id map that rejects strangers: an 8-bit fingerprint per key, 1.24 B/key,
+// ~0.4 % false positives.
 let compact = CompactHashIndex::build(verbs, 1)?;
 let id = compact.id("POST").unwrap();                  // Some(slot); a stranger may rarely read as present
 assert_eq!(compact.id_unchecked("POST"), id);          // no fingerprint check, for a closed vocabulary

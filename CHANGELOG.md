@@ -8,8 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`DictIndex` is 7 % to 53 % smaller, and the format is `BDX3`.** Seven changes, each
-  priced on its own:
+- **`DictIndex` came down on every cell of the size sweep, and the format is `BDX3`.** Thirteen
+  corpora at a hundred thousand keys, eleven at a million and six at ten million, each at blocks of
+  128, 256 and 1024: ninety cells against 3.0.0, ninety of them smaller. The median is 13 % at a
+  hundred thousand, 25 % at a million and 38 % at ten million; the ends are 0.9 % on `pypi` at the
+  smallest scale and 56 % on `numeric`. Seven changes, each priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
   `(lcp, len)` pair, four bits each, and two varints on every pair that did not fit. The pair

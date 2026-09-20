@@ -1180,7 +1180,8 @@ impl PyPerfectHashIndex {
     }
 }
 
-/// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map. Membership is
+/// Fingerprint minimal-perfect-hash dictionary: the smallest `string -> dense id` map that can
+/// reject a non-member. Membership is
 /// probabilistic (false-positive rate `2 ** -fingerprint_bits`) and there is no reverse `id -> key`.
 #[cfg(feature = "mph")]
 #[pyclass(name = "CompactHashIndex", module = "lexindex._core", frozen)]
