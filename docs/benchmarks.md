@@ -19,8 +19,11 @@ whether your machine is comparable to the one in the tables at all.
 > function of the keys and needs no timed run, so the sweep was re-run for the sizes alone at a
 > hundred thousand, a million and ten million keys; the word-list table came from a run of its own
 > harness whose call floor was the lowest this page has published, and the frontier campaign ran its
-> 1365 processes on an idle machine, so its latency columns are current as well. Still dated: the
-> block ladders in the `rsmarisa` and positioning tables, and the cold-mapping table. Measured
+> 1365 processes on an idle machine, so its latency columns are current as well. The two harnesses
+> share 34 `DictIndex` cells — same corpus, same key count, same block — and agree on every one of
+> them to every digit published here, which is what a deterministic size ought to do across two
+> programs that have nothing in common but the library. Still dated: the block ladders in the
+> `rsmarisa` and positioning tables, and the cold-mapping table. Measured
 > directly, the word list is 2.850 bytes a key at block 32,
 > 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024, and
 > 889 864 PyPI names are 4.165. Those tables' **latency** columns wait for a run of their own
