@@ -744,9 +744,14 @@ fn parse(
     let cost = &mut w.cost[..n + 1];
     let pick = &mut w.pick[..n];
     let root = trie.root();
+    // [`fsst::word_at`] carried rather than re-read: the walk runs backwards, so the word at `i`
+    // is the word at `i + 1` shifted up with `s[i]` below it -- a shift and an or where the call
+    // was a load, a bounds check and a branch for the tail, once a byte.
+    let mut word = 0u64;
     for i in (0..n).rev() {
+        word = word << 8 | u64::from(s[i]);
         // The symbol table's own answer at this position, which is the longest it can match.
-        let (code, len) = enc.step(fsst::word_at(s, i), n - i);
+        let (code, len) = enc.step(word, n - i);
         let (mut best, mut choice) = if code == ESCAPE {
             (16 + cost[i + 1], Pick::new(RAW, 0, 1))
         } else {
