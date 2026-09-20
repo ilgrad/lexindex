@@ -251,7 +251,10 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip twine
           twine check dist/*
-          python -m pip install --no-binary :all: --no-index --find-links dist lexindex
+          # By path, and deliberately without `--no-index`: installing a `.tar.gz` always builds it
+          # from source, and the flag would apply to the build dependencies too -- `maturin` is not
+          # in `dist/`, so pip would fail resolving the backend rather than the package.
+          python -m pip install dist/*.tar.gz
           cd "$RUNNER_TEMP"
           python - <<'EOF'
           import lexindex
