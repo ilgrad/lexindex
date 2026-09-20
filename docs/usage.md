@@ -37,6 +37,15 @@ half a million to ten million keys, at each of the three priced blocks, `DictInd
 rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
 and reported at what they weigh.
 
+That error is not random in `n`. Holding a corpus's content fixed and moving only its size — stride
+samples of one file, so the difference is scale and nothing else — the estimate reads about 2.8 %
+low at a million keys and converges to within 0.2 % by ten million on urls and article titles. It
+does not converge on a **deep directory tree**, where shared prefixes keep lengthening with the key
+count: a path list reads level at a million and 7.2 % high at seven. The suffix rate is measured on
+a uniform draw of 100 000 keys, whose neighbours are `n / 100 000` apart, so what it reads is a
+longer suffix than the blob's — plan a large path index expecting the blob to come in under the
+number, and re-plan on a sample of the real keys if the margin matters.
+
 **What a sample cannot see by itself is how good the vocabulary gets.** A shard's symbol table and
 the blob-wide phrase dictionary are trained on the keys the blob holds, and the miner buys a phrase
 against what it saves over the whole blob — so a hundred thousand keys afford a tenth of the
