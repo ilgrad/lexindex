@@ -244,8 +244,8 @@ shards would take a split by 2 % on its own bytes: what the miner ranks is what 
 would save, and what decides the format is whether a shard would rather spend those byte codes on
 symbols — on a million opaque keys 40 000 spans clear the first bar and no shard takes one. Each
 shard then decides for itself and has its table retrained on the spans its phrases did not cover,
-and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls 9.44 →
-7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61; dna, opaque and numeric buy
+and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls 9.26 →
+7.27 bytes a key, English titles 9.08 → 7.21, paths 12.48 → 9.32; dna, opaque and numeric buy
 nothing.
 
 **A block is not what a lookup scans.** It is cut into microblocks of `micro` keys — the largest

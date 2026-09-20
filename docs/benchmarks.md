@@ -13,15 +13,15 @@ against its hash, records the machine, and finishes by putting the run's Python 
 the published one — the number no change to this library can move, and therefore the one that says
 whether your machine is comparable to the one in the tables at all.
 
-> **Every `DictIndex` size on this page predates two 4.0.0 changes — the microblock start and the
-> dropped pruning pass — and is high by 0.04 % to 15 %.** Re-measured directly, since a size is a
-> function of the keys and needs no timed run: on the word list 2.850 bytes a key at block 32,
-> 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024; over a
-> million keys at the default block, urls 7.511, paths 9.871, English titles 7.377, Russian 7.667,
-> Chinese 6.272, DNA 4.375, opaque ids 10.399, numeric 1.011, identifiers 5.228, domains 4.500,
-> UUIDs 18.040, and 889 864 PyPI names 4.165. The tables themselves wait for a run whose Python
-> call floor is back at 47 ns — it measured 110 on the day of the first change, every latency cell
-> moves with it, and a table with one refreshed column is worse than a dated one.
+> **The whole-set sizes at a hundred thousand and a million keys are 4.0.0's; every other
+> `DictIndex` size on this page still predates two of its changes — the microblock start and the
+> dropped pruning pass — and is high by 0.04 % to 15 %.** A size is a function of the keys and needs
+> no timed run, so the sweep was re-run for them alone; the ten-million table and the word-list
+> ladder were not, and are measured directly instead: on the word list 2.850 bytes a key at block
+> 32, 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024, and
+> 4.165 over 889 864 PyPI names. Every **latency** table waits for a run whose Python call floor is
+> back at 47 ns — it measured 110 on the day of the first change, every latency cell moves with it,
+> and a table with one refreshed column is worse than a dated one.
 
 
 ## Serialised size on real English words
@@ -274,33 +274,38 @@ turns out to be the only row a reader can carry to their own corpus without meas
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.24 | 1.24 | 4.49 | 4.40 | **4.24** | 17.74 | 7.52 | 7.52 | 7.52 | 7.56 | 7.71 |
-| `domains` | 13.8 | 0.24 | 1.24 | 4.81 | 4.75 | **4.59** | 10.50 | 4.81 | 4.80 | 4.80 | 4.87 | 4.99 |
-| `idents` | 17.3 | 0.24 | 1.24 | 5.37 | 5.30 | **5.13** | 10.55 | 5.45 | 5.34 | 5.30 | 5.62 | 5.74 |
-| `numeric` | 5.9 | 0.24 | 1.24 | 1.07 | 1.03 | **0.93** | 0.00 | 1.62 | 1.62 | 1.62 | 1.64 | 1.72 |
-| `opaque` | 16.0 | 0.24 | 1.24 | 10.46 | 10.42 | **10.30** | 21.44 | 18.23 | 15.55 | 15.55 | 18.82 | 19.04 |
-| `paths` | 125.0 | 0.24 | 1.24 | 10.63 | 10.18 | 9.61 | 17.48 | 9.26 | 9.04 | **8.83** | 9.47 | 9.60 |
-| `titles-en` | 21.0 | 0.24 | 1.24 | 7.47 | 7.40 | **7.23** | 17.28 | 7.79 | 7.52 | 7.49 | 8.19 | 8.37 |
-| `titles-ru` | 35.8 | 0.24 | 1.24 | 7.95 | 7.81 | **7.57** | 31.75 | 8.07 | 7.67 | 7.61 | 8.61 | 8.77 |
-| `titles-zh` | 16.9 | 0.24 | 1.24 | 6.35 | 6.29 | **6.11** | 17.52 | 6.33 | 6.22 | 6.22 | 6.54 | 6.70 |
-| `urls` | 52.4 | 0.24 | 1.24 | 7.73 | 7.53 | **7.28** | 16.88 | 7.95 | 7.61 | 7.57 | 8.39 | 8.58 |
-| `uuid` | 36.0 | 0.24 | 1.24 | 18.15 | 18.06 | **17.90** | 37.11 | 32.93 | 22.99 | 22.98 | 34.58 | 34.80 |
+| `dna` | 24.0 | 0.24 | 1.24 | 4.45 | 4.37 | **4.23** | 17.74 | 7.52 | 7.52 | 7.52 | 7.56 | 7.71 |
+| `domains` | 13.8 | 0.24 | 1.24 | 4.54 | 4.50 | **4.36** | 10.50 | 4.81 | 4.80 | 4.80 | 4.87 | 4.99 |
+| `idents` | 17.3 | 0.24 | 1.24 | 5.29 | 5.23 | **5.07** | 10.55 | 5.45 | 5.34 | 5.30 | 5.62 | 5.74 |
+| `numeric` | 5.9 | 0.24 | 1.24 | 1.04 | 1.01 | **0.92** | 0.00 | 1.62 | 1.62 | 1.62 | 1.64 | 1.72 |
+| `opaque` | 16.0 | 0.24 | 1.24 | 10.43 | 10.40 | **10.29** | 21.44 | 18.23 | 15.55 | 15.55 | 18.82 | 19.04 |
+| `paths` | 125.0 | 0.24 | 1.24 | 10.32 | 9.87 | 9.32 | 17.48 | 9.26 | 9.04 | **8.83** | 9.47 | 9.60 |
+| `titles-en` | 21.0 | 0.24 | 1.24 | 7.44 | 7.37 | **7.21** | 17.28 | 7.79 | 7.52 | 7.49 | 8.19 | 8.37 |
+| `titles-ru` | 35.8 | 0.24 | 1.24 | 7.79 | 7.66 | **7.45** | 31.75 | 8.07 | 7.67 | 7.61 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.24 | 1.24 | 6.32 | 6.27 | **6.12** | 17.52 | 6.33 | 6.22 | 6.22 | 6.54 | 6.70 |
+| `urls` | 52.4 | 0.24 | 1.24 | 7.70 | 7.51 | **7.27** | 16.88 | 7.95 | 7.61 | 7.57 | 8.39 | 8.58 |
+| `uuid` | 36.0 | 0.24 | 1.24 | 18.11 | 18.04 | **17.89** | 37.11 | 32.93 | 22.99 | 22.98 | 34.58 | 34.80 |
 
 <sub>The bold cell in a row is the smallest structure that keeps its keys. `words` and `pypi` have
-no million-key file; their 100 000 grid, every build time, and the 100 000 rows for the rest are in
-[`bench/results/sweep-2026-09-19-arz-a3f7503.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-19-arz-a3f7503.json)
-— one run of the whole set, 264 cells, on a clean tree that began at a load average of
-0.12 / 0.37 / 0.69. Every column comes from that one run, the three `DictIndex` blocks included, so
-this table needs no reconciliation between harnesses.</sub>
+no million-key file; their 100 000 grid and the 100 000 rows for the rest are in
+[`bench/results/sweep-2026-09-20-arz-8a8778a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-20-arz-8a8778a.json)
+— one run of the whole set, 264 cells, and every column above comes from it, the three `DictIndex`
+blocks included, so this table needs no reconciliation between harnesses. **Sizes only.** That run
+began at a load average of 0.73 / 1.31 / 1.93, the decay of the build before it, and its timings
+read 5–15 % slower than the run below on every structure, controls included — so the lookup table
+keeps the earlier artifact instead of borrowing this one's, and the sizes, which no load can move,
+come from here.</sub>
 
 **`DictIndex` is the smallest key-storing structure on ten of these eleven corpora**, measured
-against marisa's *best* setting on each and not its default. The margin runs from 0.5 % on
-`titles-ru` (7.57 against 7.61) and 2–4 % on `titles-zh`, `idents`, `titles-en`, `urls` and
-`domains`, to 28 % on `uuid`, 51 % on `opaque`, 74 % on `numeric` and 77 % on `dna`. The eleventh is
+against marisa's *best* setting on each and not its default. The margin runs from 1.6 % on
+`titles-zh` (6.12 against 6.22) and 2–5 % on `titles-ru`, `titles-en`, `urls` and `idents`, to 10 %
+on `domains`, 28 % on `uuid`, 51 % on `opaque`, 77 % on `numeric` and 78 % on `dna`. The eleventh is
 `paths`, where a million paths run through a few thousand directories and marisa at sixteen tries
-holds 8.83 against 9.61 — 9 % — which is what a LOUDS trie is for and what front coding in fixed
+holds 8.83 against 9.32 — 5.3 % — which is what a LOUDS trie is for and what front coding in fixed
 blocks still does not answer. Through 3.0.0 this table read the other way round, marisa smallest on
-nine of the eleven; the `BDX3` codec is what turned it.
+nine of the eleven; the `BDX3` codec is what turned it, and 4.0.0's phrase work moved all 72
+`DictIndex` cells of the sweep again — 71 of them down, `domains` by 4.9 % and `paths` by 3.0 %,
+with `titles-zh` at 1024 keys a block the one cell that grew, by 0.05 %.
 
 **Its floor is eight or sixteen tries on nine of the eleven, not the four this page quoted through
 3.0.0.** The recursion keeps paying wherever the keys share — `titles-ru` 8.07 → 7.61, `urls`
@@ -313,12 +318,12 @@ answers 1.65× slower at sixteen tries than at four, `paths` answers 1.30× slow
 where the setting buys nothing the two are level. Marisa's smallest configuration is its slowest.
 
 **The margin is still widest where the keys share least.** `DictIndex` leads by half a blob on
-`opaque` (10.30 against 15.55) and by more than that on `dna` and `numeric` — keys with nothing to
+`opaque` (10.29 against 15.55) and by more than that on `dna` and `numeric` — keys with nothing to
 share, where a trie pays for a node per character and front coding pays for a prefix that is not
 there. Where the keys do share, the lead is a couple of per cent and a tuned marisa is the thing to
-measure against: on `titles-ru`, `urls` and `titles-en` the two are within 4 % of each other, and
+measure against: on `titles-ru`, `urls` and `titles-en` the two are within 5 % of each other, and
 `paths` is still marisa's. On `words`, the corpus every table above is measured on, `DictIndex` at
-its default block is 3.35 against marisa's 3.70 at 100 000 keys and 2.65 against 2.96 on the full
+its default block is 3.33 against marisa's 3.70 at 100 000 keys and 2.64 against 2.96 on the full
 479 823 — and there four tries really is marisa's floor, eight and sixteen reading 3.71 and 3.74.
 Read the spread between `dna` and `paths` as the honest range: which is smaller is a property of the
 keys, and the corpus set is there so that neither end can be quoted alone.
@@ -359,20 +364,23 @@ eleventh is `numeric`, where marisa's fastest is 26 % ahead of the default block
 has the least to walk. `DictIndex` also builds 1.3–2.9× faster than marisa's quickest build
 everywhere except `numeric`, where marisa is 1.2× ahead. So the size table above is not the whole
 trade, and the settings that make marisa smallest are the ones that make it slowest: on `paths`,
-the one corpus it still wins on size, its sixteen-try floor is 1.09× smaller than `DictIndex` at
+the one corpus it still wins on size, its sixteen-try floor is 1.06× smaller than `DictIndex` at
 1024 a block, 4.2× slower to answer and 2.2× slower to build.
 
 **The block is a smaller knob than it was.** A lookup scans one restart a microblock and then one
 microblock whatever the block, so 128 → 1024 keys a block moves a lookup by −2 % (`dna`) to +16 %
-(`domains`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.14–1.02 bytes a key
+(`domains`), where the one-level format paid 3.8× from 32 to 1024, and buys 0.12–1.00 bytes a key
 over 128, every corpus in the same direction. It did not use to be: `paths` at 1024 keys a block
 stored *more* than at 256 (16.13 against 15.89), and the cause was the symbol table rather than the
 layout, whose per-block arrays only shrink as the block grows. The table trained on whole blocks, so
 a larger block bought fewer neighbourhoods — 19 at 1024 against 157 at 128 — and a table trained on
 19 of them is a lottery. A training run is now a constant 256 keys whatever the block, trained per
-shard of 65 536 keys, and `paths` at 1024 reads 9.61. 256 is the default the README quotes.
+shard of 65 536 keys, and `paths` at 1024 reads 9.32. 256 is the default the README quotes.
 
-<sub>Measured 2026-09-19 at `a3f7503`, from the same artifact as the table above. Lookups are one
+<sub>Measured 2026-09-19 at `a3f7503`, from
+[`sweep-2026-09-19-arz-a3f7503.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-19-arz-a3f7503.json)
+— the artifact the size table above was taken from through 3.0.0, kept for the timings because its
+machine was the quieter of the two. Lookups are one
 run of three rounds of 20 000 probes a cell, so a column is comparable within itself and a cell
 carries a few per cent: a second run of the same build read the same bytes to the last digit and
 lookups 1–15 % higher on every structure, controls included.</sub>
@@ -390,7 +398,7 @@ lookups 1–15 % higher on every structure, controls included.</sub>
 
 Ten times the keys moves every trie and neither hash: at its floor `marisa` goes 7.49 → 5.48 on
 `titles-en` and 7.57 → 5.55 on `urls` as the sharing deepens, `DictIndex` at its default block
-7.40 → 5.82 and 7.53 → 5.86, and the two keyless rows do not move at all. Here the ranking is
+7.37 → 5.82 and 7.51 → 5.86, and the two keyless rows do not move at all. Here the ranking is
 *not* the million-key table's: `titles-en` and `urls` are two of the ten corpora `DictIndex` is
 smallest on at a million, and at ten million the trie takes both back — by 2.8 % and 0.7 %. Which
 is smallest is decided by the corpus *and* by the scale, and the two corpora it turns on are the
