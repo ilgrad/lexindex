@@ -231,7 +231,17 @@ impl Table {
                 (!g, u64::from_be_bytes(bytes), usize::from(len), bytes)
             }));
             ranked.sort_unstable_by_key(|&(g, be, len, _)| (g, be, len));
-            table = Table::reachable(ranked.iter().map(|(_, _, len, s)| &s[..*len]), max);
+            let next = Table::reachable(ranked.iter().map(|(_, _, len, s)| &s[..*len]), max);
+            // A round that returns the table it was given is a fixed point: it counts the same
+            // sample under the same encoder and ranks the same candidates, so every round after it
+            // is the same work for the same answer. Four rounds were spent on every shard; a
+            // corpus whose symbols settle early -- UUIDs, opaque ids, DNA -- now stops there, and
+            // one whose symbols keep moving still gets its four. Cheaper by the whole round, and
+            // the table it returns is the one it returned before, to the byte.
+            if next == table {
+                return table;
+            }
+            table = next;
         }
         table
     }
