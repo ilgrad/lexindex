@@ -39,9 +39,9 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   sorted keys are front-coded in blocks with the suffixes under a static symbol table:
   2.64 bytes/key, 56 % below `StringIndex`. Use it where the queries are exact and every id has
   to map back to its key.
-- **`CompactHashIndex`** — the **smallest** `string → dense id` map (a minimal perfect hash plus a
-  fingerprint per key, no keys stored). 1.3 bytes/key, at the cost of probabilistic membership and no
-  reverse lookup.
+- **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member (a
+  minimal perfect hash plus a fingerprint per key, no keys stored). 1.24 bytes/key, at the cost of
+  probabilistic membership and no reverse lookup.
   Use it when a fixed vocabulary's footprint is paramount.
 - **`ClosedHashIndex`** — the perfect hash **and nothing else**: `id(key) -> u32`, no `Option`, for
   a vocabulary known to be closed. A member's id, and for anything else some id in `[0, n)`.

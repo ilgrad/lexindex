@@ -889,7 +889,8 @@ struct Frame {
     side: Vec<(u64, u64, u32)>,
 }
 
-/// The smallest string→dense-id dictionary: a minimal perfect hash plus one small fingerprint per key.
+/// The smallest string→dense-id dictionary that can reject a non-member: a minimal perfect hash
+/// plus one small fingerprint per key.
 pub struct CompactHashIndex {
     mph: Option<Mphf>, // over one hash per distinct hash value; None iff empty
     fps: SharedBytes,  // m fingerprints of fp_bits each, bit-packed in slot order

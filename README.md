@@ -29,7 +29,7 @@ but stands on its own.
 | `Overlay` edits | ✅ | — | ✅ | — | ✅ |
 | zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ | — | ✅ |
 | **bytes/key**, 480 k English words | 5.95 | **2.64** | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 |
-| `id`, 1 M word bigrams | 420 ns | 541 ns | 128 ns | the bare perfect hash | 293 ns · `id_unchecked` 75 |
+| `id`, 1 M word bigrams | 318 ns | 465 ns | 61 ns | the bare perfect hash | 122 ns · `id_unchecked` 51 |
 | Cargo feature | — | — | `mph` (default) | `mph` | `mph` |
 
 <sub>¹ `DictIndex` maps every section but the per-block samples — eight bytes a block, one byte per
@@ -53,11 +53,11 @@ therefore read into memory rather than borrowed.</sub>
   count it (119 840)**. Every block from 32 to 1024 comes in **under every `marisa-trie` setting
   measured on this corpus** — 2.85 down to 2.51 against its 2.96–3.07. Over the eleven-corpus sweep
   at a million keys it is the smaller of the two on **ten**, against marisa's *best* setting on each
-  and not its default: 0.5 % on `titles-ru` up to 77 % on `dna`, with `paths` the one it loses, by
-  9 %. It also answers faster on all but `numeric`, 1.5–2.9× at a million keys. Exact queries,
+  and not its default: 1.6 % on `titles-zh` up to 78 % on `dna`, with `paths` the one it loses, by
+  5.3 %. At those same settings it answers faster on all but `numeric` too, 1.5–5.7×. Exact queries,
   every id back to its key, small.
-- **`CompactHashIndex`** — the **smallest** `string → dense id` map: an in-crate minimal perfect
-  hash plus a fingerprint per key, *no keys stored*. **1.24 bytes/key** on real words — **2.4× below
+- **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member:
+  an in-crate minimal perfect hash plus a fingerprint per key, *no keys stored*. **1.24 bytes/key** on real words — **2.4× below
   `marisa-trie`** — and **0.74** at a 4-bit fingerprint (6.25 % false positives), for
   **probabilistic membership** (about `2^-bits`) and no reverse lookup. Footprint first, a rare
   false positive acceptable.

@@ -301,7 +301,8 @@ class PerfectHashIndex:
 
 @final
 class CompactHashIndex:
-    """Smallest string->dense id map: minimal perfect hash + per-key fingerprints.
+    """Smallest string->dense id map that can reject a non-member: minimal perfect hash +
+    per-key fingerprints.
 
     Membership is probabilistic (false-positive rate ``2 ** -fingerprint_bits``) and there is no
     reverse ``id -> key``. Use it when only ``string -> id`` is needed and size is paramount.
