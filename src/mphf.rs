@@ -99,6 +99,15 @@ const STRIDE: u64 = 2;
 /// by the lowest product pack tighter than one: measured on 10 M word-bigram hashes, 1.30 % of the
 /// keys bumped and 1.917 bits per key against `MPH2`'s 3.03 % and 2.088, for 1.4 times the
 /// build. `MPH2` is zero mode bits: one field, 255 shifts.
+///
+/// **Two is where it stops paying.** More modes are more constellations to choose among, but not
+/// more *independent* ones, and the shifts they are taken from are what pays for them. Simulated
+/// over the same 10 M hashes at `λ` 4.5, with the offset field cut by a per-mode multiply rather
+/// than by a rotation: three mode bits bump 1.546 % of keys for 1.9489 bits and four bump 1.523 %
+/// for 1.9463, against two bits' 1.578 % and 1.9524 — a third of a per cent of the blob for two
+/// more bits in every seed and a table load and a multiply in every lookup, where an independent
+/// instruction on the lookup path costs 0.66 ns of a 16.3 ns answer. Taking the offset field by
+/// rotation instead is worse than the shipped geometry outright, at 2.985 % and 3.398 % bumped.
 const MODE_BITS: u32 = 2;
 
 /// What is added to each key's in-slice position before the positions of a bucket's keys are
