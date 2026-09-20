@@ -985,6 +985,34 @@ fn the_mphf_loader_refuses_a_remap_that_runs_backwards() {
     );
 }
 
+/// `panicking-4.0.0-mphf-window.bin` is libFuzzer's, from the `parse_mphf` target on 2026-09-20,
+/// 996 106 executions into the campaign on the commit that was to be tagged. An `MPH1` blob whose
+/// `slots_per_part` is `u64::MAX - 1`: the guard that keeps a part's slots inside its own stride
+/// read `stride < slots_per_part + 63`, and that add wrapped. Debug panicked on it; the release
+/// profile has no overflow checks, so there the wrapped window was small enough that any stride
+/// cleared it and the geometry went through. Every neighbouring check was already `checked_*` --
+/// this one add was the omission.
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
+#[test]
+fn the_mphf_loader_refuses_a_slot_window_that_overflows() {
+    let bytes = std::fs::read(data("panicking-4.0.0-mphf-window.bin")).expect("the specimen");
+    assert_eq!(bytes.len(), 443);
+    assert_eq!(
+        &bytes[..4],
+        b"MPH1",
+        "the specimen is a v1 blob, which is the path it broke"
+    );
+    assert_eq!(
+        u64::from_le_bytes(bytes[40..48].try_into().expect("8 bytes")),
+        u64::MAX - 1,
+        "slots_per_part is what overflows; if this moves the specimen no longer covers the bug"
+    );
+    assert!(
+        !lexindex::fuzzing::parse_mphf(&bytes),
+        "the blob loaded; it must be refused"
+    );
+}
+
 /// `tiered-4.0.0-dict.bdx` is the one pinned blob whose shard bought phrases, so it is the only
 /// fixture that reaches `decode_tiered` and `compare_tiered`. It is **not** regenerable from this
 /// test's corpus: the miner only runs past `MINE_MIN` keys, and a blob built from that many is

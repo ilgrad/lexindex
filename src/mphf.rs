@@ -3854,8 +3854,14 @@ impl V1 {
             ));
         }
         // A slot is `part * stride + base + shift` with `base < slots_per_part` and `shift <= 63`,
-        // so a part's slots stay inside its own stride only with this much room.
-        if stride % 64 != 0 || stride < slots_per_part + 63 {
+        // so a part's slots stay inside its own stride only with this much room. `slots_per_part`
+        // is a header field of an untrusted blob, so the add is checked: at `u64::MAX` it wraps to
+        // a small window that any stride clears, and this release profile has no overflow checks,
+        // so the wrap would pass the geometry rather than panic on it.
+        let window = slots_per_part
+            .checked_add(63)
+            .ok_or(IndexError::Format("mphf: slots per part out of range"))?;
+        if stride % 64 != 0 || stride < window {
             return Err(IndexError::Format(
                 "mphf: stride too small for a key's window",
             ));
@@ -4902,7 +4908,7 @@ mod tests {
         let (n, parts, stride) = (at(0), at(2), at(5));
         let (buckets_per_part, slots_per_part) = (at(3), at(4));
         assert!(parts >= 1);
-        let cases: [(usize, u64, &str); 10] = [
+        let cases: [(usize, u64, &str); 11] = [
             (0, n + 1, "n above the slot count"),
             (1, 0, "slots disagreeing with parts * stride"),
             (2, 0, "zero parts"),
@@ -4911,6 +4917,10 @@ mod tests {
             (5, stride + 1, "a stride that is not a multiple of 64"),
             (5, stride * 2, "a stride disagreeing with the slot count"),
             (4, stride - 62, "a part whose keys reach past its stride"),
+            // `slots_per_part + 63` wraps here. The fuzz fixture that found it is caught a check
+            // later by `stride * parts != slots`; this row drives the guard itself, so it fails
+            // whether or not the profile checks overflow.
+            (4, u64::MAX, "a slot window that overflows a u64"),
             (6, buckets_per_part, "a skew boundary at the bucket count"),
             (6, u64::MAX, "a skew boundary past the bucket count"),
         ];
