@@ -947,6 +947,8 @@ struct Memo {
     hits: Vec<(u8, u32)>,
     /// `hits[at[i]..at[i + 1]]` are the phrases that start at `i`.
     at: Vec<u32>,
+    /// [`fsst::word_at`] at every position, which the rows share.
+    words: Vec<u64>,
     len: usize,
 }
 
@@ -954,11 +956,23 @@ impl Memo {
     fn fill(&mut self, s: &[u8], encs: &[fsst::Encoder], trie: &Trie) {
         let n = s.len();
         self.len = n;
-        self.steps.clear();
-        self.steps.reserve(encs.len() * n);
+        let (steps, words) = (&mut self.steps, &mut self.words);
+        steps.clear();
+        steps.reserve(encs.len() * n);
+        // The word a position asks about is the same whichever table answers, so it is read once
+        // a byte rather than once a byte a row -- and backwards, where it is a shift and an or.
+        if words.len() < n {
+            words.resize(n, 0);
+        }
+        let words = &mut words[..n];
+        let mut w = 0u64;
+        for i in (0..n).rev() {
+            w = w << 8 | u64::from(s[i]);
+            words[i] = w;
+        }
         for enc in encs {
-            self.steps.extend((0..n).map(|i| {
-                let (code, len) = enc.step(fsst::word_at(s, i), n - i);
+            steps.extend(words.iter().enumerate().map(|(i, &w)| {
+                let (code, len) = enc.step(w, n - i);
                 (code, len as u8)
             }));
         }
