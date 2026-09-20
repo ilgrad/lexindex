@@ -42,7 +42,7 @@ const SAMPLE: usize = 100_000;
 const RUN: usize = 4096;
 
 /// The [`DictIndex`] blocks the plan prices. The block is a knob, not a constant — on an English
-/// word list the three named points of its curve span 2.79 to 3.23 bytes a key — so a ranking that
+/// word list the three named points of its curve span 2.51 to 2.85 bytes a key — so a ranking that
 /// offered one of them would be answering a question the caller did not ask. Ascending, so that
 /// candidates tying on bytes keep block order in the ladder.
 const DICT_BLOCKS: [usize; 3] = [

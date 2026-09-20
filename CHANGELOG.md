@@ -475,12 +475,12 @@ All notable changes to this project are documented here. The format follows
   20.1 → **3.2 / 4.9 / 15.8 ns** (compact 4.2 / 6.0 / 17.6). PtrHash's fast set, at 2.99 bits,
   still leads both lookup columns outright. `docs/benchmarks.md` carries the re-measured tables.
 - **`plan` prices each `DictIndex` block as a candidate of its own.** The block is a knob worth
-  2.79 against 3.23 bytes a key on an English word list — a spread wider than the gap between some
+  2.51 against 2.85 bytes a key on an English word list — a spread wider than the gap between some
   whole indexes — and the ranking hid it by pricing the default, 256, and nothing else. `Fast`
   (32), `Balanced` (256) and `Compact` (1024) are three rows on the ladder now, each with its own
   size and modelled latency, `Plan::best` may name any of them, and `lexindex build --index auto`
   builds the block on the line it marked rather than the default one. On an English word list the
-  three are modelled at 3.19, 2.80 and 2.76 bytes a key against built blobs of 3.23, 2.84 and 2.79
+  three are modelled at 2.83, 2.61 and 2.48 bytes a key against built blobs of 2.85, 2.64 and 2.51
   — every one of them within 1.3 %. Two consequences inside. The
   sample is fitted per block — the compression ratio, the packed per-block arrays and the symbol
   table all move with the block, and carrying the default block's constants across read 9.5 % high
@@ -503,7 +503,7 @@ All notable changes to this project are documented here. The format follows
   2.5 %, `titles-zh` at a million keys 15.5 % → 3.0 %, `titles-zh` whole 26.3 % → 7.1 %.
 - **`lexindex plan` and `lexindex build --index auto` now assume an open vocabulary**, which means
   they imply `--exact` and so rank only the three indexes that can tell a stranger from a member.
-  Left to itself the ranking was won by `ClosedHashIndex` at 0.26 bytes a key, which answers a key
+  Left to itself the ranking was won by `ClosedHashIndex` at 0.24 bytes a key, which answers a key
   it has never seen with some member's id — the right index for a fixed vocabulary, and a trap for
   a reader who has not decided yet. The two probabilistic indexes are put back by
   **`--closed-vocabulary`**, and the ladder says on stderr that they were left out and how to ask
@@ -527,7 +527,7 @@ All notable changes to this project are documented here. The format follows
   `unsafe` as confined to memory mapping and one prefetch, which stopped being true in 4.0.
 - **Stale figures in the docs and the source comments, corrected to what the code does.** The
   `DictIndex` example in the README quoted 3.2 B/key (the block-32 figure) and `docs/usage.md`
-  2.9, where the default block measures 2.84; `src/offsets.rs` described two packed arrays where
+  2.9, where the default block measures 2.64; `src/offsets.rs` described two packed arrays where
   there are three, and priced them at the old block; `docs/design.md` gave the per-block
   directory as 0.147 B/key and 5 % of the blob, the `micro = 16` figure, against 0.100 and 3.5 %
   measured at 32; the microblock was documented as one per sixteen keys and the symbol table as
