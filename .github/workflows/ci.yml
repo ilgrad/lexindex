@@ -279,6 +279,25 @@ jobs:
       - name: cargo semver-checks
         run: cargo semver-checks check-release
 
+  # `cargo publish` is the one step in this repository that cannot be taken back, and `release.yml`
+  # runs it beside the PyPI upload, not behind it: a tarball that fails to build there leaves the
+  # version live on one registry and unpublishable on the other. What can fail is packaging, not
+  # code -- `exclude` in `Cargo.toml` drops `docs/*` and keeps `docs/usage.md` back, and that file
+  # and `README.md` are `include_str!`'d into the crate docs, so one careless entry yields a tarball
+  # that compiles from the repository and not from the registry. Rehearsing it on every push means
+  # the commit that breaks packaging is the one that reports it.
+  package:
+    name: cargo publish --dry-run (the tarball builds from what ships)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: cargo publish --dry-run
+        run: cargo publish --dry-run --locked
+
   # A workflow file is the one thing in the repo that nothing else compiles, parses or runs. A
   # malformed one does not fail loudly -- GitHub drops the whole file, reports a 0s "failure" under
   # its path instead of its name, and the job it was supposed to run simply stops existing. That is
