@@ -622,6 +622,18 @@ impl Trie {
             }
             lowest = free_from(&taken, lowest);
         }
+        // Padded so that `base + b` is in range for every base the array stores and every byte a
+        // walk can ask for, which is what lets [`step`](Self::step) index without a check.
+        let need = trie
+            .slots
+            .iter()
+            .map(|s| s.base as usize)
+            .max()
+            .unwrap_or(0)
+            + 256;
+        if trie.slots.len() < need {
+            trie.slots.resize(need, VACANT);
+        }
         trie
     }
 
@@ -644,7 +656,12 @@ impl Trie {
     #[inline(always)]
     fn step(&self, node: u32, base: u32, b: u8) -> Option<(u32, u32, u32)> {
         let slot = base as usize + usize::from(b);
-        let child = self.slots.get(slot)?;
+        debug_assert!(slot < self.slots.len());
+        // SAFETY: `of` pads the array past the largest base it stores by the 256 bytes a step can
+        // ask for, and `base` is either the root's or one this function returned, so `base + b` is
+        // in range. A walk is a fifth of a build's instructions and the check was two of them a
+        // step.
+        let child = unsafe { self.slots.get_unchecked(slot) };
         (child.check == node).then_some((slot as u32, child.base, child.phrase))
     }
 }
