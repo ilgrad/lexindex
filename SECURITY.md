@@ -9,7 +9,7 @@ something that crosses the line.
 | Version | Supported |
 |---|---|
 | 4.0.x | yes |
-| 3.0.x | no, and the upgrade is the least drop-in one so far: 4.0 computes a different key hash, so it refuses `BMP7`, `BCH7` and `BCL1` by name, and the `BDX2` dictionary with them. Four of the five indexes have to be rebuilt from their keys — the hash ones never stored any, and the dictionary's come out of `lexindex dump` run under 3.x, before the upgrade. `BIX4` loads unchanged, and so does an `OVL2` over a `BIX4` base |
+| 3.0.x | no, and the upgrade is the least drop-in one so far: 4.0 computes a different key hash, so it refuses `BMP7`, `BCH7` and `BCL1` by name, and the `BDX2` dictionary with them. Four of the five indexes have to be rebuilt from their keys, and where those keys come from differs: `BMP7` and `BDX2` store theirs, so a 3.x process writes them out over `key(id)` before the upgrade, while `BCH7` and `BCL1` store no keys in any version and need the corpus they were built from. `lexindex dump` makes that a one-liner, but it is 4.0's subcommand — 3.0.0 shipped `plan`, `build` and `inspect` only. `BIX4` loads unchanged, and so does an `OVL2` over a `BIX4` base. [`docs/migration-4.md`](docs/migration-4.md) is the worked path |
 | 2.1.x | no — everything in the row above, and the `BDX1` dictionary 2.1 wrote on top of it |
 | 2.0.x | no — the same as 2.1 |
 | 1.x | no — 2.0 already refused the hash blobs 1.x wrote, for the same reason 4.0 refuses 3.x's; `BIX4` loads as it is, and so does an `OVL2` over a `BIX4` base, but an `OVL2` over any hash base is refused with that base |

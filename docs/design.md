@@ -1,6 +1,6 @@
 # Design
 
-lexindex is three build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
+lexindex is five build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
 
 ## Keys are bytes
 
