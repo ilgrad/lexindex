@@ -13,15 +13,16 @@ against its hash, records the machine, and finishes by putting the run's Python 
 the published one — the number no change to this library can move, and therefore the one that says
 whether your machine is comparable to the one in the tables at all.
 
-> **The whole-set sizes at a hundred thousand and a million keys are 4.0.0's; every other
-> `DictIndex` size on this page still predates two of its changes — the microblock start and the
-> dropped pruning pass — and is high by 0.04 % to 15 %.** A size is a function of the keys and needs
-> no timed run, so the sweep was re-run for them alone; the ten-million table and the word-list
-> ladder were not, and are measured directly instead: on the word list 2.850 bytes a key at block
-> 32, 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024, and
-> 4.165 over 889 864 PyPI names. Every **latency** table waits for a run whose Python call floor is
-> back at 47 ns — it measured 110 on the day of the first change, every latency cell moves with it,
-> and a table with one refreshed column is worse than a dated one.
+> **The three whole-set size tables are 4.0.0's; every other `DictIndex` size on this page still
+> predates two of its changes — the microblock start and the dropped pruning pass — and is high by
+> 0.02 % to 15 %.** A size is a function of the keys and needs no timed run, so the sweep was re-run
+> for the sizes alone at a hundred thousand, a million and ten million keys. What was not re-run is
+> the word-list ladder and the cold-mapping table; measured directly for the first of those, the
+> word list is 2.850 bytes a key at block 32, 2.721 at 64, 2.663 at 128, **2.635 at the default
+> 256**, 2.519 at 512 and 2.513 at 1024, and 889 864 PyPI names are 4.165. Every **latency** table
+> waits for a run whose Python call floor is back at 47 ns — it measured 110 on the day of the first
+> change, every latency cell moves with it, and a table with one refreshed column is worse than a
+> dated one.
 
 
 ## Serialised size on real English words
@@ -389,43 +390,46 @@ lookups 1–15 % higher on every structure, controls included.</sub>
 
 | corpus | raw | `ClosedHash` | `CompactHash` | `Dict` 128 | `Dict` 256 | `Dict` 1024 | `String` | marisa 4 | marisa 8 | marisa 16 | marisa def. | marisa fast |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna` | 24.0 | 0.24 | 1.24 | 4.06 | 3.97 | **3.82** | 15.98 | 6.69 | 6.69 | 6.69 | 6.75 | 6.99 |
-| `numeric` | 6.9 | 0.24 | 1.24 | 1.07 | 1.04 | **0.93** | 0.00 | 1.63 | 1.63 | 1.63 | 1.66 | 1.77 |
-| `opaque` | 16.0 | 0.24 | 1.24 | 10.11 | 10.07 | **9.96** | 21.47 | 15.19 | 14.72 | 14.72 | 18.33 | 18.68 |
-| `titles-en` | 21.0 | 0.24 | 1.24 | 5.89 | 5.82 | 5.64 | 13.25 | 5.57 | 5.49 | **5.48** | 5.71 | 5.87 |
-| `urls` | 52.4 | 0.24 | 1.24 | 6.06 | 5.86 | 5.59 | 13.10 | 5.66 | 5.56 | **5.55** | 5.83 | 5.99 |
-| `uuid` | 36.0 | 0.24 | 1.24 | 17.67 | 17.58 | **17.42** | 36.07 | 29.97 | 20.62 | 20.62 | 33.21 | 33.56 |
+| `dna` | 24.0 | 0.24 | 1.24 | 4.03 | 3.95 | **3.81** | 15.98 | 6.69 | 6.69 | 6.69 | 6.75 | 6.99 |
+| `numeric` | 6.9 | 0.24 | 1.24 | 1.04 | 1.02 | **0.92** | 0.00 | 1.63 | 1.63 | 1.63 | 1.66 | 1.77 |
+| `opaque` | 16.0 | 0.24 | 1.24 | 10.08 | 10.05 | **9.95** | 21.47 | 15.19 | 14.72 | 14.72 | 18.33 | 18.68 |
+| `titles-en` | 21.0 | 0.24 | 1.24 | 5.71 | 5.65 | **5.48** | 13.25 | 5.57 | 5.49 | 5.48 | 5.71 | 5.87 |
+| `urls` | 52.4 | 0.24 | 1.24 | 5.98 | 5.78 | **5.53** | 13.10 | 5.66 | 5.56 | 5.55 | 5.83 | 5.99 |
+| `uuid` | 36.0 | 0.24 | 1.24 | 17.63 | 17.56 | **17.42** | 36.07 | 29.97 | 20.62 | 20.62 | 33.21 | 33.56 |
 
 Ten times the keys moves every trie and neither hash: at its floor `marisa` goes 7.49 → 5.48 on
 `titles-en` and 7.57 → 5.55 on `urls` as the sharing deepens, `DictIndex` at its default block
-7.37 → 5.82 and 7.51 → 5.86, and the two keyless rows do not move at all. Here the ranking is
-*not* the million-key table's: `titles-en` and `urls` are two of the ten corpora `DictIndex` is
-smallest on at a million, and at ten million the trie takes both back — by 2.8 % and 0.7 %. Which
-is smallest is decided by the corpus *and* by the scale, and the two corpora it turns on are the
-ones whose keys share long fragments across the whole set rather than with their neighbours.
+7.37 → 5.65 and 7.51 → 5.78, and the two keyless rows do not move at all. Through 3.0.0 this was
+where the ranking turned over: `titles-en` and `urls` are two of the ten corpora `DictIndex` leads
+at a million, and at ten million the trie took both back, by 2.8 % and 0.7 %. It no longer does. At
+1024 keys a block `titles-en` reads **5.4776 against 5.4836** and `urls` **5.5301 against 5.5483** —
+0.11 % and 0.33 %, margins the table's two decimals cannot show. Read `titles-en` as a tie and
+`urls` as a lead, not as a comfortable win on either: what closed a 2.8 % gap was 4.0.0's phrase
+work, worth −2.9 % and −1.1 % on these two, and a change that size can reopen it.
 
-**Scale narrows every gap in the trie's favour.** `DictIndex` keeps four of the six at ten
-million — `dna` 3.82 against marisa's tuned 6.69 and `numeric` 0.93 against 1.63, both 43 %,
-`opaque` 9.96 against 14.72 and `uuid` 17.42 against 20.62, 32 % and 16 % — but every one of those
-margins is narrower than the same corpus gives at a million, `uuid` most of all, 22 % there against
-16 % here. The reason is the trie's, not ours: ten times the random identifiers share ten times more
+**Scale narrows every gap in the trie's favour.** `DictIndex` is smallest on all six at ten
+million, four of them by a distance — `dna` 3.81 against marisa's tuned 6.69 and `numeric` 0.92
+against 1.63, both 43 %, `opaque` 9.95 against 14.72 and `uuid` 17.42 against 20.62, 32 % and
+16 % — but every one of those four margins is narrower than the same corpus gives at a million,
+`uuid` most of all, 22 % there against 16 % here. The reason is the trie's, not ours: ten times the random identifiers share ten times more
 three- and four-character fragments, and a recursive trie is built to find exactly that, while a
 block of front-coded keys shares only with its own block. Read the margins as gaps that narrow with
 n, and do not build a claim on a single one of them.
 
-**The block buys less here.** 128 → 1024 keys a block is 0.14–0.47 bytes a key over these six,
-against 0.14–1.02 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
+**The block buys less here.** 128 → 1024 keys a block is 0.12–0.45 bytes a key over these six,
+against 0.12–1.00 at a million. Ten times the keys is ten times the blocks, so the per-block arrays
 a bigger block saves were already a smaller share of the index; what is left is the coded suffixes,
 and those are the symbol table's business, not the block's — which is why the table is trained on
 runs of a constant length and per shard. With whole-block training over one table a bigger block
 bought fewer neighbourhoods to train on, and `titles-en` at 1024 came out above its own 256.
 
-<sub>Measured 2026-09-19 at `31375b3`
-([`bench/results/sweep10m-2026-09-19-arz-31375b3.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-19-arz-31375b3.json)),
-`marisa-trie` 1.4.1, one build per cell at this size and three rounds of 20 000 lookups, started at
-a load average of 0.04 / 0.45 / 0.69. Every marisa cell reads to the hundredth what the 2026-09-13
-run read — a size is exact, so the two runs agree wherever the builder did not move, and what moved
-is ours.</sub>
+<sub>Measured 2026-09-20 at `0e3ca5f`
+([`bench/results/sweep10m-2026-09-20-arz-0e3ca5f.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-20-arz-0e3ca5f.json)),
+`marisa-trie` 1.4.1, one build per cell at this size and three rounds of 20 000 lookups. **Sizes
+only**, on the same terms as the million-key table: this run shared the machine with an editor and
+its timings are not published. Every marisa cell reads to the hundredth what the 2026-09-13 and
+2026-09-19 runs read — a size is exact, so three runs agree wherever the builder did not move, and
+what moved is ours.</sub>
 
 ### A cold mapping, and what is actually resident
 
