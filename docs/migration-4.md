@@ -4,7 +4,7 @@
 what still loads, what has to be rebuilt, how to get the keys back out of a 3.x file, and which ids
 survive the rebuild. The reasoning behind the policy — why a hash change waits for a major, why a
 refusal names the version that wrote the file — is in
-[design, versioning and compatibility](design.md#versioning-and-compatibility).
+[design: blob compatibility](design.md#blob-compatibility).
 
 ## What loads unchanged
 

@@ -13,14 +13,15 @@ against its hash, records the machine, and finishes by putting the run's Python 
 the published one — the number no change to this library can move, and therefore the one that says
 whether your machine is comparable to the one in the tables at all.
 
-> **The word-list table below and the three whole-set size tables are 4.0.0's; every other
-> `DictIndex` size on this page still predates two of its changes — the microblock start and the
-> dropped pruning pass — and is high by 0.02 % to 15 %.** A size is a function of the keys and needs
-> no timed run, so the sweep was re-run for the sizes alone at a hundred thousand, a million and ten
-> million keys; the word-list table came from a run of its own harness whose call floor was the
-> lowest this page has published. Still dated: the block ladders in the `rsmarisa` and positioning
-> tables, the cold-mapping table, and the research-frontier tables, which come from a harness that
-> builds nine C++ competitors. Measured directly, the word list is 2.850 bytes a key at block 32,
+> **The word-list table below, the three whole-set size tables and the research-frontier tables are
+> 4.0.0's; every other `DictIndex` size on this page still predates two of its changes — the
+> microblock start and the dropped pruning pass — and is high by 0.02 % to 15 %.** A size is a
+> function of the keys and needs no timed run, so the sweep was re-run for the sizes alone at a
+> hundred thousand, a million and ten million keys; the word-list table came from a run of its own
+> harness whose call floor was the lowest this page has published, and the frontier campaign ran its
+> 1365 processes on an idle machine, so its latency columns are current as well. Still dated: the
+> block ladders in the `rsmarisa` and positioning tables, and the cold-mapping table. Measured
+> directly, the word list is 2.850 bytes a key at block 32,
 > 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024, and
 > 889 864 PyPI names are 4.165. Those tables' **latency** columns wait for a run of their own
 > harness on a quiet machine: they move with the floor, not with this library, and a table with one
@@ -1523,112 +1524,113 @@ count their nodes and not the keys they point to, so they are kept out of every 
 recursion depth `benchmark.cpp` takes as `max_recursion` — for MARISA, one less than its number of
 tries. A structure is on the *front* when no other one is at least as small and at least as fast.
 
-<!-- table: frontier bench/results/frontier-1m-2026-09-19-arz-ef8996e.json -->
+<!-- table: frontier bench/results/frontier-1m-2026-09-20-arz-7e42c43.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |
 |---|---:|---|---|---|
-| `words-full` | 2.65 @ 304 | lexindex Dict 1024 2.52 @ 370 | XCDAT 15 7.30 @ 77 | Dict 1024, Dict 256, Dict 32 |
-| `dna-1000000` | 4.40 @ 357 | lexindex Dict 1024 4.24 @ 386 | XCDAT 15 22.46 @ 289 | Dict 1024, Dict 256 |
-| `domains-1000000` | 4.75 @ 347 | lexindex Dict 1024 4.59 @ 422 | XCDAT 15 10.33 @ 146 | Dict 1024, Dict 256, Dict 32 |
-| `idents-1000000` | 5.30 @ 410 | lexindex Dict 1024 5.13 @ 484 | XCDAT 15 13.78 @ 203 | Dict 1024, Dict 256, Dict 32 |
-| `numeric-1000000` | 1.03 @ 274 | lexindex StringIndex 0.0003 @ 116 | XCDAT 15 7.05 @ 54 | StringIndex |
-| `opaque-1000000` | 10.42 @ 360 | lexindex Dict 1024 10.30 @ 409 | XCDAT 15 20.02 @ 205 | Dict 1024, Dict 256, Dict 32 |
-| `paths-1000000` | 10.18 @ 787 | MARISA ρ=2 9.47 @ 2227 | XCDAT 15 25.11 @ 632 | Dict 1024, Dict 256 |
-| `pypi-full` | 4.36 @ 359 | lexindex Dict 1024 4.21 @ 427 | XCDAT 15 9.92 @ 138 | Dict 1024, Dict 256, Dict 32 |
-| `titles-en-1000000` | 7.40 @ 436 | lexindex Dict 1024 7.23 @ 497 | XCDAT 15 17.13 @ 242 | Dict 1024, Dict 256, Dict 32 |
-| `titles-ru-1000000` | 7.81 @ 498 | lexindex Dict 1024 7.57 @ 545 | XCDAT 15 23.08 @ 361 | Dict 1024, Dict 256, Dict 32 |
-| `titles-zh-1000000` | 6.29 @ 405 | lexindex Dict 1024 6.11 @ 471 | XCDAT 15 13.58 @ 204 | Dict 1024, Dict 256, Dict 32 |
-| `urls-1000000` | 7.53 @ 489 | lexindex Dict 1024 7.28 @ 554 | XCDAT 15 18.14 @ 366 | Dict 1024, Dict 256, Dict 32 |
-| `uuid-1000000` | 18.06 @ 448 | lexindex Dict 1024 17.90 @ 488 | XCDAT 15 38.88 @ 343 | Dict 1024, Dict 256 |
+| `words-full` | 2.64 @ 295 | lexindex Dict 1024 2.51 @ 365 | XCDAT 15 7.30 @ 80 | Dict 1024, Dict 256, Dict 32 |
+| `dna-1000000` | 4.37 @ 350 | lexindex Dict 1024 4.23 @ 382 | XCDAT 15 22.46 @ 285 | Dict 1024, Dict 256 |
+| `domains-1000000` | 4.50 @ 347 | lexindex Dict 1024 4.36 @ 418 | XCDAT 15 10.33 @ 148 | Dict 1024, Dict 256, Dict 32 |
+| `idents-1000000` | 5.23 @ 412 | lexindex Dict 1024 5.07 @ 482 | XCDAT 15 13.78 @ 203 | Dict 1024, Dict 256, Dict 32 |
+| `numeric-1000000` | 1.01 @ 280 | lexindex StringIndex 0.0003 @ 113 | XCDAT 15 7.05 @ 55 | StringIndex |
+| `opaque-1000000` | 10.40 @ 362 | lexindex Dict 1024 10.29 @ 408 | XCDAT 15 20.02 @ 205 | Dict 1024, Dict 256, Dict 32 |
+| `paths-1000000` | 9.87 @ 800 | lexindex Dict 1024 9.32 @ 835 | XCDAT 15 25.11 @ 625 | Dict 1024, Dict 256, Dict 32 |
+| `pypi-full` | 4.17 @ 355 | lexindex Dict 1024 4.02 @ 433 | XCDAT 15 9.92 @ 135 | Dict 1024, Dict 256, Dict 32 |
+| `titles-en-1000000` | 7.37 @ 436 | lexindex Dict 1024 7.21 @ 500 | XCDAT 15 17.13 @ 239 | Dict 1024, Dict 256, Dict 32 |
+| `titles-ru-1000000` | 7.66 @ 500 | lexindex Dict 1024 7.45 @ 555 | XCDAT 15 23.08 @ 365 | Dict 1024, Dict 256, Dict 32 |
+| `titles-zh-1000000` | 6.27 @ 400 | lexindex Dict 1024 6.12 @ 471 | XCDAT 15 13.58 @ 199 | Dict 1024, Dict 256, Dict 32 |
+| `urls-1000000` | 7.51 @ 493 | lexindex Dict 1024 7.27 @ 557 | XCDAT 15 18.14 @ 364 | Dict 1024, Dict 256, Dict 32 |
+| `uuid-1000000` | 18.04 @ 455 | lexindex Dict 1024 17.89 @ 494 | XCDAT 15 38.88 @ 334 | Dict 1024, Dict 256 |
 <!-- /table -->
 
-<sub>A million keys, measured 2026-09-19 at `ef8996e`
-([`bench/results/frontier-1m-2026-09-19-arz-ef8996e.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-19-arz-ef8996e.json)),
-Ryzen 7 5800HS, GCC 16.2.1, rustc 1.98.1. A cell reads bytes a key @ nanoseconds a lookup.
-`dna`, `titles-zh`, `urls` and `uuid` were measured a second time at the same commit
-([`frontier-named-2026-09-19-arz-ef8996e.log`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-named-2026-09-19-arz-ef8996e.log))
-after their first round in the campaign ran beside up to 1.4 busy CPUs of other work, and those
-runs replace the campaign's, whose own stay in its log. Other work while the 949 processes behind
-the table ran: median 0.07 busy CPUs, most 0.77.</sub>
+<sub>A million keys, measured 2026-09-20 at `7e42c43`
+([`bench/results/frontier-1m-2026-09-20-arz-7e42c43.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-20-arz-7e42c43.json)),
+Ryzen 7 5800HS, GCC 16.2.1, rustc 1.98.1. A cell reads bytes a key @ nanoseconds a lookup. The
+competitors are rebuilt from the same pinned commits as the 2026-09-19 campaign and none of their
+cells moves by as much as a per cent; what moved is lexindex's own rows. Every cell here is a
+campaign run — unlike that campaign, none needed replacing. Other work while the 949 processes
+behind the table ran: median 0.06 busy CPUs, most 1.01.</sub>
 
 lexindex is on the front on all thirteen corpora — `DictIndex` on twelve, `StringIndex` on
 `numeric` — and `DictIndex` builds before every other structure on all thirteen: 1.2× ahead of the
-next on `words` and `numeric`, 1.3–5.9× on the rest. It is the smallest structure outright on eleven
-of them, by 6 % on `domains` up to 45 % on `dna`: 2.52 bytes a key at block 1024 on `words` against
-MARISA's 2.98 at ρ=2, 7.57 on `titles-ru` against 8.61, 17.90 on `uuid` against PDT's 21.44 from a
-16.7-second build. `StringIndex` is the smallest on `numeric`, where the automaton folds a million
-decimal ids into about 300 bytes. Two corpora keep a trie ahead of `DictIndex` on size: `paths`,
-where MARISA at ρ=2 is 1.5 % smaller at 2.7 times the lookup and 2.7 times the build, and `numeric`,
-where CoCo-trie's 0.52 beats block 1024's 0.93 but not `StringIndex`. XCDAT is the fastest structure
-on every corpus, at 1.9–6.8 times the bytes of `DictIndex` at its default block; on `titles-ru`,
-`titles-zh` and `urls` C²-MARISA is faster too, and larger — 9.14 bytes a key at ρ=2 on `titles-ru`
-against 7.57 — so both are on the front.
+next on `words` and `numeric`, 1.5–5.7× on the rest. It is the smallest structure outright on twelve
+of them, by 1.6 % on `paths` up to 45 % on `dna`: 2.51 bytes a key at block 1024 on `words` against
+MARISA's 2.98 at ρ=2, 7.45 on `titles-ru` against 8.61, 17.89 on `uuid` against PDT's 21.44 from a
+16.8-second build. `paths` is both the thinnest margin and the cell that turned over in 4.0: block
+1024's 9.32 against MARISA's 9.47 at ρ=2, which reads 2.7 times slower and builds 3.2 times slower.
+Only `numeric` keeps a trie ahead of `DictIndex` on size, and there the trie is beside the point:
+CoCo-trie's 0.52 against block 1024's 0.92, while `StringIndex` folds a million decimal ids into
+about 300 bytes. XCDAT is the fastest structure on every corpus, at 1.9–7.0 times the bytes of
+`DictIndex` at its default block; C²-MARISA shares the front on ten of the thirteen, always
+larger — 9.14 bytes a key at ρ=2 on `titles-ru` against 7.45.
 
-<!-- table: frontier bench/results/frontier-10m-2026-09-19-arz-5783460.json -->
+<!-- table: frontier bench/results/frontier-10m-2026-09-20-arz-7e42c43.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |
 |---|---:|---|---|---|
-| `dna-10000000` | 3.97 @ 536 | lexindex Dict 1024 3.82 @ 521 | lexindex Dict 1024 3.82 @ 521 | Dict 1024 |
-| `numeric-10000000` | 1.04 @ 344 | lexindex StringIndex 3.6e-05 @ 138 | lexindex StringIndex 3.6e-05 @ 138 | StringIndex |
-| `opaque-10000000` | 10.07 @ 581 | lexindex Dict 1024 9.96 @ 587 | XCDAT 15 21.66 @ 341 | Dict 1024, Dict 256 |
-| `titles-en-10000000` | 5.82 @ 666 | lexindex Dict 1024 5.64 @ 689 | XCDAT 15 13.95 @ 581 | Dict 1024, Dict 256 |
-| `urls-10000000` | 5.86 @ 771 | lexindex Dict 1024 5.59 @ 766 | XCDAT 15 14.75 @ 707 | Dict 1024 |
-| `uuid-10000000` | 17.58 @ 697 | lexindex Dict 1024 17.42 @ 673 | XCDAT 15 38.58 @ 556 | Dict 1024 |
+| `dna-10000000` | 3.95 @ 536 | lexindex Dict 1024 3.81 @ 520 | lexindex Dict 1024 3.81 @ 520 | Dict 1024 |
+| `numeric-10000000` | 1.02 @ 340 | lexindex StringIndex 3.6e-05 @ 134 | lexindex StringIndex 3.6e-05 @ 134 | StringIndex |
+| `opaque-10000000` | 10.05 @ 578 | lexindex Dict 1024 9.95 @ 582 | XCDAT 15 21.66 @ 337 | Dict 1024, Dict 256 |
+| `titles-en-10000000` | 5.65 @ 682 | lexindex Dict 1024 5.48 @ 708 | XCDAT 15 13.95 @ 577 | Dict 1024, Dict 256 |
+| `urls-10000000` | 5.78 @ 760 | lexindex Dict 1024 5.53 @ 778 | XCDAT 15 14.75 @ 711 | Dict 1024, Dict 256 |
+| `uuid-10000000` | 17.56 @ 704 | lexindex Dict 1024 17.42 @ 682 | XCDAT 15 38.58 @ 550 | Dict 1024 |
 <!-- /table -->
 
-<sub>Ten million keys, measured 2026-09-19 at `5783460`
-([`bench/results/frontier-10m-2026-09-19-arz-5783460.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-09-19-arz-5783460.json)),
+<sub>Ten million keys, measured 2026-09-20 at `7e42c43`
+([`bench/results/frontier-10m-2026-09-20-arz-7e42c43.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-09-20-arz-7e42c43.json)),
 the same machine and toolchain, with two hours allowed a process and none reaching it. Other work
-while the 416 processes ran: median 0.03 busy CPUs, most 0.62.</sub>
+while the 416 processes ran: median 0.03 busy CPUs, most 1.14.</sub>
 
-At ten times the keys lexindex is on the front of all six corpora, `DictIndex` on five. It is the
-smallest structure on five of them: `dna` at 3.82 bytes a key at block 1024 against C²-CoCo's 5.98
-at ρ=1, `opaque` 9.96 against PDT's 13.73 and `uuid` 17.42 against PDT's 20.59 — builds of 115 and
-126 seconds against 1.3 and 1.7 — and, by a narrower 1 % and 4 %, `titles-en` and `urls` against
-MARISA at ρ=2; `StringIndex` is both the smallest and the fastest on `numeric`. On `dna` block 1024
-is the fastest row as well as the smallest, 521 ns to XCDAT's 571, so it dominates every other
-structure on that corpus outright. `DictIndex` builds before every one of them again, in 0.9–2.6 s,
-where the next is MARISA at 2.7–7.2 times that (PDT, at 1.4 times, on `numeric`), C²'s structures
-take 10.5–31 s and PDT up to two minutes. Only `numeric` keeps a trie smaller than `DictIndex`:
-CoCo-trie's 0.51 bytes a key against block 1024's 0.93, and neither is near `StringIndex`. `urls`,
-the corpus with the longest keys, is below whole.
+At ten times the keys lexindex is on the front of all six corpora — `DictIndex` on five,
+`StringIndex` on `numeric`, where it is both the smallest and the fastest. `DictIndex` is the
+smallest structure on the other five: `dna` at 3.81 bytes a key at block 1024 against C²-CoCo's 5.98
+at ρ=1, `opaque` 9.95 against PDT's 13.73 and `uuid` 17.42 against PDT's 20.59 — builds of 116 and
+127 seconds against 1.3 and 1.5 — and, by a narrower 4 % and 6 %, `titles-en` and `urls` against
+MARISA at ρ=2. On `dna` block 1024 is the fastest row as well as the smallest, 520 ns to XCDAT's
+574, so it is alone on that corpus's front and dominates every other structure outright.
+`DictIndex` builds before every one of them again, in 0.9–2.3 s, where the next is MARISA at
+2.9–7.5 times that (PDT, at 1.4 times, on `numeric`), C²'s structures take 10.5–31 s and PDT up to
+127 s. Only `numeric` keeps a trie smaller than `DictIndex`: CoCo-trie's 0.51 bytes a key against
+block 1024's 0.92, and neither is near `StringIndex`. `urls`, the corpus with the longest keys, is
+below whole.
 
-<!-- table: frontier bench/results/frontier-10m-2026-09-19-arz-5783460.json corpus=urls-10000000 -->
+<!-- table: frontier bench/results/frontier-10m-2026-09-20-arz-7e42c43.json corpus=urls-10000000 -->
 **`urls-10000000`** — 10,000,000 keys, 52.37 bytes a key raw
 
 | structure | bytes/key | % of raw | build ms | `id` ns | spread | front |
 |---|---:|---:|---:|---:|---:|:---:|
-| lexindex Dict 32 | 7.22 | 13.8 | 2535 | 792 | 2 % |  |
-| lexindex Dict 256 | 5.86 | 11.2 | 2586 | 771 | 2 % |  |
-| lexindex Dict 1024 | 5.59 | 10.7 | 2512 | 766 | 1 % | ● |
-| lexindex StringIndex | 13.10 | 25.0 | 9334 | 950 | 3 % |  |
-| C²-FST | 9.41 | 18.0 | 12126 | 1563 | 1 % |  |
-| C²-FST ρ=1 | 8.20 | 15.7 | 14085 | 1850 | 1 % |  |
-| C²-FST ρ=2 | 8.20 | 15.7 | 14685 | 1854 | 1 % |  |
-| C²-CoCo | 9.92 | 18.9 | 28942 | 1588 | 1 % |  |
-| C²-CoCo ρ=1 | 8.71 | 16.6 | 30896 | 1848 | 2 % |  |
-| C²-CoCo ρ=2 | 8.71 | 16.6 | 31431 | 1866 | 0 % |  |
-| C²-MARISA | 8.34 | 15.9 | 11990 | 900 | 1 % |  |
-| C²-MARISA ρ=1 | 6.92 | 13.2 | 14319 | 1197 | 0 % |  |
-| C²-MARISA ρ=2 | 6.92 | 13.2 | 15035 | 1197 | 0 % |  |
-| FST | 9.54 | 18.2 | 15776 | 1993 | 0 % |  |
+| lexindex Dict 32 | 7.13 | 13.6 | 2350 | 784 | 1 % |  |
+| lexindex Dict 256 | 5.78 | 11.0 | 2378 | 760 | 3 % | ● |
+| lexindex Dict 1024 | 5.53 | 10.6 | 2312 | 778 | 2 % | ● |
+| lexindex StringIndex | 13.10 | 25.0 | 9306 | 923 | 3 % |  |
+| C²-FST | 9.41 | 18.0 | 12060 | 1582 | 1 % |  |
+| C²-FST ρ=1 | 8.20 | 15.7 | 14080 | 1852 | 1 % |  |
+| C²-FST ρ=2 | 8.20 | 15.7 | 14619 | 1843 | 1 % |  |
+| C²-CoCo | 9.92 | 18.9 | 28793 | 1571 | 1 % |  |
+| C²-CoCo ρ=1 | 8.71 | 16.6 | 30796 | 1838 | 1 % |  |
+| C²-CoCo ρ=2 | 8.71 | 16.6 | 31362 | 1856 | 1 % |  |
+| C²-MARISA | 8.34 | 15.9 | 11999 | 896 | 1 % |  |
+| C²-MARISA ρ=1 | 6.92 | 13.2 | 14368 | 1189 | 0 % |  |
+| C²-MARISA ρ=2 | 6.92 | 13.2 | 15048 | 1192 | 0 % |  |
+| FST | 9.54 | 18.2 | 15745 | 1998 | 1 % |  |
 | CoCo | — | — | — | — | — | aborted: std::bad_alloc |
-| MARISA | 8.66 | 16.5 | 10657 | 1125 | 2 % |  |
-| MARISA ρ=1 | 6.23 | 11.9 | 11790 | 1545 | 0 % |  |
-| MARISA ρ=2 | 5.83 | 11.1 | 11943 | 1623 | 1 % |  |
-| PDT | 7.34 | 14.0 | 27693 | 1182 | 1 % |  |
-| ART | 35.80 | 68.4 | 3615 | 968 | 11 % | ref |
-| C-ART | 16.85 | 32.2 | 4289 | 989 | 4 % | ref |
-| XCDAT 7 | 12.37 | 23.6 | 12728 | 888 | 4 % |  |
-| XCDAT 8 | 11.96 | 22.8 | 12336 | 822 | 3 % |  |
-| XCDAT 15 | 14.75 | 28.2 | 12652 | 707 | 5 % | ● |
-| XCDAT 16 | 15.43 | 29.5 | 12343 | 753 | 2 % |  |
+| MARISA | 8.66 | 16.5 | 10904 | 1116 | 2 % |  |
+| MARISA ρ=1 | 6.23 | 11.9 | 12120 | 1534 | 2 % |  |
+| MARISA ρ=2 | 5.83 | 11.1 | 12278 | 1630 | 1 % |  |
+| PDT | 7.34 | 14.0 | 27941 | 1182 | 1 % |  |
+| ART | 35.80 | 68.4 | 3616 | 947 | 13 % | ref |
+| C-ART | 16.85 | 32.2 | 4212 | 958 | 33 % | ref |
+| XCDAT 7 | 12.37 | 23.6 | 12698 | 876 | 3 % |  |
+| XCDAT 8 | 11.96 | 22.8 | 12358 | 811 | 3 % |  |
+| XCDAT 15 | 14.75 | 28.2 | 12710 | 711 | 2 % | ● |
+| XCDAT 16 | 15.43 | 29.5 | 12370 | 754 | 3 % |  |
 <!-- /table -->
 
 <sub>From the same artifact
-([`bench/results/frontier-10m-2026-09-19-arz-5783460.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-09-19-arz-5783460.json)).
+([`bench/results/frontier-10m-2026-09-20-arz-7e42c43.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-09-20-arz-7e42c43.json)).
 `spread` is the range of a cell's three rounds over their median, and `ref` marks the two structures
-that do not count their keys. Two rows are on the front: block 1024, the smallest structure here at
-5.59 bytes a key against MARISA's 5.83 at ρ=2, and XCDAT 15, 8 % faster at 2.6 times the bytes.
-`bench/frontier/tables.py` prints this table for every corpus at both scales from the logs.</sub>
+that do not count their keys. Three rows are on the front: block 1024, the smallest structure here
+at 5.53 bytes a key against MARISA's 5.83 at ρ=2, block 256 at 5.78 and 18 ns faster, and XCDAT 15,
+9 % faster than block 1024 at 2.7 times the bytes. `bench/frontier/tables.py` prints this table for
+every corpus at both scales from the logs.</sub>
 
 Not every structure runs everywhere, and a cell that failed says why instead of carrying a number.
 C²'s three structures crash with a segmentation fault on `numeric` at every depth and both scales,
@@ -1638,12 +1640,13 @@ on `uuid` at a million and on every corpus but `numeric` at ten million.
 
 The campaign puts the rest of the frontier beside `marisa-trie`, and what it finds there has moved:
 no compressed trie here builds faster than blocks of front-coded keys, and none is smaller either,
-bar MARISA at ρ=2 on `paths` at a million keys, by 1.5 %, and CoCo-trie on `numeric`, where
-`StringIndex` beats both by four orders of magnitude. A block still shares only with its own
-neighbours, so where long fragments repeat across the whole key set — URLs, titles — the lead is
-narrow: 1 % on `titles-en` and 4 % on `urls` at ten million keys. Where C²'s cache-conscious MARISA
-reads faster, on URLs and on the Russian and Chinese titles, it is larger, and both are on the
-front.
+bar CoCo-trie on `numeric`, where `StringIndex` holds the whole corpus in 301 bytes at a
+million keys and 357 at ten million and beats both by three to four orders of magnitude. A block
+still shares only with its own neighbours, so where long fragments repeat across the whole key
+set — URLs, titles, paths — the lead is narrowest: 4 % on `titles-en` and 6 % on `urls` at ten
+million keys, and 1.6 % over MARISA at ρ=2 on `paths` at a million, the cell 4.0 turned over.
+Where C²'s cache-conscious MARISA reads faster, on ten of the thirteen corpora at a million keys, it
+is larger, and both are on the front.
 
 ## Scaling to millions of keys
 

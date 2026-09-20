@@ -314,9 +314,10 @@ with how much the keys share, which one word list cannot show.</sub>
 
 Two claims, scoped to libraries a Python or Rust project can install. The research-grade C++
 frontier has no binding, so it is measured in a harness of its own, on the C² paper's protocol:
-lexindex is on the size–latency front on ten of thirteen corpora at a million keys and five of six
-at ten million, `DictIndex` builds faster than every compressed trie there, and a recursive trie is
-12–37 % smaller on paths, URLs and titles
+lexindex is on the size–latency front on all thirteen corpora at a million keys and all six at ten
+million, `DictIndex` is the smallest structure on twelve and five of them and builds faster than
+every compressed trie there, and the one corpus that keeps a trie smaller is `numeric`, where
+`StringIndex` is smaller still
 ([measured in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-measured);
 papers, code and licences [cited](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited)).
 **`CompactHashIndex` is the smallest `string → dense id` map here that can reject a non-member,
