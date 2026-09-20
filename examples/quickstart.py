@@ -67,7 +67,7 @@ def compact_hash_demo() -> None:
     assert not tokens.contains("durian")  # almost surely a true miss at 2 fingerprint bytes
 
     # Per-key size is only meaningful at scale (MPH overhead dominates 10 keys): on the 479k-word
-    # system dictionary this is ~2.3 B/key at fp=2, 1.3 at fp=1 — below marisa-trie's 2.98.
+    # system dictionary this is 2.24 B/key at fp=2, 1.24 at fp=1 — below marisa-trie's 2.98.
     print("CompactHashIndex:  id('grape') ->", ids["grape"], "(dense [0, n); 1.24 B/key)")
 
 
@@ -87,14 +87,14 @@ def closed_hash_demo() -> None:
 
 
 def dict_index_demo() -> None:
-    """Ordered, every key stored, a third of StringIndex: exact both ways, plus lower_bound."""
+    """Ordered, every key stored, 56 % below StringIndex: exact both ways, plus lower_bound."""
     words = DictIndex(VOCAB)
     lo, hi = words.lower_bound("b"), words.lower_bound("c")  # the "b..." keys as an id range
     print("DictIndex:        id('cherry') ->", words.id("cherry"), " key(0) ->", words.key(0))
     print(
         "DictIndex:        keys in ['b', 'c') ->",
         words.keys_of(list(range(lo, hi))),
-        "(~3.5 B/key)",
+        "(2.64 B/key on the 479k-word dictionary)",
     )
 
 
