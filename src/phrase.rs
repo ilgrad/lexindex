@@ -629,12 +629,23 @@ impl Trie {
         Self::of(std::iter::empty())
     }
 
-    /// The child of `node` on `b`, with the phrase it ends plus one.
+    /// The base of the root, where every walk starts.
     #[inline(always)]
-    fn step(&self, node: u32, b: u8) -> Option<(u32, u32)> {
-        let slot = self.slots[node as usize].base as usize + usize::from(b);
+    fn root(&self) -> u32 {
+        self.slots[0].base
+    }
+
+    /// The child of `node` on `b`, with its own base and the phrase it ends plus one, given the
+    /// base of `node`.
+    ///
+    /// The caller carries the base because the previous step already read the record that holds
+    /// it: re-reading `slots[node].base` made a step two dependent loads where one will do, and
+    /// the root's is loop-invariant over a whole parse.
+    #[inline(always)]
+    fn step(&self, node: u32, base: u32, b: u8) -> Option<(u32, u32, u32)> {
+        let slot = base as usize + usize::from(b);
         let child = self.slots.get(slot)?;
-        (child.check == node).then_some((slot as u32, child.phrase))
+        (child.check == node).then_some((slot as u32, child.base, child.phrase))
     }
 }
 
@@ -683,6 +694,7 @@ fn parse(
     // are otherwise a twentieth of a build -- every read below is at most `n`.
     let cost = &mut w.cost[..n + 1];
     let pick = &mut w.pick[..n];
+    let root = trie.root();
     for i in (0..n).rev() {
         // The symbol table's own answer at this position, which is the longest it can match.
         let (code, len) = enc.step(fsst::word_at(s, i), n - i);
@@ -693,11 +705,12 @@ fn parse(
         };
         if let Some(prices) = prices {
             let mut node = 0u32;
+            let mut base = root;
             for (k, (&b, &tail)) in s[i..n.min(i + MAX)].iter().zip(&cost[i + 1..]).enumerate() {
-                let Some((c, phrase)) = trie.step(node, b) else {
+                let Some((c, nb, phrase)) = trie.step(node, base, b) else {
                     break;
                 };
-                node = c;
+                (node, base) = (c, nb);
                 let id = phrase as usize;
                 if id == 0 || id > prices.limit {
                     continue;
@@ -895,13 +908,15 @@ impl Memo {
         self.hits.clear();
         self.at.clear();
         self.at.push(0);
+        let root = trie.root();
         for i in 0..n {
             let mut node = 0u32;
+            let mut base = root;
             for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
-                let Some((c, phrase)) = trie.step(node, b) else {
+                let Some((c, nb, phrase)) = trie.step(node, base, b) else {
                     break;
                 };
-                node = c;
+                (node, base) = (c, nb);
                 if phrase != 0 {
                     self.hits.push((k as u8 + 1, phrase));
                 }
