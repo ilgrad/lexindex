@@ -1545,9 +1545,11 @@ tries. A structure is on the *front* when no other one is at least as small and 
 <sub>A million keys, measured 2026-09-20 at `7e42c43`
 ([`bench/results/frontier-1m-2026-09-20-arz-7e42c43.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-20-arz-7e42c43.json)),
 Ryzen 7 5800HS, GCC 16.2.1, rustc 1.98.1. A cell reads bytes a key @ nanoseconds a lookup. The
-competitors are rebuilt from the same pinned commits as the 2026-09-19 campaign and none of their
-cells moves by as much as a per cent; what moved is lexindex's own rows. Every cell here is a
-campaign run — unlike that campaign, none needed replacing. Other work while the 949 processes
+competitors are rebuilt from the same pinned commits as the 2026-09-19 campaign and every one of
+their sizes comes back byte-identical, so on the size side what moved is lexindex's own rows; their
+lookup times move by up to 10 % between the two campaigns, worst on CoCo over `opaque`, which is
+what a few per cent in a latency column is worth here. Every cell is a campaign run — unlike that
+campaign, none needed replacing. Other work while the 949 processes
 behind the table ran: median 0.06 busy CPUs, most 1.01.</sub>
 
 lexindex is on the front on all thirteen corpora — `DictIndex` on twelve, `StringIndex` on
