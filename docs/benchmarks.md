@@ -13,16 +13,18 @@ against its hash, records the machine, and finishes by putting the run's Python 
 the published one — the number no change to this library can move, and therefore the one that says
 whether your machine is comparable to the one in the tables at all.
 
-> **The three whole-set size tables are 4.0.0's; every other `DictIndex` size on this page still
-> predates two of its changes — the microblock start and the dropped pruning pass — and is high by
-> 0.02 % to 15 %.** A size is a function of the keys and needs no timed run, so the sweep was re-run
-> for the sizes alone at a hundred thousand, a million and ten million keys. What was not re-run is
-> the word-list ladder and the cold-mapping table; measured directly for the first of those, the
-> word list is 2.850 bytes a key at block 32, 2.721 at 64, 2.663 at 128, **2.635 at the default
-> 256**, 2.519 at 512 and 2.513 at 1024, and 889 864 PyPI names are 4.165. Every **latency** table
-> waits for a run whose Python call floor is back at 47 ns — it measured 110 on the day of the first
-> change, every latency cell moves with it, and a table with one refreshed column is worse than a
-> dated one.
+> **The word-list table below and the three whole-set size tables are 4.0.0's; every other
+> `DictIndex` size on this page still predates two of its changes — the microblock start and the
+> dropped pruning pass — and is high by 0.02 % to 15 %.** A size is a function of the keys and needs
+> no timed run, so the sweep was re-run for the sizes alone at a hundred thousand, a million and ten
+> million keys; the word-list table came from a run of its own harness whose call floor was the
+> lowest this page has published. Still dated: the block ladders in the `rsmarisa` and positioning
+> tables, the cold-mapping table, and the research-frontier tables, which come from a harness that
+> builds nine C++ competitors. Measured directly, the word list is 2.850 bytes a key at block 32,
+> 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024, and
+> 889 864 PyPI names are 4.165. Those tables' **latency** columns wait for a run of their own
+> harness on a quiet machine: they move with the floor, not with this library, and a table with one
+> refreshed column is worse than a dated one.
 
 
 ## Serialised size on real English words
@@ -32,34 +34,36 @@ vocabulary, never a synthetic `entity-{i}` sequence** — sequential keys collap
 near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
 better; the capability columns are why you would still pick a larger one.
 
-<!-- table: compare bench/results/compare-2026-09-19-arz-999e933.json columns=prefix,common_prefix,range,fuzzy,reverse,exact,mmap -->
+<!-- table: compare bench/results/compare-2026-09-20-arz-f2077b4.json columns=prefix,common_prefix,range,fuzzy,reverse,exact,mmap -->
 | library | prefix | common prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** | **ns/lookup** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|---:|
-| **lexindex `ClosedHashIndex`** | — | — | — | — | — | none (closed vocabulary) | — | **0.24** | 98 |
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.74** | 92 |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.24** | **85** |
-| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.24** | 92 |
-| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.53** | 415 |
-| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.65** | 388 |
-| `marisa-trie` (4 tries, tiny cache — its smallest here) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 490 |
+| **lexindex `ClosedHashIndex`** | — | — | — | — | — | none (closed vocabulary) | — | **0.24** | 89 |
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.74** | 87 |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.24** | **80** |
+| **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.24** | 88 |
+| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.52** | 400 |
+| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.64** | 377 |
+| `marisa-trie` (4 tries, tiny cache — its smallest here) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 487 |
 | `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 473 |
-| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 446 |
-| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 | 310 |
-| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.88 | 173 |
-| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 | 242 |
-| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.91 | 589 |
-| builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 241 |
+| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 448 |
+| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 | 313 |
+| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.88 | 165 |
+| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 | 240 |
+| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.91 | 595 |
+| builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 247 |
 <!-- /table -->
 
-<sub>Every cell above is one run at `999e933` in a clean worktree, on a machine whose load
-average went 0.11 into the run and 0.91 out of it
-([`bench/results/compare-2026-09-19-arz-999e933.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-19-arz-999e933.json))
+<sub>Every cell above is one run at `f2077b4` in a clean worktree, on a machine two minutes out of
+a reboot, whose load average went 0.15 into the run and 1.06 out of it
+([`bench/results/compare-2026-09-20-arz-f2077b4.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-20-arz-f2077b4.json))
 — every cell's build and lookup samples, the false-positive measurement, the CPU, kernel, rustc,
-Python and the load average at both ends of the run. **Its Python call floor is 51 ns against the
-49 of the table published through 2.1.0**, so the two columns are comparable; another session
-measured a floor of 100 and every row fifty nanoseconds higher, two hours apart and within 2 ns of
-each other, and a run half an hour before this one, on a machine still finishing a build campaign,
-measured 58 — which is the reproducibility problem this page documents further down and the reason
+Python and the load average at both ends of the run. **Its Python call floor is 46 ns**, against the
+51 of the run this table carried until now and the 49 of the one before that — the lowest this page
+has published, so its latency column sits at the bottom of the comparable range rather than the
+middle of it. Another session measured a floor of 100 and every row fifty nanoseconds higher, two
+hours apart and within 2 ns of each other; a run on the same corpus earlier the same day, with an
+editor session on the machine, measured 61 and read 15–20 % slower on every row including the
+builtin `dict`. That is the reproducibility problem this page documents further down and the reason
 `bench/reproduce.sh` prints the floor beside the published one. `marisa-trie` appears three times
 because it is a curve: its own documentation says the right configuration depends on the data, so the table carries
 its compact end, its default and its fast end rather than one point somebody could call untuned.</sub>
