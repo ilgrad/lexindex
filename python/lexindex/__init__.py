@@ -5,7 +5,8 @@ many times:
 
 - :class:`StringIndex` — ordered FST: exact ``string <-> id`` plus prefix / range / fuzzy iteration.
 - :class:`PerfectHashIndex` — fastest exact ``string -> dense id`` with membership + reverse.
-- :class:`CompactHashIndex` — smallest ``string -> dense id`` (perfect hash + fingerprints);
+- :class:`CompactHashIndex` — smallest ``string -> dense id`` that can reject a non-member
+  (perfect hash + fingerprints);
   probabilistic membership, no reverse.
 - :class:`ClosedHashIndex` — the perfect hash and nothing else, a fifth of that: ``id`` never
   says absent, for a vocabulary known to be closed.
@@ -16,7 +17,8 @@ many times:
 All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge
 index and borrow it instantly).
 
-- :class:`Overlay` — add and remove keys on top of any of them without rebuilding.
+- :class:`Overlay` — add and remove keys on top of :class:`StringIndex`,
+  :class:`PerfectHashIndex` or :class:`CompactHashIndex` without rebuilding.
 - :func:`inspect` — what a blob is, from its header alone, without loading it.
 - :func:`plan` — what each of them would cost on a set of keys, before one is built.
 """

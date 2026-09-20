@@ -19,8 +19,8 @@
 //! 1.1 changed the perfect hash once more (`MPH2`, a different function over the same keys) and
 //! re-encoded the key arena, and 2.0 replaced the key hash itself — the round it shipped with had
 //! a two-word collision family on ordinary text — so the hash blobs 1.0 and 1.1 wrote are refused
-//! by name like the pre-1.0 ones. 3.1 changed the perfect hash's seed geometry (`MPH3`) and reads
-//! `MPH2` under its own. 4.0 replaced the key hash once more — branch-free over the key's length
+//! by name like the pre-1.0 ones. 4.0 changed the perfect hash's seed geometry (`MPH3`), which
+//! reads `MPH2` under its own, and replaced the key hash once more — branch-free over the key's length
 //! classes, half the time on real words — so the 2.0 hash blobs (`BMP7`, `BCH7`, `BCL1`) are
 //! refused by name as well, and the blobs 4.0 writes are both the read fixtures and the ones
 //! pinned byte for byte. The standalone `MPH2` table fixture still parses: a table is keyed on
@@ -183,8 +183,9 @@ mod mph {
     ///
     /// Each is named by the release whose writer first produced it, and only the current set is
     /// pinned this way: 1.1 re-encoded the key arena and replaced the perfect hash, 2.0 replaced
-    /// the key hash, 3.1 the perfect hash's seed geometry, so the 1.0 and 1.1 files are the
-    /// refused fixtures, the 2.0 files the read ones, and every hash blob here is 3.1's — the
+    /// the key hash, 4.0 the perfect hash's seed geometry and the key hash again, so the 1.0 and
+    /// 1.1 files are the refused fixtures, the 2.0 files the read ones, and every hash blob here
+    /// is 4.0's — the
     /// plain pair, the fingerprinted arena, the overflow arena and the `ClosedHashIndex` blob.
     ///
     /// Regenerating them, if a format or the hash is deliberately changed:

@@ -3,12 +3,15 @@ message: "If you use this software, please cite it as below."
 type: software
 title: "lexindex: compact, immutable string-to-id indexes for huge catalogs"
 abstract: >-
-  Compact, immutable string-to-id indexes for huge catalogs, with a Rust core and
-  Python bindings. Three complementary build-once / query-many structures: an ordered
-  FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; a
-  minimal-perfect-hash dictionary with verified membership and reverse lookup; and a
-  fingerprint-based minimal-perfect-hash map storing no keys at all (~1.3 bytes/key on
-  real dictionary words). All serialise to flat, memory-mappable blobs.
+  Compact, immutable string-to-id indexes for huge catalogs, with a Rust core, Python
+  bindings and a C ABI. Five complementary build-once / query-many structures: an ordered
+  FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; an
+  ordered front-coded dictionary storing every key, which answers rank, lower-bound, prefix
+  and range (2.64 bytes/key on real dictionary words); a minimal-perfect-hash dictionary with
+  verified membership and reverse lookup; a fingerprint-based minimal-perfect-hash map storing
+  no keys at all (1.24 bytes/key); and the bare perfect hash for a vocabulary known to be
+  closed (0.24). A workload-aware planner prices each of them from a sample of the keys before
+  one is built. All serialise to flat, memory-mappable blobs.
 authors:
   - family-names: Gradina
     given-names: Ilia
@@ -23,10 +26,11 @@ keywords:
   - finite-state-transducer
   - fst
   - dictionary-encoding
+  - front-coded-dictionary
   - autocomplete
   - fuzzy-search
   - memory-mapped
   - rust
   - python
 version: 4.0.0
-date-released: "2026-09-19"
+date-released: "2026-09-20"

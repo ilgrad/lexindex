@@ -107,8 +107,9 @@ Two honest crowns, both scoped to what is measured above — libraries a Python 
 actually install. The research-grade C++ frontier (MARISA aside, which is installable) has no
 binding and is not in these claims: it is listed with its papers and licences under
 [the research frontier, cited](#the-research-frontier-cited) and measured on its own protocol under
-[the research frontier, measured](#the-research-frontier-measured). **`CompactHashIndex` is the smallest `string → dense id` map here — 2.4×
-below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4 bits** — when you can accept a bounded
+[the research frontier, measured](#the-research-frontier-measured). **`CompactHashIndex` is the smallest `string → dense id` map here that
+can reject a non-member — 2.4× below `marisa-trie` at the default 8-bit fingerprint, 3.9× at 4
+bits** — when you can accept a bounded
 false-positive rate (about `2^-fingerprint_bits` by design — the fingerprint comes from a second hash,
 uncorrelated with the slot hash for well-distributed keys — measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over 2 M non-member probes,
 z = +0.18 / −0.83 against theory; **≈0.4 %** at 8 bits, **≈0.0015 %** at 16) and don't need

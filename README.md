@@ -319,7 +319,8 @@ at ten million, `DictIndex` builds faster than every compressed trie there, and 
 12–37 % smaller on paths, URLs and titles
 ([measured in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-measured);
 papers, code and licences [cited](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited)).
-**`CompactHashIndex` is the smallest `string → dense id` map here, 2.4× below `marisa-trie` at the
+**`CompactHashIndex` is the smallest `string → dense id` map here that can reject a non-member,
+2.4× below `marisa-trie` at the
 default 8-bit fingerprint and 3.9× at 4 bits**, when a bounded false-positive rate is acceptable:
 about `2^-fingerprint_bits` by design, measured **6.2530 %** at 4 bits and **1.5553 %** at 6 over
 2 M non-member probes (z = +0.18 / −0.83 against theory), ≈0.4 % at 8, ≈0.0015 % at 16. Both hashes

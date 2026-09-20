@@ -37,8 +37,10 @@ serialised blob is now simply `[magic "BIX4"][fst bytes]`.
 
 ## `CompactHashIndex`
 
-The smallest `string → dense id` map, and smaller than any installable trie. It pairs a minimal
-perfect hash with **one small fingerprint per key and no stored keys at all**:
+The smallest `string → dense id` map that can reject a non-member, and smaller than any installable
+trie. (`ClosedHashIndex` is a fifth of it at 0.24 bytes a key, and answers for a stranger as though
+it were a member — that is the whole difference.) It pairs a minimal perfect hash with **one small
+fingerprint per key and no stored keys at all**:
 
 - **`key → id`.** The MPH (in-crate, `src/mphf.rs`) maps the key's
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
@@ -616,17 +618,22 @@ catches the half that lives in bytes.
 **A new format ships beside a reader for the old one.** 1.0 and 3.0 each refused what the previous
 major wrote, and each cost every user of that format a rebuild. The rule from 3.0 on: a writer
 change lands as a *minor* release whose loader still reads the format the previous one wrote, so
-upgrading never fails on a file; dropping a reader is reserved for a major, and only once
-`lexindex dump` can turn the old blob back into the key list that rebuilds it. `BDX3` is the first
-format written under it: it is a third smaller than `BDX2` on the corpora the dictionary is aimed at
-and shares no section layout with it, so 4.0 refuses `BDX2` by name rather than carry a second
-reader, and the migration is `lexindex dump` on 3.x into `lexindex build` on 4.0.
+upgrading never fails on a file; dropping a reader is reserved for a major, and only once the
+old blob can be turned back into the key list that rebuilds it. `BDX3` is the first format written
+under it: it is a third smaller than `BDX2` on the corpora the dictionary is aimed at and shares no
+section layout with it, so 4.0 refuses `BDX2` by name rather than carry a second reader. The way
+back is that `BDX2` stores every key: 3.x answers `key(id)` over the whole blob, so a loop on the
+installed 3.x writes the key list and 4.0 builds from it. `lexindex dump` makes that loop a
+subcommand, but it is 4.0's — 3.0.0 shipped `plan`, `build` and `inspect` only — so the rule buys
+the *next* format change a one-liner, not this one. [Upgrading to 4.0](migration-4.md) is the
+worked path.
 
 **The key hash moved in 4.0 as well, and that is where the rule stops.** `BMP7`, `BCH7` and `BCL1`
 are keyed on a hash this version no longer computes, so every id they would answer is wrong; all
-three are refused by name. For `BMP7` the way back is the rule's — `lexindex dump` under 3.x writes
-the keys and `lexindex build` under 4.0 reads them — but `BCH7` and `BCL1` store no keys in any
-version, so no dump exists for them and the way back is the corpus they were built from. A hash
+three are refused by name. For `BMP7` the way back is the rule's — it stores its keys, so 3.x can
+write them out and 4.0 can read them back — but `BCH7` and `BCL1` store no keys in any version, so
+nothing can dump them and the way back is the corpus they were built from. The ids move either way:
+a perfect hash's id is a slot, and both the hash and the seed geometry changed. A hash
 change is a heavier break than a format change for exactly that reason, which is why it waits for a
 major rather than riding one.
 
@@ -659,7 +666,7 @@ or — never — read it wrong.
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH3` | 3.1 | the minimal perfect hash, inside `BMP8`, `BCH8` and `BCL2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8` and `BCL2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so all three

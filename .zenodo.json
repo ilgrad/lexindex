@@ -1,6 +1,6 @@
 {
   "title": "lexindex: compact, immutable string-to-id indexes for huge catalogs",
-  "description": "<p>Compact, immutable string-to-id indexes for huge catalogs, with a Rust core and Python bindings. Three complementary build-once / query-many structures: an ordered FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; a minimal-perfect-hash dictionary with verified membership and reverse lookup; and a fingerprint-based minimal-perfect-hash map storing no keys at all (~1.3 bytes/key on real dictionary words). All serialise to flat, memory-mappable blobs.</p><p>Distributed on PyPI (<code>pip install lexindex</code>) and crates.io (<code>cargo add lexindex</code>); documentation at <a href=\"https://ilgrad.github.io/lexindex/\">ilgrad.github.io/lexindex</a>.</p>",
+  "description": "<p>Compact, immutable string-to-id indexes for huge catalogs, with a Rust core, Python bindings and a C ABI. Five complementary build-once / query-many structures: an ordered FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; an ordered front-coded dictionary storing every key, which answers rank, lower-bound, prefix and range (2.64 bytes/key on real dictionary words); a minimal-perfect-hash dictionary with verified membership and reverse lookup; a fingerprint-based minimal-perfect-hash map storing no keys at all (1.24 bytes/key); and the bare perfect hash for a vocabulary known to be closed (0.24). A workload-aware planner prices each of them from a sample of the keys before one is built. All serialise to flat, memory-mappable blobs.</p><p>Distributed on PyPI (<code>pip install lexindex</code>) and crates.io (<code>cargo add lexindex</code>); documentation at <a href=\"https://ilgrad.github.io/lexindex/\">ilgrad.github.io/lexindex</a>.</p>",
   "upload_type": "software",
   "access_right": "open",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "finite-state-transducer",
     "fst",
     "dictionary-encoding",
+    "front-coded-dictionary",
     "autocomplete",
     "fuzzy-search",
     "memory-mapped",

@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.0.0] — 2026-09-19
+## [4.0.0] — 2026-09-20
 
 ### Changed
 
@@ -144,8 +144,9 @@ All notable changes to this project are documented here. The format follows
   a shift and a mask, and that is the price of the bytes it saves.
 
   `BDX1` and `BDX2` are refused by name, as one reader and not three, so a dictionary blob written
-  before 4.0 has to be rebuilt from its keys — `lexindex dump` on 3.x into `lexindex build` on 4.0
-  is the path. `golden-2.2.0-dict.bdx` joins the refused fixtures and `golden-4.0.0-dict.bdx` pins
+  before 4.0 has to be rebuilt from its keys, which `BDX2` stores: 3.x answers `key(id)` over the
+  whole blob and 4.0 builds from the list. `docs/migration-4.md` is the worked path, index by index,
+  with what happens to the ids. `golden-2.2.0-dict.bdx` joins the refused fixtures and `golden-4.0.0-dict.bdx` pins
   the new bytes.
 
 - **`plan()` prices `BDX3`, and the `DictIndex` estimate lands within 1.0 % of the built blob at the

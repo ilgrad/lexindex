@@ -50,6 +50,7 @@ plugins:
 nav:
   - Home: index.md
   - Usage guide: usage.md
+  - Upgrading to 4.0: migration-4.md
   - Design: design.md
   - Benchmarks: benchmarks.md
   - API reference: api.md

@@ -64,6 +64,8 @@ crate.
 - **[Design](design.md)** — how the FST rank-walk, the fingerprint and minimal-perfect-hash
   dictionaries, and zero-copy memory-mapping work, and the serialised blob layout.
 - **[API reference](api.md)** — the typed public surface.
+- **[Upgrading to 4.0](migration-4.md)** — which 3.x blobs still load, which have to be
+  rebuilt, how to get the keys back out of one, and whose ids survive the rebuild.
 - **[Changelog](changelog.md)**.
 - **[Sponsor](https://github.com/sponsors/ilgrad)** — if lexindex saves memory or latency in a system
   you run; corporate sponsorship funds compatibility, benchmarking, security hardening and
