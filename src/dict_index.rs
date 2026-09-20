@@ -160,8 +160,8 @@ pub struct DictIndex {
     ///
     /// Derived at load rather than stored: a sample is eight bytes of a head, and the heads are in
     /// the blob already — what the section bought was contiguity, and contiguity is what a load
-    /// can build. Eight bytes a block off every blob: 2.682 bytes a key to 2.651 on words at the
-    /// default block, 1.131 to 1.068 on a million numeric keys at 128. A mapped index holds the
+    /// can build. Eight bytes a block off every blob: 2.666 bytes a key to 2.635 on words at the
+    /// default block, 1.099 to 1.037 on a million numeric keys at 128. A mapped index holds the
     /// array and borrows everything else, which it did when the array was read rather than built,
     /// so neither the load nor a lookup moved — five corpora, load within 0.9 % and `id` and `key`
     /// within 3 %, both ways.

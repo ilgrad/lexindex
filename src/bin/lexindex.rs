@@ -48,7 +48,7 @@ needs — what the index must be able to do. They narrow what `plan` ranks and w
 the ranking is won by the index that answers a stranger with some member's id, and nothing in
 the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
 the file, and the two probabilistic indexes are ranked with the rest — `ClosedHashIndex` at
-0.26 bytes a key, `CompactHashIndex` at 1.26. Naming an index with `--index` builds it whatever
+0.24 bytes a key, `CompactHashIndex` at 1.24. Naming an index with `--index` builds it whatever
 the needs say.
 
 options (`--name value` or `--name=value`):

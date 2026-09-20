@@ -1544,7 +1544,7 @@ impl PyCompactHashIndex {
 
 /// Minimal perfect hash and nothing else: `string -> dense id` for a vocabulary known to be closed.
 /// `id` never says "absent" -- a member's id, or some id in `[0, n)` for any other string -- and the
-/// index is the perfect hash alone, about 0.26 bytes per key.
+/// index is the perfect hash alone, about 0.24 bytes per key.
 #[cfg(feature = "mph")]
 #[pyclass(name = "ClosedHashIndex", module = "lexindex._core", frozen)]
 pub struct PyClosedHashIndex {

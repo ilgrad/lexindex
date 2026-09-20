@@ -401,7 +401,7 @@ a `u64`: 8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena.
 bytes per arena took the whole structure to 13.62. Since 1.1 the offsets are **blocked**: 16 slots
 share a `u32` base and carry one-byte *cumulative* offsets after it (tag `0x11`, 21 bytes per block),
 so a key is `data[base + off[k] .. base + off[k + 1]]` — 1.31 bytes per key instead of 4, and the
-whole index is **10.94 B/key**. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot
+whole index is **10.88 B/key**. A corpus whose 16-key runs do not fit in 255 bytes gets 256-slot
 blocks with two-byte offsets (`0x12`, 2.02 B/key) — but a few long keys among short ones do not
 decide the layout: since 2.0 a block whose keys outgrow its offsets keeps its place and stride,
 stores all ones in its first offset (zero in every other block) with an index after it, and its

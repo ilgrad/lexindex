@@ -104,7 +104,7 @@ rather than for its own structure.
 keys at all: one hash, one probe, at most a fingerprint to compare. What they cannot do is tell a
 stranger from a member with certainty, or give a key back for an id. Among the structures that do
 keep their keys, `DictIndex` is **both smaller and faster than every `marisa-trie` setting measured
-at either block** — 2.53 B/key and 415 ns at 512, 2.65 and 388 at the default 256, against
+at either block** — 2.52 B/key and 415 ns at 512, 2.64 and 388 at the default 256, against
 2.96–3.07 and 446–490.
 
 Two honest crowns, both scoped to what is measured above — libraries a Python or Rust project can
@@ -640,7 +640,7 @@ of per-call overhead sits on top of every Python lookup.
 
 Below 1.00× is faster than `dict`. So: a `CompactHashIndex` answers a **present** key in 0.61–0.72×
 the time of a `dict` and a **missing** one in well under half, batched `ids_of` in a quarter to just
-under half — while occupying 1.26 bytes per key on disk against the `dict`'s 71–95 bytes per key in
+under half — while occupying 1.24 bytes per key on disk against the `dict`'s 71–95 bytes per key in
 RAM. `PerfectHashIndex` trades level with `dict` on single words, costs a fifth more on the pair
 corpora, and wins on misses everywhere; `marisa-trie` costs 2.2–4.4× and `StringIndex` 1.2–2.6×, and
 both swing with the corpus exactly as their sizes do.

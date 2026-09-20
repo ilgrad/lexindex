@@ -418,7 +418,7 @@ class ClosedHashIndex:
     """Minimal perfect hash and nothing else: ``string -> dense id`` for a closed vocabulary.
 
     ``id`` never says absent: a member's id, or some id in ``[0, n)`` for any other string. The
-    index is the perfect hash alone, about 0.26 bytes per key. Use it when every query is a
+    index is the perfect hash alone, about 0.24 bytes per key. Use it when every query is a
     member by construction; ``CompactHashIndex`` the moment a stranger can ask.
     """
 

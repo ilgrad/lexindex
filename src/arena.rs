@@ -47,7 +47,7 @@
 //! This is the second narrowing of the same table, and both were worth what they cost. Before
 //! 0.5.0 every offset was 8 bytes: on the 479 823-word dictionary that was 8.0 of
 //! `PerfectHashIndex`'s 17.6 bytes per key, to address a 4.9 MB arena. Choosing 4 or 8 per arena
-//! took the whole index to 13.62 bytes per key; the blocked layouts take it to **10.94**.
+//! took the whole index to 13.62 bytes per key; the blocked layouts take it to **10.88**.
 //!
 //! Reading did not get slower for it. Alternated against the flat arena with
 //! `CompactHashIndex::id_unchecked` — same key hash, no arena — as the control, `id` measured

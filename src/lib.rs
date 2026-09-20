@@ -18,7 +18,7 @@
 //!   query is a member by construction.
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
-//!   at 10.9 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup in
+//!   at 10.88 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup
 //!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
 //!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
