@@ -1583,7 +1583,7 @@ At ten times the keys lexindex is on the front of all six corpora — `DictIndex
 `StringIndex` on `numeric`, where it is both the smallest and the fastest. `DictIndex` is the
 smallest structure on the other five: `dna` at 3.81 bytes a key at block 1024 against C²-CoCo's 5.98
 at ρ=1, `opaque` 9.95 against PDT's 13.73 and `uuid` 17.42 against PDT's 20.59 — builds of 116 and
-127 seconds against 1.3 and 1.5 — and, by a narrower 4 % and 6 %, `titles-en` and `urls` against
+127 seconds against 1.3 and 1.5 — and, by a narrower 4 % and 5 %, `titles-en` and `urls` against
 MARISA at ρ=2. On `dna` block 1024 is the fastest row as well as the smallest, 520 ns to XCDAT's
 574, so it is alone on that corpus's front and dominates every other structure outright.
 `DictIndex` builds before every one of them again, in 0.9–2.3 s, where the next is MARISA at
@@ -1643,7 +1643,7 @@ no compressed trie here builds faster than blocks of front-coded keys, and none 
 bar CoCo-trie on `numeric`, where `StringIndex` holds the whole corpus in 301 bytes at a
 million keys and 357 at ten million and beats both by three to four orders of magnitude. A block
 still shares only with its own neighbours, so where long fragments repeat across the whole key
-set — URLs, titles, paths — the lead is narrowest: 4 % on `titles-en` and 6 % on `urls` at ten
+set — URLs, titles, paths — the lead is narrowest: 4 % on `titles-en` and 5 % on `urls` at ten
 million keys, and 1.6 % over MARISA at ρ=2 on `paths` at a million, the cell 4.0 turned over.
 Where C²'s cache-conscious MARISA reads faster, on ten of the thirteen corpora at a million keys, it
 is larger, and both are on the front.
