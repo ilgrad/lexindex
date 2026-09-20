@@ -654,13 +654,45 @@ const SYMBOL: u8 = 0;
 const RAW: u8 = 1;
 const PHRASE: u8 = 2;
 
+/// A token of a parse in one word: kind in the low two bits, the input bytes it covers in the
+/// next six, then the symbol code or phrase id.
+///
+/// Packed because a parse stores one of these for every byte of every piece the build prices, and
+/// the tuple it replaced was twelve bytes for the same twenty-six bits.
+#[derive(Clone, Copy)]
+struct Pick(u32);
+
+const _: () = assert!(MAX <= 63 && CAP <= 1 << 24);
+
+impl Pick {
+    #[inline(always)]
+    fn new(kind: u8, id: u32, len: u32) -> Pick {
+        debug_assert!(len <= 63 && id < 1 << 24);
+        Pick(u32::from(kind) | len << 2 | id << 8)
+    }
+
+    #[inline(always)]
+    fn kind(self) -> u8 {
+        (self.0 & 3) as u8
+    }
+
+    #[inline(always)]
+    fn len(self) -> usize {
+        (self.0 >> 2) as usize & 63
+    }
+
+    #[inline(always)]
+    fn id(self) -> u32 {
+        self.0 >> 8
+    }
+}
+
 /// The two arrays a parse fills, kept across calls so a shard allocates once.
 #[derive(Default)]
 pub(crate) struct Scratch {
     cost: Vec<u32>,
-    /// Per byte, the token the cheapest coding from there starts with: kind, symbol code or phrase
-    /// id, and the input bytes it covers.
-    pick: Vec<(u8, u32, u32)>,
+    /// Per byte, the token the cheapest coding from there starts with.
+    pick: Vec<Pick>,
     tokens: Vec<(usize, usize, u8, u32)>,
 }
 
@@ -688,7 +720,7 @@ fn parse(
     }
     w.cost[n] = 0;
     if w.pick.len() < n {
-        w.pick.resize(n, (RAW, 0, 1));
+        w.pick.resize(n, Pick::new(RAW, 0, 1));
     }
     // Both arrays are grown past the string above; the slices say so to the bounds checks, which
     // are otherwise a twentieth of a build -- every read below is at most `n`.
@@ -699,9 +731,12 @@ fn parse(
         // The symbol table's own answer at this position, which is the longest it can match.
         let (code, len) = enc.step(fsst::word_at(s, i), n - i);
         let (mut best, mut choice) = if code == ESCAPE {
-            (16 + cost[i + 1], (RAW, 0, 1))
+            (16 + cost[i + 1], Pick::new(RAW, 0, 1))
         } else {
-            (8 + cost[i + len], (SYMBOL, u32::from(code), len as u32))
+            (
+                8 + cost[i + len],
+                Pick::new(SYMBOL, u32::from(code), len as u32),
+            )
         };
         if let Some(prices) = prices {
             let mut node = 0u32;
@@ -718,7 +753,7 @@ fn parse(
                 let c = 8 * prices.bytes_for(id - 1) as u32 + tail;
                 if c < best {
                     best = c;
-                    choice = (PHRASE, (id - 1) as u32, k as u32 + 1);
+                    choice = Pick::new(PHRASE, (id - 1) as u32, k as u32 + 1);
                 }
             }
         }
@@ -733,9 +768,9 @@ fn tokens(w: &mut Scratch, n: usize) {
     w.tokens.clear();
     let mut i = 0;
     while i < n {
-        let (kind, id, len) = w.pick[i];
-        w.tokens.push((i, len as usize, kind, id));
-        i += len as usize;
+        let pick = w.pick[i];
+        w.tokens.push((i, pick.len(), pick.kind(), pick.id()));
+        i += pick.len();
     }
 }
 
