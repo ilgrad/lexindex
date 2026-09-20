@@ -1,0 +1,72 @@
+local/uopspad at db32225 (N-07, the padding experiment): what an instruction costs inside a
+miss-bound lookup loop, and what the loop's window is.
+
+One `MPH3` table over n splitmix64 keys, probed in a shuffled order, with PAD padding instructions
+welded into the loop between one query and the next. PAD is a const generic, so the padding unrolls
+-- a `for` over a run-time count welds a compare and a branch onto every step and measures the loop
+rather than the step, which is what the first cut of this harness did (0.32 ns a `nop`, five times
+the real figure). Four shapes:
+
+  nop   retires and occupies the window, needs no port and no operand
+  alu   `add`s on four rotating registers, so the distance between two writes of one is four
+  dep   `add`s on one register: a chain, one step a cycle whatever the window holds
+  load  dependent loads inside 4 KiB, which never leaves L1
+
+`ns/step` is the slope over the last two pad counts, which is past whatever the window absorbs.
+The last line chases one dependent load at a time over a region the size of the table itself --
+the latency the sweep's misses are hiding -- and divides it by the `nop` slope.
+
+Three 100 M runs read the `nop` slope at 0.2275, 0.2317 and 0.2359 ns a step: +-1.8 %. Not on a
+pinned core, and an editor was open; the agreement across runs is the only argument that it did not
+matter. Ryzen 7 5800HS (8 cores, 16 MB L3, 38 GB), Fedora 44.
+
+WHAT IT SAYS
+
+  * An instruction added to a miss-bound lookup path costs **0.23 ns** at 100 M keys, and 0.053 ns
+    at 10 M where the 2.3 MB table is resident. The loop is not paying for the instruction's own
+    execution -- it is paying because the instruction displaces another query from the window, and
+    the window is what buys the memory-level parallelism.
+  * The table's own dependent-load latency is **85.3 ns** at 22.8 MB against **12.5 ns** at 2.3 MB,
+    and the loop answers a key in 15.0 ns, so it keeps **5.7 misses in flight**.
+  * Latency over the `nop` slope reads **359-375 instructions** at 100 M and 235 at 10 M. Zen 3's
+    reorder buffer is 256 entries, so the 100 M figure is an upper bound rather than a reading of
+    it -- some nops are eliminated at rename -- and the 10 M figure is not a window at all, the
+    loop there being throughput-bound rather than window-bound.
+  * A **dependent** instruction costs 1.00 ns a step against an independent one's 0.66 and a nop's
+    0.23: a chain welded onto the lookup path costs what four independent instructions do, which is
+    the argument against trading a table load for a longer arithmetic chain.
+  * **The lever this sets for T-07.** At 300 M keys `MPH3` answers a key in 16.3 ns against
+    `ptr_hash` fast's 16.2 (`mphf-misses-2026-09-20-arz-1a9003e.txt`). At 0.23 ns an instruction
+    that gap is **less than half an instruction**, and MPH3 takes 15 % fewer misses to reach it.
+    There is no uop-shaving win left on the single lane.
+
+CONTROL: the sequential probe order. Probing in generation order instead of shuffled moves no cell
+by more than 1 % and the slope by 3.7 % (0.2359 against 0.2275) -- the loop waits on the table, not
+on the probe array, which is read sequentially either way.
+
+=== 100 M, shuffled ===
+n 100000000, shuffled probe order, 1.911 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop       15.00    18.67    18.94    24.10    28.59    36.33    50.89      0.2275
+alu       14.89    24.85    28.74    34.73    49.62    52.65    94.78      0.6582
+dep       16.88    21.29    24.23    29.35    42.74    55.88   120.17      1.0044
+load      16.74    22.70    30.35    48.14    68.96   135.44   240.70      1.6447
+one dependent load over 22.8 MB: 85.3 ns; window = latency / nop slope = 375 instructions
+
+=== 10 M, shuffled ===
+n 10000000, shuffled probe order, 1.915 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop        2.74     3.34     3.56     4.38     5.28     6.92    10.32      0.0532
+alu        2.98     5.13     5.61     7.14    10.31    13.30    23.51      0.1595
+dep        3.26     4.27     4.86     6.29     9.33    15.57    46.82      0.4882
+load       3.25     5.05     6.85    12.39    25.54    59.45   167.21      1.6837
+one dependent load over 2.3 MB: 12.5 ns; window = latency / nop slope = 235 instructions
+
+=== 100 M, sequential probe order (control) ===
+n 100000000, sequential probe order, 1.911 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop       15.05    18.81    19.03    24.43    29.27    36.99    52.09      0.2359
+alu       14.98    25.05    28.96    34.92    50.27    53.79    94.98      0.6437
+dep       16.77    21.30    24.33    29.50    43.16    56.22   120.47      1.0038
+load      16.81    22.84    30.25    48.96    69.39   135.78   239.11      1.6146
+one dependent load over 22.8 MB: 84.6 ns; window = latency / nop slope = 359 instructions

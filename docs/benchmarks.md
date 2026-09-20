@@ -1041,6 +1041,46 @@ which is where to look for it. At 100 million keys the tables are 24–37 MB aga
 partly resident, and the six rows sit between 1.031 and 1.054 with PHast at 1.084 — the ordering
 there says nothing, and the gap only opens once nothing is resident.
 
+### What an instruction costs inside the miss
+
+A lookup that waits on memory is often said to get its arithmetic for free. It does not, and the
+price is measurable: `local/uopspad` welds `PAD` padding instructions into the probe loop between
+one query and the next, with `PAD` a const generic so the padding unrolls rather than becoming a
+loop of its own. Four shapes — a `nop`, which needs no port and no operand; independent `add`s on
+four rotating registers; a chain of `add`s on one register; and dependent loads inside 4 KiB that
+never leave L1.
+
+| n | table | 0 | 4 | 16 | 64 | 128 | ns an instruction |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 100 M | 22.8 MB | 15.00 | 18.67 | 24.10 | 36.33 | 50.89 | **0.23** (`nop`) |
+| 100 M | 22.8 MB | 14.89 | 24.85 | 34.73 | 52.65 | 94.78 | 0.66 (independent `add`) |
+| 100 M | 22.8 MB | 16.88 | 21.29 | 29.35 | 55.88 | 120.17 | 1.00 (a chain) |
+| 10 M | 2.3 MB | 2.74 | 3.34 | 4.38 | 6.92 | 10.32 | **0.053** (`nop`) |
+
+<sub>[`uops-pad-2026-09-20-arz-db32225.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/uops-pad-2026-09-20-arz-db32225.txt)
+— ns a lookup, the minimum of three rounds taken A-B-A-B over the pad counts, and the slope over
+the last two. Three 100 M runs read the `nop` slope at 0.2275, 0.2317 and 0.2359: ±1.8 %. The
+control is the probe order: probing in generation order rather than shuffled moves no cell by more
+than 1 %, so the loop waits on the table and not on the probe array, which is read sequentially
+either way.</sub>
+
+The loop is not paying for the instruction's execution. It is paying because the instruction
+displaces another query from the window, and the window is what buys the memory-level parallelism:
+one dependent load at a time over a region the size of the table takes **85.3 ns** at 22.8 MB and
+12.5 at 2.3 MB, while the loop answers a key in 15.0 ns, so it keeps **5.7 misses in flight**.
+Latency over the slope reads 359–375 instructions at 100 M — above Zen 3's 256-entry reorder
+buffer, so take it as an upper bound on the window rather than a reading of it, since some nops are
+eliminated at rename. At 10 M the same arithmetic gives 235 and means nothing: that loop is
+throughput-bound, not window-bound, which is exactly why its slope is a quarter of the other's.
+
+Two things follow. A **dependent** instruction costs 1.00 ns a step against an independent one's
+0.66 and a `nop`'s 0.23, so a chain welded onto a lookup path costs what four independent
+instructions do — which is the argument against trading a table load for a longer arithmetic chain,
+not for it. And **0.23 ns an instruction is the exchange rate for the last of the lookup column**:
+at 300 million keys `MPH3` answers in 16.3 ns against `ptr_hash` fast's 16.2, so that gap is less
+than half an instruction, and `MPH3` reaches it on 15 % fewer misses. There is nothing left to
+shave there.
+
 ## A fingerprinted `PerfectHashIndex` on mostly-absent keys
 
 `local/negfp`, a throwaway harness beside the crate, builds the dictionary twice — plain and with
