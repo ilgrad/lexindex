@@ -13,15 +13,15 @@ against its hash, records the machine, and finishes by putting the run's Python 
 the published one — the number no change to this library can move, and therefore the one that says
 whether your machine is comparable to the one in the tables at all.
 
-> **Every `DictIndex` size on this page predates the microblock-start change in 4.0.0 and is high
-> by 0.04 % to 3.7 %** — the smaller the block, the larger the gap. Re-measured directly, since a
-> size is a function of the keys and needs no timed run: on the word list 2.850 bytes a key at
-> block 32, 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at
-> 1024; over a million keys at the default block, urls 7.511, paths 10.157, English titles 7.387,
-> Russian 7.789, Chinese 6.269, DNA 4.375, opaque ids 10.399, numeric 1.011, identifiers 5.289,
-> domains 4.731, UUIDs 18.040, and 889 864 PyPI names 4.349. The tables themselves wait for a run
-> whose Python call floor is back at 47 ns — it measured 110 on the day of the change, every
-> latency cell moves with it, and a table with one refreshed column is worse than a dated one.
+> **Every `DictIndex` size on this page predates two 4.0.0 changes — the microblock start and the
+> dropped pruning pass — and is high by 0.04 % to 15 %.** Re-measured directly, since a size is a
+> function of the keys and needs no timed run: on the word list 2.850 bytes a key at block 32,
+> 2.721 at 64, 2.663 at 128, **2.635 at the default 256**, 2.519 at 512 and 2.513 at 1024; over a
+> million keys at the default block, urls 7.511, paths 9.871, English titles 7.377, Russian 7.667,
+> Chinese 6.272, DNA 4.375, opaque ids 10.399, numeric 1.011, identifiers 5.228, domains 4.500,
+> UUIDs 18.040, and 889 864 PyPI names 4.165. The tables themselves wait for a run whose Python
+> call floor is back at 47 ns — it measured 110 on the day of the first change, every latency cell
+> moves with it, and a table with one refreshed column is worse than a dated one.
 
 
 ## Serialised size on real English words

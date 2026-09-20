@@ -569,7 +569,7 @@ bits the perfect hash spends per key. Those are read off builds of two 100 000-k
 uniform over the corpus, one of runs of consecutive keys — and below that size there is nothing to
 model: the candidates are built and reported at what they weigh. Scored against the built blob on
 23 corpora of half a million to ten million keys, at each of the three priced blocks, the
-`DictIndex` estimate lands within **1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**.
+`DictIndex` estimate lands within **1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**.
 
 The two draws answer two different questions, and one draw answering both was the estimate's largest
 error. What a suffix compresses to is a property of the whole key set, so the uniform draw reads it;

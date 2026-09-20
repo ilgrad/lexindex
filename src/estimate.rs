@@ -12,7 +12,7 @@
 //! *corpus* would buy, along with the bytes an fst spends per trie node and the bits the perfect
 //! hash spends per key. Scored against the built blob on 23 corpora of half a million to ten
 //! million keys, at each of the three priced blocks, the [`DictIndex`] estimate lands within
-//! **1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**.
+//! **1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**.
 //! [`StringIndex`] is looser — 3.0 % median, 7.6 % at the 90th percentile, and 32 % on a corpus of
 //! file paths — because an fst merges equal
 //! suffixes, and how much it merges is a property of the whole key set rather than of a sample of

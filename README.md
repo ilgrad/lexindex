@@ -340,7 +340,7 @@ depends on how much the keys share, a fingerprint index's does not
 you asked for — the dictionary at each of its three block sizes — ranks them cheapest first, and
 says when two are too close to call or when the corpus is one its model cannot carry. Past 100 000
 keys it models from two draws of that size and lands within **1.0 % of the built `DictIndex` blob at
-the median and 6.5 % at worst**, over 23 corpora at three blocks each;
+the median and 7.2 % at worst**, over 23 corpora at three blocks each;
 below it, it builds the candidates and reports what they weigh. `plan_file` does the same for a
 keys file **without ever holding it**: 0.27 GB of resident memory against 1.30 on a 925 MB path
 list, and the same ladder to the byte. By hand, in decision order:

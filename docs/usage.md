@@ -32,7 +32,7 @@ Past 100 000 keys the three numbers no statistic gives — what the codec squeez
 bytes an fst spends per trie node, the bits the perfect hash spends per key — come from two draws of
 that size, and each estimate says so in `measured`. Scored against the built blob on 23 corpora of
 half a million to ten million keys, at each of the three priced blocks, `DictIndex` lands within
-**1.0 % median, 4.5 % at the 90th percentile and 6.5 % at worst**; `StringIndex` within 3.0 / 7.6 /
+**1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**; `StringIndex` within 3.0 / 7.6 /
 31.5, because an fst merges equal suffixes and how much it merges is a property of the whole key set
 rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
 and reported at what they weigh.

@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`DictIndex` is 7 % to 53 % smaller, and the format is `BDX3`.** Six changes, each
+- **`DictIndex` is 7 % to 53 % smaller, and the format is `BDX3`.** Seven changes, each
   priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
@@ -78,13 +78,27 @@ All notable changes to this project are documented here. The format follows
   default, the word list −1.6 % and −0.6 %. It is also one load fewer on the search path, worth
   −0.7 % to −1.3 % of the instructions an `id` retires and the same off `key_into`.
 
+  *The vocabulary is the miner's, and nothing prunes it after.* A candidate is kept when what it
+  saves over the whole blob clears its storage — the miner's bar carries a `scale`, because the
+  gains are counted on a sample of the suffixes and paid for by every key. A pass then re-asked the
+  same question with the scale taken off: it parsed those samples and dropped every phrase no
+  sampled piece picked. A phrase that earns its keep at one key in ten thousand appears zero times
+  in such a sample, so the pass could only remove what the blob-scaled test had already approved —
+  3 265 phrases to 1 461 on a million domains, 19 089 to 10 392 on a million paths. Measured over
+  ten corpora at four blocks, dropping the pass is smaller on 36 of 44 cells and larger on 8, every
+  loss under 0.17 %: domains −4.3 to −4.9 %, paths −2.0 to −4.6 %, identifiers −0.8 to −3.6 %, urls
+  and English titles at a hundred thousand −2.3 to −3.0 %, Russian titles −1.2 to −1.6 %. A variant
+  that kept the pass but only re-ranked, never dropping, lands within 0.08 % of no pass at all, so
+  the ordering it substituted is worth nothing. It costs the lookup, because a shard that reaches
+  more phrases gives up symbols for them: `id` +0.4 to +1.4 % and `key_into` +0.7 to +4.8 %.
+
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
   --index dict`, sizes being a function of the keys): urls 11.25 → **7.51** bytes a key, paths 14.67
-  → **10.16**, article titles 9.37 → **7.39** in English, 11.36 → **7.79** in Russian and 8.28 →
+  → **9.87**, article titles 9.37 → **7.38** in English, 11.36 → **7.67** in Russian and 8.28 →
   **6.27** in Chinese, DNA 7.70 → **4.37**, opaque ids 13.80 → **10.40**, numeric 2.13 → **1.01**,
-  identifiers 6.66 → **5.29**, domains 5.07 → **4.73**, UUIDs 20.45 → **18.04**; the dictionary's
-  479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.35**. That is 6.7 % off domains
-  and 7.2 % off the word list at one end and 52.5 % off decimal ids at the other.
+  identifiers 6.66 → **5.23**, domains 5.07 → **4.50**, UUIDs 20.45 → **18.04**; the dictionary's
+  479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.17**. That is 7.0 % off the word
+  list at one end and 52.5 % off decimal ids at the other.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   **What it costs to build.** The price is the phrase machinery and nothing else, so it is paid only
@@ -111,7 +125,8 @@ All notable changes to this project are documented here. The format follows
   rows, and one induction variable in the walk — take a build's retired instructions, net of reading
   and sorting the keys, down **9.9 % on urls, 9.6 % on English titles, 9.2 % on identifiers and
   8.8 % on paths**, and the build call itself down 2.4–3.6 % in wall clock; the blobs are
-  byte-identical. Corpora that buy no phrase, decimal ids and the word list among them, are flat by
+  byte-identical. Dropping the pruning pass takes a further **5.2 % to 8.6 %** off the same
+  measure. Corpora that buy no phrase, decimal ids and the word list among them, are flat by
   construction.
 
   **What it costs to read.** Against `BDX2` over a million keys at block 256, the two binaries
@@ -160,10 +175,10 @@ All notable changes to this project are documented here. The format follows
   merged stream that `plan` makes over the sorted keys, and the two still print the same ladder to
   the byte on a 7 343 721-line path list.
 
-  **1.0 % median, 4.5 % at the 90th percentile, 6.5 % at worst**, against 9.0 / 14.2 / 23.9 for the
+  **1.0 % median, 4.2 % at the 90th percentile, 7.2 % at worst**, against 9.0 / 14.2 / 23.9 for the
   same model reading one flat-rate sample and 8.8 / 23.8 / 33.3 for the model `BDX3` inherited.
   Corpora whose suffixes repeat nothing — DNA, UUIDs, opaque ids — land inside 0.5 %; the spread is
-  a PyPI name list at 6.5 % low and a 7.3-million-line path list at 5.1 % high. The second draw and
+  an identifier list at 4.3 % low and a 7.3-million-line path list at 7.2 % high. The second draw and
   the corpus-economy mine cost a fixed 0.35 s and 44 MB a plan, so the ratio is worst on the
   cheapest plan and vanishes on the largest: 1.30× the wall time and 1.39× the peak on a million
   urls, 1.22× and 1.62× on a million Chinese titles, 1.06× and 1.12× on ten million English ones,
