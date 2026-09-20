@@ -69,7 +69,7 @@ jobs:
       # hours under an interpreter; `the_golden_blob_parses_and_writes_back_identically` reads the
       # committed `MPH1` fixture instead and pins the same header, in 12 seconds for the whole job.
       #
-      # `dict_index::` earns its place here more than any other format: `BDX1` is the newest, and it
+      # `dict_index::` earns its place here more than any other format: `BDX3` is the newest, and it
       # stores the first eight bytes of each block head as a *big-endian* word inside an otherwise
       # little-endian blob, which is exactly the mix this job exists to catch. Three tests, 781 s
       # measured -- the round trip, the length/table checks, and the varints.

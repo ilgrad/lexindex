@@ -50,6 +50,12 @@ jobs:
           # An undated heading means the release notes were never finished.
           grep -qE "^## \[$ver\] . [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
             || { echo "::error::CHANGELOG.md '## [$ver]' heading carries no release date"; fail=1; }
+          # ... and a date that disagrees with CITATION.cff sends a wrong one to Zenodo, which
+          # mints a DOI from that file and cannot be corrected by moving the tag. 4.0.0 sat at a
+          # prepared-but-untagged 2026-09-19 for a day, which is exactly how the two drift apart.
+          chg_date="$(grep -m1 -E "^## \[$ver\] . " CHANGELOG.md | sed -E 's/.* ([0-9]{4}-[0-9]{2}-[0-9]{2})$/\1/')"
+          cff_date="$(grep -m1 '^date-released:' CITATION.cff | awk '{print $2}' | tr -d '"')"
+          check "CITATION.cff date-released" "$cff_date" "$chg_date"
           exit $fail
 
   # The full CI matrix — fmt, clippy, tests on Linux/macOS/Windows, Python 3.11–3.14, MSRV,
@@ -136,6 +142,13 @@ jobs:
           p = lexindex.PerfectHashIndex(["x", "y"])
           p.save("smoke.bmp")
           assert lexindex.PerfectHashIndex.load_mmap("smoke.bmp").key(p.id("y")) == "y"
+          d = lexindex.DictIndex(["a", "ab", "b"])
+          assert d.id("ab") == 1 and d.key(1) == "ab"
+          d.save("smoke.bdx")
+          assert lexindex.DictIndex.load_mmap("smoke.bdx").prefix("a") == [("a", 0), ("ab", 1)]
+          z = lexindex.ClosedHashIndex(["a", "b"])
+          assert sorted([z.id("a"), z.id("b")]) == [0, 1]
+          assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
           print("smoke ok:", lexindex.__version__)
           EOF
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -203,6 +216,13 @@ jobs:
           p = lexindex.PerfectHashIndex(["x", "y"])
           p.save("smoke.bmp")
           assert lexindex.PerfectHashIndex.load_mmap("smoke.bmp").key(p.id("y")) == "y"
+          d = lexindex.DictIndex(["a", "ab", "b"])
+          assert d.id("ab") == 1 and d.key(1) == "ab"
+          d.save("smoke.bdx")
+          assert lexindex.DictIndex.load_mmap("smoke.bdx").prefix("a") == [("a", 0), ("ab", 1)]
+          z = lexindex.ClosedHashIndex(["a", "b"])
+          assert sorted([z.id("a"), z.id("b")]) == [0, 1]
+          assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
           print("smoke ok:", lexindex.__version__)
           EOF
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -222,6 +242,32 @@ jobs:
         with:
           command: sdist
           args: --out dist
+      # The sdist is the only install path on a platform with no wheel, and building one proves
+      # nothing about compiling it: a file left out of the package fails here rather than after the
+      # upload, where a version number can only be burned.
+      - name: install the sdist from source and run the wheel smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip twine
+          twine check dist/*
+          python -m pip install --no-binary :all: --no-index --find-links dist lexindex
+          cd "$RUNNER_TEMP"
+          python - <<'EOF'
+          import lexindex
+          idx = lexindex.StringIndex(["banana", "apple"])
+          assert idx.id("apple") == 0 and idx.key(1) == "banana"
+          d = lexindex.DictIndex(["a", "ab", "b"])
+          assert d.id("ab") == 1 and d.key(1) == "ab"
+          assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
+          c = lexindex.CompactHashIndex(["a", "b"])
+          assert c.contains("a")
+          z = lexindex.ClosedHashIndex(["a", "b"])
+          assert sorted([z.id("a"), z.id("b")]) == [0, 1]
+          p = lexindex.PerfectHashIndex(["x", "y"])
+          assert p.key(p.id("y")) == "y"
+          print("sdist ok:", lexindex.__version__)
+          EOF
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels-sdist
