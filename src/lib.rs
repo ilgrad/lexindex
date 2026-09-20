@@ -19,11 +19,12 @@
 //! - [`PerfectHashIndex`] — a **minimal-perfect-hash** dictionary with **verified** membership and
 //!   reverse lookup (keys stored); no ordering. `id` costs about what a `std::HashMap` lookup does,
 //!   at 10.88 B/key; `id_unchecked`, which skips the membership comparison, is the fastest lookup
-//!   the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
+//!   in the crate for a vocabulary known to be closed. Use it as a token↔id map on a hot path.
 //! - [`DictIndex`] — an **ordered** dictionary with the key stored for every id: exact
 //!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
-//!   automata, so no fuzzy queries. The sorted keys are front-coded in blocks with the suffixes
-//!   under a static symbol table: 2.64 B/key on real words, 56 % below `StringIndex`. Use it
+//!   automata, so no fuzzy queries. The sorted keys are front-coded in blocks, the suffixes coded
+//!   per shard under a symbol table or a packed alphabet, over a phrase dictionary mined from the
+//!   whole blob: 2.64 B/key on real words, 56 % below `StringIndex`. Use it
 //!   where the queries are exact and the index has to be small.
 //!
 //! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable

@@ -322,12 +322,12 @@ same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 
 | `fingerprint_bits` | bytes/key | false-positive rate | false hits per 1 M non-member probes |
 |---:|---:|---:|---:|
-| 4 | **0.76** | 6.25% | 62 500 |
-| 6 | 1.01 | 1.56% | 15 625 |
-| 8 (= `fingerprint_bytes=1`, default) | 1.26 | 0.39% | 3 906 |
-| 12 | 1.76 | 0.024% | 244 |
-| 16 (= `fingerprint_bytes=2`) | 2.26 | 0.0015% | 15 |
-| 32 (= `fingerprint_bytes=4`) | 4.26 | 2.3×10⁻⁸% | ~0 |
+| 4 | **0.74** | 6.25% | 62 500 |
+| 6 | 0.99 | 1.56% | 15 625 |
+| 8 (= `fingerprint_bytes=1`, default) | 1.24 | 0.39% | 3 906 |
+| 12 | 1.74 | 0.024% | 244 |
+| 16 (= `fingerprint_bytes=2`) | 2.24 | 0.0015% | 15 |
+| 32 (= `fingerprint_bytes=4`) | 4.24 | 2.3×10⁻⁸% | ~0 |
 
 Pick by the probe mix, not the key count: the rate is per *non-member* lookup, so a workload that
 only ever queries members never sees a false positive at any width, while a filter in front of a

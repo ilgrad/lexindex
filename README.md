@@ -45,8 +45,9 @@ therefore read into memory rather than borrowed.</sub>
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: `string ↔ rank` both
   ways, `lower_bound`, `prefix`, `common_prefix`, `range`, in-order iteration — no automata, so no
   fuzzy. The sorted
-  keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes under a symbol
-  table trained on the 65 536 keys around them:
+  keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes coded per shard
+  under a symbol table or a packed alphabet — whichever that shard's own bytes prefer — over a
+  phrase dictionary mined from the whole blob where repeated spans pay for it:
   **2.64 bytes/key**, 56 % below `StringIndex`, `id` 346–353 ns against its 262–280, `key_into`
   198–200 against its `key` at 438–494. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **483 ns where `marisa-trie` must enumerate every match to
@@ -63,8 +64,8 @@ therefore read into memory rather than borrowed.</sub>
   false positive acceptable.
 - **`ClosedHashIndex`** — the perfect hash **and nothing else**: `id(key) -> u32`, no `Option` — a
   member's id, and *some* id in `[0, n)` for anything else. **0.24 bytes/key**, a fifth of
-  `CompactHashIndex`, and a lookup at `id_unchecked`'s cost (40 ns on the dictionary, against 68
-  for the fingerprint-checked `id`). A token → id map where every query is a member by construction.
+  `CompactHashIndex`, and a lookup at `id_unchecked`'s cost (19.8 ns on the dictionary, against
+  24.7 for the fingerprint-checked `id`). A token → id map where every query is a member by construction.
 - **`PerfectHashIndex`** — the perfect hash with the keys stored: **verified membership** and
   **`id → key`**, no ordering. `id_unchecked` skips the compare and runs 4.1× as fast as
   `std::HashMap`; `fingerprints=True` adds one byte per key so an absent key stops after one cache
@@ -355,7 +356,7 @@ list, and the same ladder to the byte. By hand, in decision order:
   `PerfectHashIndex` for `id → key` without ordering — and each pays for the keys it stores.
 - **Is a bounded false-positive rate acceptable?** Then `CompactHashIndex`: 2.4× under `marisa-trie`
   on single words, 4.9× on random pairs, 3.3× at 10 M — and exactly one byte per key above the bare
-  `ClosedHashIndex` (1.26 against 0.26), which is the fingerprint that buys the membership check.
+  `ClosedHashIndex` (1.24 against 0.24), which is the fingerprint that buys the membership check.
 - **Do the keys share a lot of structure** (a path namespace, a versioned catalogue, a cross product)?
   Measure before choosing: that is where an FST can beat a keyless hash outright.
 - **A `dict` / `HashMap` is not in the table** because it has no serialised form: 71–95 bytes per key

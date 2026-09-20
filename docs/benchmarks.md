@@ -218,14 +218,14 @@ So, in decision order:
   pay for the keys they store.
 - **Is a bounded false-positive rate acceptable?** If yes, `CompactHashIndex` is 2.4× smaller than
   `marisa-trie` on single words, 4.9× on random pairs and 3.3× at 10 M — and one byte per key
-  *larger* than a bare MPHF (1.26 against 0.26), which is exactly the fingerprint that buys the
+  *larger* than a bare MPHF (1.24 against 0.24), which is exactly the fingerprint that buys the
   membership check.
 - **Do the keys share a lot of structure** (a path namespace, a versioned catalogue, a cross product)?
   Then measure before choosing: that is the regime where an FST can beat a keyless hash outright.
 - **A `dict` / `HashMap` is not in the table** because it has no serialised form to measure. It cost
   71–95 bytes per key above the key list itself across these corpora (58–60 at 10 M, where the table
   amortises better), and it has to be rebuilt from the keys on every process start; every structure
-  here is mapped from a file instead.
+  here loads from a file instead, and every one but `ClosedHashIndex` by mapping it.
 
 ## The corpus set
 

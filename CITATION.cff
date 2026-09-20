@@ -11,7 +11,8 @@ abstract: >-
   verified membership and reverse lookup; a fingerprint-based minimal-perfect-hash map storing
   no keys at all (1.24 bytes/key); and the bare perfect hash for a vocabulary known to be
   closed (0.24). A workload-aware planner prices each of them from a sample of the keys before
-  one is built. All serialise to flat, memory-mappable blobs.
+  one is built. All serialise to flat blobs, and every one but the bare perfect hash can be
+  memory-mapped and borrowed rather than read.
 authors:
   - family-names: Gradina
     given-names: Ilia

@@ -12,10 +12,11 @@ many times:
   says absent, for a vocabulary known to be closed.
 - :class:`DictIndex` — ordered dictionary with the key stored for every id: exact
   ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.64 B/key on
-  real words, 52 % below ``StringIndex``.
+  real words, 56 % below ``StringIndex``.
 
-All serialise to a flat blob (``save`` / ``load``, or zero-copy ``load_mmap`` — memory-map a huge
-index and borrow it instantly).
+All serialise to a flat blob (``save`` / ``load``). Every one but :class:`ClosedHashIndex` also
+has ``load_mmap``, which maps a huge index and borrows it instantly; :class:`DictIndex` builds its
+per-block samples at load and borrows the rest.
 
 - :class:`Overlay` — add and remove keys on top of :class:`StringIndex`,
   :class:`PerfectHashIndex` or :class:`CompactHashIndex` without rebuilding.

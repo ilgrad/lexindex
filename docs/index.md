@@ -9,8 +9,9 @@ then query many times: exact `string ↔ id` both ways, plus **prefix**, **range
 (Levenshtein) and **subsequence** iteration — all automaton-driven over the FST (exact, prefix and
 range seek directly; a broad fuzzy or subsequence pattern may still traverse most of the automaton).
 The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.24 bytes/key, 2.4× below
-`marisa-trie`**, and `StringIndex` 5.95 — and each can be **memory-mapped and borrowed zero-copy**, so
-a multi-gigabyte index is ready instantly and its pages are shared across processes.
+`marisa-trie`**, and `StringIndex` 5.95 — and all but `ClosedHashIndex` can be **memory-mapped and
+borrowed** rather than read, `DictIndex` materialising only its per-block samples, so a
+multi-gigabyte index is ready instantly and its pages are shared across processes.
 
 ```bash
 pip install lexindex
@@ -36,7 +37,8 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   queries. Use it for autocomplete, fuzzy search, ordered browse.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
   both ways, `lower_bound`, `prefix`, `range`, in-order iteration, no automata so no fuzzy. The
-  sorted keys are front-coded in blocks with the suffixes under a static symbol table:
+  sorted keys are front-coded in blocks, the suffixes coded per shard under a symbol table or a
+  packed alphabet, over a phrase dictionary mined from the whole blob:
   2.64 bytes/key, 56 % below `StringIndex`. Use it where the queries are exact and every id has
   to map back to its key.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member (a
