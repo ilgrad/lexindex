@@ -224,14 +224,21 @@ impl Table {
                 }
             }
             // The rank is (gain down, bytes up); comparing the bytes as one big-endian word and
-            // then the length orders them the same way without a slice compare a step.
-            let mut ranked: Vec<(u64, u64, usize, [u8; 8])> = Vec::with_capacity(gain.len());
-            ranked.extend(gain.into_iter().map(|((word, len), g)| {
-                let bytes = word.to_le_bytes();
-                (!g, u64::from_be_bytes(bytes), usize::from(len), bytes)
-            }));
-            ranked.sort_unstable_by_key(|&(g, be, len, _)| (g, be, len));
-            let next = Table::reachable(ranked.iter().map(|(_, _, len, s)| &s[..*len]), max);
+            // then the length orders them the same way without a slice compare a step. The bytes
+            // themselves are not carried -- they are that word swapped back -- because the sort
+            // moves the whole element and a quarter of it was a copy of another quarter.
+            let mut ranked: Vec<(u64, u64, u8)> = Vec::with_capacity(gain.len());
+            ranked.extend(
+                gain.into_iter()
+                    .map(|((word, len), g)| (!g, u64::from_be_bytes(word.to_le_bytes()), len)),
+            );
+            ranked.sort_unstable();
+            let next = Table::reachable(
+                ranked
+                    .iter()
+                    .map(|&(_, be, len)| (be.swap_bytes(), usize::from(len))),
+                max,
+            );
             // A round that returns the table it was given is a fixed point: it counts the same
             // sample under the same encoder and ranks the same candidates, so every round after it
             // is the same work for the same answer. Four rounds were spent on every shard; a
@@ -248,20 +255,20 @@ impl Table {
 
     /// The first `max` of `ranked` the encoder can reach: a symbol of three bytes or more only if
     /// its slot is still free.
-    fn reachable<'a>(ranked: impl Iterator<Item = &'a [u8]>, max: usize) -> Table {
+    fn reachable(ranked: impl Iterator<Item = (u64, usize)>, max: usize) -> Table {
         let max = max.min(MAX_SYMBOLS);
         let mut taken = vec![false; SLOTS];
-        let mut syms: Vec<&[u8]> = Vec::with_capacity(max);
-        for s in ranked {
+        let mut syms: Vec<([u8; 8], usize)> = Vec::with_capacity(max);
+        for (word, len) in ranked {
             if syms.len() == max {
                 break;
             }
-            if s.len() >= 3 && std::mem::replace(&mut taken[slot_of(word_of(s))], true) {
+            if len >= 3 && std::mem::replace(&mut taken[slot_of(word)], true) {
                 continue;
             }
-            syms.push(s);
+            syms.push((word.to_le_bytes(), len));
         }
-        Table::from_symbols(syms)
+        Table::from_symbols(syms.iter().map(|(b, len)| &b[..*len]))
     }
 
     pub(crate) fn encoder(&self) -> Encoder {
