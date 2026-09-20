@@ -4567,12 +4567,12 @@ mod tests {
     }
 
     /// `README.md` and `docs/design.md` both promise that the same keys give the same blob on any
-    /// thread count, and the phrase miner broke it: its candidate prune keeps what is above a
-    /// pool's own median, so a pool that held twice the shards kept a different half and the
+    /// thread count, and the phrase miner broke it: a pool keeps the candidates above its own
+    /// median, so a pool that held twice the shards kept a different half and the
     /// vocabulary -- and every coded suffix under it -- came out different. Measured before the
     /// fix, one to sixteen cores gave three blobs of a million urls and six of a million paths.
     ///
-    /// The prune is what has to fire for the promise to be tested at all, which is why the pool is
+    /// That cut is what has to fire for the promise to be tested at all, which is why the pool is
     /// held down to a size a test can reach: keys drawn from a handful of spans so the miner has
     /// candidates, one block a shard so there are pools to split, and every thread count from one
     /// to more than there are pools.

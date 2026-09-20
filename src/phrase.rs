@@ -48,9 +48,6 @@ const PROBE_PIECES: usize = 2_048;
 /// `key_into` and twice the build; on a million URLs they took 21 % for 4 % and 12 %. Every
 /// corpus measured falls on one side or the other: 0 or 0.9 % against 5.7 to 27.6 %.
 pub(crate) const MARGIN: u64 = 3;
-/// Passes of the pruning fixed point. Two: the first drops the candidates nothing picks, the
-/// second what is left once they are gone, and the loop stops early when nothing moved.
-const PRUNE_ROUNDS: usize = 2;
 /// Candidates a round carries into the next. An uncapped pool ranks length above reuse — whole
 /// rare spans score as one phrase — and cost a prototype 1.2 bytes a key on article titles.
 const CAP: usize = 32_768;
@@ -66,13 +63,13 @@ const GAIN_CAP: usize = 1 << 18;
 #[cfg(test)]
 thread_local! {
     /// Candidates a pool holds while a test is running; zero is the real rule. Read on the thread
-    /// that builds, since the prune itself runs on the mining threads.
+    /// that builds, since the rounds themselves run on the mining threads.
     static GAIN_OVERRIDE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Holds the pool size for as long as it is alive, and puts the real rule back after. What the
-/// prune keeps is what the vocabulary is, so a test that wants the prune at all needs it to fire
-/// on a corpus a test can afford.
+/// Holds the pool size for as long as it is alive, and puts the real rule back after. What a round
+/// keeps is what the vocabulary is, so a test that wants the miner at all needs it to fire on a
+/// corpus a test can afford.
 #[cfg(test)]
 pub(crate) struct Pool;
 
@@ -1288,97 +1285,6 @@ fn worth(samples: &[(&[&[u8]], &Table)], phrases: &[Vec<u8>]) -> bool {
     })
 }
 
-/// The phrases a parse of `samples` picks, ranked by what they save, with the rest dropped.
-///
-/// A round ranks a candidate by what it *would* save; this asks the parse. A span that always
-/// loses to a longer phrase covering it is never picked, and paying for it in the dictionary costs
-/// every key in the blob — so the vocabulary the shards see is the one the parse uses, and the ids
-/// that are cheapest to name go to the phrases that earn most.
-fn prune(
-    samples: &[(&[&[u8]], &Table)],
-    mut phrases: Vec<Vec<u8>>,
-    threads: usize,
-) -> Vec<Vec<u8>> {
-    for _ in 0..PRUNE_ROUNDS {
-        let before = phrases.len();
-        phrases = prune_once(samples, phrases, threads);
-        if phrases.len() == before || phrases.is_empty() {
-            break;
-        }
-    }
-    phrases
-}
-
-fn prune_once(
-    samples: &[(&[&[u8]], &Table)],
-    phrases: Vec<Vec<u8>>,
-    threads: usize,
-) -> Vec<Vec<u8>> {
-    let trie = Trie::of(phrases.iter().map(Vec::as_slice));
-    // The most generous split any shard could buy: what it cannot reach, none of them can.
-    let prices = Split::family(phrases.len())
-        .into_iter()
-        .map(Split::prices)
-        .max_by_key(|p| p.limit)
-        .unwrap_or(Prices::MINING);
-    let share = samples.len().div_ceil(threads.max(1)).max(1);
-    let mut saved = std::thread::scope(|scope| {
-        let running: Vec<_> = samples
-            .chunks(share)
-            .map(|chunk| {
-                let (trie, phrases) = (&trie, &phrases);
-                scope.spawn(move || {
-                    let mut saved = vec![0u64; phrases.len()];
-                    let (mut w, mut alone) = (Scratch::default(), Scratch::default());
-                    for &(sample, table) in chunk {
-                        let enc = table.encoder();
-                        // What a phrase saves depends on the shard's own symbols, so its cost
-                        // under them alone is taken once per shard and only for the ones used.
-                        let mut cost = vec![0u32; phrases.len()];
-                        for &p in sample {
-                            parse(p, &enc, trie, Some(prices), &mut w);
-                            tokens(&mut w, p.len());
-                            for &(_, _, kind, id) in &w.tokens {
-                                if kind != PHRASE {
-                                    continue;
-                                }
-                                let id = id as usize;
-                                if cost[id] == 0 {
-                                    cost[id] =
-                                        parse(&phrases[id], &enc, trie, None, &mut alone) / 8;
-                                }
-                                let paid = prices.bytes_for(id) as u32;
-                                saved[id] += u64::from(cost[id].saturating_sub(paid));
-                            }
-                        }
-                    }
-                    saved
-                })
-            })
-            .collect();
-        running
-            .into_iter()
-            .map(|h| h.join().expect("pruning a share cannot panic"))
-            .reduce(|mut a, b| {
-                a.iter_mut().zip(b).for_each(|(x, y)| *x += y);
-                a
-            })
-            .unwrap_or_default()
-    });
-    saved.resize(phrases.len(), 0);
-    let mut ranked: Vec<(u64, Vec<u8>)> = phrases
-        .into_iter()
-        .zip(&saved)
-        // A phrase the parse never picks is one the dictionary pays for and nothing names. What
-        // it would be worth if it were picked is the miner's question, and was asked there: this
-        // one is only whether the vocabulary as a whole leaves it any bytes to cover.
-        .filter(|(_, g)| **g > 0)
-        .map(|(p, g)| (*g, p))
-        .collect();
-    ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
-    ranked.into_iter().map(|(_, p)| p).collect()
-}
-
 /// The phrases a corpus is worth carrying, best first.
 ///
 /// Mined from the shard samples — the suffixes each table was trained on — in rounds of
@@ -1387,9 +1293,14 @@ fn prune_once(
 /// candidates that earned most so the next one scores a phrase against its competition rather than
 /// against the symbols alone.
 ///
-/// `pool` is what the last round keeps, which is the vocabulary before pruning. Summing a thread's
-/// gains into another's is the same total as one walk of the samples, and the ranking is over
-/// distinct spans, so the threads do not move it.
+/// `pool` is what the last round keeps, and it is the vocabulary: a pass that re-asked the parse
+/// which of those the shards actually pick was measured and removed, because the question it asks
+/// is the miner's own with the scale taken off. A candidate is kept when `gain * scale` clears its
+/// storage — a bar set against the whole blob — and one that earns its keep at one key in ten
+/// thousand appears zero times in a sample of the suffixes. Dropping those cost up to 55 % of the
+/// vocabulary and up to 4.9 % of the blob. Summing a thread's gains into another's is the same
+/// total as one walk of the samples, and the ranking is over distinct spans, so the threads do not
+/// move it.
 pub(crate) fn mine(
     samples: &[Vec<&[u8]>],
     tables: &[Table],
@@ -1501,7 +1412,7 @@ pub(crate) fn mine(
             return Vec::new();
         }
     }
-    prune(&pairs, phrases, threads)
+    phrases
 }
 
 #[cfg(test)]
