@@ -104,6 +104,16 @@ All notable changes to this project are documented here. The format follows
   the other two thirds. That is what buys the wide end of the size range above; a corpus the scout
   turns away keeps only what the other four changes give it.
 
+  Those multipliers were measured before the parse was tuned, and the parse is a third of a build's
+  instructions. Six changes to it — the symbol table's eight bytes carried backwards rather than
+  re-read, the double array's step reading one record instead of two and needing no bounds check,
+  the parse token packed from twelve bytes into one word, one word a byte shared across the memo's
+  rows, and one induction variable in the walk — take a build's retired instructions, net of reading
+  and sorting the keys, down **9.9 % on urls, 9.6 % on English titles, 9.2 % on identifiers and
+  8.8 % on paths**, and the build call itself down 2.4–3.6 % in wall clock; the blobs are
+  byte-identical. Corpora that buy no phrase, decimal ids and the word list among them, are flat by
+  construction.
+
   **What it costs to read.** Against `BDX2` over a million keys at block 256, the two binaries
   alternated X-2-2-X-X-2-2-X so that code layout is not mistaken for the format: `id` runs **0.80×
   to 1.24×** and `key_into` **0.77× to 1.46×**. `key_into` is the lane that came out ahead — nine
