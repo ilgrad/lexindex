@@ -643,8 +643,8 @@ impl Trie {
 
     /// The base of the root, where every walk starts.
     #[inline(always)]
-    fn root(&self) -> u32 {
-        self.slots[0].base
+    fn root(&self) -> usize {
+        self.slots[0].base as usize
     }
 
     /// The child of `node` on `b`, with its own base and the phrase it ends plus one, given the
@@ -654,15 +654,15 @@ impl Trie {
     /// it: re-reading `slots[node].base` made a step two dependent loads where one will do, and
     /// the root's is loop-invariant over a whole parse.
     #[inline(always)]
-    fn step(&self, node: u32, base: u32, b: u8) -> Option<(u32, u32, u32)> {
-        let slot = base as usize + usize::from(b);
+    fn step(&self, node: u32, base: usize, b: u8) -> Option<(u32, usize, u32)> {
+        let slot = base + usize::from(b);
         debug_assert!(slot < self.slots.len());
         // SAFETY: `of` pads the array past the largest base it stores by the 256 bytes a step can
         // ask for, and `base` is either the root's or one this function returned, so `base + b` is
         // in range. A walk is a fifth of a build's instructions and the check was two of them a
         // step.
         let child = unsafe { self.slots.get_unchecked(slot) };
-        (child.check == node).then_some((slot as u32, child.base, child.phrase))
+        (child.check == node).then_some((slot as u32, child.base as usize, child.phrase))
     }
 }
 
@@ -761,10 +761,13 @@ fn parse(
             )
         };
         if let Some(prices) = prices {
-            let mut node = 0u32;
-            let mut base = root;
-            for (k, (&b, &tail)) in s[i..n.min(i + MAX)].iter().zip(&cost[i + 1..]).enumerate() {
-                let Some((c, nb, phrase)) = trie.step(node, base, b) else {
+            let (mut node, mut base) = (0u32, root);
+            // One induction variable, and the tail read only where a phrase is in the running:
+            // the walk is the parse's inner loop and the two pointers a zip advances were two
+            // instructions of every step for a value most steps never look at.
+            let bytes = &s[i..n.min(i + MAX)];
+            for k in 0..bytes.len() {
+                let Some((c, nb, phrase)) = trie.step(node, base, bytes[k]) else {
                     break;
                 };
                 (node, base) = (c, nb);
@@ -772,7 +775,7 @@ fn parse(
                 if id == 0 || id > prices.limit {
                     continue;
                 }
-                let c = 8 * prices.bytes_for(id - 1) as u32 + tail;
+                let c = 8 * prices.bytes_for(id - 1) as u32 + cost[i + 1 + k];
                 if c < best {
                     best = c;
                     choice = Pick::new(PHRASE, (id - 1) as u32, k as u32 + 1);
@@ -981,8 +984,7 @@ impl Memo {
         self.at.push(0);
         let root = trie.root();
         for i in 0..n {
-            let mut node = 0u32;
-            let mut base = root;
+            let (mut node, mut base) = (0u32, root);
             for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
                 let Some((c, nb, phrase)) = trie.step(node, base, b) else {
                     break;
