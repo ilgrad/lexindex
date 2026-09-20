@@ -47,7 +47,7 @@ All notable changes to this project are documented here. The format follows
   the blob's own suffixes and stored once; a shard that buys it gives up symbols for phrase codes,
   a split at `s` symbols leaving `255 - s` byte codes that name 256 phrases in one further byte or
   65 536 in two, with 255 still the escape. A suffix is parsed by dynamic programming over the
-  cheapest coding in bits, and the miner is four rounds of that parse and a count of windows of up
+  cheapest coding in bits, and the miner is three rounds of that parse and a count of windows of up
   to three adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain
   clears six times what they cost to store. Mining stops after the first round unless one of three
   sampled shards would take a split by 2 % on its own bytes — what the miner ranks is what coding a
@@ -57,7 +57,7 @@ All notable changes to this project are documented here. The format follows
   cover, and a blob no shard bought stores no dictionary. The vocabulary is a function of the keys
   alone — the miner's candidate pools are a constant rather than the thread count, so the same keys
   give byte-identical blobs on machines with one core and sixteen. At block 1024 over a million
-  keys: urls 9.44 → 7.31 bytes a key, English titles 9.17 → 7.26, paths 12.79 → 9.61.
+  keys: urls 9.26 → 7.27 bytes a key, English titles 9.08 → 7.21, paths 12.48 → 9.32.
 
   *The per-block samples are derived, not stored.* The binary search that opens a lookup runs over
   eight bytes of every block's head, and `BDX2` carried those bytes a second time in a section of
@@ -94,11 +94,15 @@ All notable changes to this project are documented here. The format follows
 
   End to end, `BDX2` against `BDX3` at the default block over a million keys each (`lexindex build
   --index dict`, sizes being a function of the keys): urls 11.25 → **7.51** bytes a key, paths 14.67
-  → **9.87**, article titles 9.37 → **7.38** in English, 11.36 → **7.67** in Russian and 8.28 →
+  → **9.87**, article titles 9.37 → **7.37** in English, 11.36 → **7.67** in Russian and 8.28 →
   **6.27** in Chinese, DNA 7.70 → **4.37**, opaque ids 13.80 → **10.40**, numeric 2.13 → **1.01**,
   identifiers 6.66 → **5.23**, domains 5.07 → **4.50**, UUIDs 20.45 → **18.04**; the dictionary's
   479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.17**. That is 7.0 % off the word
-  list at one end and 52.5 % off decimal ids at the other.
+  list at one end and 52.5 % off decimal ids at the other. Against `marisa-trie` at its own best
+  `num_tries` on each corpus, that makes `DictIndex` the smallest key-storing structure on ten of
+  the eleven sweep corpora at a million keys and on **all six at ten million**, where 3.0.0 gave
+  English titles and urls back to the trie — the two it takes back are won by 0.11 % and 0.33 %,
+  which is a tie and a lead rather than a comfortable win on either.
   `plan()` prices the dictionary and the vocabulary's growth, so its estimate follows.
 
   **What it costs to build.** The price is the phrase machinery and nothing else, so it is paid only
