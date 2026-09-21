@@ -13,6 +13,11 @@ The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.
 borrowed** rather than read, `DictIndex` materialising only its per-block samples, so a
 multi-gigabyte index is ready instantly and its pages are shared across processes.
 
+[![lexindex DictIndex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on twelve of them](assets/frontier-1m.svg)](benchmarks.md#the-research-frontier-measured)
+
+<sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
+structures, each at its own best configuration. `numeric` is the one corpus a trie still wins.</sub>
+
 ```bash
 pip install lexindex
 ```
