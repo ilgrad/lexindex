@@ -877,16 +877,21 @@ def plan(
     Five indexes with five corpus-specific size curves is a choice nobody should have to make from
     a README table: the spread between them on one corpus is larger than the spread of any one of
     them across corpora. The keys are sorted once and priced from the statistics the formats are
-    actually paid in -- the count, the mean length, the shared prefixes, the trie nodes.
+    actually paid in -- the count, the mean length, the shared prefixes.
 
     The three numbers no statistic gives -- what the symbol table squeezes a suffix into, the bytes
-    an fst spends per trie node, the bits the perfect hash spends per key -- come from builds of two
+    an fst spends a key, the bits the perfect hash spends per key -- come from builds of two
     100 000-key draws, one uniform over the corpus and one of runs of consecutive keys, so past that
     size every entry is a model and ``measured`` is ``False``. Scored against the built blob on 23
     corpora of half a million to ten million keys, at each of the three priced ``DictIndex``
     blocks, that estimate lands within 1.0 % median, 4.2 % at the 90th percentile and 7.2 % at
-    worst; ``StringIndex`` within 3.0 / 7.6 / 31.5, because an fst merges equal suffixes and how
-    much it merges is a property of the whole key set rather than of a sample of it. Below the
+    worst; ``StringIndex`` within 1.1 / 6.7 / 11.7 over 19 corpora, because an fst merges equal
+    right-languages and how much it merges is a property of the *density* of the whole key set
+    rather than of any statistic of it. A dense id space is where that still breaks: ten million
+    decimal ids merge to 356 bytes whole, no draw of a hundred thousand of them can see it, and the
+    estimate reads about a hundredfold high. The ranking survives -- a hundred times almost nothing
+    is still far under every other index, so a plan picks the fst -- but ``thin`` is set and the
+    byte count is not one to quote. Below the
     sample size nothing is modelled: the candidates are built and reported at what they weigh.
 
     The ``DictIndex`` block is a candidate rather than a default: 32, 256 and 1024 are three rows

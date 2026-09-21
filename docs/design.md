@@ -566,7 +566,7 @@ by keys `k` apart is linear in `ln k`, and a random 1-in-`step` sample reads tha
 `j` apart in the sample it is `ln step + ψ(j)`.
 
 What no statistic gives is what a *compressor* will do: the ratio the FSST symbol table squeezes a
-suffix into, the bytes an fst actually spends per trie node once it has merged what it can, and the
+suffix into, the bytes an fst actually spends a key once it has merged what it can, and the
 bits the perfect hash spends per key. Those are read off builds of two 100 000-key draws — one
 uniform over the corpus, one of runs of consecutive keys — and below that size there is nothing to
 model: the candidates are built and reported at what they weigh. Scored against the built blob on

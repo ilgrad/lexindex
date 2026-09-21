@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`plan` ranked a dense id space wrong, by four orders of magnitude.** The `StringIndex` estimate
+  was the bytes an fst spends per trie node, read off the hash draw and scaled by the corpus's trie
+  nodes. An fst does not merge by trie node — it merges equal right-languages, and how far it merges
+  is a property of the *density* of the whole key set, which a hash draw of a hundred thousand keys
+  destroys by construction. On a million decimal ids the estimate read 2 281 924 bytes where the
+  blob weighs 301, and the ladder handed back a `DictIndex` three thousand times larger than the
+  index the caller should have built.
+
+  The rate is now read off the run draw — consecutive keys of the sorted corpus, whose neighbours
+  are the corpus's own, so the merges that happen in the corpus happen in the draw — and carried
+  flat per key. Scored against the built blob on 19 corpora of a quarter million to nineteen million
+  keys, the estimate lands within **1.1 % median, 6.7 % at the 90th percentile and 11.7 % at worst**,
+  against 5.2 / 36.0 / 53.1 for what it replaced, and the ranking is right on every one of the 19.
+
+  A dense id space is still the family it cannot price: ten million decimal ids merge to 356 bytes
+  whole and no draw of a hundred thousand of them can see it, so the number reads about a
+  hundredfold high. It is two orders under every other index either way, so the ranking holds and
+  `Plan::thin` is set — a byte count under that flag is not one to quote.
+
 ## [4.0.0] — 2026-09-21
 
 ### Changed

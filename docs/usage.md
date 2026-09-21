@@ -29,12 +29,15 @@ keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key
 their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five.
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
-bytes an fst spends per trie node, the bits the perfect hash spends per key — come from two draws of
+bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
 that size, and each estimate says so in `measured`. Scored against the built blob on 23 corpora of
 half a million to ten million keys, at each of the three priced blocks, `DictIndex` lands within
-**1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**; `StringIndex` within 3.0 / 7.6 /
-31.5, because an fst merges equal suffixes and how much it merges is a property of the whole key set
-rather than of a sample of it. Below the sample size nothing is modelled: the candidates are built
+**1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**; `StringIndex` within
+**1.1 / 6.7 / 11.7** over 19 corpora, because an fst merges equal right-languages and how much it
+merges is a property of the *density* of the whole key set rather than of any statistic of it. A
+dense id space is where that still breaks: ten million decimal ids merge to 356 bytes whole, which
+no draw of a hundred thousand of them can see, and the estimate reads about a hundredfold high —
+the ranking survives, the byte count does not, and `thin` says so. Below the sample size nothing is modelled: the candidates are built
 and reported at what they weigh.
 
 That error is not random in `n`. Holding a corpus's content fixed and moving only its size — stride

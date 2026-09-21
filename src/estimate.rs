@@ -9,17 +9,21 @@
 //! structure exact; everything a format does with them is arithmetic. The one input no statistic
 //! gives is what the symbol table and the phrase dictionary squeeze a suffix into, and that can only
 //! be read off a build — so two 100 000-key draws supply it, both coded under the vocabulary the
-//! *corpus* would buy, along with the bytes an fst spends per trie node and the bits the perfect
-//! hash spends per key. Scored against the built blob on 23 corpora of half a million to ten
+//! *corpus* would buy, along with the bytes an fst spends a key and the bits the perfect hash
+//! spends per key. Scored against the built blob on 23 corpora of half a million to ten
 //! million keys, at each of the three priced blocks, the [`DictIndex`] estimate lands within
 //! **1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**.
-//! [`StringIndex`] is looser — 3.0 % median, 7.6 % at the 90th percentile, and 32 % on a corpus of
-//! file paths — because an fst merges equal
-//! suffixes, and how much it merges is a property of the whole key set rather than of a sample of
-//! it. The family the ratio carries to worst is corpora whose mean suffix is about a byte — ten
-//! million decimal ids read 4.1 % high, which is where the `DictIndex` estimate spends its 90th
-//! percentile — and [`Plan`] flags them rather than letting a ranking rest on the number it trusts
-//! least.
+//! [`StringIndex`] is looser — **1.1 % median, 6.7 % at the 90th percentile and 11.7 % at worst**
+//! over 19 corpora of a quarter million to nineteen million keys — because an fst merges equal
+//! right-languages, and how much it merges is a property of the *density* of the whole key set
+//! rather than of any statistic of it. Only the run draw keeps that density, which is why the fst
+//! rate is read off that one and carried flat; the same rate read off the hash draw and scaled by
+//! trie nodes, which is what this crate shipped through 4.0, lands at 5.2 / 36.0 / 53.1 instead.
+//! The family that breaks it outright is a *dense* id space — ten million decimal ids merge to
+//! 356 bytes whole, which no draw of a hundred thousand of them can see, and the estimate reads
+//! about a hundredfold high. The ranking survives, since a hundred times almost nothing is still
+//! two orders under every other index; the byte count does not, and [`Plan`] flags it rather than
+//! letting a caller quote the number it trusts least.
 //!
 //! Below the sample size there is nothing to model: the plan builds all the candidates and reports
 //! what they weigh.
@@ -914,11 +918,6 @@ impl Shape {
             self.lcp32 as f64 / self.pairs32 as f64
         }
     }
-
-    /// Characters the keys add over their predecessors: the nodes of the trie an fst minimises.
-    fn trie_nodes(&self) -> f64 {
-        (self.len - self.lcp1) as f64
-    }
 }
 
 /// Keys back a restart entry is coded against, and so the second distance [`Shape`] measures.
@@ -1146,15 +1145,25 @@ struct DictFit {
 struct Sample {
     /// One fit per priced block.
     dict: [DictFit; DICT_BLOCKS.len()],
-    /// What an fst spends on a trie node at the sample's density.
+    /// What an fst spends a key at the run draw's density.
     ///
-    /// This is the coarsest number in the plan and it does not get better by fitting. How far an
-    /// fst minimises below its trie depends on how much the keys share at *full* density, which a
-    /// sample cannot see: carried straight across, it reads 30 % high on `paths` and 10 % low on
-    /// `opaque` — and fitting the trend between two sample sizes and extrapolating made both worse
-    /// (`paths` +55 %), because the local slope between 50 k and 100 k keys does not point where
-    /// the curve goes over the next four e-folds.
-    fst_node: f64,
+    /// Read off [`RunSample`] and carried across flat, because how far an fst minimises below its
+    /// trie is a property of *density* and the run draw is the only one that keeps it: the keys of
+    /// a run are the corpus's own neighbours, so the right-languages that merge in the corpus merge
+    /// in the draw. Scored against the built blob on 19 corpora of a quarter million to nineteen
+    /// million keys this lands within **1.1 % median, 6.7 % at the 90th percentile and 11.7 % at
+    /// worst**, against 5.2 / 36.0 / 53.1 for the same model read off [`HashSample`] and scaled by
+    /// trie nodes, which is what this replaced.
+    ///
+    /// Fitting the slope between two run-draw sizes and extrapolating is worse than carrying it
+    /// flat — 7.0 % median, 26.2 % at the 90th percentile — for the reason a slope always fails
+    /// here: between a quarter and a whole sample the curve has not yet turned.
+    ///
+    /// A corpus of a *dense* id space is where it still breaks. Ten million decimal ids merge to
+    /// 356 bytes whole and the draw cannot see it, so the estimate reads about a hundredfold high.
+    /// The ranking survives — the number is still two orders under every other index's, so a plan
+    /// picks the fst — but the byte count does not, and [`Plan::thin`] is what says so.
+    fst_per_key: f64,
     /// `(fixed, per key)` for each hash index, fitted over two sample sizes: their blobs are a
     /// header, a perfect hash and a per-key table, and at a hundred thousand keys the header is
     /// still 0.06 bytes a key -- scaling one measurement by `n` carries that constant with it and
@@ -1167,8 +1176,8 @@ impl Sample {
     /// The constants the two draws measure for a corpus of `corpus` keys.
     fn of(spread: &[&str], runs: &[&str], corpus: usize) -> Result<Self, IndexError> {
         let draws = Draws::of(spread, runs, corpus);
-        let fst_node = StringIndex::build(spread)?.serialized_len() as f64
-            / draws.spread_shape.trie_nodes().max(1.0);
+        let fst_per_key =
+            StringIndex::build(runs)?.serialized_len() as f64 / runs.len().max(1) as f64;
         // One build of the sample a priced block, all three under the one vocabulary the corpus
         // buys: what a block costs is the block's, what a suffix compresses to is the corpus's.
         let (spread_blob, runs_blobs) = DictIndex::plan_builds(spread, runs, &DICT_BLOCKS, corpus)?;
@@ -1180,7 +1189,7 @@ impl Sample {
             dict: dict
                 .try_into()
                 .unwrap_or_else(|_| unreachable!("one fit a priced block")),
-            fst_node,
+            fst_per_key,
             #[cfg(feature = "mph")]
             hash_fit: hash_fits(spread)?,
         })
@@ -1676,7 +1685,7 @@ fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -
         .iter()
         .map(|&(kind, at)| {
             let (bytes, block) = match kind {
-                Kind::String => (sample.fst_node * shape.trie_nodes(), None),
+                Kind::String => (sample.fst_per_key * shape.n as f64, None),
                 Kind::Dict => {
                     let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
                     (
@@ -2146,6 +2155,34 @@ mod tests {
                 100.0 * err
             );
         }
+    }
+
+    /// A dense id space is the corpus an fst folds away almost entirely, and the one the model
+    /// used to miss by four orders of magnitude: read off a hash draw and scaled by trie nodes, the
+    /// estimate put a `StringIndex` over a million decimal ids at 2.28 bytes a key where the blob
+    /// weighs 0.0003, and the ladder handed the caller a `DictIndex` three thousand times larger
+    /// than what it was asking for. The draw is what fixes it -- a hash draw of a dense space is
+    /// not dense, so the merges never happen in the sample -- and the ranking is what this guards.
+    #[test]
+    fn a_dense_id_space_ranks_the_fst_first() {
+        let keys: Vec<String> = (0..20_000u32).map(|i| i.to_string()).collect();
+        let plan = with_sample(2_000, || plan(&keys, Needs::default()).unwrap());
+        assert!(plan.estimates().iter().all(|e| !e.measured));
+        assert_eq!(
+            plan.best().kind,
+            Kind::String,
+            "a dense id space is an fst's corpus, ranked {:?}",
+            plan.estimates()
+                .iter()
+                .map(|e| (e.kind, e.bytes))
+                .collect::<Vec<_>>()
+        );
+        let truth = StringIndex::build(&keys).unwrap().serialized_len() as u64;
+        let fst = plan.best().bytes;
+        assert!(
+            fst < DictIndex::build(&keys).unwrap().serialized_len() as u64,
+            "the estimate has to stay under the index it displaced: {fst} against {truth} true"
+        );
     }
 
     /// The block is a candidate, not a default: all three are priced, and the ladder marks the one
