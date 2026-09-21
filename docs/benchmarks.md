@@ -1568,6 +1568,23 @@ about 300 bytes. XCDAT is the fastest structure on every corpus, at 1.9–7.0 ti
 `DictIndex` at its default block; C²-MARISA shares the front on ten of the thirteen, always
 larger — 9.14 bytes a key at ρ=2 on `titles-ru` against 7.45.
 
+**Where this loses, and by how much.** Size is the axis `DictIndex` is built to win and latency is
+the axis it pays on: at a million keys the fastest lexindex configuration is **1.1× to 3.1× slower
+than XCDAT 15**, worst on `words` (247 ns at block 32 against 80) and closest on `urls` and
+`titles-ru`. The cause is structural rather than incidental. A probe walks a block's restarts to one
+microblock and scans it — `block / micro + micro − 2` header decodes, 62 at block 1024 — where a
+double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys
+its bytes by making a comparison cost work, and that is the bill.
+
+It is a bill that shrinks with `n`. The same ratio is 3.1× on `words` at half a million keys, 1.7×
+on `titles-en` at a million, 1.18× on `titles-en` at ten million and 1.07× on `urls` at ten million;
+on `dna` at ten million it has crossed, and `DictIndex` is both the smallest structure and the
+fastest. The plausible mechanism is that past the last level of cache every structure pays a DRAM
+fetch per probe and a blob a third the size takes a third of the misses — plausible, and not yet
+tested: it predicts that the crossing generalises at a hundred million keys, and that campaign has
+not been run. Until it has, the claim here is the measured one: **smallest everywhere, fastest on
+two corpora of nineteen, and on the front of all of them.**
+
 <!-- table: frontier bench/results/frontier-10m-2026-09-20-arz-7e42c43.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |
 |---|---:|---|---|---|

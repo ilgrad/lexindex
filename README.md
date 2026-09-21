@@ -19,8 +19,12 @@ but stands on its own.
 
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
-other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured). `numeric` is the one corpus a trie still wins, and
-it stays on the chart for that reason.</sub>
+other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
+**Size is the axis this wins; it is not the only axis.** On point-lookup latency XCDAT is 1.1× to
+3.1× faster at a million keys, at two to three times the size — the gap narrows as the corpus grows,
+and at ten million keys `dna` and `numeric` have crossed, where lexindex is the only structure on
+the front at all. Both columns are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
+and neither is quoted here without the other.</sub>
 
 ## Five indexes
 
