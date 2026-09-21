@@ -21,9 +21,10 @@ but stands on its own.
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
 other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
 **Size is the axis this wins; it is not the only axis.** On point-lookup latency XCDAT is 1.1× to
-3.1× faster at a million keys, at two to three times the size — the gap narrows as the corpus grows,
-and at ten million keys `dna` and `numeric` have crossed, where lexindex is the only structure on
-the front at all. Both columns are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
+3.1× faster at a million keys, at two to three times the size. The gap narrows up to ten million
+keys and then holds — 1.1× to 1.6× at 19 to 100 million on four corpora of six — while on `numeric`
+lexindex is the faster at ten and a hundred million, and on `dna` ahead at ten million and level at
+a hundred. Both columns are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
 and neither is quoted here without the other.</sub>
 
 ## Five indexes

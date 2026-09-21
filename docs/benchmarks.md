@@ -1576,14 +1576,28 @@ microblock and scans it — `block / micro + micro − 2` header decodes, 62 at 
 double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys
 its bytes by making a comparison cost work, and that is the bill.
 
-It is a bill that shrinks with `n`. The same ratio is 3.1× on `words` at half a million keys, 1.7×
-on `titles-en` at a million, 1.18× on `titles-en` at ten million and 1.07× on `urls` at ten million;
-on `dna` at ten million it has crossed, and `DictIndex` is both the smallest structure and the
-fastest. The plausible mechanism is that past the last level of cache every structure pays a DRAM
-fetch per probe and a blob a third the size takes a third of the misses — plausible, and not yet
-tested: it predicts that the crossing generalises at a hundred million keys, and that campaign has
-not been run. Until it has, the claim here is the measured one: **smallest everywhere, fastest on
-two corpora of nineteen, and on the front of all of them.**
+The bill shrinks with `n`, and then it stops shrinking. The same ratio is 3.1× on `words` at half a
+million keys, 1.7× on `titles-en` at a million and 1.18× at ten million — and 1.17× on all 19.2
+million English titles, while `urls` goes from 1.07× at ten million to 1.08× whole. At a hundred
+million keys `DictIndex` is 1.21× behind on `uuid` (1.24× at ten million) and 1.59× on `opaque`
+(1.72×); `dna` goes from a 9 % lead at ten million to a tie, 844 ns against 864 and inside what
+memory placement alone moves a lookup on this machine; and `StringIndex` answers `numeric` in 156 ns
+against 408. This paragraph used to end on a prediction: that past the last level of cache a blob a
+third the size takes a third of the misses, so the `dna` crossing would generalise at a hundred
+million keys. That campaign has run, and it did not. What the numbers fit instead is one step — from
+a million keys, where a structure this size still sits largely in the 16 MiB last-level cache, to
+ten million, where every one of them pays DRAM misses — after which the ratio is set by how many
+dependent misses a probe takes, not by how many bytes it could touch. That is a reading, not a
+measurement; a miss profile of both lookup paths is what would settle it. The claim here is the
+measured one: **smallest everywhere, faster than XCDAT on `numeric` at ten and a hundred million
+keys and on `dna` at ten million, 1.1–1.6× behind it on the other four past ten million, and on the
+front of all of them.** The 19.2 M and 100 M numbers are the standalone benchmark suite's, at its
+`a6c13d0` with lexindex 4.0.0 from crates.io:
+[`frontier-full-2026-09-21-arz-a6c13d0.json`](https://github.com/ilgrad/string-index-benchmarks/blob/main/results/frontier-full-2026-09-21-arz-a6c13d0.json)
+runs every structure over both corpora whole, and
+[`frontier-100m-2026-09-21-arz-a6c13d0.json`](https://github.com/ilgrad/string-index-benchmarks/blob/main/results/frontier-100m-2026-09-21-arz-a6c13d0.json)
+runs only `DictIndex` at blocks 256 and 1024, `StringIndex` and XCDAT 15, since the full set at a
+hundred million keys would run for two days.
 
 <!-- table: frontier bench/results/frontier-10m-2026-09-20-arz-7e42c43.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |

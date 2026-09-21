@@ -16,7 +16,11 @@ multi-gigabyte index is ready instantly and its pages are shared across processe
 [![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on all thirteen](assets/frontier-1m.svg)](benchmarks.md#the-research-frontier-measured)
 
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
-structures, each at its own best configuration. `numeric` is the one corpus a trie still wins.</sub>
+structures, each at its own best configuration. **Size is the axis this wins; it is not the only
+axis.** On point-lookup latency XCDAT is 1.1× to 3.1× faster at a million keys, at two to three
+times the size, and still 1.1× to 1.6× at 19 to 100 million on four corpora of six; on `numeric`
+lexindex is the faster at ten and a hundred million, and on `dna` ahead at ten million and level at
+a hundred. Both columns are in [the benchmarks](benchmarks.md#the-research-frontier-measured).</sub>
 
 ```bash
 pip install lexindex
