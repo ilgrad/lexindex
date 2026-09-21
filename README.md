@@ -420,6 +420,15 @@ and Python releases, the benchmark suite behind every number above, security har
 loaders, and performance work at hundreds of millions of keys — and tells the maintainer which
 workloads to measure next.
 
+**Commercial support and integration work** — a tuning pass on your key distribution, an integration
+into your stack, or a support retainer: <ilia.gradina@gmail.com>.
+
+## Used by
+
+Nothing yet that I know of. If lexindex is in something you ship, say so in a
+[Discussion](https://github.com/ilgrad/lexindex/discussions) and it goes here — knowing which
+workloads are real is what decides what gets measured next.
+
 ## Prior art
 
 The minimal perfect hash under the three hash indexes is in-crate and follows **PHast**'s
