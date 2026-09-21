@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ilgrad/lexindex/security/advisories/new
+    about: Please report security issues privately, not as a public issue.
+  - name: Question or idea
+    url: https://github.com/ilgrad/lexindex/discussions
+    about: For "which index should I use?", design discussion and benchmark requests.
