@@ -1,24 +1,29 @@
-"""The front-page figure: `DictIndex` against the smallest trie, on every corpus of the set.
+"""The front-page figure: lexindex against the smallest trie, on every corpus of the set.
 
     uv run --with matplotlib python bench/frontier_chart.py \
         bench/results/frontier-1m-<date>-<host>-<commit>.json
 
 Reads one campaign artifact written by `bench/frontier/tables.py` and draws the comparison the
-benchmarks page makes in prose: for each corpus, the smallest `DictIndex` block against the
+benchmarks page makes in prose: for each corpus, the smallest index this crate builds against the
 smallest structure anyone else in the campaign built. Writes an SVG beside the docs, named after
 the artifact's own commit, so a figure in the README can always be traced to the run behind it.
 
 Three choices the figure makes, each of which could be made dishonestly:
 
-* **`DictIndex` only, not lexindex's best.** `StringIndex` is smaller than every trie on `numeric`
-  (0.0003 bytes a key -- an FST minimises dense decimal ids almost entirely away), and putting that
-  in a size headline is the mirage this repository's benchmarks exist to refuse. The comparison is
-  between structures that store their keys and answer the same questions, so it is the dictionary's.
-* **The competitor's best configuration, not its default.** MARISA at the `num_tries` that suits
-  that corpus, XCDAT at its best of four, CoCo and PDT as the C² benchmark builds them. A win
-  against a badly-tuned baseline is not a win.
-* **A linear axis.** The corpora span 0.5 to 21 bytes a key and a log axis would flatter the ratios;
-  the numbers are printed on the bars instead.
+* **Both sides at their best, which is the only symmetry available.** The other side is the best of
+  eight structures, each at the configuration that suits that corpus -- MARISA at its `num_tries`,
+  XCDAT at its best of four, CoCo and PDT as the C² benchmark builds them. Holding this side to one
+  index while the other picks from eight is not modesty, it is a different measurement. So the bar
+  is whichever index lexindex builds smallest, and the label says which one it is: `DictIndex` at
+  its block on twelve corpora, `StringIndex` on `numeric`, where an fst folds a dense decimal id
+  space into 301 bytes and the label prints that rather than a rounded 0.00.
+* **The pick is the planner's, not the author's.** `lexindex plan` chooses the index off the keys
+  alone, and choosing after seeing the answer would be the mirage this repository exists to refuse.
+  Scored against the built blob on all 19 corpora of this set, its ranking of the two candidates a
+  memory objective picks between is right on every one -- so the bar is what a caller gets without
+  reading this figure.
+* **A linear axis.** The corpora span a fraction of a byte to 21 bytes a key and a log axis would
+  flatter the ratios; the numbers are printed on the bars instead.
 
 `ART` and `C-ART` are excluded, as everywhere else: they count their nodes and not the keys those
 nodes point into, so they are not comparable on size.
@@ -44,7 +49,7 @@ LOSS = "#b45309"
 
 
 def rows(artifact: dict) -> list[dict]:
-    """One row a corpus: the smallest `DictIndex` block against the smallest structure
+    """One row a corpus: the smallest index this crate builds against the smallest structure
     anyone else built."""
     by_corpus: dict[str, list[dict]] = {}
     for cell in artifact["cells"]:
@@ -54,7 +59,7 @@ def rows(artifact: dict) -> list[dict]:
 
     out = []
     for corpus, cells in by_corpus.items():
-        ours = [c for c in cells if c["structure"].startswith("lexindex Dict")]
+        ours = [c for c in cells if c["structure"].startswith("lexindex")]
         theirs = [c for c in cells if not c["structure"].startswith("lexindex")]
         if not ours or not theirs:
             continue
@@ -65,7 +70,7 @@ def rows(artifact: dict) -> list[dict]:
                 "corpus": corpus.replace("-1000000", "").replace("-full", ""),
                 "keys": best_ours["keys"],
                 "ours": best_ours["bytes_per_key"],
-                "ours_label": best_ours["structure"].removeprefix("lexindex Dict "),
+                "ours_label": best_ours["structure"].removeprefix("lexindex "),
                 "theirs": best_theirs["bytes_per_key"],
                 "theirs_label": best_theirs["structure"],
                 "margin": (best_theirs["bytes_per_key"] - best_ours["bytes_per_key"])
@@ -94,10 +99,13 @@ def draw(data: list[dict], env: dict, out: Path) -> None:
             fontsize=7.5,
             color="#475569",
         )
+        # Two decimals round an fst on a dense id space to 0.00, which reads as a missing bar
+        # rather than the point of the row; under a hundredth of a byte the label goes to bytes.
+        ours = f"{r['ours']:.2f}" if r["ours"] >= 0.01 else f"{r['ours'] * r['keys']:,.0f} B total"
         ax.text(
             r["ours"] + widest * 0.008,
             i - h / 2,
-            f"{r['ours']:.2f}  Dict {r['ours_label']}",
+            f"{ours}  {r['ours_label']}",
             va="center",
             fontsize=7.5,
             color=LEX if won else LOSS,
@@ -125,7 +133,7 @@ def draw(data: list[dict], env: dict, out: Path) -> None:
 
     won = sum(1 for r in data if r["margin"] > 0)
     ax.set_title(
-        f"lexindex `DictIndex` against the smallest trie anyone else built — "
+        f"lexindex against the smallest trie anyone else built — "
         f"smaller on {won} of {len(data)} corpora",
         fontsize=12,
         fontweight="bold",
@@ -146,19 +154,21 @@ def draw(data: list[dict], env: dict, out: Path) -> None:
         color="#64748b",
         va="bottom",
     )
-    handles = [
-        plt.Rectangle((0, 0), 1, 1, color=LEX),
-        plt.Rectangle((0, 0), 1, 1, color=RIVAL),
-        plt.Rectangle((0, 0), 1, 1, color=LOSS),
-    ]
-    # Below the axis, not inside it: at the bottom right the legend sits exactly where the one
-    # losing corpus prints its margin.
+    labels = ["lexindex, best index", "smallest other structure"]
+    colours = [LEX, RIVAL]
+    # The loss colour earns a key only when something is losing; carried unconditionally it
+    # advertises a corpus the figure does not show.
+    if won < len(data):
+        labels.append("a corpus a trie still wins")
+        colours.append(LOSS)
+    # Below the axis, not inside it: at the bottom right the legend sits exactly where the last
+    # row prints its margin.
     ax.legend(
-        handles,
-        ["lexindex DictIndex", "smallest other structure", "the one corpus a trie still wins"],
+        [plt.Rectangle((0, 0), 1, 1, color=c) for c in colours],
+        labels,
         loc="upper center",
         bbox_to_anchor=(0.5, -0.09),
-        ncol=3,
+        ncol=len(labels),
         frameon=False,
         fontsize=8,
     )

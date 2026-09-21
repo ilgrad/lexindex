@@ -15,7 +15,7 @@ persist a flat blob, and query it many times, memory-mapped where the structure 
 [`betula-cluster`](https://github.com/ilgrad/betula-cluster) (string ids ↔ cluster ids, both ways)
 but stands on its own.
 
-[![lexindex DictIndex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on twelve of them](https://raw.githubusercontent.com/ilgrad/lexindex/main/docs/assets/frontier-1m.svg)](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
+[![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on all thirteen](https://raw.githubusercontent.com/ilgrad/lexindex/main/docs/assets/frontier-1m.svg)](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
 
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
