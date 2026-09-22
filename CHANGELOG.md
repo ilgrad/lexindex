@@ -32,8 +32,10 @@ All notable changes to this project are documented here. The format follows
   then the perfect hash, the rank table and the side table. `load_mmap` borrows the dictionary and
   the rank table, and a crafted blob answers wrong ranks, never ranks past the end. Python has the
   same class, `HashedDictIndex.from_dict(dict, fingerprint_bits=8)`, with `ids_of`, `in`,
-  indexing and `.dict`. `plan` does not price it yet, the C ABI refuses its blobs, and `Overlay`
-  does not take it: its ids are ranks.
+  indexing and `.dict`, and the batch forms `DictIndex` has — `ids_of_bytes`, `ids_into` and the
+  Arrow pair `ids_of_arrow` and `ids_into_arrow` — writing `uint64` ids and `MISSING_ID` for a
+  miss. `plan` does not price it yet, the C ABI refuses its blobs, and `Overlay` does not take it:
+  its ids are ranks.
 - **The command line in the wheel.** `plan`, `build`, `inspect` and `dump` were reachable only
   through `cargo install lexindex`, so a pip install could price a corpus from Python code but not
   from a shell. The wheel now carries the binary's own program — `src/cli.rs`, compiled into both —

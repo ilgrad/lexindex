@@ -307,7 +307,7 @@ impl HashedDictIndex {
             return self.exact_id(key);
         }
         if !self.side.is_empty() {
-            return self.id_with_side(key);
+            return self.id_with_side(key.as_bytes());
         }
         let (h, full) = hash_pair_bytes(key.as_bytes());
         self.checked(self.mph.as_ref()?.index(h), full)
@@ -323,8 +323,8 @@ impl HashedDictIndex {
     /// [`id`](Self::id) for an index holding a 64-bit hash collision: the side table first, then
     /// the sidecar.
     #[cold]
-    fn id_with_side(&self, key: &str) -> Option<u64> {
-        let (h, full) = hash_pair_bytes(key.as_bytes());
+    fn id_with_side(&self, key: &[u8]) -> Option<u64> {
+        let (h, full) = hash_pair_bytes(key);
         if let Some(rank) = self.side_lookup(h, full) {
             return Some(rank);
         }
@@ -383,21 +383,30 @@ impl HashedDictIndex {
     /// index holding a hash collision takes the per-key path. Without a fingerprint it is
     /// [`dict().ids_of`](DictIndex::ids_of).
     pub fn ids_of<S: AsRef<str>>(&self, keys: &[S]) -> Vec<Option<u64>> {
+        self.ids_of_with(keys.len(), |i| keys[i].as_ref().as_bytes())
+    }
+
+    /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
+    /// are not `str`s — a lookup reading an Arrow buffer.
+    pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
+        &self,
+        n: usize,
+        key: F,
+    ) -> Vec<Option<u64>> {
         if self.fp_bits == 0 {
-            return self.dict.ids_of(keys);
+            return self.dict.ids_of_with(n, key);
         }
         let Some(mph) = &self.mph else {
-            return vec![None; keys.len()];
+            return vec![None; n];
         };
         if !self.side.is_empty() {
-            return keys.iter().map(|k| self.id(k.as_ref())).collect();
+            return (0..n).map(|i| self.id_with_side(key(i))).collect();
         }
         const AHEAD: usize = 32;
-        let key = |i: usize| keys[i].as_ref().as_bytes();
-        let mut hashes = Vec::with_capacity(keys.len());
-        let mut wanted = Vec::with_capacity(keys.len());
-        for i in 0..keys.len() {
-            if i + AHEAD < keys.len() {
+        let mut hashes = Vec::with_capacity(n);
+        let mut wanted = Vec::with_capacity(n);
+        for i in 0..n {
+            if i + AHEAD < n {
                 crate::blob::prefetch_key(key(i + AHEAD));
             }
             let (h, full) = hash_pair_bytes(key(i));
@@ -406,7 +415,7 @@ impl HashedDictIndex {
         }
         let slots = mph.index_all(&hashes);
         let table = self.ranks.as_ref();
-        (0..keys.len())
+        (0..n)
             .map(|i| {
                 if let Some(&s) = slots.get(i + AHEAD) {
                     crate::blob::prefetch_byte(table, (s * u64::from(self.width) / 8) as usize);

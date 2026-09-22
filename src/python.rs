@@ -2298,6 +2298,84 @@ impl PyHashedDictIndex {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
+    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 8-byte
+    /// native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID) where a
+    /// key is absent, for `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
+    fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
+        let packed = py.detach(|| {
+            let mut out = Vec::with_capacity(keys.len() * 8);
+            for id in self.inner.ids_of(&keys) {
+                out.extend_from_slice(&id.unwrap_or(u64::MAX).to_ne_bytes());
+            }
+            out
+        });
+        PyBytes::new(py, &packed)
+    }
+
+    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column, packed like
+    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
+    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from
+    /// the column's offset and data buffers, so no Python string exists per key.
+    fn ids_of_arrow<'py>(
+        &self,
+        py: Python<'py>,
+        column: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let chunks = utf8_chunks(column)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
+    }
+
+    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
+    /// [`ids_into`](Self::ids_into) does for a list.
+    fn ids_into_arrow(
+        &self,
+        py: Python<'_>,
+        column: &Bound<'_, PyAny>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let chunks = utf8_chunks(column)?;
+        let n = total_len(&chunks);
+        if n == 0 {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u64>(out, n)?;
+        let ids = self.arrow_ids(py, &chunks)?;
+        write_ids(py, &sink, &ids)
+    }
+
+    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
+    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
+    /// long. A read-only, strided or mistyped buffer is a `BufferError`; one shorter than `keys`
+    /// is a `ValueError`.
+    fn ids_into(
+        &self,
+        py: Python<'_>,
+        keys: Vec<PyBackedStr>,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if keys.is_empty() {
+            return writable_buffer(out);
+        }
+        let sink = id_sink::<u64>(out, keys.len())?;
+        let ids: Vec<u64> = py.detach(|| {
+            self.inner
+                .ids_of(&keys)
+                .into_iter()
+                .map(|id| id.unwrap_or(u64::MAX))
+                .collect()
+        });
+        write_ids(py, &sink, &ids)
+    }
+
+    /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
+    #[classattr]
+    const ID_DTYPE: &'static str = "uint64";
+
+    /// The [`ids_of_bytes`](Self::ids_of_bytes) item standing for an absent key.
+    #[classattr]
+    const MISSING_ID: u64 = u64::MAX;
+
     /// Serialise to a `bytes` blob, the dictionary's own blob inside it.
     fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         let bytes = py.detach(|| self.inner.to_bytes());
@@ -2377,6 +2455,26 @@ impl PyHashedDictIndex {
         Ok(Self {
             inner: Arc::new(inner),
         })
+    }
+}
+
+#[cfg(feature = "mph")]
+impl PyHashedDictIndex {
+    /// The ids of every chunk in order, [`MISSING_ID`](Self::MISSING_ID) where the column holds
+    /// a null or a key the index does not answer for.
+    fn arrow_ids(&self, py: Python<'_>, chunks: &[Utf8Chunk]) -> PyResult<Vec<u64>> {
+        let inner = &self.inner;
+        Ok(py.detach(|| {
+            let mut out = Vec::with_capacity(total_len(chunks));
+            for c in chunks {
+                let ids = inner.ids_of_with(c.len, |i| c.key(i));
+                out.extend(ids.into_iter().enumerate().map(|(i, id)| match id {
+                    Some(id) if c.valid(i) => id,
+                    _ => u64::MAX,
+                }));
+            }
+            out
+        }))
     }
 }
 

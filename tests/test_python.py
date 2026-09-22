@@ -506,6 +506,8 @@ def test_hashed_dict_index_answers_the_dictionarys_ranks(tmp_path):
         lexindex.HashedDictIndex.from_bytes(blob[:-1])
     empty = lexindex.HashedDictIndex.from_dict(lexindex.DictIndex([]), 8)
     assert empty.is_empty() and empty.id("x") is None and empty.id_unchecked("x") == 0
+    assert hd.ID_DTYPE == "uint64" and hd.MISSING_ID == 2**64 - 1
+    assert empty.ids_of_bytes(["x"]) == hd.MISSING_ID.to_bytes(8, sys.byteorder)
 
 
 def test_string_index_batch():
@@ -854,6 +856,9 @@ def test_subsequence_matches_whole_characters():
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
         lexindex.DictIndex,
+        # The sidecar's own batch, and at zero bits the dictionary's search under it.
+        lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 32),
+        lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 0),
     ],
 )
 def test_ids_of_bytes_matches_ids_of(ctor):
@@ -900,6 +905,8 @@ def test_ids_of_bytes_reads_zero_copy_through_numpy():
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
         lexindex.DictIndex,
+        lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 32),
+        lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 0),
     ],
 )
 def test_ids_into_writes_the_head_of_a_buffer_and_leaves_the_tail(ctor):
@@ -1741,12 +1748,25 @@ class _Utf8Column:
         return [self._validity, self._offsets, self._data]
 
 
+def _hashed(fingerprint_bits):
+    """A ``HashedDictIndex`` constructor shaped like the others: keys in, index out."""
+
+    def build(keys):
+        return lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys), fingerprint_bits)
+
+    build.__name__ = f"HashedDictIndex_{fingerprint_bits}"
+    return build
+
+
 _ARROW_CLASSES = [
     lexindex.CompactHashIndex,
     lexindex.PerfectHashIndex,
     lexindex.StringIndex,
     lexindex.ClosedHashIndex,
     lexindex.DictIndex,
+    # The sidecar's batch, and at zero bits the dictionary's search it hands a column to.
+    _hashed(32),
+    _hashed(0),
 ]
 
 
