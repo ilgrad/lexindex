@@ -84,7 +84,11 @@ All notable changes to this project are documented here. The format follows
   documentation, which docs.rs does not render. Both are on the public pages now, and CI denies
   rustdoc's warnings on the build docs.rs makes, where a link to a private item is reported.
 - `SECURITY.md` listed the fuzzed formats as of 1.1, without `MPH3`, the perfect hash's format since
-  4.0.0; it names `MPH3` and `BHD1` now.
+  4.0.0; it names `MPH3` and `BHD1` now. Its `unsafe` inventory is recounted from the source — 15
+  `unsafe fn`s where it said 13, 41 blocks where it said 38, eleven in the Python bindings where it
+  said nine, `HashedDictIndex`'s memory maps and the phrase trie's unchecked walk among the
+  difference — and names what it left out: the four `unsafe impl`s of `Send` and `Sync`, the
+  `unsafe trait` behind zeroed huge-page tables, and the C ABI's five internal `unsafe fn`s.
 
 ## [4.0.1] — 2026-09-22
 
