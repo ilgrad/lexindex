@@ -3,6 +3,9 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/ilgrad/lexindex/security/advisories/new
     about: Please report security issues privately, not as a public issue.
-  - name: Question or idea
-    url: https://github.com/ilgrad/lexindex/discussions
-    about: For "which index should I use?", design discussion and benchmark requests.
+  - name: Question — "which index should I use?", an unexpected size or latency
+    url: https://github.com/ilgrad/lexindex/discussions/new?category=q-a
+    about: Answered in Discussions. `lexindex plan keys.txt` makes the question concrete.
+  - name: Idea — what the library should grow
+    url: https://github.com/ilgrad/lexindex/discussions/new?category=ideas
+    about: Feature requests and design discussion, before they are concrete enough to be issues.
