@@ -1,0 +1,145 @@
+name: polars release
+
+# `lexindex-polars` publishes on its own tag, `polars-v*`, because it versions on polars' plugin
+# ABI rather than on the library's. A `v*` tag releases lexindex and never touches this file.
+on:
+  push:
+    tags: ["polars-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Same reasoning as the library's preflight: PyPI refuses a re-upload of a version, so everything
+  # kept in sync by hand is checked before an artefact is built.
+  preflight:
+    name: preflight (versions agree with the tag)
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    defaults:
+      run:
+        working-directory: polars
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: tag == Cargo.toml == pyproject.toml == CHANGELOG
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#polars-v}"
+          fail=0
+          check() { # name, found, want
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1 is '$2', expected '$3'"
+              fail=1
+            else
+              echo "ok: $1 = $2"
+            fi
+          }
+          check Cargo.toml "$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" "$ver"
+          check pyproject.toml "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" "$ver"
+          grep -qE "^## \[$ver\] . [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
+            || { echo "::error::polars/CHANGELOG.md has no dated '## [$ver]' heading"; fail=1; }
+          chg_date="$(grep -m1 -E "^## \[$ver\] . " CHANGELOG.md | sed -E 's/.* ([0-9]{4}-[0-9]{2}-[0-9]{2})$/\1/')"
+          git fetch --quiet --no-tags --depth=1 origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          tag_date="$(git for-each-ref --format='%(taggerdate:short)' "refs/tags/$GITHUB_REF_NAME")"
+          if [ -z "$tag_date" ]; then
+            echo "::error::$GITHUB_REF_NAME is a lightweight tag; a release tag is annotated (git tag -s)"
+            fail=1
+          else
+            check "the tag's date" "$tag_date" "$chg_date"
+          fi
+          exit $fail
+
+  # The plugin's own gate, run against the tag rather than trusted from the last push to main.
+  test:
+    name: test
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/polars.yml
+
+  # Wheels only, no sdist. maturin builds an sdist for this crate by vendoring the path dependency
+  # on `lexindex`, which makes the *repository root* the sdist root: the library's README, CHANGELOG
+  # and CITATION.cff end up at the top level under the plugin's name, and the two `LICENSE` files
+  # collide outright. A plugin wheel is platform-specific and abi3, so the platforms below are the
+  # install; anywhere else the README points at the git install, which needs a Rust toolchain either
+  # way.
+  wheels:
+    name: wheels ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest, target: x86_64, smoke: true }
+          - { runner: ubuntu-latest, target: aarch64 }
+          - { runner: macos-14, target: x86_64 }
+          - { runner: macos-14, target: aarch64, smoke: true }
+          - { runner: windows-latest, target: x64, smoke: true }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: polars
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: "true"
+      # A plugin that builds is not a plugin that loads: polars dlopens the cdylib by the name the
+      # namespace registers, and a wheel whose module landed in the wrong place fails only here.
+      - name: smoke test the wheel
+        if: matrix.platform.smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --find-links polars/dist lexindex-polars
+          cd "$RUNNER_TEMP"
+          python - <<'EOF'
+          import lexindex as lx
+          import lexindex_polars  # noqa: F401  -- the import registers the namespace
+          import polars as pl
+
+          lx.DictIndex(["apple", "banana"]).save("smoke.bdx")
+          df = pl.DataFrame({"k": ["banana", "apple", "cherry", None]})
+          out = df.with_columns(
+              pl.col("k").lexindex.id("smoke.bdx").alias("id"),
+              pl.col("k").lexindex.contains("smoke.bdx").alias("hit"),
+          )
+          assert out["id"].to_list() == [1, 0, None, None], out["id"].to_list()
+          assert out["hit"].to_list() == [True, True, False, None], out["hit"].to_list()
+          back = pl.DataFrame({"i": [1, 0]}).with_columns(pl.col("i").lexindex.key("smoke.bdx"))
+          assert back["i"].to_list() == ["banana", "apple"]
+          print("smoke ok")
+          EOF
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: polars-wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}
+          path: polars/dist
+
+  # No GitHub Release is created here on purpose: Zenodo archives every release of this repository
+  # and would mint a DOI for a plugin tag as though the library had been released. The tag and the
+  # PyPI project are the record.
+  publish:
+    name: publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [test, wheels]
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing
+      attestations: write # Sigstore provenance, verifiable with `gh attestation verify`
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: polars-wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

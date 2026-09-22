@@ -20,6 +20,8 @@ on:
       - Cargo.toml
       - .github/workflows/polars.yml
   workflow_dispatch:
+  # `polars-release.yml` runs this gate against the tag it is about to publish.
+  workflow_call:
 
 permissions:
   contents: read
