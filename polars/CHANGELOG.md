@@ -3,7 +3,7 @@
 `lexindex-polars` is versioned separately from `lexindex`: it tracks polars' plugin ABI, which
 moves on polars' cadence and not on the library's.
 
-## [Unreleased]
+## [0.1.0] — 2026-09-22
 
 ### Added
 
