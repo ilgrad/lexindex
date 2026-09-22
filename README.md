@@ -20,11 +20,11 @@ but stands on its own.
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
 other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
-The figure is the size axis, which `DictIndex` wins; its search is 1.1× to 3.1× slower than XCDAT's
-at a million keys and 1.1× to 1.6× past ten million on four corpora of six. **`HashedDictIndex`
+The figure is the size axis, which `DictIndex` wins; its search is 1.2× to 5.1× slower than XCDAT's
+at a million keys and 1.1× to 1.8× past ten million on five corpora of six. **`HashedDictIndex`
 (4.1) wins the latency axis as well:** the same dictionary with its `id` answered by a perfect hash
-is 3.7× to 8.7× faster than XCDAT 15 and 1.4× to 3.2× smaller, on all thirteen corpora at a million
-keys and all six at ten million — and 2.5× to 7.8× faster and 1.2× to 2.8× smaller with an 8-bit
+is 3.9× to 8.9× faster than XCDAT 15 and 1.4× to 3.2× smaller, on all thirteen corpora at a million
+keys and all six at ten million — and 3.1× to 7.6× faster and 1.2× to 2.8× smaller with an 8-bit
 fingerprint that turns away all but one stranger in 256. An exact answer for a stranger is still
 the dictionary's search, and there XCDAT keeps its lead. Every column is in
 [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#hasheddictindex-against-xcdat), and

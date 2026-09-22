@@ -1590,13 +1590,13 @@ the bytes of `DictIndex` at its default block; C²-MARISA shares the front on te
 always larger — 9.14 bytes a key at ρ=2 on `titles-ru` against 7.45.
 
 **Where this loses, and by how much.** Size is the axis `DictIndex` is built to win and latency is
-the axis it pays on: at a million keys the fastest of the lexindex rows above is **1.1× to 3.1×
-slower than XCDAT 15**, worst on `words` (247 ns at block 32 against 80) and closest on `urls` and
-`titles-ru`. The cause is structural rather than incidental. A probe walks a block's restarts to one
-microblock and scans it — `block / micro + micro − 2` header decodes, 62 at block 1024 — where a
-double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys
-its bytes by making a comparison cost work, and that is the bill. `HashedDictIndex`, which answers
-`id` without the search, does not pay it; it is
+the axis it pays on: at a million keys the fastest of the lexindex rows above is **1.2× to 3.1×
+slower than XCDAT 15**, worst on `words` (247 ns at block 32 against 80) and closest on `dna`,
+`urls` and `paths`, 1.23× to 1.27×. The cause is structural rather than incidental. A probe walks
+a block's restarts to one microblock and scans it — `block / micro + micro − 2` header decodes, 62
+at block 1024 — where a double-array trie takes one indexed load per byte of the key and decodes
+nothing. Front coding buys its bytes by making a comparison cost work, and that is the bill.
+`HashedDictIndex`, which answers `id` without the search, does not pay it; it is
 [measured against XCDAT below](#hasheddictindex-against-xcdat).
 
 The bill shrinks with `n`, and then it stops shrinking. The same ratio is 3.1× on `words` at half a
@@ -1613,7 +1613,7 @@ ten million, where every one of them pays DRAM misses — after which the ratio 
 dependent misses a probe takes, not by how many bytes it could touch. That is a reading, not a
 measurement; a miss profile of both lookup paths is what would settle it. The claim for the rows
 above is the measured one: **smallest everywhere, faster than XCDAT on `numeric` at ten and a hundred million
-keys and on `dna` at ten million, 1.1–1.6× behind it on the other four past ten million, and on the
+keys and on `dna` at ten million, 1.1–1.7× behind it on the other four past ten million, and on the
 front of all of them.** The 19.2 M and 100 M numbers are the standalone benchmark suite's, at its
 `a6c13d0` with lexindex 4.0.0 from crates.io:
 [`frontier-full-2026-09-21-arz-a6c13d0.json`](https://github.com/ilgrad/string-index-benchmarks/blob/main/results/frontier-full-2026-09-21-arz-a6c13d0.json)
