@@ -37,6 +37,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+# The crate's own command line, which the extension carries: `cargo install lexindex` installs a
+# binary of the same name running the same program, so either one first on the path answers alike.
+[project.scripts]
+lexindex = "lexindex.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/ilgrad/lexindex"
 Repository = "https://github.com/ilgrad/lexindex"

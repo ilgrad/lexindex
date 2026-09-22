@@ -384,8 +384,9 @@ Every size above is one corpus at one `n`, and the ranking is stable across neit
 depends on how much the keys share, a fingerprint index's does not
 ([three corpora, and 10 M](https://ilgrad.github.io/lexindex/benchmarks/#which-one-to-pick-and-how-much-the-corpus-decides-it)).
 **`plan` does this on your keys.** `lexindex.plan(keys, prefix=True)` in Python,
-`lexindex::plan(&keys, Needs::default().prefix())` in Rust: it prices every index that answers what
-you asked for — the dictionary at each of its three block sizes, though not yet `HashedDictIndex` —
+`lexindex::plan(&keys, Needs::default().prefix())` in Rust, and `lexindex plan keys.txt --prefix`
+from a shell after either install: it prices every index that answers what you asked for — the
+dictionary at each of its three block sizes, though not yet `HashedDictIndex` —
 ranks them cheapest first, and
 says when two are too close to call or when the corpus is one its model cannot carry. Past 100 000
 keys it models from two draws of that size and lands within **1.0 % of the built `DictIndex` blob at

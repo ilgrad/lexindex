@@ -142,6 +142,14 @@ pub use perfect_hash::PerfectHashIndex;
 
 #[cfg(feature = "python")]
 mod python;
+// The command line is `src/cli.rs`, compiled into the `lexindex` binary and, here, into the Python
+// extension for the wheel's `lexindex` command. It is written against the public API as
+// `lexindex::…`, the way the binary sees this crate, and this alias makes the same paths resolve
+// inside it.
+#[cfg(feature = "python")]
+extern crate self as lexindex;
+#[cfg(feature = "python")]
+mod cli;
 
 // The `cfg` sits inside the file, on the module itself: cbindgen reads the attribute on a `mod`
 // item as a condition on every symbol and would wrap the whole header in an `#if`.

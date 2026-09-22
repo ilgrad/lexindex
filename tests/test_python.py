@@ -1,12 +1,15 @@
 """End-to-end tests of the lexindex Python bindings."""
 
 import array
+import importlib.metadata
 import itertools
 import multiprocessing
 import os
 import pickle
 import random
 import re
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -1588,6 +1591,74 @@ def test_plan_refuses_an_objective_it_cannot_price():
     for bad in (3, None, {1: 1}):
         with pytest.raises(TypeError):
             lexindex.plan(["a", "b"], objective=bad)
+
+
+def _cli(*args, stdin=None):
+    """``python -m lexindex`` in a child interpreter, the way a shell runs it."""
+    return subprocess.run(
+        [sys.executable, "-m", "lexindex", *args],
+        input=stdin,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+
+def test_python_m_lexindex_prices_builds_inspects_and_dumps(tmp_path):
+    keys = tmp_path / "keys.txt"
+    keys.write_text("banana\napple\ncherry\napricot\napple\n", encoding="utf-8")
+    blob = tmp_path / "keys.bdx"
+    plan = _cli("plan", str(keys), "--prefix")
+    assert plan.returncode == 0, plan.stderr
+    assert plan.stdout.startswith("4 keys,") and "DictIndex" in plan.stdout
+    build = _cli("build", str(keys), str(blob), "--index", "dict")
+    assert build.returncode == 0, build.stderr
+    # The command line and the bindings are one crate, so they write one blob.
+    fruit = ["banana", "apple", "cherry", "apricot"]
+    assert blob.read_bytes() == lexindex.DictIndex(fruit).to_bytes()
+    assert "kind: DictIndex" in _cli("inspect", str(blob)).stdout
+    assert _cli("dump", str(blob)).stdout.splitlines() == sorted(fruit)
+
+
+def test_python_m_lexindex_reads_keys_from_stdin(tmp_path):
+    blob = tmp_path / "piped.bix"
+    build = _cli("build", "-", str(blob), "--index", "string", stdin="pear\nfig\n")
+    assert build.returncode == 0, build.stderr
+    assert lexindex.StringIndex.load(blob).key(0) == "fig"
+
+
+def test_python_m_lexindex_exits_as_the_binary_does(tmp_path):
+    version = _cli("--version")
+    assert (version.returncode, version.stdout) == (0, f"lexindex {lexindex.__version__}\n")
+    usage = _cli()
+    assert usage.returncode == 2
+    assert "no subcommand" in usage.stderr and "usage:" in usage.stderr
+    missing = _cli("inspect", str(tmp_path / "absent.bin"))
+    assert missing.returncode == 1 and missing.stderr.startswith("lexindex: ")
+
+
+def test_pip_install_puts_lexindex_on_the_path():
+    # The installer writes the `lexindex` script from this entry; it runs the `main` that
+    # `python -m lexindex` runs, so the tests above hold for it too.
+    (script,) = importlib.metadata.entry_points(group="console_scripts", name="lexindex")
+    assert script.value == "lexindex.__main__:main"
+    assert script.load().__module__ == "lexindex.__main__"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGINT is a POSIX signal")
+def test_python_m_lexindex_ends_on_ctrl_c(tmp_path):
+    # Blocked reading keys from a pipe that stays open. Rust retries a read that a signal
+    # interrupts, so with Python's own SIGINT handler in place the process never ends.
+    argv = [sys.executable, "-m", "lexindex", "build", "-", str(tmp_path / "x.bix")]
+    child = subprocess.Popen([*argv, "--index", "string"], stdin=subprocess.PIPE)
+    try:
+        time.sleep(1.0)
+        child.send_signal(signal.SIGINT)
+        assert child.wait(timeout=10) == -signal.SIGINT
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_build_to_file_writes_what_the_constructor_would_save(tmp_path):

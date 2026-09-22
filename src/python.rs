@@ -3281,6 +3281,28 @@ fn estimate_dict<'py>(
     Ok(d)
 }
 
+/// The wheel's `lexindex` command and `python -m lexindex`: the program the `lexindex` binary
+/// runs, over this process's own standard streams. `args` is the command line without the program name, and the return is the exit
+/// status: 0, 1 when the work failed, 2 when the command line did.
+///
+/// A build of a large corpus runs for minutes, so it runs detached from the interpreter. Stdout is
+/// flushed before returning because no Rust runtime is there to flush it at exit, and a last line
+/// without its newline would be lost.
+#[pyfunction(name = "_cli")]
+fn py_cli(py: Python<'_>, args: Vec<String>) -> u8 {
+    py.detach(|| {
+        let mut out = std::io::stdout().lock();
+        let code = crate::cli::run(
+            &args,
+            &mut std::io::stdin().lock(),
+            &mut out,
+            &mut std::io::stderr().lock(),
+        );
+        let _ = std::io::Write::flush(&mut out);
+        code
+    })
+}
+
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;
@@ -3298,5 +3320,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHashedDictIndex>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     m.add_function(wrap_pyfunction!(py_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(py_cli, m)?)?;
     Ok(())
 }

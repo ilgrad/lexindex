@@ -165,6 +165,9 @@ jobs:
           assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
           print("smoke ok:", lexindex.__version__)
           EOF
+          # The command line the wheel carries, both ways a pip install runs it.
+          python -m lexindex --version
+          lexindex --version
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
@@ -239,6 +242,8 @@ jobs:
           assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
           print("smoke ok:", lexindex.__version__)
           EOF
+          # The command line the wheel carries, run the way a pip install runs it.
+          python3.14t -m lexindex --version
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels-ft-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}

@@ -840,9 +840,11 @@ Not in the ABI, each additive when someone asks: `Overlay`, the mmap loaders, th
 ## Command line
 
 The crate ships a binary of the same name, so the choice between five indexes can be made without
-writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. It is a
-shell over `plan_file`, the builders, `inspect_file` and the indexes' own key iterators, and
-computes nothing of its own.
+writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. The
+Python wheel carries the same program, so `pip install lexindex` installs the same `lexindex`
+command with no Rust toolchain, and `python -m lexindex` runs it where the environment's scripts
+are not on the path. It is a shell over `plan_file`, the builders, `inspect_file` and the indexes'
+own key iterators, and computes nothing of its own.
 
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix

@@ -34,6 +34,13 @@ All notable changes to this project are documented here. The format follows
   same class, `HashedDictIndex.from_dict(dict, fingerprint_bits=8)`, with `ids_of`, `in`,
   indexing and `.dict`. `plan` does not price it yet, the C ABI refuses its blobs, and `Overlay`
   does not take it: its ids are ranks.
+- **The command line in the wheel.** `plan`, `build`, `inspect` and `dump` were reachable only
+  through `cargo install lexindex`, so a pip install could price a corpus from Python code but not
+  from a shell. The wheel now carries the binary's own program — `src/cli.rs`, compiled into both —
+  as a `lexindex` command and as `python -m lexindex`, so the subcommands, their output and their
+  exit statuses are the same whichever way lexindex was installed:
+  `pip install lexindex && lexindex plan keys.txt`. Ctrl-C ends a run as it ends the binary's,
+  rather than waiting for the Rust code to return.
 - **A fuzz target for `BHD1`.** `parse_hashed_dict` loads arbitrary bytes as a `HashedDictIndex`
   and holds every rank `id`, `id_unchecked` and `ids_of` answer below the key count; it runs in CI's
   fuzz matrix beside `parse_dict`, and `tests/data/golden-4.1.0-hashed.bhd` pins the format by its
