@@ -35,9 +35,15 @@ jobs:
         env:
           RUSTFLAGS: -Zsanitizer=address
         run: cargo +nightly test --target x86_64-unknown-linux-gnu --lib --tests
+      # `tests/capi.rs` compiles to nothing without the `capi` feature, so the step above runs none
+      # of it, and the C ABI is where every pointer comes from a caller this crate cannot see.
+      - name: cargo test under ASan (the C ABI)
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+        run: cargo +nightly test --target x86_64-unknown-linux-gnu --features capi --test capi
 
   miri:
-    name: Miri (fst only)
+    name: Miri
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,6 +65,13 @@ jobs:
         run: |
           cargo +nightly miri test --no-default-features --lib blob::
           cargo +nightly miri test --no-default-features --lib subsequence::
+      # The C ABI's `unsafe` blocks read and write what a C caller's pointers name. Under Miri the
+      # test calls through the module's own types (`lexindex::capi_miri`): the copies of the
+      # header's enums it uses everywhere else are, to Miri, a call with the wrong types.
+      - name: cargo miri test (the C ABI)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: cargo +nightly miri test --features capi --test capi
       # Every scalar in every blob this crate writes is little-endian, and every reader says so
       # with `from_le_bytes` -- but `to_ne_bytes` compiles, passes on x86 and silently writes a
       # different file on a big-endian machine. There is no big-endian runner and there does not

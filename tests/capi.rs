@@ -5,10 +5,21 @@
 //! the rlib that every integration test links, and `llvm-profdata` merges the two records into a
 //! count of zero (68 % of `capi.rs` reported uncovered by twelve tests that call every function).
 //! So the module is compiled only into the rlib (`not(test)`), and this file is its test.
+//!
+//! Under Miri the calls go through the module's own types instead (`lexindex::capi_miri`): Miri
+//! holds a call's types to the callee's by name, so the copies would stop it at the first call.
 #![cfg(feature = "capi")]
 
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
+
+#[cfg(miri)]
+use lexindex::capi_miri::{
+    LexindexIndex, LexindexKind, LexindexStatus, lexindex_abi_version, lexindex_index_build,
+    lexindex_index_contains, lexindex_index_free, lexindex_index_from_bytes, lexindex_index_id,
+    lexindex_index_ids, lexindex_index_key, lexindex_index_kind, lexindex_index_len,
+    lexindex_index_open, lexindex_index_save, lexindex_last_error, lexindex_version,
+};
 
 /// `LEXINDEX_ABI_VERSION` in the header.
 const LEXINDEX_ABI_VERSION: u32 = 1;
@@ -16,6 +27,7 @@ const LEXINDEX_ABI_VERSION: u32 = 1;
 const LEXINDEX_NO_ID: u64 = u64::MAX;
 
 /// `LexindexStatus` in the header, value for value.
+#[cfg(not(miri))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LexindexStatus {
@@ -30,6 +42,7 @@ enum LexindexStatus {
 }
 
 /// `LexindexKind` in the header, value for value.
+#[cfg(not(miri))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LexindexKind {
@@ -42,11 +55,13 @@ enum LexindexKind {
 }
 
 /// The opaque handle: only ever behind a pointer.
+#[cfg(not(miri))]
 #[repr(C)]
 struct LexindexIndex {
     _private: [u8; 0],
 }
 
+#[cfg(not(miri))]
 unsafe extern "C" {
     safe fn lexindex_abi_version() -> u32;
     safe fn lexindex_version() -> *const c_char;

@@ -154,6 +154,14 @@ mod cli;
 // The `cfg` sits inside the file, on the module itself: cbindgen reads the attribute on a `mod`
 // item as a condition on every symbol and would wrap the whole header in an `#if`.
 mod capi;
+/// The C ABI's own types and functions, for `tests/capi.rs` under Miri alone. Miri holds a call's
+/// types to the callee's by name, and the test's copies of the header's `#[repr(C)]` enums are the
+/// same layout under another name, which it reports as undefined behaviour at the first call.
+#[cfg(all(miri, feature = "capi", not(test)))]
+#[doc(hidden)]
+pub mod capi_miri {
+    pub use crate::capi::*;
+}
 
 /// Entry points for the fuzz targets in `fuzz/`, and **not public API**: the `fuzzing` feature is
 /// off by default and this module may change or vanish in any release.

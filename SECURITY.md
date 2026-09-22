@@ -111,7 +111,7 @@ into the `unsafe fn` of the same name, forwarding the same obligation to the Pyt
 writing memory the C caller vouched for in the function's `# Safety` line — the header carries it
 verbatim — after a null check on every function that has a status to report one in.
 `unsafe_op_in_unsafe_fn` is denied, so every one names its own justification. Miri and
-AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
+AddressSanitizer run weekly over the byte-range code and the C ABI, Miri also on a 32-bit
 target, and libFuzzer daily over the seven parsers a target can hold to a return value: `BCH8`,
 `BMP8`, `BCL2`, `BDX3` and `BHD1` — loaded and then queried, since a dictionary's block data is
 bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and

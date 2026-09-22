@@ -55,6 +55,11 @@ All notable changes to this project are documented here. The format follows
   `.clusterfuzzlite/` is the build an OSS-Fuzz project would use, and it builds all ten targets with
   the instrumentation intact: 2 448 counters in `parse_compact`, where an LTO build keeps a few
   hundred.
+- **The C ABI under the sanitizers.** The weekly AddressSanitizer run compiled `tests/capi.rs` to
+  nothing, since it needs the `capi` feature, and Miri could not run it at all: the test calls the
+  C functions through copies of the header's `#[repr(C)]` enums, which Miri holds to be other types
+  than the callee's and stops at the first call. Both run it every week now, Miri through the
+  module's own types, and both pass.
 - **`bench/frontier/run.sh --only PATTERN`** runs the campaign's processes whose label matches,
   into an artifact named `frontier-<scale>-subset-*`; `frontier_lex` takes `hashed0`, `hashed8` and
   `hashed16`, and `bench/tables.py` renders a campaign's `HashedDictIndex` table with `view=hashed`.
