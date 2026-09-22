@@ -1,0 +1,32 @@
+# local/coldmmap on ten million English Wikipedia titles
+# commit 41478d0, src/ clean (README.md and docs/usage.md carried an uncommitted doc fix; README.md reaches the crate only under cfg(doctest)), 2026-09-22T11:46:42+03:00
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.6-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+# after a reboot, bench-ready green before the batch (load 0.02); load 2.8 here from the batch's own builds just before, no other process
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   6.12      0.80      4.59      6.12   31343.7    637.6     yes
+DictIndex 32 (random)          6.12      0.80      1.81      6.12   66971.0   1438.2     yes
+DictIndex 256                  5.65      0.18      4.17      5.65   31666.5    606.5     yes
+DictIndex 256 (random)         5.65      0.18      1.06      5.65   81452.0   1513.9     yes
+DictIndex 1024                 5.48      0.12      4.11      5.48   29882.5    635.6     yes
+DictIndex 1024 (random)        5.48      0.12      1.15      5.48  110524.7   1477.2     yes
+CompactHashIndex               1.24      0.24      1.24      1.24    5336.0     27.9     yes
+CompactHashIndex (random)      1.24      0.24      0.70      1.24   52276.8    141.6     yes
+StringIndex                   13.25      0.01     10.10     13.25   87972.2    835.6     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  388828.4   3044.1     yes
+
+uuid, ten million:
+
+uuid-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                  18.14      1.20      6.58     18.14   97442.2    666.6     yes
+DictIndex 32 (random)         18.14      1.20      1.98     18.14   81527.1   3872.3     yes
+DictIndex 256                 17.56      0.17      5.82     17.56   99852.6    607.5     yes
+DictIndex 256 (random)        17.56      0.17      1.06     17.56  116557.4   3869.0     yes
+DictIndex 1024                17.42      0.06      6.02     17.42   98876.9    606.1     yes
+DictIndex 1024 (random)       17.42      0.06      1.11     17.42  149285.6   3823.9     yes
+CompactHashIndex               1.24      0.24      1.23      1.24    5219.9     28.5     yes
+CompactHashIndex (random)      1.24      0.24      0.68      1.24   51683.0    138.6     yes
+StringIndex                   36.07      0.01     15.16     36.07  240362.5    771.6     yes
+StringIndex (random)          36.07      0.01      9.98     36.07 1193104.7   4460.5     yes
