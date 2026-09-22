@@ -10,16 +10,17 @@ All notable changes to this project are documented here. The format follows
 
 - **`HashedDictIndex`: a `DictIndex` whose `id` is a hash.** A dictionary answers `id` by searching
   — the block samples, one block's restarts, one microblock's scan — and that search is the column
-  the frontier campaign lost: XCDAT 1.1–3.1× faster at a million keys, 1.1–1.6× past ten million.
+  the frontier campaign lost: XCDAT 1.2–5.1× faster at a million keys, and 1.1–1.8× at ten million
+  on five of the six corpora there.
   `HashedDictIndex::from_dict(dict, fingerprint_bits)` keeps the dictionary whole and adds a minimal
   perfect hash over the keys' 64-bit hashes and a bit-packed table holding each key's rank at its
   slot, `⌈log2 n⌉ + fingerprint_bits` bits wide. `id` is two hashes of the key and two reads and
   never touches the dictionary; `key(id)`, prefix, range and iteration go to `dict()`, whose ids are
   the same ranks. On the campaign's protocol, beside `Dict` 256 and XCDAT 15 as controls that read
-  within 4.2 % of the published campaign on all 38 of their cells, it is **faster than XCDAT and
-  smaller on all nineteen corpora**: `id_unchecked` 3.7–8.7× faster at 1.39–3.16× less space, `id`
-  at eight fingerprint bits 2.5–7.8× and 1.17–2.77×, and it builds before XCDAT on every one.
-  Against its own dictionary's search it is 7.6–20.5× faster closed and 5.7–15.5× at eight bits,
+  within 4.9 % of the published campaign on all 38 of their cells, it is **faster than XCDAT and
+  smaller on all nineteen corpora**: `id_unchecked` 3.9–8.9× faster at 1.39–3.16× less space, `id`
+  at eight fingerprint bits 3.1–7.6× and 1.17–2.77×, and it builds before XCDAT on every one.
+  Against its own dictionary's search it is 7.6–20.5× faster closed and 6.1–17.0× at eight bits,
   for 2.62 bytes a key on the 480 k-word dictionary, 2.74 at a million keys and 3.24 at ten
   million.
 

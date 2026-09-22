@@ -57,7 +57,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   queries, with `id` answered by a minimal perfect hash and a table of ranks instead of a search.
   2.62 bytes/key on top of the dictionary, one more per eight fingerprint bits for `id` to reject a
   non-member at `2^-bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
-  the closed-vocabulary path — 3.7–8.7× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
+  the closed-vocabulary path — 3.9–8.9× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
   less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member (a
   minimal perfect hash plus a fingerprint per key, no keys stored). 1.24 bytes/key, at the cost of
