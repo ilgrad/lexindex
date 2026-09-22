@@ -1,0 +1,125 @@
+# rsmarisa 0.4.2 against DictIndex over the eleven corpora at a million keys, one process per corpus
+# commit fdc28bc, clean tree, 2026-09-23; corpora as named in bench/corpora.json, sha256 checked
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.6-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+# the probe set and rounds as in rsmarisa-2026-09-23-arz-fdc28bc.txt; each process started only once a readiness check passed -- one-minute load under 0.40, no swap in use, no other process over 15 % CPU -- about two hours after a reboot.
+=== dna 2026-09-23T01:54:21+03:00 load 0.36 0.41 0.31 acpitz=77 iwlwifi_1=35 
+
+dna-1000000: 1000000 keys, raw 24.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        7.612       1262        603
+rsmarisa (3 tries, Normal = default)       7.909       1273        639
+rsmarisa (3 tries, Huge = fastest)         9.097       1305        688
+lexindex DictIndex block 64                4.630         99        265
+lexindex DictIndex block 256               4.375         97        268
+lexindex DictIndex block 512               4.246         96        281
+rc=0 2026-09-23T01:54:26+03:00 load 0.42 0.42 0.31 acpitz=78 iwlwifi_1=35 
+=== domains 2026-09-23T01:54:36+03:00 load 0.35 0.41 0.31 acpitz=58 iwlwifi_1=36 
+
+domains-1000000: 1000000 keys, raw 13.78 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        4.874        696        469
+rsmarisa (3 tries, Normal = default)       5.136        713        463
+rsmarisa (3 tries, Huge = fastest)         6.039        715        491
+lexindex DictIndex block 64                4.635        183        315
+lexindex DictIndex block 256               4.500        181        336
+lexindex DictIndex block 512               4.370        178        370
+rc=0 2026-09-23T01:54:40+03:00 load 0.40 0.42 0.31 acpitz=72 iwlwifi_1=34 
+=== idents 2026-09-23T01:54:40+03:00 load 0.40 0.42 0.31 acpitz=72 iwlwifi_1=34 
+
+idents-1000000: 1000000 keys, raw 17.28 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        5.504        648        644
+rsmarisa (3 tries, Normal = default)       5.830        667        619
+rsmarisa (3 tries, Huge = fastest)         6.604        695        620
+lexindex DictIndex block 64                5.399        218        352
+lexindex DictIndex block 256               5.228        217        376
+lexindex DictIndex block 512               5.077        213        404
+rc=0 2026-09-23T01:54:43+03:00 load 0.45 0.43 0.32 acpitz=78 iwlwifi_1=35 
+=== numeric 2026-09-23T01:54:53+03:00 load 0.38 0.41 0.31 acpitz=59 iwlwifi_1=35 
+
+numeric-1000000: 1000000 keys, raw 5.89 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        1.642         97        186
+rsmarisa (3 tries, Normal = default)       1.716        108        163
+rsmarisa (3 tries, Huge = fastest)         2.011        128        159
+lexindex DictIndex block 64                1.096         76        290
+lexindex DictIndex block 256               1.011         75        286
+lexindex DictIndex block 512               0.922         74        290
+rc=0 2026-09-23T01:54:55+03:00 load 0.38 0.41 0.31 acpitz=64 iwlwifi_1=35 
+=== opaque 2026-09-23T01:54:55+03:00 load 0.38 0.41 0.31 acpitz=70 iwlwifi_1=35 
+
+opaque-1000000: 1000000 keys, raw 16.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       18.271       1569       1077
+rsmarisa (3 tries, Normal = default)      18.945       1177       1072
+rsmarisa (3 tries, Huge = fastest)        19.535       1269       1025
+lexindex DictIndex block 64               10.487        117        298
+lexindex DictIndex block 256              10.399        123        274
+lexindex DictIndex block 512              10.295        117        298
+rc=0 2026-09-23T01:55:00+03:00 load 0.43 0.42 0.32 acpitz=76 iwlwifi_1=35 
+=== paths 2026-09-23T01:55:10+03:00 load 0.36 0.41 0.31 acpitz=58 iwlwifi_1=35 
+
+paths-1000000: 1000000 keys, raw 124.98 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       10.070       5668       1923
+rsmarisa (3 tries, Normal = default)      12.694       5675       1871
+rsmarisa (3 tries, Huge = fastest)        22.500       5727       1850
+lexindex DictIndex block 64               11.211        467        800
+lexindex DictIndex block 256               9.871        460        749
+lexindex DictIndex block 512               9.429        451        729
+rc=0 2026-09-23T01:55:31+03:00 load 0.55 0.45 0.33 acpitz=87 iwlwifi_1=34 
+=== titles-en 2026-09-23T01:55:51+03:00 load 0.39 0.42 0.32 acpitz=53 iwlwifi_1=35 
+
+titles-en-1000000: 1000000 keys, raw 20.98 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        7.854       1031        819
+rsmarisa (3 tries, Normal = default)       8.445       1015        849
+rsmarisa (3 tries, Huge = fastest)         9.403       1058        862
+lexindex DictIndex block 64                7.558        345        398
+lexindex DictIndex block 256               7.370        342        385
+lexindex DictIndex block 512               7.223        338        403
+rc=0 2026-09-23T01:55:56+03:00 load 0.44 0.43 0.32 acpitz=80 iwlwifi_1=35 
+=== titles-ru 2026-09-23T01:56:17+03:00 load 0.38 0.41 0.32 acpitz=52 iwlwifi_1=35 
+
+titles-ru-1000000: 1000000 keys, raw 35.82 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        8.223       1518       1080
+rsmarisa (3 tries, Normal = default)       9.192       1503       1063
+rsmarisa (3 tries, Huge = fastest)        11.109       1564       1084
+lexindex DictIndex block 64                8.038        388        449
+lexindex DictIndex block 256               7.664        395        424
+lexindex DictIndex block 512               7.477        385        451
+rc=0 2026-09-23T01:56:24+03:00 load 1.44 0.63 0.39 acpitz=85 iwlwifi_1=35 
+=== titles-zh 2026-09-23T01:58:04+03:00 load 0.35 0.48 0.36 acpitz=45 iwlwifi_1=35 
+
+titles-zh-1000000: 1000000 keys, raw 16.87 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        6.398        792        696
+rsmarisa (3 tries, Normal = default)       6.789        791        695
+rsmarisa (3 tries, Huge = fastest)         7.711        807        713
+lexindex DictIndex block 64                6.423        254        360
+lexindex DictIndex block 256               6.270        257        365
+lexindex DictIndex block 512               6.124        250        393
+rc=0 2026-09-23T01:58:08+03:00 load 0.40 0.49 0.36 acpitz=73 iwlwifi_1=35 
+=== urls 2026-09-23T01:58:08+03:00 load 0.40 0.49 0.36 acpitz=73 iwlwifi_1=34 
+
+urls-1000000: 1000000 keys, raw 52.36 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        8.381       2040        844
+rsmarisa (3 tries, Normal = default)      10.128       2053        868
+rsmarisa (3 tries, Huge = fastest)        15.510       2145        909
+lexindex DictIndex block 64                8.086        356        409
+lexindex DictIndex block 256               7.511        357        392
+lexindex DictIndex block 512               7.313        347        414
+rc=0 2026-09-23T01:58:17+03:00 load 0.50 0.50 0.37 acpitz=79 iwlwifi_1=34 
+=== uuid 2026-09-23T01:58:37+03:00 load 0.35 0.47 0.36 acpitz=50 iwlwifi_1=36 
+
+uuid-1000000: 1000000 keys, raw 36.00 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)       33.006       2128       1349
+rsmarisa (3 tries, Normal = default)      34.796       1556       1152
+rsmarisa (3 tries, Huge = fastest)        35.681       1722       1187
+lexindex DictIndex block 64               18.275        186        418
+lexindex DictIndex block 256              18.040        186        377
+lexindex DictIndex block 512              17.915        180        338
+rc=0 2026-09-23T01:58:44+03:00 load 0.41 0.48 0.36 acpitz=74 iwlwifi_1=35 

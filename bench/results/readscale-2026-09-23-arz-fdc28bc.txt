@@ -1,0 +1,191 @@
+# local/readscale: one mapping, many readers. Three processes at ten million English Wikipedia
+# titles and three at a million; the tables quote the minimum per cell across the three.
+# commit fdc28bc, the tree differing from it in documentation only (Markdown and doc comments), 2026-09-23
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.6-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+# each process started only once a readiness check passed -- one-minute load under 0.40, no swap in
+# use, no other process over 15 % CPU -- two to two and a half hours after a reboot. The load
+# printed after a process is its own sixteen threads; the next one waited for it to fall.
+
+########## 10000000
+### process 1 2026-09-23T02:09:16+03:00 load 0.37 0.39 0.36 1/944 54009
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.71 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       607.8           1.6      1.00
+       2       311.9           3.2      1.95
+       4       157.2           6.4      3.87
+       8        80.0          12.5      7.59
+      16        47.4          21.1     12.83
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        15.9          62.9      1.00
+       2        10.3          97.2      1.55
+       4         5.3         188.0      2.99
+       8         3.0         335.1      5.33
+      16         2.4         412.7      6.56
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       841.3           1.2      1.00
+       2       418.0           2.4      2.01
+       4       207.5           4.8      4.06
+       8       107.0           9.3      7.87
+      16        63.9          15.6     13.16
+rc=0 2026-09-23T02:10:47+03:00 load 1.82 0.89 0.55
+### process 2 2026-09-23T02:12:28+03:00 load 0.37 0.65 0.50 1/949 54946
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.71 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       605.4           1.7      1.00
+       2       309.8           3.2      1.95
+       4       157.1           6.4      3.85
+       8        79.8          12.5      7.59
+      16        47.5          21.1     12.74
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        19.3          51.8      1.00
+       2        10.5          94.8      1.83
+       4         5.5         181.8      3.51
+       8         3.4         298.5      5.76
+      16         2.8         357.9      6.91
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       811.7           1.2      1.00
+       2       406.6           2.5      2.00
+       4       202.4           4.9      4.01
+       8       104.1           9.6      7.80
+      16        62.5          16.0     12.98
+rc=0 2026-09-23T02:13:58+03:00 load 1.76 1.02 0.64
+### process 3 2026-09-23T02:15:39+03:00 load 0.39 0.75 0.58 1/943 55883
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.71 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       609.4           1.6      1.00
+       2       314.5           3.2      1.94
+       4       157.5           6.4      3.87
+       8        79.9          12.5      7.62
+      16        47.5          21.0     12.82
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        16.8          59.4      1.00
+       2         9.1         110.4      1.86
+       4         5.2         192.7      3.25
+       8         2.9         340.3      5.73
+      16         2.6         385.3      6.49
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       802.7           1.2      1.00
+       2       402.2           2.5      2.00
+       4       201.0           5.0      3.99
+       8       103.0           9.7      7.79
+      16        62.0          16.1     12.94
+rc=0 2026-09-23T02:17:08+03:00 load 1.84 1.15 0.74
+########## 1000000
+### process 1 2026-09-23T02:18:49+03:00 load 0.37 0.83 0.67 1/943 56812
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.44 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       337.6           3.0      1.00
+       2       178.9           5.6      1.89
+       4        91.5          10.9      3.69
+       8        46.9          21.3      7.20
+      16        32.0          31.2     10.54
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        12.9          77.4      1.00
+       2         6.7         148.5      1.92
+       4         3.5         289.1      3.74
+       8         1.9         536.1      6.93
+      16         1.8         547.1      7.07
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       403.7           2.5      1.00
+       2       209.7           4.8      1.92
+       4       106.5           9.4      3.79
+       8        53.8          18.6      7.50
+      16        38.5          26.0     10.48
+rc=0 2026-09-23T02:19:32+03:00 load 2.37 1.28 0.83
+### process 2 2026-09-23T02:21:22+03:00 load 0.37 0.88 0.73 1/940 57720
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.44 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       338.4           3.0      1.00
+       2       178.9           5.6      1.89
+       4        91.1          11.0      3.71
+       8        46.8          21.4      7.23
+      16        31.9          31.3     10.60
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        12.9          77.4      1.00
+       2         6.9         144.6      1.87
+       4         3.5         287.5      3.71
+       8         1.9         538.7      6.96
+      16         1.8         545.3      7.04
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       398.1           2.5      1.00
+       2       207.9           4.8      1.92
+       4       104.9           9.5      3.79
+       8        52.9          18.9      7.52
+      16        37.8          26.5     10.54
+rc=0 2026-09-23T02:22:04+03:00 load 2.06 1.21 0.84
+### process 3 2026-09-23T02:23:55+03:00 load 0.35 0.84 0.75 1/941 58634
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.44 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       338.0           3.0      1.00
+       2       178.9           5.6      1.89
+       4        91.6          10.9      3.69
+       8        46.9          21.3      7.21
+      16        31.7          31.5     10.65
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        12.8          78.1      1.00
+       2         6.7         149.0      1.91
+       4         3.5         289.2      3.70
+       8         1.9         540.4      6.92
+      16         1.8         545.9      6.99
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       402.7           2.5      1.00
+       2       210.7           4.7      1.91
+       4       106.5           9.4      3.78
+       8        53.6          18.7      7.51
+      16        37.9          26.4     10.63
+rc=0 2026-09-23T02:24:37+03:00 load 1.18 1.00 0.81
+
+# spread = the slowest of the three processes over the fastest, minus one
+# titles-en-10000000: minimum ns per cell across the three processes, speedup = min(1 thread) / min(n threads)
+#  threads              DictIndex 128           CompactHashIndex                StringIndex
+#        1    605.4   1.00x (spread  0.7%)     15.9   1.00x (spread 21.4%)    802.7   1.00x (spread  4.8%)
+#        2    309.8   1.95x (spread  1.5%)      9.1   1.75x (spread 15.4%)    402.2   2.00x (spread  3.9%)
+#        4    157.1   3.85x (spread  0.3%)      5.2   3.06x (spread  5.8%)    201.0   3.99x (spread  3.2%)
+#        8     79.8   7.59x (spread  0.3%)      2.9   5.48x (spread 17.2%)    103.0   7.79x (spread  3.9%)
+#       16     47.4  12.77x (spread  0.2%)      2.4   6.62x (spread 16.7%)     62.0  12.95x (spread  3.1%)
+#   M/s@16                       21.1                      412.7                       16.1
+#
+# titles-en-1000000: minimum ns per cell across the three processes, speedup = min(1 thread) / min(n threads)
+#  threads              DictIndex 128           CompactHashIndex                StringIndex
+#        1    337.6   1.00x (spread  0.2%)     12.8   1.00x (spread  0.8%)    398.1   1.00x (spread  1.4%)
+#        2    178.9   1.89x (spread  0.0%)      6.7   1.91x (spread  3.0%)    207.9   1.91x (spread  1.3%)
+#        4     91.1   3.71x (spread  0.5%)      3.5   3.66x (spread  0.0%)    104.9   3.80x (spread  1.5%)
+#        8     46.8   7.21x (spread  0.2%)      1.9   6.74x (spread  0.0%)     52.9   7.53x (spread  1.7%)
+#       16     31.7  10.65x (spread  0.9%)      1.8   7.11x (spread  0.0%)     37.8  10.53x (spread  1.9%)
+#   M/s@16                       31.5                      547.1                       26.5

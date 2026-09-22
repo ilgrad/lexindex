@@ -1523,8 +1523,8 @@ impl DictSections {
 /// number. Each name keeps its meaning while the block it stands for follows the measurements, and
 /// anything between them is still a number: [`DictIndex::build_with_block`] takes `1..=1024`.
 ///
-/// On real words the three store **2.85 / 2.64 / 2.51** bytes a key, answer `id` in 305–321 /
-/// 346–353 / 426–436 ns and `key_into` in 143 / 198–200 / 305; all three are under
+/// On real words the three store **2.85 / 2.64 / 2.51** bytes a key, answer `id` in 292–298 /
+/// 333–335 / 405–410 ns and `key_into` in 140–141 / 194–196 / 298; all three are under
 /// `marisa-trie`'s 2.955 floor on that corpus.
 ///
 /// ```
@@ -1571,8 +1571,8 @@ impl DictIndex {
     /// smallest divisor of the block at or above its square root — of which a lookup scans one,
     /// after one restart a microblock: `block / micro + micro − 2` entries, not `block − 1`. On
     /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51
-    /// bytes per key, `id` at 305–321 / 307–312 / 325–353 / 346–353 / 386–412 / 426–436 ns and
-    /// `key_into` at 143 / 153–156 / 173 / 198–200 / 256 / 305. Every block is
+    /// bytes per key, `id` at 292–298 / 293–300 / 311–313 / 333–335 / 369–374 / 405–410 ns and
+    /// `key_into` at 140–141 / 151–152 / 167–168 / 194–196 / 251–253 / 298. Every block is
     /// under `marisa-trie`'s 2.955 floor on that corpus. [`DictProfile`] names three points of
     /// that curve for a caller who does not want to pick one.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>

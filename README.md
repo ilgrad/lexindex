@@ -65,8 +65,8 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
   keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes coded per shard
   under a symbol table or a packed alphabet — whichever that shard's own bytes prefer — over a
   phrase dictionary mined from the whole blob where repeated spans pay for it:
-  **2.64 bytes/key**, 56 % below `StringIndex`, `id` 346–353 ns against its 262–280, `key_into`
-  198–200 against its `key` at 438–494. A prefix is a range here, not an automaton walk, so
+  **2.64 bytes/key**, 56 % below `StringIndex`, `id` 333–335 ns against its 256–270, `key_into`
+  194–196 against its `key` at 441–448. A prefix is a range here, not an automaton walk, so
   `prefix_count` is two order lookups — **483 ns where `marisa-trie` must enumerate every match to
   count it (119 840)**. Every block from 32 to 1024 comes in **under every `marisa-trie` setting
   measured on this corpus** — 2.85 down to 2.51 against its 2.96–3.07. Over the eleven-corpus sweep
@@ -441,7 +441,7 @@ the **ratios within a column**, and a shift under ~15 % between tables as the se
 | lexindex `PerfectHashIndex::id` (verified) | ~229 ms | ~110 ns | one extra cache line + full key compare |
 | `std::HashMap<String, u32>` | ~179 ms | ~234 ns | in-RAM, not serialisable |
 | lexindex `StringIndex` (FST) | ~248 ms | ~313 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~206 ms | ~442 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.93 here; on the dictionary 2.64 against 5.95, 346–353 ns against 262–280) |
+| lexindex `DictIndex` (256 per block) | ~206 ms | ~442 ns | ordered, exact reverse; its worst case — a `word.word` cross product is what a transducer factors out (0.68 B/key against 1.93 here; on the dictionary 2.64 against 5.95, 333–335 ns against 256–270) |
 | `std::BTreeMap<String, u32>` | ~203 ms | ~715 ns | in-RAM |
 
 **Reading it:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the fastest

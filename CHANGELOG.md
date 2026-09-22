@@ -33,6 +33,29 @@ All notable changes to this project are documented here. The format follows
 - The `plan` examples in `docs/usage.md` still showed `StringIndex` at 2 744 604 bytes on the word
   list, the estimate from before 4.0.1 priced the transducer off the run draw; re-run with the new
   constants, it is 2 882 400.
+- **The word-list ladder and both `rsmarisa` tables are re-measured on an idle machine**, every run
+  started only once a readiness check passed. The ladder
+  (`bench/results/dictbench-2026-09-23-arz-fdc28bc.txt`) predated the microblock offsets and the
+  three commits to the dictionary's compare path that 4.0.0 shipped: its sizes are 0.3–1.6 % lower
+  now and every `id` row 4–8 %, one to five points more than the `StringIndex` control moved, and
+  the paragraph under it is recounted — heads and arrays go from 0.44 bytes a key at 32 to 0.06 at
+  1024, no sample has been stored since `BDX3`, a block of 32 scans 16 entries rather than 31, and
+  512 stores 2.52 bytes a key rather than 2.81. The word-list `rsmarisa` table
+  (`bench/results/rsmarisa-2026-09-23-arz-fdc28bc.txt`) moved little — its `rsmarisa` rows 1–3 %,
+  `DictIndex` 3–5 % — but its caption described a protocol the harness does not run, and now names
+  the one it does. The eleven-corpus table
+  (`bench/results/rsmarisa-corpora-2026-09-23-arz-fdc28bc.txt`) did move: the 2026-09-19 run was
+  taken while other benchmarks shared the machine, and its `rsmarisa` column, whose code has not
+  changed, read 21–44 % slower than it does now. Its finding that the largest block is the fastest
+  on ten corpora of eleven does not survive — the fastest block is 64 on four, 256 on five and 512
+  on two, and within 10 % of the others on eight — while `DictIndex` is still smaller than
+  `rsmarisa` on all eleven and answers 1.5–3.7× faster on ten.
+- **The read-scaling table is re-measured the same way**
+  (`bench/results/readscale-2026-09-23-arz-fdc28bc.txt`); its 2026-09-19 run shared the machine
+  with other benchmarks too. Its one-thread cells were inflated, so its speedups were: the
+  `StringIndex` it said scaled best, super-linearly at 2.09× on two threads, now reads 2.00× and
+  scales like `DictIndex` (1.95×); eight cores give 5.5–7.8× rather than 5.7–8.1×, and
+  `CompactHashIndex` saturates at 413 M lookups a second rather than 385.
 
 ## [4.1.0] — 2026-09-22
 

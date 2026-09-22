@@ -1,0 +1,47 @@
+# rsmarisa 0.4.2 against DictIndex on /usr/share/dict/words, one process per run
+# commit fdc28bc, clean tree, three runs; the table quotes the minimum of the three
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.6-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01)
+# 20 000 probes, half members and half strangers in the corpus's own alphabet, shuffled with a fixed
+# seed; five rounds, the six lanes alternating and reversing with the round's parity, the first
+# round discarded and the minimum of the other four kept; each run started only once a readiness check passed -- one-minute load under 0.40, no swap in use, no other process over 15 % CPU -- about two hours after a reboot.
+=== words run 1 2026-09-23T01:54:18+03:00 load 0.36 0.41 0.31 acpitz=46 iwlwifi_1=35 
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        137        317
+rsmarisa (3 tries, Normal = default)       3.168        147        298
+rsmarisa (3 tries, Huge = fastest)         3.823        173        278
+lexindex DictIndex block 64                2.721         33        261
+lexindex DictIndex block 256               2.635         30        297
+lexindex DictIndex block 512               2.519         29        326
+rc=0 2026-09-23T01:54:19+03:00 load 0.36 0.41 0.31 acpitz=63 iwlwifi_1=35 
+=== words run 2 2026-09-23T01:54:19+03:00 load 0.36 0.41 0.31 acpitz=63 iwlwifi_1=35 
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        138        325
+rsmarisa (3 tries, Normal = default)       3.168        146        299
+rsmarisa (3 tries, Huge = fastest)         3.823        176        281
+lexindex DictIndex block 64                2.721         33        265
+lexindex DictIndex block 256               2.635         30        298
+lexindex DictIndex block 512               2.519         30        326
+rc=0 2026-09-23T01:54:20+03:00 load 0.36 0.41 0.31 acpitz=74 iwlwifi_1=35 
+=== words run 3 2026-09-23T01:54:20+03:00 load 0.36 0.41 0.31 acpitz=74 iwlwifi_1=35 
+
+words: 479823 keys, raw 9.32 B/key
+structure                                  B/key   build ms  ns/lookup
+rsmarisa (4 tries, Tiny = smallest)        3.003        138        317
+rsmarisa (3 tries, Normal = default)       3.168        150        297
+rsmarisa (3 tries, Huge = fastest)         3.823        176        283
+lexindex DictIndex block 64                2.721         33        260
+lexindex DictIndex block 256               2.635         30        299
+lexindex DictIndex block 512               2.519         29        328
+rc=0 2026-09-23T01:54:21+03:00 load 0.36 0.41 0.31 acpitz=77 iwlwifi_1=35 
+
+minimum of the three:
+rsmarisa (4 tries, Tiny = smallest)         3.003  build  137 ms  lookup  317 ns
+rsmarisa (3 tries, Normal = default)        3.168  build  146 ms  lookup  297 ns
+rsmarisa (3 tries, Huge = fastest)          3.823  build  173 ms  lookup  278 ns
+lexindex DictIndex block 64                 2.721  build   33 ms  lookup  260 ns
+lexindex DictIndex block 256                2.635  build   30 ms  lookup  297 ns
+lexindex DictIndex block 512                2.519  build   29 ms  lookup  326 ns

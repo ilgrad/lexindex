@@ -394,7 +394,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 307–312 ns against 346–353
+faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 293–300 ns against 333–335
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
 words.save("words.bdx")
@@ -410,13 +410,13 @@ and compares the stored suffixes there against the query without decoding them; 
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
 entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.64 bytes
-per key, `id` 346–353 ns and `key_into` 198–200, against 5.95 / 262–280 / 438–494 for
+per key, `id` 333–335 ns and `key_into` 194–196, against 5.95 / 256–270 / 441–448 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
 At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 256 ns
-against 198–200 at the default, and `id` 386–412 against 346–353.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 251–253 ns
+against 194–196 at the default, and `id` 369–374 against 333–335.
 
 ## `HashedDictIndex` — a `DictIndex` whose `id` is a hash
 
@@ -1016,7 +1016,7 @@ other. Held out, it names the fastest ordered `id(key)` in 19 of 30 cells and on
 in 23, never one more than 1.11× slower -- and 5 % is about what placement in physical memory moves
 a single-threaded probe on this machine. And it is *high*: the cells were timed through the Python
 binding, so every number carries that call, and the model reads 297 ns for `StringIndex` on the
-word list where the Rust harness in `docs/benchmarks.md` measures 262-280. The overhead falls on
+word list where the Rust harness in `docs/benchmarks.md` measures 256-270. The overhead falls on
 every candidate, so it moves the numbers and not the ranking -- but do not quote them as your own.
 
 `--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
