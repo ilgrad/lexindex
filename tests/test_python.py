@@ -6,10 +6,12 @@ import multiprocessing
 import os
 import pickle
 import random
+import re
 import sys
 import threading
 import time
 import types
+from pathlib import Path
 
 import lexindex
 import pytest
@@ -1798,3 +1800,14 @@ def test_ids_of_arrow_with_pyarrow():
     with_null = pa.array([probes[0], None, *probes[1:]])
     got = np.frombuffer(idx.ids_of_arrow(with_null), dtype=idx.ID_DTYPE).tolist()
     assert got == [_expected(idx, probes)[0], idx.MISSING_ID, *_expected(idx, probes)[1:]]
+
+
+def test_the_api_page_documents_every_public_name():
+    """`docs/api.md` lists what mkdocstrings renders, one `::: lexindex.<name>` a line, and
+    nothing held that list to `__all__`: `Overlay` was public from 0.12, `DictIndex` from 2.0 and
+    `plan` from 3.0, and none of them was on the page before 4.1."""
+    page = (Path(__file__).resolve().parent.parent / "docs" / "api.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r"^::: lexindex\.(\w+)$", page, re.M))
+    public = {name for name in lexindex.__all__ if not name.startswith("_")}
+    assert sorted(public - documented) == []
+    assert sorted(documented - public) == []
