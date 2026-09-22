@@ -26,3 +26,8 @@ __pycache__/
 bench/mphf_vs/target/
 # So is the frontier harness's lexindex side (bench/frontier/frontier_lex).
 bench/frontier/frontier_lex/target/
+# And so is the polars plugin, which builds a wheel of its own.
+polars/target/
+polars/dist/
+polars/.venv/
+polars/uv.lock

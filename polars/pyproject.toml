@@ -1,0 +1,50 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "lexindex-polars"
+version = "0.1.0"
+description = "Polars expression plugin over lexindex: a string column to dense ids, and back."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ilia Gradina", email = "ilia.gradina@gmail.com" }]
+keywords = ["polars", "plugin", "index", "perfect-hash", "categorical", "dictionary-encoding"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+# The plugin is built against polars' own FFI, so the floor is the version it was tested on rather
+# than the oldest that imports. `lexindex` is what writes the blobs this reads.
+dependencies = ["polars>=1.44", "lexindex>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/ilgrad/lexindex"
+Repository = "https://github.com/ilgrad/lexindex"
+Documentation = "https://ilgrad.github.io/lexindex/polars/"
+Issues = "https://github.com/ilgrad/lexindex/issues"
+Changelog = "https://github.com/ilgrad/lexindex/blob/main/polars/CHANGELOG.md"
+Sponsor = "https://github.com/sponsors/ilgrad"
+
+[tool.maturin]
+# A mixed project: the cdylib lands inside `lexindex_polars/`, which is where `register_plugin_function`
+# looks for it.
+module-name = "lexindex_polars._lexindex_polars"
+include = [{ path = "tests/test_polars.py", format = "sdist" }]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]

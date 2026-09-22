@@ -46,6 +46,14 @@ All notable changes to this project are documented here. The format follows
   exit statuses are the same whichever way lexindex was installed:
   `pip install lexindex && lexindex plan keys.txt`. Ctrl-C ends a run as it ends the binary's,
   rather than waiting for the Rust code to return.
+- **A Polars plugin, in `polars/`.** `lexindex-polars` is a package of its own — its own crate,
+  wheel, version and changelog — carrying four expressions over an index blob named by path:
+  `pl.col("track").lexindex.id("tracks.bdx")`, and `id_unchecked`, `contains` and `key` beside it.
+  They are plugin expressions rather than a `map_batches` callback, so polars runs them in its own
+  threads, inside a lazy plan and under the streaming engine, with no GIL; one expression serves all
+  six index kinds, because the blob says which kind it is. Nothing about the `lexindex` crate or
+  wheel changes: polars' plugin ABI moves on polars' cadence, which is not this library's, so it
+  stays out of the dependency tree and ships separately.
 - **A fuzz target for `BHD1`.** `parse_hashed_dict` loads arbitrary bytes as a `HashedDictIndex`
   and holds every rank `id`, `id_unchecked` and `ids_of` answer below the key count; it runs in CI's
   fuzz matrix beside `parse_dict`, and `tests/data/golden-4.1.0-hashed.bhd` pins the format by its

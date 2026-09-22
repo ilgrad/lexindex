@@ -56,6 +56,20 @@ If you touched `src/capi.rs`, the committed header is generated and CI diffs it:
 cbindgen --config cbindgen.toml src/capi.rs | diff -u include/lexindex.h -
 ```
 
+If you touched `polars/`, it is a crate and a wheel of its own — `lexindex-polars`, the Polars
+expression plugin — with its own gate. The tests need both wheels and a GIL-enabled interpreter,
+because the extension is `abi3`:
+
+```bash
+cd polars
+cargo fmt --all --check && cargo clippy --all-targets -- -D warnings
+maturin build --release --out dist                      # the plugin
+(cd .. && maturin build --release --out polars/dist)    # lexindex itself, for the tests to build blobs
+uv run --python 3.13 --with polars --with pytest --with dist/lexindex-*.whl \
+  --with dist/lexindex_polars-*.whl pytest tests/test_polars.py -q
+ruff check . && ruff format --check .
+```
+
 ## Guidelines
 
 - **Blob formats are frozen.** `BIX4`, `BDX3`, `MPH3`, `BMP8`, `BCH8`, `BCL2` and `OVL2` each have

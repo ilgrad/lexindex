@@ -1,0 +1,35 @@
+[package]
+name = "lexindex-polars"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Polars expression plugin over lexindex: a string column to dense ids, and back."
+authors = ["Ilia Gradina <ilia.gradina@gmail.com>"]
+repository = "https://github.com/ilgrad/lexindex"
+# The deliverable is the wheel. This crate is a cdylib of `#[no_mangle]` symbols the polars engine
+# dlopens -- there is nothing here for a Rust project to depend on, and `lexindex` itself is the
+# crate to reach for.
+publish = false
+
+[lib]
+name = "lexindex_polars"
+crate-type = ["cdylib"]
+
+[dependencies]
+# The index types, without `mmap`: this plugin reads a blob into memory and caches it, so no file
+# stays mapped and nothing here has to make `load_mmap`'s promise about the file on a user's behalf.
+lexindex = { version = "4.0", path = "..", default-features = false, features = ["mph"] }
+polars = { version = "0.55", default-features = false }
+pyo3 = { version = "0.29", features = ["abi3-py311"] }
+# `derive` is `#[polars_expr]`, which writes the C entry point the engine looks up by name.
+pyo3-polars = { version = "0.28", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+
+# Its own workspace, like `fuzz/` and the benchmark harnesses: the polars tree is large, moves with
+# polars' own releases, and is not part of what `cargo test` at the repository root builds.
+[workspace]
+
+[profile.release]
+# The plugin is one dlopen per query and then a hot loop; the library it wraps is built the same way.
+lto = "thin"
+codegen-units = 1

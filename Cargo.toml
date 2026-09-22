@@ -28,6 +28,8 @@ exclude = [
     "!docs/usage.md",
     "examples/*.py",
     "mkdocs.yml",
+    # `lexindex-polars` is its own crate and its own wheel, released on polars' cadence.
+    "polars/",
     "pyproject.toml",
     "python/",
     "tests/test_python.py",

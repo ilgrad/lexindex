@@ -169,6 +169,16 @@ cluster = labels[idx.id("doc-00042")]            # string id -> cluster
 members = [idx.key(int(r)) for r in (labels == cluster).nonzero()[0]]  # cluster -> string ids
 ```
 
+**With Polars:** `lexindex-polars` is an expression plugin, so the lookup runs in the engine's own
+threads, inside a lazy plan and under the streaming engine, without the GIL
+([the plugin](https://ilgrad.github.io/lexindex/polars/)):
+
+```python
+import lexindex_polars  # noqa: F401  -- the import registers the namespace
+
+df.with_columns(pl.col("track").lexindex.id("tracks.bdx"))   # and .contains, .key, .id_unchecked
+```
+
 ## Rust
 
 ```rust
