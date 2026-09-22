@@ -81,7 +81,9 @@ cbindgen --config cbindgen.toml src/capi.rs | diff -u include/lexindex.h -
   CARGO_PROFILE_RELEASE_LTO=false cargo +nightly fuzz run parse_dict fuzz/corpus/parse_dict tests/data
   ```
   The corpus directory comes **first** — libFuzzer writes new units into the first directory it is
-  given, and `tests/data` is read-only seeds.
+  given, and `tests/data` is read-only seeds. A pull request that touches `src/` or `fuzz/` is
+  fuzzed by ClusterFuzzLite for ten minutes; a crash fails the check and attaches the input to the
+  run as an artifact, and `cargo +nightly fuzz run <target> <file>` replays it.
 - **No new dependencies without discussion.** The runtime tree is `fst` + `memmap2`, and the Python
   wheel has no runtime dependencies at all. That is a feature people choose this library for.
 - **Every changed line should trace to the issue.** Adjacent cleanups make a diff harder to review

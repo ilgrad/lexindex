@@ -1,0 +1,52 @@
+name: ClusterFuzzLite
+
+# A pull request that touches the code is fuzzed before it is merged: every libFuzzer target, ten
+# minutes between them, from the seed corpus, under AddressSanitizer with debug assertions on. The
+# daily campaign in `fuzz.yml` fuzzes `main`; this is where a contributor's change to a loader meets
+# the targets first. ClusterFuzzLite is OSS-Fuzz's tooling on the repository's own runners -- what
+# OSS-Fuzz points a project to before it has the user base OSS-Fuzz itself asks for.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "fuzz/**"
+      - "tests/data/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/clusterfuzzlite.yml"
+
+# `actions: read` is for ClusterFuzzLite's own lookups: a coverage report to skip the targets a
+# change cannot reach, and a build of the base branch to tell a new crash from an old one. This
+# repository uploads neither, so every target runs and every crash is reported.
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  fuzz:
+    name: libFuzzer on the pull request
+    runs-on: ubuntu-latest
+    # The image build, ten targets, ten minutes of fuzzing and a reproduction of anything it finds.
+    timeout-minutes: 45
+    concurrency:
+      group: clusterfuzzlite-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      # Both actions run OSS-Fuzz's images at their floating `v1` tag, whatever commit the action
+      # itself is pinned to. A crash fails the job and uploads the input as an artifact of the run.
+      - name: build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: fuzz them for ten minutes between them
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          mode: code-change
+          fuzz-seconds: 600
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}

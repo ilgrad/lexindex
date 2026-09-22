@@ -45,6 +45,12 @@ All notable changes to this project are documented here. The format follows
   and holds every rank `id`, `id_unchecked` and `ids_of` answer below the key count; it runs in CI's
   fuzz matrix beside `parse_dict`, and `tests/data/golden-4.1.0-hashed.bhd` pins the format by its
   bytes and seeds the corpus.
+- **Pull requests are fuzzed.** One that touches `src/`, `fuzz/` or the seeds runs every libFuzzer
+  target, ten minutes between them, under ClusterFuzzLite — OSS-Fuzz's build and fuzzing images, on
+  the repository's own runners — before it is merged; the daily campaign still fuzzes `main`.
+  `.clusterfuzzlite/` is the build an OSS-Fuzz project would use, and it builds all ten targets with
+  the instrumentation intact: 2 448 counters in `parse_compact`, where an LTO build keeps a few
+  hundred.
 - **`bench/frontier/run.sh --only PATTERN`** runs the campaign's processes whose label matches,
   into an artifact named `frontier-<scale>-subset-*`; `frontier_lex` takes `hashed0`, `hashed8` and
   `hashed16`, and `bench/tables.py` renders a campaign's `HashedDictIndex` table with `view=hashed`.
@@ -71,6 +77,8 @@ All notable changes to this project are documented here. The format follows
   `HashedDictIndex`'s contract — what `fingerprint_bits` decides — sat in a private module's
   documentation, which docs.rs does not render. Both are on the public pages now, and CI denies
   rustdoc's warnings on the build docs.rs makes, where a link to a private item is reported.
+- `SECURITY.md` listed the fuzzed formats as of 1.1, without `MPH3`, the perfect hash's format since
+  4.0.0; it names `MPH3` and `BHD1` now.
 
 ## [4.0.1] — 2026-09-22
 

@@ -107,16 +107,19 @@ pointer and twenty-two `unsafe` blocks under them, each reading or writing memor
 vouched for in the function's `# Safety` line — the header carries it verbatim — after a null
 check on every function that has a status to report one in. `unsafe_op_in_unsafe_fn` is denied,
 so every one names its own justification. Miri and AddressSanitizer run weekly over the byte-range code, Miri also on a 32-bit
-target, and libFuzzer daily over the six parsers a target can hold to a return value: `BCH8`, `BMP8`,
-`BCL2`, `BDX3` — loaded and then queried, since its block data is bounds-checked on the read
-rather than at load — `OVL2`/`OVL1`, and the standalone `MPH2`/`MPH1` from inside, each run
+target, and libFuzzer daily over the seven parsers a target can hold to a return value: `BCH8`,
+`BMP8`, `BCL2`, `BDX3` and `BHD1` — loaded and then queried, since a dictionary's block data is
+bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and
+the standalone `MPH3`/`MPH2`/`MPH1` from inside, each run
 starting from the
 corpus the last one left. `inspect` has a target of its own, since it reads a header of *any*
 of those formats and is the one entry point that is not a parser for a single one. `BIX4` is
 fuzzed through `from_untrusted_bytes`, which holds it to a return value too — twice: on its own,
 and as the base region of an overlay, which is the composition a caller loading a stranger's
 overlay runs; a target over `from_bytes` would only re-find the panic above
-every week and teach us to ignore a red job.
+every week and teach us to ignore a red job. A pull request that touches the code meets the same
+targets before it is merged: ClusterFuzzLite, OSS-Fuzz's tooling on this repository's runners,
+fuzzes it for ten minutes across all of them, starting from the seeds.
 
 ## Not vulnerabilities
 

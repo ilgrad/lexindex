@@ -17,6 +17,7 @@ categories = ["data-structures", "text-processing"]
 # measurement logs, repository housekeeping -- lives in the repository, where a claim can be checked
 # against its artefact, and not in every `cargo install` and docs.rs build.
 exclude = [
+    ".clusterfuzzlite/",
     ".github/",
     ".gitignore",
     ".python-version",
