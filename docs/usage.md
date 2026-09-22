@@ -446,7 +446,11 @@ member with its rank and a non-member with `None` except at `2^-fingerprint_bits
 `CompactHashIndex`'s contract. At zero bits `id` is `DictIndex.id`, exact and at the dictionary's
 cost, and the hash path is `id_unchecked` alone. On the 480 k-word dictionary the sidecar is 2.62
 bytes per key at zero bits and one more for every eight fingerprint bits, beside the dictionary's
-2.64: 5.25 in all, 6.25 at eight bits.
+2.64: 5.25 in all, 6.25 at eight bits. On the frontier protocol — every key looked up once, in a
+shuffled order — `id_unchecked` answers in 14 to 82 ns and `id` at eight bits in 19 to 104 over
+nineteen corpora of half a million to ten million keys, against 276 to 805 for the dictionary's own
+`id` and 54 to 719 for XCDAT, the fastest trie measured
+([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
 dictionary answers. `plan` does not price it yet, `Overlay` does not take it — its ids are ranks,

@@ -4,6 +4,55 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`HashedDictIndex`: a `DictIndex` whose `id` is a hash.** A dictionary answers `id` by searching
+  — the block samples, one block's restarts, one microblock's scan — and that search is the column
+  the frontier campaign lost: XCDAT 1.1–3.1× faster at a million keys, 1.1–1.6× past ten million.
+  `HashedDictIndex::from_dict(dict, fingerprint_bits)` keeps the dictionary whole and adds a minimal
+  perfect hash over the keys' 64-bit hashes and a bit-packed table holding each key's rank at its
+  slot, `⌈log2 n⌉ + fingerprint_bits` bits wide. `id` is two hashes of the key and two reads and
+  never touches the dictionary; `key(id)`, prefix, range and iteration go to `dict()`, whose ids are
+  the same ranks. On the campaign's protocol, beside `Dict` 256 and XCDAT 15 as controls that read
+  within 4.2 % of the published campaign on all 38 of their cells, it is **faster than XCDAT and
+  smaller on all nineteen corpora**: `id_unchecked` 3.7–8.7× faster at 1.39–3.16× less space, `id`
+  at eight fingerprint bits 2.5–7.8× and 1.17–2.77×, and it builds before XCDAT on every one.
+  Against its own dictionary's search it is 7.6–20.5× faster closed and 5.7–15.5× at eight bits,
+  for 2.62 bytes a key on the 480 k-word dictionary, 2.74 at a million keys and 3.24 at ten
+  million.
+
+  The width is chosen once, at build, and it decides the contract. From one fingerprint bit up `id`
+  answers a stranger as present at `2^-fingerprint_bits`, `CompactHashIndex`'s rate; at zero bits
+  `id` is the dictionary's exact search, and the hash is `id_unchecked` alone — a member's rank, and
+  some rank below `n` for anything else. Keys sharing a 64-bit hash are told apart by the full
+  second hash in a side table, so a member's rank is exact at every width. The format is `BHD1`: a
+  48-byte header, the dictionary's `BDX3` blob byte for byte — checked by `DictIndex`'s own loader —
+  then the perfect hash, the rank table and the side table. `load_mmap` borrows the dictionary and
+  the rank table, and a crafted blob answers wrong ranks, never ranks past the end. Python has the
+  same class, `HashedDictIndex.from_dict(dict, fingerprint_bits=8)`, with `ids_of`, `in`,
+  indexing and `.dict`. `plan` does not price it yet, the C ABI refuses its blobs, and `Overlay`
+  does not take it: its ids are ranks.
+- **A fuzz target for `BHD1`.** `parse_hashed_dict` loads arbitrary bytes as a `HashedDictIndex`
+  and holds every rank `id`, `id_unchecked` and `ids_of` answer below the key count; it runs in CI's
+  fuzz matrix beside `parse_dict`, and `tests/data/golden-4.1.0-hashed.bhd` pins the format by its
+  bytes and seeds the corpus.
+- **`bench/frontier/run.sh --only PATTERN`** runs the campaign's processes whose label matches,
+  into an artifact named `frontier-<scale>-subset-*`; `frontier_lex` takes `hashed0`, `hashed8` and
+  `hashed16`, and `bench/tables.py` renders a campaign's `HashedDictIndex` table with `view=hashed`.
+
+### Fixed
+
+- `bench/frontier/run.sh` refused to run at 4.0.1: it builds `frontier_lex` with `--locked`, and
+  that crate's lock file still named lexindex 4.0.0.
+
+### Documentation
+
+- `docs/api.md` rendered four of the public names. `Overlay` (public since 0.12), `DictIndex`
+  (2.0), `plan` (3.0), `inspect` and the types they return were never on it; every name in
+  `__all__` is now, and a test fails when one is not.
+
 ## [4.0.1] — 2026-09-22
 
 ### Fixed
