@@ -53,9 +53,9 @@ SAMPLE = 100_000  # the plan's sample size; the model reads a smaller corpus as 
 OPS_PROBES = 20_000
 CP_PROBES = 5_000
 BATCHES = (16, 1_024)
-# A round for each place in an op, so that `_time` puts every structure at every one: eight
+# A round for each place in an op, so that `_time` puts every structure at every one: ten
 # structures answer `id`.
-ROUNDS = 8
+ROUNDS = 10
 
 
 def _fresh(xs: list[str]) -> list[str]:
@@ -217,6 +217,24 @@ def _time(
     return best
 
 
+class _Unchecked:
+    """A `HashedDictIndex` timed through `id_unchecked` under the name `_lanes` looks up.
+
+    At zero fingerprint bits `id` is the dictionary's own search, so its lanes would time
+    `DictIndex 256` a second time; the closed-vocabulary path is the one worth a lane. It has no
+    batch form, so this lane has no `ids_of`, and the index's own keys and prefixes are its
+    dictionary's, already timed.
+    """
+
+    def __init__(self, index) -> None:
+        self.id = index.id_unchecked
+        self.to_bytes = index.to_bytes
+
+
+def _hashed(keys: list[str], bits: int):
+    return lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys, block=256), bits)
+
+
 def structures():
     lanes = [
         ("ClosedHashIndex", lexindex.ClosedHashIndex, False),
@@ -228,6 +246,10 @@ def structures():
             (f"DictIndex {block}", lambda k, b=block: lexindex.DictIndex(k, block=b), True)
         )
     lanes.append(("StringIndex", lexindex.StringIndex, True))
+    # Measured beside the rest so that the constants a planner would price it by come from the same
+    # cache conditions; `fit` leaves them out until `plan` has a `Kind` to file them under.
+    lanes.append(("HashedDictIndex 256 fp=8", lambda k: _hashed(k, 8), True))
+    lanes.append(("HashedDictIndex 256 unchecked", lambda k: _Unchecked(_hashed(k, 0)), True))
     return lanes
 
 
@@ -409,7 +431,11 @@ def _newest(pattern: str) -> Path:
 
 def fit(artifact: Path | None) -> int:
     path = artifact or _newest("latency-model-*.json")
-    cells = [c for c in json.loads(path.read_text(encoding="utf-8"))["cells"] if c.get("ops")]
+    cells = [
+        c
+        for c in json.loads(path.read_text(encoding="utf-8"))["cells"]
+        if c.get("ops") and not c["structure"].startswith("HashedDictIndex")
+    ]
     print(f"fitting {path.name}: {len(cells)} cells\n")
     model = Model.fit(cells)
     print(f"{'structure':<24}{'op':<16}{'a':>8}{'b':>8}{'c':>8}{'d':>8}   mean err   worst")
