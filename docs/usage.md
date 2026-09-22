@@ -418,6 +418,40 @@ corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lex
 it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 256 ns
 against 198–200 at the default, and `id` 386–412 against 346–353.
 
+## `HashedDictIndex` — a `DictIndex` whose `id` is a hash
+
+```python
+from lexindex import DictIndex, HashedDictIndex
+
+# A DictIndex with a sidecar: at each key's slot in a minimal perfect hash, the key's rank and
+# `fingerprint_bits` of a second hash. `id` is one hash and a read of each table -- the dictionary
+# is not searched -- and the ordered queries go to `.dict`, whose ids are the same ranks.
+words = HashedDictIndex.from_dict(DictIndex(words_list), fingerprint_bits=8)
+words.id("banana")                 # its rank; a non-member reads as present at 2^-8
+words.id_unchecked("banana")       # a member's rank, and some rank below len() for anything else
+"banana" in words                  # id's contract again, as are words["banana"] and words.get(...)
+words.ids_of(["apple", "cherry"])  # batched: hashed in one pass, the tables' lines in flight
+words.dict.key(2)                  # key, prefix, range, iteration: the dictionary's own
+words.save("words.bhd")
+words = HashedDictIndex.load("words.bhd")        # checked like the others
+words = HashedDictIndex.load_mmap("words.bhd")   # dictionary and rank table borrowed
+
+closed = HashedDictIndex.from_dict(DictIndex(words_list), fingerprint_bits=0)
+closed.id_unchecked("banana")      # the smallest sidecar, for a vocabulary the caller controls
+closed.id("durian")                # None, always: at zero bits `id` is the dictionary's own search
+```
+
+The membership contract is chosen once, at build. From one fingerprint bit up, `id` answers a
+member with its rank and a non-member with `None` except at `2^-fingerprint_bits` —
+`CompactHashIndex`'s contract. At zero bits `id` is `DictIndex.id`, exact and at the dictionary's
+cost, and the hash path is `id_unchecked` alone. On the 480 k-word dictionary the sidecar is 2.62
+bytes per key at zero bits and one more for every eight fingerprint bits, beside the dictionary's
+2.64: 5.25 in all, 6.25 at eight bits.
+
+The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
+dictionary answers. `plan` does not price it yet, `Overlay` does not take it — its ids are ranks,
+as `DictIndex`'s are — and the C ABI refuses its blobs.
+
 ## `Overlay` — edits without a rebuild
 
 Every index is built once from the whole key set, so adding a single key has always meant
@@ -531,7 +565,7 @@ On the shuffled dictionary (479 823 member probes, min of seven alternated round
 
 The module tells CPython it does not need the GIL, and the guarantee behind that is:
 
-- **The five index types are immutable after building.** Share one across as many threads as you
+- **The six index types are immutable after building.** Share one across as many threads as you
   like and call `id`, `contains`, `key`, `ids_of` from all of them. Building, batch lookups and
   persistence release the GIL, so other threads keep running while a large index is built or queried.
 - **The two types that hold mutable state — the `StringIndex` iterator and `Overlay` — serialise.**
@@ -551,7 +585,9 @@ it over the sdist. Older free-threaded builds have no wheel: PyO3 supports `3.14
 ## Rust
 
 ```rust
-use lexindex::{ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
+use lexindex::{
+    ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex, StringIndex,
+};
 
 let idx = StringIndex::build(["apple", "apricot", "banana"])?;
 assert_eq!(idx.id("banana"), Some(2));
@@ -567,6 +603,7 @@ let info = lexindex::inspect_file(&path)?; // what the file is, from its header 
 assert_eq!((info.kind, info.keys), (lexindex::BlobKind::StringIndex, Some(3)));
 // SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
 let idx = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into RAM
+assert_eq!(idx.id("banana"), Some(2)); // the same answers, off the mapped file
 
 let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
 assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
@@ -582,6 +619,10 @@ let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys 
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
+
+let hashed = HashedDictIndex::from_dict(words, 8)?; // the dictionary, and a hash sidecar beside it
+assert_eq!(hashed.id("banana"), Some(2)); // one hash and a read of each table, not a search
+assert_eq!(hashed.dict().key(2).as_deref(), Some("banana")); // ordered queries: the dictionary's
 # drop(idx);
 # std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())
@@ -671,10 +712,10 @@ the same generator handed to `build`, and finishes in 150 s against 211: a run i
 bytes with a span per key, not a `String` each, so it also sorts faster. At 10 M pairs the corpus
 fits in one run — 296 MB against 1 205, 19 s against 24 — and the blobs are identical either way.
 
-Cargo features: `mph` (default) adds `PerfectHashIndex` and `CompactHashIndex`; `mmap` (default) adds
-`load_mmap`; `--no-default-features` is an `fst`-only build (`StringIndex` only, no extra
-dependencies). All of them compile for 32-bit targets, `wasm32-unknown-unknown` included — leave
-`mmap` off there, since there is nothing to memory-map.
+Cargo features: `mph` (default) adds `PerfectHashIndex`, `CompactHashIndex`, `ClosedHashIndex` and
+`HashedDictIndex`; `mmap` (default) adds `load_mmap`; `--no-default-features` is an `fst`-only build
+(`StringIndex` only, no extra dependencies). All of them compile for 32-bit targets,
+`wasm32-unknown-unknown` included — leave `mmap` off there, since there is nothing to memory-map.
 
 ### Editing without a rebuild — `Overlay`
 
@@ -729,9 +770,10 @@ mistake.
 
 ## C
 
-The `capi` feature exports the five indexes to C: one opaque `LexindexIndex` handle, fourteen
-`lexindex_*` functions, and the header `include/lexindex.h`, generated from `src/capi.rs` by
-`cbindgen` and regenerated in CI so the two cannot drift.
+The `capi` feature exports five of the six indexes to C, every one but `HashedDictIndex`, whose
+blobs it refuses: one opaque `LexindexIndex` handle, fourteen `lexindex_*` functions, and the header
+`include/lexindex.h`, generated from `src/capi.rs` by `cbindgen` and regenerated in CI so the two
+cannot drift.
 
 ```bash
 cargo build --release --features capi                           # target/release/liblexindex.so

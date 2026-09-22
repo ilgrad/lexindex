@@ -11,7 +11,8 @@ environment. A later log is a re-measurement of some of the campaign's corpora -
 their names, after a round of theirs ran beside other work -- and its cells replace the campaign's
 for those corpora. It has to come from the same commit, machine, toolchain and pins, and the
 artifact names it under `replaced`. The markdown printed is what the docs quote, and what
-bench/tables.py renders from the artifact: an overview, then a table a corpus.
+bench/tables.py renders from the artifact: an overview, `HashedDictIndex` against XCDAT 15 where
+the campaign ran it, then a table a corpus.
 
 A cell's `id` and build times are the medians of its rounds, and its spread is the range of the `id`
 times over that median; a structure that fails in any round has no numbers, only the reason. Sizes
@@ -46,6 +47,18 @@ LEXINDEX = {
     "dict256": "lexindex Dict 256",
     "dict1024": "lexindex Dict 1024",
     "string": "lexindex StringIndex",
+    "hashed0": "lexindex HashedDict closed",
+    "hashed8": "lexindex HashedDict fp=8",
+    "hashed16": "lexindex HashedDict fp=16",
+}
+# `HashedDictIndex` against the structure that was the fastest on every corpus before it, and beside
+# the dictionary it is built over.
+HASHED = {
+    "XCDAT 15": "XCDAT 15",
+    "lexindex Dict 256": "`Dict` 256",
+    "lexindex HashedDict closed": "`HashedDict` closed",
+    "lexindex HashedDict fp=8": "fp=8",
+    "lexindex HashedDict fp=16": "fp=16",
 }
 REFERENCE = {"ART", "C-ART"}
 # What GNU timeout exits with when it had to stop the process.
@@ -269,6 +282,19 @@ def overview(corpora: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def hashed(corpora: list[dict]) -> str:
+    """`HashedDictIndex` beside its dictionary and XCDAT 15, bytes a key @ nanoseconds a lookup."""
+    lines = [
+        "| corpus | " + " | ".join(HASHED.values()) + " |",
+        "|---|" + "---:|" * len(HASHED),
+    ]
+    for corpus in corpora:
+        cells = {c["structure"]: c for c in corpus["cells"] if measured(c)}
+        row = " | ".join(point(cells[name]) if name in cells else "—" for name in HASHED)
+        lines.append(f"| `{corpus['corpus']}` | {row} |")
+    return "\n".join(lines)
+
+
 def corpus_table(corpus: dict) -> str:
     raw = corpus["raw_bytes_per_key"]
     on_front = front(corpus["cells"])
@@ -371,6 +397,9 @@ def main() -> None:
     print(quietness(corpora))
     print()
     print(overview(corpora))
+    if any(cell["structure"].startswith("lexindex HashedDict") for cell in data["cells"]):
+        print()
+        print(hashed(corpora))
     for corpus in corpora:
         print()
         print(corpus_table(corpus))

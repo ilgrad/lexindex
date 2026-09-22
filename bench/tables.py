@@ -20,8 +20,9 @@ Two kinds of table. A `compare` table is `bench/compare.py`'s: its numbers come 
 three things cannot, and are declared here rather than inferred: the display label of a row, the
 wording of a membership cell that is neither yes nor no, and whether a library answers
 common-prefix queries -- a capability `bench/compare.py` does not measure. A `frontier` table is a
-research-frontier campaign's overview, or with `corpus=` one corpus's table, rendered by
-`bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed.
+research-frontier campaign's overview, with `view=hashed` its `HashedDictIndex` table, or with
+`corpus=` one corpus's table, rendered by `bench/frontier/tables.py` itself, so the docs cannot
+drift from what the campaign printed.
 """
 
 import argparse
@@ -59,6 +60,7 @@ LABELS = {
     "marisa-trie (4 tries, tiny cache)": "`marisa-trie` (4 tries, tiny cache — its smallest here)",
     "marisa-trie (default)": "`marisa-trie` (default)",
     "marisa-trie (huge cache)": "`marisa-trie` (huge cache)",
+    "lexindex HashedDictIndex (fp=8)": "**lexindex `HashedDictIndex` (fp=8)**",
     "lexindex StringIndex": "**lexindex `StringIndex`**",
     "lexindex PerfectHashIndex": "lexindex `PerfectHashIndex`",
     "DAWG (dawg2)": "DAWG (`dawg2`)",
@@ -70,6 +72,7 @@ MEMBERSHIP = {
     "lexindex CompactHashIndex (fp=4 bits)": "probabilistic",
     "lexindex CompactHashIndex (fp=1)": "probabilistic",
     "lexindex CompactHashIndex (fp=2)": "probabilistic",
+    "lexindex HashedDictIndex (fp=8)": "probabilistic",
 }
 # Not measured by `bench/compare.py`: which libraries answer "the keys that are prefixes of this
 # query" -- `common_prefix` here, `common_prefix_keys` in marisa, `prefixes` in dawg2 and datrie.
@@ -77,6 +80,7 @@ COMMON_PREFIX = {
     "lexindex StringIndex",
     "lexindex DictIndex (512 per block)",
     "lexindex DictIndex (256 per block, default)",
+    "lexindex HashedDictIndex (fp=8)",
     "marisa-trie (4 tries, tiny cache)",
     "marisa-trie (default)",
     "marisa-trie (huge cache)",
@@ -142,8 +146,11 @@ def render_compare(artifact: dict, opts: dict[str, str]) -> str:
 
 
 def render_frontier(artifact: dict, opts: dict[str, str]) -> str:
-    """A frontier campaign's overview, or with `corpus=` that corpus's table."""
+    """A frontier campaign's overview, with `view=hashed` its `HashedDictIndex` table, or with
+    `corpus=` that corpus's table."""
     corpora = FRONTIER.corpora_of(artifact)
+    if opts.get("view") == "hashed":
+        return FRONTIER.hashed(corpora)
     if "corpus" not in opts:
         return FRONTIER.overview(corpora)
     for corpus in corpora:

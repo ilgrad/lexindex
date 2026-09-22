@@ -6,7 +6,7 @@
 use std::io::BufRead;
 use std::time::Instant;
 
-use lexindex::{DictIndex, StringIndex};
+use lexindex::{DictIndex, HashedDictIndex, StringIndex};
 
 /// The longest key libstdc++'s `std::string` keeps inside the object rather than behind a pointer.
 const SSO: usize = 15;
@@ -57,6 +57,40 @@ impl Probe for StringIndex {
     }
     fn probe(&self, key: &str) -> u64 {
         self.id(key).unwrap_or(u64::MAX)
+    }
+}
+
+/// `HashedDictIndex` over the dictionary at its default block, through the fingerprint-checked `id`.
+/// The build is both: the dictionary from the keys, then the sidecar from the dictionary.
+struct Hashed(HashedDictIndex);
+
+impl Probe for Hashed {
+    fn build(keys: &[String], fingerprint_bits: usize) -> Self {
+        let dict = DictIndex::build(keys).expect("dict build");
+        let bits = u32::try_from(fingerprint_bits).expect("a bit count");
+        Hashed(HashedDictIndex::from_dict(dict, bits).expect("hashed build"))
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len()
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.id(key).unwrap_or(u64::MAX)
+    }
+}
+
+/// The same at zero fingerprint bits, through `id_unchecked`: the closed-vocabulary path. `id` at
+/// zero bits is the dictionary's own search, which `dict256` times.
+struct Closed(HashedDictIndex);
+
+impl Probe for Closed {
+    fn build(keys: &[String], _: usize) -> Self {
+        Closed(Hashed::build(keys, 0).0)
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len()
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.id_unchecked(key)
     }
 }
 
@@ -125,7 +159,9 @@ fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|string>...");
+        eprintln!(
+            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|string|hashed0|hashed8|hashed16>..."
+        );
         std::process::exit(2);
     }
     // A line at a time, as `std::getline` reads it: the whole file held beside the keys would count
@@ -145,6 +181,9 @@ fn main() {
             "dict256" => run::<DictIndex>(&keys, 256, "lexindex DictIndex block 256"),
             "dict1024" => run::<DictIndex>(&keys, 1024, "lexindex DictIndex block 1024"),
             "string" => run::<StringIndex>(&keys, 0, "lexindex StringIndex"),
+            "hashed0" => run::<Closed>(&keys, 0, "lexindex HashedDictIndex closed"),
+            "hashed8" => run::<Hashed>(&keys, 8, "lexindex HashedDictIndex fp=8"),
+            "hashed16" => run::<Hashed>(&keys, 16, "lexindex HashedDictIndex fp=16"),
             other => {
                 eprintln!("unknown kind {other}");
                 std::process::exit(2);

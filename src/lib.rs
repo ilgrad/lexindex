@@ -1,6 +1,6 @@
 //! lexindex: compact, immutable string↔id indexes for huge catalogs.
 //!
-//! Five complementary, build-once / query-many indexes over a set of strings (entity names, cluster
+//! Six complementary, build-once / query-many indexes over a set of strings (entity names, cluster
 //! labels, document keys, vocabulary terms):
 //!
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
@@ -26,13 +26,19 @@
 //!   per shard under a symbol table or a packed alphabet, over a phrase dictionary mined from the
 //!   whole blob: 2.64 B/key on real words, 56 % below `StringIndex`. Use it
 //!   where the queries are exact and the index has to be small.
+//! - [`HashedDictIndex`] — a [`DictIndex`] with a hash sidecar: the dictionary's ranks and ordered
+//!   queries, with `id` answered by a minimal perfect hash and a table of ranks rather than a
+//!   search. The sidecar costs `⌈log2 n⌉` bits a key and about two for the perfect hash — 2.62
+//!   B/key on real words — and `fingerprint_bits / 8` more for `id` to reject a non-member at
+//!   `2^-fingerprint_bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
+//!   the closed-vocabulary path. Use it where a `DictIndex` is wanted and `id` is the hot path.
 //!
-//! All five assign dense ids in `[0, n)`. None is mutable after building — they are immutable
+//! All six assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
-//! The minimal perfect hash under the three hash indexes implements [PHast]'s map-or-bump
-//! construction, the successor of [PTHash]; the crate depended on [`ptr_hash`] for the latter until
-//! 1.0, and the README says why that changed.
+//! The minimal perfect hash under the three hash indexes and `HashedDictIndex` implements
+//! [PHast]'s map-or-bump construction, the successor of [PTHash]; the crate depended on
+//! [`ptr_hash`] for the latter until 1.0, and the README says why that changed.
 //!
 //! ```
 //! use lexindex::StringIndex;
@@ -117,6 +123,8 @@ mod compact_hash;
 #[cfg(feature = "mph")]
 mod hash;
 #[cfg(feature = "mph")]
+mod hashed_dict;
+#[cfg(feature = "mph")]
 mod perfect_hash;
 #[cfg(feature = "mph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
@@ -124,6 +132,9 @@ pub use closed_hash::ClosedHashIndex;
 #[cfg(feature = "mph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use compact_hash::CompactHashIndex;
+#[cfg(feature = "mph")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
+pub use hashed_dict::HashedDictIndex;
 #[cfg(feature = "mph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use perfect_hash::PerfectHashIndex;
@@ -171,6 +182,12 @@ pub mod fuzzing {
     /// `key` `None` past the end, a walk that ends.
     pub fn load_dict(bytes: &[u8]) -> bool {
         crate::DictIndex::fuzz_load_and_query(bytes)
+    }
+
+    /// [`load_dict`] for a `HashedDictIndex` blob: both loaders, then ranks inside `[0, n)` from
+    /// `id`, `id_unchecked` and `ids_of` over whatever sidecar and dictionary loaded.
+    pub fn load_hashed_dict(bytes: &[u8]) -> bool {
+        crate::HashedDictIndex::fuzz_load_and_query(bytes)
     }
 
     /// [`parse_compact_frame`] for a `PerfectHashIndex` blob, whose framing also has to validate an

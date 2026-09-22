@@ -241,6 +241,42 @@ mod mph {
         }
     }
 
+    /// 4.1's `BHD1`, pinned by its bytes like the hash blobs above and read back: the 4.0
+    /// dictionary blob is inside it byte for byte, every key answers its rank through the sidecar,
+    /// and non-members are held to the 8-bit table's false-positive rate.
+    #[test]
+    fn the_hashed_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
+        let keys = keys();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        sorted.dedup();
+        let dict = lexindex::DictIndex::build(&keys).unwrap();
+        let fresh = lexindex::HashedDictIndex::from_dict(dict, 8)
+            .unwrap()
+            .to_bytes();
+        let path = data("golden-4.1.0-hashed.bhd");
+        let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(&fresh[..4], b"BHD1");
+        assert!(
+            stored == fresh,
+            "golden-4.1.0-hashed.bhd changed; regenerate {}",
+            path.display()
+        );
+        let dict_blob = std::fs::read(data("golden-4.0.0-dict.bdx")).unwrap();
+        assert_eq!(&stored[48..48 + dict_blob.len()], &dict_blob[..]);
+        let idx = lexindex::HashedDictIndex::load(&path).unwrap();
+        assert_eq!((idx.len(), idx.fingerprint_bits()), (sorted.len(), 8));
+        for (rank, key) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
+            assert_eq!(idx.id_unchecked(key), rank as u64, "{key:?}");
+        }
+        let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
+        assert!(
+            false_positives <= 20,
+            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
+        );
+    }
+
     /// The refused fixtures must stay what they were: a `BMP5`, a `BMP6` and two `BCH6` — one
     /// with 1.0's `MPH1` inside, one with `MPH2` — and 2.0's `BMP7`, `BCH7` and `BCL1`, `MPH2`
     /// inside, so that the refusal tests above keep refusing the real thing and not a file
@@ -441,6 +477,14 @@ fn the_fuzz_shims_accept_a_real_blob() {
             &std::fs::read(data(old)).unwrap()
         ));
     }
+
+    // The hashed dictionary through its own target, and refused by the dictionary's, as that
+    // blob is by it: the dictionary inside is only reached through the sidecar's framing.
+    let hashed = std::fs::read(data("golden-4.1.0-hashed.bhd")).unwrap();
+    assert!(lexindex::fuzzing::load_hashed_dict(&hashed));
+    assert!(lexindex::fuzzing::inspect(&hashed));
+    assert!(!lexindex::fuzzing::load_hashed_dict(&dict));
+    assert!(!lexindex::fuzzing::load_dict(&hashed));
 
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
@@ -930,6 +974,32 @@ fn every_golden_blob_inspects_from_its_header() {
     assert_eq!(
         (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
         (BlobKind::Mphf, "MPH3", Some(1000), Some(mph), mph)
+    );
+    // The hashed dictionary of 4.1: the 4.0 dictionary inside, the perfect hash the other 4.0
+    // blobs hold over the same keys, and eighteen bits a key of rank and fingerprint.
+    let i = inspect_file(data("golden-4.1.0-hashed.bhd")).unwrap();
+    let dict_bytes = inspect_file(data("golden-4.0.0-dict.bdx")).unwrap().bytes;
+    assert_eq!(
+        (
+            i.kind,
+            i.format.as_str(),
+            i.keys,
+            i.fingerprint_bits,
+            i.mph_bytes,
+            i.arena_bytes,
+            i.side_entries,
+            i.bytes,
+        ),
+        (
+            BlobKind::HashedDictIndex,
+            "BHD1",
+            Some(1000),
+            Some(8),
+            Some(mph),
+            Some(2250),
+            Some(0),
+            48 + dict_bytes + mph + 2250,
+        )
     );
     // Both overlay formats: three keys added and three retired over the 1000-key ordered base.
     for (name, format) in [

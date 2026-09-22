@@ -1812,7 +1812,7 @@ fn fp_table_len(count: usize, bits: u32) -> Result<usize, IndexError> {
 
 /// The low `bits` of a fingerprint, `bits` in `1..=64`.
 #[inline(always)]
-fn fp_mask(bits: u32) -> u64 {
+pub(crate) fn fp_mask(bits: u32) -> u64 {
     debug_assert!((1..=64).contains(&bits));
     u64::MAX >> (64 - bits)
 }
@@ -1822,7 +1822,7 @@ fn fp_mask(bits: u32) -> u64 {
 /// A byte-wide fingerprint — the default 8 bits, or 16, 32 and 64 — is one load; the other
 /// widths go through the bit-packed read.
 #[inline(always)]
-fn read_fp(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
+pub(crate) fn read_fp(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
     if bits & 7 == 0 {
         let k = (bits / 8) as usize;
         let at = slot.checked_mul(k)?;
@@ -1872,7 +1872,7 @@ fn read_fp_bits(bytes: &[u8], slot: usize, bits: u32) -> Option<u64> {
 
 /// Write fingerprint `fp` (already masked to `bits`) for `slot` into the zeroed bit-packed table.
 #[inline]
-fn write_fp(fps: &mut [u8], slot: usize, bits: u32, fp: u64) {
+pub(crate) fn write_fp(fps: &mut [u8], slot: usize, bits: u32, fp: u64) {
     if bits % 8 == 0 {
         // Byte-aligned widths (including the 8-bit default) take a straight copy: the generic
         // OR-in loop below costs a measurable ~2.5% of build time at 1 M keys.

@@ -350,6 +350,15 @@ fn blobs_outside_the_abi_are_unsupported() {
     assert_eq!(status, LexindexStatus::Unsupported);
     assert_eq!(message(), "overlay blobs are outside the C ABI");
     assert!(out.is_null(), "nothing written on failure");
+
+    let dict = lexindex::DictIndex::build(FRUIT).unwrap();
+    let bytes = lexindex::HashedDictIndex::from_dict(dict, 8)
+        .unwrap()
+        .to_bytes();
+    let status = unsafe { lexindex_index_from_bytes(bytes.as_ptr(), bytes.len(), &mut out) };
+    assert_eq!(status, LexindexStatus::Unsupported);
+    assert_eq!(message(), "HashedDictIndex blobs are outside the C ABI");
+    assert!(out.is_null(), "nothing written on failure");
 }
 
 #[test]

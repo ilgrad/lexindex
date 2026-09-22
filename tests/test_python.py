@@ -461,6 +461,48 @@ def test_dict_index_build_to_file_aborts_when_the_iterable_raises(tmp_path):
     assert [e.name for e in tmp_path.iterdir()] == ["words.bdx"]
 
 
+def test_hashed_dict_index_answers_the_dictionarys_ranks(tmp_path):
+    di = lexindex.DictIndex(["banana", "apple", "apricot", "cherry", "apple"])
+    hd = lexindex.HashedDictIndex.from_dict(di, 32)
+    assert len(hd) == 4 and not hd.is_empty() and hd.fingerprint_bits == 32
+    assert [hd.id(k) for k in ["apple", "apricot", "banana", "cherry"]] == [0, 1, 2, 3]
+    assert [hd.id_unchecked(k) for k in ["apple", "cherry"]] == [0, 3]
+    assert hd.ids_of(["cherry", "durian", "apple"]) == [3, None, 0]
+    assert hd["banana"] == 2 and hd.get("cherry") == 3 and hd.get("durian", -1) == -1
+    assert "apple" in hd and hd.contains("apple") and "durian" not in hd
+    with pytest.raises(KeyError):
+        hd["durian"]
+    assert 0 <= hd.id_unchecked("durian") < 4
+    # The dictionary is shared: its ranks are the sidecar's ids, and it answers the ordered queries.
+    assert hd.dict.key(hd.id("banana")) == "banana"
+    assert [k for k, _ in hd.dict.prefix("ap")] == ["apple", "apricot"]
+    assert hd.dict.to_bytes() == di.to_bytes()
+
+    exact = lexindex.HashedDictIndex.from_dict(di, 0)
+    assert exact.fingerprint_bits == 0 and exact.id("apricot") == 1 and exact.id("durian") is None
+    assert exact.ids_of(["durian", "cherry"]) == [None, 3] and exact.id_unchecked("cherry") == 3
+    with pytest.raises(ValueError, match="fingerprint_bits"):
+        lexindex.HashedDictIndex.from_dict(di, 33)
+    with pytest.raises(TypeError):
+        lexindex.HashedDictIndex.from_dict(lexindex.StringIndex(["a"]), 8)
+
+    blob = hd.to_bytes()
+    assert len(blob) == hd.serialized_len()
+    p = tmp_path / "words.bhd"
+    hd.save(p)
+    for back in (
+        lexindex.HashedDictIndex.from_bytes(blob),
+        lexindex.HashedDictIndex.load(p),
+        lexindex.HashedDictIndex.load_mmap(p),
+        lexindex.HashedDictIndex.load_mmap_verified(p),
+    ):
+        assert back.to_bytes() == blob and back.id("cherry") == 3 and back.dict.key(0) == "apple"
+    with pytest.raises(ValueError):
+        lexindex.HashedDictIndex.from_bytes(blob[:-1])
+    empty = lexindex.HashedDictIndex.from_dict(lexindex.DictIndex([]), 8)
+    assert empty.is_empty() and empty.id("x") is None and empty.id_unchecked("x") == 0
+
+
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
     assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]
@@ -1145,6 +1187,7 @@ def _hammer(fn, threads=8):
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 4),
         lexindex.DictIndex,
+        lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 8),
     ],
 )
 def test_an_index_is_safe_to_share_across_threads(ctor):
@@ -1202,6 +1245,7 @@ def test_pickle_round_trips_every_class():
     ch = lexindex.CompactHashIndex(words, 1)
     cl = lexindex.ClosedHashIndex(words)
     di = lexindex.DictIndex(words)
+    hd = lexindex.HashedDictIndex.from_dict(di, 8)
     ov = lexindex.Overlay(si)
     ov.add("durian")
     ov.remove("apple")
@@ -1209,7 +1253,7 @@ def test_pickle_round_trips_every_class():
     # Protocol 2 as well as the default: `__reduce__` names a static method by qualname, which is
     # the part of the protocol that differs between them.
     for protocol in (2, pickle.HIGHEST_PROTOCOL):
-        for original in (si, ph, ch, cl, di, ov):
+        for original in (si, ph, ch, cl, di, hd, ov):
             back = pickle.loads(pickle.dumps(original, protocol=protocol))
             assert type(back) is type(original)
             assert len(back) == len(original)
@@ -1379,6 +1423,7 @@ def test_path_forms_of_the_strict_loader_accept_a_real_file(tmp_path):
         lambda keys: lexindex.DictIndex(keys),
         lambda keys: lexindex.PerfectHashIndex(keys),
         lambda keys: lexindex.CompactHashIndex(keys, 4),
+        lambda keys: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys), 8),
     ],
 )
 def test_load_mmap_verified_refuses_a_flipped_byte_the_plain_mapping_takes(tmp_path, ctor):
@@ -1406,6 +1451,11 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
         (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH8"),
         (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL2"),
         (lexindex.DictIndex(keys), "DictIndex", "BDX3"),
+        (
+            lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys), 8),
+            "HashedDictIndex",
+            "BHD1",
+        ),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)

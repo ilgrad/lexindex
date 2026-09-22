@@ -279,6 +279,12 @@ fn load(bytes: &[u8]) -> Result<Any, LexindexStatus> {
                 "overlay blobs are outside the C ABI",
             ));
         }
+        BlobKind::HashedDictIndex => {
+            return Err(fail(
+                LexindexStatus::Unsupported,
+                "HashedDictIndex blobs are outside the C ABI",
+            ));
+        }
     };
     Ok(any)
 }

@@ -50,7 +50,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 #[cfg(feature = "mph")]
-use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
+use crate::{ClosedHashIndex, CompactHashIndex, HashedDictIndex, PerfectHashIndex};
 
 /// Collect any Python iterable of `str` — list, tuple, generator, an open file — into borrowed
 /// strings. `Vec<PyBackedStr>` as a parameter would accept only sequences, which rules out building
@@ -2194,6 +2194,192 @@ impl PyDictIndex {
     }
 }
 
+/// A `DictIndex` with a hash sidecar answering `id(key)`: the dictionary's ranks at a hash index's
+/// lookup cost, and its ordered queries through `.dict`.
+#[cfg(feature = "mph")]
+#[pyclass(name = "HashedDictIndex", module = "lexindex._core", frozen)]
+pub struct PyHashedDictIndex {
+    inner: Arc<HashedDictIndex>,
+}
+
+#[cfg(feature = "mph")]
+#[pymethods]
+impl PyHashedDictIndex {
+    /// Build the sidecar over `dict`, storing `fingerprint_bits` (`0..=32`) of a second hash
+    /// beside each key's rank. From one bit up, `id` answers a non-member with some rank at
+    /// `2 ** -fingerprint_bits`; at zero it is the dictionary's own exact search, and the sidecar
+    /// serves `id_unchecked`. The dictionary is shared with `dict`, not copied.
+    #[staticmethod]
+    fn from_dict(
+        py: Python<'_>,
+        dict: &Bound<'_, PyDictIndex>,
+        fingerprint_bits: u32,
+    ) -> PyResult<Self> {
+        let shared = Arc::clone(&dict.get().inner);
+        let inner = py
+            .detach(|| HashedDictIndex::from_shared_dict(shared, fingerprint_bits))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// The dictionary the sidecar rides on, sharing its memory: `key`, `prefix`, `lower_bound`,
+    /// `range`, iteration and the exact `id`, with this index's ids.
+    #[getter]
+    fn dict(&self) -> PyDictIndex {
+        PyDictIndex {
+            inner: Arc::clone(self.inner.shared_dict()),
+        }
+    }
+
+    /// Width of the stored fingerprints in bits: from one up, the false-positive rate of `id` is
+    /// `2 ** -fingerprint_bits`; at zero, `id` is exact.
+    #[getter]
+    fn fingerprint_bits(&self) -> u32 {
+        self.inner.fingerprint_bits()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Rank of `key`, or `None`: through the sidecar from one fingerprint bit up, and a
+    /// non-member answered with a rank at `2 ** -fingerprint_bits`; exact at zero bits.
+    fn id(&self, key: &str) -> Option<u64> {
+        self.inner.id(key)
+    }
+
+    /// Rank of `key` **without** any membership check -- `key` must be a member, or the result is
+    /// some rank below `len()`. The fastest lookup for a closed vocabulary, at any width.
+    fn id_unchecked(&self, key: &str) -> u64 {
+        self.inner.id_unchecked(key)
+    }
+
+    /// Rank of `key`, raising `KeyError` if `id` says it is absent -- the dict spelling of
+    /// [`id`](Self::id). No `__setitem__`, no `keys` / `values` / `items`: an immutable
+    /// `str -> int` lookup.
+    fn __getitem__(&self, key: &str) -> PyResult<u64> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Rank of `key`, or `default` (`None` unless given).
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
+    }
+
+    /// Whether `key` is present, under the same contract as [`id`](Self::id).
+    fn contains(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`, `None` where a key
+    /// is absent.
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
+        py.detach(|| self.inner.ids_of(&keys))
+    }
+
+    /// Serialise to a `bytes` blob, the dictionary's own blob inside it.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let bytes = py.detach(|| self.inner.to_bytes());
+        PyBytes::new(py, &bytes)
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> usize {
+        self.inner.serialized_len()
+    }
+
+    /// Pickle support: the blob, and the loader that reads it back.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py),)))
+    }
+
+    /// Reconstruct from a [`PyHashedDictIndex::to_bytes`] blob. Every length and every checksum,
+    /// the dictionary's included, is validated, so arbitrary input raises rather than
+    /// misbehaving.
+    #[staticmethod]
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| HashedDictIndex::from_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the index to `path`.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
+    }
+
+    /// Load a file written with `save`, validated like `from_bytes`.
+    #[staticmethod]
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| HashedDictIndex::load(&path)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Zero-copy load: memory-map the file and borrow the rank table and the dictionary from it,
+    /// as `DictIndex.load_mmap` does; the perfect hash and the dictionary's per-block samples are
+    /// what the load holds.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the index is
+    /// alive -- the bytes are borrowed, so a concurrent write is undefined behaviour. See
+    /// `StringIndex.load_mmap` for the full contract; use `load` if the file may change.
+    #[staticmethod]
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { HashedDictIndex::load_mmap(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// `load_mmap` plus the checks `load` makes: one pass over the mapping at load, the bulk still
+    /// borrowed. For a file you wrote but did not carry yourself.
+    ///
+    /// The same obligation as `load_mmap`: the file must not change while the index is alive. The
+    /// checks run once, at load, and say nothing about later.
+    #[staticmethod]
+    fn load_mmap_verified(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller (see the docstring); unenforceable from Python.
+        let inner = py
+            .detach(|| unsafe { HashedDictIndex::load_mmap_verified(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
 /// The three bases an [`PyOverlay`] can sit on. `Overlay<I>` is generic and a `#[pyclass]` cannot
 /// be, so the choice becomes a runtime tag — and with it, `key`/`keys`/`compact` become a runtime
 /// `TypeError` on a `CompactHashIndex` base where Rust refuses at compile time.
@@ -2937,6 +3123,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
             BlobKind::DictIndex => "DictIndex",
             BlobKind::Mphf => "Mphf",
             BlobKind::Overlay => "Overlay",
+            BlobKind::HashedDictIndex => "HashedDictIndex",
         },
     )?;
     d.set_item("format", &info.format)?;
@@ -3107,6 +3294,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOverlay>()?;
     m.add_class::<PyDictIndex>()?;
     m.add_class::<DictIndexIterator>()?;
+    #[cfg(feature = "mph")]
+    m.add_class::<PyHashedDictIndex>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     m.add_function(wrap_pyfunction!(py_plan, m)?)?;
     Ok(())

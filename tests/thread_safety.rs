@@ -21,6 +21,7 @@ fn index_types_are_send_and_sync() {
     {
         assert_send_sync::<lexindex::CompactHashIndex>();
         assert_send_sync::<lexindex::PerfectHashIndex>();
+        assert_send_sync::<lexindex::HashedDictIndex>();
     }
 }
 
@@ -60,15 +61,19 @@ fn mph_dictionaries_serve_many_readers() {
     let keys: Vec<String> = (0..2_000).map(|i| format!("tok-{i:05}")).collect();
     let exact = Arc::new(PerfectHashIndex::build(&keys).unwrap());
     let compact = Arc::new(CompactHashIndex::build(&keys, 2).unwrap());
+    let dict = lexindex::DictIndex::build(&keys).unwrap();
+    let hashed = Arc::new(lexindex::HashedDictIndex::from_dict(dict, 8).unwrap());
 
     let readers: Vec<_> = (0..8)
         .map(|_| {
             let (exact, compact, keys) = (Arc::clone(&exact), Arc::clone(&compact), keys.clone());
+            let hashed = Arc::clone(&hashed);
             thread::spawn(move || {
-                for key in &keys {
+                for (rank, key) in keys.iter().enumerate() {
                     let id = exact.id(key).expect("member");
                     assert_eq!(exact.key(id), Some(key.as_str())); // reverse round-trips
                     assert!(compact.contains(key)); // never a false negative on a member
+                    assert_eq!(hashed.id(key), Some(rank as u64)); // the keys are in rank order
                 }
             })
         })

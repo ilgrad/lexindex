@@ -18,6 +18,7 @@ pub enum BlobKind {
     /// A standalone minimal perfect hash, the region the three hash indexes embed.
     Mphf,
     Overlay,
+    HashedDictIndex,
 }
 
 /// What [`inspect`] reads out of a blob's header.
@@ -36,13 +37,14 @@ pub struct BlobInfo {
     /// Keys the blob holds; for an overlay, the live keys. `None` only for an overlay whose base
     /// this crate did not write, since its key count is inside a header this crate cannot read.
     pub keys: Option<u64>,
-    /// `CompactHashIndex`: the fingerprint width.
+    /// `CompactHashIndex` and `HashedDictIndex`: the fingerprint width.
     pub fingerprint_bits: Option<u32>,
     /// The minimal perfect hash's region, for the kinds that hold one; `8 * mph_bytes / keys` is
     /// its bits per key.
     pub mph_bytes: Option<u64>,
     /// `PerfectHashIndex`: the key arena; `CompactHashIndex`: the fingerprint table;
-    /// `DictIndex`: the head keys and the front-coded block data.
+    /// `DictIndex`: the head keys and the front-coded block data; `HashedDictIndex`: the rank
+    /// table, the dictionary being the blob less that, the perfect hash and the side table.
     pub arena_bytes: Option<u64>,
     /// Keys in the hash indexes' collision side table.
     pub side_entries: Option<u64>,
@@ -309,6 +311,19 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
                 (0, 0)
             };
             rest(bytes, [header + table, keyed, codes, phrases, arrays])?;
+            Ok(i)
+        }
+        b"BHD1" => {
+            // `[magic 4][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32][payload
+            // u64][check u32]`, then the dictionary's own blob, the MPH, the ranks and the side.
+            w.bytes(0, 48)?;
+            let (n, fp, dict) = (w.u64(4)?, w.u32(12)?, w.u64(16)?);
+            let (mph, side) = (w.u64(24)?, u64::from(w.u32(32)?));
+            let mut i = info(BlobKind::HashedDictIndex, format, bytes, n);
+            i.fingerprint_bits = Some(fp);
+            i.mph_bytes = Some(mph);
+            i.side_entries = Some(side);
+            i.arena_bytes = Some(rest(bytes, [48, dict, mph, side * 24])?);
             Ok(i)
         }
         b"MPH1" | b"MPH2" | b"MPH3" => {
@@ -580,6 +595,37 @@ mod tests {
         assert_eq!(
             (i.kind, i.format.as_str(), i.keys, i.mph_bytes),
             (BlobKind::Mphf, "MPH3", Some(300), Some(blob.len() as u64))
+        );
+    }
+
+    #[cfg(feature = "mph")]
+    #[test]
+    fn a_hashed_dict_index_inspects_to_sections_that_add_up() {
+        let dict = crate::DictIndex::build(keys()).unwrap();
+        let dict_bytes = dict.serialized_len() as u64;
+        let blob = crate::HashedDictIndex::from_dict(dict, 8)
+            .unwrap()
+            .to_bytes();
+        let i = inspect(&blob).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.fingerprint_bits),
+            (BlobKind::HashedDictIndex, "BHD1", Some(300), Some(8))
+        );
+        // Nine bits of rank and eight of fingerprint a key.
+        assert_eq!(i.arena_bytes, Some((300 * 17u64).div_ceil(8)));
+        assert_eq!(
+            48 + dict_bytes + i.mph_bytes.unwrap() + i.arena_bytes.unwrap(),
+            i.bytes
+        );
+        assert_eq!(i.side_entries, Some(0));
+        // A blob that ends inside the perfect hash its header places.
+        let mut short = blob.clone();
+        short.truncate(48 + dict_bytes as usize);
+        assert!(
+            inspect(&short)
+                .unwrap_err()
+                .to_string()
+                .contains("truncated")
         );
     }
 

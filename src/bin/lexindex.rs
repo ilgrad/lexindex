@@ -15,7 +15,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 #[cfg(feature = "mph")]
-use lexindex::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
+use lexindex::{ClosedHashIndex, CompactHashIndex, HashedDictIndex, PerfectHashIndex};
 
 const USAGE: &str = concat!(
     "lexindex ",
@@ -741,6 +741,12 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
         }
         BlobKind::DictIndex => {
             for (key, id) in DictIndex::load(path)?.iter() {
+                write_key(&mut sink, &key, id)?;
+            }
+        }
+        #[cfg(feature = "mph")]
+        BlobKind::HashedDictIndex => {
+            for (key, id) in HashedDictIndex::load(path)?.dict().iter() {
                 write_key(&mut sink, &key, id)?;
             }
         }
@@ -1671,6 +1677,28 @@ mod tests {
         let (code, out, err) = go(&["dump", dest.to_str().unwrap()], "");
         assert_eq!((code, err.as_str()), (0, ""));
         assert_eq!(out, "b\nc\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A `HashedDictIndex` dumps its dictionary, and `inspect` names it; `build` does not write
+    /// one, so the blob comes from the library.
+    #[cfg(feature = "mph")]
+    #[test]
+    fn dump_and_inspect_read_a_hashed_dict_index() {
+        let dir = tmpdir();
+        let dest = dir.join("hashed.bhd");
+        let dict = DictIndex::build(["pear", "apple", "fig"]).unwrap();
+        HashedDictIndex::from_dict(dict, 8)
+            .unwrap()
+            .save(&dest)
+            .unwrap();
+        let (code, out, err) = go(&["dump", dest.to_str().unwrap()], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert_eq!(out, "apple\nfig\npear\n");
+        let (code, out, err) = go(&["inspect", dest.to_str().unwrap()], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(out.contains("kind: HashedDictIndex\n"), "{out}");
+        assert!(out.contains("keys: 3\n"), "{out}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

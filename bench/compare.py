@@ -207,6 +207,10 @@ def build_lexindex_dict512():
     return lexindex.DictIndex(KEYS, block=512)
 
 
+def build_lexindex_hashed_dict():
+    return lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(KEYS), 8)
+
+
 def build_lexindex_closed():
     return lexindex.ClosedHashIndex(KEYS)
 
@@ -312,6 +316,11 @@ CANDIDATES = [
         "lexindex\nDictIndex\n(256 per block, default)",
         build_lexindex_dict,
         dict(prefix=1, rangeq=1, fuzzy=0, reverse=1, exact=1, serialise=1, mmap=1),
+    ),
+    (
+        "lexindex\nHashedDictIndex\n(fp=8)",
+        build_lexindex_hashed_dict,
+        dict(prefix=1, rangeq=1, fuzzy=0, reverse=1, exact=0, serialise=1, mmap=1),
     ),
     (
         "lexindex\nStringIndex",

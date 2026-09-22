@@ -3552,7 +3552,7 @@ impl DictIndex {
     /// `verify`, the payload checksum and [`check_layout`](Self::check_layout) as well, which
     /// read every section. Without it the sections are borrowed as they are and the accessors
     /// bound what the arrays say, so a mapping loads without touching its pages.
-    fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
+    pub(crate) fn from_shared(blob: SharedBytes, verify: bool) -> Result<Self, IndexError> {
         let bytes: &[u8] = &blob;
         if let Some((_, why)) = LEGACY_MAGIC.iter().find(|(m, _)| bytes.starts_with(*m)) {
             return Err(IndexError::Format(why));
@@ -3904,7 +3904,7 @@ impl DictIndex {
         crate::blob::write_atomically_with(path.as_ref(), |w| self.write_to(w))
     }
 
-    fn write_to(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
+    pub(crate) fn write_to(&self, w: &mut dyn std::io::Write) -> Result<(), IndexError> {
         w.write_all(&self.header())?;
         self.write_sections(|s| Ok(w.write_all(s)?))
     }

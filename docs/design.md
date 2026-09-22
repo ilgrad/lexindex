@@ -1,6 +1,6 @@
 # Design
 
-lexindex is five build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
+lexindex is six build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
 
 ## Keys are bytes
 
@@ -366,6 +366,44 @@ there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them
 itself: `prefix_id_range` costs two order lookups whatever the number of matches.
 
+## `HashedDictIndex`
+
+A `DictIndex` answers `id` by searching — the block samples, a walk of one block's restarts, a scan
+of one microblock — and that is 2 500 to 3 300 instructions a lookup on the corpora it was counted
+on, most of them the scan. A perfect hash answers the same question in about a hundred, but its
+slot is not the rank, and the rank is what makes a dictionary's id worth having: the ids are the
+order, so a range of keys is a range of ids. `HashedDictIndex` stores the rank at the slot. The
+dictionary is kept whole; beside it sit a minimal perfect hash over the keys' 64-bit hashes and a
+table of one value a slot, `⌈log2 n⌉ + fingerprint_bits` bits wide and bit-packed: the rank of the
+slot's key above `fingerprint_bits` of its second hash. `id` is one hash, one perfect-hash lookup
+and one read of the table, and does not touch the dictionary; the ordered queries go to the
+dictionary, whose ids are the ranks the table holds.
+
+The width is chosen at build, and it decides the contract. From one bit up the stored fingerprint is
+compared and a non-member reads as present at `2^-fingerprint_bits` — `CompactHashIndex`'s rate,
+for the same compare. At zero bits nothing is stored to compare, so `id` does not pretend: it is the
+dictionary's own search, exact, and the hash path is `id_unchecked` alone, a member's rank and some
+rank below `n` for anything else. Zero bits is also the smallest sidecar: 2.62 bytes a key on the
+480 k-word dictionary — 19 bits of rank and two of perfect hash — 2.74 at a million keys and 3.24
+at ten million, where a rank takes 24 bits; each eight fingerprint bits add a byte. A rank and its
+fingerprint must fit the one 64-bit read a lookup makes, which is what caps `fingerprint_bits` at
+32: with at most `u32::MAX` keys a rank takes at most 32.
+
+The build walks the dictionary once in rank order, hashing every key, and holds 24 bytes a key while
+it builds the perfect hash over the distinct hashes and writes each rank at its slot. Keys sharing a
+64-bit hash follow the other hash indexes' rule: the lowest-ranked keeps the slot, the rest go to a
+side table matched on the full second hash before the rank table is read, exact for members at any
+width. The same dictionary and width give the same blob, byte for byte.
+
+The serialised blob is a 48-byte header — `[magic "BHD1"][n][fingerprint_bits][dictionary bytes]
+[mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` blob unchanged, the MPH blob,
+the rank table and the side table. Embedding the dictionary verbatim keeps one loader for it: the
+region goes to `DictIndex`'s own, which checks it as it checks a standalone blob, and the pair is
+refused if the dictionary's key count and the header's disagree. `load_mmap` borrows the
+dictionary's sections and the rank table and reads the perfect hash and the side table into memory,
+as the other hash indexes do. A crafted rank table can make `id` answer wrong, never past the end:
+a rank at or above `n` is refused by `id` and clamped by `id_unchecked`.
+
 ## `PerfectHashIndex`
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
@@ -665,8 +703,9 @@ or — never — read it wrong.
 | `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
+| `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` blob, read by `DictIndex`'s loader |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8` and `BCL2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8`, `BCL2` and `BHD1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so all three
@@ -697,15 +736,15 @@ down outside the index belongs with the blob that produced it.
 
 ## Cargo features
 
-- `mph` (default) — `PerfectHashIndex`, `CompactHashIndex` and the in-crate MPH behind them. No
-  dependency, any pointer width.
+- `mph` (default) — `PerfectHashIndex`, `CompactHashIndex`, `ClosedHashIndex`, `HashedDictIndex` and
+  the in-crate MPH behind them. No dependency, any pointer width.
 - `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`). The one feature with a target
   it cannot serve: there is nothing to map on `wasm32`.
 - `python` — the PyO3 abi3 extension module.
-- `capi` — the C ABI: one opaque handle over the five indexes and fourteen `lexindex_*` functions,
-  declared in `include/lexindex.h`. Pulls `mph`, no dependency. `cargo build --release --features
-  capi` exports it from the `cdylib`; `cargo rustc --release --features capi --crate-type staticlib`
-  gives the archive.
+- `capi` — the C ABI: one opaque handle over every index but `HashedDictIndex` and fourteen
+  `lexindex_*` functions, declared in `include/lexindex.h`. Pulls `mph`, no dependency. `cargo build
+  --release --features capi` exports it from the `cdylib`; `cargo rustc --release --features capi
+  --crate-type staticlib` gives the archive.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and
   owned `save`/`load`, depending on nothing but `fst`. The full default build depends on `fst` and
   `memmap2` and nothing else, and `cargo audit` reports nothing on either. CI cross-checks `i686`

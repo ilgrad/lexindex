@@ -1,9 +1,10 @@
-"""Quickstart: the five lexindex structures and when to reach for each.
+"""Quickstart: the six lexindex structures and when to reach for each.
 
-One vocabulary, five indexes, each answering a different question:
+One vocabulary, six indexes, each answering a different question:
 
   - StringIndex       ordered + typo-tolerant: autocomplete, fuzzy, range, exact both ways
   - DictIndex         ordered, every key stored: exact both ways + lower_bound, a third of the size
+  - HashedDictIndex   a DictIndex whose string -> id is a hash: the same ranks, no search
   - CompactHashIndex  smallest string -> id (probabilistic membership, no reverse)
   - ClosedHashIndex   the perfect hash alone: string -> id for a vocabulary known to be closed
   - PerfectHashIndex  exact membership + reverse id -> string, fastest closed-vocabulary lookup
@@ -19,7 +20,14 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from lexindex import ClosedHashIndex, CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex
+from lexindex import (
+    ClosedHashIndex,
+    CompactHashIndex,
+    DictIndex,
+    HashedDictIndex,
+    PerfectHashIndex,
+    StringIndex,
+)
 
 VOCAB = [
     "apple",
@@ -98,6 +106,17 @@ def dict_index_demo() -> None:
     )
 
 
+def hashed_dict_demo() -> None:
+    """A DictIndex with a hash sidecar: its ranks, answered by a hash rather than a search."""
+    words = HashedDictIndex.from_dict(DictIndex(VOCAB), fingerprint_bits=8)
+    assert words.id("cherry") == words.dict.id("cherry") == 6  # the dictionary's own ranks
+    assert words.dict.key(6) == "cherry"  # ordered queries and id -> key go to the dictionary
+    closed = HashedDictIndex.from_dict(DictIndex(VOCAB), fingerprint_bits=0)
+    assert closed.id_unchecked("cherry") == 6  # the closed path: no fingerprint stored
+    assert closed.id("durian") is None  # at zero bits `id` is the dictionary's exact search
+    print("HashedDictIndex:  id('cherry') ->", words.id("cherry"), "(one hash, no search)")
+
+
 def perfect_hash_demo() -> None:
     """Exact membership + reverse lookup, fastest closed-vocabulary map."""
     d = PerfectHashIndex(VOCAB)
@@ -123,6 +142,7 @@ if __name__ == "__main__":
     compact_hash_demo()
     closed_hash_demo()
     dict_index_demo()
+    hashed_dict_demo()
     perfect_hash_demo()
     persistence_demo()
     print("\nquickstart OK")

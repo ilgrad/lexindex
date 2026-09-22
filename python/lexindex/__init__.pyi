@@ -12,6 +12,7 @@ __all__ = [
     "CompactHashIndex",
     "DictIndex",
     "Estimate",
+    "HashedDictIndex",
     "Overlay",
     "OverlayInfo",
     "PerfectHashIndex",
@@ -606,6 +607,78 @@ class DictIndex:
         """
 
 @final
+class HashedDictIndex:
+    """A :class:`DictIndex` with a hash sidecar answering ``id(key)``: the dictionary's ranks at a
+    hash index's lookup cost.
+
+    Beside each key's slot in a minimal perfect hash the sidecar stores the key's rank and
+    ``fingerprint_bits`` of a second hash, ``ceil(log2 n) + fingerprint_bits`` bits a key and
+    about two for the perfect hash. ``id`` is one hash and a read of each table and never touches
+    the dictionary; ``key``, ``prefix``, ``lower_bound``, ``range`` and iteration go to
+    :attr:`dict`, whose ids are the same.
+    """
+
+    @staticmethod
+    def from_dict(dict: DictIndex, fingerprint_bits: int) -> HashedDictIndex:
+        """Build the sidecar over ``dict``, storing ``fingerprint_bits`` (``0..=32``) of a second
+        hash beside each key's rank. From one bit up, ``id`` answers a non-member with some rank
+        at ``2 ** -fingerprint_bits``; at zero it is the dictionary's own exact search, and the
+        sidecar serves ``id_unchecked``. The dictionary is shared with ``dict``, not copied."""
+
+    @property
+    def dict(self) -> DictIndex:
+        """The dictionary the sidecar rides on, sharing its memory."""
+
+    @property
+    def fingerprint_bits(self) -> int: ...
+    def __len__(self) -> int: ...
+    def __contains__(self, key: str, /) -> bool: ...
+    def is_empty(self) -> bool: ...
+    def id(self, key: str) -> int | None:
+        """Rank of ``key``, or ``None``: a non-member is answered with a rank at
+        ``2 ** -fingerprint_bits``, and never at zero bits."""
+
+    def id_unchecked(self, key: str) -> int:
+        """Rank of ``key`` without any membership check: a member's rank, and some rank below
+        ``len()`` for anything else. The fastest lookup for a closed vocabulary."""
+
+    def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Rank of ``key``, raising ``KeyError`` if :meth:`id` says it is absent. There is no
+        ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an immutable
+        ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Rank of ``key``, or ``default`` (``None`` unless given)."""
+
+    def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
+    @staticmethod
+    def from_bytes(data: bytes) -> HashedDictIndex:
+        """Reconstruct from a ``to_bytes`` blob. Every length and every checksum, the
+        dictionary's included, is validated, so arbitrary input raises ``ValueError``."""
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @staticmethod
+    def load(path: str | os.PathLike[str]) -> HashedDictIndex:
+        """Load a file written by ``save``. Validated like ``from_bytes``."""
+    @staticmethod
+    def load_mmap(path: str | os.PathLike[str]) -> HashedDictIndex:
+        """Memory-map a file written by ``save`` and borrow the rank table and the dictionary
+        from it; the perfect hash and the dictionary's per-block samples are what the load reads.
+
+        One obligation, and it is about the mapping rather than the bytes: the file must not be
+        modified or truncated by any process while the index is alive (see
+        ``StringIndex.load_mmap``). The framing is validated as in ``from_bytes``; the checksums
+        are skipped by design, and ``load_mmap_verified`` adds them back.
+        """
+    @staticmethod
+    def load_mmap_verified(path: str | os.PathLike[str]) -> HashedDictIndex:
+        """``load_mmap`` plus the checks ``load`` makes: one pass over the mapping at load, the
+        bulk still borrowed. Same obligation as ``load_mmap``.
+        """
+
+@final
 class Overlay:
     """Add and remove keys on top of an index that is expensive to rebuild.
 
@@ -740,10 +813,10 @@ class BlobInfo(TypedDict):
     the key count -- for an overlay, the live keys -- and is ``None`` only for an overlay over a
     base this library did not write. ``mph_bytes`` is the perfect hash's region where there is one
     (``8 * mph_bytes / keys`` is its bits per key); ``arena_bytes`` is the key arena of a
-    ``PerfectHashIndex``, the fingerprint table of a ``CompactHashIndex`` or the keys and block
-    data of a ``DictIndex``; ``side_entries`` the
+    ``PerfectHashIndex``, the fingerprint table of a ``CompactHashIndex``, the keys and block
+    data of a ``DictIndex`` or the rank table of a ``HashedDictIndex``; ``side_entries`` the
     keys in a hash index's collision side table; ``fingerprint_bits`` the width a
-    ``CompactHashIndex`` was built with.
+    ``CompactHashIndex`` or a ``HashedDictIndex`` was built with.
     """
 
     kind: Literal[
@@ -754,6 +827,7 @@ class BlobInfo(TypedDict):
         "DictIndex",
         "Mphf",
         "Overlay",
+        "HashedDictIndex",
     ]
     format: str
     bytes: int

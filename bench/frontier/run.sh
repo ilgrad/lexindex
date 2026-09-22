@@ -6,6 +6,7 @@
 #   bench/frontier/run.sh --scale 10m       # the six corpora with a ten-million-key file
 #   bench/frontier/run.sh urls-1000000      # named corpus files only
 #   bench/frontier/run.sh --rounds 1        # one process a structure and corpus rather than three
+#   bench/frontier/run.sh --only 'lexindex|xcdat 15'   # the processes whose label matches, alone
 #   bench/frontier/run.sh --allow-dirty     # for development; the artifact is tagged <sha>-dirty
 #
 # One protocol for every row, C²'s `benchmark.cpp`: read the file, sort and deduplicate, build once,
@@ -37,6 +38,7 @@ lex=$root/bench/frontier/frontier_lex/target/release/frontier_lex
 allow_dirty=0
 scale=1m
 rounds=3
+only=
 named=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,8 +51,12 @@ while [ $# -gt 0 ]; do
       rounds=${2:-}
       shift
       ;;
+    --only)
+      only=${2:-}
+      shift
+      ;;
     -h | --help)
-      sed -n '2,15p' "$0" | cut -c3-
+      sed -n '2,16p' "$0" | cut -c3-
       exit 0
       ;;
     -*)
@@ -87,6 +93,10 @@ table=frontier-$scale
 if [ ${#named[@]} -gt 0 ]; then
   stems=("${named[@]}")
   table="frontier-named"
+fi
+# A campaign of some of the structures is not the campaign, and its artifact says so by name.
+if [ -n "$only" ]; then
+  table=$table-subset
 fi
 
 commit=$(git rev-parse --short HEAD)
@@ -140,7 +150,7 @@ log=bench/results/$table-$(date +%F)-$host-$commit.log
 
 # One process a structure, labelled as tables.py reads them.
 processes=()
-for kind in dict32 dict256 dict1024 string; do
+for kind in dict32 dict256 dict1024 string hashed0 hashed8 hashed16; do
   processes+=("lexindex $kind")
 done
 # C²'s fourth argument is the depth of the recursion its paper ablates; for the MARISA baseline it is
@@ -152,6 +162,13 @@ done
 for type in 7 8 15 16; do
   processes+=("xcdat $type")
 done
+if [ -n "$only" ]; then
+  mapfile -t processes < <(printf '%s\n' "${processes[@]}" | grep -E -- "$only" || true)
+  if [ ${#processes[@]} -eq 0 ]; then
+    echo "--only '$only' matches no process" >&2
+    exit 2
+  fi
+fi
 
 header() {
   local l2 l3 changed
@@ -177,6 +194,9 @@ header() {
   echo "rustc: $(rustc --version)"
   echo "load at start: $(cut -d' ' -f1-3 /proc/loadavg)"
   echo "rounds: $rounds, even rounds in the reverse order"
+  if [ -n "$only" ]; then
+    echo "only: $only"
+  fi
   echo "quiet before each process: under $QUIET_CPUS busy CPUs for 1 s"
   echo "clock ticks: $ticks"
   echo "address space cap: $ADDRESS_SPACE_KB KB"

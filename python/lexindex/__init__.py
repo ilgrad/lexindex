@@ -13,6 +13,8 @@ many times:
 - :class:`DictIndex` — ordered dictionary with the key stored for every id: exact
   ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.64 B/key on
   real words, 56 % below ``StringIndex``.
+- :class:`HashedDictIndex` — a :class:`DictIndex` with a hash sidecar: ``id`` at a hash index's
+  cost, with the dictionary's ranks, and its ordered queries through ``.dict``.
 
 All serialise to a flat blob (``save`` / ``load``). Every one but :class:`ClosedHashIndex` also
 has ``load_mmap``, which maps a huge index and borrows it instantly; :class:`DictIndex` builds its
@@ -31,6 +33,7 @@ from lexindex._core import (
     ClosedHashIndex,
     CompactHashIndex,
     DictIndex,
+    HashedDictIndex,
     Overlay,
     PerfectHashIndex,
     StringIndex,
@@ -55,6 +58,7 @@ class BlobInfo(TypedDict):
         "DictIndex",
         "Mphf",
         "Overlay",
+        "HashedDictIndex",
     ]
     format: str
     bytes: int
@@ -122,6 +126,7 @@ __all__ = [
     "CompactHashIndex",
     "DictIndex",
     "Estimate",
+    "HashedDictIndex",
     "Overlay",
     "OverlayInfo",
     "PerfectHashIndex",

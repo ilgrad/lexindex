@@ -35,6 +35,7 @@ jobs:
           - parse_compact
           - parse_closed
           - parse_dict
+          - parse_hashed_dict
           - parse_perfect
           - parse_overlay
           - parse_overlay_untrusted
