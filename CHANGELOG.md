@@ -46,6 +46,11 @@ All notable changes to this project are documented here. The format follows
 
 - `bench/frontier/run.sh` refused to run at 4.0.1: it builds `frontier_lex` with `--locked`, and
   that crate's lock file still named lexindex 4.0.0.
+- **The release preflight checks the tag's own date.** It compared `CITATION.cff`'s
+  `date-released` with the CHANGELOG heading and neither with the day of the tag, so a release
+  prepared on one day and tagged on another passed — 4.0.0 was re-dated twice by hand. It now reads
+  the annotated tag's date, in the tagger's zone, and refuses a mismatch or a lightweight tag before
+  anything is built.
 
 ### Documentation
 

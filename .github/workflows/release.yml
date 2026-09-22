@@ -56,6 +56,20 @@ jobs:
           chg_date="$(grep -m1 -E "^## \[$ver\] . " CHANGELOG.md | sed -E 's/.* ([0-9]{4}-[0-9]{2}-[0-9]{2})$/\1/')"
           cff_date="$(grep -m1 '^date-released:' CITATION.cff | awk '{print $2}' | tr -d '"')"
           check "CITATION.cff date-released" "$cff_date" "$chg_date"
+          # Agreeing with each other is not agreeing with the release: both are written when the
+          # release is prepared, and 4.0.0 was prepared on the 19th, re-dated to the 20th and tagged
+          # on the 21st, which the check above would have passed on any of those days. The day that
+          # counts is the tagger's, in the tagger's own zone, and a re-run of this job days later
+          # does not move it. The tag object is fetched rather than assumed: checkout has stored a
+          # tag push as a bare ref to its commit before (actions/checkout#290), which has no date.
+          git fetch --quiet --no-tags --depth=1 origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          tag_date="$(git for-each-ref --format='%(taggerdate:short)' "refs/tags/$GITHUB_REF_NAME")"
+          if [ -z "$tag_date" ]; then
+            echo "::error::$GITHUB_REF_NAME is a lightweight tag; a release tag is annotated (git tag -s)"
+            fail=1
+          else
+            check "the tag's date" "$tag_date" "$chg_date"
+          fi
           exit $fail
 
   # The full CI matrix — fmt, clippy, tests on Linux/macOS/Windows, Python 3.11–3.14, MSRV,
