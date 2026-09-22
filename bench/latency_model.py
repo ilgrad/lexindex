@@ -510,15 +510,23 @@ WORKLOADS = (
 )
 
 
+# A pick this close to the fastest is a tie at this harness's resolution rather than a wrong answer:
+# where a structure lands in physical memory moves a single-threaded probe on this machine by 4-7 %,
+# and the ordered candidates at 1 000 000 keys are often closer than that -- three `DictIndex`
+# blocks within 1.5 % of each other on `dna`.
+TIE = 1.05
+
+
 def _held_out(cells: list[dict]) -> None:
     """Fitted without a corpus, what does the model's pick cost on it against the fastest?
 
-    For each workload over every corpus and size: how often the pick is the fastest, and the mean
-    and worst of what it costs over what the fastest does -- which is what a wrong pick costs.
+    For each workload over every corpus and size: how often the pick is the fastest, how often it is
+    within `TIE` of it, and the mean and worst of what it costs over what the fastest does -- which
+    is what a wrong pick costs.
     """
     corpora_ = sorted({c["corpus"] for c in cells})
     held = {name: Model.fit([c for c in cells if c["corpus"] != name]) for name in corpora_}
-    print(f"{'held out, a corpus at a time':<34}{'fastest':>9}{'mean':>7}{'worst':>7}")
+    print(f"{'held out, a corpus at a time':<34}{'fastest':>9}{'<=5 %':>8}{'mean':>7}{'worst':>7}")
     for label, weights, needs in WORKLOADS:
         right, ratios, worst = 0, [], (1.0, "")
         for name, model in held.items():
@@ -539,8 +547,9 @@ def _held_out(cells: list[dict]) -> None:
                 ratios.append(cost[pick] / cost[best])
                 if ratios[-1] > worst[0]:
                     worst = (ratios[-1], f"{name} {size:,}: {pick} for {best}")
+        ties = sum(r <= TIE for r in ratios)
         print(
-            f"  {label:<32}{right:>4}/{len(ratios):<4}"
+            f"  {label:<32}{right:>4}/{len(ratios):<4}{ties:>4}/{len(ratios):<3}"
             f"{sum(ratios) / len(ratios):7.3f}{worst[0]:7.3f}  {worst[1]}"
         )
 

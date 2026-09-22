@@ -502,24 +502,27 @@ impl Ops {
 /// at 100 000 keys, eleven at 1 000 000 and six at 10 000 000, in one process, every operation over
 /// fresh probes of its own and every structure timed at every place in its operation's round.
 /// `bench/latency_model.py measure` produced them and `fit` re-derives these tables from
-/// `bench/results/latency-model-2026-09-15-arz-e6b3319.json`, with no slope below zero. Mean
-/// absolute error is 5–13 % of the measurement on `id(key)`, and 23–28 % at worst, on prefix
-/// counts.
+/// `bench/results/latency-model-2026-09-23-arz-7731027.json`, with no slope below zero; the two
+/// `HashedDictIndex` lanes that artifact also holds are measured and not priced. Mean absolute
+/// error is 6–12 % of the measurement on `id(key)` and 26–42 % on prefix counts, whose cost is
+/// mostly how many keys the prefix matches.
 ///
 /// **Far too coarse to quote and quite enough to rank.** Fitted with a corpus left out, the model
-/// names the fastest `id(key)` on that corpus in 30 of 30 corpus-size cells, and the same for
-/// `key(id)` and for a `common_prefix`-heavy workload; over ten workloads the mean pick costs
-/// 1.000–1.047× the fastest. Against the *published* sweep, which it was not fitted to, it names
-/// the fastest of every lane in 28 of 30 cells — never more than 1.10× slower — the faster of
-/// `DictIndex` and `StringIndex` in 24, and the fastest `DictIndex` block in 19, never more than
-/// 1.08× slower.
+/// names the fastest index on that corpus in 30 of 30 corpus-size cells for `id(key)`, for nine
+/// hits to a miss, for batches of 1 024, for `key(id)` and for a `common_prefix`-heavy workload;
+/// over ten workloads the mean pick costs 1.000–1.050× the fastest. Against the *published*
+/// sweep, which it was not fitted to, it names the fastest of every lane in 28 of 30 cells — never
+/// more than 1.12× slower — the faster of `DictIndex` and `StringIndex` in 29, never more than
+/// 1.02× slower, and the fastest `DictIndex` block in 21, never more than 1.05× slower.
 ///
-/// **Choosing between `DictIndex` and `StringIndex` got harder in 4.0, and the scores say so**:
-/// ordered picks held out fall to 16 of 30 with a worst case of 1.75×, against 24 and 1.24× on the
-/// `BDX2` constants. `BDX3` moved the dictionary's `id` lane up by about a sixth and left the
-/// transducer's where it was, so the two now cross inside the corpus set rather than outside it —
-/// `numeric` at a hundred thousand keys is where the model gets it wrong by the most. The block
-/// choice is the same story one level down: 19 of 30 here against 22 before.
+/// **What it gets wrong is a choice between ordered indexes, because there the candidates are
+/// close.** The transducer is the faster at 100 000 keys on six corpora of thirteen and at every
+/// size on `numeric`, and the blocks of one dictionary are often within a few per cent of each
+/// other. Held out, the fastest ordered `id(key)` is named in 19 of 30 cells and one within 5 %
+/// of it — what placement in physical memory moves a single-threaded probe on this machine — in
+/// 23, never more than 1.11× slower. Nine prefix counts to a hit is the weakest workload: 15 and
+/// 23 of 30, and 1.64× on ten million `numeric` ids, whose transducer of a few hundred bytes is
+/// smaller than any the fit sees once `numeric` is left out.
 ///
 /// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
 /// through the Python binding so that every one of them carries that call. Nothing here rescales
@@ -529,11 +532,11 @@ const COST: [(Kind, Ops); 4] = [
         Kind::Closed,
         Ops {
             floor: 0.00,
-            mixed: cost(51.1, 9.97, 0.151, 0.000),
-            hit: cost(51.6, 9.95, 0.149, 0.000),
-            miss: cost(48.5, 9.78, 0.108, 0.000),
-            batch16: cost(37.5, 1.82, 0.116, 0.000),
-            batch1024: cost(33.7, 0.80, 0.152, 0.000),
+            mixed: cost(47.4, 8.87, 0.060, 0.000),
+            hit: cost(47.5, 8.47, 0.062, 0.000),
+            miss: cost(45.3, 8.78, 0.068, 0.000),
+            batch16: cost(34.1, 1.98, 0.073, 0.000),
+            batch1024: cost(31.9, 0.78, 0.063, 0.000),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -544,11 +547,11 @@ const COST: [(Kind, Ops); 4] = [
         Kind::Compact,
         Ops {
             floor: 0.92,
-            mixed: cost(46.4, 18.41, 0.111, 0.010),
-            hit: cost(43.6, 18.05, 0.057, 0.026),
-            miss: cost(30.6, 18.33, 0.102, 0.000),
-            batch16: cost(44.0, 2.86, 0.095, 0.000),
-            batch1024: cost(37.3, 1.46, 0.057, 0.001),
+            mixed: cost(43.1, 16.10, 0.095, 0.000),
+            hit: cost(37.5, 15.90, 0.110, 0.000),
+            miss: cost(26.6, 15.13, 0.103, 0.010),
+            batch16: cost(39.0, 3.06, 0.090, 0.000),
+            batch1024: cost(33.7, 1.45, 0.070, 0.000),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -559,12 +562,12 @@ const COST: [(Kind, Ops); 4] = [
         Kind::Perfect,
         Ops {
             floor: 3.30,
-            mixed: cost(-4.4, 24.41, 0.000, 0.000),
-            hit: cost(-7.3, 28.71, 0.000, 0.000),
-            miss: cost(-19.8, 18.23, 0.000, 0.000),
-            batch16: cost(47.1, 5.05, 0.042, 0.000),
-            batch1024: cost(40.8, 2.52, 0.047, 0.005),
-            key: Some(cost(26.0, 20.67, 0.025, 0.000)),
+            mixed: cost(-7.7, 22.55, 0.000, 0.000),
+            hit: cost(-23.3, 27.28, 0.000, 0.000),
+            miss: cost(-21.6, 16.27, 0.000, 0.000),
+            batch16: cost(36.9, 5.38, 0.028, 0.000),
+            batch1024: cost(35.6, 2.62, 0.066, 0.000),
+            key: Some(cost(-4.7, 21.27, 0.042, 0.000)),
             prefix: None,
             common_prefix: None,
             longest_prefix: None,
@@ -574,15 +577,15 @@ const COST: [(Kind, Ops); 4] = [
         Kind::String,
         Ops {
             floor: 0.00,
-            mixed: cost(164.7, 26.97, 0.000, 1.251),
-            hit: cost(165.7, 28.39, 0.126, 1.227),
-            miss: cost(157.5, 24.54, 0.000, 1.237),
-            batch16: cost(156.1, 26.73, 0.000, 1.263),
-            batch1024: cost(149.2, 27.23, 0.000, 1.216),
-            key: Some(cost(234.1, 35.92, 14.978, 1.280)),
-            prefix: Some(cost(392.8, 103.75, 0.323, 0.000)),
-            common_prefix: Some(cost(441.9, 6.87, 0.000, 1.134)),
-            longest_prefix: Some(cost(217.4, 33.42, 4.416, 0.354)),
+            mixed: cost(152.2, 15.30, 0.000, 1.209),
+            hit: cost(150.1, 18.16, 0.000, 1.185),
+            miss: cost(142.0, 15.55, 0.000, 1.206),
+            batch16: cost(143.2, 18.03, 0.000, 1.191),
+            batch1024: cost(138.9, 18.45, 0.000, 1.186),
+            key: Some(cost(251.3, 22.94, 10.942, 1.541)),
+            prefix: Some(cost(365.8, 88.14, 1.537, 0.000)),
+            common_prefix: Some(cost(347.8, 0.00, 0.000, 1.149)),
+            longest_prefix: Some(cost(212.7, 17.36, 0.000, 0.968)),
         },
     ),
 ];
@@ -593,61 +596,61 @@ const DICT_COST: [(usize, Ops); 4] = [
     (
         32,
         Ops {
-            floor: 0.92,
-            mixed: cost(134.5, 47.48, 0.000, 0.386),
-            hit: cost(127.0, 50.97, 0.000, 0.348),
-            miss: cost(131.4, 48.26, 0.000, 0.370),
-            batch16: cost(233.7, 29.49, 0.000, 0.333),
-            batch1024: cost(212.1, 30.03, 0.000, 0.321),
-            key: Some(cost(162.4, 26.86, 0.033, 0.326)),
-            prefix: Some(cost(289.4, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1163.5, 92.31, 53.263, 5.478)),
-            longest_prefix: Some(cost(536.8, 62.71, 0.000, 0.468)),
+            floor: 0.86,
+            mixed: cost(147.3, 34.02, 0.000, 0.358),
+            hit: cost(130.4, 40.33, 0.000, 0.325),
+            miss: cost(130.0, 39.71, 0.000, 0.339),
+            batch16: cost(223.9, 23.65, 0.000, 0.310),
+            batch1024: cost(211.4, 23.94, 0.000, 0.308),
+            key: Some(cost(151.8, 20.66, 0.000, 0.319)),
+            prefix: Some(cost(270.8, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1158.8, 56.94, 44.316, 4.957)),
+            longest_prefix: Some(cost(513.8, 40.82, 0.000, 0.478)),
         },
     ),
     (
         128,
         Ops {
-            floor: 0.70,
-            mixed: cost(194.0, 39.78, 0.000, 0.405),
-            hit: cost(187.3, 41.67, 0.000, 0.411),
-            miss: cost(186.8, 39.86, 0.000, 0.404),
-            batch16: cost(254.5, 30.38, 0.000, 0.385),
-            batch1024: cost(232.2, 31.74, 0.000, 0.367),
-            key: Some(cost(194.9, 27.08, 0.116, 0.410)),
-            prefix: Some(cost(290.2, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1245.5, 75.76, 65.581, 4.972)),
-            longest_prefix: Some(cost(631.4, 48.14, 0.000, 0.502)),
+            floor: 0.65,
+            mixed: cost(191.1, 27.69, 0.000, 0.395),
+            hit: cost(177.7, 32.61, 0.000, 0.373),
+            miss: cost(174.3, 32.61, 0.000, 0.380),
+            batch16: cost(238.5, 24.68, 0.000, 0.345),
+            batch1024: cost(223.8, 25.77, 0.000, 0.340),
+            key: Some(cost(189.4, 18.28, 0.024, 0.430)),
+            prefix: Some(cost(274.1, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1222.8, 48.86, 54.566, 4.425)),
+            longest_prefix: Some(cost(592.7, 32.15, 0.000, 0.490)),
         },
     ),
     (
         256,
         Ops {
-            floor: 0.66,
-            mixed: cost(226.2, 34.33, 0.000, 0.419),
-            hit: cost(224.6, 35.81, 0.000, 0.413),
-            miss: cost(221.4, 33.80, 0.000, 0.413),
-            batch16: cost(274.4, 30.00, 0.000, 0.393),
-            batch1024: cost(253.6, 31.09, 0.000, 0.369),
-            key: Some(cost(213.7, 25.74, 0.713, 0.352)),
-            prefix: Some(cost(296.0, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1232.3, 77.98, 77.137, 4.421)),
-            longest_prefix: Some(cost(686.5, 41.43, 0.000, 0.544)),
+            floor: 0.63,
+            mixed: cost(222.0, 22.85, 0.000, 0.419),
+            hit: cost(210.7, 27.38, 0.000, 0.392),
+            miss: cost(206.3, 27.40, 0.000, 0.400),
+            batch16: cost(257.7, 24.13, 0.000, 0.355),
+            batch1024: cost(243.9, 24.82, 0.000, 0.351),
+            key: Some(cost(209.9, 16.45, 0.591, 0.382)),
+            prefix: Some(cost(282.5, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1191.7, 56.70, 65.209, 3.793)),
+            longest_prefix: Some(cost(634.6, 28.12, 0.000, 0.525)),
         },
     ),
     (
         1024,
         Ops {
-            floor: 0.50,
-            mixed: cost(292.2, 28.83, 0.000, 0.452),
-            hit: cost(288.5, 31.15, 0.000, 0.441),
-            miss: cost(288.8, 27.38, 0.000, 0.448),
-            batch16: cost(340.5, 27.57, 0.000, 0.412),
-            batch1024: cost(317.0, 28.18, 0.000, 0.388),
-            key: Some(cost(273.9, 27.40, 1.228, 0.383)),
-            prefix: Some(cost(377.2, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1303.2, 95.91, 108.704, 2.733)),
-            longest_prefix: Some(cost(805.2, 36.56, 0.171, 0.586)),
+            floor: 0.49,
+            mixed: cost(289.2, 18.60, 0.000, 0.428),
+            hit: cost(280.2, 21.96, 0.000, 0.416),
+            miss: cost(274.0, 21.96, 0.000, 0.417),
+            batch16: cost(317.5, 22.11, 0.000, 0.383),
+            batch1024: cost(303.6, 22.25, 0.000, 0.380),
+            key: Some(cost(267.1, 18.74, 1.136, 0.406)),
+            prefix: Some(cost(352.2, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(1232.7, 81.44, 92.909, 2.122)),
+            longest_prefix: Some(cost(744.2, 26.80, 0.849, 0.432)),
         },
     ),
 ];
@@ -763,10 +766,11 @@ impl Plan {
     /// **An estimate, and of one machine.** `a + b·s + c·mean_len + d·s·mean_len` per structure
     /// and operation, where `s` is `log2` of the candidate's blob over 64 KiB, fitted to 240 cells
     /// measured on this crate's own hardware — an AMD Ryzen 7 5800HS with 16 MB of L3 — with mean
-    /// absolute error 5–13 % on `id(key)`. It is accurate enough to order the candidates and
+    /// absolute error 6–12 % on `id(key)`. It is accurate enough to order the candidates and
     /// nowhere near accurate enough to quote: fitted with a corpus left out, its fastest ordered
-    /// index on that corpus is the measured fastest in 24 of 30 corpus-size cells and never more
-    /// than 1.24× slower than it — and it will not tell you what your own lookup costs.
+    /// index on that corpus is the measured fastest in 19 of 30 corpus-size cells, within 5 % of
+    /// it in 23 and never more than 1.11× slower — and it will not tell you what your own lookup
+    /// costs.
     ///
     /// ```
     /// # use lexindex::{plan, Needs};

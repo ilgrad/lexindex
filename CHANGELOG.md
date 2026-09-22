@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The latency model is re-fitted to a clean run, and the 1.75× it was quoted at does not
+  reproduce.** The constants `plan` ranks by under `Objective::Latency`, `Balanced` and `Workload`
+  came from a run taken beside other work — its load average was 0.64 when it started and 1.82 when
+  it ended, 2.41 over its last five minutes — and from before the three commits that took 6–13 %
+  off the instructions of a `DictIndex` lookup ahead of 4.0.0. Re-measured on a freshly booted,
+  idle machine over the same 240 cells (`bench/results/latency-model-2026-09-23-arz-7731027.json`),
+  every structure's `id(key)` reads 9–19 % faster at the median, and at 100 000 keys `StringIndex`
+  is faster than `DictIndex` at block 32 on six corpora of thirteen rather than three. On the
+  published sweep, which neither fit saw, the model now picks the faster of `DictIndex` and
+  `StringIndex` in 29 of 30 cells, never more than 1.02× slower (was 27, 1.18×), and the fastest
+  `DictIndex` block in 21 (was 15). Held out a corpus at a time, the ordered `id(key)` pick is the
+  fastest in 19 of 30 cells and within 5 % of it in 23, never more than 1.11× slower. The 1.75× the
+  4.0.0 notes put down to `BDX3` — `numeric` at 100 000 keys — belonged to the loaded run: scored
+  on the new cells, the old constants do no worse than 1.11× either. `bench/latency_model.py fit`
+  reports the within-5 % count beside the exact one, since 5 % is about what placement in physical
+  memory moves a single-threaded probe on this machine and the ordered candidates are often closer
+  than that. The run also times `HashedDictIndex`, closed and at eight fingerprint bits; `plan`
+  still does not price it, because a new `Kind` breaks an exhaustive `match` and waits for a major
+  release.
+
+### Documentation
+
+- The `plan` examples in `docs/usage.md` still showed `StringIndex` at 2 744 604 bytes on the word
+  list, the estimate from before 4.0.1 priced the transducer off the run draw; re-run with the new
+  constants, it is 2 882 400.
+
 ## [4.1.0] — 2026-09-22
 
 ### Added

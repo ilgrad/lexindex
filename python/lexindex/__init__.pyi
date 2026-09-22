@@ -897,7 +897,7 @@ class Estimate(TypedDict):
 
     ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a :class:`Workload`, of
     the workload's mean operation -- and is never measured: it comes from a fit to 240 cells timed
-    on this crate's own machine, with a mean absolute error of 5-13 % on ``id(key)``. It is
+    on this crate's own machine, with a mean absolute error of 6-12 % on ``id(key)``. It is
     accurate enough to order the candidates and nowhere near accurate enough to quote as your own
     latency.
     """
