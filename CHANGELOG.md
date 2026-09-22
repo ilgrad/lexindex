@@ -52,6 +52,9 @@ All notable changes to this project are documented here. The format follows
 - `docs/api.md` rendered four of the public names. `Overlay` (public since 0.12), `DictIndex`
   (2.0), `plan` (3.0), `inspect` and the types they return were never on it; every name in
   `__all__` is now, and a test fails when one is not.
+- **CI fails when a page cites a `bench/results` file that is not committed.** A citation of an
+  untracked artifact is a 404 from the day it is pushed; one reached a commit this cycle and was
+  caught by hand before the push.
 
 ## [4.0.1] — 2026-09-22
 

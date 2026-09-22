@@ -120,6 +120,19 @@ jobs:
       # hand, or a caption naming a different run, fails here rather than in a later review.
       - name: published tables match the artifacts they cite
         run: uv run --no-project python bench/tables.py --check
+      # A page can cite an artifact that was never committed, and the link is a 404 from the day it
+      # is pushed: 868e686 cited a cold-mapping run that was still untracked. Every
+      # `bench/results/<file>` a tracked file names must be tracked itself; a glob in prose
+      # (`mphf-strings-*`) has no extension and is not a citation.
+      - name: every cited bench/results artifact is committed
+        run: |
+          set -euo pipefail
+          missing=0
+          while read -r path; do
+            git ls-files --error-unmatch -- "$path" >/dev/null 2>&1 \
+              || { echo "::error::cited but not committed: $path"; missing=1; }
+          done < <(git grep -IohE 'bench/results/[A-Za-z0-9._-]+\.[a-z]+' -- ':!bench/results' | sort -u)
+          exit "$missing"
       - name: clippy (python bindings)
         run: cargo clippy --features python -- -D warnings
       - name: build abi3 wheel
