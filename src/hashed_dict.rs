@@ -10,19 +10,7 @@
 //!
 //! The sidecar costs `⌈log2 n⌉ + fingerprint_bits` bits a key and about two for the perfect hash:
 //! closed, 2.7 bytes a key at a million keys and 3.2 at ten million, and `fingerprint_bits / 8`
-//! more for membership.
-//!
-//! The membership contract is chosen once, at build:
-//!
-//! - **`fingerprint_bits >= 1`**: [`id`](HashedDictIndex::id) answers a non-member with `Some` at
-//!   a rate of `2^-fingerprint_bits`, as [`CompactHashIndex::id`](crate::CompactHashIndex::id)
-//!   does. A member always gets its own rank.
-//! - **`fingerprint_bits == 0`**: `id` is the dictionary's own search: exact, at the dictionary's
-//!   cost. The smallest sidecar, for a caller whose hot path is
-//!   [`id_unchecked`](HashedDictIndex::id_unchecked).
-//!
-//! [`id_unchecked`](HashedDictIndex::id_unchecked) is the closed path at any width: a member's
-//! rank, and some rank below `len()` for anything else.
+//! more for membership. What that width decides is documented on [`HashedDictIndex`].
 
 use std::sync::Arc;
 
@@ -44,7 +32,20 @@ const SIDE_ENTRY: usize = 24; // hash u64 + full second hash u64 + rank u64
 const MAX_FP_BITS: u32 = 32;
 
 /// A [`DictIndex`] with a hash sidecar answering `id(key)`: the dictionary's ranks and ordered
-/// queries, at a hash index's lookup cost. See the [module documentation](self).
+/// queries, at a hash index's lookup cost.
+///
+/// `key`, `prefix`, `lower_bound` and iteration go to [`dict`](Self::dict), whose ids are the same
+/// ranks. The membership contract is chosen once, at build:
+///
+/// - **`fingerprint_bits >= 1`**: [`id`](Self::id) answers a non-member with `Some` at a rate of
+///   `2^-fingerprint_bits`, as [`CompactHashIndex::id`](crate::CompactHashIndex::id) does. A member
+///   always gets its own rank.
+/// - **`fingerprint_bits == 0`**: `id` is the dictionary's own search: exact, at the dictionary's
+///   cost. The smallest sidecar, for a caller whose hot path is
+///   [`id_unchecked`](Self::id_unchecked).
+///
+/// [`id_unchecked`](Self::id_unchecked) is the closed path at any width: a member's rank, and some
+/// rank below `len()` for anything else.
 pub struct HashedDictIndex {
     // Shared rather than owned so the Python binding can hand the dictionary out as a
     // `DictIndex` object of its own without a copy.
@@ -88,7 +89,7 @@ fn table_len(count: usize, width: u32) -> Result<usize, IndexError> {
 
 impl HashedDictIndex {
     /// Build the sidecar over `dict`, storing `fingerprint_bits` (`0..=32`) of a second hash
-    /// beside each key's rank. See the [module documentation](self) for what the width decides.
+    /// beside each key's rank. See [`HashedDictIndex`] for what the width decides.
     ///
     /// The dictionary is walked once in rank order and each key hashed; 24 bytes a key are held
     /// while the perfect hash is built over the distinct hashes and the ranks are written at their

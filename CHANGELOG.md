@@ -67,6 +67,10 @@ All notable changes to this project are documented here. The format follows
 - **CI fails when a page cites a `bench/results` file that is not committed.** A citation of an
   untracked artifact is a 404 from the day it is pushed; one reached a commit this cycle and was
   caught by hand before the push.
+- `plan_file`'s page on docs.rs has linked a private constant since 4.0.0, a dead link there, and
+  `HashedDictIndex`'s contract — what `fingerprint_bits` decides — sat in a private module's
+  documentation, which docs.rs does not render. Both are on the public pages now, and CI denies
+  rustdoc's warnings on the build docs.rs makes, where a link to a private item is reported.
 
 ## [4.0.1] — 2026-09-22
 

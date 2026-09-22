@@ -1429,7 +1429,7 @@ pub fn plan_for<S: AsRef<str>>(
 /// is where `n`, the mean key length and both shared-prefix distances are counted, exactly and not
 /// from a sample. What a sample is still needed for is the three numbers no statistic gives, and
 /// those come from two draws of 100 000 keys, both decided **by hash** in the one pass over the
-/// merge: a uniform draw of the distinct keys, and runs of [`RUN`] consecutive keys each started by
+/// merge: a uniform draw of the distinct keys, and runs of 4 096 consecutive keys each started by
 /// the hash of its first — the draws [`plan`] makes over the sorted keys it holds. So the two agree
 /// on the shape to the byte and read their constants off the same samples.
 ///

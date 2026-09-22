@@ -47,6 +47,12 @@ jobs:
         run: cargo clippy --features bench-mphf --all-targets -- -D warnings
       - name: clippy (fuzzing = the shims the fuzz targets call)
         run: cargo clippy --features fuzzing --all-targets -- -D warnings
+      # docs.rs renders the default features, and a link there to a private item or to nothing is
+      # a dead link on the crate's front page; rustdoc only warns about either.
+      - name: rustdoc (the docs.rs build, warnings denied)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
       - name: test (default)
         run: cargo test
       - name: test (no-default-features)
