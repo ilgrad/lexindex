@@ -18,7 +18,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # The index types, without `mmap`: this plugin reads a blob into memory and caches it, so no file
 # stays mapped and nothing here has to make `load_mmap`'s promise about the file on a user's behalf.
-lexindex = { version = "4.0", path = "..", default-features = false, features = ["mph"] }
+lexindex = { version = "4.1", path = "..", default-features = false, features = ["mph"] }
 polars = { version = "0.55", default-features = false }
 pyo3 = { version = "0.29", features = ["abi3-py311"] }
 # `derive` is `#[polars_expr]`, which writes the C entry point the engine looks up by name.
