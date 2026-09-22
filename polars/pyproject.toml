@@ -26,7 +26,7 @@ classifiers = [
 ]
 # The plugin is built against polars' own FFI, so the floor is the version it was tested on rather
 # than the oldest that imports. `lexindex` is what writes the blobs this reads.
-dependencies = ["polars>=1.44", "lexindex>=4.0"]
+dependencies = ["polars>=1.44", "lexindex>=4.1"]
 
 [project.urls]
 Homepage = "https://github.com/ilgrad/lexindex"
