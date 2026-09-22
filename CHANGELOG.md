@@ -62,7 +62,9 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - `bench/frontier/run.sh` refused to run at 4.0.1: it builds `frontier_lex` with `--locked`, and
-  that crate's lock file still named lexindex 4.0.0.
+  that crate's lock file still named lexindex 4.0.0 — as `bench/mphf_vs`'s did. CI now fails when a
+  tracked `Cargo.lock` names another version of lexindex than `Cargo.toml` does, so a release
+  commit that misses one is red before it is tagged.
 - **The release preflight checks the tag's own date.** It compared `CITATION.cff`'s
   `date-released` with the CHANGELOG heading and neither with the day of the tag, so a release
   prepared on one day and tagged on another passed — 4.0.0 was re-dated twice by hand. It now reads

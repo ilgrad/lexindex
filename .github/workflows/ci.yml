@@ -316,6 +316,23 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The benchmark and fuzz harnesses are crates of their own, with committed lock files that
+      # name lexindex's version. A release bumps `Cargo.toml` and cargo rewrites the root lock, but
+      # nothing rewrites theirs, and `bench/frontier/run.sh` builds `--locked`: frontier_lex's lock
+      # went stale at 3.0.0 and again at 4.0.1, and `run.sh` refused to build until a run hit it.
+      - name: every tracked Cargo.lock names this version of lexindex
+        run: |
+          set -euo pipefail
+          want="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          stale=0
+          while read -r lock; do
+            got="$(awk '/^\[\[package\]\]/ { p = 0 } /^name = "lexindex"$/ { p = 1 } p && /^version = / { gsub(/"/, "", $3); print $3 }' "$lock")"
+            if [ -n "$got" ] && [ "$got" != "$want" ]; then
+              echo "::error file=$lock::names lexindex $got, Cargo.toml says $want (cargo update -p lexindex --manifest-path ${lock%Cargo.lock}Cargo.toml)"
+              stale=1
+            fi
+          done < <(git ls-files '*Cargo.lock')
+          exit "$stale"
       - name: cargo publish --dry-run
         run: cargo publish --dry-run --locked
 
