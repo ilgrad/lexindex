@@ -4,15 +4,17 @@ type: software
 title: "lexindex: compact, immutable string-to-id indexes for huge catalogs"
 abstract: >-
   Compact, immutable string-to-id indexes for huge catalogs, with a Rust core, Python
-  bindings and a C ABI. Five complementary build-once / query-many structures: an ordered
+  bindings and a C ABI. Six complementary build-once / query-many structures: an ordered
   FST-backed index with prefix, range, fuzzy (Levenshtein) and subsequence queries; an
   ordered front-coded dictionary storing every key, which answers rank, lower-bound, prefix
-  and range (2.64 bytes/key on real dictionary words); a minimal-perfect-hash dictionary with
-  verified membership and reverse lookup; a fingerprint-based minimal-perfect-hash map storing
-  no keys at all (1.24 bytes/key); and the bare perfect hash for a vocabulary known to be
-  closed (0.24). A workload-aware planner prices each of them from a sample of the keys before
-  one is built. All serialise to flat blobs, and every one but the bare perfect hash can be
-  memory-mapped and borrowed rather than read.
+  and range (2.64 bytes/key on real dictionary words); the same dictionary with a hash
+  sidecar, which answers its ranks from a minimal perfect hash rather than a search; a
+  minimal-perfect-hash dictionary with verified membership and reverse lookup; a
+  fingerprint-based minimal-perfect-hash map storing no keys at all (1.24 bytes/key); and
+  the bare perfect hash for a vocabulary known to be closed (0.24). A workload-aware planner
+  prices five of them from a sample of the keys before one is built. All serialise to flat
+  blobs, and every one but the bare perfect hash can be memory-mapped and borrowed rather
+  than read.
 authors:
   - family-names: Gradina
     given-names: Ilia
