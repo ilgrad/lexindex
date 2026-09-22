@@ -38,6 +38,7 @@ enum LexindexKind {
     Dict = 2,
     String = 3,
     Perfect = 4,
+    HashedDict = 5,
 }
 
 /// The opaque handle: only ever behind a pointer.
@@ -95,17 +96,25 @@ unsafe extern "C" {
     fn lexindex_index_free(index: *mut LexindexIndex);
 }
 const FRUIT: [&str; 4] = ["apple", "apricot", "banana", "cherry"];
-const KINDS: [LexindexKind; 5] = [
+const KINDS: [LexindexKind; 6] = [
     LexindexKind::Closed,
     LexindexKind::Compact,
     LexindexKind::Dict,
     LexindexKind::String,
     LexindexKind::Perfect,
+    LexindexKind::HashedDict,
 ];
 const EXACT: [LexindexKind; 3] = [
     LexindexKind::Dict,
     LexindexKind::String,
     LexindexKind::Perfect,
+];
+/// The kinds that store their keys: the exact ones and the dictionary under a sidecar.
+const KEYED: [LexindexKind; 4] = [
+    LexindexKind::Dict,
+    LexindexKind::String,
+    LexindexKind::Perfect,
+    LexindexKind::HashedDict,
 ];
 
 fn arrays(keys: &[&str]) -> (Vec<*const c_char>, Vec<usize>) {
@@ -199,7 +208,10 @@ fn every_kind_builds_and_answers_id() {
         let singles: Vec<u64> = FRUIT.iter().map(|k| id(index, k).unwrap()).collect();
         assert!(singles.iter().all(|&i| i < 4), "{kind:?}: {singles:?}");
         assert_eq!(ids(index, &FRUIT).unwrap(), singles, "{kind:?}");
-        if matches!(kind, LexindexKind::Dict | LexindexKind::String) {
+        if matches!(
+            kind,
+            LexindexKind::Dict | LexindexKind::String | LexindexKind::HashedDict
+        ) {
             assert_eq!(singles, [0, 1, 2, 3], "{kind:?}: the id is the sorted rank");
         }
         let mut sorted = singles.clone();
@@ -232,15 +244,17 @@ fn a_miss_is_not_found_where_the_kind_can_tell() {
     free(closed);
     // One fingerprint byte: a miss answers as present one time in 256, so only agreement between
     // the single and the batch form is a promise.
-    let compact = build(LexindexKind::Compact, &FRUIT);
-    let single = id(compact, "durian").ok().unwrap_or(LEXINDEX_NO_ID);
-    assert_eq!(ids(compact, &["durian"]).unwrap(), [single]);
-    free(compact);
+    for kind in [LexindexKind::Compact, LexindexKind::HashedDict] {
+        let index = build(kind, &FRUIT);
+        let single = id(index, "durian").ok().unwrap_or(LEXINDEX_NO_ID);
+        assert_eq!(ids(index, &["durian"]).unwrap(), [single], "{kind:?}");
+        free(index);
+    }
 }
 
 #[test]
 fn keys_come_back_where_they_are_stored() {
-    for kind in EXACT {
+    for kind in KEYED {
         let index = build(kind, &FRUIT);
         for want in FRUIT {
             let i = id(index, want).unwrap();
@@ -287,9 +301,14 @@ fn contains_is_exact_probabilistic_or_unsupported() {
         assert_eq!(contains(index, "durian"), Ok(false), "{kind:?}");
         free(index);
     }
-    let compact = build(LexindexKind::Compact, &FRUIT);
-    assert!(FRUIT.iter().all(|k| contains(compact, k) == Ok(true)));
-    free(compact);
+    for kind in [LexindexKind::Compact, LexindexKind::HashedDict] {
+        let index = build(kind, &FRUIT);
+        assert!(
+            FRUIT.iter().all(|k| contains(index, k) == Ok(true)),
+            "{kind:?}"
+        );
+        free(index);
+    }
     let closed = build(LexindexKind::Closed, &FRUIT);
     assert_eq!(contains(closed, "banana"), Err(LexindexStatus::Unsupported));
     assert_eq!(message(), "a closed hash index cannot tell membership");
@@ -351,14 +370,43 @@ fn blobs_outside_the_abi_are_unsupported() {
     assert_eq!(message(), "overlay blobs are outside the C ABI");
     assert!(out.is_null(), "nothing written on failure");
 
-    let dict = lexindex::DictIndex::build(FRUIT).unwrap();
-    let bytes = lexindex::HashedDictIndex::from_dict(dict, 8)
-        .unwrap()
-        .to_bytes();
+    let bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/golden-4.0.0-mphf.bin"
+    ))
+    .unwrap();
     let status = unsafe { lexindex_index_from_bytes(bytes.as_ptr(), bytes.len(), &mut out) };
     assert_eq!(status, LexindexStatus::Unsupported);
-    assert_eq!(message(), "HashedDictIndex blobs are outside the C ABI");
+    assert_eq!(message(), "a standalone perfect hash is not an index");
     assert!(out.is_null(), "nothing written on failure");
+}
+
+/// `build` fixes the width at eight bits; a blob carries its own, and the handle answers at it —
+/// exactly at zero, where `id` is the dictionary's search.
+#[test]
+fn a_hashed_dict_blob_answers_at_its_own_width() {
+    for bits in [0, 8, 32] {
+        let dict = lexindex::DictIndex::build(FRUIT).unwrap();
+        let rust = lexindex::HashedDictIndex::from_dict(dict, bits).unwrap();
+        let bytes = rust.to_bytes();
+        let mut index = ptr::null_mut();
+        assert_eq!(
+            unsafe { lexindex_index_from_bytes(bytes.as_ptr(), bytes.len(), &mut index) },
+            LexindexStatus::Ok,
+            "{bits}: {}",
+            message()
+        );
+        assert_eq!(kind_of(index), LexindexKind::HashedDict);
+        assert_eq!(ids(index, &FRUIT).unwrap(), [0, 1, 2, 3], "{bits}");
+        for probe in ["durian", "apples", ""] {
+            assert_eq!(id(index, probe).ok(), rust.id(probe), "{bits}: {probe:?}");
+            assert_eq!(contains(index, probe), Ok(rust.contains(probe)));
+        }
+        if bits == 0 {
+            assert_eq!(id(index, "durian"), Err(LexindexStatus::NotFound));
+        }
+        free(index);
+    }
 }
 
 #[test]
@@ -492,7 +540,11 @@ fn versions_empty_batches_and_null_frees() {
         "nothing to look up, nothing to write, nothing to check"
     );
     free(index);
-    for kind in [LexindexKind::String, LexindexKind::Dict] {
+    for kind in [
+        LexindexKind::String,
+        LexindexKind::Dict,
+        LexindexKind::HashedDict,
+    ] {
         let empty = build(kind, &[]);
         assert_eq!(len_of(empty), 0);
         assert_eq!(id(empty, "apple"), Err(LexindexStatus::NotFound));
@@ -550,6 +602,7 @@ fn the_declarations_here_are_the_headers() {
         ("LEXINDEX_KIND_DICT", LexindexKind::Dict),
         ("LEXINDEX_KIND_STRING", LexindexKind::String),
         ("LEXINDEX_KIND_PERFECT", LexindexKind::Perfect),
+        ("LEXINDEX_KIND_HASHED_DICT", LexindexKind::HashedDict),
     ];
     for (name, kind) in kinds {
         assert_eq!(value_of(name), kind as u64, "{name}");

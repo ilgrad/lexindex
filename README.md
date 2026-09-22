@@ -235,9 +235,8 @@ assert_eq!(hashed.dict().key(2).as_deref(), Some("POST"));
 
 ## C
 
-Under the `capi` feature five of the six indexes — every one but `HashedDictIndex`, whose blobs it
-refuses — are one opaque handle behind fourteen `lexindex_*` functions, declared in
-[`include/lexindex.h`](include/lexindex.h):
+Under the `capi` feature the six indexes are one opaque handle behind fourteen `lexindex_*`
+functions, declared in [`include/lexindex.h`](include/lexindex.h):
 
 ```c
 #include "lexindex.h"

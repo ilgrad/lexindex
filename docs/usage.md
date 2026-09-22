@@ -453,8 +453,8 @@ nineteen corpora of half a million to ten million keys, against 276 to 805 for t
 ([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
-dictionary answers. `plan` does not price it yet, `Overlay` does not take it — its ids are ranks,
-as `DictIndex`'s are — and the C ABI refuses its blobs.
+dictionary answers. `plan` does not price it yet, and `Overlay` does not take it: its ids are
+ranks, as `DictIndex`'s are.
 
 ## `Overlay` — edits without a rebuild
 
@@ -774,10 +774,9 @@ mistake.
 
 ## C
 
-The `capi` feature exports five of the six indexes to C, every one but `HashedDictIndex`, whose
-blobs it refuses: one opaque `LexindexIndex` handle, fourteen `lexindex_*` functions, and the header
-`include/lexindex.h`, generated from `src/capi.rs` by `cbindgen` and regenerated in CI so the two
-cannot drift.
+The `capi` feature exports the six indexes to C: one opaque `LexindexIndex` handle, fourteen
+`lexindex_*` functions, and the header `include/lexindex.h`, generated from `src/capi.rs` by
+`cbindgen` and regenerated in CI so the two cannot drift.
 
 ```bash
 cargo build --release --features capi                           # target/release/liblexindex.so
@@ -818,12 +817,13 @@ The rules, each of which the header states beside the function it binds:
   leaves its message in `lexindex_last_error()`, one per thread, valid until the next failure on
   that thread; `NOT_FOUND` is an answer rather than a failure and leaves it alone. A null pointer
   where one is required is `INVALID_ARGUMENT` on every function that has a status to return it in.
-- **One handle, five kinds.** A C caller opens a blob it may not have written, so the kind is a
+- **One handle, six kinds.** A C caller opens a blob it may not have written, so the kind is a
   run-time fact: `lexindex_index_kind` says which, and what a kind cannot answer is `UNSUPPORTED`
   rather than a missing symbol — `key` on `LEXINDEX_KIND_COMPACT` and `LEXINDEX_KIND_CLOSED`, which
   store no keys; `contains` on `LEXINDEX_KIND_CLOSED`, the perfect hash alone. `id` means what the
   kind means: exact for string, dict and perfect; a miss answers as present one time in 256 for
-  compact; every key gets some id for closed.
+  compact, and for hashed dict at the width it was built with — eight bits from
+  `lexindex_index_build`, exact at zero; every key gets some id for closed.
 - **Keys are `(pointer, length)` UTF-8**, not NUL-terminated, so `strlen` is the caller's; paths
   are NUL-terminated. `key` writes NUL-terminated and reports the length without the terminator;
   `buf = NULL, cap = 0` asks for the size, and `BUFFER_TOO_SMALL` reports it as well.

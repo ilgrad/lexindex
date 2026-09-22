@@ -1,4 +1,4 @@
-//! The C ABI: one opaque handle over the five indexes, under the `capi` feature.
+//! The C ABI: one opaque handle over the six indexes, under the `capi` feature.
 //!
 //! Every function is `extern "C"`, prefixed `lexindex_`, and declared in `include/lexindex.h`,
 //! which `cbindgen` generates from this file and CI regenerates to check. The surface is small on
@@ -6,10 +6,10 @@
 //! promise with a longer tail than a Rust signature: nothing like `cargo semver-checks` watches
 //! it, and every caller is compiled against a header rather than a crate version.
 //!
-//! # One handle, five kinds
+//! # One handle, six kinds
 //!
 //! A C caller opens a blob it may not have written, so the kind of index is a run-time fact, and
-//! [`LexindexIndex`] is a sum over the five rather than five handle types. `lexindex_index_kind`
+//! [`LexindexIndex`] is a sum over the six rather than six handle types. `lexindex_index_kind`
 //! says which one a handle holds; what a kind cannot answer — `key` on the two indexes that store
 //! no keys, `contains` on the bare perfect hash — is `LEXINDEX_STATUS_UNSUPPORTED` at run time
 //! rather than a missing symbol at link time.
@@ -27,14 +27,16 @@
 //!
 //! A handle is freed by `lexindex_index_free` and nothing else. Keys and paths are borrowed for the
 //! call and never retained; `lexindex_index_from_bytes` copies. A handle is immutable once made, so
-//! any number of threads may query it at once: the five index types are `Send + Sync`, and the
+//! any number of threads may query it at once: the six index types are `Send + Sync`, and the
 //! message is the only mutable state, one per thread.
 //!
 //! # Versioning
 //!
 //! `LEXINDEX_ABI_VERSION` is the ABI the header describes and `lexindex_abi_version` the one the
-//! library was built with. Within a number, symbols are only added, so a newer library serves an
-//! older header; removing or changing one bumps it, and that is a major release of the crate.
+//! library was built with. Within a number, symbols and kinds are only added, so a newer library
+//! serves an older header: a kind that header does not name comes back only for a blob the library
+//! it was written against refused. Removing or changing either bumps the number, and that is a
+//! major release of the crate.
 //!
 //! Not here on purpose, each additive when someone asks: `Overlay`, the mmap loaders, the automata
 //! queries, and the fingerprint and block knobs of `build`.
@@ -48,8 +50,8 @@ use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
 
 use crate::{
-    BlobKind, ClosedHashIndex, CompactHashIndex, DictIndex, IndexError, PerfectHashIndex,
-    StringIndex,
+    BlobKind, ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, IndexError,
+    PerfectHashIndex, StringIndex,
 };
 
 /// The ABI this header describes; `lexindex_abi_version` returns the library's.
@@ -81,7 +83,8 @@ pub enum LexindexStatus {
     BufferTooSmall = 7,
 }
 
-/// Which of the five indexes a handle holds, smallest first.
+/// Which of the six indexes a handle holds: the first five smallest first, then in the order they
+/// joined, since a value never moves.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexindexKind {
@@ -97,9 +100,14 @@ pub enum LexindexKind {
     String = 3,
     /// `PerfectHashIndex`: exact both ways, unordered.
     Perfect = 4,
+    /// `HashedDictIndex`: a dictionary with a hash sidecar answering `id`. Ordered and every key
+    /// stored, so `key` is exact and the id is the sorted rank; `id` and `contains` are the
+    /// sidecar's, which answers a key outside the set as present with probability 2^-bits for the
+    /// fingerprint width it was built with — 2^-8 from `lexindex_index_build`, never at zero bits.
+    HashedDict = 5,
 }
 
-/// An index of any of the five kinds. Opaque: made by `lexindex_index_open`,
+/// An index of any of the six kinds. Opaque: made by `lexindex_index_open`,
 /// `lexindex_index_from_bytes` or `lexindex_index_build`, freed by `lexindex_index_free`.
 pub struct LexindexIndex(Any);
 
@@ -109,6 +117,7 @@ enum Any {
     Compact(CompactHashIndex),
     Closed(ClosedHashIndex),
     Perfect(PerfectHashIndex),
+    HashedDict(HashedDictIndex),
 }
 
 thread_local! {
@@ -280,10 +289,7 @@ fn load(bytes: &[u8]) -> Result<Any, LexindexStatus> {
             ));
         }
         BlobKind::HashedDictIndex => {
-            return Err(fail(
-                LexindexStatus::Unsupported,
-                "HashedDictIndex blobs are outside the C ABI",
-            ));
+            Any::HashedDict(HashedDictIndex::from_bytes(bytes).map_err(failed)?)
         }
     };
     Ok(any)
@@ -353,7 +359,9 @@ pub unsafe extern "C" fn lexindex_index_from_bytes(
 
 /// Builds an index of `kind` from `n` keys, `keys[i]` being `lens[i]` bytes of UTF-8, in any order
 /// and with duplicates collapsed. `LEXINDEX_KIND_COMPACT` gets a one-byte fingerprint and
-/// `LEXINDEX_KIND_DICT` the default block, which is what `plan` prices them at.
+/// `LEXINDEX_KIND_DICT` the default block, which is what `plan` prices them at;
+/// `LEXINDEX_KIND_HASHED_DICT` gets both, the dictionary at its default block and eight
+/// fingerprint bits beside it.
 ///
 /// # Safety
 ///
@@ -380,6 +388,10 @@ pub unsafe extern "C" fn lexindex_index_build(
                 LexindexKind::Closed => Any::Closed(ClosedHashIndex::build(keys).map_err(failed)?),
                 LexindexKind::Perfect => {
                     Any::Perfect(PerfectHashIndex::build(keys).map_err(failed)?)
+                }
+                LexindexKind::HashedDict => {
+                    let dict = DictIndex::build(keys).map_err(failed)?;
+                    Any::HashedDict(HashedDictIndex::from_dict(dict, 8).map_err(failed)?)
                 }
             })
         })
@@ -408,6 +420,7 @@ pub unsafe extern "C" fn lexindex_index_save(
         Any::Compact(i) => i.save(path),
         Any::Closed(i) => i.save(path),
         Any::Perfect(i) => i.save(path),
+        Any::HashedDict(i) => i.save(path),
     };
     status(saved.map_err(failed))
 }
@@ -426,6 +439,7 @@ pub unsafe extern "C" fn lexindex_index_kind(index: *const LexindexIndex) -> Lex
         Any::Compact(_) => LexindexKind::Compact,
         Any::Closed(_) => LexindexKind::Closed,
         Any::Perfect(_) => LexindexKind::Perfect,
+        Any::HashedDict(_) => LexindexKind::HashedDict,
     }
 }
 
@@ -443,6 +457,7 @@ pub unsafe extern "C" fn lexindex_index_len(index: *const LexindexIndex) -> usiz
         Any::Compact(i) => i.len(),
         Any::Closed(i) => i.len(),
         Any::Perfect(i) => i.len(),
+        Any::HashedDict(i) => i.len(),
     }
 }
 
@@ -453,13 +468,15 @@ fn id_of(any: &Any, key: &str) -> Option<u64> {
         Any::Compact(i) => i.id(key).map(u64::from),
         Any::Closed(i) => Some(u64::from(i.id(key))),
         Any::Perfect(i) => i.id(key).map(u64::from),
+        Any::HashedDict(i) => i.id(key),
     }
 }
 
 /// The id of `key` (`key_len` bytes of UTF-8) into `out`, or `LEXINDEX_STATUS_NOT_FOUND`. What
 /// "found" means is the kind's: exact for string, dict and perfect; probabilistic for compact,
-/// which answers a key outside the set as present with probability 2^-8; every key for closed,
-/// the perfect hash alone, which maps a key it never saw to some other key's id.
+/// which answers a key outside the set as present with probability 2^-8, and for hashed dict, at
+/// 2^-bits for the width it was built with and exact at zero; every key for closed, the perfect
+/// hash alone, which maps a key it never saw to some other key's id.
 ///
 /// # Safety
 ///
@@ -538,6 +555,11 @@ pub unsafe extern "C" fn lexindex_index_ids(
             .into_iter()
             .map(|id| id.map_or(LEXINDEX_NO_ID, u64::from))
             .collect(),
+        Any::HashedDict(i) => i
+            .ids_of(&keys)
+            .into_iter()
+            .map(|id| id.unwrap_or(LEXINDEX_NO_ID))
+            .collect(),
     };
     for (i, id) in ids.into_iter().enumerate() {
         // SAFETY: the caller promised room for `n` ids at `out`, and `i < n`.
@@ -547,7 +569,8 @@ pub unsafe extern "C" fn lexindex_index_ids(
 }
 
 /// Whether `key` is in the index, into `out`: exact for string, dict and perfect, probabilistic for
-/// compact (the same 2^-8 as `id`), and `LEXINDEX_STATUS_UNSUPPORTED` for closed, which cannot tell.
+/// compact and hashed dict (at the rate `id` has), and `LEXINDEX_STATUS_UNSUPPORTED` for closed,
+/// which cannot tell.
 ///
 /// # Safety
 ///
@@ -573,6 +596,7 @@ pub unsafe extern "C" fn lexindex_index_contains(
         Any::Dict(i) => i.contains(key),
         Any::Compact(i) => i.contains(key),
         Any::Perfect(i) => i.contains(key),
+        Any::HashedDict(i) => i.contains(key),
         Any::Closed(_) => {
             return fail(
                 LexindexStatus::Unsupported,
@@ -617,6 +641,7 @@ pub unsafe extern "C" fn lexindex_index_key(
     let key: Option<Cow<str>> = match any {
         Any::String(i) => i.key(id).map(Cow::Owned),
         Any::Dict(i) => i.key(id).map(Cow::Owned),
+        Any::HashedDict(i) => i.dict().key(id).map(Cow::Owned),
         Any::Perfect(i) => u32::try_from(id)
             .ok()
             .and_then(|id| i.key(id))

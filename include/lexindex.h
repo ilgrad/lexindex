@@ -57,7 +57,8 @@ typedef enum {
 } LexindexStatus;
 
 /**
- * Which of the five indexes a handle holds, smallest first.
+ * Which of the six indexes a handle holds: the first five smallest first, then in the order they
+ * joined, since a value never moves.
  */
 typedef enum {
   /**
@@ -82,10 +83,17 @@ typedef enum {
    * `PerfectHashIndex`: exact both ways, unordered.
    */
   LEXINDEX_KIND_PERFECT = 4,
+  /**
+   * `HashedDictIndex`: a dictionary with a hash sidecar answering `id`. Ordered and every key
+   * stored, so `key` is exact and the id is the sorted rank; `id` and `contains` are the
+   * sidecar's, which answers a key outside the set as present with probability 2^-bits for the
+   * fingerprint width it was built with — 2^-8 from `lexindex_index_build`, never at zero bits.
+   */
+  LEXINDEX_KIND_HASHED_DICT = 5,
 } LexindexKind;
 
 /**
- * An index of any of the five kinds. Opaque: made by `lexindex_index_open`,
+ * An index of any of the six kinds. Opaque: made by `lexindex_index_open`,
  * `lexindex_index_from_bytes` or `lexindex_index_build`, freed by `lexindex_index_free`.
  */
 typedef struct LexindexIndex LexindexIndex;
@@ -133,7 +141,9 @@ LexindexStatus lexindex_index_from_bytes(const uint8_t *bytes, size_t len, Lexin
 /**
  * Builds an index of `kind` from `n` keys, `keys[i]` being `lens[i]` bytes of UTF-8, in any order
  * and with duplicates collapsed. `LEXINDEX_KIND_COMPACT` gets a one-byte fingerprint and
- * `LEXINDEX_KIND_DICT` the default block, which is what `plan` prices them at.
+ * `LEXINDEX_KIND_DICT` the default block, which is what `plan` prices them at;
+ * `LEXINDEX_KIND_HASHED_DICT` gets both, the dictionary at its default block and eight
+ * fingerprint bits beside it.
  *
  * # Safety
  *
@@ -177,8 +187,9 @@ size_t lexindex_index_len(const LexindexIndex *index);
 /**
  * The id of `key` (`key_len` bytes of UTF-8) into `out`, or `LEXINDEX_STATUS_NOT_FOUND`. What
  * "found" means is the kind's: exact for string, dict and perfect; probabilistic for compact,
- * which answers a key outside the set as present with probability 2^-8; every key for closed,
- * the perfect hash alone, which maps a key it never saw to some other key's id.
+ * which answers a key outside the set as present with probability 2^-8, and for hashed dict, at
+ * 2^-bits for the width it was built with and exact at zero; every key for closed, the perfect
+ * hash alone, which maps a key it never saw to some other key's id.
  *
  * # Safety
  *
@@ -207,7 +218,8 @@ LexindexStatus lexindex_index_ids(const LexindexIndex *index,
 
 /**
  * Whether `key` is in the index, into `out`: exact for string, dict and perfect, probabilistic for
- * compact (the same 2^-8 as `id`), and `LEXINDEX_STATUS_UNSUPPORTED` for closed, which cannot tell.
+ * compact and hashed dict (at the rate `id` has), and `LEXINDEX_STATUS_UNSUPPORTED` for closed,
+ * which cannot tell.
  *
  * # Safety
  *
