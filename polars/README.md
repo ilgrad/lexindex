@@ -13,7 +13,7 @@ import lexindex as lx
 import polars as pl
 import lexindex_polars  # noqa: F401  -- the import registers the namespace
 
-lx.DictIndex(sorted(set(catalog))).save("tracks.bdx")   # once, offline
+lx.DictIndex(sorted(set(catalog))).save("tracks.bdx")  # once, offline
 
 df.with_columns(
     pl.col("track").lexindex.id("tracks.bdx").alias("track_id"),
