@@ -133,8 +133,10 @@ jobs:
               || { echo "::error::cited but not committed: $path"; missing=1; }
           done < <(git grep -IohE 'bench/results/[A-Za-z0-9._-]+\.[a-z]+' -- ':!bench/results' | sort -u)
           exit "$missing"
+      # `--all-targets`: the tests compile against pyo3 too, whose extra `PartialEq` impls can make
+      # an untyped literal ambiguous, and `src/cli.rs` builds into the extension with its tests.
       - name: clippy (python bindings)
-        run: cargo clippy --features python -- -D warnings
+        run: cargo clippy --features python --all-targets -- -D warnings
       - name: build abi3 wheel
         run: uv run --with maturin maturin build --release --out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn a_table_holds_what_it_was_given_at_every_length_around_a_huge_page() {
         assert_eq!(Pages::<u64>::default().len(), 0);
-        assert_eq!(&*Pages::<u8>::zeroed(0), &[]);
+        assert_eq!(&*Pages::<u8>::zeroed(0), &[0u8; 0]);
         for len in [
             1,
             7,
