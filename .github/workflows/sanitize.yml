@@ -124,11 +124,13 @@ jobs:
   # `dependabot[bot]` into the contributor list, and that list is kept to people. What the bot would
   # have noticed is checked here instead, weekly, and reported as a failing job; the pins then move
   # in a human's own commit. Never a gate on a PR. A pin is stale when it is not the commit behind
-  # the action's latest release. `dtolnay/rust-toolchain` is the exception: its refs *are* its
-  # inputs (`@stable`, `@nightly`), its one release tag `v1` is years behind `master`, and this repo
-  # pins `master` on purpose -- so for it the check is the pinned commit's age, 180 days. A crate is
-  # behind when `cargo update --dry-run` would move it, or knows a newer version that the MSRV does
-  # *not* rule out -- one that the MSRV does rule out is a decision already taken, not a nudge.
+  # the action's latest release or, for an action that publishes none, behind the tag its pin's
+  # comment names (ClusterFuzzLite's `v1`). `dtolnay/rust-toolchain` is the exception: its refs
+  # *are* its inputs (`@stable`, `@nightly`), its one release tag `v1` is years behind `master`, and
+  # this repo pins `master` on purpose -- so for it the check is the pinned commit's age, 180 days.
+  # A crate is behind when `cargo update --dry-run` would move it, or knows a newer version that the
+  # MSRV does *not* rule out -- one that the MSRV does rule out is a decision already taken, not a
+  # nudge.
   freshness:
     name: pins and dependencies are current
     runs-on: ubuntu-latest
@@ -143,20 +145,31 @@ jobs:
         run: |
           set -euo pipefail
           : > stale.txt
-          grep -rhoE 'uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' .github/workflows \
-            | sed 's/^uses: //' | sort -u > pins.txt
+          # An action in a subdirectory of its repository is checked as the repository.
+          grep -rhoE 'uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' .github/workflows \
+            | sed -E 's|^uses: ([^/]+/[^/@]+)[^@]*@|\1@|' | sort -u > pins.txt
           while IFS=@ read -r repo sha; do
-            if [ "$repo" != dtolnay/rust-toolchain ] \
-               && tag=$(gh api "repos/$repo/releases/latest" --jq .tag_name 2>/dev/null); then
+            if [ "$repo" = dtolnay/rust-toolchain ]; then
+              when=$(gh api "repos/$repo/commits/$sha" --jq .commit.committer.date)
+              age=$(( ( $(date +%s) - $(date -d "$when" +%s) ) / 86400 ))
+              if [ "$age" -gt 180 ]; then
+                echo "$repo: tracked by commit; pinned one is $age days old" >> stale.txt
+              fi
+            elif tag=$(gh api "repos/$repo/releases/latest" --jq .tag_name 2>/dev/null); then
               latest=$(gh api "repos/$repo/commits/$tag" --jq .sha)
               if [ "$latest" != "$sha" ]; then
                 echo "$repo: pinned ${sha:0:7}, latest release $tag is ${latest:0:7}" >> stale.txt
               fi
             else
-              when=$(gh api "repos/$repo/commits/$sha" --jq .commit.committer.date)
-              age=$(( ( $(date +%s) - $(date -d "$when" +%s) ) / 86400 ))
-              if [ "$age" -gt 180 ]; then
-                echo "$repo: tracked by commit; pinned one is $age days old" >> stale.txt
+              tag=$(grep -rhoE "uses: ${repo}[^@ ]*@${sha} # [^ ]+" .github/workflows \
+                | sed -n '1s/.* # //p' || true)
+              if [ -z "$tag" ]; then
+                echo "$repo: publishes no release, and its pin names no tag to follow" >> stale.txt
+                continue
+              fi
+              latest=$(gh api "repos/$repo/commits/$tag" --jq .sha)
+              if [ "$latest" != "$sha" ]; then
+                echo "$repo: pinned ${sha:0:7}, $tag is now ${latest:0:7}" >> stale.txt
               fi
             fi
           done < pins.txt
