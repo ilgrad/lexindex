@@ -1,0 +1,71 @@
+name: polars plugin
+
+# `lexindex-polars` in `polars/` is its own crate, wheel and version: it is built against polars'
+# plugin ABI, which moves on polars' cadence rather than this library's, and it sits outside the
+# workspace and outside the release gate. What can break it is the plugin tree, the library it
+# wraps, or the manifest that names the version it depends on — so the job runs on those paths
+# alone, and a docs commit does not pay for it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - polars/**
+      - src/**
+      - Cargo.toml
+      - .github/workflows/polars.yml
+  pull_request:
+    paths:
+      - polars/**
+      - src/**
+      - Cargo.toml
+      - .github/workflows/polars.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: polars (fmt · clippy · pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      # Its own workspace, so its own cache: `polars/target` shares nothing with the root's.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: polars -> target
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # `uv.lock` is gitignored, so the cache's dependency glob matches nothing and the
+          # post-step would fail on it; off is exactly the v5 behaviour this job was written for.
+          enable-cache: false
+      - name: ruff check
+        run: uvx ruff check polars/
+      - name: ruff format --check
+        run: uvx ruff format --check polars/
+      - name: fmt
+        working-directory: polars
+        run: cargo fmt --all --check
+      - name: clippy
+        working-directory: polars
+        run: cargo clippy --all-targets -- -D warnings
+      # The tests build every index kind with `lexindex` itself and then read those blobs through
+      # the plugin, so both wheels come from this checkout rather than from PyPI: a change under
+      # `src/` reaching the plugin is exactly what this job exists to catch.
+      - name: build the lexindex wheel
+        run: uv run --no-project --with maturin maturin build --release --out dist
+      - name: build the plugin wheel
+        working-directory: polars
+        run: uv run --no-project --with maturin maturin build --release --out ../dist
+      # 3.13 rather than the runner's default: both wheels are abi3, and pip takes no abi3 wheel on
+      # a free-threaded interpreter. polars itself comes from the plugin wheel's own dependencies.
+      - name: pytest
+        run: |
+          set -euo pipefail
+          wheels=()
+          for wheel in dist/*.whl; do wheels+=(--with "$wheel"); done
+          uv run --python 3.13 --with pytest "${wheels[@]}" pytest polars/tests -q
