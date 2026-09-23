@@ -90,6 +90,7 @@ mod estimate;
 mod extsort;
 mod fsst;
 mod fst_bounds;
+mod fst_walk;
 mod inspect;
 mod offsets;
 mod overlay;
@@ -300,7 +301,8 @@ pub mod fuzzing {
     /// `from_untrusted_bytes` makes the panic an `Err`, and that is a claim worth a fuzzer:
     /// **no input may panic out of this function**, and any index that does load must answer its
     /// own keys with their own ranks and decode each of them back, because the loader checked
-    /// every node's outputs and bytes to say so.
+    /// every node's outputs and bytes to say so. The walks that read the transducer lazily, a
+    /// field at a time, must also agree with `fst`'s own decoder on every key and one past it.
     pub fn parse_string(bytes: &[u8]) -> bool {
         let Ok(idx) = crate::StringIndex::from_untrusted_bytes(bytes) else {
             return false;
@@ -318,6 +320,20 @@ pub mod fuzzing {
                 Some(key.as_str()),
                 "reverse lookup disagrees with the scan"
             );
+            for q in [key.clone(), format!("{key}\u{10FFFF}")] {
+                let (mut lazy, mut nodes) = (Vec::new(), Vec::new());
+                idx.for_each_common_prefix(&q, |end, v| lazy.push((end, v)));
+                idx.for_each_common_prefix_by_nodes(&q, |end, v| nodes.push((end, v)));
+                assert_eq!(
+                    lazy, nodes,
+                    "the lazy walk disagrees with fst's decoder on {q:?}"
+                );
+                assert_eq!(
+                    lazy.last(),
+                    Some(&(key.len(), id)),
+                    "{q:?} does not end at {key:?}"
+                );
+            }
             n += 1;
         }
         assert_eq!(n, idx.len() as u64, "the scan and the length disagree");

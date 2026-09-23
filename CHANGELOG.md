@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`StringIndex` reads its transducer one step at a time.** `id`, `contains`, `ids_of` and every
+  prefix walk — `common_prefix`, `longest_prefix`, `occurrences`, `for_each_common_prefix` — went
+  through the `fst` crate's node decoder, which reads a whole node — its pack sizes, transition
+  count, end address and final output — before it can say where one byte leads. A walk down one
+  path needs two answers at each node it passes, whether the node is final and where the next byte
+  goes, and now reads only those, from the same bytes. The answers are unchanged, and three checks
+  hold the reader to `fst`'s decoder: a property test over random maps with arbitrary values, the
+  transducer formats before version 3, and the `parse_string` fuzz target, which walks every key
+  of a parsed blob both ways.
+
 ## [4.2.0] — 2026-09-23
 
 ### Added

@@ -10,6 +10,7 @@ use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::extsort::{RUN_BYTES, Run, Runs};
 use crate::fst_bounds;
+use crate::fst_walk::Layout;
 use fst::automaton::{Automaton, Levenshtein, Str};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 
@@ -18,6 +19,9 @@ const MAGIC: &[u8; 4] = b"BIX4";
 /// An immutable, ordered string↔id index — a single finite-state transducer.
 pub struct StringIndex {
     map: Map<SharedBytes>,
+    /// Where the walks that follow one path start, read from the footer once: see
+    /// [`fst_walk`](crate::fst_walk).
+    layout: Layout,
 }
 
 impl StringIndex {
@@ -39,7 +43,7 @@ impl StringIndex {
             builder.insert(k.as_ref().as_bytes(), i as u64)?;
         }
         let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
-        Ok(Self { map })
+        Self::from_map(map)
     }
 
     /// Build from keys that are **already in ascending order**, without materialising them.
@@ -77,7 +81,7 @@ impl StringIndex {
         let mut builder = MapBuilder::memory();
         Self::insert_sorted(&mut builder, items)?;
         let map = Map::new(SharedBytes::from_owned(builder.into_inner()?))?;
-        Ok(Self { map })
+        Self::from_map(map)
     }
 
     /// [`build_sorted`](Self::build_sorted) writing the blob straight to `path`, so the finished
@@ -275,7 +279,8 @@ impl StringIndex {
 
     /// Id of `key`, or `None` if absent.
     pub fn id(&self, key: &str) -> Option<u64> {
-        self.map.get(key)
+        self.layout
+            .get(self.map.as_fst().as_bytes(), key.as_bytes())
     }
 
     /// [`id`](Self::id) over `n` keys given as bytes by position, for a caller whose keys are
@@ -286,12 +291,13 @@ impl StringIndex {
         n: usize,
         key: F,
     ) -> Vec<Option<u64>> {
-        (0..n).map(|i| self.map.get(key(i))).collect()
+        let bytes = self.map.as_fst().as_bytes();
+        (0..n).map(|i| self.layout.get(bytes, key(i))).collect()
     }
 
     /// Whether `key` is present.
     pub fn contains(&self, key: &str) -> bool {
-        self.map.get(key).is_some()
+        self.id(key).is_some()
     }
 
     /// Key for `id`, or `None` if out of range.
@@ -380,7 +386,19 @@ impl StringIndex {
     /// assert_eq!(found, [(1, 0), (2, 1), (5, 2)]);
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
-    pub fn for_each_common_prefix(&self, query: &str, mut f: impl FnMut(usize, u64)) {
+    pub fn for_each_common_prefix(&self, query: &str, f: impl FnMut(usize, u64)) {
+        self.layout
+            .common_prefixes(self.map.as_fst().as_bytes(), query, f);
+    }
+
+    /// [`for_each_common_prefix`](Self::for_each_common_prefix) through `fst`'s own node decoder:
+    /// the reference the lazy walk is checked against, by the tests and the fuzz target.
+    #[cfg(any(test, feature = "fuzzing"))]
+    pub(crate) fn for_each_common_prefix_by_nodes(
+        &self,
+        query: &str,
+        mut f: impl FnMut(usize, u64),
+    ) {
         let fst = self.map.as_fst();
         let mut node = fst.root();
         let mut acc: u64 = 0;
@@ -888,7 +906,15 @@ impl StringIndex {
             map.as_fst().verify()?;
             Self::verify_ranks(&map)?;
         }
-        Ok(Self { map })
+        Self::from_map(map)
+    }
+
+    /// The index over `map`, with the walks' layout read from its footer -- refused when the footer
+    /// names a root outside the blob, which `Fst::new` lets through.
+    fn from_map(map: Map<SharedBytes>) -> Result<Self, IndexError> {
+        let layout = Layout::of(map.as_fst().as_bytes())
+            .ok_or(IndexError::Format("fst node address is outside the blob"))?;
+        Ok(Self { map, layout })
     }
 
     /// The lexindex invariant on top of a valid FST: the value stored for the `i`-th key in sorted
@@ -1887,5 +1913,83 @@ mod tests {
             assert_eq!(idx.key(i as u64).as_deref(), Some(*k)); // rank-walk round-trips
         }
         assert_eq!(idx.key(sorted.len() as u64), None); // out of range
+    }
+
+    /// Every query answered twice, by the lazy reader and by `fst`'s own node decoder, on the one
+    /// transducer: the prefix walk and the point lookup must agree on every key and every string
+    /// near one.
+    fn assert_walks_agree(idx: &StringIndex, keys: impl IntoIterator<Item = String>) {
+        for key in keys {
+            for q in [format!("{key}中z"), format!("{key}x"), key] {
+                let (mut lazy, mut nodes) = (Vec::new(), Vec::new());
+                idx.for_each_common_prefix(&q, |end, v| lazy.push((end, v)));
+                idx.for_each_common_prefix_by_nodes(&q, |end, v| nodes.push((end, v)));
+                assert_eq!(lazy, nodes, "prefixes of {q:?}");
+                assert_eq!(idx.id(&q), idx.map.get(&q), "id of {q:?}");
+            }
+        }
+    }
+
+    /// The lazy reader against `fst`'s decoder on transducers of every node shape. The alphabet
+    /// mixes inputs `fst` stores in the state byte with ones it does not, and characters of one to
+    /// four bytes, so nodes of one transition come with and without a common input, and nodes of
+    /// many transitions below and above the 32 that bring a transition index. Half the maps hold
+    /// values that are not ranks, so final nodes carry outputs of their own and edges up to eight
+    /// bytes of one -- shapes this crate never builds, and `load_mmap` loads regardless.
+    #[test]
+    fn the_lazy_walk_answers_what_fsts_own_decoder_does() {
+        use proptest::prelude::*;
+        const ALPHABET: &[char] = &[
+            't', 'e', '/', 'o', 'a', 's', 'r', 'i', 'p', 'c', 'n', 'w', '.', 'h', 'l', 'm', '-',
+            'd', 'u', '0', '1', '2', 'g', '=', ':', 'b', 'f', '3', 'y', '5', '\0', '\u{7f}', ' ',
+            '"', '#', '<', '>', '\\', '^', '`', '{', '|', '}', '~', 'é', 'ж', '中', '国', '人',
+            '😀', '𝄞',
+        ];
+        let key = prop::collection::vec(prop::sample::select(ALPHABET), 0..6)
+            .prop_map(|cs| cs.into_iter().collect::<String>());
+        let entries = prop::collection::btree_map(key.clone(), any::<u64>(), 0..300);
+        let strategy = (entries, prop::collection::vec(key, 0..40), any::<bool>());
+        proptest::test_runner::TestRunner::default()
+            .run(&strategy, |(entries, queries, ranks)| {
+                let mut b = MapBuilder::memory();
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    b.insert(k, if ranks { i as u64 } else { *v }).unwrap();
+                }
+                let map = Map::new(SharedBytes::from_owned(b.into_inner().unwrap())).unwrap();
+                let idx = StringIndex::from_map(map).unwrap();
+                assert_walks_agree(&idx, entries.into_keys().chain(queries));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Versions 1 and 2 of `fst`'s format keep no checksum, and version 1 no transition index: the
+    /// lazy reader takes both from the header, as `fst` does. Written here by taking a version-3
+    /// blob's checksum off and its version down, which is all that separates them.
+    #[test]
+    fn the_lazy_walk_reads_the_formats_before_version_3() {
+        let wide: Vec<String> = (0..40u8)
+            .map(|i| format!("k{}", char::from(b'0' + i)))
+            .collect();
+        let narrow: Vec<String> = ["apple", "apricot", "banana", "band", "中国", "中国人"]
+            .map(String::from)
+            .to_vec();
+        for (keys, versions) in [(&wide, &[2u64][..]), (&narrow, &[1, 2])] {
+            let fst = StringIndex::build(keys)
+                .unwrap()
+                .map
+                .as_fst()
+                .as_bytes()
+                .to_vec();
+            for &version in versions {
+                let mut old = fst[..fst.len() - 4].to_vec();
+                old[..8].copy_from_slice(&version.to_le_bytes());
+                let map = Map::new(SharedBytes::from_owned(old)).unwrap();
+                assert_eq!(fst_bounds::version(map.as_fst().as_bytes()), version);
+                let idx = StringIndex::from_map(map).unwrap();
+                assert_walks_agree(&idx, keys.iter().cloned());
+                assert_eq!(idx.id(&keys[3]), Some(3), "version {version}");
+            }
+        }
     }
 }
