@@ -115,7 +115,7 @@ verbatim — after a null check on every function that has a status to report on
 `unsafe_op_in_unsafe_fn` is denied, so every one names its own justification. Miri and
 AddressSanitizer run weekly over the byte-range code and the C ABI, Miri also on a 32-bit
 target, and libFuzzer daily over the seven parsers a target can hold to a return value: `BCH8`,
-`BMP8`, `BCL2`, `BDX3` and `BHD1` — loaded and then queried, since a dictionary's block data is
+`BMP8`, `BCL2`, `BDX3`, `BDX4` and `BHD1` — loaded and then queried, since a dictionary's block data is
 bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and
 the standalone `MPH3`/`MPH2`/`MPH1` from inside, each run
 starting from the

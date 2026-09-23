@@ -23,6 +23,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
+use crate::charcode::{self, CharCode, Probe, Tally};
 use crate::extsort::{RUN_BYTES, Replay, Run, Runs};
 use crate::fsst::{self, ESCAPE, Table};
 use crate::offsets::{self, Offsets};
@@ -34,17 +35,24 @@ use std::cmp::Ordering;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
 /// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][codes u32]
-/// [g u16][phrases u32][reserved u48][check u32]`, then the head keys end to end, the head ends
-/// packed ([`offsets`]), the block data, the suffix codecs — one per
+/// [g u16][phrases u32][chars u32][reserved u16][check u32]`, then the head keys end to end, the
+/// head ends packed ([`offsets`]), the block data, the suffix codecs — one per
 /// `shard` blocks, each behind its own `u32` length, so a reader that knows how many there are
 /// walks them without a directory — the header codes, two per shard and each self-delimiting
-/// ([`paircode`]), the phrase dictionary the whole blob shares ([`phrase`](crate::phrase)), and
-/// the block and microblock starts packed.
+/// ([`paircode`]), the phrase dictionary the whole blob shares ([`phrase`](crate::phrase)), the
+/// block and microblock starts packed, and last the character code the keys are spelled in
+/// ([`charcode`]), which only a `BDX4` blob holds.
 ///
 /// Everything but the keys themselves comes after the data, because none of it is known until the
 /// data is encoded: the starts' widths, the code a shard's entries were written under, and the
 /// codec its suffixes were. That is what lets a streamed build write every section once, in order.
 const MAGIC: &[u8; 4] = b"BDX3";
+/// A `BDX3` blob whose keys are spelled in a [character code](charcode), which it stores last and
+/// whose length is the header's `chars`. A magic of its own rather than a flag in `BDX3`'s
+/// reserved bytes, which 4.2 did not read: it would have compared a query it never coded against
+/// coded keys and answered wrongly, where a new magic is refused by name. A blob without a code is
+/// still `BDX3`, byte for byte what 4.2 wrote, and 4.2 still reads it.
+const CODED_MAGIC: &[u8; 4] = b"BDX4";
 /// The formats this one replaces, with what a loader says about each. A refusal names what wrote
 /// the blob, because a bare "bad magic" sends someone hunting for disk corruption when the file is
 /// intact and merely old.
@@ -194,6 +202,10 @@ pub struct DictIndex {
     /// and the comparisons to 1.17. Two bytes a blob and none a block, and the search over the
     /// samples is the same search — what changes is which eight bytes it reads.
     g: usize,
+    /// The code every key is spelled in, where one paid: every section above holds coded bytes,
+    /// a query is coded before it is compared, and a key decoded after it is read. Boxed, so that
+    /// a blob without one — every Latin corpus — carries eight bytes for it rather than eighty.
+    code: Option<Box<CharCode>>,
 }
 
 /// The sample the search runs on: the eight bytes of a key at `g`, zero-padded, in byte order.
@@ -374,18 +386,13 @@ fn build_threads(n: usize, block: usize) -> usize {
 /// sample does: a hundred thousand keys standing in for a million hold a tenth of the evidence, and
 /// the miner prices a span on the pieces it is shown — at a sixth of them it reads a span seen twice
 /// as a hundred uses of the blob rather than ten.
-fn build_pieces<S: AsRef<str>>(
-    keys: &[S],
-    block: usize,
-    micro: usize,
-    dense: usize,
-) -> Vec<Vec<&[u8]>> {
+fn build_pieces<K: AsKey>(keys: &[K], block: usize, micro: usize, dense: usize) -> Vec<Vec<&[u8]>> {
     let n = keys.len();
     let nb = n.div_ceil(block);
     let shard = shard_blocks_for(block);
     let span = shard * block;
     let mut pieces: Vec<Vec<&[u8]>> = vec![Vec::new(); nb.div_ceil(shard).max(1)];
-    let mut restart: &[u8] = keys.first().map_or(&[][..], |k| k.as_ref().as_bytes());
+    let mut restart: &[u8] = keys.first().map_or(&[][..], AsKey::key_bytes);
     let mut prev: &[u8] = restart;
     let step_over = |left: usize| {
         if dense > 0 {
@@ -396,7 +403,7 @@ fn build_pieces<S: AsRef<str>>(
     };
     let mut step = step_over(span.min(n));
     for (i, key) in keys.iter().enumerate().skip(1) {
-        let key = key.as_ref().as_bytes();
+        let key = key.key_bytes();
         let off = i % block;
         if off == 0 {
             if i % span == 0 {
@@ -499,6 +506,30 @@ fn head_of<'a>(heads: &'a [u8], ends: &Offsets, b: usize) -> &'a [u8] {
     heads.get(at(start)..at(end)).unwrap_or_default()
 }
 
+/// A key as the encoder reads it: its bytes. Every builder takes `str`s, which is what the blanket
+/// implementation covers; a key under a character code is bytes that are not UTF-8.
+pub(crate) trait AsKey {
+    fn key_bytes(&self) -> &[u8];
+}
+
+impl<S: AsRef<str> + ?Sized> AsKey for S {
+    #[inline(always)]
+    fn key_bytes(&self) -> &[u8] {
+        self.as_ref().as_bytes()
+    }
+}
+
+/// A key given as its bytes.
+#[derive(Clone, Copy)]
+pub(crate) struct Bytes<'a>(pub(crate) &'a [u8]);
+
+impl AsKey for Bytes<'_> {
+    #[inline(always)]
+    fn key_bytes(&self) -> &[u8] {
+        self.0
+    }
+}
+
 /// How many leading bytes `a` and `b` share.
 #[inline]
 pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
@@ -515,6 +546,70 @@ pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
         i += 1;
     }
     i
+}
+
+/// The [character code](charcode) a set of keys is smallest under, or `None` where none pays. A
+/// scan for bytes outside ASCII settles every Latin corpus without decoding a character.
+pub(crate) fn choose_code<'a>(keys: impl Iterator<Item = &'a str> + Clone) -> Option<CharCode> {
+    let (bytes, high) = keys.clone().fold((0u64, 0u64), |(b, h), k| {
+        (b + k.len() as u64, h + charcode::high_bytes(k.as_bytes()))
+    });
+    if !charcode::worth_counting(bytes, high) {
+        return None;
+    }
+    let mut tally = Tally::new();
+    for k in keys {
+        tally.add(k);
+    }
+    tally.choose()
+}
+
+/// `key` as a blob under `code` spells it: its own bytes without one, and otherwise its spelling in
+/// `buf`. A key the code cannot spell was not in the stream the code was chosen over.
+fn spell<'a>(
+    code: Option<&CharCode>,
+    key: &'a str,
+    buf: &'a mut Vec<u8>,
+) -> Result<&'a [u8], IndexError> {
+    let Some(code) = code else {
+        return Ok(key.as_bytes());
+    };
+    buf.clear();
+    if !code.encode_key(key, buf) {
+        return Err(IndexError::Format(
+            "dict: the key stream changed between passes",
+        ));
+    }
+    Ok(buf)
+}
+
+/// Every key spelled under `code`, end to end, with where each ends; `None` if a key holds a
+/// character the code does not spell.
+pub(crate) fn encode_all<'a>(
+    code: &CharCode,
+    keys: impl Iterator<Item = &'a str>,
+) -> Option<(Vec<u8>, Vec<usize>)> {
+    let mut arena = Vec::new();
+    let mut ends = Vec::new();
+    for key in keys {
+        if !code.encode_key(key, &mut arena) {
+            return None;
+        }
+        ends.push(arena.len());
+    }
+    Some((arena, ends))
+}
+
+/// The keys an [`encode_all`] arena holds, one view each.
+pub(crate) fn views<'a>(arena: &'a [u8], ends: &[usize]) -> Vec<Bytes<'a>> {
+    let mut at = 0;
+    ends.iter()
+        .map(|&end| {
+            let key = Bytes(&arena[at..end]);
+            at = end;
+            key
+        })
+        .collect()
 }
 
 pub(crate) fn put_varint(out: &mut Vec<u8>, mut v: usize) {
@@ -1380,8 +1475,8 @@ fn mine_phrases(samples: &[Vec<&[u8]>], tables: &[Table], n: usize, threads: usi
 /// Encode a range of whole shards. `keys` must start on a shard boundary, which is what makes the
 /// parts concatenate into the blob a single pass would have written — and what lets a shard's
 /// header codes be chosen from all of its runs.
-fn encode_range<S: AsRef<str>>(
-    keys: &[S],
+fn encode_range<K: AsKey>(
+    keys: &[K],
     block: usize,
     micro: usize,
     tables: &[Table],
@@ -1411,11 +1506,11 @@ fn encode_range<S: AsRef<str>>(
         let encoder = table.encoder();
         collected.clear();
         for chunk in span.chunks(block) {
-            let head = chunk[0].as_ref().as_bytes();
+            let head = chunk[0].key_bytes();
             part.heads.extend_from_slice(head);
             part.head_ends.push(part.heads.len() as u64);
             view.clear();
-            view.extend(chunk.iter().map(|k| k.as_ref().as_bytes()));
+            view.extend(chunk.iter().map(AsKey::key_bytes));
             collect_block(&mut collected, &view, micro, &encoder, &mut coded);
         }
         let (codec, codes) = collected.settle(table.clone(), phrases, &mut pairs, &mut parsed);
@@ -1479,6 +1574,8 @@ pub struct DictSections {
     pub block_offsets: u64,
     /// Packed: where each microblock's entries start. Empty when a block is one microblock.
     pub micro_offsets: u64,
+    /// The character code the keys are spelled in; zero where they are spelled in UTF-8.
+    pub chars: u64,
     /// The restarts' coded `(lcp, len)` pairs.
     pub restart_headers: u64,
     /// The `(lcp, len)` varints of the restarts too wide for a one-byte header.
@@ -1510,6 +1607,7 @@ impl DictSections {
             + self.head_ends
             + self.block_offsets
             + self.micro_offsets
+            + self.chars
             + self.restart_headers
             + self.restart_wide
             + self.restart_codes
@@ -1589,7 +1687,7 @@ impl DictIndex {
         let mut keys: Vec<S> = items.into_iter().collect();
         keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        Self::from_sorted(&keys, block, micro_for(block))
+        Self::from_keys(&keys, block, micro_for(block))
     }
 
     /// Build from keys that are **already in ascending byte order** — a sorted file, a database
@@ -1643,7 +1741,7 @@ impl DictIndex {
             ));
         }
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        Self::from_sorted(&keys, block, micro_for(block))
+        Self::from_keys(&keys, block, micro_for(block))
     }
 
     /// [`build_with_block`](Self::build_with_block) with the microblock size chosen by the caller
@@ -1665,7 +1763,7 @@ impl DictIndex {
         let mut keys: Vec<S> = items.into_iter().collect();
         keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
-        Self::from_sorted(&keys, block, micro)
+        Self::from_keys(&keys, block, micro)
     }
 
     /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
@@ -1687,8 +1785,10 @@ impl DictIndex {
     /// **Transient disk**: one run file per `RUN_BYTES` of keys, in a directory beside the output,
     /// removed however the build ends. **Three passes** over the sorted keys: the symbol table is
     /// trained on suffixes from blocks spread over the index, that spread is a function of the key
-    /// count, and the key count is what the first pass establishes. Where the corpus needed more
-    /// than one run, each pass is a fresh merge of them.
+    /// count, and the key count is what the first pass establishes. A corpus with two bytes in
+    /// fifteen or more outside ASCII takes a fourth after the first, which counts its characters
+    /// for the code they may be spelled in. Where the corpus needed more than one run, each pass is
+    /// a fresh merge of them.
     pub fn build_to_file<I, S>(
         items: I,
         path: impl AsRef<std::path::Path>,
@@ -1797,14 +1897,44 @@ impl DictIndex {
         let mut n = 0usize;
         let mut heads: Vec<u8> = Vec::new();
         let mut head_ends: Vec<u64> = Vec::new();
+        let (mut bytes, mut high) = (0u64, 0u64);
         src.each(&mut |key| {
             if n % block == 0 {
                 heads.extend_from_slice(key.as_bytes());
                 head_ends.push(heads.len() as u64);
             }
+            bytes += key.len() as u64;
+            high += charcode::high_bytes(key.as_bytes());
             n += 1;
             Ok(())
         })?;
+        // The code is chosen on exactly the counts `choose_code` takes over the same keys, so the
+        // file is the blob `build` makes; a corpus the bound rules out pays for no tally pass.
+        let code = if charcode::worth_counting(bytes, high) {
+            let mut tally = Tally::new();
+            src.each(&mut |key| {
+                tally.add(key);
+                Ok(())
+            })?;
+            tally.choose()
+        } else {
+            None
+        };
+        let mut spelt: Vec<u8> = Vec::new();
+        if let Some(code) = &code {
+            let mut at = 0;
+            let mut coded = Vec::with_capacity(heads.len());
+            for end in &mut head_ends {
+                let head =
+                    std::str::from_utf8(&heads[at..*end as usize]).expect("a head is a whole key");
+                spell(Some(code), head, &mut spelt)?;
+                coded.extend_from_slice(&spelt);
+                at = *end as usize;
+                *end = coded.len() as u64;
+            }
+            heads = coded;
+        }
+        let code = code.as_ref();
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let nb = n.div_ceil(block);
@@ -1823,7 +1953,7 @@ impl DictIndex {
         let mut restart: Vec<u8> = Vec::new();
         let mut i = 0usize;
         src.each(&mut |key| {
-            let bytes = key.as_bytes();
+            let bytes = spell(code, key, &mut spelt)?;
             let off = i % block;
             if off == 0 && i % span == 0 {
                 step = ((n - i).min(span) / TRAIN_PIECES).max(1);
@@ -1929,7 +2059,7 @@ impl DictIndex {
                     at_shard = i / span;
                     encoder = tables[at_shard].encoder();
                 }
-                keys.extend_from_slice(key.as_bytes());
+                keys.extend_from_slice(spell(code, key, &mut spelt)?);
                 ends.push(keys.len());
                 i += 1;
                 Ok(())
@@ -1994,6 +2124,11 @@ impl DictIndex {
             w.write_all(&block_bases)?;
             w.write_all(&block_deltas)?;
             w.write_all(&micro_deltas)?;
+            let mut chars = Vec::with_capacity(code.map_or(0, CharCode::serialized_len));
+            if let Some(code) = code {
+                code.write_to(&mut chars);
+            }
+            w.write_all(&chars)?;
             w.flush()?;
             // The payload hash runs over the sections in blob order, so it is taken from the file
             // rather than from the stream: one sequential read of what was just written.
@@ -2009,7 +2144,7 @@ impl DictIndex {
                 hasher.update(&buf[..got]);
             }
             let mut h = [0u8; HEADER];
-            h[0..4].copy_from_slice(MAGIC);
+            h[0..4].copy_from_slice(if code.is_some() { CODED_MAGIC } else { MAGIC });
             h[4..12].copy_from_slice(&(n as u64).to_le_bytes());
             h[12..16].copy_from_slice(&(block as u32).to_le_bytes());
             h[16..24].copy_from_slice(&(heads.len() as u64).to_le_bytes());
@@ -2025,6 +2160,7 @@ impl DictIndex {
             h[52..56].copy_from_slice(&(code_bytes.len() as u32).to_le_bytes());
             h[56..58].copy_from_slice(&(g as u16).to_le_bytes());
             h[58..62].copy_from_slice(&(dictionary.len() as u32).to_le_bytes());
+            h[62..66].copy_from_slice(&(chars.len() as u32).to_le_bytes());
             let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
             h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
             file.seek(SeekFrom::Start(0))?;
@@ -2034,12 +2170,36 @@ impl DictIndex {
         Ok(n)
     }
 
-    fn from_sorted<S: AsRef<str>>(
+    fn from_sorted<K: AsKey>(keys: &[K], block: usize, micro: usize) -> Result<Self, IndexError> {
+        Self::from_sorted_on(keys, block, micro, build_threads(keys.len(), block))
+    }
+
+    /// The in-memory build over sorted, distinct keys, spelled in the [character code](charcode)
+    /// they pay for, if any.
+    fn from_keys<S: AsRef<str>>(
         keys: &[S],
         block: usize,
         micro: usize,
     ) -> Result<Self, IndexError> {
-        Self::from_sorted_on(keys, block, micro, build_threads(keys.len(), block))
+        match choose_code(keys.iter().map(AsRef::as_ref)) {
+            None => Self::from_sorted(keys, block, micro),
+            Some(code) => Self::from_coded(keys, block, micro, code),
+        }
+    }
+
+    /// [`from_keys`](Self::from_keys) under `code`: every key spelled into one arena, and the
+    /// build run over that.
+    fn from_coded<S: AsRef<str>>(
+        keys: &[S],
+        block: usize,
+        micro: usize,
+        code: CharCode,
+    ) -> Result<Self, IndexError> {
+        let (arena, ends) = encode_all(&code, keys.iter().map(AsRef::as_ref))
+            .expect("a code chosen over the keys spells every one of them");
+        let mut idx = Self::from_sorted(&views(&arena, &ends), block, micro)?;
+        idx.code = Some(Box::new(code));
+        Ok(idx)
     }
 
     /// The builds a plan prices a `DictIndex` from: a uniform draw of the corpus at the default
@@ -2061,9 +2221,9 @@ impl DictIndex {
     /// *less* accurate — the smallest block's own draw reads the ratio 21 % high on decimal ids.
     /// Every priced block shards the keys the same way — a shard is [`SHARD_KEYS`] keys whatever
     /// the block — so one set of tables covers the same ranges in all three.
-    pub(crate) fn plan_builds<S: AsRef<str>>(
-        spread: &[S],
-        runs: &[S],
+    pub(crate) fn plan_builds<K: AsKey>(
+        spread: &[K],
+        runs: &[K],
         blocks: &[usize],
         corpus: usize,
     ) -> Result<(Self, Vec<Self>), IndexError> {
@@ -2101,8 +2261,8 @@ impl DictIndex {
 
     /// [`from_sorted`](Self::from_sorted) with the thread count fixed, so a test can hold the
     /// output to the one a single thread produces.
-    fn from_sorted_on<S: AsRef<str>>(
-        keys: &[S],
+    fn from_sorted_on<K: AsKey>(
+        keys: &[K],
         block: usize,
         micro: usize,
         threads: usize,
@@ -2118,8 +2278,8 @@ impl DictIndex {
     /// the million-key blob spends 0.53 on article titles. Such a build also trains and mines on
     /// every suffix it has rather than [`TRAIN_PIECES`] a shard, since its evidence is already an
     /// eighth of the real build's.
-    fn from_sorted_as<S: AsRef<str>>(
-        keys: &[S],
+    fn from_sorted_as<K: AsKey>(
+        keys: &[K],
         block: usize,
         micro: usize,
         threads: usize,
@@ -2135,8 +2295,8 @@ impl DictIndex {
     /// The encoding half of a build: the keys coded under a vocabulary already chosen. Split out
     /// because the estimator prices three blocks off one sample and the vocabulary is the corpus's
     /// rather than the block's — see [`plan_builds`](Self::plan_builds).
-    fn from_vocabulary<S: AsRef<str>>(
-        keys: &[S],
+    fn from_vocabulary<K: AsKey>(
+        keys: &[K],
         block: usize,
         micro: usize,
         threads: usize,
@@ -2150,10 +2310,10 @@ impl DictIndex {
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
         // of blocks encode on their own threads and the parts are concatenated in order — the bytes
-        // do not depend on how many threads ran. The threads take a `&[&str]` view rather than the
-        // caller's `&[S]`, which would need `S: Sync` on a signature that has not asked for it; the
-        // view costs sixteen bytes a key for the length of the encoding and is only built when
-        // there is enough work to split.
+        // do not depend on how many threads ran. The threads take a view of the keys' bytes rather
+        // than the caller's `&[K]`, which would need `K: Sync` on a signature that has not asked
+        // for it; the view costs sixteen bytes a key for the length of the encoding and is only
+        // built when there is enough work to split.
         // A range must cover whole shards, because a shard's header code is chosen from all of
         // its runs at once: split inside one and two threads would each choose their own.
         let run = (span * nb.div_ceil(threads).div_ceil(shard)).max(1);
@@ -2165,7 +2325,7 @@ impl DictIndex {
                 })
                 .collect()
         } else {
-            let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
+            let view: Vec<Bytes<'_>> = keys.iter().map(|k| Bytes(k.key_bytes())).collect();
             std::thread::scope(|scope| {
                 let running: Vec<_> = view
                     .chunks(run)
@@ -2252,6 +2412,7 @@ impl DictIndex {
             shard,
             phrases,
             g,
+            code: None,
         })
     }
 
@@ -2621,6 +2782,51 @@ fn decode_tiered(
 }
 
 impl DictIndex {
+    /// `query` as the keys are spelled, handed to `f` with what the bytes stand for. A blob without
+    /// a code hands the query over as it is. One with a code spells it into a buffer on the stack
+    /// for a query of up to 128 bytes, so that a lookup allocates nothing, and onto the heap past
+    /// that.
+    #[inline(always)]
+    fn probe<R>(&self, query: &str, f: impl FnOnce(&[u8], Probe) -> R) -> R {
+        const STACK: usize = 256;
+        let Some(code) = &self.code else {
+            return f(query.as_bytes(), Probe::Exact);
+        };
+        if 2 * query.len() <= STACK {
+            let mut buf = [0u8; STACK];
+            let (probe, len) = code.probe_into(query, &mut buf);
+            f(&buf[..len], probe)
+        } else {
+            let mut buf = vec![0u8; 2 * query.len()];
+            let (probe, len) = code.probe_into(query, &mut buf);
+            f(&buf[..len], probe)
+        }
+    }
+
+    /// [`locate`](Self::locate) for a query as the caller spells it: a query holding a character
+    /// the code does not spell is no key, and its rank is where the code places it.
+    #[inline]
+    fn locate_query(&self, query: &str) -> (u64, bool) {
+        self.probe(query, |bytes, probe| match probe {
+            Probe::Exact => self.locate(bytes),
+            Probe::Absent => (self.locate(bytes).0, false),
+            Probe::Last => (self.n as u64, false),
+        })
+    }
+
+    /// A stored key's bytes as the caller spells them; `None` for bytes no build wrote.
+    fn spelled(&self, stored: &[u8]) -> Option<String> {
+        match &self.code {
+            None => std::str::from_utf8(stored).ok().map(str::to_owned),
+            Some(code) => {
+                let mut out = Vec::with_capacity(2 * stored.len());
+                code.decode_into(stored, &mut out)
+                    .then(|| String::from_utf8(out).ok())
+                    .flatten()
+            }
+        }
+    }
+
     /// The rank of the first key not below `probe`, and whether that key is `probe`.
     fn locate(&self, probe: &[u8]) -> (u64, bool) {
         if self.n == 0 {
@@ -2779,31 +2985,27 @@ impl DictIndex {
 
     /// Rank of `key` if it is a member.
     pub fn id(&self, key: &str) -> Option<u64> {
-        self.id_bytes(key.as_bytes())
-    }
-
-    pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u64> {
-        match self.locate(key) {
+        match self.locate_query(key) {
             (rank, true) => Some(rank),
             _ => None,
         }
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.locate(key.as_bytes()).1
+        self.locate_query(key).1
     }
 
     /// The rank of the first key not below `key`: `key`'s own id if it is a member, otherwise
     /// the id it would have, `len()` past every key. Two of these bound a range of keys as a
     /// range of ids.
     pub fn lower_bound(&self, key: &str) -> u64 {
-        self.locate(key.as_bytes()).0
+        self.locate_query(key).0
     }
 
     /// The smallest `(key, id)` with `key >= query` (the *successor*), or `None` if every key is
     /// smaller.
     pub fn successor(&self, query: &str) -> Option<(String, u64)> {
-        let rank = self.locate(query.as_bytes()).0;
+        let rank = self.locate_query(query).0;
         self.key(rank).map(|k| (k, rank))
     }
 
@@ -2811,7 +3013,7 @@ impl DictIndex {
     /// larger. A present `query` is its own predecessor; otherwise the answer sits one rank below
     /// the first key above it, ids being the sorted rank.
     pub fn predecessor(&self, query: &str) -> Option<(String, u64)> {
-        let (rank, found) = self.locate(query.as_bytes());
+        let (rank, found) = self.locate_query(query);
         let at = if found { rank } else { rank.checked_sub(1)? };
         self.key(at).map(|k| (k, at))
     }
@@ -2836,23 +3038,32 @@ impl DictIndex {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn prefix_id_range(&self, prefix: &str) -> std::ops::Range<u64> {
-        let start = self.locate(prefix.as_bytes()).0;
-        // The exclusive end is the first key that does not carry the prefix: the same bytes with
-        // the last one incremented. A trailing `0xff` cannot appear in UTF-8, so the carry loop is
-        // unreachable for a `&str` — it is here because the invariant that makes it unreachable
-        // belongs to the caller's type, not to this function.
-        let mut upper = prefix.as_bytes().to_vec();
-        let end = loop {
-            match upper.pop() {
-                Some(0xff) => continue,
-                Some(b) => {
-                    upper.push(b + 1);
-                    break self.locate(&upper).0;
+        self.probe(prefix, |bytes, probe| {
+            let start = match probe {
+                Probe::Exact => self.locate(bytes).0,
+                // A prefix no key can carry: the empty range where it would have started.
+                Probe::Absent => {
+                    let at = self.locate(bytes).0;
+                    return at..at;
                 }
-                None => break self.n as u64,
-            }
-        };
-        start..end.max(start)
+                Probe::Last => return self.n as u64..self.n as u64,
+            };
+            // The exclusive end is the first key that does not carry the prefix: the same bytes
+            // with the last one incremented. UTF-8 never ends on `0xff`, but a prefix in a code of
+            // whole bytes can, and the carry is what takes it to the byte before.
+            let mut upper = bytes.to_vec();
+            let end = loop {
+                match upper.pop() {
+                    Some(0xff) => continue,
+                    Some(b) => {
+                        upper.push(b + 1);
+                        break self.locate(&upper).0;
+                    }
+                    None => break self.n as u64,
+                }
+            };
+            start..end.max(start)
+        })
     }
 
     /// How many keys start with `prefix` — [`prefix_id_range`](Self::prefix_id_range)'s width.
@@ -2895,6 +3106,43 @@ impl DictIndex {
         n: usize,
         key: F,
     ) -> Vec<Option<u64>> {
+        let Some(code) = &self.code else {
+            return self.ids_of_spelled(n, key);
+        };
+        // Every key spelled first, into one arena: the lanes read each probe several times. A key
+        // the code cannot spell, or that is not UTF-8, is searched as the empty probe and its
+        // answer dropped after.
+        let mut arena = Vec::new();
+        let mut spans = Vec::with_capacity(n);
+        let mut exact = Vec::with_capacity(n);
+        for i in 0..n {
+            let at = arena.len();
+            let probe = match std::str::from_utf8(key(i)) {
+                Ok(k) => {
+                    arena.resize(at + 2 * k.len(), 0);
+                    let (probe, len) = code.probe_into(k, &mut arena[at..]);
+                    arena.truncate(at + len);
+                    probe
+                }
+                Err(_) => Probe::Last,
+            };
+            if probe != Probe::Exact {
+                arena.truncate(at);
+            }
+            spans.push((at, arena.len()));
+            exact.push(probe == Probe::Exact);
+        }
+        let mut out = self.ids_of_spelled(n, |i| &arena[spans[i].0..spans[i].1]);
+        for (id, exact) in out.iter_mut().zip(exact) {
+            if !exact {
+                *id = None;
+            }
+        }
+        out
+    }
+
+    /// [`ids_of_with`](Self::ids_of_with) over keys already spelled as the blob spells them.
+    fn ids_of_spelled<'a, F: Fn(usize) -> &'a [u8]>(&self, n: usize, key: F) -> Vec<Option<u64>> {
         let mut out = Vec::with_capacity(n);
         if self.n == 0 {
             out.resize(n, None);
@@ -3151,7 +3399,11 @@ impl DictIndex {
     /// `len()`, and for the key a corrupted blob decodes to something that is not UTF-8.
     pub fn key_into(&self, id: u64, out: &mut String) -> bool {
         let mut buf = std::mem::take(out).into_bytes();
-        let found = self.key_bytes_into(id, &mut buf);
+        let found = self.key_bytes_into(id, &mut buf)
+            && self
+                .code
+                .as_ref()
+                .is_none_or(|c| c.decode_in_place(&mut buf));
         match String::from_utf8(buf) {
             Ok(s) => {
                 *out = s;
@@ -3219,7 +3471,7 @@ impl DictIndex {
                 open = usize::MAX;
                 continue;
             }
-            out.push(std::str::from_utf8(&buf).ok().map(str::to_owned));
+            out.push(self.spelled(&buf));
         }
         out
     }
@@ -3273,6 +3525,16 @@ impl DictIndex {
     /// ```
     pub fn common_prefix(&self, query: &str) -> Vec<(String, u64)> {
         let mut found = Vec::new();
+        if let Some(code) = &self.code {
+            let (mut coded, mut ends) = (Vec::new(), Vec::new());
+            code.prefixes(query, &mut coded, &mut ends);
+            for (end, spelled) in ends {
+                if let (id, true) = self.locate(&coded[..spelled]) {
+                    found.push((query[..end].to_owned(), id));
+                }
+            }
+            return found;
+        }
         for end in 0..=query.len() {
             if !query.is_char_boundary(end) {
                 continue;
@@ -3290,6 +3552,16 @@ impl DictIndex {
     /// Walks down from `query` itself and stops at the first hit, so a long match is cheap and
     /// only a query that matches nothing pays for every boundary.
     pub fn longest_prefix(&self, query: &str) -> Option<(String, u64)> {
+        if let Some(code) = &self.code {
+            let (mut coded, mut ends) = (Vec::new(), Vec::new());
+            code.prefixes(query, &mut coded, &mut ends);
+            return ends.into_iter().rev().find_map(|(end, spelled)| {
+                match self.locate(&coded[..spelled]) {
+                    (id, true) => Some((query[..end].to_owned(), id)),
+                    _ => None,
+                }
+            });
+        }
         for end in (0..=query.len()).rev() {
             if !query.is_char_boundary(end) {
                 continue;
@@ -3327,7 +3599,7 @@ impl DictIndex {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn iter_after(&self, after: &str) -> impl Iterator<Item = (String, u64)> + '_ {
-        let (rank, found) = self.locate(after.as_bytes());
+        let (rank, found) = self.locate_query(after);
         self.iter_from(rank + u64::from(found))
     }
 
@@ -3389,7 +3661,17 @@ impl DictIndex {
             }
             let this = id as u64;
             id += 1;
-            Some((String::from_utf8_lossy(&cur).into_owned(), this))
+            let key = match &self.code {
+                None => String::from_utf8_lossy(&cur).into_owned(),
+                Some(_) => match self.spelled(&cur) {
+                    Some(key) => key,
+                    None => {
+                        id = self.n;
+                        return None;
+                    }
+                },
+            };
+            Some((key, this))
         })
     }
 
@@ -3418,7 +3700,17 @@ impl DictIndex {
             f(section)?;
         }
         f(self.micros.section())?;
+        if let Some(code) = &self.code {
+            let mut chars = Vec::with_capacity(code.serialized_len());
+            code.write_to(&mut chars);
+            f(&chars)?;
+        }
         Ok(())
+    }
+
+    /// The character code's bytes, zero for a blob without one.
+    fn chars_len(&self) -> usize {
+        self.code.as_deref().map_or(0, CharCode::serialized_len)
     }
 
     fn header(&self) -> [u8; HEADER] {
@@ -3429,7 +3721,11 @@ impl DictIndex {
         })
         .expect("hashing the sections cannot fail");
         let mut h = [0u8; HEADER];
-        h[0..4].copy_from_slice(MAGIC);
+        h[0..4].copy_from_slice(if self.code.is_some() {
+            CODED_MAGIC
+        } else {
+            MAGIC
+        });
         h[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
         h[12..16].copy_from_slice(&(self.block as u32).to_le_bytes());
         h[16..24].copy_from_slice(&(self.heads.len() as u64).to_le_bytes());
@@ -3445,16 +3741,18 @@ impl DictIndex {
         h[52..56].copy_from_slice(&(codes_len(&self.codes) as u32).to_le_bytes());
         h[56..58].copy_from_slice(&(self.g as u16).to_le_bytes());
         h[58..62].copy_from_slice(&(self.phrases.serialized_len() as u32).to_le_bytes());
+        h[62..66].copy_from_slice(&(self.chars_len() as u32).to_le_bytes());
         let check = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
         h[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
         h
     }
 
-    /// Serialise to `[magic "BDX3"][n][block][head bytes][data bytes][codec bytes][payload]
-    /// [offset widths][micro][shard][header-code bytes][g][dictionary bytes][check]`, then the
-    /// head keys, the packed head ends, the samples, the block data, the suffix codecs, the header
-    /// codes, the phrase dictionary and the two start arrays. `check` is a hash of the preceding
-    /// header bytes and `payload` a hash of everything after it, both verified on load.
+    /// Serialise to `[magic "BDX3" or "BDX4"][n][block][head bytes][data bytes][codec bytes]
+    /// [payload][offset widths][micro][shard][header-code bytes][g][dictionary bytes]
+    /// [character-code bytes][check]`, then the head keys, the packed head ends, the block data,
+    /// the suffix codecs, the header codes, the phrase dictionary, the two start arrays and, in a
+    /// `BDX4` blob, the character code. `check` is a hash of the preceding header bytes and
+    /// `payload` a hash of everything after it, both verified on load.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.serialized_len());
         out.extend_from_slice(&self.header());
@@ -3477,6 +3775,7 @@ impl DictIndex {
             + self.blocks.len()
             + self.micros.len()
             + self.data.len()
+            + self.chars_len()
     }
 
     /// Where this index's bytes go, section by section: [`DictSections`].
@@ -3502,6 +3801,7 @@ impl DictIndex {
             head_ends: self.head_ends.len() as u64,
             block_offsets: self.blocks.len() as u64,
             micro_offsets: self.micros.len() as u64,
+            chars: self.chars_len() as u64,
             ..DictSections::default()
         };
         for b in 0..self.blocks_len() {
@@ -3557,9 +3857,13 @@ impl DictIndex {
         if let Some((_, why)) = LEGACY_MAGIC.iter().find(|(m, _)| bytes.starts_with(*m)) {
             return Err(IndexError::Format(why));
         }
-        if bytes.len() < HEADER || &bytes[..4] != MAGIC {
-            return Err(IndexError::Format("bad magic or truncated header"));
+        let coded = match bytes.get(..4) {
+            _ if bytes.len() < HEADER => None,
+            Some(m) if m == MAGIC => Some(false),
+            Some(m) if m == CODED_MAGIC => Some(true),
+            _ => None,
         }
+        .ok_or(IndexError::Format("bad magic or truncated header"))?;
         let check = u32::from_le_bytes(bytes[CHECKED..HEADER].try_into().unwrap());
         if check != crate::blob::hash_bytes(&bytes[..CHECKED]) as u32 {
             return Err(IndexError::Format("header checksum mismatch"));
@@ -3607,6 +3911,8 @@ impl DictIndex {
         let codes_len = u32_at(52) as usize;
         let g = usize::from(u16::from_le_bytes(bytes[56..58].try_into().unwrap()));
         let phrase_len = u32_at(58) as usize;
+        // `BDX3`'s bytes here were reserved and went unread, so they are still not read there.
+        let chars_len = if coded { u32_at(62) as usize } else { 0 };
         let nb = n.div_ceil(block);
         let shards = nb.div_ceil(shard).max(1);
         // Every microblock holds at least one key, so the count is bounded by the key count and
@@ -3625,7 +3931,8 @@ impl DictIndex {
             .and_then(|t| t.checked_add(arrays))
             .and_then(|t| t.checked_add(data_len))
             .and_then(|t| t.checked_add(codes_len))
-            .and_then(|t| t.checked_add(phrase_len));
+            .and_then(|t| t.checked_add(phrase_len))
+            .and_then(|t| t.checked_add(chars_len));
         if total != Some(bytes.len()) {
             return Err(IndexError::Format(
                 "dict: the section lengths do not add up to the blob",
@@ -3692,6 +3999,13 @@ impl DictIndex {
             shift,
         );
         let micros = offsets::Packed::new(take(offsets::deltas_len(nm, micro_width)), micro_width);
+        let code = match coded {
+            false => None,
+            true => Some(Box::new(
+                CharCode::read(&take(chars_len))
+                    .ok_or(IndexError::Format("dict: bad character code"))?,
+            )),
+        };
         let idx = Self {
             block,
             micro,
@@ -3708,6 +4022,7 @@ impl DictIndex {
             shard,
             phrases,
             g,
+            code,
         };
         if verify {
             idx.check_layout()?;
@@ -3775,9 +4090,20 @@ impl DictIndex {
 
     /// The queries the fuzz shim puts to every blob. Short, so the pairwise range probes stay
     /// cheap, and spread over the byte order so a prefix range is sometimes empty, sometimes the
-    /// whole index, and sometimes neither.
+    /// whole index, and sometimes neither. The last three are what a character code spells or
+    /// places: one Latin, one Cyrillic and one Chinese character.
     #[cfg(feature = "fuzzing")]
-    const FUZZ_PROBES: [&str; 6] = ["", "\u{0}", "a", "ab", "zzzzzzzzzzzzzzzzz", "\u{10FFFF}"];
+    const FUZZ_PROBES: [&str; 9] = [
+        "",
+        "\u{0}",
+        "a",
+        "ab",
+        "zzzzzzzzzzzzzzzzz",
+        "\u{10FFFF}",
+        "\u{e9}",
+        "\u{44f}",
+        "\u{4e2d}",
+    ];
 
     /// Whether `bytes` loads, and whether what loaded answers without panicking — by the checked
     /// path and by the mapping's, which takes the arrays as they are. Exists for the libFuzzer
@@ -4070,6 +4396,245 @@ mod tests {
         }
     }
 
+    /// [`corpus`] with keys in two more scripts and an astral plane: what a character code is for,
+    /// beside every shape the golden keys pin.
+    fn scripts() -> Vec<String> {
+        let mut keys = corpus();
+        let stems = [
+            "北京",
+            "北京大学",
+            "中华人民共和国",
+            "中国",
+            "上海",
+            "москва",
+            "московский",
+            "мир",
+            "мирный",
+            "ёж",
+            "яблоко",
+            "𠀋",
+            "𠀋𠀍",
+        ];
+        for (i, stem) in stems.iter().enumerate() {
+            keys.push((*stem).to_owned());
+            keys.push(format!("{stem}{i}"));
+            keys.push(format!("{stem}-{stem}"));
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    /// [`probes`] and the queries a code can miss: a character below, between and above those it
+    /// spells, alone, after a key and inside one.
+    fn script_probes(keys: &[String]) -> Vec<String> {
+        let mut out = probes(keys);
+        for miss in [
+            "\u{1}",
+            "~",
+            "\u{80}",
+            "\u{3000}",
+            "丁",
+            "中丁",
+            "北京\u{4E00}",
+            "мф",
+            "м\u{10FFFF}",
+            "ё",
+            "я\0",
+            "\u{FFFF}",
+            "𠀋\u{20000}",
+        ] {
+            out.push(miss.to_owned());
+        }
+        for k in keys.iter().step_by(11) {
+            out.push(format!("{k}丁"));
+            out.push(format!("{k}~"));
+            let mut chars: Vec<char> = k.chars().collect();
+            if let Some(c) = chars.first_mut() {
+                *c = char::from_u32(*c as u32 + 1).unwrap_or('\u{10FFFF}');
+            }
+            out.push(chars.into_iter().collect());
+        }
+        out
+    }
+
+    /// `keys` spelled in the code [`CharCode::forced`] makes of them, whatever it saves.
+    fn coded(keys: &[String], block: usize, seven: bool, singles: usize) -> DictIndex {
+        let code = CharCode::forced(keys, seven, singles);
+        DictIndex::from_coded(keys, block, micro_for(block), code).unwrap()
+    }
+
+    #[test]
+    fn a_coded_blob_answers_every_query_a_linear_scan_does() {
+        let keys = scripts();
+        let ps = script_probes(&keys);
+        let mut queries = keys.clone();
+        queries.extend(ps.iter().cloned());
+        for (seven, singles) in [(true, 0), (true, 12), (false, 0), (false, 5)] {
+            for block in [1usize, 32, MAX_BLOCK] {
+                let what = format!("seven {seven}, {singles} singles, block {block}");
+                let idx = coded(&keys, block, seven, singles);
+                let blob = idx.to_bytes();
+                assert_eq!(&blob[..4], CODED_MAGIC, "{what}");
+                assert_eq!(blob.len(), idx.serialized_len(), "{what}");
+                let sections = idx.sections();
+                assert_eq!(sections.total() as usize, blob.len(), "{what}");
+                assert!(sections.chars > 0, "{what}");
+                check(&idx, &keys);
+                let back = DictIndex::from_bytes(&blob).unwrap();
+                assert_eq!(back.to_bytes(), blob, "{what}");
+                check(&back, &keys);
+                scan_ordered(&back, &keys, &ps, &what);
+                scan_prefixes(&back, &keys, &ps, &what);
+                batch_matches(&back, &queries, &what);
+                keys_of_matches(&back, &what);
+                // Bytes that are no string are no key, in a coded blob as in a plain one.
+                assert_eq!(
+                    back.ids_of_with(2, |i| [b"\xff".as_slice(), keys[3].as_bytes()][i]),
+                    [None, Some(3)],
+                    "{what}"
+                );
+                let mapped = DictIndex::from_shared(SharedBytes::from_owned(blob), false).unwrap();
+                check(&mapped, &keys);
+            }
+        }
+    }
+
+    /// Up to `n` keys of two to five characters drawn from `alphabet` CJK ideographs.
+    fn ideographs(n: usize, alphabet: u32) -> Vec<String> {
+        let mut x = 7u32;
+        let mut keys: Vec<String> = (0..n)
+            .map(|i| {
+                (0..2 + i % 4)
+                    .map(|_| {
+                        x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                        char::from_u32(0x4E00 + (x >> 16) % alphabet).unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    #[test]
+    fn the_build_spells_its_keys_in_a_code_only_where_it_pays() {
+        let plain = |keys: &[String]| {
+            DictIndex::from_sorted(keys, DEFAULT_BLOCK, micro_for(DEFAULT_BLOCK))
+                .unwrap()
+                .serialized_len()
+        };
+        let cjk = ideographs(20_000, 300);
+        let blob = DictIndex::build(&cjk).unwrap().to_bytes();
+        assert_eq!(&blob[..4], CODED_MAGIC);
+        assert!(
+            blob.len() < plain(&cjk),
+            "{} coded against {} plain",
+            blob.len(),
+            plain(&cjk)
+        );
+        check(&DictIndex::from_bytes(&blob).unwrap(), &cjk);
+        // Two thousand ideographs over three thousand keys: a table of two kilobytes against 10.5
+        // saved before the codec, under the twentieth the choice asks. The bar is conservative
+        // here — this blob would have come out 4.1 % smaller coded — and what it guards against
+        // is a corpus whose codec keeps less of the saving, as Russian titles keep 5 %.
+        let sparse = ideographs(3000, 2000);
+        let blob = DictIndex::build(&sparse).unwrap().to_bytes();
+        assert_eq!(&blob[..4], MAGIC);
+        assert_eq!(blob.len(), plain(&sparse));
+        // The golden keys are ASCII but for four, and a code would spend bytes on them.
+        let keys = corpus();
+        let blob = DictIndex::build(&keys).unwrap().to_bytes();
+        assert_eq!(&blob[..4], MAGIC);
+        assert_eq!(
+            &blob[62..68],
+            [0; 6],
+            "a plain blob's reserved bytes stay as 4.2 left them"
+        );
+    }
+
+    #[test]
+    fn a_streamed_build_spells_its_keys_as_the_sorting_one_does() {
+        let keys = ideographs(20_000, 300);
+        let twice: Vec<&str> = keys
+            .iter()
+            .rev()
+            .chain(keys.iter())
+            .map(String::as_str)
+            .collect();
+        let dir = scratch("dictcoded");
+        let path = dir.join("idx.bdx");
+        for block in [1usize, 32, DEFAULT_BLOCK, MAX_BLOCK] {
+            let want = DictIndex::build_with_block(&keys, block)
+                .unwrap()
+                .to_bytes();
+            assert_eq!(&want[..4], CODED_MAGIC, "block {block}");
+            let n = DictIndex::build_to_file_runs(&twice, &path, block, || Ok(()), 4096).unwrap();
+            assert_eq!(n, keys.len());
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                want,
+                "block {block}, spilled"
+            );
+            let n = DictIndex::build_to_file_with_block(&twice, &path, block).unwrap();
+            assert_eq!(n, keys.len());
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                want,
+                "block {block}, in memory"
+            );
+            check(&DictIndex::load(&path).unwrap(), &keys);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_corrupted_character_code_is_refused_or_answers_without_panicking() {
+        let keys = scripts();
+        let ps = script_probes(&keys);
+        let (mut loaded, mut spurned) = (0, 0);
+        for seven in [true, false] {
+            let blob = coded(&keys, 32, seven, 3).to_bytes();
+            let len = u32::from_le_bytes(blob[62..66].try_into().unwrap()) as usize;
+            let at = blob.len() - len;
+            assert_eq!(layout(&blob, 32).chars, at);
+            for i in 0..len {
+                for xor in [0x01u8, 0x80, 0xFF] {
+                    let mut b = blob.clone();
+                    b[at + i] ^= xor;
+                    reframe(&mut b);
+                    if answers_or_is_refused(&b, &keys, &ps, true) {
+                        loaded += 1;
+                    } else {
+                        spurned += 1;
+                    }
+                }
+            }
+            // A length that does not reach the end of the blob, or runs past it.
+            for len in [len - 1, len + 1] {
+                let mut b = blob.clone();
+                b[62..66].copy_from_slice(&(len as u32).to_le_bytes());
+                reframe(&mut b);
+                refused(&b, "do not add up");
+            }
+            // The magic alone decides whether there is a code: a coded blob read as a plain one
+            // has bytes left over, and a plain one read as coded names a section it lacks.
+            let mut b = blob.clone();
+            b[..4].copy_from_slice(MAGIC);
+            reframe(&mut b);
+            refused(&b, "do not add up");
+        }
+        let mut plain = DictIndex::build(&keys).unwrap().to_bytes();
+        plain[..4].copy_from_slice(CODED_MAGIC);
+        reframe(&mut plain);
+        refused(&plain, "bad character code");
+        assert!(
+            loaded > 0 && spurned > 0,
+            "loaded {loaded}, refused {spurned}"
+        );
+    }
+
     /// A corpus spilled into more runs than a merge may open builds the same blob as one held in
     /// memory. The collapse runs between the spill and the three passes, and if it lost, reordered
     /// or duplicated a key the bytes would differ.
@@ -4208,78 +4773,67 @@ mod tests {
     #[test]
     fn the_ordered_queries_agree_with_a_linear_scan() {
         let keys = corpus();
-        let pairs: Vec<(String, u64)> = keys.iter().cloned().zip(0..).collect();
         let ps = probes(&keys);
         for block in [1usize, 3, 32, MAX_BLOCK] {
             let idx = DictIndex::build_with_block(&keys, block).unwrap();
-            for p in &ps {
-                let want: Vec<(String, u64)> = pairs
-                    .iter()
-                    .filter(|(k, _)| k.starts_with(p))
-                    .cloned()
-                    .collect();
-                assert_eq!(&idx.prefix(p), &want, "block {block} prefix {p:?}");
-                assert_eq!(
-                    idx.prefix_iter(p).take(2).collect::<Vec<_>>(),
-                    want.iter().take(2).cloned().collect::<Vec<_>>(),
-                    "block {block} prefix_iter {p:?}"
-                );
-                let r = idx.prefix_id_range(p);
-                assert_eq!(
-                    r.end - r.start,
-                    want.len() as u64,
-                    "block {block} range {p:?}"
-                );
-                assert_eq!(
-                    idx.prefix_count(p),
-                    want.len() as u64,
-                    "block {block} count {p:?}"
-                );
-                if let Some((_, first)) = want.first() {
-                    assert_eq!(r.start, *first, "block {block} range start {p:?}");
-                }
+            scan_ordered(&idx, &keys, &ps, &format!("block {block}"));
+        }
+    }
 
-                let want = pairs
-                    .iter()
-                    .find(|(k, _)| k.as_str() >= p.as_str())
-                    .cloned();
-                assert_eq!(idx.successor(p), want, "block {block} successor {p:?}");
-                let want = pairs
-                    .iter()
-                    .rev()
-                    .find(|(k, _)| k.as_str() <= p.as_str())
-                    .cloned();
-                assert_eq!(idx.predecessor(p), want, "block {block} predecessor {p:?}");
+    /// Every ordered query `idx` answers for `ps`, against a scan of `keys` in rank order.
+    fn scan_ordered(idx: &DictIndex, keys: &[String], ps: &[String], what: &str) {
+        let pairs: Vec<(String, u64)> = keys.iter().cloned().zip(0..).collect();
+        for p in ps {
+            let want: Vec<(String, u64)> = pairs
+                .iter()
+                .filter(|(k, _)| k.starts_with(p))
+                .cloned()
+                .collect();
+            assert_eq!(&idx.prefix(p), &want, "{what} prefix {p:?}");
+            assert_eq!(
+                idx.prefix_iter(p).take(2).collect::<Vec<_>>(),
+                want.iter().take(2).cloned().collect::<Vec<_>>(),
+                "{what} prefix_iter {p:?}"
+            );
+            let r = idx.prefix_id_range(p);
+            assert_eq!(r.end - r.start, want.len() as u64, "{what} range {p:?}");
+            assert_eq!(idx.prefix_count(p), want.len() as u64, "{what} count {p:?}");
+            if let Some((_, first)) = want.first() {
+                assert_eq!(r.start, *first, "{what} range start {p:?}");
+            }
 
-                let want: Vec<(String, u64)> = pairs
-                    .iter()
-                    .filter(|(k, _)| k.as_str() > p.as_str())
-                    .cloned()
-                    .collect();
-                assert_eq!(
-                    idx.iter_after(p).collect::<Vec<_>>(),
-                    want,
-                    "block {block} after {p:?}"
-                );
-            }
-            for w in ps.chunks(2).filter(|w| w.len() == 2) {
-                let (lo, hi) = (&w[0], &w[1]);
-                let want: Vec<(String, u64)> = pairs
-                    .iter()
-                    .filter(|(k, _)| k.as_str() >= lo.as_str() && k.as_str() < hi.as_str())
-                    .cloned()
-                    .collect();
-                assert_eq!(
-                    &idx.range(lo, hi),
-                    &want,
-                    "block {block} range {lo:?}..{hi:?}"
-                );
-                assert_eq!(
-                    idx.range_count(lo, hi),
-                    want.len() as u64,
-                    "block {block} count"
-                );
-            }
+            let want = pairs
+                .iter()
+                .find(|(k, _)| k.as_str() >= p.as_str())
+                .cloned();
+            assert_eq!(idx.successor(p), want, "{what} successor {p:?}");
+            let want = pairs
+                .iter()
+                .rev()
+                .find(|(k, _)| k.as_str() <= p.as_str())
+                .cloned();
+            assert_eq!(idx.predecessor(p), want, "{what} predecessor {p:?}");
+
+            let want: Vec<(String, u64)> = pairs
+                .iter()
+                .filter(|(k, _)| k.as_str() > p.as_str())
+                .cloned()
+                .collect();
+            assert_eq!(
+                idx.iter_after(p).collect::<Vec<_>>(),
+                want,
+                "{what} after {p:?}"
+            );
+        }
+        for w in ps.chunks(2).filter(|w| w.len() == 2) {
+            let (lo, hi) = (&w[0], &w[1]);
+            let want: Vec<(String, u64)> = pairs
+                .iter()
+                .filter(|(k, _)| k.as_str() >= lo.as_str() && k.as_str() < hi.as_str())
+                .cloned()
+                .collect();
+            assert_eq!(&idx.range(lo, hi), &want, "{what} range {lo:?}..{hi:?}");
+            assert_eq!(idx.range_count(lo, hi), want.len() as u64, "{what} count");
         }
     }
 
@@ -4475,24 +5029,29 @@ mod tests {
     #[test]
     fn keys_of_answers_what_key_answers_in_any_order() {
         let keys = corpus();
-        let n = keys.len() as u64;
         for block in [1usize, 3, 32, MAX_BLOCK] {
             let idx = DictIndex::build_with_block(&keys, block).unwrap();
-            // Ascending and contiguous (the walk), every third (a sparse ascending run),
-            // descending (no walk), scattered, and out of range.
-            let orders: [Vec<u64>; 5] = [
-                (0..n).collect(),
-                (0..n).step_by(3).collect(),
-                (0..n).rev().collect(),
-                (0..n).map(|i| (i * 7919) % n).collect(),
-                vec![n, n + 1, u64::MAX, 0, n - 1],
-            ];
-            for ids in &orders {
-                let want: Vec<Option<String>> = ids.iter().map(|&i| idx.key(i)).collect();
-                assert_eq!(&idx.keys_of(ids), &want, "block {block}");
-            }
-            assert!(idx.keys_of(&[]).is_empty());
+            keys_of_matches(&idx, &format!("block {block}"));
         }
+    }
+
+    /// [`DictIndex::keys_of`] answers every order of ids as [`DictIndex::key`] does one at a time.
+    fn keys_of_matches(idx: &DictIndex, what: &str) {
+        let n = idx.len() as u64;
+        // Ascending and contiguous (the walk), every third (a sparse ascending run),
+        // descending (no walk), scattered, and out of range.
+        let orders: [Vec<u64>; 5] = [
+            (0..n).collect(),
+            (0..n).step_by(3).collect(),
+            (0..n).rev().collect(),
+            (0..n).map(|i| (i * 7919) % n).collect(),
+            vec![n, n + 1, u64::MAX, 0, n - 1],
+        ];
+        for ids in &orders {
+            let want: Vec<Option<String>> = ids.iter().map(|&i| idx.key(i)).collect();
+            assert_eq!(&idx.keys_of(ids), &want, "{what}");
+        }
+        assert!(idx.keys_of(&[]).is_empty());
     }
 
     #[test]
@@ -4506,16 +5065,7 @@ mod tests {
         );
         for block in [1usize, 3, 32, MAX_BLOCK] {
             let idx = DictIndex::build_with_block(&keys, block).unwrap();
-            let want: Vec<Option<u64>> = queries.iter().map(|q| idx.id(q)).collect();
-            assert_eq!(idx.ids_of(&queries), want, "block {block}");
-            // The ragged last lane, at every width that can end one.
-            for take in [0usize, 1, LANES - 1, LANES, LANES + 1] {
-                assert_eq!(
-                    idx.ids_of(&queries[..take]),
-                    want[..take].to_vec(),
-                    "block {block} take {take}"
-                );
-            }
+            batch_matches(&idx, &queries, &format!("block {block}"));
         }
         let empty = DictIndex::build(Vec::<&str>::new()).unwrap();
         assert_eq!(
@@ -4525,28 +5075,47 @@ mod tests {
         );
     }
 
+    /// [`DictIndex::ids_of`] answers `queries` as [`DictIndex::id`] does one at a time.
+    fn batch_matches(idx: &DictIndex, queries: &[String], what: &str) {
+        let want: Vec<Option<u64>> = queries.iter().map(|q| idx.id(q)).collect();
+        assert_eq!(idx.ids_of(queries), want, "{what}");
+        // The ragged last lane, at every width that can end one.
+        for take in [0usize, 1, LANES - 1, LANES, LANES + 1] {
+            assert_eq!(
+                idx.ids_of(&queries[..take]),
+                want[..take].to_vec(),
+                "{what} take {take}"
+            );
+        }
+    }
+
     #[test]
     fn the_prefixes_of_a_query_agree_with_a_linear_scan() {
         let keys = corpus();
         let ps = probes(&keys);
         for block in [1usize, 3, 32, MAX_BLOCK] {
             let idx = DictIndex::build_with_block(&keys, block).unwrap();
-            for q in &ps {
-                // Prefixes of `q` sort by length, so the linear scan in rank order is already
-                // shortest first and its last element is the longest match.
-                let want: Vec<(String, u64)> = keys
-                    .iter()
-                    .zip(0u64..)
-                    .filter(|(k, _)| q.starts_with(k.as_str()))
-                    .map(|(k, id)| (k.clone(), id))
-                    .collect();
-                assert_eq!(&idx.common_prefix(q), &want, "block {block} query {q:?}");
-                assert_eq!(
-                    idx.longest_prefix(q),
-                    want.last().cloned(),
-                    "block {block} query {q:?}"
-                );
-            }
+            scan_prefixes(&idx, &keys, &ps, &format!("block {block}"));
+        }
+    }
+
+    /// The keys that are prefixes of each of `ps`, against a scan of `keys` in rank order.
+    fn scan_prefixes(idx: &DictIndex, keys: &[String], ps: &[String], what: &str) {
+        for q in ps {
+            // Prefixes of `q` sort by length, so the linear scan in rank order is already
+            // shortest first and its last element is the longest match.
+            let want: Vec<(String, u64)> = keys
+                .iter()
+                .zip(0u64..)
+                .filter(|(k, _)| q.starts_with(k.as_str()))
+                .map(|(k, id)| (k.clone(), id))
+                .collect();
+            assert_eq!(&idx.common_prefix(q), &want, "{what} query {q:?}");
+            assert_eq!(
+                idx.longest_prefix(q),
+                want.last().cloned(),
+                "{what} query {q:?}"
+            );
         }
     }
 
@@ -5040,6 +5609,7 @@ mod tests {
         block_bases: usize,
         block_deltas: usize,
         micro_deltas: usize,
+        chars: usize,
         head_width: u32,
         block_width: u32,
         micro_width: u32,
@@ -5074,10 +5644,12 @@ mod tests {
         let block_bases = phrases + u32::from_le_bytes(blob[58..62].try_into().unwrap()) as usize;
         let block_deltas = block_bases + offsets::bases_len(nb, shift);
         let micro_deltas = block_deltas + offsets::deltas_len(nb, block_width);
-        assert_eq!(
-            micro_deltas + offsets::deltas_len(nm, micro_width),
-            blob.len()
-        );
+        let chars = micro_deltas + offsets::deltas_len(nm, micro_width);
+        let chars_len = match &blob[..4] {
+            m if m == CODED_MAGIC => u32::from_le_bytes(blob[62..66].try_into().unwrap()) as usize,
+            _ => 0,
+        };
+        assert_eq!(chars + chars_len, blob.len());
         Layout {
             codecs,
             phrases,
@@ -5087,6 +5659,7 @@ mod tests {
             block_bases,
             block_deltas,
             micro_deltas,
+            chars,
             head_width,
             block_width,
             micro_width,

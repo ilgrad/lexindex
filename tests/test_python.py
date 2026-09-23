@@ -407,6 +407,42 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     assert walked == [(w, i) for i, w in enumerate(words[:1500])]
 
 
+def test_dict_index_in_a_character_code_answers_what_the_fst_does():
+    """Keys mostly outside ASCII are stored in a character code (`BDX4`), and every query -- the
+    batch and an Arrow column among them -- answers what StringIndex answers over UTF-8, for
+    characters the code spells and for characters it does not."""
+    x = 7
+    words = set()
+    for i in range(20_000):
+        chars = []
+        for _ in range(2 + i % 4):
+            x = (x * 1_103_515_245 + 12345) % 2**32
+            chars.append(chr(0x4E00 + (x >> 16) % 300))
+        words.add("".join(chars))
+    words = sorted(words)
+    di = lexindex.DictIndex(words)
+    si = lexindex.StringIndex(words)
+    blob = di.to_bytes()
+    assert blob[:4] == b"BDX4" and lexindex.inspect(blob)["format"] == "BDX4"
+    # U+5317 and ASCII are in no key, so the code spells neither.
+    probes = [*words[:40:7], words[-1], "\u5317", "abc", "", words[5] + "\u5317", words[5][:1]]
+    probes += [words[9] + words[9], "\U0010ffff"]
+    assert di.ids_of(probes) == si.ids_of(probes)
+    for q in probes:
+        assert di.id(q) == si.id(q), q
+        assert di.prefix_id_range(q) == si.prefix_id_range(q), q
+        assert di.prefix(q, limit=5) == si.prefix(q, limit=5), q
+        assert di.successor(q) == si.successor(q), q
+        assert di.predecessor(q) == si.predecessor(q), q
+        assert di.common_prefix(q) == si.common_prefix(q), q
+        assert di.longest_prefix(q) == si.longest_prefix(q), q
+    expected = [di.MISSING_ID if v is None else v for v in di.ids_of(probes)]
+    assert _unpack(di, di.ids_of_arrow(_Utf8Column(probes))) == expected
+    assert di.keys_of([0, 5, len(words) - 1]) == [words[0], words[5], words[-1]]
+    back = lexindex.DictIndex.from_bytes(blob)
+    assert back.to_bytes() == blob and list(back) == list(di)
+
+
 def test_dict_index_block_takes_a_profile_name(tmp_path):
     words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
     sizes = []

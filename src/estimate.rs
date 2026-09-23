@@ -28,6 +28,8 @@
 //! Below the sample size there is nothing to model: the plan builds all the candidates and reports
 //! what they weigh.
 
+use crate::charcode::{self, CharCode, Tally};
+use crate::dict_index::{AsKey, views};
 use crate::{DictIndex, IndexError, StringIndex, dict_index};
 use std::fmt;
 
@@ -885,11 +887,13 @@ impl fmt::Display for Plan {
 }
 
 /// What one walk over the sorted keys tells the models. All of it exact.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Shape {
     n: usize,
     /// Bytes in all the keys.
     len: u64,
+    /// Those of them outside ASCII: what says whether a character code is worth counting.
+    high: u64,
     /// Bytes shared with the previous key, summed — what front coding does not store.
     lcp1: u64,
     /// The same for the keys 32 apart, which is what a restart entry is coded against.
@@ -899,12 +903,28 @@ struct Shape {
 }
 
 impl Shape {
-    fn of(keys: &[&str]) -> Self {
+    fn of<K: AsKey>(keys: &[K]) -> Self {
         let mut walk = ShapeWalk::default();
         for k in keys {
-            walk.push(k);
+            walk.push(k.key_bytes());
         }
         walk.finish()
+    }
+
+    /// This shape as a character code spells the keys, read off a draw of them in both spellings:
+    /// the bytes scaled as the uniform draw's, the shared prefixes as those of the run draw's
+    /// neighbours. `high` stays the keys' own; the choice it decides has been made.
+    fn spelt(&self, spread: [&Shape; 2], runs: [&Shape; 2]) -> Shape {
+        let scale = |x: u64, to: u64, from: u64| match from {
+            0 => x,
+            _ => (u128::from(x) * u128::from(to) / u128::from(from)) as u64,
+        };
+        Shape {
+            len: scale(self.len, spread[1].len, spread[0].len),
+            lcp1: scale(self.lcp1, runs[1].lcp1, runs[0].lcp1),
+            lcp32: scale(self.lcp32, runs[1].lcp32, runs[0].lcp32),
+            ..self.clone()
+        }
     }
 
     fn mean_len(&self) -> f64 {
@@ -934,23 +954,24 @@ const LCP_BACK: usize = 32;
 #[derive(Default)]
 struct ShapeWalk {
     shape: Shape,
-    ring: Vec<String>,
+    ring: Vec<Vec<u8>>,
 }
 
 impl ShapeWalk {
     /// The next key of an ascending, distinct stream.
-    fn push(&mut self, key: &str) {
+    fn push(&mut self, key: &[u8]) {
         let n = self.shape.n;
         self.shape.len += key.len() as u64;
+        self.shape.high += charcode::high_bytes(key);
         if n > 0 {
             let prev = &self.ring[(n - 1) % LCP_BACK];
-            self.shape.lcp1 += dict_index::lcp(prev.as_bytes(), key.as_bytes()) as u64;
+            self.shape.lcp1 += dict_index::lcp(prev, key) as u64;
         }
         if n >= LCP_BACK {
             // The slot about to be overwritten holds the key `LCP_BACK` back, and nothing else
             // reads it.
             let back = &self.ring[n % LCP_BACK];
-            self.shape.lcp32 += dict_index::lcp(back.as_bytes(), key.as_bytes()) as u64;
+            self.shape.lcp32 += dict_index::lcp(back, key) as u64;
             self.shape.pairs32 += 1;
         }
         if self.ring.len() < LCP_BACK {
@@ -958,7 +979,7 @@ impl ShapeWalk {
         } else {
             let slot = &mut self.ring[n % LCP_BACK];
             slot.clear();
-            slot.push_str(key);
+            slot.extend_from_slice(key);
         }
         self.shape.n += 1;
     }
@@ -1149,6 +1170,11 @@ struct DictFit {
 struct Sample {
     /// One fit per priced block.
     dict: [DictFit; DICT_BLOCKS.len()],
+    /// The corpus's [`Shape`] as a `DictIndex` spells its keys: the shape itself, or where a build
+    /// would take a character code, the shape under it.
+    dict_shape: Shape,
+    /// What that code's table weighs, zero without one.
+    chars: f64,
     /// What an fst spends a key at the run draw's density.
     ///
     /// Read off [`RunSample`] and carried across flat, because how far an fst minimises below its
@@ -1177,26 +1203,60 @@ struct Sample {
 }
 
 impl Sample {
-    /// The constants the two draws measure for a corpus of `corpus` keys.
-    fn of(spread: &[&str], runs: &[&str], corpus: usize) -> Result<Self, IndexError> {
-        let draws = Draws::of(spread, runs, corpus);
+    /// The constants the two draws measure for the corpus `shape` describes.
+    fn of(spread: &[&str], runs: &[&str], shape: &Shape) -> Result<Self, IndexError> {
         let fst_per_key =
             StringIndex::build(runs)?.serialized_len() as f64 / runs.len().max(1) as f64;
-        // One build of the sample a priced block, all three under the one vocabulary the corpus
-        // buys: what a block costs is the block's, what a suffix compresses to is the corpus's.
+        let (dict, dict_shape, chars) = match code_for(spread, runs, shape) {
+            None => (Self::dict_fits(spread, runs, shape.n)?, shape.clone(), 0.0),
+            Some(code) => {
+                let spell = |keys: &[&str]| {
+                    dict_index::encode_all(&code, keys.iter().copied())
+                        .expect("a code chosen over both draws spells both")
+                };
+                let (spread_arena, spread_ends) = spell(spread);
+                let (runs_arena, runs_ends) = spell(runs);
+                let (coded_spread, coded_runs) = (
+                    views(&spread_arena, &spread_ends),
+                    views(&runs_arena, &runs_ends),
+                );
+                let dict_shape = shape.spelt(
+                    [&Shape::of(spread), &Shape::of(&coded_spread)],
+                    [&Shape::of(runs), &Shape::of(&coded_runs)],
+                );
+                (
+                    Self::dict_fits(&coded_spread, &coded_runs, shape.n)?,
+                    dict_shape,
+                    code.serialized_len() as f64,
+                )
+            }
+        };
+        Ok(Self {
+            dict,
+            dict_shape,
+            chars,
+            fst_per_key,
+            #[cfg(feature = "mph")]
+            hash_fit: hash_fits(spread)?,
+        })
+    }
+
+    /// One build of the draws a priced block, all three under the one vocabulary the corpus buys:
+    /// what a block costs is the block's, what a suffix compresses to is the corpus's.
+    fn dict_fits<K: AsKey>(
+        spread: &[K],
+        runs: &[K],
+        corpus: usize,
+    ) -> Result<[DictFit; DICT_BLOCKS.len()], IndexError> {
+        let draws = Draws::of(spread, runs, corpus);
         let (spread_blob, runs_blobs) = DictIndex::plan_builds(spread, runs, &DICT_BLOCKS, corpus)?;
         let mut dict = Vec::with_capacity(DICT_BLOCKS.len());
         for (block, runs_blob) in DICT_BLOCKS.into_iter().zip(&runs_blobs) {
             dict.push(DictFit::of(&draws, block, &spread_blob, runs_blob));
         }
-        Ok(Self {
-            dict: dict
-                .try_into()
-                .unwrap_or_else(|_| unreachable!("one fit a priced block")),
-            fst_per_key,
-            #[cfg(feature = "mph")]
-            hash_fit: hash_fits(spread)?,
-        })
+        Ok(dict
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("one fit a priced block")))
     }
 
     /// The fit for a block, or the nearest priced one. Nothing in the crate asks for a block
@@ -1306,13 +1366,28 @@ struct Draws {
 }
 
 impl Draws {
-    fn of(spread: &[&str], runs: &[&str], corpus: usize) -> Self {
+    fn of<K: AsKey>(spread: &[K], runs: &[K], corpus: usize) -> Self {
         Self {
             spread_shape: Shape::of(spread),
             runs_shape: Shape::of(runs),
             corpus,
         }
     }
+}
+
+/// The character code a build of the whole corpus would spell its keys in, chosen off both draws:
+/// the corpus's own byte counts say whether one is worth counting and weigh what it saves against
+/// its table, and the draws say which characters it holds and how often. Both draws are counted,
+/// so that the code spells every key either holds.
+fn code_for(spread: &[&str], runs: &[&str], shape: &Shape) -> Option<CharCode> {
+    if !charcode::worth_counting(shape.len, shape.high) {
+        return None;
+    }
+    let mut tally = Tally::new();
+    for key in spread.iter().chain(runs) {
+        tally.add(key);
+    }
+    tally.choose_for(shape.len)
 }
 
 /// A fitted `(fixed, per key)` line at `n`.
@@ -1406,11 +1481,7 @@ pub fn plan_for<S: AsRef<str>>(
         weigh(&sorted, &candidates)?
     } else {
         let (spread, runs) = draws(&sorted, sample_size());
-        model(
-            &shape,
-            &Sample::of(&spread, &runs, sorted.len())?,
-            &candidates,
-        )
+        model(&shape, &Sample::of(&spread, &runs, &shape)?, &candidates)
     };
     rank(&mut estimates, objective, sorted.len(), shape.mean_len());
     Ok(Plan {
@@ -1489,7 +1560,7 @@ fn plan_file_with(
     // the sample itself.
     let mut all: Option<Vec<String>> = Some(Vec::new());
     let mut each = |key: &str| {
-        walk.push(key);
+        walk.push(key.as_bytes());
         if let Some(hash) = spread.wanted(key) {
             spread.keep(hash, key.to_owned());
         }
@@ -1528,7 +1599,7 @@ fn plan_file_with(
             let adjacent: Vec<&str> = adjacent.iter().map(String::as_str).collect();
             model(
                 &shape,
-                &Sample::of(&spread, &adjacent, shape.n)?,
+                &Sample::of(&spread, &adjacent, &shape)?,
                 &candidates,
             )
         }
@@ -1692,8 +1763,9 @@ fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -
                 Kind::String => (sample.fst_per_key * shape.n as f64, None),
                 Kind::Dict => {
                     let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                    let fit = sample.dict_fit(block);
                     (
-                        dict_bytes(shape, sample.dict_fit(block), block),
+                        dict_bytes(&sample.dict_shape, fit, block) + sample.chars,
                         Some(block),
                     )
                 }
@@ -1717,7 +1789,8 @@ fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -
 }
 
 /// The format as the model: a header, the symbol tables, the phrase dictionary, one head a block
-/// stored whole, one byte an entry, the suffixes the table squeezed, and the packed arrays.
+/// stored whole, one byte an entry, the suffixes the table squeezed, and the packed arrays — over
+/// the keys as the blob spells them, so without the character code's table, which is the caller's.
 fn dict_bytes(shape: &Shape, fit: &DictFit, block: usize) -> f64 {
     let n = shape.n as f64;
     let blocks = shape.n.div_ceil(block) as f64;
@@ -1751,6 +1824,25 @@ mod tests {
                     "{}-{:012x}",
                     ["ab", "abc", "b", "cde", "d", "ef", "g"][i % 7],
                     h >> 16
+                )
+            })
+            .collect()
+    }
+
+    /// [`corpus`] in Chinese: the prefixes in ideographs, and tails of four out of four hundred of
+    /// them — a corpus a `DictIndex` spells in a character code.
+    fn ideographs(n: usize) -> Vec<String> {
+        (0..n)
+            .map(|i| {
+                let mut h = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                h ^= h >> 29;
+                h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                let tail: String = (0..4)
+                    .map(|k| char::from_u32(0x4E00 + ((h >> (16 + 9 * k)) % 400) as u32).unwrap())
+                    .collect();
+                format!(
+                    "{}{tail}",
+                    ["北", "北京", "上", "上海", "中", "中国", "广"][i % 7]
                 )
             })
             .collect()
@@ -2258,6 +2350,33 @@ mod tests {
         );
     }
 
+    /// A corpus a build spells in a character code is priced in it: the draws spelt as the corpus
+    /// would be, and the shape scaled by what the spelling did to them. This one reads 1.7–2.3 %
+    /// low that way, and 7.5–11.0 % high priced in UTF-8.
+    #[test]
+    fn the_model_prices_a_coded_corpus_near_its_build() {
+        let keys = ideographs(60_000);
+        let blob = DictIndex::build(&keys).unwrap().to_bytes();
+        assert_eq!(&blob[..4], b"BDX4", "a corpus a code pays on");
+        let plan = with_sample(6_000, || {
+            plan_for(&keys, Needs::default().ordered(), Objective::Memory).unwrap()
+        });
+        for e in plan.estimates().iter().filter(|e| e.kind == Kind::Dict) {
+            assert!(!e.measured);
+            let truth = DictIndex::build_with_block(&keys, e.block.unwrap())
+                .unwrap()
+                .serialized_len() as f64;
+            let err = (e.bytes as f64 - truth) / truth;
+            assert!(
+                err.abs() < 0.05,
+                "block {:?}: {} against {truth} ({:+.1} %)",
+                e.block,
+                e.bytes,
+                100.0 * err
+            );
+        }
+    }
+
     /// The draw takes the size it asked for at any corpus size. A `step_by(n / want)` gives a step
     /// of one just past `want` -- 150 001 keys would "sample" all 150 001 of them -- and the
     /// fractional stride is what fixes it.
@@ -2401,29 +2520,32 @@ mod tests {
     /// keys arrived as a slice or as a merge of spilled runs.
     #[test]
     fn a_merged_file_plans_exactly_as_the_loaded_corpus_does() {
-        let keys = corpus(20_000);
-        let path = keys_file("merged.txt", &(keys.join("\n") + "\n"));
-        let needs = Needs::default().ordered();
-        let (want, got) = with_sample(2_000, || {
-            (
-                plan(&keys, needs).unwrap(),
-                // 8 KiB a run over 20 000 keys is a real merge: hundreds of runs, collapsed.
-                plan_file_with(&path, needs, Objective::Memory, 8 << 10).unwrap(),
-            )
-        });
-        assert!(got.estimates().iter().all(|e| !e.measured));
-        assert_eq!(
-            got.shape(),
-            want.shape(),
-            "the shape is counted, not sampled"
-        );
-        assert_eq!(got, want);
-        assert_eq!(
-            beside(&path),
-            vec!["merged.txt".to_string()],
-            "no runs left"
-        );
-        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        // The second corpus is one a build spells in a character code, which the plan decides on
+        // counts the file's merge makes and the loaded keys' walk makes alike.
+        for keys in [corpus(20_000), ideographs(20_000)] {
+            let path = keys_file("merged.txt", &(keys.join("\n") + "\n"));
+            let needs = Needs::default().ordered();
+            let (want, got) = with_sample(2_000, || {
+                (
+                    plan(&keys, needs).unwrap(),
+                    // 8 KiB a run over 20 000 keys is a real merge: hundreds of runs, collapsed.
+                    plan_file_with(&path, needs, Objective::Memory, 8 << 10).unwrap(),
+                )
+            });
+            assert!(got.estimates().iter().all(|e| !e.measured));
+            assert_eq!(
+                got.shape(),
+                want.shape(),
+                "the shape is counted, not sampled"
+            );
+            assert_eq!(got, want);
+            assert_eq!(
+                beside(&path),
+                vec!["merged.txt".to_string()],
+                "no runs left"
+            );
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
     }
 
     /// A file is lines, not keys: a blank line is the newline at the end of the last one, and a

@@ -226,13 +226,15 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
-        b"BDX1" | b"BDX2" | b"BDX3" => {
+        b"BDX1" | b"BDX2" | b"BDX3" | b"BDX4" => {
             // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in all
-            // three, then the offset widths and the microblock size `BDX2` added, and the header
-            // codes and the phrase dictionary `BDX3` did. A blob this version refuses to load
-            // still says what it is here.
+            // four, then the offset widths and the microblock size `BDX2` added, and the header
+            // codes and the phrase dictionary `BDX3` did. `BDX4` is `BDX3` with its keys spelled
+            // in a character code, stored last. A blob this version refuses to load still says
+            // what it is here.
             let one = &magic == b"BDX1";
-            let three = &magic == b"BDX3";
+            let coded = &magic == b"BDX4";
+            let three = &magic == b"BDX3" || coded;
             let header: u64 = if one {
                 48
             } else if three {
@@ -310,7 +312,11 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             } else {
                 (0, 0)
             };
-            rest(bytes, [header + table, keyed, codes, phrases, arrays])?;
+            let chars = if coded { u64::from(w.u32(62)?) } else { 0 };
+            rest(
+                bytes,
+                [header + table, keyed, codes, phrases, arrays, chars],
+            )?;
             Ok(i)
         }
         b"BHD1" => {
@@ -658,6 +664,41 @@ mod tests {
         short[4..12].copy_from_slice(&300u64.to_le_bytes());
         short[12..16].copy_from_slice(&0u32.to_le_bytes());
         assert_eq!(inspect(&short).unwrap().keys, Some(300));
+    }
+
+    #[test]
+    fn a_dict_index_in_a_character_code_inspects_to_the_whole_blob() {
+        // Five thousand keys out of a hundred ideographs: a corpus the build spells in a code.
+        let mut x = 7u32;
+        let keys: Vec<String> = (0..5000)
+            .map(|i| {
+                (0..2 + i % 4)
+                    .map(|_| {
+                        x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                        char::from_u32(0x4E00 + (x >> 16) % 100).unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+        let idx = crate::DictIndex::build(&keys).unwrap();
+        let blob = idx.to_bytes();
+        let i = inspect(&blob).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.bytes),
+            (
+                BlobKind::DictIndex,
+                "BDX4",
+                Some(idx.len() as u64),
+                blob.len() as u64
+            )
+        );
+        // The code is the last section, and a blob cut inside it is truncated.
+        let chars = idx.sections().chars as usize;
+        assert!(chars > 0);
+        assert!(inspect(&blob[..blob.len() - 1]).is_err());
+        let mut long = blob.clone();
+        long[62..66].copy_from_slice(&(blob.len() as u32).to_le_bytes());
+        assert!(inspect(&long).is_err(), "a code longer than the blob");
     }
 
     #[test]

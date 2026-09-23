@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` spells keys mostly outside ASCII in a character code of their own, and such a blob
+  is 6.7–17.9 % smaller.** UTF-8 spends three bytes on a Chinese character and two on a Cyrillic
+  letter, and the dictionary's symbol tables win back only part of that. A build now counts the
+  characters its keys hold and, where they are mostly outside ASCII, may respell every key in a
+  code fitted to them: the most frequent characters a byte each, the rest two. The codewords rise
+  with the characters and none is a prefix of another, so coded keys sort exactly as the keys do —
+  ids stay ranks, a prefix stays a prefix, and every query answers as it did, a query holding a
+  character the code does not spell included. The code is kept only where it pays: it has to take a
+  tenth off the keys, table included, and a twentieth of what it saves has to cover the table,
+  because the codec behind it removes much of the same redundancy on its own. At the default block,
+  jieba's 349 045-word lexicon goes from 3.653 to 3.040 bytes a key (−16.8 %) — under
+  `marisa-trie`'s smallest setting on it, 3.58, which was smaller than 4.2's blob — a million
+  Chinese Wikipedia titles from 6.270 to 5.851 (−6.7 %) and a million Russian ones from 7.664 to
+  6.862 (−10.5 %); at 100 000 keys the three come out 17.6, 9.2 and 14.2 % smaller. English
+  titles, words, paths, PyPI names, URLs, identifiers and domains take no code and write the blob
+  4.2 wrote, byte for byte. The bar is conservative on a small corpus: three thousand random keys
+  over two thousand ideographs would have come out 4.1 % smaller coded, and are kept in UTF-8.
+- **A blob in a character code is `BDX4`**: `BDX3`'s layout with the code appended as its last
+  section, its length in four header bytes `BDX3` reserved. 4.3 reads every `BDX3`, and a build that
+  takes no code still writes one. **4.2 and earlier refuse a `BDX4`**, and with it a
+  `HashedDictIndex` whose dictionary is one, so a reader has to be on 4.3 before the first such
+  build reaches it. `DictSections::chars` and `lexindex inspect --sections` say what the code weighs.
+- **`plan()` prices the code**: it chooses one off its two draws as a build would off the corpus,
+  spells the draws in it and scales the corpus's shape by what the spelling did to them. On the three
+  corpora above the `DictIndex` estimate lands within +1.6 to +3.1 %, −3.2 to −3.9 % and −0.3 to
+  −0.6 % of the built blob across the three priced blocks, where an estimate priced in UTF-8 would
+  carry what the code saves as its error.
 - **`StringIndex` reads its transducer one step at a time.** `id`, `contains`, `ids_of` and every
   prefix walk — `common_prefix`, `longest_prefix`, `occurrences`, `for_each_common_prefix` — went
   through the `fst` crate's node decoder, which reads a whole node — its pack sizes, transition

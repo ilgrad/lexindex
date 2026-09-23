@@ -67,6 +67,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod blob;
+mod charcode;
 #[cfg(feature = "mph")]
 mod mphf;
 mod pages;

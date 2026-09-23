@@ -279,9 +279,10 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   before its suffixes — the suffixes under a 255-symbol FSST-style table (its own format) trained
   on the index's own suffixes; a lookup walks the microblock heads to one microblock, rules most
   of its entries out by the header alone and compares the rest against the probe without decoding
-  them.
+  them. Keys mostly outside ASCII are first respelled in an order-keeping code of one or two bytes a
+  character (`BDX4`), which takes Chinese and Russian corpora 6.7–17.9 % smaller.
 - **`HashedDictIndex` stores the rank at the perfect hash's slot.** One bit-packed value a key,
-  `⌈log2 n⌉ + fingerprint_bits` wide, beside the dictionary's own `BDX3` blob embedded byte for byte:
+  `⌈log2 n⌉ + fingerprint_bits` wide, beside the dictionary's own `BDX3` or `BDX4` blob embedded byte for byte:
   `id` never reads the dictionary, and nothing ordered reads the hash.
 - **`CompactHashIndex` stores no keys.** A minimal perfect hash plus one `fingerprint_bits`-wide
   fingerprint per slot from a second, uncorrelated hash — a design rate of about `2^-bits`, not a

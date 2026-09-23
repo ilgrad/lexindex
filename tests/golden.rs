@@ -470,6 +470,9 @@ fn the_fuzz_shims_accept_a_real_blob() {
     // refused at the magic now, which is a path a mutation can still reach.
     let dict = std::fs::read(data("golden-4.0.0-dict.bdx")).unwrap();
     assert!(lexindex::fuzzing::load_dict(&dict));
+    let coded = std::fs::read(data("golden-4.3.0-dict.bdx")).unwrap();
+    assert!(lexindex::fuzzing::load_dict(&coded));
+    assert!(lexindex::fuzzing::inspect(&coded));
     assert!(!lexindex::fuzzing::load_dict(&closed));
     assert!(!lexindex::fuzzing::parse_closed_frame(&dict));
     for old in ["golden-2.0.0-dict.bdx", "golden-2.2.0-dict.bdx"] {
@@ -782,6 +785,76 @@ fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     assert_eq!(walked, sorted);
 }
 
+/// The keys `golden-4.3.0-dict.bdx` was built from: Russian words, Chinese words and a third of
+/// them with a number, from a fixed generator. A corpus a build spells in a character code — the
+/// letters and the most frequent ideographs a byte each, the rest two — which the golden keys,
+/// ASCII but for four, are not.
+fn coded_keys() -> Vec<String> {
+    let mut x = 7u32;
+    let mut next = |m: u32| {
+        x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        (x >> 16) % m
+    };
+    (0..2000)
+        .map(|i| {
+            let (base, span, len) = match i % 2 {
+                0 => (0x430, 32, 3 + next(6)),
+                _ => (0x4E00, 110, 2 + next(3)),
+            };
+            let mut key: String = (0..len)
+                .map(|_| char::from_u32(base + next(span)).unwrap())
+                .collect();
+            if i % 3 == 0 {
+                key.push('-');
+                key.push_str(&next(1000).to_string());
+            }
+            key
+        })
+        .collect()
+}
+
+/// The first blob written in a character code, pinned like the one without: `BDX4` is `BDX3`
+/// with the keys respelled and the code appended, and a build decides both deterministically.
+/// Queries holding a character the code does not spell have to miss without disturbing the order.
+#[test]
+fn the_coded_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
+    let keys = coded_keys();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    sorted.dedup();
+    let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
+    let path = data("golden-4.3.0-dict.bdx");
+    let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&fresh[..4], b"BDX4");
+    assert!(
+        stored == fresh,
+        "golden-4.3.0-dict.bdx changed; regenerate {}",
+        path.display()
+    );
+    let idx = lexindex::DictIndex::load(&path).unwrap();
+    assert!(idx.sections().chars > 0);
+    assert_eq!(idx.len(), sorted.len());
+    for (rank, key) in sorted.iter().enumerate() {
+        assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
+        assert_eq!(
+            idx.key(rank as u64).as_deref(),
+            Some(key.as_str()),
+            "{rank}"
+        );
+    }
+    // `ё`, capitals and ideographs past the hundred and ten are spelled by nothing in the code.
+    for stranger in ["ёж", "Москва", "龍", "北", "", "-", "а-0"] {
+        let rank = sorted.partition_point(|k| k.as_str() < stranger) as u64;
+        let member = sorted
+            .binary_search_by(|k| k.as_str().cmp(stranger))
+            .is_ok();
+        assert_eq!(idx.id(stranger), member.then_some(rank), "{stranger:?}");
+        assert_eq!(idx.lower_bound(stranger), rank, "{stranger:?}");
+    }
+    let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+    assert_eq!(walked, sorted);
+}
+
 /// The byte split of the pinned dictionary blob accounts for all of it, and says the same thing
 /// about the same bytes as it did when the blob was written. A section that starts drifting is a
 /// format change nobody declared.
@@ -909,6 +982,18 @@ fn every_golden_blob_inspects_from_its_header() {
         (BlobKind::DictIndex, "BDX1", Some(1000), None, None, None)
     );
     assert!(dict.arena_bytes.unwrap() < dict.bytes);
+    // The dictionary of 4.3 in a character code, which is its last section.
+    let coded = inspect_file(data("golden-4.3.0-dict.bdx")).unwrap();
+    assert_eq!(
+        (coded.kind, coded.format.as_str(), coded.keys),
+        (BlobKind::DictIndex, "BDX4", Some(1996))
+    );
+    assert_eq!(
+        coded.bytes,
+        std::fs::metadata(data("golden-4.3.0-dict.bdx"))
+            .unwrap()
+            .len()
+    );
     // The hash blobs of 1.0 to 2.0 are refused the way the loaders refuse them — old, not
     // corrupt — while their standalone perfect-hash tables still inspect: a table is keyed on
     // nothing but the hashes it was handed.

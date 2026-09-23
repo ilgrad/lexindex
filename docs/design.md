@@ -340,9 +340,10 @@ selects branchlessly, and its two searches are independent chains where a descen
 serial.
 
 The serialised blob is a 72-byte header — `[magic "BDX3"][n][block][head bytes][data bytes]
-[codec bytes][payload][offset widths][micro][shard][header-code bytes][g][dictionary bytes][check]`
-— then the heads, the packed head ends, the block data, the suffix codecs, the header
-codes, the phrase dictionary, the packed block starts and the packed microblock starts; the loader
+[codec bytes][payload][offset widths][micro][shard][header-code bytes][g][dictionary bytes]
+[character-code bytes][check]` — then the heads, the packed head ends, the block data, the suffix
+codecs, the header codes, the phrase dictionary, the packed block starts, the packed microblock
+starts and, in a `BDX4` blob, the character code (below); the loader
 checks every length, both checksums, the codecs, the dictionary and the arrays' order before
 anything is trusted, and the block data — bounded on every read rather than validated up front — is
 what the fuzz target queries after loading. Everything from the codecs on comes after the data
@@ -365,6 +366,45 @@ and a lookup that did not move (2.666 bytes a key to 2.635 on words at the defau
 there are no automata, so a fuzzy question is `StringIndex`'s — but prefix and range are not
 automaton questions here, they are two `lower_bound`s and a walk, and this index answers them
 itself: `prefix_id_range` costs two order lookups whatever the number of matches.
+
+**Keys mostly outside ASCII are respelled before any of that.** UTF-8 spends three bytes on a
+Chinese character and two on a Cyrillic letter, and a symbol table wins back only part of it: a
+Chinese key of three characters still reaches it as nine bytes, and a Russian title spends a byte on
+every letter that says only which half of the Cyrillic block the letter is in. A build counts the
+characters its keys hold and may respell every key in a code fitted to them: the most frequent
+characters a byte each, the rest two, a lead byte naming a page of them and a second byte the
+character's place in it. The codewords ascend with the characters, and a lead says on its own
+whether a second byte follows, so coded keys sort exactly as the keys do: ids stay ranks, a prefix
+of a key is a prefix of its code, and a probe spelled the same way is compared byte for byte by a
+codec that did not change. A query holding a character the code does not spell is no key and still
+has a place in the order, which the first codeword above the missing character marks. Every byte of
+the code stays below `0x80` wherever the alphabet fits 128 pages of 128, and that is half of what it
+buys: a shard whose suffixes use no high byte is stored at seven bits a byte by the packed codec,
+which on jieba's lexicon is 6 of the 17 points the code takes off. Past that, ASCII stays itself and
+up to 32 768 other characters take leads from `0x80`.
+
+The code is kept where it pays, decided on counts rather than on a trial build. The keys have to come
+out a tenth smaller, table included, which no corpus mostly in ASCII comes near. And a twentieth of
+what the code saves has to cover its table, because the dictionary's own codec takes out much of the
+same redundancy: of what the code saved on jieba's lexicon, Chinese titles and Russian ones, 22, 11
+and 5 % was still saved in the blob. Characters with a byte of their own are kept only where together
+they are a tenth of what is written. Below that a single saves little and costs the headers their
+regularity — a Chinese key under pages alone is two bytes a character, so every shared prefix and
+suffix length is even, and the twenty singles jieba's lexicon could afford took it from 16.8 %
+smaller to 15.3 — while Russian titles, whose letters are 96 % of what they write, are 10.5 %
+smaller with them and 2.2 % *larger* without. At the default block the lexicon goes from 3.653 to
+3.040 bytes a key, a million Chinese titles from 6.270 to 5.851 and a million Russian ones from
+7.664 to 6.862; English titles, words, paths, PyPI names, URLs, identifiers and domains keep their
+blob byte for byte. The second bar is conservative where the table is a large share of the keys:
+three thousand random keys over two thousand ideographs would have come out 4.1 % smaller coded, and
+are kept in UTF-8.
+
+A blob in a code is `BDX4`: `BDX3`'s layout with the code appended last and its length in four header
+bytes `BDX3` reserved. A magic of its own rather than a flag in those bytes, because 4.2 did not read
+them and would have compared an uncoded query against coded keys; a magic it does not know, it
+refuses. The code is validated whole on load — its mode, its page widths, ascending scalar values and
+nothing left over — and a stored key that does not decode ends a walk and fails `key`, as the
+corrupted blob it is.
 
 ## `HashedDictIndex`
 
@@ -396,7 +436,7 @@ side table matched on the full second hash before the rank table is read, exact 
 width. The same dictionary and width give the same blob, byte for byte.
 
 The serialised blob is a 48-byte header — `[magic "BHD1"][n][fingerprint_bits][dictionary bytes]
-[mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` blob unchanged, the MPH blob,
+[mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` or `BDX4` blob unchanged, the MPH blob,
 the rank table and the side table. Embedding the dictionary verbatim keeps one loader for it: the
 region goes to `DictIndex`'s own, which checks it as it checks a standalone blob, and the pair is
 refused if the dictionary's key count and the header's disagree. `load_mmap` borrows the
@@ -644,6 +684,13 @@ candidates within 1.3× of each other, which is inside what an estimate can sepa
 the plan says to build both and measure, which is the same advice this document gives everywhere
 else.
 
+The score above predates the character code a build may spell a corpus in. A plan chooses the code
+off both draws as a build chooses it off the corpus, spells the draws in it, and scales the corpus's
+lengths and shared prefixes by what the spelling did to the draws; on jieba's lexicon, a million
+Chinese titles and a million Russian ones the estimate then lands at +1.6 to +3.1 %, −3.2 to −3.9 %
+and −0.3 to −0.6 % across the three priced blocks, where an estimate priced in UTF-8 would carry
+what the code saves as its error.
+
 ## Versioning
 
 Semantic versioning, with one qualification that matters more here than the API does: **a blob format
@@ -661,7 +708,10 @@ old blob can be turned back into the key list that rebuilds it. `BDX3` is the fi
 under it: it is a third smaller than `BDX2` on the corpora the dictionary is aimed at and shares no
 section layout with it, so 4.0 refuses `BDX2` by name rather than carry a second reader. The way
 back is that `BDX2` stores every key: 3.x answers `key(id)` over the whole blob, so a loop on the
-installed 3.x writes the key list and 4.0 builds from it. `lexindex dump` makes that loop a
+installed 3.x writes the key list and 4.0 builds from it. `BDX4` (4.3) is the rule working as
+meant: a new writer for the corpora a character code pays on, `BDX3` still written for every other
+and read from every version that wrote one, and a reader older than 4.3 refusing the new magic
+rather than misreading it. `lexindex dump` makes that loop a
 subcommand, but it is 4.0's — 3.0.0 shipped `plan`, `build` and `inspect` only — so the rule buys
 the *next* format change a one-liner, not this one. [Upgrading to 4.0](migration-4.md) is the
 worked path.
@@ -705,7 +755,8 @@ or — never — read it wrong.
 | `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
-| `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` blob, read by `DictIndex`'s loader |
+| `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
+| `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8`, `BCL2` and `BHD1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 

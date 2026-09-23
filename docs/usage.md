@@ -898,6 +898,7 @@ sections.heads: 4282 (0.0089 B/key, 0.36 %)
 sections.head_ends: 659 (0.0014 B/key, 0.05 %)
 sections.block_offsets: 1128 (0.0024 B/key, 0.09 %)
 sections.micro_offsets: 22501 (0.0469 B/key, 1.87 %)
+sections.chars: 0 (0.0000 B/key, 0.00 %)
 sections.restart_headers: 9845 (0.0205 B/key, 0.82 %)
 sections.restart_wide: 794 (0.0017 B/key, 0.07 %)
 sections.restart_codes: 47107 (0.0982 B/key, 3.91 %)
@@ -914,10 +915,11 @@ Read it as four groups. The **codes** are the front-coded suffixes under whichev
 settled on, which is what the index is for. The **headers** are the `(lcp, len)` stream and the
 varints of the pairs no code could name — 0.75 bytes a key here against the flat 0.97 `BDX2` spent,
 a quarter of the blob on this corpus and near half of it on dense decimal ids, since there is almost
-nothing else to store. The **vocabulary** — the symbol tables, the code each shard's headers took
-and the phrase dictionary — is 0.66 % here, and is the part that grows with the shards rather than
-with the keys. The **directory** — the three packed offset arrays and the block heads — is 2.7 % at
-this block and never more than a few per cent, which is worth knowing before optimising it. The
+nothing else to store. The **vocabulary** — the symbol tables, the code each shard's headers took,
+the phrase dictionary and, in a `BDX4` blob, the character code its keys are spelled in — is
+0.66 % here, and is the part that grows with the shards rather than with the keys. The
+**directory** — the three packed offset arrays and the block heads — is 2.7 % at this block and
+never more than a few per cent, which is worth knowing before optimising it. The
 per-block samples the opening search reads are not in the list because they are not in the blob:
 eight bytes of a head each, built from the heads at load. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
 The same numbers are on [`DictSections`](https://docs.rs/lexindex/latest/lexindex/struct.DictSections.html)
