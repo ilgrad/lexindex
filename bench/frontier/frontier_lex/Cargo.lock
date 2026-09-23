@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "lexindex"
-version = "4.1.1"
+version = "4.2.0"
 dependencies = [
  "fst",
  "memmap2",
