@@ -300,31 +300,39 @@ turns out to be the only row a reader can carry to their own corpus without meas
 | `opaque` | 16.0 | 0.24 | 1.24 | 10.43 | 10.40 | **10.29** | 21.44 | 18.23 | 15.55 | 15.55 | 18.82 | 19.04 |
 | `paths` | 125.0 | 0.24 | 1.24 | 10.32 | 9.87 | 9.32 | 17.48 | 9.26 | 9.04 | **8.83** | 9.47 | 9.60 |
 | `titles-en` | 21.0 | 0.24 | 1.24 | 7.44 | 7.37 | **7.21** | 17.28 | 7.79 | 7.52 | 7.49 | 8.19 | 8.37 |
-| `titles-ru` | 35.8 | 0.24 | 1.24 | 7.79 | 7.66 | **7.45** | 31.75 | 8.07 | 7.67 | 7.61 | 8.61 | 8.77 |
-| `titles-zh` | 16.9 | 0.24 | 1.24 | 6.32 | 6.27 | **6.12** | 17.52 | 6.33 | 6.22 | 6.22 | 6.54 | 6.70 |
+| `titles-ru` | 35.8 | 0.24 | 1.24 | 6.92 | 6.86 | **6.70** | 31.75 | 8.07 | 7.67 | 7.61 | 8.61 | 8.77 |
+| `titles-zh` | 16.9 | 0.24 | 1.24 | 5.89 | 5.85 | **5.69** | 17.52 | 6.33 | 6.22 | 6.22 | 6.54 | 6.70 |
 | `urls` | 52.4 | 0.24 | 1.24 | 7.70 | 7.51 | **7.27** | 16.88 | 7.95 | 7.61 | 7.57 | 8.39 | 8.58 |
 | `uuid` | 36.0 | 0.24 | 1.24 | 18.11 | 18.04 | **17.89** | 37.11 | 32.93 | 22.99 | 22.98 | 34.58 | 34.80 |
 
-<sub>The bold cell in a row is the smallest structure that keeps its keys. `words` and `pypi` have
-no million-key file; their 100 000 grid and the 100 000 rows for the rest are in
-[`bench/results/sweep-2026-09-20-arz-8a8778a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-20-arz-8a8778a.json)
-— one run of the whole set, 264 cells, and every column above comes from it, the three `DictIndex`
-blocks included, so this table needs no reconciliation between harnesses. **Sizes only.** That run
-began at a load average of 0.73 / 1.31 / 1.93, the decay of the build before it, and its timings
-read 5–15 % slower than the run below on every structure, controls included — so the lookup table
-keeps the earlier artifact instead of borrowing this one's, and the sizes, which no load can move,
-come from here.</sub>
+<sub>The bold cell in a row is the smallest structure that keeps its keys. `words`, `pypi` and
+`jieba-dict` have no million-key file; their 100 000 grid and the 100 000 rows for the rest are in
+[`bench/results/sweep-2026-09-23-arz-4f2a0e9.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-23-arz-4f2a0e9.json)
+— one run of the whole set at 4.3.0, 275 cells, and every column above comes from it, the three
+`DictIndex` blocks included, so this table needs no reconciliation between harnesses. **Sizes
+only.** That run shared the machine with an editor and ended at a load average of 2.17, so its
+timings are not published: the lookup table keeps the earlier artifact instead of borrowing this
+one's, and the sizes, which no load can move, come from here. Of the 264 cells it shares with the
+4.0.0 run before it
+([`sweep-2026-09-20-arz-8a8778a.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep-2026-09-20-arz-8a8778a.json)),
+252 read the same to the byte; the twelve that moved are the `DictIndex` cells of `titles-ru` and
+`titles-zh`.</sub>
 
 **`DictIndex` is the smallest key-storing structure on ten of these eleven corpora**, measured
-against marisa's *best* setting on each and not its default. The margin runs from 1.6 % on
-`titles-zh` (6.12 against 6.22) and 2–5 % on `titles-ru`, `titles-en`, `urls` and `idents`, to 10 %
-on `domains`, 28 % on `uuid`, 51 % on `opaque`, 77 % on `numeric` and 78 % on `dna`. The eleventh is
+against marisa's *best* setting on each and not its default. The margin runs from 3.9 % on
+`titles-en` (7.21 against 7.49) and 4–5 % on `urls` and `idents`, through 9 % on `titles-zh`, 10 %
+on `domains` and 14 % on `titles-ru`, to 28 % on `uuid`, 51 % on `opaque`, 77 % on `numeric` and
+78 % on `dna`. The eleventh is
 `paths`, where a million paths run through a few thousand directories and marisa at sixteen tries
 holds 8.83 against 9.32 — 5.3 % — which is what a LOUDS trie is for and what front coding in fixed
 blocks still does not answer. Through 3.0.0 this table read the other way round, marisa smallest on
 nine of the eleven; the `BDX3` codec is what turned it, and 4.0.0's phrase work moved all 72
 `DictIndex` cells of the sweep again — 71 of them down, `domains` by 4.9 % and `paths` by 3.0 %,
-with `titles-zh` at 1024 keys a block the one cell that grew, by 0.05 %.
+with `titles-zh` at 1024 keys a block the one cell that grew, by 0.05 %. 4.3.0's character code
+moved twelve and nothing else: `titles-ru` 10.1–11.1 % smaller at a million keys and 13.8–14.7 % at
+100 000, `titles-zh` 6.7–7.0 % and 9.2–9.3 %, which took their margins from 2.2 % and 1.6 % to 14 %
+and 9 %. A code can only pay where two bytes in fifteen or more are outside ASCII, so the Latin
+corpora keep their blobs byte for byte.
 
 **Its floor is eight or sixteen tries on nine of the eleven, not the four this page quoted through
 3.0.0.** The recursion keeps paying wherever the keys share — `titles-ru` 8.07 → 7.61, `urls`
@@ -340,8 +348,8 @@ where the setting buys nothing the two are level. Marisa's smallest configuratio
 `opaque` (10.29 against 15.55) and by more than that on `dna` and `numeric` — keys with nothing to
 share, where a trie pays for a node per character and front coding pays for a prefix that is not
 there. Where the keys do share, the lead is a couple of per cent and a tuned marisa is the thing to
-measure against: on `titles-ru`, `urls` and `titles-en` the two are within 5 % of each other, and
-`paths` is still marisa's. On `words`, the corpus every table above is measured on, `DictIndex` at
+measure against: on `urls` and `titles-en` the two are within 5 % of each other, and `paths` is
+still marisa's. On `words`, the corpus every table above is measured on, `DictIndex` at
 its default block is 3.33 against marisa's 3.70 at 100 000 keys and 2.64 against 2.96 on the full
 479 823 — and there four tries really is marisa's floor, eight and sixteen reading 3.71 and 3.74.
 Read the spread between `dna` and `paths` as the honest range: which is smaller is a property of the
@@ -447,7 +455,9 @@ bought fewer neighbourhoods to train on, and `titles-en` at 1024 came out above 
 only**, on the same terms as the million-key table: this run shared the machine with an editor and
 its timings are not published. Every marisa cell reads to the hundredth what the 2026-09-13 and
 2026-09-19 runs read — a size is exact, so three runs agree wherever the builder did not move, and
-what moved is ours.</sub>
+what moved is ours. Run again at 4.3.0
+([`sweep10m-2026-09-23-arz-4f2a0e9.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-23-arz-4f2a0e9.json)),
+all 66 cells read the same to the byte: the character code takes none of these six corpora.</sub>
 
 ### A cold mapping, and what is actually resident
 

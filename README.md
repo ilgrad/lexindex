@@ -71,7 +71,7 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
   count it (119 840)**. Every block from 32 to 1024 comes in **under every `marisa-trie` setting
   measured on this corpus** — 2.85 down to 2.51 against its 2.96–3.07. Over the eleven-corpus sweep
   at a million keys it is the smaller of the two on **ten**, against marisa's *best* setting on each
-  and not its default: 1.6 % on `titles-zh` up to 78 % on `dna`, with `paths` the one it loses, by
+  and not its default: 3.9 % on `titles-en` up to 78 % on `dna`, with `paths` the one it loses, by
   5.3 %. At those same settings it answers faster on all but `numeric` too, 1.5–5.7×. Exact queries,
   every id back to its key, small.
 - **`HashedDictIndex`** — a `DictIndex` whose `id` is a hash: the dictionary kept whole, and beside
