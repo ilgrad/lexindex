@@ -296,7 +296,7 @@ then still a byte an entry, so the file was byte for byte the same length — `i
 keys a block and 15 % at 256, with `key_into` unchanged.
 
 `id` is a binary search over the samples — a flat array, eight bytes a block, built at load — then over the
-heads of the few blocks whose sample equals the probe's, then the block's restarts and one of its
+heads of the few blocks whose sample equals the probe's, if any does, then the block's restarts and one of its
 microblocks, neither decoding anything: an entry's stored suffix is compared against the probe
 symbol by symbol, eight bytes at a time, and the shared-prefix length alone decides most entries —
 shorter than what the probe has matched so far means the entry is past the probe, longer means it is
@@ -327,6 +327,19 @@ lookup and the in-block scan is the rest** — 37.1 ns of it the two binary sear
 samples, 48 the head boundary. A sparser probe stream moves the second and not the first: at 20 000
 probes rather than two million the head boundary nearly doubles, the heads and the block starts no
 longer staying resident between lookups, while the sample search does not move.
+
+Since 4.3.3 a lookup pays the head boundary only where the samples leave it open. A block whose
+sample is below the probe's has its head below the probe, and one whose sample is above has its head
+above, so only a run of blocks sharing the probe's sample leaves heads to compare; every lookup had
+also compared the head of the block before that run — one more dependent load and a `memcmp`, for a
+block the samples had already chosen. Few probes land in a run: from 0.4 % on numeric keys, opaque
+ids and UUIDs, where only a probe that is itself a block's head does, to 12.4 % on URLs. Paths are
+the exception, and the gap `g` leaves open: every path shares one byte, past which the samples tie
+3 899 blocks of 3 907, as the URLs' did before `g` — so every path lands in a run and is routed by
+the heads alone. Against 4.3.2 in one process, in two builds of the harness
+([`bench/results/id-ab-2026-09-24-arz-af19cb7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-af19cb7.txt)),
+`id` is 2.7–5.5 % faster on eight of the eleven corpora that take no code, 0.9–4.3 % on identifiers
+and UUIDs, and level on paths.
 
 That split is the other half of the block ladder: a larger block spends less on the search and more
 on the scan, one for one, so past a million keys `id` barely moves across the ladder while on the
@@ -403,11 +416,25 @@ it. Decoding is two reads and a four-byte store a codeword, out of a table of th
 codeword's first byte can take and one of every character's UTF-8, and what it writes is whole
 characters, which need no second check. Measured against 4.2.0 in one process, in two builds of the
 harness, `key_into` reads as fast as it did — 2.5–3.3 % faster on the Russian titles, within 2 % on
-the Chinese ones, level on the lexicon — and `id` is 1–2 % slower on the Russian titles,
-6–8 % on the Chinese ones and 3–4 % faster on the lexicon. Spelling the query is all of what `id`
-still pays on the Russian titles and two thirds of the extra instructions on the Chinese ones.
-4.3.0, whose decoder found each codeword's lead among the leads and checked the key again, was up to
-23 % slower on `key_into` and 13 % on `id`. A blob that takes no code reads within 2 % of 4.2.
+the Chinese ones, level on the lexicon. 4.3.0, whose decoder found each codeword's lead among the
+leads and checked the key again, was up to 23 % slower on `key_into` and 13 % on `id`. A blob that
+takes no code reads within 2 % of 4.2.
+
+`id` hides the spelling where it can. Counted per query on the Chinese titles, the search in code
+costs fewer cycles than 4.2's search in UTF-8; what `id` paid over 4.2 was the spelling — 342
+instructions, some 130 cycles — run before the first step of the search could issue. The code keeps
+order, so the blocks a query falls between are the same whether the samples are taken from the
+heads as coded or as decoded, and a coded blob's loader takes both. Where the decoded samples tie no
+more blocks than the coded ones — on the Chinese titles 51 of 3 907 against 70, on the lexicon none
+either way — `id` searches them with the query's own UTF-8 and spells it while that search waits on
+its loads. The Russian titles tie 659 decoded against 161 coded, eight bytes of UTF-8 being four
+letters, and keep the coded route. Against 4.2.0 in one process, in two builds of the harness
+([`bench/results/id-ab-2026-09-24-arz-af19cb7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-af19cb7.txt)),
+`id` is level on the Chinese titles (−0.5 and +0.3 %, where 4.3.2 was 6 % slower), 0.8–2.7 % slower
+on the Russian ones and 7–8 % faster on the lexicon. The batch does not hide it: `ids_of` is
+2.8–4.5 % slower than 4.2.0 on the Chinese titles and 1.2–2.4 % on the Russian ones. On all three
+corpora a batch is slower than a loop of `id` in every version measured — the index is in the
+last-level cache and there is little wait to overlap — so the spelling has nothing to run beside.
 
 A blob in a code is `BDX4`: `BDX3`'s layout with the code appended last and its length in four header
 bytes `BDX3` reserved. A magic of its own rather than a flag in those bytes, because 4.2 did not read

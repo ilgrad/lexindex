@@ -1,0 +1,194 @@
+local/idfast at af19cb7 (a coded blob routes the query's own UTF-8, and no lookup reads a head the
+samples settle): what `DictIndex::id` and `ids_of` cost at the default block in three builds of the
+library over the same keys, in one process --
+
+  4.2.0     from crates.io; every blob `BDX3`
+  4.3.2     the tag v4.3.2; `BDX4` where the character code pays
+  af19cb7   the tree under test, which has to write 4.3.2's blob byte for byte -- the harness
+            asserts that on every corpus
+
+Fourteen of the files `bench/corpora.json` names: the thirteen corpora of the million-key frontier
+and jieba's lexicon (349 045 keys). Three of them take the character code: jieba's lexicon and the
+million Chinese and Russian titles. Per corpus, 200 000 probes, every one a hit, shuffled with a
+fixed seed and laid end to end in one arena so that the probes' own bytes stream. Before any timing,
+the ids every build's `id` and `ids_of` give over the probes are checked to sum alike, and the
+first 20 000 probes' ids to agree one by one. Each build's index is loaded from its blob twice, so that one placement
+in physical memory is not mistaken for the code; within a load, an untimed pass of every op, then
+five rounds of the seven ops -- a `HashMap<&str, u64>` lookup of the same probes as the control,
+which no build can move, then `id` in each build, then `ids_of` in each -- in that order and then in
+the reverse one, every timed pass right after an untimed pass of the same op. 20 timed passes an op;
+each line gives the median and, in brackets, the minimum, in ns a probe. `id` takes a `&str` and is
+called in a loop; `ids_of` takes the 200 000 probes as one slice.
+
+The whole run was taken twice, by two builds of the harness whose code layout differs -- the second
+has its functions in the reverse order behind a padding function -- since on a probe loop like this
+alignment alone moves a few per cent. Both are below. Built release, thin LTO, one codegen unit.
+
+AMD Ryzen 7 5800HS (8 cores, 16 MB L3), 38 GiB DDR4-3200 in unequal channels (layout not read here
+-- needs root; the physical placement of each load not recorded), Fedora 44, Linux
+7.2.7-200.fc44.x86_64, rustc 1.98.1, governor powersave. The run started only once a readiness
+check passed -- one-minute load 0.36, no swap in use, no other process over 15 % CPU, 5.3 h up
+after a reboot -- and the hottest thermal zone read under 70 C: 50 C at the start of each build's
+run, which the second waited for, and 93 C at the end of each. The one-minute load at the end, 1.03,
+is the run's own.
+
+How far to trust a line: across the two builds, 4.2.0's own `id` lines agree within 2.3 % on
+thirteen corpora of the fourteen, and its `ids_of` lines within 4.7 %. The fourteenth is idents in
+the first build, where every line of the row, the control's included, reads 9-25 % above the second
+build's -- something outside the code, and that row's ratios are out of line with the second
+build's. The control's median moves by up to 32 % between the two processes on the four smallest
+corpora (jieba, words, numeric, pypi), where a `HashMap` lookup is fastest and each process builds
+its own table, and within 3.3 % on the other nine. So a difference of two or three per cent between
+builds of the library means something only inside one run, where they alternate, and only where
+both harness builds agree on it.
+
+== harness build 1
+thermals at start: acpitz 50, iwlwifi_1 38
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.2 and af19cb7 BDX4 5851205 B
+  control   188.9 [ 184.3]
+  id       4.2.0  351.3 [ 345.0]  4.3.2  373.7 [ 368.4]  af19cb7  352.3 [ 348.5]  vs 4.2.0  +0.3 %  vs 4.3.2  -5.7 %
+  ids_of   4.2.0  384.1 [ 379.5]  4.3.2  437.5 [ 432.5]  af19cb7  401.4 [ 397.9]  vs 4.2.0  +4.5 %  vs 4.3.2  -8.3 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.2 and af19cb7 BDX4 6861688 B
+  control   225.2 [ 223.0]
+  id       4.2.0  384.4 [ 381.3]  4.3.2  399.5 [ 397.9]  af19cb7  387.6 [ 384.2]  vs 4.2.0  +0.8 %  vs 4.3.2  -3.0 %
+  ids_of   4.2.0  425.1 [ 419.8]  4.3.2  499.7 [ 497.4]  af19cb7  435.4 [ 430.8]  vs 4.2.0  +2.4 %  vs 4.3.2 -12.9 %
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.2 and af19cb7 BDX4 1061163 B
+  control    62.0 [  55.8]
+  id       4.2.0  289.5 [ 285.5]  4.3.2  284.5 [ 279.5]  af19cb7  266.3 [ 261.5]  vs 4.2.0  -8.0 %  vs 4.3.2  -6.4 %
+  ids_of   4.2.0  337.1 [ 328.3]  4.3.2  339.9 [ 328.1]  af19cb7  319.0 [ 312.4]  vs 4.2.0  -5.3 %  vs 4.3.2  -6.1 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.2 and af19cb7 BDX3 7370097 B
+  control   200.9 [ 193.3]
+  id       4.2.0  359.9 [ 357.3]  4.3.2  356.4 [ 354.6]  af19cb7  343.6 [ 339.7]  vs 4.2.0  -4.5 %  vs 4.3.2  -3.6 %
+  ids_of   4.2.0  393.6 [ 391.6]  4.3.2  394.6 [ 392.6]  af19cb7  382.8 [ 377.6]  vs 4.2.0  -2.8 %  vs 4.3.2  -3.0 %
+words-full: 479823 keys, 200000 probes; 4.2.0 BDX3 1264362 B, 4.3.2 and af19cb7 BDX3 1264362 B
+  control   106.9 [ 100.9]
+  id       4.2.0  288.3 [ 286.9]  4.3.2  291.8 [ 290.3]  af19cb7  277.6 [ 276.1]  vs 4.2.0  -3.7 %  vs 4.3.2  -4.9 %
+  ids_of   4.2.0  328.8 [ 326.6]  4.3.2  331.3 [ 329.9]  af19cb7  314.7 [ 313.1]  vs 4.2.0  -4.3 %  vs 4.3.2  -5.0 %
+dna-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 4374995 B, 4.3.2 and af19cb7 BDX3 4374995 B
+  control   210.0 [ 199.1]
+  id       4.2.0  260.6 [ 255.6]  4.3.2  256.4 [ 254.3]  af19cb7  248.5 [ 246.9]  vs 4.2.0  -4.7 %  vs 4.3.2  -3.1 %
+  ids_of   4.2.0  303.3 [ 302.1]  4.3.2  301.4 [ 300.7]  af19cb7  292.6 [ 291.7]  vs 4.2.0  -3.6 %  vs 4.3.2  -2.9 %
+domains-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 4499605 B, 4.3.2 and af19cb7 BDX3 4499605 B
+  control   186.3 [ 164.2]
+  id       4.2.0  323.1 [ 318.5]  4.3.2  322.5 [ 318.2]  af19cb7  307.1 [ 303.8]  vs 4.2.0  -5.0 %  vs 4.3.2  -4.8 %
+  ids_of   4.2.0  363.7 [ 349.8]  4.3.2  367.3 [ 354.1]  af19cb7  353.8 [ 341.1]  vs 4.2.0  -2.7 %  vs 4.3.2  -3.7 %
+idents-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 5228340 B, 4.3.2 and af19cb7 BDX3 5228340 B
+  control   233.4 [ 222.2]
+  id       4.2.0  405.7 [ 385.4]  4.3.2  401.0 [ 384.2]  af19cb7  397.4 [ 371.1]  vs 4.2.0  -2.0 %  vs 4.3.2  -0.9 %
+  ids_of   4.2.0  431.4 [ 421.9]  4.3.2  430.3 [ 423.8]  af19cb7  436.5 [ 414.3]  vs 4.2.0  +1.2 %  vs 4.3.2  +1.5 %
+numeric-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 1010907 B, 4.3.2 and af19cb7 BDX3 1010907 B
+  control    90.6 [  86.5]
+  id       4.2.0  284.4 [ 283.0]  4.3.2  284.3 [ 282.2]  af19cb7  276.7 [ 274.2]  vs 4.2.0  -2.7 %  vs 4.3.2  -2.7 %
+  ids_of   4.2.0  327.2 [ 325.1]  4.3.2  328.3 [ 325.4]  af19cb7  316.8 [ 315.4]  vs 4.2.0  -3.2 %  vs 4.3.2  -3.5 %
+opaque-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 10398695 B, 4.3.2 and af19cb7 BDX3 10398695 B
+  control   193.2 [ 189.1]
+  id       4.2.0  257.9 [ 253.5]  4.3.2  258.7 [ 256.1]  af19cb7  250.2 [ 248.1]  vs 4.2.0  -3.0 %  vs 4.3.2  -3.3 %
+  ids_of   4.2.0  302.4 [ 300.3]  4.3.2  303.4 [ 301.6]  af19cb7  291.5 [ 290.2]  vs 4.2.0  -3.6 %  vs 4.3.2  -3.9 %
+paths-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 9870918 B, 4.3.2 and af19cb7 BDX3 9870918 B
+  control   280.4 [ 277.2]
+  id       4.2.0  660.7 [ 656.5]  4.3.2  652.0 [ 645.1]  af19cb7  657.7 [ 654.4]  vs 4.2.0  -0.5 %  vs 4.3.2  +0.9 %
+  ids_of   4.2.0  644.8 [ 626.6]  4.3.2  643.8 [ 629.3]  af19cb7  646.3 [ 626.7]  vs 4.2.0  +0.2 %  vs 4.3.2  +0.4 %
+pypi-full: 889864 keys, 200000 probes; 4.2.0 BDX3 3706628 B, 4.3.2 and af19cb7 BDX3 3706628 B
+  control   144.2 [ 137.2]
+  id       4.2.0  330.0 [ 327.1]  4.3.2  330.7 [ 328.3]  af19cb7  318.2 [ 316.7]  vs 4.2.0  -3.6 %  vs 4.3.2  -3.8 %
+  ids_of   4.2.0  374.3 [ 373.6]  4.3.2  379.1 [ 377.6]  af19cb7  368.3 [ 365.8]  vs 4.2.0  -1.6 %  vs 4.3.2  -2.8 %
+urls-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7511038 B, 4.3.2 and af19cb7 BDX3 7511038 B
+  control   250.4 [ 229.8]
+  id       4.2.0  363.2 [ 359.4]  4.3.2  359.5 [ 358.4]  af19cb7  348.1 [ 346.2]  vs 4.2.0  -4.2 %  vs 4.3.2  -3.2 %
+  ids_of   4.2.0  394.8 [ 393.0]  4.3.2  398.9 [ 395.7]  af19cb7  387.5 [ 385.3]  vs 4.2.0  -1.9 %  vs 4.3.2  -2.8 %
+uuid-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 18040375 B, 4.3.2 and af19cb7 BDX3 18040375 B
+  control   214.4 [ 211.0]
+  id       4.2.0  328.7 [ 323.6]  4.3.2  331.2 [ 328.2]  af19cb7  325.5 [ 321.8]  vs 4.2.0  -1.0 %  vs 4.3.2  -1.7 %
+  ids_of   4.2.0  365.9 [ 358.5]  4.3.2  373.7 [ 362.4]  af19cb7  362.7 [ 354.8]  vs 4.2.0  -0.9 %  vs 4.3.2  -2.9 %
+thermals at end: acpitz 93, iwlwifi_1 37
+
+== harness build 2
+thermals at start: acpitz 50, iwlwifi_1 37
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.2 and af19cb7 BDX4 5851205 B
+  control   189.2 [ 182.4]
+  id       4.2.0  354.5 [ 351.6]  4.3.2  377.3 [ 375.2]  af19cb7  352.8 [ 350.8]  vs 4.2.0  -0.5 %  vs 4.3.2  -6.5 %
+  ids_of   4.2.0  391.1 [ 386.4]  4.3.2  437.5 [ 434.9]  af19cb7  402.1 [ 399.8]  vs 4.2.0  +2.8 %  vs 4.3.2  -8.1 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.2 and af19cb7 BDX4 6861688 B
+  control   224.8 [ 202.7]
+  id       4.2.0  383.5 [ 379.2]  4.3.2  404.4 [ 399.5]  af19cb7  393.7 [ 386.1]  vs 4.2.0  +2.7 %  vs 4.3.2  -2.7 %
+  ids_of   4.2.0  428.0 [ 419.2]  4.3.2  495.4 [ 484.7]  af19cb7  433.2 [ 425.5]  vs 4.2.0  +1.2 %  vs 4.3.2 -12.6 %
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.2 and af19cb7 BDX4 1061163 B
+  control    82.1 [  61.1]
+  id       4.2.0  286.8 [ 284.6]  4.3.2  285.1 [ 283.7]  af19cb7  267.5 [ 265.8]  vs 4.2.0  -6.7 %  vs 4.3.2  -6.2 %
+  ids_of   4.2.0  336.2 [ 335.4]  4.3.2  342.1 [ 341.4]  af19cb7  319.3 [ 318.3]  vs 4.2.0  -5.0 %  vs 4.3.2  -6.7 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.2 and af19cb7 BDX3 7370097 B
+  control   199.6 [ 198.1]
+  id       4.2.0  355.9 [ 354.8]  4.3.2  358.0 [ 356.4]  af19cb7  346.0 [ 343.2]  vs 4.2.0  -2.8 %  vs 4.3.2  -3.4 %
+  ids_of   4.2.0  402.1 [ 400.2]  4.3.2  406.2 [ 404.2]  af19cb7  393.7 [ 392.1]  vs 4.2.0  -2.1 %  vs 4.3.2  -3.1 %
+words-full: 479823 keys, 200000 probes; 4.2.0 BDX3 1264362 B, 4.3.2 and af19cb7 BDX3 1264362 B
+  control   119.1 [  94.2]
+  id       4.2.0  291.0 [ 288.9]  4.3.2  293.9 [ 292.6]  af19cb7  279.7 [ 278.3]  vs 4.2.0  -3.9 %  vs 4.3.2  -4.8 %
+  ids_of   4.2.0  337.5 [ 336.8]  4.3.2  340.7 [ 338.1]  af19cb7  323.0 [ 321.7]  vs 4.2.0  -4.3 %  vs 4.3.2  -5.2 %
+dna-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 4374995 B, 4.3.2 and af19cb7 BDX3 4374995 B
+  control   203.7 [ 197.0]
+  id       4.2.0  258.9 [ 255.1]  4.3.2  259.2 [ 257.3]  af19cb7  249.5 [ 248.2]  vs 4.2.0  -3.6 %  vs 4.3.2  -3.7 %
+  ids_of   4.2.0  303.5 [ 302.5]  4.3.2  304.4 [ 303.4]  af19cb7  293.1 [ 292.2]  vs 4.2.0  -3.4 %  vs 4.3.2  -3.7 %
+domains-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 4499605 B, 4.3.2 and af19cb7 BDX3 4499605 B
+  control   189.1 [ 180.6]
+  id       4.2.0  319.7 [ 318.2]  4.3.2  321.9 [ 317.6]  af19cb7  306.9 [ 302.4]  vs 4.2.0  -4.0 %  vs 4.3.2  -4.7 %
+  ids_of   4.2.0  355.1 [ 352.7]  4.3.2  357.0 [ 355.0]  af19cb7  345.6 [ 340.4]  vs 4.2.0  -2.7 %  vs 4.3.2  -3.2 %
+idents-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 5228340 B, 4.3.2 and af19cb7 BDX3 5228340 B
+  control   186.4 [ 174.2]
+  id       4.2.0  361.3 [ 356.3]  4.3.2  359.3 [ 355.0]  af19cb7  344.0 [ 340.1]  vs 4.2.0  -4.8 %  vs 4.3.2  -4.3 %
+  ids_of   4.2.0  395.3 [ 394.1]  4.3.2  396.4 [ 395.5]  af19cb7  380.4 [ 378.9]  vs 4.2.0  -3.8 %  vs 4.3.2  -4.0 %
+numeric-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 1010907 B, 4.3.2 and af19cb7 BDX3 1010907 B
+  control   102.7 [  86.7]
+  id       4.2.0  278.1 [ 277.0]  4.3.2  275.1 [ 273.6]  af19cb7  267.5 [ 266.4]  vs 4.2.0  -3.8 %  vs 4.3.2  -2.7 %
+  ids_of   4.2.0  315.1 [ 313.4]  4.3.2  313.8 [ 312.4]  af19cb7  301.4 [ 300.6]  vs 4.2.0  -4.3 %  vs 4.3.2  -3.9 %
+opaque-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 10398695 B, 4.3.2 and af19cb7 BDX3 10398695 B
+  control   196.4 [ 191.3]
+  id       4.2.0  260.6 [ 252.4]  4.3.2  257.9 [ 250.5]  af19cb7  250.5 [ 243.1]  vs 4.2.0  -3.9 %  vs 4.3.2  -2.9 %
+  ids_of   4.2.0  299.5 [ 293.2]  4.3.2  299.3 [ 290.2]  af19cb7  284.9 [ 279.4]  vs 4.2.0  -4.9 %  vs 4.3.2  -4.8 %
+paths-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 9870918 B, 4.3.2 and af19cb7 BDX3 9870918 B
+  control   288.4 [ 275.6]
+  id       4.2.0  660.6 [ 653.1]  4.3.2  671.4 [ 655.0]  af19cb7  668.9 [ 653.3]  vs 4.2.0  +1.3 %  vs 4.3.2  -0.4 %
+  ids_of   4.2.0  653.2 [ 650.6]  4.3.2  663.4 [ 649.5]  af19cb7  657.8 [ 649.1]  vs 4.2.0  +0.7 %  vs 4.3.2  -0.8 %
+pypi-full: 889864 keys, 200000 probes; 4.2.0 BDX3 3706628 B, 4.3.2 and af19cb7 BDX3 3706628 B
+  control   171.7 [ 148.4]
+  id       4.2.0  334.7 [ 332.7]  4.3.2  338.7 [ 335.1]  af19cb7  320.0 [ 317.2]  vs 4.2.0  -4.4 %  vs 4.3.2  -5.5 %
+  ids_of   4.2.0  382.1 [ 381.0]  4.3.2  385.1 [ 383.7]  af19cb7  367.1 [ 366.2]  vs 4.2.0  -3.9 %  vs 4.3.2  -4.7 %
+urls-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7511038 B, 4.3.2 and af19cb7 BDX3 7511038 B
+  control   242.3 [ 233.8]
+  id       4.2.0  366.6 [ 362.6]  4.3.2  369.2 [ 363.4]  af19cb7  356.0 [ 351.8]  vs 4.2.0  -2.9 %  vs 4.3.2  -3.6 %
+  ids_of   4.2.0  413.2 [ 398.2]  4.3.2  415.5 [ 402.1]  af19cb7  399.9 [ 387.9]  vs 4.2.0  -3.2 %  vs 4.3.2  -3.7 %
+uuid-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 18040375 B, 4.3.2 and af19cb7 BDX3 18040375 B
+  control   211.1 [ 198.3]
+  id       4.2.0  328.7 [ 324.0]  4.3.2  337.1 [ 333.4]  af19cb7  325.5 [ 322.1]  vs 4.2.0  -1.0 %  vs 4.3.2  -3.4 %
+  ids_of   4.2.0  371.9 [ 360.5]  4.3.2  380.0 [ 376.4]  af19cb7  366.3 [ 360.6]  vs 4.2.0  -1.5 %  vs 4.3.2  -3.6 %
+thermals at end: acpitz 93, iwlwifi_1 37
+
+== an earlier run, the same night, of the same library code on four of the corpora
+
+Taken 20 minutes before the run above, by the same two harness builds but for their output (the
+median alone), over a tree that differs from af19cb7 by one lint attribute, which compiles to
+nothing. The label `new` is that tree. Started at 50 C on the same readiness check (load 0.38, no
+swap in use, 5.1 h up); 93 and 85 C at the ends of the two builds' runs.
+
+-- harness build 1
+thermals at start: acpitz 50, iwlwifi_1 37
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.2 and new BDX4 5851205 B
+  control  188.2 | id 4.2.0  351.5  4.3.2  377.9  new  352.4 ns  new/4.2.0  +0.3 %  new/4.3.2  -6.8 % | ids_of 4.2.0  387.9  4.3.2  436.9  new  401.2  new/4.2.0  +3.4 %  new/4.3.2  -8.2 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.2 and new BDX4 6861688 B
+  control  225.3 | id 4.2.0  391.3  4.3.2  403.2  new  388.1 ns  new/4.2.0  -0.8 %  new/4.3.2  -3.8 % | ids_of 4.2.0  428.9  4.3.2  500.3  new  429.8  new/4.2.0  +0.2 %  new/4.3.2 -14.1 %
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.2 and new BDX4 1061163 B
+  control   59.2 | id 4.2.0  284.8  4.3.2  277.5  new  262.6 ns  new/4.2.0  -7.8 %  new/4.3.2  -5.4 % | ids_of 4.2.0  324.4  4.3.2  330.3  new  308.4  new/4.2.0  -4.9 %  new/4.3.2  -6.6 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.2 and new BDX3 7370097 B
+  control  197.5 | id 4.2.0  363.6  4.3.2  363.3  new  346.5 ns  new/4.2.0  -4.7 %  new/4.3.2  -4.6 % | ids_of 4.2.0  405.5  4.3.2  408.5  new  388.0  new/4.2.0  -4.3 %  new/4.3.2  -5.0 %
+thermals at end: acpitz 93, iwlwifi_1 37
+
+-- harness build 2
+thermals at start: acpitz 49, iwlwifi_1 37
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.2 and new BDX4 5851205 B
+  control  187.1 | id 4.2.0  346.8  4.3.2  369.6  new  350.4 ns  new/4.2.0  +1.0 %  new/4.3.2  -5.2 % | ids_of 4.2.0  382.8  4.3.2  435.1  new  397.5  new/4.2.0  +3.8 %  new/4.3.2  -8.7 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.2 and new BDX4 6861688 B
+  control  223.8 | id 4.2.0  386.0  4.3.2  393.8  new  381.5 ns  new/4.2.0  -1.2 %  new/4.3.2  -3.1 % | ids_of 4.2.0  426.0  4.3.2  492.2  new  424.5  new/4.2.0  -0.4 %  new/4.3.2 -13.7 %
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.2 and new BDX4 1061163 B
+  control   63.7 | id 4.2.0  287.4  4.3.2  284.1  new  267.2 ns  new/4.2.0  -7.0 %  new/4.3.2  -5.9 % | ids_of 4.2.0  334.4  4.3.2  345.5  new  320.3  new/4.2.0  -4.2 %  new/4.3.2  -7.3 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.2 and new BDX3 7370097 B
+  control  197.3 | id 4.2.0  358.4  4.3.2  357.3  new  337.6 ns  new/4.2.0  -5.8 %  new/4.3.2  -5.5 % | ids_of 4.2.0  391.5  4.3.2  396.8  new  376.2  new/4.2.0  -3.9 %  new/4.3.2  -5.2 %
+thermals at end: acpitz 85, iwlwifi_1 37
