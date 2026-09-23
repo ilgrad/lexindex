@@ -3182,13 +3182,6 @@ fn write_ids<T: pyo3::buffer::Element>(
     Ok(())
 }
 
-/// `gil_used = false` is spelled out rather than left to PyO3's default, which is already `false`:
-/// the claim ships either way, so it should be one somebody checked. What backs it, measured on
-/// CPython 3.14t with eight threads: the index types are immutable after building and are
-/// `Send + Sync`, so sharing one and calling `id`/`contains`/`ids_of` from every thread is sound and
-/// raises nothing; the types that do hold mutable state — the `StringIndex` and `DictIndex`
-/// iterators and `Overlay` — are `frozen` with that state behind a lock, so sharing one of those
-/// serialises instead of raising `Already borrowed`.
 /// What a blob is, from its header alone: its kind, its format and the sizes a caller would
 /// otherwise have to load it to learn. `blob` is a path or `bytes`; over a path only the header
 /// and the footer are read, so an index of gigabytes inspects in microseconds (an overlay's
@@ -3401,6 +3394,13 @@ fn py_cli(py: Python<'_>, args: Vec<String>) -> u8 {
     })
 }
 
+// `gil_used = false` is spelled out rather than left to PyO3's default, which is already `false`:
+// the claim ships either way, so it should be one somebody checked. What backs it, measured on
+// CPython 3.14t with eight threads: the index types are immutable after building and are
+// `Send + Sync`, so sharing one and calling `id`/`contains`/`ids_of` from every thread is sound and
+// raises nothing; the types that do hold mutable state — the `StringIndex` and `DictIndex`
+// iterators and `Overlay` — are `frozen` with that state behind a lock, so sharing one of those
+// serialises instead of raising `Already borrowed`.
 #[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStringIndex>()?;

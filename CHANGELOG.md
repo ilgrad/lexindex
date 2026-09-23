@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`lexindex.inspect`'s docstring opened with somebody else's paragraph**, a note on the
+  extension module's `gil_used = false` that has sat above `inspect` since `inspect` was added in
+  2.0.0 — so `help(lexindex.inspect)` began with it, and so did `inspect`'s entry on the API page,
+  which is rendered from the same docstring. The note is back beside the `#[pymodule]` it explains,
+  as a plain comment that cannot become a docstring again.
+
 ## [4.1.1] — 2026-09-23
 
 ### Fixed

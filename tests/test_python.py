@@ -1505,6 +1505,10 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
         lexindex.inspect(tmp_path / "missing.blob")
 
 
+def test_inspect_docstring_opens_with_what_inspect_does():
+    assert lexindex.inspect.__doc__.startswith("What a blob is, from its header alone")
+
+
 def test_plan_prices_every_index_that_answers_the_question():
     keys = [f"key{i:04}" for i in range(200)]
     p = lexindex.plan(keys)
