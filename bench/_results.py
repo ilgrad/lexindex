@@ -22,6 +22,7 @@ import socket
 import statistics
 import subprocess
 import sys
+import sysconfig
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -91,7 +92,10 @@ def environment() -> dict[str, Any]:
         "cpu": _cpu_model(),
         "cpus": os.cpu_count(),
         "kernel": f"{platform.system()} {platform.release()}",
-        "python": sys.version.split()[0],
+        # A free-threaded build's objects are larger, so a Python heap it measures is too: `t`, as
+        # its executable is named.
+        "python": sys.version.split()[0]
+        + ("t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""),
         "rustc": _run("rustc", "--version"),
         "lexindex": getattr(lexindex, "__version__", None),
         "loadavg_start": [round(x, 2) for x in _LOADAVG_AT_IMPORT],
