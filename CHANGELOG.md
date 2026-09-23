@@ -25,6 +25,10 @@ All notable changes to this project are documented here. The format follows
   titles, words, paths, PyPI names, URLs, identifiers and domains take no code and write the blob
   4.2 wrote, byte for byte. The bar is conservative on a small corpus: three thousand random keys
   over two thousand ideographs would have come out 4.1 % smaller coded, and are kept in UTF-8.
+  **What it costs is time, where it is taken**, since a query is spelled in the code before the
+  search and a key decoded after it is read: against 4.2.0 in one process, `id` is 6 % slower on
+  the Russian titles, 10 % on the Chinese ones and level on the lexicon, and `key_into` 22, 11 and
+  5 % slower. On a corpus that takes no code both are within 3 % of 4.2.0.
 - **A blob in a character code is `BDX4`**: `BDX3`'s layout with the code appended as its last
   section, its length in four header bytes `BDX3` reserved. 4.3 reads every `BDX3`, and a build that
   takes no code still writes one. **4.2 and earlier refuse a `BDX4`**, and with it a
@@ -43,7 +47,9 @@ All notable changes to this project are documented here. The format follows
   goes, and now reads only those, from the same bytes. The answers are unchanged, and three checks
   hold the reader to `fst`'s decoder: a property test over random maps with arbitrary values, the
   transducer formats before version 3, and the `parse_string` fuzz target, which walks every key
-  of a parsed blob both ways.
+  of a parsed blob both ways. Against 4.2.0 in one process, over a million titles in English,
+  Chinese and Russian and over jieba's lexicon, `id` is 29–34 % faster and a common-prefix walk
+  20–26 % faster.
 
 ## [4.2.0] — 2026-09-23
 

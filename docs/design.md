@@ -397,7 +397,10 @@ smaller with them and 2.2 % *larger* without. At the default block the lexicon g
 7.664 to 6.862; English titles, words, paths, PyPI names, URLs, identifiers and domains keep their
 blob byte for byte. The second bar is conservative where the table is a large share of the keys:
 three thousand random keys over two thousand ideographs would have come out 4.1 % smaller coded, and
-are kept in UTF-8.
+are kept in UTF-8. What the code costs is time where it is taken — a query is spelled before the
+search, a key decoded after it is read — and measured against 4.2.0 in one process that is `id` 6 %
+slower on the Russian titles, 10 % on the Chinese ones and level on the lexicon, and `key_into` 22,
+11 and 5 % slower; a blob that takes no code reads as 4.2's did, within 3 %.
 
 A blob in a code is `BDX4`: `BDX3`'s layout with the code appended last and its length in four header
 bytes `BDX3` reserved. A magic of its own rather than a flag in those bytes, because 4.2 did not read
