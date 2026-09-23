@@ -1,0 +1,94 @@
+{
+  "table": "cjk-sizes",
+  "environment": {
+    "date": "2026-09-23",
+    "host": "arz",
+    "commit": "d6a4b27",
+    "cpu": "AMD Ryzen 7 5800HS with Radeon Graphics",
+    "cpus": 16,
+    "kernel": "Linux 7.2.7-200.fc44.x86_64",
+    "python": "3.14.7",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "lexindex": "4.1.1",
+    "loadavg_start": [
+      2.37,
+      3.55,
+      2.08
+    ],
+    "loadavg_end": [
+      2.31,
+      3.5,
+      2.08
+    ]
+  },
+  "corpus": "jieba-v0.42.1-dict.txt",
+  "words": 349045,
+  "competitors": {
+    "marisa-trie": "1.4.1",
+    "dawg2": "0.13.3",
+    "datrie": "0.8.3",
+    "jieba": "0.42.1"
+  },
+  "cells": [
+    {
+      "structure": "lexindex StringIndex",
+      "bytes": 3124743,
+      "note": "prefix walk"
+    },
+    {
+      "structure": "lexindex DictIndex 32",
+      "bytes": 1336885,
+      "note": "one order lookup a boundary"
+    },
+    {
+      "structure": "lexindex DictIndex 256",
+      "bytes": 1275214,
+      "note": "one order lookup a boundary"
+    },
+    {
+      "structure": "lexindex DictIndex 1024",
+      "bytes": 1231435,
+      "note": "one order lookup a boundary"
+    },
+    {
+      "structure": "lexindex HashedDictIndex 256 fp=0",
+      "bytes": 2188854,
+      "note": "exact id by hash"
+    },
+    {
+      "structure": "lexindex HashedDictIndex 256 fp=8",
+      "bytes": 2537899,
+      "note": "exact id by hash"
+    },
+    {
+      "structure": "lexindex CompactHashIndex fp=8",
+      "bytes": 433695,
+      "note": "holds no keys: cannot enumerate prefixes"
+    },
+    {
+      "structure": "marisa-trie, smallest",
+      "bytes": 1249448,
+      "note": "num_tries=5; default 3: 1,252,688"
+    },
+    {
+      "structure": "dawg2 DAWG",
+      "bytes": 2330628,
+      "note": ""
+    },
+    {
+      "structure": "datrie",
+      "bytes": null,
+      "note": "died, signal 6: malloc(): invalid size (unsorted)"
+    },
+    {
+      "structure": "jieba prefix dict (Python heap)",
+      "bytes": 47771616,
+      "note": "498,113 entries, 149,068 of them bare prefixes"
+    },
+    {
+      "structure": "python dict word -> freq",
+      "bytes": 30539142,
+      "note": "no prefixes; keys parsed inside the count"
+    }
+  ]
+}
