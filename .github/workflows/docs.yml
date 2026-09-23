@@ -3,16 +3,21 @@ name: docs
 on:
   push:
     branches: [main]
+    # Every file the site is built from. Two pages include `CHANGELOG.md` and `polars/README.md` as
+    # snippets, and mkdocstrings renders a compiled class or function from the docstring the
+    # extension carries — the doc comment in `src/python.rs` — rather than from the stub.
     paths:
       - docs/**
       - mkdocs.yml
       - python/**
       - CHANGELOG.md
+      - polars/README.md
+      - src/python.rs
       - .github/workflows/docs.yml
-  # Every published GitHub Release (release.yml auto-creates one on a v* tag) refreshes the site,
-  # so a release always ships its docs even when the release commit only touches root files.
-  release:
-    types: [published]
+  # No `release` trigger: release.yml creates the GitHub Release with `GITHUB_TOKEN`, whose events
+  # start no workflow. None is needed — a tag adds nothing the site is built from, and the push of
+  # the commit it names has deployed it already — and a deploy from the tag could replace a newer
+  # main with an older tree.
   workflow_dispatch:
 
 permissions:

@@ -13,6 +13,12 @@ All notable changes to this project are documented here. The format follows
   2.0.0 — so `help(lexindex.inspect)` began with it, and so did `inspect`'s entry on the API page,
   which is rendered from the same docstring. The note is back beside the `#[pymodule]` it explains,
   as a plain comment that cannot become a docstring again.
+- **`docs.yml`**: its `release: published` trigger never fired, in 24 releases — `release.yml`
+  creates the GitHub Release with `GITHUB_TOKEN`, whose events start no workflow — and its push
+  filter missed two files the site is built from: `polars/README.md`, which is the Polars page, and
+  `src/python.rs`, whose doc comments are the docstrings the API page renders for every compiled
+  class and function. The trigger is gone and the filter names both, so a change to either
+  redeploys the site on the push that carries it.
 
 ## [4.1.1] — 2026-09-23
 
