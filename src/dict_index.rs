@@ -548,18 +548,105 @@ pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
     i
 }
 
+/// `f` over `keys` cut into `threads` contiguous ranges, each on a thread of its own where there is
+/// more than one; the results in key order.
+fn in_ranges<'k, T: Send>(
+    keys: &[&'k str],
+    threads: usize,
+    f: impl Fn(&[&'k str]) -> T + Sync,
+) -> Vec<T> {
+    if threads <= 1 || keys.len() <= 1 {
+        return vec![f(keys)];
+    }
+    let f = &f;
+    std::thread::scope(|scope| {
+        let running: Vec<_> = keys
+            .chunks(keys.len().div_ceil(threads))
+            .map(|range| scope.spawn(move || f(range)))
+            .collect();
+        running
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .expect("counting or spelling a range of keys cannot panic")
+            })
+            .collect()
+    })
+}
+
+/// Keys a pass over them prefetches ahead of the one it is on: far enough for a load from memory to
+/// land in time.
+const READ_AHEAD: usize = 32;
+
+/// `keys` in order, the key [`READ_AHEAD`] places on prefetched as each is handed out. A caller's
+/// keys lie wherever it allocated them, so a pass in key order otherwise waits on memory at every
+/// key: counting the bytes outside ASCII over a million DNA reads took 24 ns a key rather than 7.
+fn read_ahead<'a, 'k>(keys: &'a [&'k str]) -> impl Iterator<Item = &'k str> + 'a {
+    keys.iter().enumerate().map(move |(i, &key)| {
+        if let Some(next) = keys.get(i + READ_AHEAD) {
+            crate::blob::prefetch_key(next.as_bytes());
+        }
+        key
+    })
+}
+
+/// Drop adjacent duplicates from `keys` in place, in the one pass that checks they ascend: `false`
+/// at the first key below its predecessor, with `keys` then a permutation of what it was. It reads
+/// ahead, and stands for the two passes a sort's check for a run and `dedup_by` made over keys
+/// scattered through the heap: 34 ns a key over a million DNA reads against 7 for this one, and 41
+/// against 27 over a million paths.
+fn dedup_ascending<S: AsRef<str>>(keys: &mut Vec<S>) -> bool {
+    let mut kept = 0;
+    for i in 0..keys.len() {
+        if let Some(next) = keys.get(i + READ_AHEAD) {
+            crate::blob::prefetch_key(next.as_ref().as_bytes());
+        }
+        if kept > 0 {
+            match keys[i].as_ref().cmp(keys[kept - 1].as_ref()) {
+                Ordering::Less => return false,
+                Ordering::Equal => continue,
+                Ordering::Greater => {}
+            }
+        }
+        if kept != i {
+            keys.swap(kept, i);
+        }
+        kept += 1;
+    }
+    keys.truncate(kept);
+    true
+}
+
+/// `keys` sorted, unless they ascend already, and their duplicates dropped.
+fn sort_distinct<S: AsRef<str>>(keys: &mut Vec<S>) {
+    if !dedup_ascending(keys) {
+        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        assert!(dedup_ascending(keys), "sorted keys ascend");
+    }
+}
+
 /// The [character code](charcode) a set of keys is smallest under, or `None` where none pays. A
-/// scan for bytes outside ASCII settles every Latin corpus without decoding a character.
-pub(crate) fn choose_code<'a>(keys: impl Iterator<Item = &'a str> + Clone) -> Option<CharCode> {
-    let (bytes, high) = keys.clone().fold((0u64, 0u64), |(b, h), k| {
-        (b + k.len() as u64, h + charcode::high_bytes(k.as_bytes()))
-    });
+/// scan for bytes outside ASCII settles every Latin corpus without decoding a character. Both
+/// passes run a range of keys a thread: a caller's keys lie wherever it allocated them, so a pass
+/// in key order waits on memory a key, and one thread keeps only so many of those loads in flight.
+pub(crate) fn choose_code(keys: &[&str], threads: usize) -> Option<CharCode> {
+    let (bytes, high) = in_ranges(keys, threads, |range| {
+        read_ahead(range).fold((0u64, 0u64), |(b, h), k| {
+            (b + k.len() as u64, h + charcode::high_bytes(k.as_bytes()))
+        })
+    })
+    .into_iter()
+    .fold((0, 0), |(b, h), (rb, rh)| (b + rb, h + rh));
     if !charcode::worth_counting(bytes, high) {
         return None;
     }
     let mut tally = Tally::new();
-    for k in keys {
-        tally.add(k);
+    for part in in_ranges(keys, threads, |range| {
+        let mut part = Tally::new();
+        read_ahead(range).for_each(|k| part.add(k));
+        part
+    }) {
+        tally.merge(part);
     }
     tally.choose()
 }
@@ -585,13 +672,10 @@ fn spell<'a>(
 
 /// Every key spelled under `code`, end to end, with where each ends; `None` if a key holds a
 /// character the code does not spell.
-pub(crate) fn encode_all<'a>(
-    code: &CharCode,
-    keys: impl Iterator<Item = &'a str>,
-) -> Option<(Vec<u8>, Vec<usize>)> {
+pub(crate) fn encode_all(code: &CharCode, keys: &[&str]) -> Option<(Vec<u8>, Vec<usize>)> {
     let mut arena = Vec::new();
     let mut ends = Vec::new();
-    for key in keys {
+    for key in read_ahead(keys) {
         if !code.encode_key(key, &mut arena) {
             return None;
         }
@@ -1685,8 +1769,7 @@ impl DictIndex {
         // `String`s: every key is copied into a block below in either case, so the intermediate
         // copy only doubled the peak for a caller that already owned the corpus.
         let mut keys: Vec<S> = items.into_iter().collect();
-        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
+        sort_distinct(&mut keys);
         Self::from_keys(&keys, block, micro_for(block))
     }
 
@@ -1695,11 +1778,11 @@ impl DictIndex {
     /// [`build`](Self::build) drops them after sorting, so for the same key set the two produce
     /// **byte-identical** blobs. Blocks of 256 keys.
     ///
-    /// It is not the faster of the two and does not claim to be: `build`'s sort is
-    /// pattern-defeating, so it recognises an ascending run and returns almost at once — over
-    /// 479 823 words the two measured 31.9 against 32.1 ms. Nor does it hold less, since the symbol
-    /// table is trained on a sample of the blocks before any block is encoded, so the keys are read
-    /// twice either way. What it buys is the **check**.
+    /// It is not the faster of the two and does not claim to be: `build` looks for keys already in
+    /// order before it sorts, in the pass that drops duplicates, so over sorted keys the two run the
+    /// same code. Nor does it hold less, since the symbol table is trained on a sample of the blocks
+    /// before any block is encoded, so the keys are read twice either way. What it buys is the
+    /// **check**.
     ///
     /// The order is the caller's precondition and is checked anyway: a key below its predecessor
     /// returns an error rather than an index that answers wrongly, which is what an unsorted input
@@ -1735,12 +1818,11 @@ impl DictIndex {
             return Err(IndexError::Format("dict: block must be in 1..=1024"));
         }
         let mut keys: Vec<S> = items.into_iter().collect();
-        if keys.windows(2).any(|w| w[1].as_ref() < w[0].as_ref()) {
+        if !dedup_ascending(&mut keys) {
             return Err(IndexError::Format(
                 "dict: build_sorted got a key below its predecessor",
             ));
         }
-        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
         Self::from_keys(&keys, block, micro_for(block))
     }
 
@@ -1761,8 +1843,7 @@ impl DictIndex {
             return Err(IndexError::Format("dict: micro must divide block"));
         }
         let mut keys: Vec<S> = items.into_iter().collect();
-        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
+        sort_distinct(&mut keys);
         Self::from_keys(&keys, block, micro)
     }
 
@@ -2170,7 +2251,11 @@ impl DictIndex {
         Ok(n)
     }
 
-    fn from_sorted<K: AsKey>(keys: &[K], block: usize, micro: usize) -> Result<Self, IndexError> {
+    fn from_sorted<K: AsKey + Sync>(
+        keys: &[K],
+        block: usize,
+        micro: usize,
+    ) -> Result<Self, IndexError> {
         Self::from_sorted_on(keys, block, micro, build_threads(keys.len(), block))
     }
 
@@ -2181,23 +2266,32 @@ impl DictIndex {
         block: usize,
         micro: usize,
     ) -> Result<Self, IndexError> {
-        match choose_code(keys.iter().map(AsRef::as_ref)) {
-            None => Self::from_sorted(keys, block, micro),
-            Some(code) => Self::from_coded(keys, block, micro, code),
+        // The keys as `str`s every thread of the build can share, which the caller's `S` need not
+        // be: sixteen bytes a key, taken once for the whole build.
+        let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
+        match choose_code(&view, build_threads(view.len(), block)) {
+            None => Self::from_sorted(&view, block, micro),
+            Some(code) => Self::from_coded(view, block, micro, code),
         }
     }
 
-    /// [`from_keys`](Self::from_keys) under `code`: every key spelled into one arena, and the
-    /// build run over that.
-    fn from_coded<S: AsRef<str>>(
-        keys: &[S],
+    /// [`from_keys`](Self::from_keys) under `code`: every key spelled, a range of them a thread,
+    /// each range into an arena of its own, and the build run over the spellings.
+    fn from_coded(
+        keys: Vec<&str>,
         block: usize,
         micro: usize,
         code: CharCode,
     ) -> Result<Self, IndexError> {
-        let (arena, ends) = encode_all(&code, keys.iter().map(AsRef::as_ref))
-            .expect("a code chosen over the keys spells every one of them");
-        let mut idx = Self::from_sorted(&views(&arena, &ends), block, micro)?;
+        let parts = in_ranges(&keys, build_threads(keys.len(), block), |range| {
+            encode_all(&code, range).expect("a code chosen over the keys spells every one of them")
+        });
+        drop(keys);
+        let coded: Vec<Bytes<'_>> = parts
+            .iter()
+            .flat_map(|(arena, ends)| views(arena, ends))
+            .collect();
+        let mut idx = Self::from_sorted(&coded, block, micro)?;
         idx.code = Some(Box::new(code));
         Ok(idx)
     }
@@ -2221,7 +2315,7 @@ impl DictIndex {
     /// *less* accurate — the smallest block's own draw reads the ratio 21 % high on decimal ids.
     /// Every priced block shards the keys the same way — a shard is [`SHARD_KEYS`] keys whatever
     /// the block — so one set of tables covers the same ranges in all three.
-    pub(crate) fn plan_builds<K: AsKey>(
+    pub(crate) fn plan_builds<K: AsKey + Sync>(
         spread: &[K],
         runs: &[K],
         blocks: &[usize],
@@ -2261,7 +2355,7 @@ impl DictIndex {
 
     /// [`from_sorted`](Self::from_sorted) with the thread count fixed, so a test can hold the
     /// output to the one a single thread produces.
-    fn from_sorted_on<K: AsKey>(
+    fn from_sorted_on<K: AsKey + Sync>(
         keys: &[K],
         block: usize,
         micro: usize,
@@ -2278,7 +2372,7 @@ impl DictIndex {
     /// the million-key blob spends 0.53 on article titles. Such a build also trains and mines on
     /// every suffix it has rather than [`TRAIN_PIECES`] a shard, since its evidence is already an
     /// eighth of the real build's.
-    fn from_sorted_as<K: AsKey>(
+    fn from_sorted_as<K: AsKey + Sync>(
         keys: &[K],
         block: usize,
         micro: usize,
@@ -2295,7 +2389,7 @@ impl DictIndex {
     /// The encoding half of a build: the keys coded under a vocabulary already chosen. Split out
     /// because the estimator prices three blocks off one sample and the vocabulary is the corpus's
     /// rather than the block's — see [`plan_builds`](Self::plan_builds).
-    fn from_vocabulary<K: AsKey>(
+    fn from_vocabulary<K: AsKey + Sync>(
         keys: &[K],
         block: usize,
         micro: usize,
@@ -2310,10 +2404,7 @@ impl DictIndex {
 
         // Once the table is fixed a block depends on nothing outside itself, so contiguous ranges
         // of blocks encode on their own threads and the parts are concatenated in order — the bytes
-        // do not depend on how many threads ran. The threads take a view of the keys' bytes rather
-        // than the caller's `&[K]`, which would need `K: Sync` on a signature that has not asked
-        // for it; the view costs sixteen bytes a key for the length of the encoding and is only
-        // built when there is enough work to split.
+        // do not depend on how many threads ran.
         // A range must cover whole shards, because a shard's header code is chosen from all of
         // its runs at once: split inside one and two threads would each choose their own.
         let run = (span * nb.div_ceil(threads).div_ceil(shard)).max(1);
@@ -2325,9 +2416,8 @@ impl DictIndex {
                 })
                 .collect()
         } else {
-            let view: Vec<Bytes<'_>> = keys.iter().map(|k| Bytes(k.key_bytes())).collect();
             std::thread::scope(|scope| {
-                let running: Vec<_> = view
+                let running: Vec<_> = keys
                     .chunks(run)
                     .enumerate()
                     .map(|(c, range)| {
@@ -4466,7 +4556,8 @@ mod tests {
     /// `keys` spelled in the code [`CharCode::forced`] makes of them, whatever it saves.
     fn coded(keys: &[String], block: usize, seven: bool, singles: usize) -> DictIndex {
         let code = CharCode::forced(keys, seven, singles);
-        DictIndex::from_coded(keys, block, micro_for(block), code).unwrap()
+        let view = keys.iter().map(String::as_str).collect();
+        DictIndex::from_coded(view, block, micro_for(block), code).unwrap()
     }
 
     #[test]
@@ -4592,6 +4683,59 @@ mod tests {
             check(&DictIndex::load(&path).unwrap(), &keys);
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    proptest::proptest! {
+        /// The one pass that checks the order and drops duplicates leaves what a sort and `dedup`
+        /// leave, and refuses exactly the keys that do not ascend, leaving them all.
+        #[test]
+        fn one_pass_dedups_as_sort_and_dedup_do(
+            keys in proptest::collection::vec("[ab\u{e9}\u{4e2d}]{0,3}", 0..40),
+        ) {
+            let mut want = keys.clone();
+            want.sort_unstable();
+            want.dedup();
+            let mut got = keys.clone();
+            sort_distinct(&mut got);
+            proptest::prop_assert_eq!(&got, &want);
+            let ascends = keys.windows(2).all(|w| w[0] <= w[1]);
+            let mut once = keys.clone();
+            proptest::prop_assert_eq!(dedup_ascending(&mut once), ascends);
+            if ascends {
+                proptest::prop_assert_eq!(&once, &want);
+            } else {
+                let mut all = keys.clone();
+                all.sort_unstable();
+                once.sort_unstable();
+                proptest::prop_assert_eq!(&once, &all);
+            }
+        }
+    }
+
+    /// Counted and spelled a range of keys a thread, the code and every spelling are the ones one
+    /// thread makes.
+    #[test]
+    fn the_code_does_not_depend_on_how_many_threads_counted() {
+        let keys = ideographs(20_000, 300);
+        let view: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let one = choose_code(&view, 1).expect("ideographs pay for a code");
+        let (arena, ends) = encode_all(&one, &view).unwrap();
+        let serial: Vec<&[u8]> = views(&arena, &ends).into_iter().map(|b| b.0).collect();
+        let (mut want, mut got) = (Vec::new(), Vec::new());
+        one.write_to(&mut want);
+        for threads in [2, 3, 7] {
+            let code = choose_code(&view, threads).unwrap();
+            got.clear();
+            code.write_to(&mut got);
+            assert_eq!(got, want, "{threads} threads");
+            let parts = in_ranges(&view, threads, |range| encode_all(&code, range).unwrap());
+            let spelt: Vec<&[u8]> = parts
+                .iter()
+                .flat_map(|(arena, ends)| views(arena, ends))
+                .map(|b| b.0)
+                .collect();
+            assert_eq!(spelt, serial, "{threads} threads");
+        }
     }
 
     #[test]

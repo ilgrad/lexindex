@@ -148,9 +148,8 @@ pub(crate) fn prefetch_byte_unchecked(data: &[u8], i: usize) {
     let _ = (data, i);
 }
 
-/// [`prefetch_byte`] of a key's first and last bytes: the hash reads the key to its end, and a
-/// key of a few dozen bytes lies across two lines as often as not.
-#[cfg(feature = "mph")]
+/// [`prefetch_byte`] of a key's first and last bytes, for a reader that goes to its end — a hash, a
+/// count: a key of a few dozen bytes lies across two lines as often as not.
 #[inline(always)]
 pub(crate) fn prefetch_key(key: &[u8]) {
     prefetch(key, 0);

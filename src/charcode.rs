@@ -484,10 +484,24 @@ pub(crate) fn worth_counting(bytes: u64, high: u64) -> bool {
     high * 30 >= bytes * 4
 }
 
-/// Bytes of `key` outside ASCII.
+/// Bytes of `key` outside ASCII, eight at a time: each byte's top bit moved to its bottom, and the
+/// eight summed into the top byte by one multiply. A byte at a time compiled to four instructions a
+/// byte, and a loop that long keeps too few of the keys' loads in flight: over a million paths in
+/// key order it took 153 ns a key against 63, and 98 against 44 reading ahead.
 #[inline]
 pub(crate) fn high_bytes(key: &[u8]) -> u64 {
-    key.iter().filter(|&&b| b >= 0x80).count() as u64
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    let count = |w: u64| ((w >> 7) & ONES).wrapping_mul(ONES) >> 56;
+    let mut words = key.chunks_exact(8);
+    let mut n = 0;
+    for w in &mut words {
+        n += count(u64::from_le_bytes(w.try_into().expect("a chunk of eight")));
+    }
+    let tail = words
+        .remainder()
+        .iter()
+        .fold(0u64, |t, &b| t << 8 | u64::from(b));
+    n + count(tail)
 }
 
 /// How often each character occurs over a set of keys, and what the keys weigh in UTF-8: what
@@ -511,6 +525,21 @@ impl Tally {
         for c in key.chars() {
             let page = self.pages[c as usize >> 8].get_or_insert_with(|| Box::new([0; PAGE]));
             page[c as usize & 0xFF] += 1;
+        }
+    }
+
+    /// Add what `other` counted, so that keys can be counted a range at a time.
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.bytes += other.bytes;
+        for (mine, theirs) in self.pages.iter_mut().zip(other.pages) {
+            let Some(theirs) = theirs else { continue };
+            match mine {
+                None => *mine = Some(theirs),
+                Some(mine) => mine
+                    .iter_mut()
+                    .zip(theirs.iter())
+                    .for_each(|(a, b)| *a += b),
+            }
         }
     }
 
@@ -967,5 +996,30 @@ mod tests {
         assert!(!worth_counting(100, 13));
         assert!(worth_counting(30, 4));
         assert_eq!(high_bytes("aé中".as_bytes()), 5);
+    }
+
+    proptest! {
+        /// Eight at a time counts what one at a time does, at every length and tail.
+        #[test]
+        fn high_bytes_counts_a_byte_at_a_time(key in proptest::collection::vec(any::<u8>(), 0..40)) {
+            prop_assert_eq!(high_bytes(&key), key.iter().filter(|&&b| b >= 0x80).count() as u64);
+        }
+
+        /// Counted a range at a time and merged, a tally chooses the code one tally over every key
+        /// does.
+        #[test]
+        fn merged_tallies_choose_what_one_tally_does(
+            keys in proptest::collection::vec(text(), 1..60),
+            cut in 0usize..60,
+        ) {
+            let cut = cut.min(keys.len());
+            let (mut whole, mut left, mut right) = (Tally::new(), Tally::new(), Tally::new());
+            keys.iter().for_each(|k| whole.add(k));
+            keys[..cut].iter().for_each(|k| left.add(k));
+            keys[cut..].iter().for_each(|k| right.add(k));
+            left.merge(right);
+            prop_assert_eq!(left.bytes, whole.bytes);
+            prop_assert_eq!(&left.pages, &whole.pages);
+        }
     }
 }

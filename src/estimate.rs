@@ -1211,7 +1211,7 @@ impl Sample {
             None => (Self::dict_fits(spread, runs, shape.n)?, shape.clone(), 0.0),
             Some(code) => {
                 let spell = |keys: &[&str]| {
-                    dict_index::encode_all(&code, keys.iter().copied())
+                    dict_index::encode_all(&code, keys)
                         .expect("a code chosen over both draws spells both")
                 };
                 let (spread_arena, spread_ends) = spell(spread);
@@ -1243,7 +1243,7 @@ impl Sample {
 
     /// One build of the draws a priced block, all three under the one vocabulary the corpus buys:
     /// what a block costs is the block's, what a suffix compresses to is the corpus's.
-    fn dict_fits<K: AsKey>(
+    fn dict_fits<K: AsKey + Sync>(
         spread: &[K],
         runs: &[K],
         corpus: usize,
