@@ -346,6 +346,20 @@ impl CharCode {
         true
     }
 
+    /// [`decode_into`](Self::decode_into) as far as the first codeword that takes `out` to `need`
+    /// bytes or past them, for a caller that reads only the front of a key.
+    pub(crate) fn decode_front(&self, coded: &[u8], need: usize, out: &mut Vec<u8>) -> bool {
+        let mut at = 0;
+        while at < coded.len() && out.len() < need {
+            let Some((u, len)) = self.utf8_at(coded, at) else {
+                return false;
+            };
+            out.extend_from_slice(&u.to_le_bytes()[..packed_len(u)]);
+            at += len;
+        }
+        true
+    }
+
     /// Replace `buf`'s code by what it spells, in place, so that a caller who keeps one buffer
     /// allocates nothing; `false`, with `buf` empty, on bytes no code wrote.
     ///
