@@ -73,7 +73,7 @@ class StringIndex:
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
         """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
-        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
         immutable ``str -> int`` lookup, not a mapping."""
 
     def get(self, key: str, default: _T | None = None) -> int | _T | None:
@@ -84,15 +84,15 @@ class StringIndex:
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
 
-        One 8-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        One 8-byte native-endian item per key, aligned with ``keys``, ``MISSING_ID`` where a
         key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
         """
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+        """``ids_of_bytes`` written into memory the caller owns instead of a fresh ``bytes``.
 
-        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``out`` is any writable C-contiguous buffer of ``ID_DTYPE`` items --
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
@@ -101,20 +101,20 @@ class StringIndex:
         """
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null comes
-        back as :attr:`MISSING_ID`."""
+        back as ``MISSING_ID``."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64 here); the width differs between
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint64 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
 
     MISSING_ID: ClassVar[int]
-    """The :meth:`ids_of_bytes` item standing for an absent key."""
+    """The ``ids_of_bytes`` item standing for an absent key."""
 
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def prefix(self, prefix: str, limit: int | None = None) -> list[tuple[str, int]]: ...
@@ -227,7 +227,7 @@ class PerfectHashIndex:
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
         """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
-        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
         immutable ``str -> int`` lookup, not a mapping."""
 
     def get(self, key: str, default: _T | None = None) -> int | _T | None:
@@ -238,15 +238,15 @@ class PerfectHashIndex:
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
 
-        One 4-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        One 4-byte native-endian item per key, aligned with ``keys``, ``MISSING_ID`` where a
         key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
         """
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+        """``ids_of_bytes`` written into memory the caller owns instead of a fresh ``bytes``.
 
-        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``out`` is any writable C-contiguous buffer of ``ID_DTYPE`` items --
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
@@ -255,20 +255,20 @@ class PerfectHashIndex:
         """
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null comes
-        back as :attr:`MISSING_ID`."""
+        back as ``MISSING_ID``."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint32 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
 
     MISSING_ID: ClassVar[int]
-    """The :meth:`ids_of_bytes` item standing for an absent key."""
+    """The ``ids_of_bytes`` item standing for an absent key."""
 
     def keys_of(self, ids: Sequence[int]) -> list[str | None]: ...
     def to_bytes(self) -> bytes: ...
@@ -343,7 +343,7 @@ class CompactHashIndex:
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
         """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
-        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
         immutable ``str -> int`` lookup, not a mapping."""
 
     def get(self, key: str, default: _T | None = None) -> int | _T | None:
@@ -353,15 +353,15 @@ class CompactHashIndex:
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer instead of a list, for ``numpy`` / ``array`` callers.
 
-        One 4-byte native-endian item per key, aligned with ``keys``, :attr:`MISSING_ID` where a
+        One 4-byte native-endian item per key, aligned with ``keys``, ``MISSING_ID`` where a
         key is absent. ``np.frombuffer(buf, dtype=index.ID_DTYPE)`` shares the memory rather than
         copying it; ``ids_of`` has to build one Python ``int`` per key, which is what this avoids.
         """
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns instead of a fresh ``bytes``.
+        """``ids_of_bytes`` written into memory the caller owns instead of a fresh ``bytes``.
 
-        ``out`` is any writable C-contiguous buffer of :attr:`ID_DTYPE` items --
+        ``out`` is any writable C-contiguous buffer of ``ID_DTYPE`` items --
         ``np.empty(len(keys), dtype=index.ID_DTYPE)`` is the usual one -- so a hot loop can reuse
         one array. The first ``len(keys)`` items are written; the rest are left as they were. A
         read-only, strided or mistyped buffer raises ``BufferError``; one shorter than ``keys``
@@ -370,20 +370,20 @@ class CompactHashIndex:
         """
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null comes
-        back as :attr:`MISSING_ID`."""
+        back as ``MISSING_ID``."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32 here); the width differs between
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint32 here); the width differs between
     the index types, so read it from the class rather than hardcoding one."""
 
     MISSING_ID: ClassVar[int]
-    """The :meth:`ids_of_bytes` item standing for an absent key."""
+    """The ``ids_of_bytes`` item standing for an absent key."""
 
     def to_bytes(self) -> bytes: ...
     def serialized_len(self) -> int: ...
@@ -437,21 +437,21 @@ class ClosedHashIndex:
         with ``keys``, for ``np.frombuffer(buf, dtype=index.ID_DTYPE)``."""
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
-        buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
+        """``ids_of_bytes`` written into memory the caller owns: any writable C-contiguous
+        buffer of ``ID_DTYPE`` items at least ``len(keys)`` long. A read-only, strided or
         mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null raises
         ``ValueError``: a closed vocabulary has no id for it."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint32)."""
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint32)."""
 
     def to_bytes(self) -> bytes: ...
     def serialized_len(self) -> int: ...
@@ -519,7 +519,7 @@ class DictIndex:
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
         """Rank of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
-        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
         immutable ``str -> int`` lookup, not a mapping."""
 
     def get(self, key: str, default: _T | None = None) -> int | _T | None:
@@ -555,28 +555,28 @@ class DictIndex:
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer: one 8-byte native-endian item per key, aligned
-        with ``keys``, :attr:`MISSING_ID` where a key is absent, for
+        with ``keys``, ``MISSING_ID`` where a key is absent, for
         ``np.frombuffer(buf, dtype=index.ID_DTYPE)``."""
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
-        buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
+        """``ids_of_bytes`` written into memory the caller owns: any writable C-contiguous
+        buffer of ``ID_DTYPE`` items at least ``len(keys)`` long. A read-only, strided or
         mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null comes
-        back as :attr:`MISSING_ID`."""
+        back as ``MISSING_ID``."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64)."""
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint64)."""
 
     MISSING_ID: ClassVar[int]
-    """The :meth:`ids_of_bytes` item standing for an absent key."""
+    """The ``ids_of_bytes`` item standing for an absent key."""
 
     def __iter__(self) -> Iterator[tuple[str, int]]: ...
     def to_bytes(self) -> bytes: ...
@@ -608,14 +608,14 @@ class DictIndex:
 
 @final
 class HashedDictIndex:
-    """A :class:`DictIndex` with a hash sidecar answering ``id(key)``: the dictionary's ranks at a
+    """A ``DictIndex`` with a hash sidecar answering ``id(key)``: the dictionary's ranks at a
     hash index's lookup cost.
 
     Beside each key's slot in a minimal perfect hash the sidecar stores the key's rank and
     ``fingerprint_bits`` of a second hash, ``ceil(log2 n) + fingerprint_bits`` bits a key and
     about two for the perfect hash. ``id`` is one hash and a read of each table and never touches
     the dictionary; ``key``, ``prefix``, ``lower_bound``, ``range`` and iteration go to
-    :attr:`dict`, whose ids are the same.
+    ``dict``, whose ids are the same.
     """
 
     @staticmethod
@@ -644,7 +644,7 @@ class HashedDictIndex:
 
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
-        """Rank of ``key``, raising ``KeyError`` if :meth:`id` says it is absent. There is no
+        """Rank of ``key``, raising ``KeyError`` if ``id`` says it is absent. There is no
         ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an immutable
         ``str -> int`` lookup, not a mapping."""
 
@@ -654,28 +654,28 @@ class HashedDictIndex:
     def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
     def ids_of_bytes(self, keys: Sequence[str]) -> bytes:
         """Batched ``id`` packed into a buffer: one 8-byte native-endian item per key, aligned
-        with ``keys``, :attr:`MISSING_ID` where a key is absent, for
+        with ``keys``, ``MISSING_ID`` where a key is absent, for
         ``np.frombuffer(buf, dtype=index.ID_DTYPE)``."""
 
     def ids_into(self, keys: Sequence[str], out: Buffer) -> None:
-        """:meth:`ids_of_bytes` written into memory the caller owns: any writable C-contiguous
-        buffer of :attr:`ID_DTYPE` items at least ``len(keys)`` long. A read-only, strided or
+        """``ids_of_bytes`` written into memory the caller owns: any writable C-contiguous
+        buffer of ``ID_DTYPE`` items at least ``len(keys)`` long. A read-only, strided or
         mistyped buffer raises ``BufferError``; one shorter than ``keys`` raises ``ValueError``."""
 
     def ids_of_arrow(self, column: object) -> bytes:
-        """:meth:`ids_of_bytes` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
+        """``ids_of_bytes`` over an Arrow ``utf8``/``large_utf8`` column — a pyarrow ``Array``
         or ``ChunkedArray``, a pandas ``ArrowDtype`` column, a polars ``Series`` — read straight
         from its offset and data buffers, so no Python string exists per key. A null comes
-        back as :attr:`MISSING_ID`."""
+        back as ``MISSING_ID``."""
 
     def ids_into_arrow(self, column: object, out: Buffer) -> None:
-        """:meth:`ids_of_arrow` written into ``out``, as :meth:`ids_into` does for a list."""
+        """``ids_of_arrow`` written into ``out``, as ``ids_into`` does for a list."""
 
     ID_DTYPE: ClassVar[str]
-    """``numpy`` dtype of one :meth:`ids_of_bytes` item (uint64)."""
+    """``numpy`` dtype of one ``ids_of_bytes`` item (uint64)."""
 
     MISSING_ID: ClassVar[int]
-    """The :meth:`ids_of_bytes` item standing for an absent key."""
+    """The ``ids_of_bytes`` item standing for an absent key."""
 
     def to_bytes(self) -> bytes: ...
     def serialized_len(self) -> int: ...
@@ -712,7 +712,7 @@ class Overlay:
     retired from it, leaving the base untouched and still usable.
 
     Ids are stable: an id is never reissued, removing a key does not renumber anything, and
-    re-adding a removed key revives its original id. :meth:`compact` is the one operation that
+    re-adding a removed key revives its original id. ``compact`` is the one operation that
     renumbers.
     """
 
@@ -721,13 +721,13 @@ class Overlay:
     def __contains__(self, key: str, /) -> bool: ...
     def is_empty(self) -> bool: ...
     def id_space(self) -> int:
-        """How many ids have ever been issued; :meth:`key` is ``None`` at or above this."""
+        """How many ids have ever been issued; ``key`` is ``None`` at or above this."""
 
     def id(self, key: str) -> int | None: ...
     def contains(self, key: str) -> bool: ...
     def __getitem__(self, key: str, /) -> int:
         """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
-        :meth:`id`. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
         immutable ``str -> int`` lookup, not a mapping."""
 
     def get(self, key: str, default: _T | None = None) -> int | _T | None:
@@ -739,50 +739,50 @@ class Overlay:
     def remove(self, key: str) -> bool:
         """Remove ``key``, returning whether it was there.
 
-        Over a :class:`CompactHashIndex` base this inherits that index's false-positive rate: a
+        Over a ``CompactHashIndex`` base this inherits that index's false-positive rate: a
         ``contains`` that was never true of a real key can retire an id. Remove by a key you know
-        is present, or by the id itself with :meth:`retire_id`.
+        is present, or by the id itself with ``retire_id``.
         """
 
     def retire_id(self, id: int) -> bool:
         """Retire ``id`` itself, returning whether it was live.
 
-        The same tombstone :meth:`remove` sets, without the key lookup in front of it -- which over
-        a :class:`CompactHashIndex` base is the part a false positive corrupts. An application that
+        The same tombstone ``remove`` sets, without the key lookup in front of it -- which over
+        a ``CompactHashIndex`` base is the part a false positive corrupts. An application that
         stored the id it was given when the key was added has the exact id to retire and needs no
-        membership test. An id at or above :meth:`id_space`, or one already retired, is ``False``
+        membership test. An id at or above ``id_space``, or one already retired, is ``False``
         and changes nothing.
         """
 
     def key(self, id: int) -> str | None:
-        """Key for ``id``. Raises ``TypeError`` on a :class:`CompactHashIndex` base, which stores
+        """Key for ``id``. Raises ``TypeError`` on a ``CompactHashIndex`` base, which stores
         no keys."""
 
     def keys(self) -> list[str]:
-        """Every live key. Raises ``TypeError`` on a :class:`CompactHashIndex` base."""
+        """Every live key. Raises ``TypeError`` on a ``CompactHashIndex`` base."""
 
     def compact(self) -> Overlay:
         """Fold the edits into a fresh base. This renumbers: ids do not survive it. Raises
-        ``TypeError`` on a :class:`CompactHashIndex` base."""
+        ``TypeError`` on a ``CompactHashIndex`` base."""
 
     def compact_to_file(self, path: str | os.PathLike[str]) -> int:
-        """:meth:`compact` written straight to ``path`` as the base's own blob, without the live
+        """``compact`` written straight to ``path`` as the base's own blob, without the live
         keys ever being held in memory at once; load it with the base class's ``load`` or
-        ``load_mmap`` and wrap it in a new :class:`Overlay`. Returns how many keys the file holds.
-        Raises ``TypeError`` on a :class:`CompactHashIndex` base."""
+        ``load_mmap`` and wrap it in a new ``Overlay``. Returns how many keys the file holds.
+        Raises ``TypeError`` on a ``CompactHashIndex`` base."""
 
     def compact_with_remap(self) -> tuple[Overlay, bytes]:
-        """:meth:`compact`, and the renumbering it did: one native-endian ``uint64`` per id the
+        """``compact``, and the renumbering it did: one native-endian ``uint64`` per id the
         overlay had issued (``np.frombuffer(remap, dtype="uint64")``), the new id of each old one,
         ``2**64 - 1`` where the id was retired. Raises ``TypeError`` on a
-        :class:`CompactHashIndex` base."""
+        ``CompactHashIndex`` base."""
 
     def base(self) -> StringIndex | PerfectHashIndex | CompactHashIndex:
         """The index underneath, unchanged and shared with this overlay."""
 
     def to_bytes(self) -> bytes: ...
     def save(self, path: str | os.PathLike[str]) -> None:
-        """Write :meth:`to_bytes` to ``path``, atomically: a crash or a full disk leaves the
+        """Write ``to_bytes`` to ``path``, atomically: a crash or a full disk leaves the
         previous file intact rather than a truncated one under the real name."""
 
     @staticmethod
@@ -808,13 +808,13 @@ class Overlay:
     def from_untrusted_bytes(
         data: bytes, base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex]
     ) -> Overlay:
-        """:meth:`from_bytes` for a blob **someone else wrote**.
+        """``from_bytes`` for a blob **someone else wrote**.
 
         The overlay's own framing is checked identically either way. What changes is the loader the
         *embedded base* is handed to, and it matters for exactly one base: a ``StringIndex`` region
-        can panic ``from_bytes`` (see :meth:`StringIndex.from_untrusted_bytes`), and an overlay
+        can panic ``from_bytes`` (see ``StringIndex.from_untrusted_bytes``), and an overlay
         frame passes every check it makes for itself before that region is reached. Over the two
-        hash bases this is the same work as :meth:`from_bytes`, whose loaders are already total.
+        hash bases this is the same work as ``from_bytes``, whose loaders are already total.
         """
 
     @staticmethod
@@ -822,16 +822,16 @@ class Overlay:
         path: str | os.PathLike[str],
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
-        """:meth:`from_bytes` from a file: checksummed and validated the same way."""
+        """``from_bytes`` from a file: checksummed and validated the same way."""
     @staticmethod
     def load_untrusted(
         path: str | os.PathLike[str],
         base: type[StringIndex] | type[PerfectHashIndex] | type[CompactHashIndex],
     ) -> Overlay:
-        """:meth:`from_untrusted_bytes` from a file."""
+        """``from_untrusted_bytes`` from a file."""
 
 class BlobInfo(TypedDict):
-    """What :func:`inspect` reads out of a blob's header.
+    """What ``inspect`` reads out of a blob's header.
 
     Every field comes from the framing and none is checked against the contents: a blob that
     inspects cleanly may still fail to load, and the sizes are what the header claims. ``keys`` is
@@ -888,14 +888,14 @@ def inspect(blob: str | os.PathLike[str] | bytes) -> BlobInfo:
     """
 
 class Estimate(TypedDict):
-    """What one index would weigh on the keys :func:`plan` was given.
+    """What one index would weigh on the keys ``plan`` was given.
 
     ``bytes`` is the size of its serialised blob and ``bytes_per_key`` that over the number of
     distinct keys. ``block`` is the ``DictIndex`` block the estimate was priced at and ``None``
     for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
 
-    ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a :class:`Workload`, of
+    ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a ``Workload``, of
     the workload's mean operation -- and is never measured: it comes from a fit to 240 cells timed
     on this crate's own machine, with a mean absolute error of 6-12 % on ``id(key)``. It is
     accurate enough to order the candidates and nowhere near accurate enough to quote as your own
@@ -916,7 +916,7 @@ class Estimate(TypedDict):
     nanos: float
 
 class Plan(TypedDict):
-    """What :func:`plan` priced: the ranking, the shape of the corpus and the caveats.
+    """What ``plan`` priced: the ranking, the shape of the corpus and the caveats.
 
     ``estimates`` is every index that answers what was asked, in the objective's order, and
     ``best`` is its first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean
@@ -939,7 +939,7 @@ class Plan(TypedDict):
     text: str
 
 class Workload(TypedDict, total=False):
-    """How often each operation is asked of the index, for :func:`plan` to rank by.
+    """How often each operation is asked of the index, for ``plan`` to rank by.
 
     The weights are relative -- ``{"hits": 9, "misses": 1}`` is nine hits to a miss, and so is
     ``{"hits": 900, "misses": 100}`` -- so counts read off a log serve as they are. ``hits`` and
@@ -1005,7 +1005,7 @@ def plan(
 
     ``objective`` is what the ranking is *for*: ``memory`` (the default, the smallest blob),
     ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``), ``balanced``
-    (whichever candidate gives up least on either), or a :class:`Workload` -- a mapping from
+    (whichever candidate gives up least on either), or a ``Workload`` -- a mapping from
     operation to weight such as ``{"hits": 9, "misses": 1, "batch": 64}`` -- ranked by its mean
     operation. The candidates and their sizes do not change with it; only the order, and so
     ``best``, do -- except that a workload's operations add to what the index has to answer.

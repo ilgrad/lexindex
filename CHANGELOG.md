@@ -13,6 +13,14 @@ All notable changes to this project are documented here. The format follows
   2.0.0 — so `help(lexindex.inspect)` began with it, and so did `inspect`'s entry on the API page,
   which is rendered from the same docstring. The note is back beside the `#[pymodule]` it explains,
   as a plain comment that cannot become a docstring again.
+- **The API page carried 73 links to nowhere and 26 Sphinx roles printed as typed.** The binding's
+  doc comments in `src/python.rs` are Python docstrings — `help()` and the API page both read them
+  — but they were written as rustdoc: `[id](Self::id)` is a dead link in Markdown, and
+  `[PyStringIndex::to_bytes]` names a Rust type no Python caller meets. Those are code spans now,
+  and `DictIndexIterator`'s docstring, which was a note on its lock, describes the iterator. The
+  stub and `lexindex/__init__.py` used Sphinx roles (`:meth:`, `:class:`, 105 of them), which
+  Markdown shows verbatim; they are double-backtick literals now, as the rest of those docstrings
+  already were. A test holds every docstring the runtime or the stub carries to that.
 - **`docs.yml`**: its `release: published` trigger never fired, in 24 releases — `release.yml`
   creates the GitHub Release with `GITHUB_TOKEN`, whose events start no workflow — and its push
   filter missed two files the site is built from: `polars/README.md`, which is the Polars page, and

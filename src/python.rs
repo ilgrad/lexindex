@@ -197,8 +197,8 @@ impl PyStringIndex {
         written.map_err(to_py)
     }
 
-    /// [`from_sorted`] streamed straight to `path`, so neither the corpus nor the finished index
-    /// has to fit in memory. Returns the number of keys written.
+    /// `from_sorted` streamed straight to `path`, so neither the corpus nor the finished index has
+    /// to fit in memory. Returns the number of keys written.
     #[staticmethod]
     fn build_sorted_to_file(items: &Bound<'_, PyAny>, path: PathBuf) -> PyResult<usize> {
         let err = Rc::new(RefCell::new(None));
@@ -279,19 +279,19 @@ impl PyStringIndex {
         self.inner.key(id)
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, looping in Rust to amortise the Python↔Rust
-    /// boundary. Returns a list aligned with `keys`, `None` where a key is absent. (Named `ids_of`, not
+    /// Batched `id`: one call for many keys, looping in Rust to amortise the Python↔Rust boundary.
+    /// Returns a list aligned with `keys`, `None` where a key is absent. (Named `ids_of`, not
     /// `ids`/`keys`, so the class is not mistaken for a mapping by `dict(index)`.)
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
         py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
-    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    /// Batched `id` packed into a `bytes` buffer instead of a list, for callers who hand the result
+    /// to `numpy` or `array` rather than reading it item by item.
     ///
-    /// One `8`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
-    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
-    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    /// One `8`-byte native-endian item per key, aligned with `keys`, `MISSING_ID` where a key is
+    /// absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather than copying it;
+    /// `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
     /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
     /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
@@ -306,12 +306,12 @@ impl PyStringIndex {
         PyBytes::new(py, &packed)
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
-    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
-    /// column's offset and data buffers, so no Python string exists per key — building and
-    /// borrowing those was half to two thirds of what the list forms cost.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array` or
+    /// `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// `ids_of_bytes`: one `ID_DTYPE` item per element, `MISSING_ID` for an absent key and for a
+    /// null. The keys are read from the column's offset and data buffers, so no Python string
+    /// exists per key — building and borrowing those was half to two thirds of what the list forms
+    /// cost.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -322,9 +322,8 @@ impl PyStringIndex {
         Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
-    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list: `out` is
+    /// a writable C-contiguous buffer of `ID_DTYPE` items at least as long as the column.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -341,11 +340,11 @@ impl PyStringIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
-    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
-    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
-    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
-    /// With no keys nothing is written and `out` need only be a writable buffer.
+    /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
+    /// `out` is any writable C-contiguous buffer of `ID_DTYPE` items —
+    /// `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can reuse one
+    /// array. The first `len(keys)` items are written; the rest are left as they were. With no keys
+    /// nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint32` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -377,8 +376,8 @@ impl PyStringIndex {
     #[classattr]
     const MISSING_ID: u64 = u64::MAX;
 
-    /// Batched [`key`](Self::key): one call for many ids. Returns a list aligned with `ids`, `None`
-    /// where an id is out of range.
+    /// Batched `key`: one call for many ids. Returns a list aligned with `ids`, `None` where an id
+    /// is out of range.
     fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
         py.detach(|| ids.iter().map(|&i| self.inner.key(i)).collect())
     }
@@ -537,7 +536,7 @@ impl PyStringIndex {
         Ok((from_bytes, (self.to_bytes(py),)))
     }
 
-    /// Reconstruct from a [`PyStringIndex::to_bytes`] blob.
+    /// Reconstruct from a `to_bytes` blob.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
         let inner = py.detach(|| StringIndex::from_bytes(data)).map_err(to_py)?;
@@ -665,7 +664,7 @@ impl PyStringIndex {
 /// realistic key.
 const ITER_CHUNK: usize = 1024;
 
-/// Lazy `(key, id)` iterator over a [`PyStringIndex`], in sorted order. Holds a reference to the parent
+/// Lazy `(key, id)` iterator over a `StringIndex`, in sorted order. Holds a reference to the parent
 /// index and streams it a chunk at a time, so it never materialises the whole key set.
 #[pyclass(frozen, name = "StringIndexIterator", module = "lexindex._core")]
 pub struct StringIndexIterator {
@@ -913,17 +912,17 @@ impl PyPerfectHashIndex {
         self.inner.key(id).map(|k| PyString::new(py, k))
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
+    /// Batched `id`: one call for many keys, aligned with `keys` (`None` where absent).
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
-    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    /// Batched `id` packed into a `bytes` buffer instead of a list, for callers who hand the result
+    /// to `numpy` or `array` rather than reading it item by item.
     ///
-    /// One `4`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
-    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
-    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    /// One `4`-byte native-endian item per key, aligned with `keys`, `MISSING_ID` where a key is
+    /// absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather than copying it;
+    /// `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
     /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
     /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
@@ -947,12 +946,12 @@ impl PyPerfectHashIndex {
         Ok(PyBytes::new(py, &packed))
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
-    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
-    /// column's offset and data buffers, so no Python string exists per key — building and
-    /// borrowing those was half to two thirds of what the list forms cost.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array` or
+    /// `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// `ids_of_bytes`: one `ID_DTYPE` item per element, `MISSING_ID` for an absent key and for a
+    /// null. The keys are read from the column's offset and data buffers, so no Python string
+    /// exists per key — building and borrowing those was half to two thirds of what the list forms
+    /// cost.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -963,9 +962,8 @@ impl PyPerfectHashIndex {
         Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
-    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list: `out` is
+    /// a writable C-contiguous buffer of `ID_DTYPE` items at least as long as the column.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -987,11 +985,11 @@ impl PyPerfectHashIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
-    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
-    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
-    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
-    /// With no keys nothing is written and `out` need only be a writable buffer.
+    /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
+    /// `out` is any writable C-contiguous buffer of `ID_DTYPE` items —
+    /// `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can reuse one
+    /// array. The first `len(keys)` items are written; the rest are left as they were. With no keys
+    /// nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -1031,7 +1029,7 @@ impl PyPerfectHashIndex {
     #[classattr]
     const MISSING_ID: u32 = u32::MAX;
 
-    /// Batched [`key`](Self::key): one call for many ids, aligned with `ids` (`None` where out of range).
+    /// Batched `key`: one call for many ids, aligned with `ids` (`None` where out of range).
     fn keys_of<'py>(&self, py: Python<'py>, ids: Vec<u32>) -> Vec<Option<Bound<'py, PyString>>> {
         // Two passes on purpose: the lookups are pure Rust and run with the GIL released, then the
         // arena slices become Python strings. Collecting `String`s in between would copy each key
@@ -1070,7 +1068,7 @@ impl PyPerfectHashIndex {
         Ok((from_bytes, (self.to_bytes(py)?,)))
     }
 
-    /// Reconstruct from a [`PyPerfectHashIndex::to_bytes`] blob.
+    /// Reconstruct from a `to_bytes` blob.
     ///
     /// Every length the index will read is validated against the bytes present, so arbitrary input
     /// raises rather than misbehaving. A blob written before 1.0 is refused: its perfect hash came
@@ -1317,17 +1315,17 @@ impl PyCompactHashIndex {
         self.inner.contains(key)
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys` (`None` where absent).
+    /// Batched `id`: one call for many keys, aligned with `keys` (`None` where absent).
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u32>> {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list, for callers who
-    /// hand the result to `numpy` or `array` rather than reading it item by item.
+    /// Batched `id` packed into a `bytes` buffer instead of a list, for callers who hand the result
+    /// to `numpy` or `array` rather than reading it item by item.
     ///
-    /// One `4`-byte native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID)
-    /// where a key is absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather
-    /// than copying it; `ids_of` has to build one Python `int` per key, which is what this avoids.
+    /// One `4`-byte native-endian item per key, aligned with `keys`, `MISSING_ID` where a key is
+    /// absent. `np.frombuffer(buf, dtype=index.ID_DTYPE)` shares the memory rather than copying it;
+    /// `ids_of` has to build one Python `int` per key, which is what this avoids.
     ///
     /// Native endianness — unlike the blobs, which are little-endian everywhere — because the
     /// buffer is meant for `np.frombuffer` on the machine that produced it, not for the wire.
@@ -1351,12 +1349,12 @@ impl PyCompactHashIndex {
         Ok(PyBytes::new(py, &packed))
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
-    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from the
-    /// column's offset and data buffers, so no Python string exists per key — building and
-    /// borrowing those was half to two thirds of what the list forms cost.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array` or
+    /// `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// `ids_of_bytes`: one `ID_DTYPE` item per element, `MISSING_ID` for an absent key and for a
+    /// null. The keys are read from the column's offset and data buffers, so no Python string
+    /// exists per key — building and borrowing those was half to two thirds of what the list forms
+    /// cost.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -1367,9 +1365,8 @@ impl PyCompactHashIndex {
         Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
-    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list: `out` is
+    /// a writable C-contiguous buffer of `ID_DTYPE` items at least as long as the column.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -1391,11 +1388,11 @@ impl PyCompactHashIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns instead of a fresh
-    /// `bytes` per call: `out` is any writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE)
-    /// items — `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can
-    /// reuse one array. The first `len(keys)` items are written; the rest are left as they were.
-    /// With no keys nothing is written and `out` need only be a writable buffer.
+    /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
+    /// `out` is any writable C-contiguous buffer of `ID_DTYPE` items —
+    /// `np.empty(len(keys), dtype=index.ID_DTYPE)` is the usual one — so a hot loop can reuse one
+    /// array. The first `len(keys)` items are written; the rest are left as they were. With no keys
+    /// nothing is written and `out` need only be a writable buffer.
     ///
     /// A read-only, strided or mistyped buffer is a `BufferError` (a `uint64` array handed to this
     /// index is refused rather than half-filled); one shorter than `keys` is a `ValueError`.
@@ -1461,7 +1458,7 @@ impl PyCompactHashIndex {
         Ok((from_bytes, (self.to_bytes(py)?,)))
     }
 
-    /// Reconstruct from a [`PyCompactHashIndex::to_bytes`] blob.
+    /// Reconstruct from a `to_bytes` blob.
     ///
     /// Every length the index will read is validated against the bytes present, so arbitrary input
     /// raises rather than misbehaving. A blob written before 1.0 is refused: its perfect hash came
@@ -1584,15 +1581,14 @@ impl PyClosedHashIndex {
         self.inner.id(key)
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`.
+    /// Batched `id`: one call for many keys, aligned with `keys`.
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<u32> {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 4-byte
-    /// native-endian item per key, aligned with `keys`, for
-    /// `np.frombuffer(buf, dtype=index.ID_DTYPE)`. No item stands for an absent key, because
-    /// this index never reports one.
+    /// Batched `id` packed into a `bytes` buffer instead of a list: one 4-byte native-endian item
+    /// per key, aligned with `keys`, for `np.frombuffer(buf, dtype=index.ID_DTYPE)`. No item stands
+    /// for an absent key, because this index never reports one.
     fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
         let packed = py.detach(|| {
             let mut out = Vec::with_capacity(keys.len() * 4);
@@ -1604,12 +1600,12 @@ impl PyClosedHashIndex {
         PyBytes::new(py, &packed)
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
-    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// a `ValueError` for an absent key and for a null. The keys are read from the
-    /// column's offset and data buffers, so no Python string exists per key — building and
-    /// borrowing those was half to two thirds of what the list forms cost.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array` or
+    /// `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// `ids_of_bytes`: one `ID_DTYPE` item per element, a `ValueError` for an absent key and for a
+    /// null. The keys are read from the column's offset and data buffers, so no Python string
+    /// exists per key — building and borrowing those was half to two thirds of what the list forms
+    /// cost.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -1620,9 +1616,8 @@ impl PyClosedHashIndex {
         Ok(PyBytes::new(py, &packed(&ids, u32::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
-    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list: `out` is
+    /// a writable C-contiguous buffer of `ID_DTYPE` items at least as long as the column.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -1639,10 +1634,10 @@ impl PyClosedHashIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
-    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
-    /// long; the first `len(keys)` items are written and the rest left as they were. A read-only,
-    /// strided or mistyped buffer is a `BufferError`; one shorter than `keys` is a `ValueError`.
+    /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
+    /// buffer of `ID_DTYPE` items at least `len(keys)` long; the first `len(keys)` items are
+    /// written and the rest left as they were. A read-only, strided or mistyped buffer is a
+    /// `BufferError`; one shorter than `keys` is a `ValueError`.
     fn ids_into(
         &self,
         py: Python<'_>,
@@ -1681,8 +1676,8 @@ impl PyClosedHashIndex {
         Ok((from_bytes, (self.to_bytes(py),)))
     }
 
-    /// Reconstruct from a [`PyClosedHashIndex::to_bytes`] blob. Every length the index will read
-    /// is validated against the bytes present, so arbitrary input raises rather than misbehaving.
+    /// Reconstruct from a `to_bytes` blob. Every length the index will read is validated against
+    /// the bytes present, so arbitrary input raises rather than misbehaving.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
         let inner = py
@@ -1946,22 +1941,21 @@ impl PyDictIndex {
         self.inner.key(id)
     }
 
-    /// Batched [`key`](Self::key): a list aligned with `ids`, `None` where an id is out of
-    /// range. Ids that ascend within one block are answered by a single walk of it, so the range
-    /// `prefix_id_range` returns costs one pass rather than one per id.
+    /// Batched `key`: a list aligned with `ids`, `None` where an id is out of range. Ids that
+    /// ascend within one block are answered by a single walk of it, so the range `prefix_id_range`
+    /// returns costs one pass rather than one per id.
     fn keys_of(&self, py: Python<'_>, ids: Vec<u64>) -> Vec<Option<String>> {
         py.detach(|| self.inner.keys_of(&ids))
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`, `None` where a
-    /// key is absent.
+    /// Batched `id`: one call for many keys, aligned with `keys`, `None` where a key is absent.
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 8-byte
-    /// native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID) where a
-    /// key is absent, for `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
+    /// Batched `id` packed into a `bytes` buffer instead of a list: one 8-byte native-endian item
+    /// per key, aligned with `keys`, `MISSING_ID` where a key is absent, for
+    /// `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
     fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
         let packed = py.detach(|| {
             let mut out = Vec::with_capacity(keys.len() * 8);
@@ -1973,11 +1967,11 @@ impl PyDictIndex {
         PyBytes::new(py, &packed)
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array`
-    /// or `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from
-    /// the column's offset and data buffers, so no Python string exists per key.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column — a pyarrow `Array` or
+    /// `ChunkedArray`, a pandas column of `ArrowDtype`, a polars `Series` — packed like
+    /// `ids_of_bytes`: one `ID_DTYPE` item per element, `MISSING_ID` for an absent key and for a
+    /// null. The keys are read from the column's offset and data buffers, so no Python string
+    /// exists per key.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -1988,9 +1982,8 @@ impl PyDictIndex {
         Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list: `out` is a writable C-contiguous buffer of
-    /// [`ID_DTYPE`](Self::ID_DTYPE) items at least as long as the column.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list: `out` is
+    /// a writable C-contiguous buffer of `ID_DTYPE` items at least as long as the column.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -2007,10 +2000,10 @@ impl PyDictIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
-    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
-    /// long; the first `len(keys)` items are written and the rest left as they were. A read-only,
-    /// strided or mistyped buffer is a `BufferError`; one shorter than `keys` is a `ValueError`.
+    /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
+    /// buffer of `ID_DTYPE` items at least `len(keys)` long; the first `len(keys)` items are
+    /// written and the rest left as they were. A read-only, strided or mistyped buffer is a
+    /// `BufferError`; one shorter than `keys` is a `ValueError`.
     fn ids_into(
         &self,
         py: Python<'_>,
@@ -2070,9 +2063,8 @@ impl PyDictIndex {
         Ok((from_bytes, (self.to_bytes(py),)))
     }
 
-    /// Reconstruct from a [`PyDictIndex::to_bytes`] blob. Every length, both checksums, the
-    /// symbol table and the per-block arrays are validated, so arbitrary input raises rather
-    /// than misbehaving.
+    /// Reconstruct from a `to_bytes` blob. Every length, both checksums, the symbol table and the
+    /// per-block arrays are validated, so arbitrary input raises rather than misbehaving.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
         let inner = py.detach(|| DictIndex::from_bytes(data)).map_err(to_py)?;
@@ -2131,8 +2123,11 @@ impl PyDictIndex {
     }
 }
 
-/// [`PyDictIndex::__iter__`]: ids are dense, so the cursor is the next id and a refill is one
-/// walk from it. Behind a lock for the reason [`StringIndexIterator`] gives.
+// Ids are dense, so the cursor is the next id and a refill is one walk from it. Behind a lock for
+// the reason `StringIndexIterator::state` gives.
+/// Lazy `(key, id)` iterator over a `DictIndex`, in sorted order, which is id order. Holds a
+/// reference to the parent index and streams it a chunk at a time, so it never materialises the
+/// whole key set.
 #[pyclass(frozen, name = "DictIndexIterator", module = "lexindex._core")]
 pub struct DictIndexIterator {
     parent: Py<PyDictIndex>,
@@ -2287,20 +2282,19 @@ impl PyHashedDictIndex {
         }
     }
 
-    /// Whether `key` is present, under the same contract as [`id`](Self::id).
+    /// Whether `key` is present, under the same contract as `id`.
     fn contains(&self, key: &str) -> bool {
         self.inner.contains(key)
     }
 
-    /// Batched [`id`](Self::id): one call for many keys, aligned with `keys`, `None` where a key
-    /// is absent.
+    /// Batched `id`: one call for many keys, aligned with `keys`, `None` where a key is absent.
     fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
         py.detach(|| self.inner.ids_of(&keys))
     }
 
-    /// Batched [`id`](Self::id) packed into a `bytes` buffer instead of a list: one 8-byte
-    /// native-endian item per key, aligned with `keys`, [`MISSING_ID`](Self::MISSING_ID) where a
-    /// key is absent, for `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
+    /// Batched `id` packed into a `bytes` buffer instead of a list: one 8-byte native-endian item
+    /// per key, aligned with `keys`, `MISSING_ID` where a key is absent, for
+    /// `np.frombuffer(buf, dtype=index.ID_DTYPE)`.
     fn ids_of_bytes<'py>(&self, py: Python<'py>, keys: Vec<PyBackedStr>) -> Bound<'py, PyBytes> {
         let packed = py.detach(|| {
             let mut out = Vec::with_capacity(keys.len() * 8);
@@ -2312,10 +2306,9 @@ impl PyHashedDictIndex {
         PyBytes::new(py, &packed)
     }
 
-    /// Batched [`id`](Self::id) over an Arrow `utf8` / `large_utf8` column, packed like
-    /// [`ids_of_bytes`](Self::ids_of_bytes): one [`ID_DTYPE`](Self::ID_DTYPE) item per element,
-    /// [`MISSING_ID`](Self::MISSING_ID) for an absent key and for a null. The keys are read from
-    /// the column's offset and data buffers, so no Python string exists per key.
+    /// Batched `id` over an Arrow `utf8` / `large_utf8` column, packed like `ids_of_bytes`: one
+    /// `ID_DTYPE` item per element, `MISSING_ID` for an absent key and for a null. The keys are
+    /// read from the column's offset and data buffers, so no Python string exists per key.
     fn ids_of_arrow<'py>(
         &self,
         py: Python<'py>,
@@ -2326,8 +2319,7 @@ impl PyHashedDictIndex {
         Ok(PyBytes::new(py, &packed(&ids, u64::to_ne_bytes)))
     }
 
-    /// [`ids_of_arrow`](Self::ids_of_arrow) written into memory the caller owns, as
-    /// [`ids_into`](Self::ids_into) does for a list.
+    /// `ids_of_arrow` written into memory the caller owns, as `ids_into` does for a list.
     fn ids_into_arrow(
         &self,
         py: Python<'_>,
@@ -2344,10 +2336,9 @@ impl PyHashedDictIndex {
         write_ids(py, &sink, &ids)
     }
 
-    /// [`ids_of_bytes`](Self::ids_of_bytes) written into memory the caller owns: `out` is any
-    /// writable C-contiguous buffer of [`ID_DTYPE`](Self::ID_DTYPE) items at least `len(keys)`
-    /// long. A read-only, strided or mistyped buffer is a `BufferError`; one shorter than `keys`
-    /// is a `ValueError`.
+    /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
+    /// buffer of `ID_DTYPE` items at least `len(keys)` long. A read-only, strided or mistyped
+    /// buffer is a `BufferError`; one shorter than `keys` is a `ValueError`.
     fn ids_into(
         &self,
         py: Python<'_>,
@@ -2396,9 +2387,8 @@ impl PyHashedDictIndex {
         Ok((from_bytes, (self.to_bytes(py),)))
     }
 
-    /// Reconstruct from a [`PyHashedDictIndex::to_bytes`] blob. Every length and every checksum,
-    /// the dictionary's included, is validated, so arbitrary input raises rather than
-    /// misbehaving.
+    /// Reconstruct from a `to_bytes` blob. Every length and every checksum, the dictionary's
+    /// included, is validated, so arbitrary input raises rather than misbehaving.
     #[staticmethod]
     fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
         let inner = py
@@ -2780,7 +2770,7 @@ impl PyOverlay {
         Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Write [`to_bytes`](Self::to_bytes) to `path`.
+    /// Write `to_bytes` to `path`.
     fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
         let guard = self.lock(py);
         let inner = &*guard;
@@ -2788,8 +2778,8 @@ impl PyOverlay {
             .map_err(to_py)
     }
 
-    /// Read a blob written by [`to_bytes`](Self::to_bytes), rebuilding the base with `base`'s own
-    /// loader — pass the class, not an instance.
+    /// Read a blob written by `to_bytes`, rebuilding the base with `base`'s own loader — pass the
+    /// class, not an instance.
     ///
     /// The blob records which base wrote it and a mismatch is refused, so the wrong class is an
     /// error rather than an unchecked read of bytes meant for something else.
@@ -2828,7 +2818,7 @@ impl PyOverlay {
         Ok((from_bytes, (self.to_bytes(py)?, base)))
     }
 
-    /// [`from_bytes`](Self::from_bytes) for a blob **someone else wrote**.
+    /// `from_bytes` for a blob **someone else wrote**.
     ///
     /// The overlay's own framing is checked identically either way — magic, both checksums, the
     /// section lengths, the additions and their UTF-8, the tombstones. What changes is the loader
@@ -2846,7 +2836,7 @@ impl PyOverlay {
         Self::load_blob(py, data, base, BaseTrust::Stranger)
     }
 
-    /// [`from_bytes`](Self::from_bytes) from a file: checksummed and validated the same way.
+    /// `from_bytes` from a file: checksummed and validated the same way.
     #[staticmethod]
     fn load(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
         let data = py
@@ -2855,8 +2845,8 @@ impl PyOverlay {
         Self::load_blob(py, &data, base, BaseTrust::Own)
     }
 
-    /// [`from_untrusted_bytes`](Self::from_untrusted_bytes) from a file: the overlay's framing
-    /// checked as always, the embedded base handed to the strict loader.
+    /// `from_untrusted_bytes` from a file: the overlay's framing checked as always, the embedded
+    /// base handed to the strict loader.
     #[staticmethod]
     fn load_untrusted(py: Python<'_>, path: PathBuf, base: &Bound<'_, PyType>) -> PyResult<Self> {
         let data = py

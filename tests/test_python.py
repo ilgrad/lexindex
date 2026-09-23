@@ -1,7 +1,9 @@
 """End-to-end tests of the lexindex Python bindings."""
 
 import array
+import ast
 import importlib.metadata
+import inspect
 import itertools
 import multiprocessing
 import os
@@ -1507,6 +1509,50 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
 
 def test_inspect_docstring_opens_with_what_inspect_does():
     assert lexindex.inspect.__doc__.startswith("What a blob is, from its header alone")
+
+
+# A docstring is read by `help()`, by an IDE out of the stub, and on the API page, which renders
+# Markdown: there a rustdoc link is a dead link and a Sphinx role is printed as typed.
+_FOREIGN_MARKUP = re.compile(
+    r"\]\((?:Self|crate|super)::"  # a rustdoc link to an item
+    r"|\[`[^`\]]+`\](?![(\[])"  # a rustdoc shortcut link
+    r"|\bPy(?:(?:String|PerfectHash|CompactHash|ClosedHash|Dict|HashedDict)Index|Overlay)\b"
+    r"|:(?:meth|class|func|attr|data|mod|exc|obj):`"  # a Sphinx role
+)
+
+
+def _runtime_docstrings():
+    for module in (lexindex, lexindex._core):
+        yield module.__name__, module.__doc__ or ""
+        for name, obj in vars(module).items():
+            ours = getattr(obj, "__module__", "").startswith("lexindex")
+            if name.startswith("_") or not ours:
+                continue
+            yield f"{module.__name__}.{name}", obj.__doc__ or ""
+            for member, raw in vars(obj).items() if inspect.isclass(obj) else ():
+                raw = getattr(raw, "__func__", raw)
+                if inspect.isroutine(raw) or inspect.isdatadescriptor(raw):
+                    yield f"{module.__name__}.{name}.{member}", raw.__doc__ or ""
+
+
+def _stub_docstrings():
+    stub = Path(lexindex.__file__).with_name("__init__.pyi")
+    for node in ast.walk(ast.parse(stub.read_text(encoding="utf-8"))):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            yield f"__init__.pyi:{node.lineno}", node.value.value
+
+
+def test_docstrings_carry_no_rustdoc_links_or_sphinx_roles():
+    found = sorted(
+        (where, m.group(0))
+        for where, doc in itertools.chain(_runtime_docstrings(), _stub_docstrings())
+        for m in _FOREIGN_MARKUP.finditer(doc)
+    )
+    assert found == []
 
 
 def test_plan_prices_every_index_that_answers_the_question():
