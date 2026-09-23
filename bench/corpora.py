@@ -2,11 +2,11 @@
 
 Bytes per key is a property of the *keys* at least as much as of the structure: `StringIndex`
 measures 0.68 on one corpus and 16.57 on another, and `marisa-trie` moves between 2.12 and 6.21 over
-the same span. One corpus cannot carry a size claim. This module is the set that can — thirteen
+the same span. One corpus cannot carry a size claim. This module is the set that can — fourteen
 corpora of four kinds:
 
 * **fetched** from a pinned URL and checked against a SHA-256 — Wikipedia article titles in three
-  scripts, the Tranco domain ranking, the PyPI package index;
+  scripts, the Tranco domain ranking, the PyPI package index, jieba's Chinese segmentation lexicon;
 * **derived** from one of those by the transformation under which the keys really exist — the
   article URLs are the titles with Wikipedia's own prefix and escaping;
 * **read off this machine** — the Fedora word list, this filesystem's paths, the identifiers in the
@@ -61,6 +61,7 @@ SEED = 0x6C6578696E646578 & 0xFFFFFFFF  # "lexindex" as bytes, truncated
 
 WIKI_DUMP = "20260801"  # a dated dump, not `latest`: `latest` cannot be pinned by hash
 TRANCO_LIST = "38KVL"  # the daily list of 2026-09-11, whose id is permanent
+JIEBA_TAG = "v0.42.1"  # a release tag, not a branch: a branch cannot be pinned by hash
 
 
 FETCHED: dict[str, str] = {}  # cached file -> the URL it came from, for the manifest
@@ -129,6 +130,18 @@ def _pypi() -> Iterator[str]:
     for project in payload["projects"]:
         if project["name"]:
             yield project["name"]
+
+
+def _jieba_dict() -> Iterator[str]:
+    """The words of the `word freq tag` lines; frequency and tag are the segmenter's, not keys."""
+    path = _download(
+        f"https://raw.githubusercontent.com/fxsjy/jieba/{JIEBA_TAG}/jieba/dict.txt",
+        f"jieba-{JIEBA_TAG}-dict.txt",
+    )
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if word := line.split(" ", 1)[0].strip():
+                yield word
 
 
 def _words() -> Iterator[str]:
@@ -231,6 +244,15 @@ CORPORA: tuple[Corpus, ...] = (
         sizes=(100_000, 1_000_000),
         full=True,
         note="CJK: three bytes a character, and short keys — the hardest case for front coding",
+    ),
+    Corpus(
+        "jieba-dict",
+        f"Chinese words — the jieba {JIEBA_TAG} segmentation lexicon, `jieba/dict.txt` (MIT)",
+        _jieba_dict,
+        fetched=True,
+        sizes=(100_000,),
+        full=True,
+        note="what a dictionary segmenter loads: 349 045 words of 2.9 characters, nearly all CJK",
     ),
     Corpus(
         "urls",

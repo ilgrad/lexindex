@@ -81,6 +81,29 @@
         }
       ]
     },
+    "jieba-dict": {
+      "what": "Chinese words — the jieba v0.42.1 segmentation lexicon, `jieba/dict.txt` (MIT)",
+      "nested": true,
+      "pool_keys": 349045,
+      "built": "2026-09-23",
+      "files": [
+        {
+          "file": "jieba-dict-100000.txt",
+          "keys": 100000,
+          "bytes": 974778,
+          "mean_key_bytes": 8.75,
+          "sha256": "5fd22c9088f2ceb296dce3c9829dff5729669bcc1c455bf640ed04a439215e18"
+        },
+        {
+          "file": "jieba-dict-full.txt",
+          "keys": 349045,
+          "bytes": 3397594,
+          "mean_key_bytes": 8.73,
+          "sha256": "33be02a6d5c811b57029db740516ed57a9ef41fca5b92f0e1b499bcd4f6bc00b"
+        }
+      ],
+      "note": "what a dictionary segmenter loads: 349 045 words of 2.9 characters, nearly all CJK"
+    },
     "numeric": {
       "what": "dense decimal ids, `0` to `n-1`",
       "nested": false,
@@ -381,7 +404,7 @@
     }
   },
   "host": "arz",
-  "kernel": "Linux 7.2.4-200.fc44.x86_64",
+  "kernel": "Linux 7.2.7-200.fc44.x86_64",
   "grid": [
     100000,
     1000000,
@@ -392,6 +415,11 @@
       "url": "https://dumps.wikimedia.org/enwiki/20260801/enwiki-20260801-all-titles-in-ns0.gz",
       "bytes": 109015770,
       "sha256": "88a6b0aeb072c476d5e3d071fe03802b6d68d84297055834a6abe4cdf3487006"
+    },
+    "jieba-v0.42.1-dict.txt": {
+      "url": "https://raw.githubusercontent.com/fxsjy/jieba/v0.42.1/jieba/dict.txt",
+      "bytes": 5071852,
+      "sha256": "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8"
     },
     "pypi-simple.json": {
       "url": "https://pypi.org/simple/",
