@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`key_into` on a blob in a character code is back at 4.2.0's speed, and `id` much closer to
+  it.** 4.3.0 decoded a key a character at a time through the tables the code is stored in — the
+  codeword's lead found among the leads, a branch on the mode and on the lead's width,
+  `char::encode_utf8` — and then checked the finished key as UTF-8 a second time; it spelled a
+  query through a two-level index, behind a branch on the mode. A codeword now decodes in two reads
+  and one four-byte store, out of a table of the 256 values its first byte can take and one of
+  every character's UTF-8. What the decoder writes is whole characters out of a table built from
+  `char`s, so it becomes a `String` without the second pass; a debug build still checks it, and so
+  do the fuzz targets. Code points below U+0800 — ASCII, Cyrillic and every other script UTF-8
+  spells in two bytes — are one flat level of the index, and under the eight-bit mode ASCII is in
+  the index too, so spelling a query no longer asks which mode it is in. Blobs are unchanged, byte
+  for byte. Against 4.2.0 in one process, in two builds of the harness
+  (`bench/results/charcode-ab-2026-09-23-arz-668a1d3.txt`): `key_into` is 2.5–3.3 % faster on a
+  million Russian titles, where 4.3.0 was 19–23 % slower, within 2 % on a million Chinese ones
+  (4.3.0: 11–12 % slower) and level on jieba's lexicon (4.3.0: 4–5 % slower); `id` is 1–2 %
+  slower on the Russian titles (4.3.0: 6–7 %), 6–8 % on the Chinese ones (4.3.0: 12–13 %) and 3–4 %
+  faster on the lexicon, as in 4.3.0. English titles, whose blob is 4.2's, read within 2 % of
+  4.2.0, the band two builds of the harness move by. Most of what `id` still pays is spelling the
+  query: all of it on the Russian titles, where spelling it twice adds 610 instructions and `id`
+  pays 605 over 4.2.0, and two thirds of the 530 instructions it pays on the Chinese ones.
+
+### Documentation
+
+- **The million-key size table and the README's margin over `marisa-trie` are re-measured at
+  4.3.0** (`bench/results/sweep-2026-09-23-arz-4f2a0e9.json`), so they show the character code. Of
+  the 264 cells the run shares with the 4.0.0 one, 252 are the same to the byte; the twelve that
+  moved are `DictIndex` on the Russian and Chinese titles, 6.7–14.7 % smaller, and their margins
+  over marisa's best setting go from 2.2 and 1.6 % to 14 and 9 %, so the README's range now starts
+  at English titles' 3.9 %. At ten million keys
+  (`bench/results/sweep10m-2026-09-23-arz-4f2a0e9.json`) all 66 cells are the same to the byte: the
+  code takes none of those six corpora. The run's timings are not published, since the machine was
+  busy.
+
 ## [4.3.0] — 2026-09-23
 
 ### Changed

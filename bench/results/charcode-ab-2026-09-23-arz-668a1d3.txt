@@ -1,0 +1,160 @@
+local/z5b at 668a1d3 (the character code's decoder rewrite): what `DictIndex::id` and `key_into`
+cost at the default block in three builds of the library over the same keys, in one process --
+
+  4.2.0     from crates.io; every blob `BDX3`
+  4.3.0     the tag v4.3.0; `BDX4` where the character code pays, and its first decoder
+  668a1d3   the tree under test, which has to write 4.3.0's blob byte for byte -- the harness
+            rebuilds it at the start of the run and asserts that on every corpus
+
+Four of the files `bench/corpora.json` names: jieba's lexicon (349 045 keys) and a million titles
+each in Chinese, Russian and English. Per corpus, 200 000 probes, every one a hit, shuffled with a
+fixed seed and laid end to end in one arena so that the probes' own bytes stream. Before any timing,
+every probe's id is checked equal across the three builds and every `key_into` checked to give the
+probe back. Each build's index is loaded from its blob twice, at different times, so that one
+placement in physical memory is not mistaken for the code; within a load, seven rounds of the
+builds in the order A-B-C-C-B-A for `id` and again for `key_into`, with a `HashMap<&str, u64>`
+lookup of the same probes -- which no build can move -- before and after each round as the control.
+28 passes a build; each line of a run gives the median and, in brackets, the minimum. `id` takes a
+`&str`, `key_into` writes into one reused `String`.
+
+The whole run was taken twice, by two builds of the harness whose code layout differs, since on a
+miss-bound probe loop alignment alone moves a few per cent. Both are below.
+
+AMD Ryzen 7 5800HS (8 cores, 16 MB L3), 38 GiB DDR4-3200 in unequal channels (layout not read here
+-- needs root; the physical placement of each load not recorded), Fedora 44, Linux
+7.2.7-200.fc44.x86_64, rustc 1.98.1, governor powersave. The run started only once a readiness
+check passed -- one-minute load 0.29, no swap in use, no other process over 15 % CPU, 6.1 h up --
+and the hottest thermal zone read under 70 C: 47 C at the start, 82 C between the two builds, 87 C
+at the end. The controls of the two builds agree within 1.7 % on three corpora of four and within
+1.4 % in their minimum on the fourth, and 4.2.0's own lines within 1.6 % on all four: the heat left
+no mark the numbers show. The one-minute load at the end, 0.89, is the run's own.
+
+WHAT IT SAYS -- per cent against 4.2.0, build 1 / build 2, medians
+
+                    key_into                          id
+                    668a1d3        4.3.0              668a1d3        4.3.0
+  titles-ru  1 M    -2.5 / -3.3    +19.1 / +22.7      +1.2 / +2.1    +5.8 / +7.2
+  titles-zh  1 M    +1.9 / -0.8    +12.2 / +10.7      +7.9 / +6.1    +12.7 / +12.4
+  jieba lexicon     -0.5 / -0.6    +5.3 / +4.3        -3.7 / -2.6    -3.7 / -2.4
+  titles-en  1 M    +1.2 / -1.0    +0.8 / +1.2        +1.9 / -0.5    +2.6 / +1.9
+
+  * `key_into` is back at 4.2.0's time on every corpus the code takes. English titles take no code,
+    so all three builds read 4.2's own blob there, and their 668a1d3 row, within 2 %, is the band
+    two builds of the harness move by.
+  * `id` keeps a cost on the Chinese titles, 6-8 %, and 1-2 % on the Russian ones -- half and a
+    quarter of 4.3.0's. On the lexicon it is 3-4 % faster than 4.2.0, as in 4.3.0.
+  * Where the rest of `id`'s cost is, in instructions (below): spelling the query a second time adds
+    610 to a Russian `id`, which is all of the 605 it pays over 4.2.0; 348 to a Chinese one, two
+    thirds of the 530 it pays, the rest elsewhere in the lookup; and 200 on the lexicon, where `id`
+    pays 174 in all, so that the rest of its lookup is cheaper than 4.2.0's.
+
+INSTRUCTIONS -- `perf stat -e instructions:u,branches:u,branch-misses:u`, per call: a run of five
+passes over the 200 000 probes, less a run that only loads the blob and lays out the probes, over
+10^6 calls. Deterministic, unlike the timings; cycles are not quoted.
+
+                    key_into instructions      key_into branch misses    id instructions
+                    4.2.0 / 4.3.0 / 668a1d3    4.2.0 / 4.3.0 / 668a1d3   4.2.0 / 4.3.0 / 668a1d3
+  titles-ru  1 M    3050 / 4145 / 3230         23.51 / 25.57 / 19.39     2984 / 3891 / 3589
+  titles-zh  1 M    2670 / 3071 / 2665         18.40 / 18.38 / 16.64     2932 / 3530 / 3462
+  jieba lexicon     2208 / 2496 / 2263         13.35 / 10.29 / 10.05     2700 / 2892 / 2874
+  titles-en  1 M    2614 / 2602 / 2596         18.08 / 18.01 / 18.06     2983 / 3009 / 3009
+
+  668a1d3's `id` with the query spelled twice (a temporary second call, not committed), against
+  the single call's 3589.0, 3462.0 and 2873.8 counted beside it:
+  titles-ru 4198.9 (+609.9), titles-zh 3809.5 (+347.5), jieba 3073.4 (+199.6)
+
+=== build 1
+thermals at start: acpitz 47, iwlwifi_1 36
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.0 and z5b BDX4 1061163 B
+  control HashMap  min   108.0  median   142.4 ns
+  id       median 4.2.0   290.1 | 4.3.0   279.4 | z5b   279.5 ns   (min 286.1 / 274.9 / 273.4)   4.3/4.2 -3.7 %  z5b/4.2 -3.7 %  z5b/4.3 +0.1 %
+  key_into median 4.2.0   195.0 | 4.3.0   205.3 | z5b   193.9 ns   (min 192.2 / 203.0 / 191.4)   4.3/4.2 +5.3 %  z5b/4.2 -0.5 %  z5b/4.3 -5.5 %
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.0 and z5b BDX4 5851205 B
+  control HashMap  min   196.5  median   211.8 ns
+  id       median 4.2.0   360.5 | 4.3.0   406.4 | z5b   388.9 ns   (min 354.8 / 396.0 / 369.6)   4.3/4.2 +12.7 %  z5b/4.2 +7.9 %  z5b/4.3 -4.3 %
+  key_into median 4.2.0   269.5 | 4.3.0   302.5 | z5b   274.5 ns   (min 253.5 / 291.1 / 255.8)   4.3/4.2 +12.2 %  z5b/4.2 +1.9 %  z5b/4.3 -9.2 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.0 and z5b BDX4 6861688 B
+  control HashMap  min   225.9  median   238.2 ns
+  id       median 4.2.0   405.2 | 4.3.0   428.7 | z5b   410.1 ns   (min 390.0 / 423.4 / 393.9)   4.3/4.2 +5.8 %  z5b/4.2 +1.2 %  z5b/4.3 -4.3 %
+  key_into median 4.2.0   326.1 | 4.3.0   388.4 | z5b   318.0 ns   (min 302.8 / 379.9 / 300.4)   4.3/4.2 +19.1 %  z5b/4.2 -2.5 %  z5b/4.3 -18.1 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.0 and z5b BDX3 7370097 B
+  control HashMap  min   206.9  median   220.3 ns
+  id       median 4.2.0   363.6 | 4.3.0   372.9 | z5b   370.5 ns   (min 358.0 / 368.3 / 349.9)   4.3/4.2 +2.6 %  z5b/4.2 +1.9 %  z5b/4.3 -0.6 %
+  key_into median 4.2.0   266.7 | 4.3.0   269.0 | z5b   270.0 ns   (min 247.4 / 259.0 / 249.2)   4.3/4.2 +0.8 %  z5b/4.2 +1.2 %  z5b/4.3 +0.4 %
+thermals at end: acpitz 82, iwlwifi_1 35
+
+=== build 2
+thermals at start: acpitz 82, iwlwifi_1 35
+jieba-dict-full: 349045 keys, 200000 probes; 4.2.0 BDX3 1275214 B, 4.3.0 and z5b BDX4 1061163 B
+  control HashMap  min   109.5  median   134.1 ns
+  id       median 4.2.0   290.1 | 4.3.0   283.0 | z5b   282.6 ns   (min 285.7 / 278.2 / 278.0)   4.3/4.2 -2.4 %  z5b/4.2 -2.6 %  z5b/4.3 -0.1 %
+  key_into median 4.2.0   194.1 | 4.3.0   202.5 | z5b   193.0 ns   (min 191.7 / 200.7 / 190.8)   4.3/4.2 +4.3 %  z5b/4.2 -0.6 %  z5b/4.3 -4.7 %
+titles-zh-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 6269927 B, 4.3.0 and z5b BDX4 5851205 B
+  control HashMap  min   198.0  median   215.3 ns
+  id       median 4.2.0   365.9 | 4.3.0   411.4 | z5b   388.3 ns   (min 356.3 / 399.2 / 367.7)   4.3/4.2 +12.4 %  z5b/4.2 +6.1 %  z5b/4.3 -5.6 %
+  key_into median 4.2.0   271.8 | 4.3.0   300.9 | z5b   269.7 ns   (min 254.4 / 292.3 / 253.7)   4.3/4.2 +10.7 %  z5b/4.2 -0.8 %  z5b/4.3 -10.3 %
+titles-ru-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7664309 B, 4.3.0 and z5b BDX4 6861688 B
+  control HashMap  min   226.1  median   238.0 ns
+  id       median 4.2.0   410.6 | 4.3.0   440.0 | z5b   419.4 ns   (min 401.0 / 431.7 / 401.8)   4.3/4.2 +7.2 %  z5b/4.2 +2.1 %  z5b/4.3 -4.7 %
+  key_into median 4.2.0   328.4 | 4.3.0   403.0 | z5b   317.5 ns   (min 303.7 / 384.8 / 300.1)   4.3/4.2 +22.7 %  z5b/4.2 -3.3 %  z5b/4.3 -21.2 %
+titles-en-1000000: 1000000 keys, 200000 probes; 4.2.0 BDX3 7370097 B, 4.3.0 and z5b BDX3 7370097 B
+  control HashMap  min   207.4  median   222.3 ns
+  id       median 4.2.0   369.5 | 4.3.0   376.5 | z5b   367.5 ns   (min 365.4 / 373.5 / 348.9)   4.3/4.2 +1.9 %  z5b/4.2 -0.5 %  z5b/4.3 -2.4 %
+  key_into median 4.2.0   268.8 | 4.3.0   271.9 | z5b   266.2 ns   (min 250.5 / 262.9 / 248.8)   4.3/4.2 +1.2 %  z5b/4.2 -1.0 %  z5b/4.3 -2.1 %
+thermals at end: acpitz 87, iwlwifi_1 34
+
+=== readiness at the start
+load                   0.29  ok
+swap in use            0 MiB  ok
+memory available       28.2 GiB  ok
+page cache             26.7 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+uptime                 6.1 h
+governor               powersave
+
+READY
+
+=== readiness at the end
+load                   0.89  ABOVE 0.40 -- something else is running
+swap in use            0 MiB  ok
+memory available       28.2 GiB  ok
+page cache             26.7 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+uptime                 6.1 h
+governor               powersave
+temperature            87 C  HOT -- let it settle
+
+NOT READY -- do not quote a latency number from this machine now.
+Sizes are deterministic and may be measured regardless.
+
+=== perf stat, per call (count.sh OP 5 200000 FILE plain v43 fast)
+== titles-ru-1000000 key
+plain  key  instr  3050.1  branches  518.6  misses 23.51  cycles  1590.3
+v43    key  instr  4145.4  branches  823.0  misses 25.57  cycles  1912.9
+fast   key  instr  3229.7  branches  508.9  misses 19.39  cycles  1579.6
+== titles-ru-1000000 id
+plain  id   instr  2984.1  branches  414.5  misses 21.38  cycles  1912.5
+v43    id   instr  3890.7  branches  633.5  misses 22.40  cycles  2103.3
+fast   id   instr  3588.8  branches  535.0  misses 21.55  cycles  2050.3
+== titles-zh-1000000 key
+plain  key  instr  2669.8  branches  424.9  misses 18.40  cycles  1360.1
+v43    key  instr  3071.2  branches  543.3  misses 18.38  cycles  1487.0
+fast   key  instr  2665.1  branches  415.1  misses 16.64  cycles  1348.2
+== titles-zh-1000000 id
+plain  id   instr  2931.7  branches  403.4  misses 18.33  cycles  1743.0
+v43    id   instr  3530.3  branches  520.1  misses 19.60  cycles  1906.7
+fast   id   instr  3461.6  branches  498.3  misses 18.62  cycles  1898.8
+== jieba-dict-full key
+plain  key  instr  2207.7  branches  354.8  misses 13.35  cycles   838.3
+v43    key  instr  2495.7  branches  395.5  misses 10.29  cycles   879.9
+fast   key  instr  2262.7  branches  327.3  misses 10.05  cycles   831.8
+== jieba-dict-full id
+plain  id   instr  2699.7  branches  385.1  misses 14.91  cycles  1259.1
+v43    id   instr  2892.3  branches  443.0  misses 12.85  cycles  1181.8
+fast   id   instr  2874.4  branches  436.5  misses 12.90  cycles  1187.4
+== titles-en-1000000 key
+plain  key  instr  2613.7  branches  402.2  misses 18.08  cycles  1347.2
+v43    key  instr  2602.0  branches  403.2  misses 18.01  cycles  1272.5
+fast   key  instr  2595.9  branches  401.2  misses 18.06  cycles  1375.0
+== titles-en-1000000 id
+plain  id   instr  2983.3  branches  409.6  misses 18.49  cycles  1831.4
+v43    id   instr  3009.2  branches  413.6  misses 18.55  cycles  1862.8
+fast   id   instr  3009.3  branches  413.6  misses 18.49  cycles  1812.1

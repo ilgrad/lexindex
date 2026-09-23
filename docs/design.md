@@ -398,9 +398,16 @@ smaller with them and 2.2 % *larger* without. At the default block the lexicon g
 blob byte for byte. The second bar is conservative where the table is a large share of the keys:
 three thousand random keys over two thousand ideographs would have come out 4.1 % smaller coded, and
 are kept in UTF-8. What the code costs is time where it is taken — a query is spelled before the
-search, a key decoded after it is read — and measured against 4.2.0 in one process that is `id` 6 %
-slower on the Russian titles, 10 % on the Chinese ones and level on the lexicon, and `key_into` 22,
-11 and 5 % slower; a blob that takes no code reads as 4.2's did, within 3 %.
+search, a key decoded after it is read. Spelling is one read a character below U+0800 and two above
+it. Decoding is two reads and a four-byte store a codeword, out of a table of the 256 values a
+codeword's first byte can take and one of every character's UTF-8, and what it writes is whole
+characters, which need no second check. Measured against 4.2.0 in one process, in two builds of the
+harness, `key_into` reads as fast as it did — 2.5–3.3 % faster on the Russian titles, within 2 % on
+the Chinese ones, level on the lexicon — and `id` is 1–2 % slower on the Russian titles,
+6–8 % on the Chinese ones and 3–4 % faster on the lexicon. Spelling the query is all of what `id`
+still pays on the Russian titles and two thirds of the extra instructions on the Chinese ones.
+4.3.0, whose decoder found each codeword's lead among the leads and checked the key again, was up to
+23 % slower on `key_into` and 13 % on `id`. A blob that takes no code reads within 2 % of 4.2.
 
 A blob in a code is `BDX4`: `BDX3`'s layout with the code appended last and its length in four header
 bytes `BDX3` reserved. A magic of its own rather than a flag in those bytes, because 4.2 did not read
