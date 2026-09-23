@@ -1,0 +1,580 @@
+bench/frontier/frontier_lex at 152a00f (the in-memory build's passes over the keys rewritten): how
+long `DictIndex::build_with_block` takes over the thirteen corpora of the million-key frontier, at
+blocks 1024 and 256, in three versions of the library --
+
+  v4.2.0    the tag; before the character code
+  v4.3.1    the tag; the character code, whose in-memory build counted the keys' bytes outside
+            ASCII, their characters and their spelling in three passes on one thread
+  152a00f   the tree under test
+
+Each version is its own build of the harness from that tree, built as bench/frontier builds it
+(release, thin LTO, one codegen unit, no target-cpu). One process a corpus and version: it reads the
+corpus a line at a time, sorts and deduplicates the keys itself -- so every build is handed keys in
+order, whose bytes lie in the heap in the file's order -- and builds block 1024, then block 256,
+timing each build on its own. The lookups the harness then runs are not what this file is for. Six
+rounds; within a round each corpus in turn, and for each the three versions in the order above in
+odd rounds and in the reverse order in even ones. Each cell is the median of six builds in ms and,
+in brackets, the fastest and slowest. The blobs 152a00f writes are the size 4.3.1's are on all 26
+cells, and the crate's golden files hold them byte for byte.
+
+AMD Ryzen 7 5800HS (8 cores, 16 threads, 16 MB L3), 38 GiB DDR4-3200 in unequal channels (layout
+not read here -- needs root), Fedora 44, Linux 7.2.7-200.fc44.x86_64, rustc 1.98.1, governor
+powersave. The run started only once a readiness check passed -- one-minute load 0.31, no swap in
+use, no process over 15 % CPU, 3.1 h up -- at 47 C; it ended at 86 C with a one-minute load of 1.65,
+its own: a build runs on up to sixteen threads. v4.2.0 is the control no edit here can touch: in
+the four earlier runs of this harness that evening its medians were 1.2 % faster to 6.8 % slower
+than here on every corpus they share, so a difference under a few per cent between versions means
+something only inside one run, where the versions alternate -- as those below do.
+
+corpus             block            v4.2.0            v4.3.1           152a00f   vs 4.2.0  vs 4.3.1
+words-full          1024      63 [ 63- 64]      74 [ 73- 74]      60 [ 60- 64]     -4.8 %   -18.4 %
+words-full           256      45 [ 45- 45]      55 [ 54- 56]      41 [ 41- 43]     -8.9 %   -25.5 %
+dna-1000000         1024     122 [116-127]     175 [169-206]     100 [ 98-112]    -18.1 %   -43.1 %
+dna-1000000          256     103 [102-107]     158 [156-162]      87 [ 87- 88]    -15.5 %   -44.9 %
+domains-1000000     1024     225 [223-263]     260 [257-306]     214 [213-216]     -4.7 %   -17.5 %
+domains-1000000      256     179 [175-186]     211 [206-249]     170 [168-202]     -4.7 %   -19.2 %
+idents-1000000      1024     271 [270-276]     314 [311-344]     260 [258-292]     -4.2 %   -17.2 %
+idents-1000000       256     214 [211-216]     252 [247-263]     207 [199-220]     -3.3 %   -17.7 %
+numeric-1000000     1024      85 [ 84- 88]     104 [102-109]      68 [ 67- 82]    -20.0 %   -34.9 %
+numeric-1000000      256      70 [ 70- 72]      90 [ 88- 94]      53 [ 53- 54]    -24.8 %   -40.8 %
+opaque-1000000      1024     139 [138-144]     177 [173-184]     122 [120-124]    -12.2 %   -31.1 %
+opaque-1000000       256     111 [109-140]     150 [146-151]     102 [101-105]     -7.7 %   -31.4 %
+paths-1000000       1024     556 [553-563]     714 [708-719]     560 [554-603]     +0.7 %   -21.4 %
+paths-1000000        256     455 [448-463]     610 [600-615]     450 [448-455]     -1.1 %   -26.3 %
+pypi-full           1024     197 [196-199]     224 [223-229]     189 [187-190]     -4.1 %   -15.8 %
+pypi-full            256     151 [148-153]     179 [177-183]     147 [145-153]     -2.6 %   -17.9 %
+titles-en-1000000   1024     420 [415-421]     465 [461-477]     412 [410-416]     -1.7 %   -11.3 %
+titles-en-1000000    256     340 [338-342]     388 [382-390]     335 [330-343]     -1.6 %   -13.7 %
+titles-ru-1000000   1024     512 [503-515]     679 [674-743]     332 [332-335]    -35.1 %   -51.0 %
+titles-ru-1000000    256     394 [384-450]     600 [596-612]     280 [275-285]    -29.0 %   -53.4 %
+titles-zh-1000000   1024     320 [317-323]     518 [511-581]     275 [275-276]    -14.1 %   -46.9 %
+titles-zh-1000000    256     255 [254-262]     462 [459-471]     228 [226-228]    -10.8 %   -50.8 %
+urls-1000000        1024     424 [423-427]     542 [532-571]     420 [419-424]     -0.8 %   -22.3 %
+urls-1000000         256     347 [343-352]     458 [455-467]     342 [339-351]     -1.3 %   -25.2 %
+uuid-1000000        1024     220 [216-258]     283 [273-323]     202 [201-205]     -8.0 %   -28.6 %
+uuid-1000000         256     180 [175-200]     236 [233-270]     164 [163-167]     -8.9 %   -30.4 %
+
+The passes on their own. local/census, one process: a million keys (all 479 823 of words-full) read
+and sorted as above, then one pass over them in key order, ten times, the variants alternated
+A..J, J..A. Per key, median of ten; `high` is the count of bytes outside ASCII where the pass takes
+it. "byte" counts them a byte at a time (4.3.1), "word" eight at a time (152a00f); "+pf" prefetches
+the key 32 places ahead; "run check" is what a sort's check for a run compares, "dedup ==" what
+`dedup_by` does; "check+pf" is the one pass 152a00f runs in their place, "fused" the census taken in
+that pass as well, which 152a00f does not do: on long keys it costs more than it saves. Started
+once the same readiness check passed, at 53 C; it ended 11 s later at 80 C.
+
+== dna-1000000
+lens: median 1.31 ms, min 1.23 (1.3 ns/key), high 0
+byte: median 52.48 ms, min 50.36 (52.5 ns/key), high 0
+word: median 23.64 ms, min 23.17 (23.6 ns/key), high 0
+run check: median 18.42 ms, min 18.25 (18.4 ns/key), high 0
+dedup ==: median 15.80 ms, min 15.63 (15.8 ns/key), high 0
+fused: median 35.57 ms, min 35.11 (35.6 ns/key), high 0
+word+pf: median 6.98 ms, min 6.74 (7.0 ns/key), high 0
+fused+pf: median 8.60 ms, min 8.53 (8.6 ns/key), high 0
+check+pf: median 6.88 ms, min 6.78 (6.9 ns/key), high 0
+byte+pf: median 10.31 ms, min 10.08 (10.3 ns/key), high 0
+== paths-1000000
+lens: median 1.32 ms, min 1.23 (1.3 ns/key), high 0
+byte: median 153.02 ms, min 152.72 (153.0 ns/key), high 259536
+word: median 63.37 ms, min 63.09 (63.4 ns/key), high 259536
+run check: median 30.79 ms, min 30.69 (30.8 ns/key), high 0
+dedup ==: median 9.75 ms, min 9.67 (9.7 ns/key), high 0
+fused: median 85.70 ms, min 85.50 (85.7 ns/key), high 259536
+word+pf: median 44.21 ms, min 44.13 (44.2 ns/key), high 259536
+fused+pf: median 62.52 ms, min 62.33 (62.5 ns/key), high 259536
+check+pf: median 26.99 ms, min 26.83 (27.0 ns/key), high 0
+byte+pf: median 97.50 ms, min 97.24 (97.5 ns/key), high 259536
+== words-full
+lens: median 0.57 ms, min 0.52 (1.2 ns/key), high 0
+byte: median 9.51 ms, min 8.24 (19.8 ns/key), high 0
+word: median 7.57 ms, min 7.27 (15.8 ns/key), high 0
+run check: median 7.70 ms, min 7.09 (16.0 ns/key), high 0
+dedup ==: median 2.31 ms, min 2.23 (4.8 ns/key), high 0
+fused: median 13.01 ms, min 12.61 (27.1 ns/key), high 0
+word+pf: median 4.11 ms, min 4.01 (8.6 ns/key), high 0
+fused+pf: median 7.87 ms, min 7.73 (16.4 ns/key), high 0
+check+pf: median 4.62 ms, min 4.44 (9.6 ns/key), high 0
+byte+pf: median 4.36 ms, min 4.30 (9.1 ns/key), high 0
+== titles-zh-1000000
+lens: median 1.30 ms, min 1.24 (1.3 ns/key), high 0
+byte: median 37.66 ms, min 36.62 (37.7 ns/key), high 14749158
+word: median 23.92 ms, min 23.75 (23.9 ns/key), high 14749158
+run check: median 18.75 ms, min 18.60 (18.7 ns/key), high 0
+dedup ==: median 7.36 ms, min 7.25 (7.4 ns/key), high 0
+fused: median 38.92 ms, min 38.49 (38.9 ns/key), high 14749158
+word+pf: median 9.65 ms, min 9.49 (9.6 ns/key), high 14749158
+fused+pf: median 17.55 ms, min 17.40 (17.6 ns/key), high 14749158
+check+pf: median 10.10 ms, min 9.90 (10.1 ns/key), high 0
+byte+pf: median 11.41 ms, min 11.16 (11.4 ns/key), high 14749158
+
+Every build, in the order run: round, version, corpus, block, build time, bytes a key.
+
+1 v4.2.0   words-full         block 1024  build   63 ms  2.513 B/key
+1 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+1 v4.3.1   words-full         block 1024  build   74 ms  2.513 B/key
+1 v4.3.1   words-full         block  256  build   56 ms  2.635 B/key
+1 152a00f  words-full         block 1024  build   60 ms  2.513 B/key
+1 152a00f  words-full         block  256  build   41 ms  2.635 B/key
+1 v4.2.0   dna-1000000        block 1024  build  116 ms  4.231 B/key
+1 v4.2.0   dna-1000000        block  256  build  102 ms  4.375 B/key
+1 v4.3.1   dna-1000000        block 1024  build  176 ms  4.231 B/key
+1 v4.3.1   dna-1000000        block  256  build  159 ms  4.375 B/key
+1 152a00f  dna-1000000        block 1024  build   99 ms  4.231 B/key
+1 152a00f  dna-1000000        block  256  build   87 ms  4.375 B/key
+1 v4.2.0   domains-1000000    block 1024  build  225 ms  4.363 B/key
+1 v4.2.0   domains-1000000    block  256  build  175 ms  4.500 B/key
+1 v4.3.1   domains-1000000    block 1024  build  257 ms  4.363 B/key
+1 v4.3.1   domains-1000000    block  256  build  206 ms  4.500 B/key
+1 152a00f  domains-1000000    block 1024  build  213 ms  4.363 B/key
+1 152a00f  domains-1000000    block  256  build  168 ms  4.500 B/key
+1 v4.2.0   idents-1000000     block 1024  build  270 ms  5.066 B/key
+1 v4.2.0   idents-1000000     block  256  build  212 ms  5.228 B/key
+1 v4.3.1   idents-1000000     block 1024  build  312 ms  5.066 B/key
+1 v4.3.1   idents-1000000     block  256  build  247 ms  5.228 B/key
+1 152a00f  idents-1000000     block 1024  build  258 ms  5.066 B/key
+1 152a00f  idents-1000000     block  256  build  199 ms  5.228 B/key
+1 v4.2.0   numeric-1000000    block 1024  build   85 ms  0.918 B/key
+1 v4.2.0   numeric-1000000    block  256  build   71 ms  1.011 B/key
+1 v4.3.1   numeric-1000000    block 1024  build  104 ms  0.918 B/key
+1 v4.3.1   numeric-1000000    block  256  build   89 ms  1.011 B/key
+1 152a00f  numeric-1000000    block 1024  build   68 ms  0.918 B/key
+1 152a00f  numeric-1000000    block  256  build   53 ms  1.011 B/key
+1 v4.2.0   opaque-1000000     block 1024  build  139 ms  10.291 B/key
+1 v4.2.0   opaque-1000000     block  256  build  109 ms  10.399 B/key
+1 v4.3.1   opaque-1000000     block 1024  build  175 ms  10.291 B/key
+1 v4.3.1   opaque-1000000     block  256  build  150 ms  10.399 B/key
+1 152a00f  opaque-1000000     block 1024  build  123 ms  10.291 B/key
+1 152a00f  opaque-1000000     block  256  build  101 ms  10.399 B/key
+1 v4.2.0   paths-1000000      block 1024  build  553 ms  9.323 B/key
+1 v4.2.0   paths-1000000      block  256  build  452 ms  9.871 B/key
+1 v4.3.1   paths-1000000      block 1024  build  709 ms  9.323 B/key
+1 v4.3.1   paths-1000000      block  256  build  600 ms  9.871 B/key
+1 152a00f  paths-1000000      block 1024  build  560 ms  9.323 B/key
+1 152a00f  paths-1000000      block  256  build  448 ms  9.871 B/key
+1 v4.2.0   pypi-full          block 1024  build  197 ms  4.022 B/key
+1 v4.2.0   pypi-full          block  256  build  148 ms  4.165 B/key
+1 v4.3.1   pypi-full          block 1024  build  225 ms  4.022 B/key
+1 v4.3.1   pypi-full          block  256  build  180 ms  4.165 B/key
+1 152a00f  pypi-full          block 1024  build  189 ms  4.022 B/key
+1 152a00f  pypi-full          block  256  build  145 ms  4.165 B/key
+1 v4.2.0   titles-en-1000000  block 1024  build  415 ms  7.212 B/key
+1 v4.2.0   titles-en-1000000  block  256  build  340 ms  7.370 B/key
+1 v4.3.1   titles-en-1000000  block 1024  build  461 ms  7.212 B/key
+1 v4.3.1   titles-en-1000000  block  256  build  389 ms  7.370 B/key
+1 152a00f  titles-en-1000000  block 1024  build  410 ms  7.212 B/key
+1 152a00f  titles-en-1000000  block  256  build  330 ms  7.370 B/key
+1 v4.2.0   titles-ru-1000000  block 1024  build  503 ms  7.447 B/key
+1 v4.2.0   titles-ru-1000000  block  256  build  389 ms  7.664 B/key
+1 v4.3.1   titles-ru-1000000  block 1024  build  743 ms  6.698 B/key
+1 v4.3.1   titles-ru-1000000  block  256  build  612 ms  6.862 B/key
+1 152a00f  titles-ru-1000000  block 1024  build  332 ms  6.698 B/key
+1 152a00f  titles-ru-1000000  block  256  build  277 ms  6.862 B/key
+1 v4.2.0   titles-zh-1000000  block 1024  build  321 ms  6.117 B/key
+1 v4.2.0   titles-zh-1000000  block  256  build  262 ms  6.270 B/key
+1 v4.3.1   titles-zh-1000000  block 1024  build  520 ms  5.687 B/key
+1 v4.3.1   titles-zh-1000000  block  256  build  471 ms  5.851 B/key
+1 152a00f  titles-zh-1000000  block 1024  build  275 ms  5.687 B/key
+1 152a00f  titles-zh-1000000  block  256  build  228 ms  5.851 B/key
+1 v4.2.0   urls-1000000       block 1024  build  423 ms  7.271 B/key
+1 v4.2.0   urls-1000000       block  256  build  352 ms  7.511 B/key
+1 v4.3.1   urls-1000000       block 1024  build  537 ms  7.271 B/key
+1 v4.3.1   urls-1000000       block  256  build  467 ms  7.511 B/key
+1 152a00f  urls-1000000       block 1024  build  421 ms  7.271 B/key
+1 152a00f  urls-1000000       block  256  build  342 ms  7.511 B/key
+1 v4.2.0   uuid-1000000       block 1024  build  220 ms  17.894 B/key
+1 v4.2.0   uuid-1000000       block  256  build  178 ms  18.040 B/key
+1 v4.3.1   uuid-1000000       block 1024  build  279 ms  17.894 B/key
+1 v4.3.1   uuid-1000000       block  256  build  233 ms  18.040 B/key
+1 152a00f  uuid-1000000       block 1024  build  202 ms  17.894 B/key
+1 152a00f  uuid-1000000       block  256  build  164 ms  18.040 B/key
+2 152a00f  words-full         block 1024  build   64 ms  2.513 B/key
+2 152a00f  words-full         block  256  build   42 ms  2.635 B/key
+2 v4.3.1   words-full         block 1024  build   74 ms  2.513 B/key
+2 v4.3.1   words-full         block  256  build   54 ms  2.635 B/key
+2 v4.2.0   words-full         block 1024  build   64 ms  2.513 B/key
+2 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+2 152a00f  dna-1000000        block 1024  build  112 ms  4.231 B/key
+2 152a00f  dna-1000000        block  256  build   88 ms  4.375 B/key
+2 v4.3.1   dna-1000000        block 1024  build  175 ms  4.231 B/key
+2 v4.3.1   dna-1000000        block  256  build  159 ms  4.375 B/key
+2 v4.2.0   dna-1000000        block 1024  build  127 ms  4.231 B/key
+2 v4.2.0   dna-1000000        block  256  build  107 ms  4.375 B/key
+2 152a00f  domains-1000000    block 1024  build  215 ms  4.363 B/key
+2 152a00f  domains-1000000    block  256  build  169 ms  4.500 B/key
+2 v4.3.1   domains-1000000    block 1024  build  262 ms  4.363 B/key
+2 v4.3.1   domains-1000000    block  256  build  210 ms  4.500 B/key
+2 v4.2.0   domains-1000000    block 1024  build  225 ms  4.363 B/key
+2 v4.2.0   domains-1000000    block  256  build  183 ms  4.500 B/key
+2 152a00f  idents-1000000     block 1024  build  258 ms  5.066 B/key
+2 152a00f  idents-1000000     block  256  build  206 ms  5.228 B/key
+2 v4.3.1   idents-1000000     block 1024  build  344 ms  5.066 B/key
+2 v4.3.1   idents-1000000     block  256  build  252 ms  5.228 B/key
+2 v4.2.0   idents-1000000     block 1024  build  271 ms  5.066 B/key
+2 v4.2.0   idents-1000000     block  256  build  214 ms  5.228 B/key
+2 152a00f  numeric-1000000    block 1024  build   68 ms  0.918 B/key
+2 152a00f  numeric-1000000    block  256  build   53 ms  1.011 B/key
+2 v4.3.1   numeric-1000000    block 1024  build  102 ms  0.918 B/key
+2 v4.3.1   numeric-1000000    block  256  build   90 ms  1.011 B/key
+2 v4.2.0   numeric-1000000    block 1024  build   85 ms  0.918 B/key
+2 v4.2.0   numeric-1000000    block  256  build   70 ms  1.011 B/key
+2 152a00f  opaque-1000000     block 1024  build  121 ms  10.291 B/key
+2 152a00f  opaque-1000000     block  256  build  104 ms  10.399 B/key
+2 v4.3.1   opaque-1000000     block 1024  build  178 ms  10.291 B/key
+2 v4.3.1   opaque-1000000     block  256  build  146 ms  10.399 B/key
+2 v4.2.0   opaque-1000000     block 1024  build  142 ms  10.291 B/key
+2 v4.2.0   opaque-1000000     block  256  build  140 ms  10.399 B/key
+2 152a00f  paths-1000000      block 1024  build  561 ms  9.323 B/key
+2 152a00f  paths-1000000      block  256  build  448 ms  9.871 B/key
+2 v4.3.1   paths-1000000      block 1024  build  708 ms  9.323 B/key
+2 v4.3.1   paths-1000000      block  256  build  601 ms  9.871 B/key
+2 v4.2.0   paths-1000000      block 1024  build  558 ms  9.323 B/key
+2 v4.2.0   paths-1000000      block  256  build  450 ms  9.871 B/key
+2 152a00f  pypi-full          block 1024  build  190 ms  4.022 B/key
+2 152a00f  pypi-full          block  256  build  147 ms  4.165 B/key
+2 v4.3.1   pypi-full          block 1024  build  223 ms  4.022 B/key
+2 v4.3.1   pypi-full          block  256  build  182 ms  4.165 B/key
+2 v4.2.0   pypi-full          block 1024  build  198 ms  4.022 B/key
+2 v4.2.0   pypi-full          block  256  build  151 ms  4.165 B/key
+2 152a00f  titles-en-1000000  block 1024  build  410 ms  7.212 B/key
+2 152a00f  titles-en-1000000  block  256  build  334 ms  7.370 B/key
+2 v4.3.1   titles-en-1000000  block 1024  build  463 ms  7.212 B/key
+2 v4.3.1   titles-en-1000000  block  256  build  382 ms  7.370 B/key
+2 v4.2.0   titles-en-1000000  block 1024  build  420 ms  7.212 B/key
+2 v4.2.0   titles-en-1000000  block  256  build  338 ms  7.370 B/key
+2 152a00f  titles-ru-1000000  block 1024  build  332 ms  6.698 B/key
+2 152a00f  titles-ru-1000000  block  256  build  283 ms  6.862 B/key
+2 v4.3.1   titles-ru-1000000  block 1024  build  674 ms  6.698 B/key
+2 v4.3.1   titles-ru-1000000  block  256  build  602 ms  6.862 B/key
+2 v4.2.0   titles-ru-1000000  block 1024  build  512 ms  7.447 B/key
+2 v4.2.0   titles-ru-1000000  block  256  build  395 ms  7.664 B/key
+2 152a00f  titles-zh-1000000  block 1024  build  275 ms  5.687 B/key
+2 152a00f  titles-zh-1000000  block  256  build  228 ms  5.851 B/key
+2 v4.3.1   titles-zh-1000000  block 1024  build  513 ms  5.687 B/key
+2 v4.3.1   titles-zh-1000000  block  256  build  462 ms  5.851 B/key
+2 v4.2.0   titles-zh-1000000  block 1024  build  317 ms  6.117 B/key
+2 v4.2.0   titles-zh-1000000  block  256  build  254 ms  6.270 B/key
+2 152a00f  urls-1000000       block 1024  build  420 ms  7.271 B/key
+2 152a00f  urls-1000000       block  256  build  343 ms  7.511 B/key
+2 v4.3.1   urls-1000000       block 1024  build  542 ms  7.271 B/key
+2 v4.3.1   urls-1000000       block  256  build  455 ms  7.511 B/key
+2 v4.2.0   urls-1000000       block 1024  build  424 ms  7.271 B/key
+2 v4.2.0   urls-1000000       block  256  build  349 ms  7.511 B/key
+2 152a00f  uuid-1000000       block 1024  build  201 ms  17.894 B/key
+2 152a00f  uuid-1000000       block  256  build  163 ms  18.040 B/key
+2 v4.3.1   uuid-1000000       block 1024  build  323 ms  17.894 B/key
+2 v4.3.1   uuid-1000000       block  256  build  235 ms  18.040 B/key
+2 v4.2.0   uuid-1000000       block 1024  build  258 ms  17.894 B/key
+2 v4.2.0   uuid-1000000       block  256  build  181 ms  18.040 B/key
+3 v4.2.0   words-full         block 1024  build   63 ms  2.513 B/key
+3 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+3 v4.3.1   words-full         block 1024  build   73 ms  2.513 B/key
+3 v4.3.1   words-full         block  256  build   56 ms  2.635 B/key
+3 152a00f  words-full         block 1024  build   60 ms  2.513 B/key
+3 152a00f  words-full         block  256  build   43 ms  2.635 B/key
+3 v4.2.0   dna-1000000        block 1024  build  122 ms  4.231 B/key
+3 v4.2.0   dna-1000000        block  256  build  103 ms  4.375 B/key
+3 v4.3.1   dna-1000000        block 1024  build  173 ms  4.231 B/key
+3 v4.3.1   dna-1000000        block  256  build  162 ms  4.375 B/key
+3 152a00f  dna-1000000        block 1024  build  104 ms  4.231 B/key
+3 152a00f  dna-1000000        block  256  build   87 ms  4.375 B/key
+3 v4.2.0   domains-1000000    block 1024  build  263 ms  4.363 B/key
+3 v4.2.0   domains-1000000    block  256  build  186 ms  4.500 B/key
+3 v4.3.1   domains-1000000    block 1024  build  306 ms  4.363 B/key
+3 v4.3.1   domains-1000000    block  256  build  212 ms  4.500 B/key
+3 152a00f  domains-1000000    block 1024  build  215 ms  4.363 B/key
+3 152a00f  domains-1000000    block  256  build  171 ms  4.500 B/key
+3 v4.2.0   idents-1000000     block 1024  build  270 ms  5.066 B/key
+3 v4.2.0   idents-1000000     block  256  build  215 ms  5.228 B/key
+3 v4.3.1   idents-1000000     block 1024  build  314 ms  5.066 B/key
+3 v4.3.1   idents-1000000     block  256  build  249 ms  5.228 B/key
+3 152a00f  idents-1000000     block 1024  build  260 ms  5.066 B/key
+3 152a00f  idents-1000000     block  256  build  209 ms  5.228 B/key
+3 v4.2.0   numeric-1000000    block 1024  build   88 ms  0.918 B/key
+3 v4.2.0   numeric-1000000    block  256  build   70 ms  1.011 B/key
+3 v4.3.1   numeric-1000000    block 1024  build  105 ms  0.918 B/key
+3 v4.3.1   numeric-1000000    block  256  build   90 ms  1.011 B/key
+3 152a00f  numeric-1000000    block 1024  build   67 ms  0.918 B/key
+3 152a00f  numeric-1000000    block  256  build   53 ms  1.011 B/key
+3 v4.2.0   opaque-1000000     block 1024  build  138 ms  10.291 B/key
+3 v4.2.0   opaque-1000000     block  256  build  110 ms  10.399 B/key
+3 v4.3.1   opaque-1000000     block 1024  build  176 ms  10.291 B/key
+3 v4.3.1   opaque-1000000     block  256  build  150 ms  10.399 B/key
+3 152a00f  opaque-1000000     block 1024  build  122 ms  10.291 B/key
+3 152a00f  opaque-1000000     block  256  build  103 ms  10.399 B/key
+3 v4.2.0   paths-1000000      block 1024  build  554 ms  9.323 B/key
+3 v4.2.0   paths-1000000      block  256  build  448 ms  9.871 B/key
+3 v4.3.1   paths-1000000      block 1024  build  712 ms  9.323 B/key
+3 v4.3.1   paths-1000000      block  256  build  615 ms  9.871 B/key
+3 152a00f  paths-1000000      block 1024  build  554 ms  9.323 B/key
+3 152a00f  paths-1000000      block  256  build  450 ms  9.871 B/key
+3 v4.2.0   pypi-full          block 1024  build  196 ms  4.022 B/key
+3 v4.2.0   pypi-full          block  256  build  153 ms  4.165 B/key
+3 v4.3.1   pypi-full          block 1024  build  229 ms  4.022 B/key
+3 v4.3.1   pypi-full          block  256  build  177 ms  4.165 B/key
+3 152a00f  pypi-full          block 1024  build  187 ms  4.022 B/key
+3 152a00f  pypi-full          block  256  build  147 ms  4.165 B/key
+3 v4.2.0   titles-en-1000000  block 1024  build  420 ms  7.212 B/key
+3 v4.2.0   titles-en-1000000  block  256  build  341 ms  7.370 B/key
+3 v4.3.1   titles-en-1000000  block 1024  build  477 ms  7.212 B/key
+3 v4.3.1   titles-en-1000000  block  256  build  383 ms  7.370 B/key
+3 152a00f  titles-en-1000000  block 1024  build  413 ms  7.212 B/key
+3 152a00f  titles-en-1000000  block  256  build  336 ms  7.370 B/key
+3 v4.2.0   titles-ru-1000000  block 1024  build  512 ms  7.447 B/key
+3 v4.2.0   titles-ru-1000000  block  256  build  450 ms  7.664 B/key
+3 v4.3.1   titles-ru-1000000  block 1024  build  679 ms  6.698 B/key
+3 v4.3.1   titles-ru-1000000  block  256  build  597 ms  6.862 B/key
+3 152a00f  titles-ru-1000000  block 1024  build  333 ms  6.698 B/key
+3 152a00f  titles-ru-1000000  block  256  build  275 ms  6.862 B/key
+3 v4.2.0   titles-zh-1000000  block 1024  build  321 ms  6.117 B/key
+3 v4.2.0   titles-zh-1000000  block  256  build  255 ms  6.270 B/key
+3 v4.3.1   titles-zh-1000000  block 1024  build  511 ms  5.687 B/key
+3 v4.3.1   titles-zh-1000000  block  256  build  462 ms  5.851 B/key
+3 152a00f  titles-zh-1000000  block 1024  build  275 ms  5.687 B/key
+3 152a00f  titles-zh-1000000  block  256  build  227 ms  5.851 B/key
+3 v4.2.0   urls-1000000       block 1024  build  425 ms  7.271 B/key
+3 v4.2.0   urls-1000000       block  256  build  345 ms  7.511 B/key
+3 v4.3.1   urls-1000000       block 1024  build  532 ms  7.271 B/key
+3 v4.3.1   urls-1000000       block  256  build  461 ms  7.511 B/key
+3 152a00f  urls-1000000       block 1024  build  419 ms  7.271 B/key
+3 152a00f  urls-1000000       block  256  build  341 ms  7.511 B/key
+3 v4.2.0   uuid-1000000       block 1024  build  219 ms  17.894 B/key
+3 v4.2.0   uuid-1000000       block  256  build  175 ms  18.040 B/key
+3 v4.3.1   uuid-1000000       block 1024  build  281 ms  17.894 B/key
+3 v4.3.1   uuid-1000000       block  256  build  238 ms  18.040 B/key
+3 152a00f  uuid-1000000       block 1024  build  202 ms  17.894 B/key
+3 152a00f  uuid-1000000       block  256  build  164 ms  18.040 B/key
+4 152a00f  words-full         block 1024  build   60 ms  2.513 B/key
+4 152a00f  words-full         block  256  build   41 ms  2.635 B/key
+4 v4.3.1   words-full         block 1024  build   74 ms  2.513 B/key
+4 v4.3.1   words-full         block  256  build   55 ms  2.635 B/key
+4 v4.2.0   words-full         block 1024  build   64 ms  2.513 B/key
+4 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+4 152a00f  dna-1000000        block 1024  build  100 ms  4.231 B/key
+4 152a00f  dna-1000000        block  256  build   87 ms  4.375 B/key
+4 v4.3.1   dna-1000000        block 1024  build  175 ms  4.231 B/key
+4 v4.3.1   dna-1000000        block  256  build  156 ms  4.375 B/key
+4 v4.2.0   dna-1000000        block 1024  build  127 ms  4.231 B/key
+4 v4.2.0   dna-1000000        block  256  build  104 ms  4.375 B/key
+4 152a00f  domains-1000000    block 1024  build  214 ms  4.363 B/key
+4 152a00f  domains-1000000    block  256  build  171 ms  4.500 B/key
+4 v4.3.1   domains-1000000    block 1024  build  258 ms  4.363 B/key
+4 v4.3.1   domains-1000000    block  256  build  210 ms  4.500 B/key
+4 v4.2.0   domains-1000000    block 1024  build  223 ms  4.363 B/key
+4 v4.2.0   domains-1000000    block  256  build  177 ms  4.500 B/key
+4 152a00f  idents-1000000     block 1024  build  262 ms  5.066 B/key
+4 152a00f  idents-1000000     block  256  build  201 ms  5.228 B/key
+4 v4.3.1   idents-1000000     block 1024  build  313 ms  5.066 B/key
+4 v4.3.1   idents-1000000     block  256  build  252 ms  5.228 B/key
+4 v4.2.0   idents-1000000     block 1024  build  271 ms  5.066 B/key
+4 v4.2.0   idents-1000000     block  256  build  211 ms  5.228 B/key
+4 152a00f  numeric-1000000    block 1024  build   67 ms  0.918 B/key
+4 152a00f  numeric-1000000    block  256  build   53 ms  1.011 B/key
+4 v4.3.1   numeric-1000000    block 1024  build  109 ms  0.918 B/key
+4 v4.3.1   numeric-1000000    block  256  build   94 ms  1.011 B/key
+4 v4.2.0   numeric-1000000    block 1024  build   85 ms  0.918 B/key
+4 v4.2.0   numeric-1000000    block  256  build   72 ms  1.011 B/key
+4 152a00f  opaque-1000000     block 1024  build  124 ms  10.291 B/key
+4 152a00f  opaque-1000000     block  256  build  101 ms  10.399 B/key
+4 v4.3.1   opaque-1000000     block 1024  build  184 ms  10.291 B/key
+4 v4.3.1   opaque-1000000     block  256  build  149 ms  10.399 B/key
+4 v4.2.0   opaque-1000000     block 1024  build  139 ms  10.291 B/key
+4 v4.2.0   opaque-1000000     block  256  build  111 ms  10.399 B/key
+4 152a00f  paths-1000000      block 1024  build  562 ms  9.323 B/key
+4 152a00f  paths-1000000      block  256  build  450 ms  9.871 B/key
+4 v4.3.1   paths-1000000      block 1024  build  719 ms  9.323 B/key
+4 v4.3.1   paths-1000000      block  256  build  613 ms  9.871 B/key
+4 v4.2.0   paths-1000000      block 1024  build  562 ms  9.323 B/key
+4 v4.2.0   paths-1000000      block  256  build  463 ms  9.871 B/key
+4 152a00f  pypi-full          block 1024  build  189 ms  4.022 B/key
+4 152a00f  pypi-full          block  256  build  149 ms  4.165 B/key
+4 v4.3.1   pypi-full          block 1024  build  224 ms  4.022 B/key
+4 v4.3.1   pypi-full          block  256  build  178 ms  4.165 B/key
+4 v4.2.0   pypi-full          block 1024  build  199 ms  4.022 B/key
+4 v4.2.0   pypi-full          block  256  build  153 ms  4.165 B/key
+4 152a00f  titles-en-1000000  block 1024  build  416 ms  7.212 B/key
+4 152a00f  titles-en-1000000  block  256  build  343 ms  7.370 B/key
+4 v4.3.1   titles-en-1000000  block 1024  build  471 ms  7.212 B/key
+4 v4.3.1   titles-en-1000000  block  256  build  390 ms  7.370 B/key
+4 v4.2.0   titles-en-1000000  block 1024  build  417 ms  7.212 B/key
+4 v4.2.0   titles-en-1000000  block  256  build  340 ms  7.370 B/key
+4 152a00f  titles-ru-1000000  block 1024  build  335 ms  6.698 B/key
+4 152a00f  titles-ru-1000000  block  256  build  277 ms  6.862 B/key
+4 v4.3.1   titles-ru-1000000  block 1024  build  676 ms  6.698 B/key
+4 v4.3.1   titles-ru-1000000  block  256  build  597 ms  6.862 B/key
+4 v4.2.0   titles-ru-1000000  block 1024  build  508 ms  7.447 B/key
+4 v4.2.0   titles-ru-1000000  block  256  build  394 ms  7.664 B/key
+4 152a00f  titles-zh-1000000  block 1024  build  276 ms  5.687 B/key
+4 152a00f  titles-zh-1000000  block  256  build  227 ms  5.851 B/key
+4 v4.3.1   titles-zh-1000000  block 1024  build  581 ms  5.687 B/key
+4 v4.3.1   titles-zh-1000000  block  256  build  462 ms  5.851 B/key
+4 v4.2.0   titles-zh-1000000  block 1024  build  323 ms  6.117 B/key
+4 v4.2.0   titles-zh-1000000  block  256  build  255 ms  6.270 B/key
+4 152a00f  urls-1000000       block 1024  build  420 ms  7.271 B/key
+4 152a00f  urls-1000000       block  256  build  339 ms  7.511 B/key
+4 v4.3.1   urls-1000000       block 1024  build  543 ms  7.271 B/key
+4 v4.3.1   urls-1000000       block  256  build  459 ms  7.511 B/key
+4 v4.2.0   urls-1000000       block 1024  build  424 ms  7.271 B/key
+4 v4.2.0   urls-1000000       block  256  build  343 ms  7.511 B/key
+4 152a00f  uuid-1000000       block 1024  build  204 ms  17.894 B/key
+4 152a00f  uuid-1000000       block  256  build  167 ms  18.040 B/key
+4 v4.3.1   uuid-1000000       block 1024  build  285 ms  17.894 B/key
+4 v4.3.1   uuid-1000000       block  256  build  233 ms  18.040 B/key
+4 v4.2.0   uuid-1000000       block 1024  build  216 ms  17.894 B/key
+4 v4.2.0   uuid-1000000       block  256  build  180 ms  18.040 B/key
+5 v4.2.0   words-full         block 1024  build   63 ms  2.513 B/key
+5 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+5 v4.3.1   words-full         block 1024  build   73 ms  2.513 B/key
+5 v4.3.1   words-full         block  256  build   55 ms  2.635 B/key
+5 152a00f  words-full         block 1024  build   60 ms  2.513 B/key
+5 152a00f  words-full         block  256  build   41 ms  2.635 B/key
+5 v4.2.0   dna-1000000        block 1024  build  117 ms  4.231 B/key
+5 v4.2.0   dna-1000000        block  256  build  102 ms  4.375 B/key
+5 v4.3.1   dna-1000000        block 1024  build  169 ms  4.231 B/key
+5 v4.3.1   dna-1000000        block  256  build  157 ms  4.375 B/key
+5 152a00f  dna-1000000        block 1024  build   98 ms  4.231 B/key
+5 152a00f  dna-1000000        block  256  build   87 ms  4.375 B/key
+5 v4.2.0   domains-1000000    block 1024  build  223 ms  4.363 B/key
+5 v4.2.0   domains-1000000    block  256  build  179 ms  4.500 B/key
+5 v4.3.1   domains-1000000    block 1024  build  298 ms  4.363 B/key
+5 v4.3.1   domains-1000000    block  256  build  212 ms  4.500 B/key
+5 152a00f  domains-1000000    block 1024  build  216 ms  4.363 B/key
+5 152a00f  domains-1000000    block  256  build  170 ms  4.500 B/key
+5 v4.2.0   idents-1000000     block 1024  build  275 ms  5.066 B/key
+5 v4.2.0   idents-1000000     block  256  build  214 ms  5.228 B/key
+5 v4.3.1   idents-1000000     block 1024  build  311 ms  5.066 B/key
+5 v4.3.1   idents-1000000     block  256  build  251 ms  5.228 B/key
+5 152a00f  idents-1000000     block 1024  build  259 ms  5.066 B/key
+5 152a00f  idents-1000000     block  256  build  208 ms  5.228 B/key
+5 v4.2.0   numeric-1000000    block 1024  build   86 ms  0.918 B/key
+5 v4.2.0   numeric-1000000    block  256  build   70 ms  1.011 B/key
+5 v4.3.1   numeric-1000000    block 1024  build  104 ms  0.918 B/key
+5 v4.3.1   numeric-1000000    block  256  build   88 ms  1.011 B/key
+5 152a00f  numeric-1000000    block 1024  build   68 ms  0.918 B/key
+5 152a00f  numeric-1000000    block  256  build   53 ms  1.011 B/key
+5 v4.2.0   opaque-1000000     block 1024  build  139 ms  10.291 B/key
+5 v4.2.0   opaque-1000000     block  256  build  111 ms  10.399 B/key
+5 v4.3.1   opaque-1000000     block 1024  build  173 ms  10.291 B/key
+5 v4.3.1   opaque-1000000     block  256  build  146 ms  10.399 B/key
+5 152a00f  opaque-1000000     block 1024  build  120 ms  10.291 B/key
+5 152a00f  opaque-1000000     block  256  build  102 ms  10.399 B/key
+5 v4.2.0   paths-1000000      block 1024  build  555 ms  9.323 B/key
+5 v4.2.0   paths-1000000      block  256  build  462 ms  9.871 B/key
+5 v4.3.1   paths-1000000      block 1024  build  715 ms  9.323 B/key
+5 v4.3.1   paths-1000000      block  256  build  608 ms  9.871 B/key
+5 152a00f  paths-1000000      block 1024  build  559 ms  9.323 B/key
+5 152a00f  paths-1000000      block  256  build  455 ms  9.871 B/key
+5 v4.2.0   pypi-full          block 1024  build  197 ms  4.022 B/key
+5 v4.2.0   pypi-full          block  256  build  150 ms  4.165 B/key
+5 v4.3.1   pypi-full          block 1024  build  226 ms  4.022 B/key
+5 v4.3.1   pypi-full          block  256  build  183 ms  4.165 B/key
+5 152a00f  pypi-full          block 1024  build  189 ms  4.022 B/key
+5 152a00f  pypi-full          block  256  build  153 ms  4.165 B/key
+5 v4.2.0   titles-en-1000000  block 1024  build  419 ms  7.212 B/key
+5 v4.2.0   titles-en-1000000  block  256  build  342 ms  7.370 B/key
+5 v4.3.1   titles-en-1000000  block 1024  build  466 ms  7.212 B/key
+5 v4.3.1   titles-en-1000000  block  256  build  387 ms  7.370 B/key
+5 152a00f  titles-en-1000000  block 1024  build  413 ms  7.212 B/key
+5 152a00f  titles-en-1000000  block  256  build  330 ms  7.370 B/key
+5 v4.2.0   titles-ru-1000000  block 1024  build  515 ms  7.447 B/key
+5 v4.2.0   titles-ru-1000000  block  256  build  393 ms  7.664 B/key
+5 v4.3.1   titles-ru-1000000  block 1024  build  686 ms  6.698 B/key
+5 v4.3.1   titles-ru-1000000  block  256  build  607 ms  6.862 B/key
+5 152a00f  titles-ru-1000000  block 1024  build  332 ms  6.698 B/key
+5 152a00f  titles-ru-1000000  block  256  build  282 ms  6.862 B/key
+5 v4.2.0   titles-zh-1000000  block 1024  build  319 ms  6.117 B/key
+5 v4.2.0   titles-zh-1000000  block  256  build  254 ms  6.270 B/key
+5 v4.3.1   titles-zh-1000000  block 1024  build  520 ms  5.687 B/key
+5 v4.3.1   titles-zh-1000000  block  256  build  460 ms  5.851 B/key
+5 152a00f  titles-zh-1000000  block 1024  build  276 ms  5.687 B/key
+5 152a00f  titles-zh-1000000  block  256  build  228 ms  5.851 B/key
+5 v4.2.0   urls-1000000       block 1024  build  424 ms  7.271 B/key
+5 v4.2.0   urls-1000000       block  256  build  344 ms  7.511 B/key
+5 v4.3.1   urls-1000000       block 1024  build  541 ms  7.271 B/key
+5 v4.3.1   urls-1000000       block  256  build  457 ms  7.511 B/key
+5 152a00f  urls-1000000       block 1024  build  424 ms  7.271 B/key
+5 152a00f  urls-1000000       block  256  build  348 ms  7.511 B/key
+5 v4.2.0   uuid-1000000       block 1024  build  218 ms  17.894 B/key
+5 v4.2.0   uuid-1000000       block  256  build  200 ms  18.040 B/key
+5 v4.3.1   uuid-1000000       block 1024  build  286 ms  17.894 B/key
+5 v4.3.1   uuid-1000000       block  256  build  270 ms  18.040 B/key
+5 152a00f  uuid-1000000       block 1024  build  205 ms  17.894 B/key
+5 152a00f  uuid-1000000       block  256  build  165 ms  18.040 B/key
+6 152a00f  words-full         block 1024  build   63 ms  2.513 B/key
+6 152a00f  words-full         block  256  build   41 ms  2.635 B/key
+6 v4.3.1   words-full         block 1024  build   73 ms  2.513 B/key
+6 v4.3.1   words-full         block  256  build   55 ms  2.635 B/key
+6 v4.2.0   words-full         block 1024  build   63 ms  2.513 B/key
+6 v4.2.0   words-full         block  256  build   45 ms  2.635 B/key
+6 152a00f  dna-1000000        block 1024  build   98 ms  4.231 B/key
+6 152a00f  dna-1000000        block  256  build   88 ms  4.375 B/key
+6 v4.3.1   dna-1000000        block 1024  build  206 ms  4.231 B/key
+6 v4.3.1   dna-1000000        block  256  build  157 ms  4.375 B/key
+6 v4.2.0   dna-1000000        block 1024  build  121 ms  4.231 B/key
+6 v4.2.0   dna-1000000        block  256  build  103 ms  4.375 B/key
+6 152a00f  domains-1000000    block 1024  build  214 ms  4.363 B/key
+6 152a00f  domains-1000000    block  256  build  202 ms  4.500 B/key
+6 v4.3.1   domains-1000000    block 1024  build  258 ms  4.363 B/key
+6 v4.3.1   domains-1000000    block  256  build  249 ms  4.500 B/key
+6 v4.2.0   domains-1000000    block 1024  build  233 ms  4.363 B/key
+6 v4.2.0   domains-1000000    block  256  build  179 ms  4.500 B/key
+6 152a00f  idents-1000000     block 1024  build  292 ms  5.066 B/key
+6 152a00f  idents-1000000     block  256  build  220 ms  5.228 B/key
+6 v4.3.1   idents-1000000     block 1024  build  344 ms  5.066 B/key
+6 v4.3.1   idents-1000000     block  256  build  263 ms  5.228 B/key
+6 v4.2.0   idents-1000000     block 1024  build  276 ms  5.066 B/key
+6 v4.2.0   idents-1000000     block  256  build  216 ms  5.228 B/key
+6 152a00f  numeric-1000000    block 1024  build   82 ms  0.918 B/key
+6 152a00f  numeric-1000000    block  256  build   54 ms  1.011 B/key
+6 v4.3.1   numeric-1000000    block 1024  build  107 ms  0.918 B/key
+6 v4.3.1   numeric-1000000    block  256  build   89 ms  1.011 B/key
+6 v4.2.0   numeric-1000000    block 1024  build   84 ms  0.918 B/key
+6 v4.2.0   numeric-1000000    block  256  build   71 ms  1.011 B/key
+6 152a00f  opaque-1000000     block 1024  build  122 ms  10.291 B/key
+6 152a00f  opaque-1000000     block  256  build  105 ms  10.399 B/key
+6 v4.3.1   opaque-1000000     block 1024  build  182 ms  10.291 B/key
+6 v4.3.1   opaque-1000000     block  256  build  151 ms  10.399 B/key
+6 v4.2.0   opaque-1000000     block 1024  build  144 ms  10.291 B/key
+6 v4.2.0   opaque-1000000     block  256  build  112 ms  10.399 B/key
+6 152a00f  paths-1000000      block 1024  build  603 ms  9.323 B/key
+6 152a00f  paths-1000000      block  256  build  451 ms  9.871 B/key
+6 v4.3.1   paths-1000000      block 1024  build  718 ms  9.323 B/key
+6 v4.3.1   paths-1000000      block  256  build  615 ms  9.871 B/key
+6 v4.2.0   paths-1000000      block 1024  build  563 ms  9.323 B/key
+6 v4.2.0   paths-1000000      block  256  build  458 ms  9.871 B/key
+6 152a00f  pypi-full          block 1024  build  188 ms  4.022 B/key
+6 152a00f  pypi-full          block  256  build  145 ms  4.165 B/key
+6 v4.3.1   pypi-full          block 1024  build  224 ms  4.022 B/key
+6 v4.3.1   pypi-full          block  256  build  178 ms  4.165 B/key
+6 v4.2.0   pypi-full          block 1024  build  197 ms  4.022 B/key
+6 v4.2.0   pypi-full          block  256  build  151 ms  4.165 B/key
+6 152a00f  titles-en-1000000  block 1024  build  412 ms  7.212 B/key
+6 152a00f  titles-en-1000000  block  256  build  341 ms  7.370 B/key
+6 v4.3.1   titles-en-1000000  block 1024  build  464 ms  7.212 B/key
+6 v4.3.1   titles-en-1000000  block  256  build  389 ms  7.370 B/key
+6 v4.2.0   titles-en-1000000  block 1024  build  421 ms  7.212 B/key
+6 v4.2.0   titles-en-1000000  block  256  build  342 ms  7.370 B/key
+6 152a00f  titles-ru-1000000  block 1024  build  334 ms  6.698 B/key
+6 152a00f  titles-ru-1000000  block  256  build  285 ms  6.862 B/key
+6 v4.3.1   titles-ru-1000000  block 1024  build  679 ms  6.698 B/key
+6 v4.3.1   titles-ru-1000000  block  256  build  596 ms  6.862 B/key
+6 v4.2.0   titles-ru-1000000  block 1024  build  512 ms  7.447 B/key
+6 v4.2.0   titles-ru-1000000  block  256  build  384 ms  7.664 B/key
+6 152a00f  titles-zh-1000000  block 1024  build  275 ms  5.687 B/key
+6 152a00f  titles-zh-1000000  block  256  build  226 ms  5.851 B/key
+6 v4.3.1   titles-zh-1000000  block 1024  build  515 ms  5.687 B/key
+6 v4.3.1   titles-zh-1000000  block  256  build  459 ms  5.851 B/key
+6 v4.2.0   titles-zh-1000000  block 1024  build  318 ms  6.117 B/key
+6 v4.2.0   titles-zh-1000000  block  256  build  255 ms  6.270 B/key
+6 152a00f  urls-1000000       block 1024  build  421 ms  7.271 B/key
+6 152a00f  urls-1000000       block  256  build  351 ms  7.511 B/key
+6 v4.3.1   urls-1000000       block 1024  build  571 ms  7.271 B/key
+6 v4.3.1   urls-1000000       block  256  build  455 ms  7.511 B/key
+6 v4.2.0   urls-1000000       block 1024  build  427 ms  7.271 B/key
+6 v4.2.0   urls-1000000       block  256  build  349 ms  7.511 B/key
+6 152a00f  uuid-1000000       block 1024  build  202 ms  17.894 B/key
+6 152a00f  uuid-1000000       block  256  build  167 ms  18.040 B/key
+6 v4.3.1   uuid-1000000       block 1024  build  273 ms  17.894 B/key
+6 v4.3.1   uuid-1000000       block  256  build  238 ms  18.040 B/key
+6 v4.2.0   uuid-1000000       block 1024  build  220 ms  17.894 B/key
+6 v4.2.0   uuid-1000000       block  256  build  182 ms  18.040 B/key
