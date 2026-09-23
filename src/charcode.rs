@@ -28,6 +28,8 @@ const LEADS: usize = 128;
 const PAGE: usize = 256;
 /// Pages the index can name: every scalar value is below `0x110000 = 0x1100 * 256`.
 const PAGES: usize = 0x1100;
+/// Code points the [`Index`] holds in one flat level: every one UTF-8 spells in one or two bytes.
+const LOW: usize = 0x800;
 
 /// Which characters a code spells, and in which bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,24 +81,25 @@ fn word(first: u8, second: Option<u8>) -> Word {
     }
 }
 
-/// Write `w` at `at`, returning where it ends. `out` has room: a codeword is at most two bytes and
-/// never longer than the character it spells is in UTF-8, bar ASCII in [`Mode::Seven`], which is
-/// what the callers' buffers of twice the query are sized for.
+/// Write `w` at `at` as two bytes whatever its length, returning where it ends: a single's second
+/// byte is the next codeword's to overwrite, or past what the caller reads. `out` has room for
+/// both — each character before `at` took at most two bytes of it and this one at least one of the
+/// query's, which is what the callers' buffers of twice the query are sized for.
 #[inline(always)]
 fn put(out: &mut [u8], at: usize, w: Word) -> usize {
-    out[at] = (w >> 8) as u8;
-    if w >> 16 == 2 {
-        out[at + 1] = w as u8;
-        at + 2
-    } else {
-        at + 1
-    }
+    let two = &mut out[at..at + 2];
+    two[0] = (w >> 8) as u8;
+    two[1] = w as u8;
+    at + (w >> 16) as usize
 }
 
-/// Codewords by code point, two levels deep: a page of 256 code points, then the point in it. Only
-/// the pages the alphabet touches hold a table — a Chinese alphabet of 12 000 characters touches
-/// about a hundred of the 4 352, a hundred kilobytes beside the first level's eight and a half.
+/// Codewords by code point. Below [`LOW`] — ASCII, and every script UTF-8 spells in two bytes,
+/// Cyrillic among them — one flat level of 8 KiB, so that such a character is one read. Above it
+/// two levels: a page of 256 code points, then the point in it, and only the pages the alphabet
+/// touches hold a table — a Chinese alphabet of 12 000 characters touches about a hundred of the
+/// 4 352, a hundred kilobytes beside the first level's eight and a half.
 struct Index {
+    low: Box<[Word; LOW]>,
     /// `pages[cp >> 8]`: one past the page's place in `words`, or zero for a page the alphabet has
     /// no character on.
     pages: Box<[u16]>,
@@ -104,11 +107,38 @@ struct Index {
 }
 
 impl Index {
+    fn build(spelt: impl IntoIterator<Item = (char, Word)>) -> Self {
+        let mut low = Box::new([0; LOW]);
+        let mut pages = vec![0u16; PAGES].into_boxed_slice();
+        let mut words: Vec<Word> = Vec::new();
+        for (c, w) in spelt {
+            let cp = c as usize;
+            if cp < LOW {
+                low[cp] = w;
+                continue;
+            }
+            if pages[cp >> 8] == 0 {
+                words.resize(words.len() + PAGE, 0);
+                pages[cp >> 8] = (words.len() / PAGE) as u16;
+            }
+            words[(usize::from(pages[cp >> 8]) - 1) * PAGE + (cp & 0xFF)] = w;
+        }
+        Self {
+            low,
+            pages,
+            words: words.into_boxed_slice(),
+        }
+    }
+
     #[inline(always)]
     fn get(&self, c: char) -> Word {
-        match self.pages[c as usize >> 8] {
+        let cp = c as usize;
+        if cp < LOW {
+            return self.low[cp];
+        }
+        match self.pages[cp >> 8] {
             0 => 0,
-            p => self.words[(usize::from(p) - 1) * PAGE + (c as usize & 0xFF)],
+            p => self.words[(usize::from(p) - 1) * PAGE + (cp & 0xFF)],
         }
     }
 }
@@ -137,32 +167,53 @@ pub(crate) struct CharCode {
     /// codewords, the second byte a character's place in it.
     firsts: Box<[u16]>,
     index: Index,
+    /// By byte, what a codeword that starts with it decodes to: the rank in [`utf8`](Self::utf8) of
+    /// its lead's first character, above nine bits holding how many characters the lead spells —
+    /// one for a single, zero for a byte no codeword starts with.
+    leads: Box<[u32; 256]>,
+    /// Every character spelled, by rank, as [`packed`] UTF-8 — in [`Mode::Eight`] followed by
+    /// ASCII's 128, which spell themselves — so that a codeword decodes in two reads and a store.
+    utf8: Box<[u32]>,
     /// What [`write_to`](Self::write_to) writes, counted once.
     len: usize,
+}
+
+/// A character's UTF-8 in the four bytes of a `u32`, in the order they are written, zero past the
+/// last.
+fn packed(c: char) -> u32 {
+    let mut bytes = [0u8; 4];
+    c.encode_utf8(&mut bytes);
+    u32::from_le_bytes(bytes)
+}
+
+/// How many bytes [`packed`] spells: its first byte's leading ones, or one for ASCII, without a
+/// branch on which.
+#[inline(always)]
+fn packed_len(u: u32) -> usize {
+    ((u as u8).leading_ones() as usize).max(1)
 }
 
 impl CharCode {
     /// The code over `chars`, ascending, under leads of the widths `firsts` bounds.
     fn new(mode: Mode, chars: Box<[char]>, firsts: Box<[u16]>) -> Self {
-        let mut pages = vec![0u16; PAGES].into_boxed_slice();
-        let mut words: Vec<Word> = Vec::new();
-        for (l, pair) in firsts.windows(2).enumerate() {
+        let spelt = firsts.windows(2).enumerate().flat_map(|(l, pair)| {
             let (first, end) = (usize::from(pair[0]), usize::from(pair[1]));
             let lead = mode.base() + l as u8;
-            for (at, &c) in chars[first..end].iter().enumerate() {
-                let p = c as usize >> 8;
-                if pages[p] == 0 {
-                    words.resize(words.len() + PAGE, 0);
-                    pages[p] = (words.len() / PAGE) as u16;
-                }
-                words[(usize::from(pages[p]) - 1) * PAGE + (c as usize & 0xFF)] =
-                    if end - first == 1 {
-                        word(lead, None)
-                    } else {
-                        word(lead, Some(at as u8))
-                    };
-            }
-        }
+            chars[first..end].iter().enumerate().map(move |(at, &c)| {
+                let w = if end - first == 1 {
+                    word(lead, None)
+                } else {
+                    word(lead, Some(at as u8))
+                };
+                (c, w)
+            })
+        });
+        // ASCII spells itself under `Mode::Eight`, and the index says so, so that no loop coding a
+        // key has to ask which mode it is in.
+        let ascii = (0..0x80u8)
+            .filter(|_| mode == Mode::Eight)
+            .map(|b| (char::from(b), word(b, None)));
+        let index = Index::build(spelt.chain(ascii));
         let mut prev = 0u32;
         let deltas: usize = chars
             .iter()
@@ -173,14 +224,25 @@ impl CharCode {
             })
             .sum();
         let len = 1 + varint_len(chars.len() as u32) + firsts.len() + deltas;
+        let mut utf8: Vec<u32> = chars.iter().map(|&c| packed(c)).collect();
+        let mut leads = Box::new([0u32; 256]);
+        for (l, pair) in firsts.windows(2).enumerate() {
+            leads[usize::from(mode.base()) + l] =
+                u32::from(pair[0]) << 9 | u32::from(pair[1] - pair[0]);
+        }
+        if mode == Mode::Eight {
+            for b in 0..0x80u8 {
+                leads[usize::from(b)] = (utf8.len() as u32) << 9 | 1;
+                utf8.push(packed(char::from(b)));
+            }
+        }
         Self {
             mode,
             chars,
             firsts,
-            index: Index {
-                pages,
-                words: words.into_boxed_slice(),
-            },
+            index,
+            leads,
+            utf8: utf8.into_boxed_slice(),
             len,
         }
     }
@@ -190,10 +252,6 @@ impl CharCode {
     /// does, and a stream that changed between two passes can.
     pub(crate) fn encode_key(&self, key: &str, out: &mut Vec<u8>) -> bool {
         for c in key.chars() {
-            if self.mode == Mode::Eight && c.is_ascii() {
-                out.push(c as u8);
-                continue;
-            }
             match self.index.get(c) {
                 0 => return false,
                 w => {
@@ -212,11 +270,6 @@ impl CharCode {
     pub(crate) fn probe_into(&self, query: &str, out: &mut [u8]) -> (Probe, usize) {
         let mut o = 0;
         for c in query.chars() {
-            if self.mode == Mode::Eight && c.is_ascii() {
-                out[o] = c as u8;
-                o += 1;
-                continue;
-            }
             let w = self.index.get(c);
             if w != 0 {
                 o = put(out, o, w);
@@ -246,16 +299,12 @@ impl CharCode {
         ends.clear();
         ends.push((0, 0));
         for (at, c) in query.char_indices() {
-            if self.mode == Mode::Eight && c.is_ascii() {
-                out.push(c as u8);
-            } else {
-                match self.index.get(c) {
-                    0 => return,
-                    w => {
-                        out.push((w >> 8) as u8);
-                        if w >> 16 == 2 {
-                            out.push(w as u8);
-                        }
+            match self.index.get(c) {
+                0 => return,
+                w => {
+                    out.push((w >> 8) as u8);
+                    if w >> 16 == 2 {
+                        out.push(w as u8);
                     }
                 }
             }
@@ -263,61 +312,81 @@ impl CharCode {
         }
     }
 
-    /// The character whose codeword starts at `at`, and the codeword's length; `None` where no
-    /// codeword starts, which only a blob this crate did not write holds.
+    /// The [`packed`] character whose codeword starts at `at`, and the codeword's length; `None`
+    /// where no codeword starts, which only a blob this crate did not write holds.
     #[inline(always)]
-    fn char_at(&self, coded: &[u8], at: usize) -> Option<(char, usize)> {
-        let b = *coded.get(at)?;
-        if self.mode == Mode::Eight && b < 0x80 {
-            return Some((char::from(b), 1));
-        }
-        let l = usize::from(b.wrapping_sub(self.mode.base()));
-        let first = usize::from(*self.firsts.get(l)?);
-        let width = usize::from(*self.firsts.get(l + 1)?) - first;
+    fn utf8_at(&self, coded: &[u8], at: usize) -> Option<(u32, usize)> {
+        let lead = self.leads[usize::from(*coded.get(at)?)];
+        let (first, width) = ((lead >> 9) as usize, lead & 0x1FF);
         if width == 1 {
-            return Some((self.chars[first], 1));
+            return Some((self.utf8[first], 1));
         }
-        let s = usize::from(*coded.get(at + 1)?);
-        (s < width).then(|| (self.chars[first + s], 2))
+        let s = u32::from(*coded.get(at + 1)?);
+        (s < width).then(|| (self.utf8[first + s as usize], 2))
     }
 
     /// Append what `coded` spells to `out`; `false` on bytes no code wrote.
+    ///
+    /// Every character is stored as four bytes and the ones past its length are overwritten by the
+    /// next, so `out` is first grown by four bytes a byte of code: the most any codeword spells.
     pub(crate) fn decode_into(&self, coded: &[u8], out: &mut Vec<u8>) -> bool {
+        let mut w = out.len();
+        out.resize(w + 4 * coded.len(), 0);
         let mut at = 0;
         while at < coded.len() {
-            let Some((c, len)) = self.char_at(coded, at) else {
+            let Some((u, len)) = self.utf8_at(coded, at) else {
+                out.truncate(w);
                 return false;
             };
-            out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            out[w..w + 4].copy_from_slice(&u.to_le_bytes());
+            w += packed_len(u);
             at += len;
         }
+        out.truncate(w);
         true
     }
 
     /// Replace `buf`'s code by what it spells, in place, so that a caller who keeps one buffer
     /// allocates nothing; `false`, with `buf` empty, on bytes no code wrote.
     ///
-    /// The code is moved to the top of four times its length and decoded upwards from the bottom.
-    /// No codeword spells more than four bytes, so after `k` bytes of code the output is at most
-    /// `4k` long while the next unread byte sits at `3c + k`, `c` the code's length — never behind
-    /// the output, since `k <= c`.
+    /// The code is moved to the top of four times its length and decoded upwards from the bottom,
+    /// each character stored as four bytes whatever it spells. No codeword spells more than four,
+    /// so after `k` bytes of code the output is at most `4k` long, and the store for the codeword
+    /// of `len` bytes read next, from `3c + k`, `c` the code's length, ends by `4k + 4`: never past
+    /// the byte after it, `3c + k + len`, since that codeword ends by `c`.
     pub(crate) fn decode_in_place(&self, buf: &mut Vec<u8>) -> bool {
         let c = buf.len();
         buf.resize(4 * c, 0);
         buf.copy_within(..c, 3 * c);
         let (mut r, mut w) = (3 * c, 0);
         while r < 4 * c {
-            let Some((ch, len)) = self.char_at(buf, r) else {
+            let Some((u, len)) = self.utf8_at(buf, r) else {
                 buf.clear();
                 return false;
             };
             r += len;
-            let s = ch.len_utf8();
-            ch.encode_utf8(&mut buf[w..w + s]);
-            w += s;
+            buf[w..w + 4].copy_from_slice(&u.to_le_bytes());
+            w += packed_len(u);
         }
         buf.truncate(w);
         true
+    }
+
+    /// [`decode_in_place`](Self::decode_in_place), handed back as a `String` over the same
+    /// allocation; `None` on bytes no code wrote.
+    ///
+    /// What the decoder leaves is UTF-8 by construction, so it is not proved again by
+    /// `String::from_utf8`, whose pass over a Russian title was 11 % of `key_into`'s instructions.
+    pub(crate) fn decode_owned(&self, mut buf: Vec<u8>) -> Option<String> {
+        if !self.decode_in_place(&mut buf) {
+            return None;
+        }
+        debug_assert!(std::str::from_utf8(&buf).is_ok(), "{buf:?}");
+        // SAFETY: `decode_in_place` stored entries of `utf8` one after another from byte 0, each
+        // where the one before it ended by `packed_len`, and cut the buffer where the last ended.
+        // Every entry is `packed` from a `char`, whose first byte `packed_len` reads its length
+        // from — so the buffer is those characters' UTF-8, whole and in order.
+        Some(unsafe { String::from_utf8_unchecked(buf) })
     }
 
     /// `[mode u8][characters varint][leads u8][lead widths, less one, a byte each][the characters'
@@ -525,12 +594,7 @@ impl Tally {
         let code = CharCode::new(mode, chars, firsts.into());
         let spelt: u64 = alphabet
             .iter()
-            .map(|&(c, n)| {
-                n * match code.index.get(c) {
-                    0 => 1, // ASCII under `Mode::Eight`, itself
-                    w => u64::from(w >> 16),
-                }
-            })
+            .map(|&(c, n)| n * u64::from(code.index.get(c) >> 16))
             .sum();
         let spelt = (u128::from(spelt) * u128::from(bytes) / u128::from(self.bytes.max(1))) as u64;
         let table = code.serialized_len() as u64;
@@ -638,10 +702,11 @@ mod tests {
     /// Characters from four scripts and both ends of the code space, weighted so that some are
     /// frequent enough to be singles and most are not.
     fn text() -> impl Strategy<Value = String> {
-        let pool: Vec<char> = "\u{0}\u{1}az~\u{7f}\u{80}éжЖё中国人之的\u{ffff}\u{10000}\u{10ffff}"
-            .chars()
-            .chain((0x4E00..0x4E00 + 300).filter_map(char::from_u32))
-            .collect();
+        let pool: Vec<char> =
+            "\u{0}\u{1}az~\u{7f}\u{80}éжЖё\u{7ff}\u{800}中国人之的\u{ffff}\u{10000}\u{10ffff}"
+                .chars()
+                .chain((0x4E00..0x4E00 + 300).filter_map(char::from_u32))
+                .collect();
         proptest::collection::vec(proptest::sample::select(pool), 0..6)
             .prop_map(|cs| cs.into_iter().collect())
     }
@@ -668,6 +733,7 @@ mod tests {
                 let mut inplace = ca.clone();
                 prop_assert!(code.decode_in_place(&mut inplace));
                 prop_assert_eq!(&inplace, a.as_bytes());
+                prop_assert_eq!(code.decode_owned(ca.clone()), Some(a.clone()));
                 for b in &keys {
                     let cb = code.encoded(b);
                     prop_assert_eq!(ca.cmp(&cb), a.cmp(b), "{:?} {:?}", a, b);
@@ -733,7 +799,8 @@ mod tests {
             }
         }
 
-        /// A table no build wrote is refused or read, never a panic.
+        /// A table no build wrote is refused or read, never a panic, and whatever bytes a table
+        /// that was read decodes are UTF-8 — the check `decode_owned` makes in a debug build.
         #[test]
         fn arbitrary_tables_never_panic(data in proptest::collection::vec(any::<u8>(), 0..64)) {
             if let Some(code) = CharCode::read(&data) {
@@ -741,6 +808,25 @@ mod tests {
                 let _ = code.decode_into(&data, &mut out);
                 let mut buf = data.clone();
                 let _ = code.decode_in_place(&mut buf);
+                let _ = code.decode_owned(data.clone());
+            }
+        }
+
+        /// Arbitrary code under a real table: every byte string decodes to UTF-8 or is refused.
+        #[test]
+        fn arbitrary_code_decodes_to_utf8_or_nothing(
+            keys in proptest::collection::vec(text(), 1..20),
+            seven in any::<bool>(),
+            singles in 0usize..20,
+            data in proptest::collection::vec(any::<u8>(), 0..48),
+        ) {
+            let code = CharCode::forced(&keys, seven, singles);
+            let mut out = Vec::new();
+            if code.decode_into(&data, &mut out) {
+                prop_assert!(std::str::from_utf8(&out).is_ok());
+                prop_assert_eq!(code.decode_owned(data.clone()).map(String::into_bytes), Some(out));
+            } else {
+                prop_assert!(code.decode_owned(data.clone()).is_none());
             }
         }
     }

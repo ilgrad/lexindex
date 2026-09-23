@@ -2819,7 +2819,7 @@ impl DictIndex {
         match &self.code {
             None => std::str::from_utf8(stored).ok().map(str::to_owned),
             Some(code) => {
-                let mut out = Vec::with_capacity(2 * stored.len());
+                let mut out = Vec::with_capacity(4 * stored.len());
                 code.decode_into(stored, &mut out)
                     .then(|| String::from_utf8(out).ok())
                     .flatten()
@@ -3399,11 +3399,16 @@ impl DictIndex {
     /// `len()`, and for the key a corrupted blob decodes to something that is not UTF-8.
     pub fn key_into(&self, id: u64, out: &mut String) -> bool {
         let mut buf = std::mem::take(out).into_bytes();
-        let found = self.key_bytes_into(id, &mut buf)
-            && self
-                .code
-                .as_ref()
-                .is_none_or(|c| c.decode_in_place(&mut buf));
+        let found = self.key_bytes_into(id, &mut buf);
+        if let (true, Some(code)) = (found, &self.code) {
+            return match code.decode_owned(buf) {
+                Some(s) => {
+                    *out = s;
+                    true
+                }
+                None => false,
+            };
+        }
         match String::from_utf8(buf) {
             Ok(s) => {
                 *out = s;
