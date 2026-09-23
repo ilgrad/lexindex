@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.3] — 2026-09-24
+
+### Fixed
+
+- **`DictIndex::id` on a blob in a character code is as fast as 4.2.0's again.** 4.3.2's `id` was
+  6 % slower than 4.2.0's on a million Chinese titles. Counted per query, the search was not the
+  cause — in code it costs fewer cycles than 4.2's search in UTF-8 — but spelling the query: 342
+  instructions and some 130 cycles, run before the first step of the search could issue. The code
+  keeps order, so the blocks a query falls between are the same whether the per-block samples are
+  taken from the heads as coded or as decoded, and a coded blob's loader now takes both. Where the
+  decoded samples tie no more blocks than the coded ones — 51 of 3 907 against 70 on the Chinese
+  titles, none either way on jieba's lexicon — `id` searches them with the query's own UTF-8 and
+  spells it while that search waits on its loads. The Russian titles tie 659 decoded against 161
+  coded, eight bytes of UTF-8 being four letters, and keep the coded route. The decoded samples are
+  derived at load like the coded ones and take as much memory, eight bytes a block; blobs are
+  unchanged, byte for byte. With the change below, against 4.2.0 and 4.3.2 in one process, in two
+  builds of the harness (`bench/results/id-ab-2026-09-24-arz-af19cb7.txt`): on the Chinese titles
+  `id` is level with 4.2.0 (−0.5 and +0.3 %) and 5.7–6.5 % faster than 4.3.2, on the lexicon
+  6.7–8.0 % faster than 4.2.0, and on the Russian titles 2.7–3.0 % faster than 4.3.2 and 0.8–2.7 %
+  slower than 4.2.0.
+- **`DictIndex::ids_of` on a blob in a character code is 6–13 % faster.** It checked every `&str`
+  key as UTF-8 a second time, and grew, zero-filled and cut back an arena the size of the whole
+  batch a key at a time. It now takes a `str` as it is, and spells 32 keys at a time into one arena
+  reused across the batch, so it no longer holds a spelled copy of every key. Against 4.3.2 in the
+  same run: 8.1–8.3 % faster on the Chinese titles, 12.6–12.9 % on the Russian ones and 6.1–6.7 % on
+  the lexicon. That still leaves it 2.8–4.5 % and 1.2–2.4 % slower than 4.2.0's on the two sets of
+  titles, and 5.0–5.3 % faster on the lexicon: on all three corpora a batch is slower than a loop of
+  `id` in every version measured, so the spelling has no wait to run beside.
+
+### Changed
+
+- **A `DictIndex` lookup compares a head only where the samples leave it open, and `id` is faster
+  on every corpus but paths.** A block whose sample is below the probe's has its head below the
+  probe, and one whose sample is above has its head above, so only a run of blocks sharing the
+  probe's sample leaves heads to compare. Every lookup had also compared the head of the block
+  before that run: one more dependent load and a `memcmp`, for a block the samples had already
+  chosen. Between 0.4 and 12.4 % of the probes land in a run on thirteen of the fourteen corpora
+  measured; on paths all of them do, since every path shares one byte and past it the samples tie
+  3 899 blocks of 3 907. On the eleven corpora that take no code, against 4.3.2 in the same run,
+  `id` is 2.7–5.5 % faster on eight of them, 0.9–4.3 % on identifiers and UUIDs and level on paths;
+  `ids_of` is 2.8–5.2 % faster on nine and level on paths, and on identifiers 4.0 % faster in one
+  harness build and 1.5 % slower in the other, whose whole row, the control's included, the machine
+  slowed by 9–25 %.
+
 ## [4.3.2] — 2026-09-24
 
 ### Fixed
