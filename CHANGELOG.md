@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`StringIndex.occurrences(text)`: every key that occurs in a text, in one call.** A dictionary
+  segmenter — jieba and its ports among them — asks for the keys that start at each character of a
+  sentence, and from Python that was a `common_prefix` call per character, each one a crossing of
+  the binding for a walk that is over within a few characters. `occurrences` runs the same walk at
+  every character on the Rust side and returns `(start, end, id)` triples, with `text[start:end]`
+  the key: starts ascend, and within a start the shortest key comes first — the order jieba's word
+  graph is built in. Offsets count characters, as a `str` is indexed, not UTF-8 bytes. The empty
+  key, which would occur at every position, is not reported.
+- **`StringIndex::for_each_common_prefix`**, the walk under `common_prefix` and `longest_prefix`,
+  is public: `f(end, id)` for every key that is a prefix of the query, shortest first, with the
+  key `&query[..end]` and nothing allocated. The walk stops where no key continues, so the query
+  can be the whole rest of a text.
+
 ### Fixed
 
 - **`lexindex.inspect`'s docstring opened with somebody else's paragraph**, a note on the

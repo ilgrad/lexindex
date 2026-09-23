@@ -117,6 +117,8 @@ idx.get("missing", -1)   # -1
 idx.prefix("ap")         # [("apple", 0), ("apricot", 1)]
 idx.common_prefix("applesauce")  # [("apple", 0)]  — the keys that are prefixes OF the query
 idx.longest_prefix("applesauce") # ("apple", 0)    — what a longest-match tokeniser takes
+idx.occurrences("cherry-apple")  # [(0, 6, 3), (7, 12, 0)]  — every key in a text, as (start, end,
+                                 # id) in characters: common_prefix at every position, in one call
 idx.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]  — [lo, hi)
 idx.successor("ba")      # ("banana", 2)   — smallest key ≥ query
 idx.predecessor("ba")    # ("apricot", 1)  — largest key ≤ query

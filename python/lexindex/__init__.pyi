@@ -125,6 +125,15 @@ class StringIndex:
         that start there. One walk down the transducer, whatever the index holds.
         """
 
+    def occurrences(self, text: str) -> list[tuple[int, int, int]]:
+        """Every key in ``text``, as ``(start, end, id)`` with ``text[start:end]`` the key.
+
+        Starts ascend, and within a start the shortest key comes first. The whole-text form of
+        ``common_prefix`` that a dictionary segmenter runs at every character: one call per text
+        instead of one per character, which is where a loop over the characters spends its time.
+        Offsets count characters. The empty key, if the index holds it, is not reported.
+        """
+
     def longest_prefix(self, query: str) -> tuple[str, int] | None:
         """The longest key that is a prefix of ``query``, or ``None`` -- the longest match."""
 

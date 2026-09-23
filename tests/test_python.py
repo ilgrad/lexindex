@@ -437,6 +437,22 @@ def test_common_prefix_and_longest_prefix_on_both_ordered_indexes():
         assert idx.common_prefix("a") == [] and idx.longest_prefix("a") is None
 
 
+def test_occurrences_is_common_prefix_at_every_character_in_character_offsets():
+    # Multi-byte keys, so a byte offset leaking through would show; the empty key is held and must
+    # not be reported, since it would "occur" at every position.
+    keys = sorted({"", "中", "中国", "中国人", "国人", "人民", "a", "ab", "é", "éa"})
+    idx = lexindex.StringIndex(keys)
+    for text in ["中国人民", "xéab中国z", "", "zzz", "中国人中国"]:
+        want = [
+            (k, k + len(key), i)
+            for k in range(len(text))
+            for key, i in idx.common_prefix(text[k:])
+            if key
+        ]
+        assert idx.occurrences(text) == want, text
+        assert all(text[s:e] == keys[i] for s, e, i in want), text
+
+
 def test_dict_index_build_to_file_writes_what_the_constructor_would(tmp_path):
     words = [f"token-{i * 7919 % 10007:05}" for i in range(20_000)]  # duplicates fold
     distinct = sorted(set(words))

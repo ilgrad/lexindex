@@ -404,6 +404,29 @@ impl PyStringIndex {
         py.detach(|| self.inner.common_prefix(query))
     }
 
+    /// Every key that occurs in `text`, as `(start, end, id)` with `text[start:end]` the key:
+    /// starts ascending, and within a start shortest first. The whole-text form of `common_prefix`
+    /// that a dictionary segmenter runs at every character, in one call a text rather than one a
+    /// character, which is where a loop over characters spends its time. Offsets count characters,
+    /// as a `str` is indexed; the empty key, if the index holds it, is not reported.
+    fn occurrences(&self, py: Python<'_>, text: &str) -> Vec<(usize, usize, u64)> {
+        py.detach(|| {
+            let mut out = Vec::new();
+            for (start_char, (start, _)) in text.char_indices().enumerate() {
+                let rest = &text[start..];
+                let (mut seen_bytes, mut seen_chars) = (0, 0);
+                self.inner.for_each_common_prefix(rest, |end, id| {
+                    if end > 0 {
+                        seen_chars += rest[seen_bytes..end].chars().count();
+                        seen_bytes = end;
+                        out.push((start_char, start_char + seen_chars, id));
+                    }
+                });
+            }
+            out
+        })
+    }
+
     /// The longest key that is a prefix of `query`, or `None` -- the match a longest-match
     /// tokeniser takes. See `common_prefix`.
     fn longest_prefix(&self, py: Python<'_>, query: &str) -> Option<(String, u64)> {

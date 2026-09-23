@@ -350,7 +350,7 @@ impl StringIndex {
     /// ```
     pub fn common_prefix(&self, query: &str) -> Vec<(String, u64)> {
         let mut found = Vec::new();
-        self.each_common_prefix(query, |end, id| found.push((query[..end].to_owned(), id)));
+        self.for_each_common_prefix(query, |end, id| found.push((query[..end].to_owned(), id)));
         found
     }
 
@@ -361,13 +361,26 @@ impl StringIndex {
     /// the shorter matches.
     pub fn longest_prefix(&self, query: &str) -> Option<(String, u64)> {
         let mut last = None;
-        self.each_common_prefix(query, |end, id| last = Some((end, id)));
+        self.for_each_common_prefix(query, |end, id| last = Some((end, id)));
         last.map(|(end, id)| (query[..end].to_owned(), id))
     }
 
-    /// Walk `query` through the transducer, reporting `(end, id)` at every final state it passes —
-    /// every key that is a prefix of `query`, shortest first.
-    fn each_common_prefix(&self, query: &str, mut f: impl FnMut(usize, u64)) {
+    /// [`common_prefix`](Self::common_prefix) with nothing allocated: `f(end, id)` for every key
+    /// that is a prefix of `query`, shortest first, where the key is `&query[..end]`.
+    ///
+    /// The form a dictionary segmenter runs at every character of a text, where building a `String`
+    /// a match costs more than finding it. The walk ends where no key continues, so the query can
+    /// be the whole rest of the text.
+    ///
+    /// ```
+    /// use lexindex::StringIndex;
+    /// let idx = StringIndex::build(["a", "ap", "apple", "b"])?;
+    /// let mut found = Vec::new();
+    /// idx.for_each_common_prefix("apples", |end, id| found.push((end, id)));
+    /// assert_eq!(found, [(1, 0), (2, 1), (5, 2)]);
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn for_each_common_prefix(&self, query: &str, mut f: impl FnMut(usize, u64)) {
         let fst = self.map.as_fst();
         let mut node = fst.root();
         let mut acc: u64 = 0;
