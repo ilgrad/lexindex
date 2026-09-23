@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.2] — 2026-09-24
+
+### Fixed
+
+- **`DictIndex` builds faster than 4.2.0 again; 4.3.0 had made every in-memory build 11–81 %
+  slower.** Before building, 4.3.0 counted the keys' bytes outside ASCII to learn whether a
+  character code could pay, and where one could it counted their characters and spelled every key:
+  three passes on one thread, in key order, over the caller's keys. Those lie wherever the caller
+  allocated them, so such a pass waits on memory at every key, and the byte count compiled to four
+  instructions a byte, which keeps few of those loads in flight. The count now takes eight bytes a
+  step; the three passes run a range of keys a thread, over one view of the keys that the
+  encoder's threads now share rather than taking their own; and every pass prefetches the key 32
+  places ahead. The order check and the deduplication in front of the build — a sort's check for
+  a run and a `dedup_by`, two more passes of the same kind — are now one pass that reads ahead.
+  Blobs are unchanged, byte for byte. Over the thirteen corpora of the million-key frontier, at
+  blocks 1024 and 256, alternated with 4.2.0 and 4.3.1 in one run
+  (`bench/results/build-ab-2026-09-23-arz-152a00f.txt`), a build takes 11–53 % less time than
+  4.3.1's on every corpus; against 4.2.0's it is 29–35 % faster on Russian titles, 11–14 % on
+  Chinese ones, 3–25 % on eight Latin corpora, and within 2 % on paths, English titles and URLs.
+  The loss was found by re-measuring the frontier at 4.3.1
+  (`bench/results/frontier-1m-2026-09-23-arz-8dc8b73.json`), where `DictIndex` no longer built
+  first on three corpora of the thirteen, and the corpus sweep at 4.3.1 shows it too
+  (`bench/results/sweep-2026-09-23-arz-8dc8b73.json`).
+
 ## [4.3.1] — 2026-09-23
 
 ### Fixed
