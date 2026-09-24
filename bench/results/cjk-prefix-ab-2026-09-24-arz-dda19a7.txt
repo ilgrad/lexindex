@@ -1,0 +1,174 @@
+z7ab: writing /home/ilgrad/Documents/projects/betula/repos/lexindex/local/cjk/results/z7ab-2026-09-24-1845/z7ab.txt
+# Z-7 A/B: 5 processes, 30 rounds each
+# gate: bench-ready green and hottest zone < 70 C, waiting up to 30 min
+## machine, start
+date: 2026-09-24T18:45:52+03:00
+uptime:  18:45:52 up  4:32,  1 user,  load average: 2.26, 2.90, 2.14
+kernel: 7.2.7-200.fc44.x86_64; cpu: AMD Ryzen 7 5800HS with Radeon Graphics, 16 threads
+governor: powersave
+thermals: acpitz 61.0 C  iwlwifi_1 37.0 C  
+memory: MemAvailable: 27637584 kB;Cached: 30640592 kB;SwapTotal: 28310012 kB;SwapFree: 28310012 kB
+DIMM layout: not read (needs root); buffer placement: not read (needs root). Every structure is
+  allocated anew in each process; a cell is the minimum over them, the ratio paired per process
+bench-ready at the start (informational; the gate is per process):
+    load                   2.26  ABOVE 0.40 -- something else is running
+    swap in use            0 MiB  ok
+    memory available       26.4 GiB  ok
+    page cache             29.2 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+    uptime                 4.5 h
+    governor               powersave
+    
+    NOT READY -- do not quote a latency number from this machine now.
+    Sizes are deterministic and may be measured regardless.
+prototype: dda19a7 perf(string): answer a prefix walk's first character from a table (status: 0 changed files under src)
+text sha256 7f7a42d10d0737a9...; lexicon sha256 7197c3211ddd9896...
+
+## build and prepare (untimed)
+warning: z7ab@0.0.0: In file included from cpp/darts_shim.cc:8:
+warning: z7ab@0.0.0: ../vendor/darts-clone/include/darts.h:958:3: warning: type qualifiers ignored on function return type [-Wignored-qualifiers]
+warning: z7ab@0.0.0:   958 |   const value_type values(std::size_t id) const {
+warning: z7ab@0.0.0:       |   ^~~~~
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.02s
+z7ab binary sha256 48bfbb9ab17a507968731e43d5de95791dee5a792d3a20a279019445505ceceb
+locked: name = "cedarwood" version = "0.5.0" source = "registry+https://github.com/rust-lang/crates.io-index" name = "fst" version = "0.4.7" source = "registry+https://github.com/rust-lang/crates.io-index" name = "jieba-rs" version = "0.11.0" source = "registry+https://github.com/rust-lang/crates.io-index" name = "lexindex" version = "4.4.1" dependencies = [ name = "lexindex" version = "4.4.1" source = "registry+https://github.com/rust-lang/crates.io-index"
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# lexicon: 349046 lines, 349045 distinct words; text: 4997 sentences, 195832 characters; 16736 blocks, 178338 characters in them
+ok   every character of every block, the query running to the block's end: 178338 positions, 161896 with a match, 237465 matches, at most 6 at one position; StringIndex, DictIndex 256, cedarwood and darts-clone give the same (length, id) set at every one, and every id names the word the text spells
+ok   the timed walks (lexindex, cedarwood, darts-clone), in order and shuffled, each tally 237465 matches summing to 36484462043, the reference's
+ok   every character of every sentence, punctuation included, the query running to the sentence's end: 195832 positions, 161896 with a match, 237465 matches; the same four-way agreement
+
+## timed processes
+gate before process 1: green after 194 s; thermals acpitz 46.0 C  iwlwifi_1 35.0 C  
+### process 1, started 18:49:09
+process 1: exit 0, ended 18:49:13; thermals after: acpitz 73.0 C  iwlwifi_1 35.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from all four structures, and every timed walk's tally in both lanes
+# checked: the prototype's walk tallies the released one's in both lanes
+variant                                         ns/char   (178338 characters in blocks; min of 30 rounds, alternated)
+control: jieba-rs 0.11.0 cut_all (blocks)          32.7
+old: lexindex 4.4.1, in order                      81.5
+new: first-character table, in order               65.5
+cedarwood 0.5.0, in order                          49.9
+darts-clone 0.32, in order                         41.6
+old: lexindex 4.4.1, shuffled                      93.6
+new: first-character table, shuffled               76.9
+cedarwood 0.5.0, shuffled                          46.4
+darts-clone 0.32, shuffled                         35.0
+gate before process 2: green after 2 s; thermals acpitz 68.0 C  iwlwifi_1 35.0 C  
+### process 2, started 18:49:15
+process 2: exit 0, ended 18:49:19; thermals after: acpitz 74.0 C  iwlwifi_1 36.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from all four structures, and every timed walk's tally in both lanes
+# checked: the prototype's walk tallies the released one's in both lanes
+variant                                         ns/char   (178338 characters in blocks; min of 30 rounds, alternated)
+control: jieba-rs 0.11.0 cut_all (blocks)          40.0
+old: lexindex 4.4.1, in order                      81.1
+new: first-character table, in order               65.2
+cedarwood 0.5.0, in order                          52.4
+darts-clone 0.32, in order                         43.6
+old: lexindex 4.4.1, shuffled                      95.0
+new: first-character table, shuffled               77.5
+cedarwood 0.5.0, shuffled                          50.7
+darts-clone 0.32, shuffled                         34.8
+gate before process 3: green after 2 s; thermals acpitz 69.0 C  iwlwifi_1 36.0 C  
+### process 3, started 18:49:21
+process 3: exit 0, ended 18:49:25; thermals after: acpitz 73.0 C  iwlwifi_1 35.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from all four structures, and every timed walk's tally in both lanes
+# checked: the prototype's walk tallies the released one's in both lanes
+variant                                         ns/char   (178338 characters in blocks; min of 30 rounds, alternated)
+control: jieba-rs 0.11.0 cut_all (blocks)          32.6
+old: lexindex 4.4.1, in order                      81.6
+new: first-character table, in order               64.9
+cedarwood 0.5.0, in order                          49.5
+darts-clone 0.32, in order                         41.1
+old: lexindex 4.4.1, shuffled                      94.2
+new: first-character table, shuffled               76.7
+cedarwood 0.5.0, shuffled                          46.2
+darts-clone 0.32, shuffled                         35.0
+gate before process 4: green after 34 s; thermals acpitz 46.0 C  iwlwifi_1 35.0 C  
+### process 4, started 18:49:59
+process 4: exit 0, ended 18:50:03; thermals after: acpitz 72.0 C  iwlwifi_1 35.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from all four structures, and every timed walk's tally in both lanes
+# checked: the prototype's walk tallies the released one's in both lanes
+variant                                         ns/char   (178338 characters in blocks; min of 30 rounds, alternated)
+control: jieba-rs 0.11.0 cut_all (blocks)          33.2
+old: lexindex 4.4.1, in order                      81.5
+new: first-character table, in order               64.7
+cedarwood 0.5.0, in order                          49.5
+darts-clone 0.32, in order                         42.4
+old: lexindex 4.4.1, shuffled                      93.5
+new: first-character table, shuffled               76.5
+cedarwood 0.5.0, shuffled                          46.9
+darts-clone 0.32, shuffled                         35.6
+gate before process 5: green after 2 s; thermals acpitz 68.0 C  iwlwifi_1 34.0 C  
+### process 5, started 18:50:05
+process 5: exit 0, ended 18:50:09; thermals after: acpitz 78.0 C  iwlwifi_1 34.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# old: lexindex 4.4.1 (crates.io); new: lexindex at dda19a7 (local/wt/z7); cedarwood 0.5.0 (crates.io), jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from all four structures, and every timed walk's tally in both lanes
+# checked: the prototype's walk tallies the released one's in both lanes
+variant                                         ns/char   (178338 characters in blocks; min of 30 rounds, alternated)
+control: jieba-rs 0.11.0 cut_all (blocks)          41.0
+old: lexindex 4.4.1, in order                      80.8
+new: first-character table, in order               63.9
+cedarwood 0.5.0, in order                          51.3
+darts-clone 0.32, in order                         42.2
+old: lexindex 4.4.1, shuffled                      95.6
+new: first-character table, shuffled               77.2
+cedarwood 0.5.0, shuffled                          50.0
+darts-clone 0.32, shuffled                         39.8
+
+## machine, end
+date: 2026-09-24T18:50:09+03:00
+uptime:  18:50:09 up  4:36,  1 user,  load average: 0.35, 1.39, 1.69
+kernel: 7.2.7-200.fc44.x86_64; cpu: AMD Ryzen 7 5800HS with Radeon Graphics, 16 threads
+governor: powersave
+thermals: acpitz 78.0 C  iwlwifi_1 34.0 C  
+memory: MemAvailable: 27719304 kB;Cached: 30640664 kB;SwapTotal: 28310012 kB;SwapFree: 28310012 kB
+bench-ready at the end:
+    load                   0.35  ok
+    swap in use            0 MiB  ok
+    memory available       26.4 GiB  ok
+    page cache             29.2 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+    uptime                 4.6 h
+    governor               powersave
+    
+    READY
+
+## summary: ns/char, minimum over 5 processes; per process after the bar
+control: jieba-rs 0.11.0 cut_all (blocks)        32.6   | 32.7/40.0/32.6/33.2/41.0
+old: lexindex 4.4.1, in order                    80.8   | 81.5/81.1/81.6/81.5/80.8
+new: first-character table, in order             63.9   | 65.5/65.2/64.9/64.7/63.9
+cedarwood 0.5.0, in order                        49.5   | 49.9/52.4/49.5/49.5/51.3
+darts-clone 0.32, in order                       41.1   | 41.6/43.6/41.1/42.4/42.2
+old: lexindex 4.4.1, shuffled                    93.5   | 93.6/95.0/94.2/93.5/95.6
+new: first-character table, shuffled             76.5   | 76.9/77.5/76.7/76.5/77.2
+cedarwood 0.5.0, shuffled                        46.2   | 46.4/50.7/46.2/46.9/50.0
+darts-clone 0.32, shuffled                       34.8   | 35.0/34.8/35.0/35.6/39.8
+new/old, in order: 0.804 0.804 0.795 0.794 0.791  (range 0.791-0.804)
+  new against cedarwood 0.5.0, in order: 1.29x (minima)
+  new against darts-clone 0.32, in order: 1.55x (minima)
+new/old, shuffled: 0.822 0.816 0.814 0.818 0.808  (range 0.808-0.822)
+  new against cedarwood 0.5.0, shuffled: 1.66x (minima)
+  new against darts-clone 0.32, shuffled: 2.20x (minima)
+control spread across processes +25.8 % -- OUTSIDE the protocol's 5 %
+done: /home/ilgrad/Documents/projects/betula/repos/lexindex/local/cjk/results/z7ab-2026-09-24-1845/z7ab.txt

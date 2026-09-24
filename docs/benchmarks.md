@@ -1417,20 +1417,47 @@ id) pairs at every position: 237 465 matches.
 
 | Rust, ns a character | bytes/word | in text order | shuffled |
 |---|---:|---:|---:|
-| darts-clone 0.32 | 17.75 | **37.7** | **35.0** |
-| cedarwood 0.5.0 | 60.55 | 43.5 | 44.6 |
-| **lexindex `StringIndex`** 4.4.0 | **8.95** | 81.2 | 93.4 |
+| darts-clone 0.32 | 17.75 | **41.1** | **34.8** |
+| cedarwood 0.5.0 | 60.55 | 49.5 | 46.2 |
+| **lexindex `StringIndex`** 4.4.2 | **9.24** | 63.9 | 76.5 |
+| lexindex `StringIndex` 4.4.1 | 8.95 | 80.8 | 93.5 |
 
-**On this walk lexindex loses, by about 2×.** `StringIndex` takes 1.9–2.1× cedar's time and
-2.2–2.7× darts-clone's, holding half darts-clone's bytes and a seventh of cedar's. cedar's figure is
-its resident heap: 0.5.0 has no file form, and its array grows by doubling, so a quarter of its
-slots sit idle. Where `StringIndex`'s time goes is not measured yet.
+**On this walk lexindex still loses, by 1.3–2.2×.** 4.4.2's `StringIndex` takes 1.3–1.7× cedar's
+time and 1.6–2.2× darts-clone's, holding half darts-clone's bytes and a seventh of cedar's. cedar's
+figure is its resident heap: 0.5.0 has no file form, and its array grows by doubling, so a quarter
+of its slots sit idle. The loss is in instructions: at 4.4.1 a walk ran 1 025 a character against
+cedar's 150 and darts-clone's 151. It is 5.9 steps down the transducer, and each reads a node's
+header afresh — its state, the widths its fields are packed in, a target and an output — where a
+double array reads one base/check pair. The first character, which crosses the root and the widest
+nodes under it, took 649 of the 1 025. Since 4.4.2 the first walk derives a table of the state past
+every first character, which takes a walk to 581 instructions and 18–21 % off its time. The table
+is 0.29 of the 9.24 bytes a word and is held in memory only — the file is 8.95 bytes a word, as it
+was; [the design notes](design.md#stringindex) describe both. The steps past the first character
+are what is left.
+
+<sub>Measured 2026-09-24: lexindex 4.4.1 from crates.io and 4.4.2's walk at `dda19a7`, in one binary
+([`bench/results/cjk-prefix-ab-2026-09-24-arz-dda19a7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-ab-2026-09-24-arz-dda19a7.txt)):
+five processes, each started only once the machine passed a readiness check with the hottest
+thermal zone under 70 °C (it read 46–69 °C, and 72–78 °C as each process ended). A process ran 30
+alternated rounds over its rows in 4 s; a cell is the minimum over the five. "In text order" walks
+each block's positions in order, as a segmenter does, with the sentences in a seeded shuffle;
+"shuffled" takes the same positions in a seeded random order. The control row, jieba-rs 0.11.0's
+`cut_all`, spread +25.8 % across the processes and cedar's and darts-clone's rows 6–14 %, outside
+the 5 % the protocol allows; the ranking does not depend on it — every process orders the four rows
+the same way in both lanes. The lexindex rows spread 1.0–2.5 %, and 4.4.2's time over 4.4.1's,
+taken within each process, 0.791–0.804 in text order and 0.808–0.822 shuffled. The instruction
+counts are `perf stat`'s, one row a process
+([`bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt)),
+which also takes the walk apart by node and counts it on five more corpora. rustc 1.98.1;
+darts-clone at `87b71af`, built with g++ 16.2.1 `-O3`. The harness is not in the repository; the
+files record every version, hash and flag. No competitor here is a lexindex dependency.</sub>
 
 **Through Python the walk is the small part of the cost.** Plugged into jieba 0.42.1 in place of
 its own dictionary, one `StringIndex.occurrences` call a block rather than one `common_prefix` call
 a position takes the DAG from 926 to 573 ns a character — the same walk, fewer calls — and makes
-the fastest backend measured. Every backend also answers jieba's one other dictionary read, the
-`FREQ.get` that decides whether a run of single characters goes to the HMM:
+the fastest backend measured. These are 4.4.0's walks, without the table. Every backend also
+answers jieba's one other dictionary read, the `FREQ.get` that decides whether a run of single
+characters goes to the HMM:
 
 | Python, ns a character | DAG | `lcut(HMM=False)` | `lcut()` |
 |---|---:|---:|---:|
@@ -1445,21 +1472,16 @@ Over `occurrences` a cut takes 25 % less time than over jieba's own dictionary, 
 the HMM, jieba's default, which adds 520–584 ns a character to every row. `DictIndex` is the slowest
 here for the reason the table above gives: a binary search a character boundary.
 
-<sub>Measured 2026-09-24 against lexindex 4.4.0 from crates.io and PyPI (`3a73ed5`)
+<sub>Measured 2026-09-24 against lexindex 4.4.0 from PyPI (`3a73ed5`)
 ([`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt)):
-three Rust and three Python processes, interleaved, each started only once the machine passed a
-readiness check with the hottest thermal zone under 70 °C (it read 48–51 °C). A cell is the minimum
-over the three. A Rust process ran 30 alternated rounds over its rows in 3 s; a Python one ran 5
-rounds in 33 s and ended at 85–94 °C. "In text order" walks each block's positions in order, as a
-segmenter does, with the sentences in a seeded shuffle; "shuffled" takes the same positions in a
-seeded random order. The DAG column is per character in blocks (178 338), the cut columns per
-character of text (195 832). The control rows are jieba-rs 0.11.0's `cut_all` in Rust
-and jieba's own dictionary in Python. The Rust control spread +9.5 % across its processes, outside
-the 5 % the protocol allows, so read the Rust nanoseconds as ±10 %; a 2× gap does not depend on
-them. The Python controls spread 0.4–0.9 %. rustc 1.98.1; darts-clone at `87b71af`, built with
-g++ 16.2.1 `-O3`; frame pointers off on both sides. CPython 3.14.7 with the GIL; `marisa-trie`
-1.4.1, `dawg2` 0.13.3. The harness is not in the repository; the file records every version, hash
-and flag. No competitor here is a lexindex dependency.</sub>
+three Python processes, interleaved with three Rust ones over 4.4.0 that the file also holds, each
+started only once the machine passed a readiness check with the hottest thermal zone under 70 °C
+(it read 48–51 °C). A cell is the minimum over the three. A Python process ran 5 rounds in 33 s and
+ended at 85–94 °C. The DAG column is per character in blocks (178 338), the cut columns per
+character of text (195 832). The control row, jieba's own dictionary, spread 0.4–0.9 % across the
+processes. CPython 3.14.7 with the GIL; `marisa-trie` 1.4.1, `dawg2` 0.13.3. The harness is not in
+the repository; the file records every version, hash and flag. No competitor here is a lexindex
+dependency.</sub>
 
 ## Hash quality
 

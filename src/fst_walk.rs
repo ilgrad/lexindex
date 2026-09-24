@@ -49,10 +49,11 @@ impl Layout {
 /// Basic Multilingual Plane that begins a key.
 ///
 /// A walk down a lexicon of Chinese words spends most of its instructions on its first character:
-/// the root and the two nodes below it take its three bytes, each node decoded in full, before the
-/// walk reaches the words that begin with it. This answers those steps with one lookup — a page of
-/// 64 code points, a bit for each, and a rank into the states. A character outside the plane is left
-/// to the walk; one inside it that no key begins with ends the walk.
+/// the root and the two nodes below it take its three bytes, each node's header read afresh and its
+/// transitions searched, before the walk reaches the words that begin with it. This answers those
+/// steps with one lookup — a page of 64 code points, a bit for each, and a rank into the states. A
+/// character outside the plane is left to the walk; one inside it that no key begins with ends the
+/// walk.
 pub(crate) struct FirstChars {
     /// The empty key's value, if the index holds it: the one match before any character.
     root: Option<u64>,

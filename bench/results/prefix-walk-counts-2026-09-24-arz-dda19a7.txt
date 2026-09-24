@@ -1,0 +1,49 @@
+# The common-prefix walk, counted: lexindex 4.4.1's StringIndex against the first-character table
+# (dda19a7, branch z7-firstchar), with cedarwood 0.5.0 and darts-clone 0.32 on the same probes.
+# Instruction counts, taken with `perf stat -e instructions:u` over one row a process, reps R minus
+# reps 0, so the setup cancels. Counts only: the machine was not quiet, and no time is quoted here.
+# Harnesses: local/cjk/z7 (z7, z7-nodes, z7-corpus); not in the repository.
+# rustc 1.98.1; AMD Ryzen 7 5800HS; 2026-09-24.
+
+## 1. Z-2b's probe set: jieba 0.42.1's lexicon over UD Chinese GSDSimp r2.18, 178 338 positions,
+##    in-order lane, 20 reps; per character
+
+variant                  instructions   loads dispatched   branch misses
+StringIndex 4.4.1              1025.2              293.6            3.8
+StringIndex dda19a7             580.6              170.1            3.0
+cedarwood 0.5.0                 150.0               67.2            0.91
+darts-clone 0.32                151.5               37.9            0.90
+
+StringIndex 4.4.1 over each query's first character alone: 648.7 instructions a character.
+
+## 2. Where 4.4.1's walk goes (z7-nodes, fst 0.4.7's node decoder over the same walks)
+
+steps a position 5.891, of which failing 0.831; indexed (over 32 transitions) 1.681;
+one-transition 0.609; linear scans 3.431, reading 19.18 inputs (5.59 a scan)
+
+depth  steps/pos  indexed  one-trans  scan-reads/pos
+    0      1.000    0.000      0.000           6.477
+    1      0.931    0.765      0.015           0.912
+    2      0.910    0.813      0.001           1.247
+    3      0.908    0.000      0.003           3.249
+    4      0.776    0.103      0.029           5.489
+    5      0.551    0.000      0.250           0.748
+    6      0.411    0.000      0.080           0.598
+    7      0.180    0.000      0.080           0.411
+
+## 3. Six corpora (z7-corpus): every key walked with one more character on it ('é'), in a fixed
+##    shuffle, 3 reps; instructions a walk; both builds report the same checksum, the sum of
+##    end ^ id over every match of every walk
+
+corpus                 4.4.1    dda19a7   ratio   table bytes   bytes a key
+words-full            1684.1     1513.0   0.898           536         0.001
+titles-en-1000000     2264.1     2075.5   0.917        32 440         0.032
+urls-1000000          3874.9     3755.6   0.969            32         0.000
+titles-ru-1000000     3608.9     3244.5   0.899        26 600         0.027
+titles-zh-1000000     1983.5     1536.9   0.775        84 696         0.085
+jieba-dict-full       1386.6      927.8   0.669       101 844         0.292
+
+Table bytes: 12 a page of 64 code points up to the highest first character in the plane, and 8 a
+character that begins a key; derived by the first walk, not at load. On jieba's lexicon a
+from_bytes load that derived it would run 2 888 670 more instructions; the first walk pays that
+instead.

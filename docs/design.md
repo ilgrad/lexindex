@@ -35,6 +35,21 @@ blob — `/usr/share/dict/words` goes from **12.6 to 5.95 bytes/key** — becaus
 advertised size on structured keys that share long prefixes, not on a natural vocabulary. The
 serialised blob is now simply `[magic "BIX4"][fst bytes]`.
 
+**The prefix walks start from a table of first characters.** `common_prefix`, `longest_prefix` and
+`occurrences` are one walk: the query is the path, read down the FST a byte at a time, and every
+final state on it is a match. Each step reads a node's header afresh, and the first character's
+steps are the dearest — they cross the root and, for a character of two or three bytes, nodes of
+tens of transitions; over Chinese text against jieba's lexicon they were 649 of a walk's 1 025
+instructions a character. The first walk of an index therefore derives, once, the state past every
+first character in the Basic Multilingual Plane: a bitmap over 64-code-point pages up to the
+highest such character, where each page's states begin, and a node address and output sum, two
+`u32`s, for each character that begins a key — 12 bytes a page and 8 a character. A walk looks its
+first character up there and goes on from that state; one that begins no key ends the walk once the
+empty key, if the index holds it, is reported. A character outside the plane is walked as before,
+and an index whose addresses or sums outgrow 32 bits gets no table. It is held in memory only, so
+the blob is unchanged and no load builds it: 0.29 bytes a key on jieba's lexicon, 0.085 on a million
+Chinese titles, 0.03 on English or Russian ones, and nothing in an index that only answers `id`.
+
 ## `CompactHashIndex`
 
 The smallest `string → dense id` map that can reject a non-member, and smaller than any installable
