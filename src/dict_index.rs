@@ -3277,45 +3277,75 @@ impl DictIndex {
         }
     }
 
-    /// The words of [`mroute`](Self::mroute), read off every block's restart run as it decodes.
+    /// The words of [`mroute`](Self::mroute), read off every block's restart run.
     fn micro_route(&self) -> Vec<u64> {
         let per = self.per;
         if per == 1 {
             return Vec::new();
         }
         let mut out = vec![u64::MAX; self.blocks_len() * per];
-        let (mut cur, mut keys, mut ends) = (Vec::new(), Vec::new(), Vec::with_capacity(per));
+        let mut cur = Vec::new();
         for (b, group) in out.chunks_exact_mut(per).enumerate() {
             group[0] = NO_ROUTE;
             let r = self.micros_in(b);
             if r < 2 {
                 continue;
             }
-            let codec = self.codec_of(b);
-            let mut entries = Entries::of(&self.codes_of(b).1, codec, self.restart_data(b), r);
-            let head = self.head(b);
-            cur.clear();
-            cur.extend_from_slice(head);
-            keys.clear();
-            ends.clear();
-            let decoded = (1..r).all(|_| {
-                let ok = self.advance(codec, &mut entries, &mut cur);
-                keys.extend_from_slice(&cur);
-                ends.push(keys.len());
-                ok
-            });
-            if !decoded {
-                continue;
-            }
-            let key = |j: usize| &keys[if j == 1 { 0 } else { ends[j - 2] }..ends[j - 1]];
-            // Every restart lies between the head and the last one, so shares what those two do.
-            let o = lcp(head, key(r - 1));
-            group[0] = o as u64;
-            for (j, word) in group.iter_mut().enumerate().take(r).skip(1) {
-                *word = sample_at(key(j), o);
+            let run = CodedRun {
+                codec: self.codec_of(b),
+                code: &self.codes_of(b).1,
+                data: self.restart_data(b),
+                count: r,
+            };
+            if let Some(o) = self.restart_words(run, self.head(b), &mut cur, &mut group[1..r]) {
+                group[0] = o as u64;
             }
         }
         out
+    }
+
+    /// One block's restart words into `words`, and the bytes they are taken past; `None` for a run
+    /// this crate did not write.
+    ///
+    /// What every restart shares with the head is the least prefix any two neighbours share, so
+    /// one pass over the headers finds it, and a second decodes each restart only as far as the
+    /// eight bytes past it: a restart that shares all of them with the one before has its word.
+    fn restart_words(
+        &self,
+        run: CodedRun<'_>,
+        head: &[u8],
+        cur: &mut Vec<u8>,
+        words: &mut [u64],
+    ) -> Option<usize> {
+        let mut entries = run.entries();
+        let mut o = head.len();
+        for _ in 0..words.len() {
+            let (l, len) = entries.head()?;
+            entries.skip(len);
+            o = o.min(l);
+        }
+        if entries.reach() > entries.end_bits {
+            return None;
+        }
+        let need = o + 8;
+        let mut entries = run.entries();
+        cur.clear();
+        cur.extend_from_slice(head);
+        for word in words {
+            let (l, len) = entries.head()?;
+            let piece = entries.piece(len);
+            if l < need {
+                if l > cur.len() || piece.units(run.codec.unit()) != len {
+                    return None;
+                }
+                cur.truncate(l);
+                if !run.codec.decode_into(&self.phrases, piece, cur, need - l) {
+                    return None;
+                }
+            }
+            *word = sample_at(cur, o);
+        }
+        Some(o)
     }
 
     /// The microblock of block `b` — `r` of them — that `probe` falls in, off the block's words in
