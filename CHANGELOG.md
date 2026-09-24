@@ -4,16 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.4.2] — 2026-09-24
+
+### Changed
+
+- **A `StringIndex` prefix walk — `common_prefix`, `longest_prefix`, `occurrences` — takes its first
+  character from a table: over Chinese text it runs 18–21 % faster.** A walk reads the query down
+  the transducer a byte at a time, each node's header read afresh, and a query's first character
+  crosses the widest nodes, the root and the ones that spell the rest of its bytes. Over UD Chinese
+  GSDSimp against jieba 0.42.1's lexicon that character took 649 of a walk's 1 025 instructions. The first walk now derives the state past every first character in the
+  Basic Multilingual Plane — a bitmap of 64-code-point pages up to the highest such character, a
+  count a page, a node address and output sum a character that begins a key — and a walk starts
+  from there, or stops at once when no key begins with its first character; a character outside
+  the plane is walked as before. 581 instructions a character. Against 4.4.1 in one binary over
+  five processes (`bench/results/cjk-prefix-ab-2026-09-24-arz-dda19a7.txt`): 80.8 → 63.9 ns a
+  character in text order and 93.5 → 76.5 shuffled, 0.79–0.80 and 0.81–0.82 of 4.4.1's time in
+  every process. cedarwood 0.5.0 walks the same text in 49.5 and 46.2 ns and darts-clone 0.32 in
+  41.1 and 34.8, so lexindex still loses this walk, by 1.3–1.7× and 1.6–2.2× where it lost by
+  1.6–2.0× and 2.0–2.7×. On five more corpora a walk runs 22 % fewer instructions over a million
+  Chinese titles, 10 % over words and Russian titles, 8 % over English titles and 3 % over URLs
+  (`bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt`, counts only). The table is held
+  in memory only and no blob changes: 0.29 bytes a key on jieba's lexicon, 0.085 on the Chinese
+  titles, 0.03 on the English and Russian ones. The first walk derives it, not the load, so an
+  index that only answers `id` never holds it; on the lexicon that first walk runs 2.9 M
+  instructions more.
 
 ### Documentation
 
 - **The common-prefix walk over Chinese text is measured against cedar and darts-clone, and
-  lexindex loses it by about 2×.** `docs/benchmarks.md` gains a section on jieba's lexicon over
-  4 997 sentences: from Rust, `StringIndex` walks 1.9–2.7× slower than cedarwood 0.5.0 and
-  darts-clone 0.32, holding a seventh of cedar's bytes and half darts-clone's; from Python, jieba
-  over `StringIndex.occurrences` cuts in 25 % less time than over its own dictionary, 18 % with the
-  HMM, the fastest backend measured (`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`).
+  lexindex still loses it.** `docs/benchmarks.md` gains a section on jieba's lexicon over 4 997
+  sentences: from Rust, 4.4.2's `StringIndex` walks 1.3–1.7× slower than cedarwood 0.5.0 and
+  1.6–2.2× slower than darts-clone 0.32, holding a seventh of cedar's bytes and half darts-clone's;
+  from Python, jieba over 4.4.0's `StringIndex.occurrences` cuts in 25 % less time than over its own
+  dictionary, 18 % with the HMM, the fastest backend measured
+  (`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`).
 
 ## [4.4.1] — 2026-09-24
 
