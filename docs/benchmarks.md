@@ -1374,37 +1374,42 @@ them, so the timings compare the same work.
 
 | | bytes/key | `common_prefix` | `longest_prefix` |
 |---|---:|---:|---:|
-| `datrie` | 30.69 | **546 ns** | **271 ns** |
-| **lexindex `StringIndex`** | 5.95 | 636 | 357 |
-| `dawg2` | 23.96 | 688 | 607 |
-| `marisa-trie` | 2.98 | 1 104 | 861 |
-| **lexindex `DictIndex` 256** (default) | **2.65** | 2 925 | 1 143 |
-| **lexindex `DictIndex` 512** | **2.53** | 3 252 | 1 265 |
+| `datrie` | 30.69 | **544 ns** | **279 ns** |
+| **lexindex `StringIndex`** | 5.95 | **561** | **285** |
+| `dawg2` | 23.96 | 675 | 589 |
+| `marisa-trie` | 2.98 | 1 096 | 848 |
+| **lexindex `DictIndex` 256** (default) | **2.64** | 2 358 | 933 |
+| **lexindex `DictIndex` 512** | **2.52** | 2 563 | 1 014 |
 
 **This is the query a transducer is shaped for, and the numbers say so.** The query *is* the path:
 one walk down the FST, every final state on it a match, `O(query bytes)` whatever the index holds.
-`StringIndex` is second only to `datrie` on both columns — at **a fifth of `datrie`'s bytes and a
-quarter of `dawg2`'s**, ahead of `dawg2` on both and of `marisa-trie` by 1.7× and 2.4× at twice
-marisa's size. It is the *largest* of the ordered indexes in
-this crate, and on this one query that is where the bytes went.
+`StringIndex` and `datrie` are level on both columns — 561 against 544 ns and 285 against 279,
+closer than the three runs' own spread, and the order flips from run to run — at **a fifth of
+`datrie`'s bytes and a quarter of `dawg2`'s**, ahead of `dawg2` on both and of `marisa-trie` by
+2.0× and 3.0× at twice marisa's size. It is the *largest* of the ordered indexes in this crate, and
+on this one query that is where the bytes went. At 3.0.0 it read 636 and 357 ns, second to `datrie`
+on both; 4.3's one-step-at-a-time reader and 4.4.2's first-character table are what closed the gap.
 
 **`DictIndex` has no walk to make and the table shows what that costs.** One order lookup per
 character boundary, so a ten-character query is ten binary searches where the trie made one
-descent: 2.6× marisa's time at the default block, 2.9× at 512. `longest_prefix` is the exception —
+descent: 2.2× marisa's time at the default block, 2.3× at 512. `longest_prefix` is the exception —
 it starts at the query and stops at the first hit, so it never pays for the boundaries under the
-match, and both blocks land within 33–47 % of marisa (1 143 and 1 265 ns against 861) while storing
-fewer bytes than it. A caller who
-asks this question often should hold a `StringIndex`; one who asks it occasionally, alongside the
-ranks and ranges only `DictIndex` gives, can have it for a binary search per character.
+match, and both blocks land within 10–20 % of marisa (933 and 1 014 ns against 848) while storing
+fewer bytes than it. A caller who asks this question often should hold a `StringIndex`; one who asks
+it occasionally, alongside the ranks and ranges only `DictIndex` gives, can have it for a binary
+search per character.
 
-<sub>Measured 2026-09-19 at `999e933`
-([`bench/results/common-prefix-2026-09-19-arz-999e933.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-19-arz-999e933.txt)),
-the minimum of three runs a minute and a half apart, each the minimum of five alternated rounds.
-They agree within 3 % on every row but `datrie`'s `longest_prefix`, where they spread 10 % — read
-that cell as the one with the error bar. `marisa-trie` 1.4.1, `dawg2` 0.13.3, `datrie` 0.8.3,
-Ryzen 7 5800HS, load 0.04–0.28 at the three starts. Nanoseconds per query through Python; the call overhead
-is in every row, and the three tries are C extensions too. None of them is a lexindex
-dependency — reproduce in a throwaway environment.</sub>
+<sub>Measured 2026-09-24 against lexindex 4.4.2 from PyPI (`b101076`)
+([`bench/results/common-prefix-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-24-arz-b101076.txt)),
+the minimum of three runs, each started once the machine passed a readiness check with the hottest
+thermal zone under 70 °C, each the minimum of five rounds. The first run read 1–13 % above the other
+two on every row; those two agree within 2 % on every row but `datrie`'s `common_prefix`, 5 %.
+`marisa-trie` 1.4.1, `dawg2` 0.13.3, `datrie` 0.8.3 read within 3 % of the same harness on
+2026-09-19, when lexindex was 3.0.0
+([`bench/results/common-prefix-2026-09-19-arz-999e933.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-19-arz-999e933.txt)).
+Sizes are each structure's saved file, built as the harness builds it. Nanoseconds per query through
+Python 3.14.7; the call overhead is in every row, and the three tries are C extensions too. None of
+them is a lexindex dependency — reproduce in a throwaway environment.</sub>
 
 ### On Chinese running text, from Rust and from Python
 

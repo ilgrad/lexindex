@@ -1,0 +1,51 @@
+# local/cpbench.py -- common_prefix and longest_prefix against marisa-trie, dawg2 and datrie
+# lexindex 4.4.2 from PyPI (b101076), 2026-09-24, arz (Ryzen 7 5800HS, Zen 3); python 3.14.7 GIL on lexindex 4.4.2 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3
+# The harness is the one the 999e933 artifact ran, unchanged. Three runs, each started once
+# bench-ready passed and the hottest thermal zone read under 70 C; the tables quote the minimum.
+=== cpbench run 1, 2026-09-24T19:42:34+03:00, load 0.34 0.43 0.86, gate green after 2 s; thermals acpitz 53 C  iwlwifi_1 37 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2390             953 
+DictIndex 512             2638            1047 
+StringIndex                586             298 
+marisa-trie               1164             873 
+dawg2                      722             619 
+datrie                     612             307 
+    thermals after: acpitz 83 C  iwlwifi_1 35 C  
+=== cpbench run 2, 2026-09-24T19:43:11+03:00, load 0.19 0.38 0.83, gate green after 34 s; thermals acpitz 47 C  iwlwifi_1 35 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2367             933 
+DictIndex 512             2567            1014 
+StringIndex                561             287 
+marisa-trie               1104             848 
+dawg2                      675             593 
+datrie                     544             279 
+    thermals after: acpitz 75 C  iwlwifi_1 35 C  
+=== cpbench run 3, 2026-09-24T19:43:49+03:00, load 0.14 0.35 0.80, gate green after 35 s; thermals acpitz 46 C  iwlwifi_1 35 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each
+                  common_prefix  longest_prefix
+DictIndex 256             2358             940 
+DictIndex 512             2563            1015 
+StringIndex                564             285 
+marisa-trie               1096             855 
+dawg2                      687             589 
+datrie                     573             283 
+    thermals after: acpitz 81 C  iwlwifi_1 35 C  
+
+=== sizes (deterministic; each structure built as local/cpbench.py builds it, over the same 479 823 keys)
+DictIndex 256     2.635 bytes/key (1264362 bytes, lexindex 4.4.2 to_bytes)
+DictIndex 512     2.519 bytes/key (1208878 bytes, lexindex 4.4.2 to_bytes)
+StringIndex       5.953 bytes/key (2856332 bytes, lexindex 4.4.2 to_bytes)
+marisa-trie       2.978 bytes/key (1429144 bytes, saved file)
+dawg2            23.961 bytes/key (11496968 bytes, saved file)
+datrie           30.685 bytes/key (14723523 bytes, saved file; sorted insertion, the alphabet of the keys)
+
+=== minimum over the three runs, ns a query
+                  common_prefix  longest_prefix
+DictIndex 256             2358             933
+DictIndex 512             2563            1014
+StringIndex                561             285
+marisa-trie               1096             848
+dawg2                      675             589
+datrie                     544             279

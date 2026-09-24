@@ -17,6 +17,13 @@ All notable changes to this project are documented here. The format follows
   Through Python (`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`), jieba over
   `StringIndex.occurrences` builds the DAG in 560 ns a character against 649 over its own
   dictionary and cuts in 27 % less time, 21 % with the HMM.
+- **The common-prefix table on English words is re-measured at 4.4.2, and `StringIndex` is level
+  with `datrie` there.** It had stood at 3.0.0's numbers since 2026-09-19. Through Python, over the
+  same 20 000 queries (`bench/results/common-prefix-2026-09-24-arz-b101076.txt`), `StringIndex`
+  reads 561 ns on `common_prefix` and 285 on `longest_prefix` against `datrie`'s 544 and 279, a gap
+  inside the runs' own spread, at a fifth of its bytes; at 3.0.0 it read 636 and 357. `DictIndex`
+  at the default block reads 2 358 and 933, where it read 2 925 and 1 143. The three tries read
+  within 3 % of the 2026-09-19 run.
 
 ## [4.4.2] — 2026-09-24
 
