@@ -3193,8 +3193,8 @@ impl DictIndex {
         if self.n == 0 {
             return (0, false);
         }
-        let (l, known) = match sample_range(&self.samples, self.route(probe)) {
-            Ok((lo, hi)) => self.run_boundary(probe, lo, hi),
+        let (l, known) = match self.route(probe) {
+            Ok(s) => self.sample_boundary(probe, s),
             Err(l) => (l, None),
         };
         match known {
@@ -3204,6 +3204,28 @@ impl DictIndex {
             Some((matched, _)) => self.locate_past(l - 1, probe, matched),
             None => self.locate_in(l, probe),
         }
+    }
+
+    /// [`sample_range`] and [`run_boundary`](Self::run_boundary) for one probe whose sample is
+    /// `s`. A run of equal samples that has a trie is not measured: its root knows where it ends,
+    /// and on paths the gallop to that end was two dozen steps of a lookup.
+    #[inline(always)]
+    fn sample_boundary(&self, probe: &[u8], s: u64) -> (usize, Option<(usize, usize)>) {
+        let samples = &self.samples;
+        let lo = samples.partition_point(|&x| x < s);
+        if samples.get(lo) != Some(&s) {
+            return (lo, None);
+        }
+        if samples.get(lo + 1) == Some(&s) {
+            if let Some(root) = self.ties.root(lo) {
+                let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
+                return self.ties.boundary(root, probe, |b| self.head(b), flat);
+            }
+        }
+        (
+            self.head_boundary(probe, lo, past_equal(samples, lo, s)),
+            None,
+        )
     }
 
     /// The probe's sample, or the block boundary it lands on outright.
