@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "lexindex-polars"
-version = "0.1.0"
+version = "0.1.1"
 description = "Polars expression plugin over lexindex: a string column to dense ids, and back."
 readme = "README.md"
 requires-python = ">=3.11"

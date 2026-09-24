@@ -22,7 +22,7 @@ from polars.plugins import register_plugin_function
 
 __all__ = ["LexindexExpr", "__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 _LIB = Path(__file__).parent
 

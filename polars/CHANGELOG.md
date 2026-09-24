@@ -3,6 +3,26 @@
 `lexindex-polars` is versioned separately from `lexindex`: it tracks polars' plugin ABI, which
 moves on polars' cadence and not on the library's.
 
+## [0.1.1] — 2026-09-24
+
+### Changed
+
+- **The wheel is built against lexindex 4.4.0; 0.1.0's was built against 4.1.0.** The library is
+  compiled into the plugin, so its lookups are that version's: `StringIndex`'s are faster since
+  lexindex 4.3.0, and `DictIndex`'s since 4.3.3 and 4.4.0. lexindex's own changelog has 4.4.0's
+  `DictIndex` `id` taking 4.9–15.5 % less time than 4.3.3's at the default block of 256, on twelve
+  corpora of thirteen at a million keys, in its Rust harness; nothing was timed through the plugin.
+  No blob format 0.1.0 read has changed, so every index file it read still reads, with the same
+  answers.
+
+### Fixed
+
+- **A `DictIndex` in a character code is read rather than refused.** lexindex 4.3 and later may
+  spell a dictionary whose keys are mostly outside ASCII — Chinese or Russian titles, say — in a
+  code of its own and save it as a `BDX4` blob. 0.1.0 predates that format and refused such a file
+  as not a readable index, and with it a `HashedDictIndex` whose dictionary is one, though the
+  `lexindex>=4.1` it depends on admits the versions that write them.
+
 ## [0.1.0] — 2026-09-22
 
 ### Added
