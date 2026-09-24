@@ -80,60 +80,83 @@ impl Ties {
         if u32::try_from(nb).is_err() {
             return ties;
         }
-        // The prefix the heads of `[lo, hi)` share, where the words past it split them: they are
-        // in order, so the first and the last word differ exactly when two of them do. Heads that
-        // differ past it only by NUL bytes a shorter one's padding matches do not split.
-        let splits = |lo: usize, hi: usize| {
-            let (first, last) = (head(lo), head(hi - 1));
+        // The prefix `first` and `last` share, where the words past it split the heads between
+        // them: those are in order, so the first and the last word differ exactly when two of
+        // them do. Heads that differ past it only by NUL bytes a shorter one's padding matches do
+        // not split.
+        let splits = |first: &[u8], last: &[u8]| {
             let p = lcp(first, last);
             let p32 = u32::try_from(p).ok()?;
             (sample_at(first, p) != sample_at(last, p)).then_some(p32)
         };
-        // Breadth first, so that a node's number is known when its parent's edge is written.
-        let mut queue = std::collections::VecDeque::new();
-        let mut lo = 0;
-        while lo < nb {
+        // The roots first, so that run `r`'s root is node `r`. Most indexes have no run at all,
+        // and a scan for the next pair of equal neighbours is what it costs them.
+        let mut at = 0;
+        while let Some(k) = samples[at..].windows(2).position(|w| w[0] == w[1]) {
+            let lo = at + k;
             let hi = lo
-                + samples[lo..]
+                + 2
+                + samples[lo + 2..]
                     .iter()
                     .take_while(|&&s| s == samples[lo])
                     .count();
-            if let Some(p) = (hi - lo >= 2).then(|| splits(lo, hi)).flatten() {
+            if let Some(p) = splits(head(lo), head(hi - 1)) {
                 ties.roots.push(lo as u32);
-                ties.nodes.push(Node::default());
-                queue.push_back((ties.nodes.len() - 1, p, lo, hi, 1));
+                ties.nodes.push(Node {
+                    p,
+                    hi: hi as u32,
+                    ..Node::default()
+                });
             }
-            lo = hi;
+            at = hi;
         }
-        let mut words = Vec::new();
-        while let Some((i, p, lo, hi, depth)) = queue.pop_front() {
-            words.clear();
-            words.extend((lo..hi).map(|b| sample_at(head(b), p as usize)));
-            let first = ties.words.len() as u32;
-            let mut a = 0;
-            while a < words.len() {
-                let c = a + words[a..].iter().take_while(|&&w| w == words[a]).count();
-                let kid = match c - a {
-                    1 => LEAF,
-                    _ if depth >= MAX_DEPTH => FLAT,
-                    _ => match splits(lo + a, lo + c) {
-                        Some(p) => {
-                            ties.nodes.push(Node::default());
-                            queue.push_back((ties.nodes.len() - 1, p, lo + a, lo + c, depth + 1));
-                            (ties.nodes.len() - 1) as u32
-                        }
-                        None => FLAT,
-                    },
+        // Then each root's trie, breadth first, so that a node's number is known when its
+        // parent's edge is written. A run's heads are read once, not once a level. A run of `k`
+        // blocks has at least `k` edges and a real one seldom many more, so that is what the
+        // edges are given room for; the scratch is the longest run.
+        let runs = (0..ties.roots.len()).map(|r| (ties.nodes[r].hi - ties.roots[r]) as usize);
+        let (tied, longest) = runs.fold((0, 0), |(t, l), k| (t + k, l.max(k)));
+        ties.words.reserve_exact(tied);
+        ties.starts.reserve_exact(tied);
+        ties.kids.reserve_exact(tied);
+        let (mut heads, mut words) = (Vec::with_capacity(longest), Vec::with_capacity(longest));
+        let mut queue = std::collections::VecDeque::new();
+        for r in 0..ties.roots.len() {
+            let (base, end) = (ties.roots[r] as usize, ties.nodes[r].hi as usize);
+            heads.clear();
+            heads.extend((base..end).map(&head));
+            queue.push_back((r, ties.nodes[r].p, base, end, 1));
+            while let Some((i, p, lo, hi, depth)) = queue.pop_front() {
+                let run = &heads[lo - base..hi - base];
+                words.clear();
+                words.extend(run.iter().map(|h| sample_at(h, p as usize)));
+                let first = ties.words.len() as u32;
+                let mut a = 0;
+                while a < words.len() {
+                    let c = a + words[a..].iter().take_while(|&&w| w == words[a]).count();
+                    let kid = match c - a {
+                        1 => LEAF,
+                        _ if depth >= MAX_DEPTH => FLAT,
+                        _ => match splits(run[a], run[c - 1]) {
+                            Some(p) => {
+                                ties.nodes.push(Node::default());
+                                let kid = ties.nodes.len() - 1;
+                                queue.push_back((kid, p, lo + a, lo + c, depth + 1));
+                                kid as u32
+                            }
+                            None => FLAT,
+                        },
+                    };
+                    ties.push_edge(words[a], lo + a, kid);
+                    a = c;
+                }
+                ties.nodes[i] = Node {
+                    p,
+                    first,
+                    count: ties.words.len() as u32 - first,
+                    hi: hi as u32,
                 };
-                ties.push_edge(words[a], lo + a, kid);
-                a = c;
             }
-            ties.nodes[i] = Node {
-                p,
-                first,
-                count: ties.words.len() as u32 - first,
-                hi: hi as u32,
-            };
         }
         ties.roots.shrink_to_fit();
         ties.nodes.shrink_to_fit();
