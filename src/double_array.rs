@@ -114,12 +114,15 @@ unsafe fn decode(b: &[u8], i: usize) -> (u32, usize) {
     }
 }
 
-/// Slot `s` of the array at `slots`.
+/// Slot `s` of the array at `slots`, which holds `len` of them.
 ///
 /// # Safety
-/// `s` must be below the array's length.
+/// `s` must be below `len`.
 #[inline(always)]
-unsafe fn slot(slots: *const u8, s: usize) -> u64 {
+unsafe fn slot(slots: *const u8, len: usize, s: usize) -> u64 {
+    // What makes this hold is the walk over every slot at load. The fuzz targets and Miri run with
+    // debug assertions, so a blob that walk lets through and a query then reads past shows here.
+    debug_assert!(s < len, "slot {s} of {len}");
     // SAFETY: slot `s` is eight bytes inside the array, and a byte array needs no alignment.
     u64::from_le_bytes(unsafe { *slots.add(8 * s).cast::<[u8; 8]>() })
 }
@@ -519,10 +522,14 @@ impl DoubleArrayIndex {
 
         // Labels: 1 for the most frequent character, ties by code point, so the same keys always
         // number the same way.
-        let mut freq = vec![0u64; 0x11_0000];
+        let mut freq: Vec<u64> = Vec::new();
         for k in keys {
             for c in k.as_ref().chars() {
-                freq[c as usize] += 1;
+                let cp = c as usize;
+                if cp >= freq.len() {
+                    freq.resize(cp + 1, 0);
+                }
+                freq[cp] += 1;
             }
         }
         let mut chars: Vec<(u64, u32)> = freq
@@ -685,7 +692,7 @@ impl DoubleArrayIndex {
         if b.is_empty() {
             return self.empty;
         }
-        let slots = self.slots.as_ptr();
+        let (slots, n_slots) = (self.slots.as_ptr(), self.slots.len() / 8);
         let (table, table_len) = (self.table.as_ptr(), self.table.len() / 2);
         let mut base = 0usize;
         let mut i = 0;
@@ -698,7 +705,7 @@ impl DoubleArrayIndex {
             }
             // SAFETY: `base` is a row's, and every row's `max_label` slots past its base are
             // inside the array — `build` sizes it so, and every load checks it; `x <= max_label`.
-            let v = unsafe { slot(slots, base + x as usize) };
+            let v = unsafe { slot(slots, n_slots, base + x as usize) };
             if v & LABEL_MASK != x {
                 return None;
             }
@@ -763,7 +770,7 @@ impl DoubleArrayIndex {
             f(0, id);
         }
         let b = query.as_bytes();
-        let slots = self.slots.as_ptr();
+        let (slots, n_slots) = (self.slots.as_ptr(), self.slots.len() / 8);
         let (table, table_len) = (self.table.as_ptr(), self.table.len() / 2);
         let mut base = 0usize;
         let mut i = 0;
@@ -775,7 +782,7 @@ impl DoubleArrayIndex {
                 return;
             }
             // SAFETY: as in `id`.
-            let v = unsafe { slot(slots, base + x as usize) };
+            let v = unsafe { slot(slots, n_slots, base + x as usize) };
             if v & LABEL_MASK != x {
                 return;
             }
@@ -880,7 +887,7 @@ impl DoubleArrayIndex {
                 std::slice::from_raw_parts(ends.as_ptr().cast::<usize>(), n + 1),
             )
         };
-        let slots = self.slots.as_ptr();
+        let (slots, n_slots) = (self.slots.as_ptr(), self.slots.len() / 8);
         for p in 0..n {
             let mut base = 0usize;
             let mut j = p;
@@ -891,7 +898,7 @@ impl DoubleArrayIndex {
                     break;
                 }
                 // SAFETY: as in `id`.
-                let v = unsafe { slot(slots, base + x as usize) };
+                let v = unsafe { slot(slots, n_slots, base + x as usize) };
                 if v & LABEL_MASK != x {
                     break;
                 }
