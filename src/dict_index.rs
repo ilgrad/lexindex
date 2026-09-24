@@ -31,6 +31,7 @@ use crate::packed::{self, Alphabet};
 use crate::paircode::{self, Code};
 use crate::phrase::{self, Dict, Split, Trie};
 use crate::room::{Room, commit};
+use crate::ties::Ties;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -175,6 +176,9 @@ pub struct DictIndex {
     /// so neither the load nor a lookup moved — five corpora, load within 0.9 % and `id` and `key`
     /// within 3 %, both ways.
     samples: Vec<u64>,
+    /// What places a probe among the heads of a run of equal samples, derived from the heads the
+    /// way the samples are and held in no blob. See [`Ties`].
+    ties: Ties,
     /// Where block `b`'s restart stream starts in `data`, packed the same way; its microblocks
     /// follow it.
     blocks: Offsets,
@@ -255,7 +259,7 @@ struct RawRoute {
 ///
 /// Every head shares its first `g` bytes, so ordering by this word is ordering by the head.
 #[inline(always)]
-fn sample_at(key: &[u8], g: usize) -> u64 {
+pub(crate) fn sample_at(key: &[u8], g: usize) -> u64 {
     fsst::word_at(key, g).swap_bytes()
 }
 
@@ -2534,7 +2538,7 @@ impl DictIndex {
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let samples = samples_of(&heads, &head_ends, g);
-        Ok(Self {
+        let mut idx = Self {
             block,
             micro,
             per: block.div_ceil(micro),
@@ -2542,6 +2546,7 @@ impl DictIndex {
             heads: SharedBytes::from_owned(heads),
             head_ends: packed_offsets(&head_ends),
             samples,
+            ties: Ties::default(),
             blocks: packed_offsets(&blocks),
             micros: packed_micros(if block.div_ceil(micro) == 1 {
                 &[]
@@ -2557,7 +2562,9 @@ impl DictIndex {
             code: None,
             raw: None,
             mroute: OnceLock::new(),
-        })
+        };
+        idx.ties = Ties::derive(&idx.samples, |b| idx.head(b));
+        Ok(idx)
     }
 
     /// Number of distinct keys.
@@ -3187,7 +3194,7 @@ impl DictIndex {
             return (0, false);
         }
         let l = match sample_range(&self.samples, self.route(probe)) {
-            Ok((lo, hi)) => self.head_boundary(probe, lo, hi),
+            Ok((lo, hi)) => self.run_boundary(probe, lo, hi),
             Err(l) => l,
         };
         self.locate_in(l, probe)
@@ -3247,6 +3254,20 @@ impl DictIndex {
             place_prefix(&raw.prefix, self.blocks_len(), query)?;
         }
         Ok(sample_at(query, raw.g))
+    }
+
+    /// [`head_boundary`](Self::head_boundary) over a run of equal samples `[lo, hi)`, placed by the
+    /// run's [`Ties`] where it has them: one head compare for the whole run rather than one a
+    /// halving of it.
+    #[inline]
+    fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> usize {
+        if hi - lo >= 2 {
+            if let Some(root) = self.ties.root(lo) {
+                let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
+                return self.ties.boundary(root, probe, |b| self.head(b), flat);
+            }
+        }
+        self.head_boundary(probe, lo, hi)
     }
 
     /// The first block index in `[l, r)` whose head is past `probe`, or `r` — the samples have
@@ -3727,7 +3748,7 @@ impl DictIndex {
                 } else if hi_at[j] == lo_at[j] {
                     lo_at[j]
                 } else {
-                    self.head_boundary(key(base + j), lo_at[j], hi_at[j])
+                    self.run_boundary(key(base + j), lo_at[j], hi_at[j])
                 };
             }
             // The block start is one load and the data it names another, so they are pulled in as
@@ -4545,6 +4566,7 @@ impl DictIndex {
             heads,
             head_ends,
             samples,
+            ties: Ties::default(),
             blocks,
             micros,
             data,
@@ -4560,6 +4582,7 @@ impl DictIndex {
         if verify {
             idx.check_layout()?;
         }
+        idx.ties = Ties::derive(&idx.samples, |b| idx.head(b));
         idx.raw = idx.raw_route();
         Ok(idx)
     }

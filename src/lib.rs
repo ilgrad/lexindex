@@ -101,6 +101,7 @@ mod phrase;
 mod room;
 mod string_index;
 mod subsequence;
+mod ties;
 
 pub use dict_index::{DictIndex, DictProfile, DictSections};
 pub use estimate::{Estimate, Kind, Needs, Objective, Plan, Workload, plan, plan_file, plan_for};
