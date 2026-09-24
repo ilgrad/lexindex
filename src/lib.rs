@@ -31,7 +31,7 @@
 //!   search. The sidecar costs `⌈log2 n⌉` bits a key and about two for the perfect hash — 2.62
 //!   B/key on real words — and `fingerprint_bits / 8` more for `id` to reject a non-member at
 //!   `2^-fingerprint_bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
-//!   the closed-vocabulary path, 3.9–8.9× faster than XCDAT's lookup — the fastest trie measured —
+//!   the closed-vocabulary path, 4.1–8.9× faster than XCDAT's lookup — the fastest trie measured —
 //!   at 1.4–3.2× less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
 //!
 //! All six assign dense ids in `[0, n)`. None is mutable after building — they are immutable

@@ -20,11 +20,11 @@ but stands on its own.
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
 other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
-The figure is the size axis, which `DictIndex` wins; its search is 1.2× to 5.1× slower than XCDAT's
+The figure is the size axis, which `DictIndex` wins; its search is 1.2× to 5.0× slower than XCDAT's
 at a million keys and 1.1× to 1.8× past ten million on five corpora of six. **`HashedDictIndex`
 (4.1) wins the latency axis as well:** the same dictionary with its `id` answered by a perfect hash
-is 3.9× to 8.9× faster than XCDAT 15 and 1.4× to 3.2× smaller, on all thirteen corpora at a million
-keys and all six at ten million — and 3.1× to 7.6× faster and 1.2× to 2.8× smaller with an 8-bit
+is 4.1× to 8.9× faster than XCDAT 15 and 1.4× to 3.2× smaller, on all thirteen corpora at a million
+keys and all six at ten million — and 3.0× to 7.6× faster and 1.2× to 2.8× smaller with an 8-bit
 fingerprint that turns away all but one stranger in 256. An exact answer for a stranger is still
 the dictionary's search, and there XCDAT keeps its lead. Every column is in
 [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#hasheddictindex-against-xcdat), and
@@ -78,8 +78,8 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
   it a minimal perfect hash and a table holding each key's **rank** at its slot, so `id` is a hash
   and a read where the dictionary searches, while `key(id)`, prefix, range and iteration are the
   dictionary's own, on the same ids. Against XCDAT, the fastest trie measured, over thirteen corpora
-  at a million keys and six at ten million: **3.9–8.9× faster and 1.4–3.2× smaller** through
-  `id_unchecked`, for 2.62 bytes a key over the dictionary on real words, and 3.1–7.6× faster and
+  at a million keys and six at ten million: **4.1–8.9× faster and 1.4–3.2× smaller** through
+  `id_unchecked`, for 2.62 bytes a key over the dictionary on real words, and 3.0–7.6× faster and
   1.2–2.8× smaller through `id` with an 8-bit fingerprint — a byte a key more — that turns away all
   but one stranger in 256. The dictionary's queries, and a hash's `id`.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member:

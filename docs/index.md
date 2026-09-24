@@ -18,11 +18,11 @@ multi-gigabyte index is ready instantly and its pages are shared across processe
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
 other structure are in [the benchmarks](benchmarks.md#the-research-frontier-measured). The figure is
-the size axis, which `DictIndex` wins; its search is 1.2× to 5.1× slower than XCDAT's at a million
+the size axis, which `DictIndex` wins; its search is 1.2× to 5.0× slower than XCDAT's at a million
 keys and 1.1× to 1.8× past ten million on five corpora of six. **`HashedDictIndex` (4.1) wins the
-latency axis as well:** the same dictionary with its `id` answered by a perfect hash is 3.9× to 8.9×
+latency axis as well:** the same dictionary with its `id` answered by a perfect hash is 4.1× to 8.9×
 faster than XCDAT 15 and 1.4× to 3.2× smaller, on all thirteen corpora at a million keys and all six
-at ten million — and 3.1× to 7.6× faster and 1.2× to 2.8× smaller with an 8-bit fingerprint that
+at ten million — and 3.0× to 7.6× faster and 1.2× to 2.8× smaller with an 8-bit fingerprint that
 turns away all but one stranger in 256. An exact answer for a stranger is still the dictionary's
 search, and there XCDAT keeps its lead. Every column is in
 [the benchmarks](benchmarks.md#hasheddictindex-against-xcdat), and none is quoted here without the
@@ -60,7 +60,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   queries, with `id` answered by a minimal perfect hash and a table of ranks instead of a search.
   2.62 bytes/key on top of the dictionary, one more per eight fingerprint bits for `id` to reject a
   non-member at `2^-bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
-  the closed-vocabulary path — 3.9–8.9× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
+  the closed-vocabulary path — 4.1–8.9× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
   less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member (a
   minimal perfect hash plus a fingerprint per key, no keys stored). 1.24 bytes/key, at the cost of
