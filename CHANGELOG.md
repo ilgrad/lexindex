@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] — 2026-09-24
+
+### Added
+
+- **`DictIndex::route_microblocks`, in Rust and in Python: a faster `DictIndex` search for eight
+  bytes of memory a microblock.** Once the samples and the head have chosen a block, a lookup walks
+  the block's restart run — the first keys of its microblocks, coded against one another — to find
+  the microblock it scans. `route_microblocks()` derives, for every block, the bytes its restarts
+  share with its head and each restart's eight bytes past them; a lookup then counts the words below
+  its own instead of walking, and walks only where a word ties it. No answer changes, and no blob,
+  byte for byte: the words are held in memory only, `8 / micro` bytes a key — 0.5 at the default
+  block of 256, 0.25 at 1024 — and the method returns the bytes they take. It is a method rather
+  than the default because it is paid for twice. Routed, the default block would give up its size
+  lead over the smallest trie on four corpora of the thirteen at a million keys — `words`,
+  `domains`, `idents` and `pypi`, where it leads by 0.34–0.39 B/key — and deriving the words reads
+  every block's restart run, which a lazy `load_mmap` leaves unread until a lookup needs it. It
+  takes `&self`, so a dictionary shared through an `Arc` — the Python object,
+  `HashedDictIndex::dict` — routes in place, and a lookup that races it walks the run. Against the
+  same index unrouted, in one process and in two builds of the harness
+  (`bench/results/id-ab-2026-09-24-arz-0216b39.txt`): at the default block `id` takes 19–31 % less
+  time on twelve corpora at a million keys and 13–22 % on six at ten million, and `ids_of` 16–24 %
+  and 7–17 %; at 1024 keys a block `id` takes 23–36 % and 14–28 % less. With the change below,
+  against 4.3.3, a routed `id` at the default block takes 23–41 % less time at a million keys and
+  19–31 % at ten million. `paths`, whose restarts tie in the eight bytes past what they share, moves
+  between −2.4 and +1.8 %. At 32 keys a block, two microblocks, the words save at most 15 %, and
+  cost `numeric` at ten million 3–10 %.
+
+### Changed
+
+- **A `DictIndex` lookup is faster with nothing asked for: `id` by 4–16 % and `ids_of` by 4–13 % on
+  twelve corpora of thirteen at a million keys.** Most of a lookup's instructions go to two
+  front-coded scans, and the scan matched on the shard's codec for every entry it compared. It now
+  picks the codec and the kind of header code once a run and walks the run in a loop of its own for
+  that pair; reads the probe's last eight bytes once a walk, where every compare that reached the
+  end of the key had folded them a byte at a time; and tests the symbol table's own codes before its
+  escape and phrase prefixes. Blobs are unchanged, byte for byte. Against 4.3.3 in the run above,
+  unrouted: `id` takes 4.9–15.5 % less time at the default block on twelve corpora at a million keys
+  and 2.3–11.7 % on six at ten million, 6.3–16.4 % and 2.8–15.7 % at 1024 keys a block, and
+  3.7–15.2 % and 0.6–14.0 % at 32; `ids_of` at the default block 3.7–12.7 % and 2.2–9.6 %. On
+  `paths` every lookup is 1.1–2.6 % faster.
+
 ## [4.3.3] — 2026-09-24
 
 ### Fixed
