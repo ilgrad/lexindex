@@ -12,14 +12,15 @@
 //! word an entry ([`offsets`](crate::offsets)): where a block's head ends, and where its entries
 //! start.
 //!
-//! `id` is a binary search over the samples, then over the heads of the few blocks whose sample
-//! equals the probe's, then one block scanned without decoding anything: an entry's stored suffix
-//! is compared against the probe symbol by symbol, and the shared-prefix length says on its own
-//! when the probe has been passed. `key(id)` is the block's head plus the entries between it and
-//! the id whose shared-prefix length strictly increases — a monotonic stack over the headers finds
-//! them, and only those are decoded, each one eight-byte store per code. There are no automata, so
-//! a fuzzy query is a `StringIndex` question; prefix and range are two order lookups and a walk,
-//! which this index answers itself at 3–4 bytes per key.
+//! `id` is a binary search over the samples, then, where a run of blocks shares the probe's
+//! sample, a descent of the run's trie of words past what its heads share and one head compare
+//! ([`ties`](crate::ties)), then one block scanned without decoding anything: an entry's stored
+//! suffix is compared against the probe symbol by symbol, and the shared-prefix length says on its
+//! own when the probe has been passed. `key(id)` is the block's head plus the entries between it
+//! and the id whose shared-prefix length strictly increases — a monotonic stack over the headers
+//! finds them, and only those are decoded, each one eight-byte store per code. There are no
+//! automata, so a fuzzy query is a `StringIndex` question; prefix and range are two order lookups
+//! and a walk, which this index answers itself at 3–4 bytes per key.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
@@ -177,8 +178,9 @@ pub struct DictIndex {
     /// within 3 %, both ways.
     samples: Vec<u64>,
     /// What places a probe among the heads of a run of equal samples, derived from the heads the
-    /// way the samples are and held in no blob. See [`Ties`].
-    ties: Ties,
+    /// way the samples are and held in no blob. See [`Ties`]. Boxed, so that an index with no such
+    /// run carries eight bytes for it rather than a hundred and twenty.
+    ties: Option<Box<Ties>>,
     /// Where block `b`'s restart stream starts in `data`, packed the same way; its microblocks
     /// follow it.
     blocks: Offsets,
@@ -2546,7 +2548,7 @@ impl DictIndex {
             heads: SharedBytes::from_owned(heads),
             head_ends: packed_offsets(&head_ends),
             samples,
-            ties: Ties::default(),
+            ties: None,
             blocks: packed_offsets(&blocks),
             micros: packed_micros(if block.div_ceil(micro) == 1 {
                 &[]
@@ -3217,9 +3219,8 @@ impl DictIndex {
             return (lo, None);
         }
         if samples.get(lo + 1) == Some(&s) {
-            if let Some(root) = self.ties.root(lo) {
-                let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
-                return self.ties.boundary(root, probe, |b| self.head(b), flat);
+            if let Some(placed) = self.tie_boundary(probe, lo) {
+                return placed;
             }
         }
         (
@@ -3290,12 +3291,20 @@ impl DictIndex {
     #[inline]
     fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> (usize, Option<(usize, usize)>) {
         if hi - lo >= 2 {
-            if let Some(root) = self.ties.root(lo) {
-                let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
-                return self.ties.boundary(root, probe, |b| self.head(b), flat);
+            if let Some(placed) = self.tie_boundary(probe, lo) {
+                return placed;
             }
         }
         (self.head_boundary(probe, lo, hi), None)
+    }
+
+    /// [`Ties::boundary`] for the run of equal samples that starts at block `lo`, if it has a trie.
+    #[inline(always)]
+    fn tie_boundary(&self, probe: &[u8], lo: usize) -> Option<(usize, Option<(usize, usize)>)> {
+        let ties = self.ties.as_deref()?;
+        let root = ties.root(lo)?;
+        let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
+        Some(ties.boundary(root, probe, |b| self.head(b), flat))
     }
 
     /// The first block index in `[l, r)` whose head is past `probe`, or `r` — the samples have
@@ -4599,7 +4608,7 @@ impl DictIndex {
             heads,
             head_ends,
             samples,
-            ties: Ties::default(),
+            ties: None,
             blocks,
             micros,
             data,

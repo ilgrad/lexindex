@@ -72,14 +72,15 @@ pub(crate) struct Ties {
 }
 
 impl Ties {
-    /// The tries over the heads `head(b)` whose samples are `samples`: nothing where no two
-    /// neighbouring samples are equal, and nothing past what a `u32` numbers.
-    pub(crate) fn derive<'h>(samples: &[u64], head: impl Fn(usize) -> &'h [u8]) -> Self {
+    /// The tries over the heads `head(b)` whose samples are `samples`: `None` where no run of
+    /// equal neighbours splits, and past what a `u32` numbers.
+    pub(crate) fn derive<'h>(
+        samples: &[u64],
+        head: impl Fn(usize) -> &'h [u8],
+    ) -> Option<Box<Self>> {
         let mut ties = Ties::default();
         let nb = samples.len();
-        if u32::try_from(nb).is_err() {
-            return ties;
-        }
+        u32::try_from(nb).ok()?;
         // The prefix `first` and `last` share, where the words past it split the heads between
         // them: those are in order, so the first and the last word differ exactly when two of
         // them do. Heads that differ past it only by NUL bytes a shorter one's padding matches do
@@ -109,6 +110,9 @@ impl Ties {
                 });
             }
             at = hi;
+        }
+        if ties.roots.is_empty() {
+            return None;
         }
         // Then each root's trie, breadth first, so that a node's number is known when its
         // parent's edge is written. A run's heads are read once, not once a level. A run of `k`
@@ -163,7 +167,7 @@ impl Ties {
         ties.words.shrink_to_fit();
         ties.starts.shrink_to_fit();
         ties.kids.shrink_to_fit();
-        ties
+        Some(Box::new(ties))
     }
 
     fn push_edge(&mut self, word: u64, start: usize, kid: u32) {
@@ -289,6 +293,7 @@ mod tests {
     fn check(heads: &[Vec<u8>], g: usize, probes: &[Vec<u8>]) {
         let samples: Vec<u64> = heads.iter().map(|h| sample_at(h, g)).collect();
         let ties = Ties::derive(&samples, |b| &heads[b]);
+        let ties = ties.as_deref();
         for probe in probes {
             if probe.get(..g) != heads[0].get(..g) {
                 continue;
@@ -301,8 +306,8 @@ mod tests {
             }
             let flat = |a: usize, c: usize| a + plain(&heads[a..c], probe);
             // A run that does not split has no root, and its heads are compared.
-            let (got, known) = match ties.root(lo) {
-                Some(root) => ties.boundary(root, probe, |b| &heads[b], flat),
+            let (got, known) = match ties.and_then(|t| Some((t, t.root(lo)?))) {
+                Some((ties, root)) => ties.boundary(root, probe, |b| &heads[b], flat),
                 None => (flat(lo, hi), None),
             };
             assert_eq!(got, plain(heads, probe), "probe {probe:?}");
@@ -400,8 +405,8 @@ mod tests {
             .map(|h| h.to_vec())
             .collect();
         let samples: Vec<u64> = vec![7; heads.len()];
-        let ties = Ties::derive(&samples, |b| &heads[b]);
-        let root = ties.root(0).expect("the first and last heads differ");
+        let ties = Ties::derive(&samples, |b| &heads[b]).expect("the first and last heads differ");
+        let root = ties.root(0).expect("the run starts at block 0");
         for probe in probes_of(&heads) {
             let (got, _) = ties.boundary(root, &probe, |b| &heads[b], |a, _| a);
             assert!(got <= heads.len());
