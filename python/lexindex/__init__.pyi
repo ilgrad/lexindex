@@ -11,6 +11,7 @@ __all__ = [
     "ClosedHashIndex",
     "CompactHashIndex",
     "DictIndex",
+    "DoubleArrayIndex",
     "Estimate",
     "HashedDictIndex",
     "Overlay",
@@ -731,6 +732,75 @@ class HashedDictIndex:
         """
 
 @final
+class DoubleArrayIndex:
+    """Character-wise double-array trie for dictionary matching: ``common_prefix``,
+    ``longest_prefix`` and ``occurrences`` at one load a character.
+
+    Ids are ranks in byte order, the ids ``StringIndex`` assigns to the same keys. There is no
+    reverse lookup: a ``StringIndex`` or ``DictIndex`` over the same keys spells an id back.
+    """
+
+    def __new__(cls, items: Iterable[str]) -> DoubleArrayIndex:
+        """Build from an iterable of strings; duplicates are removed. Refused with ``ValueError``
+        past 8 388 608 keys, 65 535 distinct characters or a trie of 8 388 608 slots -- about
+        four million Chinese words, fewer long Latin ones."""
+
+    def __len__(self) -> int: ...
+    def __contains__(self, key: str, /) -> bool: ...
+    def is_empty(self) -> bool: ...
+    def id(self, key: str) -> int | None: ...
+    def contains(self, key: str) -> bool: ...
+    def __getitem__(self, key: str, /) -> int:
+        """Dense id of ``key``, raising ``KeyError`` if it is absent — the dict spelling of
+        ``id``. There is no ``__setitem__`` and no ``keys`` / ``values`` / ``items``: this is an
+        immutable ``str -> int`` lookup, not a mapping."""
+
+    def get(self, key: str, default: _T | None = None) -> int | _T | None:
+        """Dense id of ``key``, or ``default`` (``None`` unless given)."""
+
+    def ids_of(self, keys: Sequence[str]) -> list[int | None]: ...
+    def common_prefix(self, query: str) -> list[tuple[str, int]]:
+        """Every key that is a prefix of ``query``, shortest first.
+
+        The dictionary-matching query: given a vocabulary and a position in a sentence, the entries
+        that start there. One load a character of ``query``, ending where no key continues.
+        """
+
+    def occurrences(self, text: str) -> list[tuple[int, int, int]]:
+        """Every key in ``text``, as ``(start, end, id)`` with ``text[start:end]`` the key.
+
+        Starts ascend, and within a start the shortest key comes first. The whole-text form of
+        ``common_prefix`` that a dictionary segmenter runs at every character: one call per text
+        instead of one per character, which is where a loop over the characters spends its time.
+        Offsets count characters. The empty key, if the index holds it, is not reported.
+        """
+
+    def longest_prefix(self, query: str) -> tuple[str, int] | None:
+        """The longest key that is a prefix of ``query``, or ``None`` -- the longest match."""
+
+    def to_bytes(self) -> bytes: ...
+    def serialized_len(self) -> int: ...
+    @staticmethod
+    def from_bytes(data: bytes) -> DoubleArrayIndex:
+        """Reconstruct from a ``to_bytes`` blob; arbitrary input raises ``ValueError``. Every slot
+        is walked at load, so a blob crafted to carry matching checksums answers wrong ids, never
+        out-of-range ones."""
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @staticmethod
+    def load(path: str | os.PathLike[str]) -> DoubleArrayIndex:
+        """Load a file written by ``save``, validated like ``from_bytes``."""
+    @staticmethod
+    def load_mmap(path: str | os.PathLike[str]) -> DoubleArrayIndex:
+        """Memory-map the file and read the slots and the code table where they lie.
+
+        The file must not be modified or truncated by any process while the index is alive: the
+        bytes are borrowed, not copied, so a concurrent write is undefined behaviour rather than a
+        stale answer (the Rust loader is ``unsafe fn``). Use ``load`` if the file may change.
+        The payload checksum is skipped by design; the walk over every slot, which is what lets a
+        query read without a bounds check, is not.
+        """
+
+@final
 class Overlay:
     """Add and remove keys on top of an index that is expensive to rebuild.
 
@@ -866,9 +936,10 @@ class BlobInfo(TypedDict):
     base this library did not write. ``mph_bytes`` is the perfect hash's region where there is one
     (``8 * mph_bytes / keys`` is its bits per key); ``arena_bytes`` is the key arena of a
     ``PerfectHashIndex``, the fingerprint table of a ``CompactHashIndex``, the keys and block
-    data of a ``DictIndex`` or the rank table of a ``HashedDictIndex``; ``side_entries`` the
-    keys in a hash index's collision side table; ``fingerprint_bits`` the width a
-    ``CompactHashIndex`` or a ``HashedDictIndex`` was built with.
+    data of a ``DictIndex``, the rank table of a ``HashedDictIndex`` or the slot array of a
+    ``DoubleArrayIndex``; ``side_entries`` the keys in a hash index's collision side table;
+    ``fingerprint_bits`` the width a ``CompactHashIndex`` or a ``HashedDictIndex`` was built
+    with.
     """
 
     kind: Literal[
@@ -880,6 +951,7 @@ class BlobInfo(TypedDict):
         "Mphf",
         "Overlay",
         "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     format: str
     bytes: int

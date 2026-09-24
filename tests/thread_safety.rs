@@ -17,6 +17,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 fn index_types_are_send_and_sync() {
     assert_send_sync::<StringIndex>();
     assert_send_sync::<lexindex::DictIndex>();
+    assert_send_sync::<lexindex::DoubleArrayIndex>();
     #[cfg(feature = "mph")]
     {
         assert_send_sync::<lexindex::CompactHashIndex>();
@@ -31,25 +32,33 @@ fn index_types_are_send_and_sync() {
 fn one_index_serves_many_readers() {
     let keys: Vec<String> = (0..2_000).map(|i| format!("key-{i:05}")).collect();
     let idx = Arc::new(StringIndex::build(&keys).unwrap());
+    let double_array = Arc::new(lexindex::DoubleArrayIndex::build(&keys).unwrap());
+    // Longer than the 256 bytes the occurrence walk decodes on the stack, and a `k` starts every
+    // key, so the joined text holds these hundred and nothing across a join.
+    let text = keys[100..200].concat();
 
     let readers: Vec<_> = (0..8)
         .map(|_| {
             let idx = Arc::clone(&idx);
             let keys = keys.clone();
+            let (double_array, text) = (Arc::clone(&double_array), text.clone());
             thread::spawn(move || {
                 for (rank, key) in keys.iter().enumerate() {
                     let id = rank as u64;
                     assert_eq!(idx.id(key), Some(id));
                     assert_eq!(idx.key(id).as_deref(), Some(key.as_str()));
+                    assert_eq!(double_array.id(key), Some(id)); // the same ranks
                 }
-                idx.prefix("key-001").len()
+                let mut occurrences = 0;
+                double_array.for_each_occurrence(&text, |_, _, _| occurrences += 1);
+                (idx.prefix("key-001").len(), occurrences)
             })
         })
         .collect();
 
     // Every reader must agree — a data race would show up as a differing count.
     for r in readers {
-        assert_eq!(r.join().unwrap(), 100); // key-00100..key-00199
+        assert_eq!(r.join().unwrap(), (100, 100)); // key-00100..key-00199, both ways
     }
 }
 

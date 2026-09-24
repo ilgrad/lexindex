@@ -36,6 +36,7 @@ jobs:
           - parse_closed
           - parse_dict
           - parse_hashed_dict
+          - parse_double_array
           - parse_perfect
           - parse_overlay
           - parse_overlay_untrusted

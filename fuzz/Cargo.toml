@@ -55,6 +55,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "parse_double_array"
+path = "fuzz_targets/parse_double_array.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "parse_perfect"
 path = "fuzz_targets/parse_perfect.rs"
 test = false

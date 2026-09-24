@@ -585,6 +585,79 @@ def test_hashed_dict_index_answers_the_dictionarys_ranks(tmp_path):
     assert empty.ids_of_bytes(["x"]) == hd.MISSING_ID.to_bytes(8, sys.byteorder)
 
 
+def test_double_array_index_answers_what_the_string_index_does():
+    """The ids are StringIndex's, and so is every match, in the same character offsets."""
+    # The empty key, keys that are prefixes of keys, and characters of one to four bytes: past the
+    # Basic Multilingual Plane an emoji and a CJK Extension B character.
+    keys = ["", "a", "ab", "abc", "b", "é", "éa"]
+    keys += ["北", "北京", "北京大学", "大学", "大学生", "学生", "日本", "日本語"]
+    keys += ["\U0001f600", "\U0001f600\U0001f600", "a\U0001f600", "\U00020000北"]
+    da = lexindex.DoubleArrayIndex([*keys, "北京", "a"])  # duplicates fold
+    si = lexindex.StringIndex(keys)
+    assert len(da) == len(keys) and not da.is_empty()
+    texts = ["北京大学生", "x北京y大学z", "\U0001f600" * 3 + "\U00020000北京", "日本語の本", "abcd"]
+    texts.append("北京大学生\U0001f600abc" * 40)  # past the walk's buffers on the stack
+    probes = [*keys, *texts, *(k + "x" for k in keys), *(k[:-1] for k in keys if k), "\U0010ffff"]
+    assert da.ids_of(probes) == si.ids_of(probes)
+    for q in probes:
+        assert da.id(q) == si.id(q), q
+        assert (q in da) == da.contains(q) == (si.id(q) is not None), q
+        assert da.common_prefix(q) == si.common_prefix(q), q
+        assert da.longest_prefix(q) == si.longest_prefix(q), q
+        assert da.occurrences(q) == si.occurrences(q), q
+        assert all(q[s:e] == si.key(i) for s, e, i in da.occurrences(q)), q
+    assert da["大学"] == si.id("大学") and da.get("大学生") == si.id("大学生")
+    assert da.get("北京大") is None and da.get("北京大", -1) == -1
+    with pytest.raises(KeyError, match="北京大"):
+        da["北京大"]
+    # The empty key alone is a prefix of everything and occurs nowhere.
+    only_empty = lexindex.DoubleArrayIndex([""])
+    assert only_empty.common_prefix("ab") == [("", 0)] and only_empty.occurrences("ab") == []
+    empty = lexindex.DoubleArrayIndex([])
+    assert empty.is_empty() and empty.id("") is None and empty.common_prefix("ab") == []
+    assert empty.longest_prefix("ab") is None and empty.occurrences("ab") == []
+
+
+def test_double_array_index_round_trips_and_refuses_a_damaged_blob(tmp_path):
+    keys = ["", "北京", "北京大学", "大学", "\U0001f600"]  # in byte order, so the ids are 0..4
+    da = lexindex.DoubleArrayIndex(keys)
+    blob = da.to_bytes()
+    assert blob[:4] == b"BDA1" and len(blob) == da.serialized_len()
+    p = tmp_path / "words.bda"
+    da.save(p)
+    assert p.read_bytes() == blob
+    for back in (
+        lexindex.DoubleArrayIndex.from_bytes(blob),
+        lexindex.DoubleArrayIndex.load(p),
+        lexindex.DoubleArrayIndex.load_mmap(str(p)),
+    ):
+        assert back.to_bytes() == blob and back.ids_of(keys) == [0, 1, 2, 3, 4]
+        assert back.occurrences("北京大学\U0001f600") == da.occurrences("北京大学\U0001f600")
+    damaged = bytearray(blob)
+    damaged[-1] ^= 0x55  # a payload byte, so the checksum no longer matches
+    for bad in (b"", b"nope", blob[:-1], blob + b"\0", bytes(damaged)):
+        with pytest.raises(ValueError):
+            lexindex.DoubleArrayIndex.from_bytes(bad)
+    p.write_bytes(damaged)
+    with pytest.raises(ValueError):
+        lexindex.DoubleArrayIndex.load(p)
+    with pytest.raises(OSError):
+        lexindex.DoubleArrayIndex.load(tmp_path / "missing.bda")
+
+
+def test_double_array_index_refuses_more_distinct_characters_than_labels():
+    """Labels are 16 bits: 65 535 distinct characters build and one more is refused. One key a
+    character, from U+4E00 through the rest of the Basic Multilingual Plane and on past it, the
+    surrogates skipped -- a lone one has no UTF-8 form, so no key can hold it."""
+    code_points = itertools.chain(range(0x4E00, 0xD800), range(0xE000, 0x11_0000))
+    keys = [chr(cp) for cp in itertools.islice(code_points, 65_536)]
+    assert ord(keys[-1]) > 0xFFFF
+    with pytest.raises(ValueError, match="65 535"):
+        lexindex.DoubleArrayIndex(keys)
+    # Code point order is byte order, so a key's id is its position.
+    assert lexindex.DoubleArrayIndex(keys[:-1]).ids_of(keys) == [*range(65_535), None]
+
+
 def test_string_index_batch():
     si = lexindex.StringIndex(["apple", "apricot", "banana", "cherry"])
     assert si.ids_of(["banana", "missing", "apple"]) == [2, None, 0]
@@ -868,6 +941,7 @@ def test_query_limit_truncates_and_matches_unlimited():
         lexindex.CompactHashIndex,
         lexindex.ClosedHashIndex,
         lexindex.DictIndex,
+        lexindex.DoubleArrayIndex,
     ],
 )
 def test_bulk_arguments_reject_non_strings(ctor):
@@ -903,6 +977,7 @@ def test_multibyte_keys_survive_the_borrowed_path():
         lexindex.DictIndex,
         lexindex.PerfectHashIndex,
         lambda items: lexindex.CompactHashIndex(items, 1),
+        lexindex.DoubleArrayIndex,
     ],
 )
 def test_builds_from_a_generator_and_takes_pathlike(ctor, tmp_path):
@@ -1275,6 +1350,7 @@ def _hammer(fn, threads=8):
         lambda items: lexindex.CompactHashIndex(items, 4),
         lexindex.DictIndex,
         lambda items: lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(items), 8),
+        lexindex.DoubleArrayIndex,
     ],
 )
 def test_an_index_is_safe_to_share_across_threads(ctor):
@@ -1333,6 +1409,7 @@ def test_pickle_round_trips_every_class():
     cl = lexindex.ClosedHashIndex(words)
     di = lexindex.DictIndex(words)
     hd = lexindex.HashedDictIndex.from_dict(di, 8)
+    da = lexindex.DoubleArrayIndex(words)
     ov = lexindex.Overlay(si)
     ov.add("durian")
     ov.remove("apple")
@@ -1340,7 +1417,7 @@ def test_pickle_round_trips_every_class():
     # Protocol 2 as well as the default: `__reduce__` names a static method by qualname, which is
     # the part of the protocol that differs between them.
     for protocol in (2, pickle.HIGHEST_PROTOCOL):
-        for original in (si, ph, ch, cl, di, hd, ov):
+        for original in (si, ph, ch, cl, di, hd, da, ov):
             back = pickle.loads(pickle.dumps(original, protocol=protocol))
             assert type(back) is type(original)
             assert len(back) == len(original)
@@ -1543,6 +1620,7 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
             "HashedDictIndex",
             "BHD1",
         ),
+        (lexindex.DoubleArrayIndex(keys), "DoubleArrayIndex", "BDA1"),
     ]:
         blob = idx.to_bytes()
         info = lexindex.inspect(blob)
@@ -1589,7 +1667,8 @@ def test_inspect_docstring_opens_with_what_inspect_does():
 _FOREIGN_MARKUP = re.compile(
     r"\]\((?:Self|crate|super)::"  # a rustdoc link to an item
     r"|\[`[^`\]]+`\](?![(\[])"  # a rustdoc shortcut link
-    r"|\bPy(?:(?:String|PerfectHash|CompactHash|ClosedHash|Dict|HashedDict)Index|Overlay)\b"
+    r"|\bPy(?:(?:String|PerfectHash|CompactHash|ClosedHash|Dict|HashedDict|DoubleArray)Index"
+    r"|Overlay)\b"
     r"|:(?:meth|class|func|attr|data|mod|exc|obj):`"  # a Sphinx role
 )
 

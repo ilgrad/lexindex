@@ -1,6 +1,6 @@
-"""Quickstart: the six lexindex structures and when to reach for each.
+"""Quickstart: the seven lexindex structures and when to reach for each.
 
-One vocabulary, six indexes, each answering a different question:
+One vocabulary, seven indexes, each answering a different question:
 
   - StringIndex       ordered + typo-tolerant: autocomplete, fuzzy, range, exact both ways
   - DictIndex         ordered, every key stored: exact both ways + lower_bound, a third of the size
@@ -8,6 +8,7 @@ One vocabulary, six indexes, each answering a different question:
   - CompactHashIndex  smallest string -> id (probabilistic membership, no reverse)
   - ClosedHashIndex   the perfect hash alone: string -> id for a vocabulary known to be closed
   - PerfectHashIndex  exact membership + reverse id -> string, fastest closed-vocabulary lookup
+  - DoubleArrayIndex  every key occurring in a text, a character a step: segmentation, tagging
 
 Run::
 
@@ -24,6 +25,7 @@ from lexindex import (
     ClosedHashIndex,
     CompactHashIndex,
     DictIndex,
+    DoubleArrayIndex,
     HashedDictIndex,
     PerfectHashIndex,
     StringIndex,
@@ -127,6 +129,20 @@ def perfect_hash_demo() -> None:
     print("PerfectHashIndex:  id('avocado') ->", i, "-> key ->", d.key(i))
 
 
+def double_array_demo() -> None:
+    """Every key occurring in a text, one load a character: a segmenter's question."""
+    words = ["北京", "北京大学", "大学", "大学生", "生活"]
+    lexicon = DoubleArrayIndex(words)
+    text = "北京大学生活"
+    # (start, end, id) in characters, starts ascending and the shortest key first at each start
+    found = lexicon.occurrences(text)
+    assert [text[s:e] for s, e, _ in found] == ["北京", "北京大学", "大学", "大学生", "生活"]
+    assert lexicon.longest_prefix(text) == ("北京大学", 1)
+    # the ids are the keys' ranks, the ones StringIndex gives the same keys
+    assert lexicon.id("大学") == StringIndex(words).id("大学") == 2
+    print("DoubleArrayIndex:  occurrences ->", [text[s:e] for s, e, _ in found])
+
+
 def persistence_demo() -> None:
     """Build once, persist, then memory-map and borrow zero-copy — load time independent of size."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -144,5 +160,6 @@ if __name__ == "__main__":
     dict_index_demo()
     hashed_dict_demo()
     perfect_hash_demo()
+    double_array_demo()
     persistence_demo()
     print("\nquickstart OK")

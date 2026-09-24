@@ -489,6 +489,16 @@ fn the_fuzz_shims_accept_a_real_blob() {
     assert!(!lexindex::fuzzing::load_hashed_dict(&dict));
     assert!(!lexindex::fuzzing::load_dict(&hashed));
 
+    // The double array through its own target -- loaded both ways and queried from its own
+    // characters -- and refused by the dictionaries', as their blobs are by it.
+    let double_array = std::fs::read(data("golden-4.5.0-double-array.bda")).unwrap();
+    assert!(lexindex::fuzzing::load_double_array(&double_array));
+    assert!(lexindex::fuzzing::inspect(&double_array));
+    assert!(!lexindex::fuzzing::load_double_array(&dict));
+    assert!(!lexindex::fuzzing::load_double_array(&hashed));
+    assert!(!lexindex::fuzzing::load_dict(&double_array));
+    assert!(!lexindex::fuzzing::load_hashed_dict(&double_array));
+
     // The overlay seeds, through both of their targets: the frame-only one and the one that also
     // parses the embedded base. `OVL1` matters as much as `OVL2` here -- it is the format without
     // checksums, so it is the one a mutation can still reach the framing through.
@@ -880,6 +890,65 @@ fn the_golden_dict_blobs_sections_account_for_every_byte() {
     assert!(s.entry_codes > s.entry_headers + s.entry_wide, "{s:?}");
 }
 
+/// 4.5's `BDA1`, the character-wise double array, pinned by its bytes: the characters are
+/// labelled by frequency with ties broken by code point and every row takes the lowest base that
+/// fits, so a build over the golden keys is this file. It loads -- copied, and mapped, which skips
+/// the payload checksum but not the walk over the slots -- every key answers the id `StringIndex`
+/// gives it, every stranger `None`, and the occurrence walk over the keys joined into one text is
+/// the prefix walk from every character, past the stack buffers and with the empty key left out.
+///
+/// A change to the layout is a format change: a new magic, and a golden file of its own beside
+/// this one, which stays to prove that the blobs 4.5 wrote still load. A change to the labels or
+/// the placement alone writes a different `BDA1` that loads the same way: regenerate this file
+/// then, as the other golden builds are.
+#[test]
+fn the_double_array_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
+    let keys = keys();
+    let fresh = lexindex::DoubleArrayIndex::build(&keys).unwrap().to_bytes();
+    let path = data("golden-4.5.0-double-array.bda");
+    let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&fresh[..4], b"BDA1");
+    assert!(
+        stored == fresh,
+        "golden-4.5.0-double-array.bda changed; a new layout takes a new magic, a new placement a \
+         regenerated {}",
+        path.display()
+    );
+    let string = lexindex::StringIndex::build(&keys).unwrap();
+    let loaded = [
+        lexindex::DoubleArrayIndex::load(&path),
+        lexindex::DoubleArrayIndex::from_bytes(&stored),
+        // SAFETY: a committed blob, and nothing in this process writes to it while mapped.
+        #[cfg(feature = "mmap")]
+        unsafe {
+            lexindex::DoubleArrayIndex::load_mmap(&path)
+        },
+    ]
+    .map(Result::unwrap);
+    let text = keys.concat();
+    let mut want = Vec::new();
+    for (start, _) in text.char_indices() {
+        string.for_each_common_prefix(&text[start..], |end, id| {
+            if end > 0 {
+                want.push((start, start + end, id));
+            }
+        });
+    }
+    for idx in &loaded {
+        assert_eq!(idx.len(), string.len());
+        assert_eq!(idx.to_bytes(), stored);
+        for key in &keys {
+            assert_eq!(idx.id(key), string.id(key), "{key:?}");
+        }
+        for stranger in non_members() {
+            assert_eq!(idx.id(&stranger), None, "{stranger:?}");
+        }
+        let mut got = Vec::new();
+        idx.for_each_occurrence(&text, |start, end, id| got.push((start, end, id)));
+        assert_eq!(got, want);
+    }
+}
+
 /// `inspect` names every blob in `tests/data/` from its header alone, and refuses the pre-1.0
 /// hash blobs the way the loaders do: by the type to rebuild, not as corrupt.
 #[test]
@@ -1085,6 +1154,36 @@ fn every_golden_blob_inspects_from_its_header() {
             Some(0),
             48 + dict_bytes + mph + 2250,
         )
+    );
+    // The double array of 4.5: the slots are its arena, and the rest is the header, a code table of
+    // two bytes for every code point up to `中` (U+4E2D, the keys' highest in the plane) and the two
+    // characters past the plane, `🎉` and `😀`, at eight bytes each. The header is what an index
+    // holding no character writes: no slots, no code table, nothing past the plane.
+    let header = lexindex::DoubleArrayIndex::build([""])
+        .unwrap()
+        .serialized_len() as u64;
+    let i = inspect_file(data("golden-4.5.0-double-array.bda")).unwrap();
+    assert_eq!(
+        (
+            i.kind,
+            i.format.as_str(),
+            i.keys,
+            i.fingerprint_bits,
+            i.mph_bytes,
+            i.side_entries,
+        ),
+        (
+            BlobKind::DoubleArrayIndex,
+            "BDA1",
+            Some(1000),
+            None,
+            None,
+            None
+        )
+    );
+    assert_eq!(
+        i.bytes,
+        header + i.arena_bytes.unwrap() + 2 * 0x4E2E + 2 * 8
     );
     // Both overlay formats: three keys added and three retired over the 1000-key ordered base.
     for (name, format) in [

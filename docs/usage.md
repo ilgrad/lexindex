@@ -468,6 +468,39 @@ The blob holds the dictionary's own blob byte for byte, so a loaded index answer
 dictionary answers. `plan` does not price it yet, and `Overlay` does not take it: its ids are
 ranks, as `DictIndex`'s are.
 
+## `DoubleArrayIndex` — a lexicon against running text
+
+```python
+from lexindex import DoubleArrayIndex, StringIndex
+
+# A character-wise double-array trie: a step is a character, one load each, so the queries that walk
+# a text -- the keys it starts with, the longest one, every key anywhere in it -- cost a load a
+# character. Duplicates are removed; the ids are the keys' ranks, the same StringIndex gives.
+words = ["北京", "北京大学", "大学", "大学生"]
+lexicon = DoubleArrayIndex(words)
+lexicon.occurrences("北京大学生")  # every (start, end, id) in characters: starts ascending, shortest first
+lexicon.common_prefix("大学生活")  # the keys the text starts with, shortest first: [("大学", 2), ...]
+lexicon.longest_prefix("大学生活")  # ("大学生", 3), or None
+lexicon.id("大学")                 # the key's rank; "大学" in lexicon, lexicon["大学"] and .get(...) too
+lexicon.ids_of(["大学", "x"])       # batched
+StringIndex(words).key(lexicon.id("大学"))   # nothing comes back out of this one: StringIndex spells an id
+lexicon.save("lexicon.bda")
+lexicon = DoubleArrayIndex.load("lexicon.bda")        # every slot checked
+lexicon = DoubleArrayIndex.load_mmap("lexicon.bda")   # the slots and the code table borrowed
+```
+
+`occurrences` is what a segmenter asks: jieba builds its DAG from every word starting at each
+position of a sentence, and one call a sentence returns all of them. The empty key, if it was
+built in, is a prefix of every query — `common_prefix` reports it first — but never an occurrence.
+
+It answers these queries and `id`, and nothing else: no `key(id)`, no `prefix`, no iteration — keep
+the key list, or build a `StringIndex` or `DictIndex` over the same keys, whose ids are the same.
+A build is refused past 8 388 608 keys, 65 535 distinct characters or a trie that needs more than
+8 388 608 slots: about four million Chinese words, fewer long Latin ones — a million `word.word`
+pairs of English take 2.2 M. Every load walks all the slots to check them, `load_mmap` included,
+so a crafted file answers wrong ids and never reads out of bounds; `load_mmap` skips only the
+checksum over the payload.
+
 ## `Overlay` — edits without a rebuild
 
 Every index is built once from the whole key set, so adding a single key has always meant
@@ -581,7 +614,7 @@ On the shuffled dictionary (479 823 member probes, min of seven alternated round
 
 The module tells CPython it does not need the GIL, and the guarantee behind that is:
 
-- **The six index types are immutable after building.** Share one across as many threads as you
+- **The seven index types are immutable after building.** Share one across as many threads as you
   like and call `id`, `contains`, `key`, `ids_of` from all of them. Building, batch lookups and
   persistence release the GIL, so other threads keep running while a large index is built or queried.
 - **The two types that hold mutable state — the `StringIndex` iterator and `Overlay` — serialise.**
@@ -602,7 +635,8 @@ it over the sdist. Older free-threaded builds have no wheel: PyO3 supports `3.14
 
 ```rust
 use lexindex::{
-    ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex, StringIndex,
+    ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex,
+    PerfectHashIndex, StringIndex,
 };
 
 let idx = StringIndex::build(["apple", "apricot", "banana"])?;
@@ -640,6 +674,12 @@ words.route_microblocks(); // opt-in: ~0.5 B/key of memory, in no blob, for a fa
 let hashed = HashedDictIndex::from_dict(words, 8)?; // the dictionary, and a hash sidecar beside it
 assert_eq!(hashed.id("banana"), Some(2)); // one hash and a read of each table, not a search
 assert_eq!(hashed.dict().key(2).as_deref(), Some("banana")); // ordered queries: the dictionary's
+
+let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?; // a character a step
+assert_eq!(lexicon.longest_prefix("大学生活"), Some(("大学生".to_string(), 3)));
+let mut words = Vec::new(); // every key in the text: (start, end) in bytes, and the key's rank
+lexicon.for_each_occurrence("北京大学生", |start, end, id| words.push((start, end, id)));
+assert_eq!(words, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]);
 # drop(idx);
 # std::fs::remove_file(&path).ok();
 # Ok::<(), lexindex::IndexError>(())
@@ -647,7 +687,8 @@ assert_eq!(hashed.dict().key(2).as_deref(), Some("banana")); // ordered queries:
 
 ### Building a corpus that does not fit in memory
 
-Every index has a build that never holds the keys, and each takes the shape its structure allows:
+Every index but `DoubleArrayIndex` has a build that never holds the keys, and each takes the shape
+its structure allows:
 
 ```rust
 use lexindex::{CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
@@ -731,7 +772,7 @@ fits in one run — 296 MB against 1 205, 19 s against 24 — and the blobs are 
 
 Cargo features: `mph` (default) adds `PerfectHashIndex`, `CompactHashIndex`, `ClosedHashIndex` and
 `HashedDictIndex`; `mmap` (default) adds `load_mmap`; `--no-default-features` is an `fst`-only build
-(`StringIndex` only, no extra dependencies). All of them compile for 32-bit targets,
+(`StringIndex`, `DictIndex`, `DoubleArrayIndex` and `Overlay`, no extra dependencies). All of them compile for 32-bit targets,
 `wasm32-unknown-unknown` included — leave `mmap` off there, since there is nothing to memory-map.
 
 ### Editing without a rebuild — `Overlay`

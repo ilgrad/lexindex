@@ -1,6 +1,6 @@
 //! lexindex: compact, immutable string↔id indexes for huge catalogs.
 //!
-//! Six complementary, build-once / query-many indexes over a set of strings (entity names, cluster
+//! Seven complementary, build-once / query-many indexes over a set of strings (entity names, cluster
 //! labels, document keys, vocabulary terms):
 //!
 //! - [`StringIndex`] — an **ordered** index backed by a finite-state transducer ([`fst`]). Exact
@@ -33,8 +33,15 @@
 //!   `2^-fingerprint_bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
 //!   the closed-vocabulary path, 4.1–9.0× faster than XCDAT's lookup — the fastest trie measured —
 //!   at 1.4–3.2× less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
+//! - [`DoubleArrayIndex`] — a character-wise **double-array trie** for dictionary matching over
+//!   running text: every key that is a prefix of a text, the longest one, and every key occurring
+//!   anywhere in it, at one load a character. A label is a character rather than a byte, so a
+//!   Chinese word of three characters is three steps. 15.62 B/key on jieba's Chinese lexicon, the
+//!   smallest double array measured there (darts-clone 17.75). The ids are `StringIndex`'s for the
+//!   same keys; no reverse lookup, no prefix enumeration. Use it to segment or tag text against a
+//!   lexicon.
 //!
-//! All six assign dense ids in `[0, n)`. None is mutable after building — they are immutable
+//! All seven assign dense ids in `[0, n)`. None is mutable after building — they are immutable
 //! summaries, like the clustering features in the companion `betula-cluster` crate.
 //!
 //! The minimal perfect hash under the three hash indexes and `HashedDictIndex` implements
@@ -87,6 +94,7 @@ pub use hash::hash_pair_bytes;
 #[doc(hidden)]
 pub use mphf::Mphf;
 mod dict_index;
+mod double_array;
 mod estimate;
 mod extsort;
 mod fsst;
@@ -104,6 +112,7 @@ mod subsequence;
 mod ties;
 
 pub use dict_index::{DictIndex, DictProfile, DictSections};
+pub use double_array::DoubleArrayIndex;
 pub use estimate::{Estimate, Kind, Needs, Objective, Plan, Workload, plan, plan_file, plan_for};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
 pub use overlay::{Overlay, OverlayBase, OverlayKeys};
@@ -208,6 +217,15 @@ pub mod fuzzing {
     /// `id`, `id_unchecked` and `ids_of` over whatever sidecar and dictionary loaded.
     pub fn load_hashed_dict(bytes: &[u8]) -> bool {
         crate::HashedDictIndex::fuzz_load_and_query(bytes)
+    }
+
+    /// Load a `DoubleArrayIndex` blob both ways and query what loaded; `true` if the checked way
+    /// did. Both loaders walk every slot before a query can read one, which is what lets the walks
+    /// read without a bounds check — so this target queries, with probes spelled from the blob's
+    /// own characters: ids inside `[0, n)`, matches in order on character boundaries, and the
+    /// occurrence walk agreeing with the prefix walk from every character.
+    pub fn load_double_array(bytes: &[u8]) -> bool {
+        crate::DoubleArrayIndex::fuzz_load_and_query(bytes)
     }
 
     /// [`parse_compact_frame`] for a `PerfectHashIndex` blob, whose framing also has to validate an

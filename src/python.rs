@@ -35,7 +35,7 @@
 //! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
 //! released with the GIL held.
 
-use crate::{DictIndex, DictProfile, IndexError, Overlay, StringIndex};
+use crate::{DictIndex, DictProfile, DoubleArrayIndex, IndexError, Overlay, StringIndex};
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -2509,6 +2509,176 @@ impl PyHashedDictIndex {
     }
 }
 
+/// Character-wise double-array trie for dictionary matching: `common_prefix`, `longest_prefix`
+/// and `occurrences` at one load a character, with the ids `StringIndex` assigns to the same keys.
+/// No reverse lookup: a `StringIndex` or `DictIndex` over the same keys spells an id back.
+#[pyclass(name = "DoubleArrayIndex", module = "lexindex._core", frozen)]
+pub struct PyDoubleArrayIndex {
+    inner: Arc<DoubleArrayIndex>,
+}
+
+#[pymethods]
+impl PyDoubleArrayIndex {
+    /// Build from an iterable of strings (duplicates removed; ids are sorted rank, as
+    /// `StringIndex` numbers the same keys). Refused with `ValueError` past 8 388 608 keys,
+    /// 65 535 distinct characters or a trie of 8 388 608 slots -- about four million Chinese
+    /// words, fewer long Latin ones.
+    #[new]
+    fn new(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let items = collect_strs(items)?;
+        let inner = py
+            .detach(|| DoubleArrayIndex::build(items.iter()))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Id of `key`, or `None` if absent.
+    fn id(&self, key: &str) -> Option<u64> {
+        self.inner.id(key)
+    }
+
+    /// Whether `key` is present.
+    fn contains(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Dense id of `key`, raising `KeyError` if it is absent -- the dict spelling of `id`. No
+    /// `__setitem__`, no `keys` / `values` / `items`: an immutable `str -> int` lookup.
+    fn __getitem__(&self, key: &str) -> PyResult<u64> {
+        self.inner
+            .id(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
+    }
+
+    /// Dense id of `key`, or `default` (`None` unless given).
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match self.inner.id(key) {
+            Some(id) => Ok(id.into_pyobject(py)?.into_any()),
+            None => Ok(default.unwrap_or_else(|| py.None().into_bound(py))),
+        }
+    }
+
+    /// Batched `id`: one call for many keys, aligned with `keys`, `None` where a key is absent.
+    fn ids_of(&self, py: Python<'_>, keys: Vec<PyBackedStr>) -> Vec<Option<u64>> {
+        py.detach(|| keys.iter().map(|k| self.inner.id(k)).collect())
+    }
+
+    /// Every key that is a **prefix of `query`**, shortest first. This is the dictionary-matching
+    /// query: given a vocabulary and a position in a sentence, it returns the entries that start
+    /// there. The empty key, if the index holds it, is a prefix of everything and comes first.
+    fn common_prefix(&self, py: Python<'_>, query: &str) -> Vec<(String, u64)> {
+        py.detach(|| self.inner.common_prefix(query))
+    }
+
+    /// Every key that occurs in `text`, as `(start, end, id)` with `text[start:end]` the key:
+    /// starts ascending, and within a start shortest first. The whole-text form of `common_prefix`
+    /// that a dictionary segmenter runs at every character, in one call a text rather than one a
+    /// character, which is where a loop over characters spends its time. Offsets count characters,
+    /// as a `str` is indexed; the empty key, if the index holds it, is not reported.
+    fn occurrences(&self, py: Python<'_>, text: &str) -> Vec<(usize, usize, u64)> {
+        py.detach(|| {
+            let mut out = Vec::new();
+            self.inner
+                .for_each_occurrence_in_chars(text, |start, end, id| out.push((start, end, id)));
+            out
+        })
+    }
+
+    /// The longest key that is a prefix of `query`, or `None` -- the match a longest-match
+    /// tokeniser takes. See `common_prefix`.
+    fn longest_prefix(&self, py: Python<'_>, query: &str) -> Option<(String, u64)> {
+        py.detach(|| self.inner.longest_prefix(query))
+    }
+
+    /// Serialise to a `bytes` blob.
+    fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let bytes = py.detach(|| self.inner.to_bytes());
+        PyBytes::new(py, &bytes)
+    }
+
+    /// Length of the `to_bytes` blob in bytes, without producing it.
+    fn serialized_len(&self) -> usize {
+        self.inner.serialized_len()
+    }
+
+    /// Pickle support: the blob, and the loader that reads it back.
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, (Bound<'py, PyBytes>,))> {
+        let from_bytes = py.get_type::<Self>().getattr("from_bytes")?;
+        Ok((from_bytes, (self.to_bytes(py),)))
+    }
+
+    /// Reconstruct from a `to_bytes` blob. The framing and both checksums are validated and every
+    /// slot is walked, so arbitrary input raises rather than misbehaving; a blob crafted to carry
+    /// matching checksums answers wrong ids, never out-of-range ones.
+    #[staticmethod]
+    fn from_bytes(py: Python<'_>, data: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| DoubleArrayIndex::from_bytes(data))
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Write the index to `path`.
+    fn save(&self, py: Python<'_>, path: PathBuf) -> PyResult<()> {
+        py.detach(|| self.inner.save(&path)).map_err(to_py)
+    }
+
+    /// Load a file written with `save`, validated like `from_bytes`.
+    #[staticmethod]
+    fn load(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let inner = py.detach(|| DoubleArrayIndex::load(&path)).map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Zero-copy load: memory-map the file and read the slots and the code table where they lie.
+    /// The payload checksum `load` verifies is skipped; the walk over every slot is not, since it
+    /// is what lets a query read without a bounds check, so the load still reads the array once.
+    ///
+    /// The mapped file must not be modified or truncated by any process while the index is alive:
+    /// the bytes are borrowed, not copied, so a concurrent write is undefined behaviour rather
+    /// than a stale answer. Python cannot express that obligation in the type system the way the
+    /// Rust API does (where this is an `unsafe fn`), so it is the caller's contract. Use `load` if
+    /// the file may change.
+    #[staticmethod]
+    fn load_mmap(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        // SAFETY: forwarded to the caller, who is told in the docstring above that the file must
+        // stay unmodified for the index's lifetime. There is no way to enforce it from Python.
+        let inner = py
+            .detach(|| unsafe { DoubleArrayIndex::load_mmap(&path) })
+            .map_err(to_py)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+}
+
 /// The three bases an [`PyOverlay`] can sit on. `Overlay<I>` is generic and a `#[pyclass]` cannot
 /// be, so the choice becomes a runtime tag — and with it, `key`/`keys`/`compact` become a runtime
 /// `TypeError` on a `CompactHashIndex` base where Rust refuses at compile time.
@@ -3246,6 +3416,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
             BlobKind::Mphf => "Mphf",
             BlobKind::Overlay => "Overlay",
             BlobKind::HashedDictIndex => "HashedDictIndex",
+            BlobKind::DoubleArrayIndex => "DoubleArrayIndex",
         },
     )?;
     d.set_item("format", &info.format)?;
@@ -3447,6 +3618,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DictIndexIterator>()?;
     #[cfg(feature = "mph")]
     m.add_class::<PyHashedDictIndex>()?;
+    m.add_class::<PyDoubleArrayIndex>()?;
     m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     m.add_function(wrap_pyfunction!(py_plan, m)?)?;
     m.add_function(wrap_pyfunction!(py_cli, m)?)?;

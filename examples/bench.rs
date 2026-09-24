@@ -11,7 +11,9 @@
 //! from `$LEXINDEX_BENCH_WORDS` or `/usr/share/dict/words`; the benchmark refuses to run without
 //! one rather than silently substituting synthetic keys.
 
-use lexindex::{CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex, StringIndex};
+use lexindex::{
+    CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex, StringIndex,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::time::Instant;
@@ -133,6 +135,12 @@ fn main() {
         |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
     );
     bench(
+        "lexindex DoubleArrayIndex",
+        n,
+        || DoubleArrayIndex::build(&keys).unwrap(),
+        |idx| probe.iter().map(|&i| idx.id(&keys[i]).unwrap_or(0)).sum(),
+    );
+    bench(
         "lexindex HashedDict (fp=8)",
         n,
         || HashedDictIndex::from_dict(DictIndex::build(&keys).unwrap(), 8).unwrap(),
@@ -234,6 +242,7 @@ fn main() {
     let ph = PerfectHashIndex::build(&keys).unwrap();
     let hd = HashedDictIndex::from_dict(DictIndex::build(&keys).unwrap(), 8).unwrap();
     let ch = CompactHashIndex::build(&keys, 1).unwrap();
+    let da = DoubleArrayIndex::build(&keys).unwrap();
     let raw = keys.iter().map(String::len).sum::<usize>();
     println!("\nserialised size (bytes/key):");
     println!(
@@ -255,6 +264,10 @@ fn main() {
     println!(
         "  lexindex PerfectHashIndex   {:6.2}",
         ph.to_bytes().unwrap().len() as f64 / n as f64
+    );
+    println!(
+        "  lexindex DoubleArrayIndex   {:6.2}",
+        da.serialized_len() as f64 / n as f64
     );
     println!("  raw key bytes (no index)  {:6.2}", raw as f64 / n as f64);
 

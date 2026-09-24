@@ -2,7 +2,7 @@
 //! robustness — `from_bytes` on arbitrary bytes (`StringIndex`, whose loader is safe) or on a
 //! corrupted self-produced blob (all three) must fail cleanly, never panic.
 
-use lexindex::{DictIndex, Overlay, StringIndex};
+use lexindex::{DictIndex, DoubleArrayIndex, Overlay, StringIndex};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -87,6 +87,104 @@ fn check_dict_index_roundtrip(keys: &[String]) {
             }
             let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
             assert_eq!(walked, expected);
+        }
+    }
+}
+
+/// The double array's alphabet: ASCII, ideographs of three bytes, and two characters of four past
+/// the Basic Multilingual Plane, which it labels from a table beside its code table.
+const DOUBLE_ARRAY_CHARS: [char; 12] = [
+    'a', 'b', '北', '京', '大', '学', '生', '日', '本', '語', '😀', '𠀀',
+];
+
+/// Characters no key holds: `z` inside the code table's range or past it, by whether the keys
+/// reach an ideograph; `龍` past it but inside the plane; `🎉` past the plane.
+const DOUBLE_ARRAY_STRANGERS: [char; 3] = ['z', '龍', '🎉'];
+
+/// Key sets over [`DOUBLE_ARRAY_CHARS`], half of them holding the empty key as well.
+fn double_array_keys() -> impl Strategy<Value = Vec<String>> {
+    let key = prop::collection::vec(prop::sample::select(DOUBLE_ARRAY_CHARS.to_vec()), 1..6)
+        .prop_map(|cs| cs.into_iter().collect::<String>());
+    (prop::collection::vec(key, 0..40), any::<bool>()).prop_map(|(mut keys, empty)| {
+        if empty {
+            keys.push(String::new());
+        }
+        keys
+    })
+}
+
+/// Texts over the keys' alphabet and the strangers, the empty text among them.
+fn double_array_texts() -> impl Strategy<Value = Vec<String>> {
+    let alphabet: Vec<char> = DOUBLE_ARRAY_CHARS
+        .iter()
+        .chain(&DOUBLE_ARRAY_STRANGERS)
+        .copied()
+        .collect();
+    let text = prop::collection::vec(prop::sample::select(alphabet), 0..16)
+        .prop_map(|cs| cs.into_iter().collect::<String>());
+    prop::collection::vec(text, 1..8)
+}
+
+/// `DoubleArrayIndex` against `StringIndex` over the same keys: the same id for every probe, the
+/// same prefix matches and longest match, and occurrences that are `StringIndex`'s prefix walk from
+/// every character with the empty key left out; and a blob that loads back to the same bytes and
+/// answers the same. The probes are the texts, every key, every key doubled, cut short by a
+/// character or followed by a stranger, all the keys joined into one text, and the first text
+/// padded to either side of the 256 bytes past which the occurrence walk decodes into the heap
+/// rather than onto the stack.
+fn check_double_array_agrees_with_string_index(keys: &[String], texts: &[String]) {
+    let da = DoubleArrayIndex::build(keys).unwrap();
+    let si = StringIndex::build(keys).unwrap();
+    let blob = da.to_bytes();
+    assert_eq!(blob.len(), da.serialized_len());
+    let back = DoubleArrayIndex::from_bytes(&blob).unwrap();
+    assert_eq!(
+        back.to_bytes(),
+        blob,
+        "the blob is not written back as read"
+    );
+
+    let expected = distinct_sorted(keys.to_vec());
+    let mut probes: Vec<String> = texts.to_vec();
+    for key in &expected {
+        probes.push(key.clone());
+        probes.push(format!("{key}{key}"));
+        probes.push(format!("{key}🎉"));
+        let mut shorter = key.clone();
+        shorter.pop();
+        probes.push(shorter);
+    }
+    probes.push(expected.concat());
+    for len in [256, 257] {
+        probes.push(format!("{}{}", "a".repeat(len - texts[0].len()), texts[0]));
+    }
+
+    for idx in [&da, &back] {
+        assert_eq!(idx.len(), si.len());
+        assert_eq!(idx.is_empty(), si.is_empty());
+        for q in &probes {
+            assert_eq!(idx.id(q), si.id(q), "id({q:?})");
+            let mut got = Vec::new();
+            idx.for_each_common_prefix(q, |end, id| got.push((end, id)));
+            let mut want = Vec::new();
+            si.for_each_common_prefix(q, |end, id| want.push((end, id)));
+            assert_eq!(got, want, "common prefixes of {q:?}");
+            assert_eq!(
+                idx.longest_prefix(q),
+                si.longest_prefix(q),
+                "longest prefix of {q:?}"
+            );
+            let mut want = Vec::new();
+            for (start, _) in q.char_indices() {
+                si.for_each_common_prefix(&q[start..], |end, id| {
+                    if end > 0 {
+                        want.push((start, start + end, id));
+                    }
+                });
+            }
+            let mut got = Vec::new();
+            idx.for_each_occurrence(q, |start, end, id| got.push((start, end, id)));
+            assert_eq!(got, want, "occurrences in {q:?}");
         }
     }
 }
@@ -563,5 +661,18 @@ proptest! {
             prop_assert_eq!(idx.range_count(lo, hi), expected as u64, "range_count({:?}, {:?})", lo, hi);
             prop_assert_eq!(idx.range_count(lo, hi), idx.range(lo, hi).len() as u64);
         }
+    }
+}
+
+proptest! {
+    /// The double array answers every query `StringIndex` answers over the same keys, and its blob
+    /// round-trips: the dictionary-matching semantics are the ordered index's, ids included, on
+    /// keys of one, three and four bytes a character, the empty key among them half the time.
+    #[test]
+    fn double_array_agrees_with_string_index(
+        keys in double_array_keys(),
+        texts in double_array_texts(),
+    ) {
+        check_double_array_agrees_with_string_index(&keys, &texts);
     }
 }

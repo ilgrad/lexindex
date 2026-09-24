@@ -19,6 +19,7 @@ pub enum BlobKind {
     Mphf,
     Overlay,
     HashedDictIndex,
+    DoubleArrayIndex,
 }
 
 /// What [`inspect`] reads out of a blob's header.
@@ -44,7 +45,9 @@ pub struct BlobInfo {
     pub mph_bytes: Option<u64>,
     /// `PerfectHashIndex`: the key arena; `CompactHashIndex`: the fingerprint table;
     /// `DictIndex`: the head keys and the front-coded block data; `HashedDictIndex`: the rank
-    /// table, the dictionary being the blob less that, the perfect hash and the side table.
+    /// table, the dictionary being the blob less that, the perfect hash and the side table;
+    /// `DoubleArrayIndex`: the slot array, eight bytes a slot, the rest being the header and the
+    /// character tables.
     pub arena_bytes: Option<u64>,
     /// Keys in the hash indexes' collision side table.
     pub side_entries: Option<u64>,
@@ -330,6 +333,19 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             i.mph_bytes = Some(mph);
             i.side_entries = Some(side);
             i.arena_bytes = Some(rest(bytes, [48, dict, mph, side * 24])?);
+            Ok(i)
+        }
+        b"BDA1" => {
+            // `[magic 4][n u64][empty u64][slots u64][table u32][supp u32][max_label u32][payload
+            // u64][reserved 12][check u32]`, then the slots, the code table and the supplementary
+            // characters.
+            w.bytes(0, 64)?;
+            let (n, slots) = (w.u64(4)?, w.u64(20)?);
+            let (table, supp) = (u64::from(w.u32(28)?), u64::from(w.u32(32)?));
+            let mut i = info(BlobKind::DoubleArrayIndex, format, bytes, n);
+            let slot_bytes = slots.checked_mul(8).ok_or(TRUNCATED)?;
+            i.arena_bytes = Some(slot_bytes);
+            rest(bytes, [64, slot_bytes, 2 * table, 8 * supp])?;
             Ok(i)
         }
         b"MPH1" | b"MPH2" | b"MPH3" => {
@@ -636,6 +652,30 @@ mod tests {
     }
 
     #[test]
+    fn a_double_array_index_inspects_to_sections_that_add_up() {
+        let idx = crate::DoubleArrayIndex::build(["", "北京", "北京大学", "大学", "😀"]).unwrap();
+        let blob = idx.to_bytes();
+        let i = inspect(&blob).unwrap();
+        assert_eq!(
+            (i.kind, i.format.as_str(), i.keys, i.bytes),
+            (
+                BlobKind::DoubleArrayIndex,
+                "BDA1",
+                Some(5),
+                blob.len() as u64
+            )
+        );
+        let slots = u64::from_le_bytes(blob[20..28].try_into().unwrap());
+        assert_eq!(i.arena_bytes, Some(8 * slots));
+        assert!(
+            inspect(&blob[..blob.len() - 1])
+                .unwrap_err()
+                .to_string()
+                .contains("truncated")
+        );
+    }
+
+    #[test]
     fn a_dict_index_inspects_to_its_keys_and_arena() {
         let keys: Vec<String> = (0..300).map(|i| format!("key-{i:03}")).collect();
         let idx = crate::DictIndex::build(&keys).unwrap();
@@ -653,7 +693,7 @@ mod tests {
         // blocks' arrays.
         let arena = i.arena_bytes.unwrap();
         assert!(
-            arena > 0 && arena + 52 + 10 * 8 < i.bytes,
+            arena > 0 && arena + 64 + 10 * 8 < i.bytes,
             "{arena} of {}",
             i.bytes
         );

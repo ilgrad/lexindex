@@ -291,6 +291,12 @@ fn load(bytes: &[u8]) -> Result<Any, LexindexStatus> {
         BlobKind::HashedDictIndex => {
             Any::HashedDict(HashedDictIndex::from_bytes(bytes).map_err(failed)?)
         }
+        BlobKind::DoubleArrayIndex => {
+            return Err(fail(
+                LexindexStatus::Unsupported,
+                "DoubleArrayIndex blobs are outside the C ABI",
+            ));
+        }
     };
     Ok(any)
 }

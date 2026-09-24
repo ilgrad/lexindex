@@ -766,6 +766,12 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
         BlobKind::CompactHashIndex => return Err(keyless("CompactHashIndex")),
         BlobKind::ClosedHashIndex => return Err(keyless("ClosedHashIndex")),
         BlobKind::Mphf => return Err(keyless("minimal perfect hash")),
+        BlobKind::DoubleArrayIndex => {
+            return Err(Fail::Failed(format!(
+                "{path}: a DoubleArrayIndex answers no id -> key, so it cannot be dumped; keep the \
+                 key list it was built from"
+            )));
+        }
         #[cfg(not(feature = "mph"))]
         other => {
             return Err(Fail::Failed(format!(

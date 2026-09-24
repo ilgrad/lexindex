@@ -15,6 +15,7 @@ many times:
   real words, 56 % below ``StringIndex``.
 - ``HashedDictIndex`` — a ``DictIndex`` with a hash sidecar: ``id`` at a hash index's
   cost, with the dictionary's ranks, and its ordered queries through ``.dict``.
+- ``DoubleArrayIndex`` — character-wise double-array trie for dictionary matching, no reverse.
 
 All serialise to a flat blob (``save`` / ``load``). Every one but ``ClosedHashIndex`` also
 has ``load_mmap``, which maps a huge index and borrows it instantly; ``DictIndex`` builds its
@@ -33,6 +34,7 @@ from lexindex._core import (
     ClosedHashIndex,
     CompactHashIndex,
     DictIndex,
+    DoubleArrayIndex,
     HashedDictIndex,
     Overlay,
     PerfectHashIndex,
@@ -59,6 +61,7 @@ class BlobInfo(TypedDict):
         "Mphf",
         "Overlay",
         "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     format: str
     bytes: int
@@ -125,6 +128,7 @@ __all__ = [
     "ClosedHashIndex",
     "CompactHashIndex",
     "DictIndex",
+    "DoubleArrayIndex",
     "Estimate",
     "HashedDictIndex",
     "Overlay",

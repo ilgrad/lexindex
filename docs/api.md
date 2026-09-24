@@ -26,6 +26,10 @@ The typed public surface of the `lexindex` Python package.
 
 ::: lexindex.PerfectHashIndex
 
+## DoubleArrayIndex
+
+::: lexindex.DoubleArrayIndex
+
 ## Overlay
 
 ::: lexindex.Overlay
