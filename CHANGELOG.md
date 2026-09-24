@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **The common-prefix walk over Chinese text is measured against cedar and darts-clone, and
+  lexindex loses it by about 2×.** `docs/benchmarks.md` gains a section on jieba's lexicon over
+  4 997 sentences: from Rust, `StringIndex` walks 1.9–2.7× slower than cedarwood 0.5.0 and
+  darts-clone 0.32, holding a seventh of cedar's bytes and half darts-clone's; from Python, jieba
+  over `StringIndex.occurrences` cuts in 25 % less time than over its own dictionary, 18 % with the
+  HMM, the fastest backend measured (`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`).
+
 ## [4.4.1] — 2026-09-24
 
 ### Changed

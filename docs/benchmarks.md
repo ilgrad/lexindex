@@ -1406,6 +1406,61 @@ Ryzen 7 5800HS, load 0.04–0.28 at the three starts. Nanoseconds per query thro
 is in every row, and the three tries are C extensions too. None of them is a lexindex
 dependency — reproduce in a throwaway environment.</sub>
 
+### On Chinese running text, from Rust and from Python
+
+A Chinese segmenter asks this question at every character: jieba builds a DAG of every word that
+starts at each position of a sentence. The run below asks it at all 178 338 positions inside the
+blocks jieba segments — runs of Han characters, ASCII letters and digits, its `re_han_default` — of
+UD Chinese GSDSimp r2.18's 4 997 sentences, against jieba 0.42.1's 349 045-word lexicon, each query
+running to the end of its block. Before any timing, every structure gave the same set of (length,
+id) pairs at every position: 237 465 matches.
+
+| Rust, ns a character | bytes/word | in text order | shuffled |
+|---|---:|---:|---:|
+| darts-clone 0.32 | 17.75 | **37.7** | **35.0** |
+| cedarwood 0.5.0 | 60.55 | 43.5 | 44.6 |
+| **lexindex `StringIndex`** 4.4.0 | **8.95** | 81.2 | 93.4 |
+
+**On this walk lexindex loses, by about 2×.** `StringIndex` takes 1.9–2.1× cedar's time and
+2.2–2.7× darts-clone's, holding half darts-clone's bytes and a seventh of cedar's. cedar's figure is
+its resident heap: 0.5.0 has no file form, and its array grows by doubling, so a quarter of its
+slots sit idle. Where `StringIndex`'s time goes is not measured yet.
+
+**Through Python the walk is the small part of the cost.** Plugged into jieba 0.42.1 in place of
+its own dictionary, one `StringIndex.occurrences` call a block rather than one `common_prefix` call
+a position takes the DAG from 926 to 573 ns a character — the same walk, fewer calls — and makes
+the fastest backend measured. Every backend also answers jieba's one other dictionary read, the
+`FREQ.get` that decides whether a run of single characters goes to the HMM:
+
+| Python, ns a character | DAG | `lcut(HMM=False)` | `lcut()` |
+|---|---:|---:|---:|
+| **`StringIndex.occurrences`** | **573** | **1 119** | **1 647** |
+| jieba's own dictionary | 648 | 1 495 | 2 015 |
+| `StringIndex.common_prefix` | 926 | 1 429 | 1 961 |
+| `dawg2` `prefixes` | 964 | — | — |
+| `marisa-trie` | 1 423 | 1 930 | 2 514 |
+| `DictIndex` 256 | 2 049 | 2 486 | 3 035 |
+
+Over `occurrences` a cut takes 25 % less time than over jieba's own dictionary, and 18 % less with
+the HMM, jieba's default, which adds 520–584 ns a character to every row. `DictIndex` is the slowest
+here for the reason the table above gives: a binary search a character boundary.
+
+<sub>Measured 2026-09-24 against lexindex 4.4.0 from crates.io and PyPI (`3a73ed5`)
+([`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt)):
+three Rust and three Python processes, interleaved, each started only once the machine passed a
+readiness check with the hottest thermal zone under 70 °C (it read 48–51 °C). A cell is the minimum
+over the three. A Rust process ran 30 alternated rounds over its rows in 3 s; a Python one ran 5
+rounds in 33 s and ended at 85–94 °C. "In text order" walks each block's positions in order, as a
+segmenter does, with the sentences in a seeded shuffle; "shuffled" takes the same positions in a
+seeded random order. The DAG column is per character in blocks (178 338), the cut columns per
+character of text (195 832). The control rows are jieba-rs 0.11.0's `cut_all` in Rust
+and jieba's own dictionary in Python. The Rust control spread +9.5 % across its processes, outside
+the 5 % the protocol allows, so read the Rust nanoseconds as ±10 %; a 2× gap does not depend on
+them. The Python controls spread 0.4–0.9 %. rustc 1.98.1; darts-clone at `87b71af`, built with
+g++ 16.2.1 `-O3`; frame pointers off on both sides. CPython 3.14.7 with the GIL; `marisa-trie`
+1.4.1, `dawg2` 0.13.3. The harness is not in the repository; the file records every version, hash
+and flag. No competitor here is a lexindex dependency.</sub>
+
 ## Hash quality
 
 Size and speed both rest on the key hash being indistinguishable from random on *real* keys, so the
