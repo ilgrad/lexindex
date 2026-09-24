@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **`paths` is re-measured at 4.4.2 in the million-key frontier, and the Python jieba lane on
+  4.4.2's wheel.** `paths` alone, every structure, three rounds
+  (`bench/results/frontier-named-2026-09-24-arz-b101076.json`): with 4.4.1's tie trie `DictIndex`
+  reads 712 ns at block 256 and 758 at 1024, where the 4.4.0 campaign read 794 and 826, against
+  XCDAT 15's 618 — still behind, by 1.15× at block 256 and 1.11× at block 32, where it was 1.25×
+  and 1.20×. Every competitor reads 0.971–1.012 of the campaign and every size is byte-identical.
+  Through Python (`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`), jieba over
+  `StringIndex.occurrences` builds the DAG in 560 ns a character against 649 over its own
+  dictionary and cuts in 27 % less time, 21 % with the HMM.
+
 ## [4.4.2] — 2026-09-24
 
 ### Changed

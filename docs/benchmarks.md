@@ -1454,34 +1454,37 @@ files record every version, hash and flag. No competitor here is a lexindex depe
 
 **Through Python the walk is the small part of the cost.** Plugged into jieba 0.42.1 in place of
 its own dictionary, one `StringIndex.occurrences` call a block rather than one `common_prefix` call
-a position takes the DAG from 926 to 573 ns a character — the same walk, fewer calls — and makes
-the fastest backend measured. These are 4.4.0's walks, without the table. Every backend also
-answers jieba's one other dictionary read, the `FREQ.get` that decides whether a run of single
-characters goes to the HMM:
+a position takes the DAG from 913 to 560 ns a character — the same walk, fewer calls — and makes
+the fastest backend measured. Every backend also answers jieba's one other dictionary read, the
+`FREQ.get` that decides whether a run of single characters goes to the HMM:
 
 | Python, ns a character | DAG | `lcut(HMM=False)` | `lcut()` |
 |---|---:|---:|---:|
-| **`StringIndex.occurrences`** | **573** | **1 119** | **1 647** |
-| jieba's own dictionary | 648 | 1 495 | 2 015 |
-| `StringIndex.common_prefix` | 926 | 1 429 | 1 961 |
-| `dawg2` `prefixes` | 964 | — | — |
-| `marisa-trie` | 1 423 | 1 930 | 2 514 |
-| `DictIndex` 256 | 2 049 | 2 486 | 3 035 |
+| **`StringIndex.occurrences`** | **560** | **1 098** | **1 609** |
+| jieba's own dictionary | 649 | 1 498 | 2 031 |
+| `StringIndex.common_prefix` | 913 | 1 416 | 1 941 |
+| `dawg2` `prefixes` | 963 | — | — |
+| `marisa-trie` | 1 417 | 1 919 | 2 476 |
+| `DictIndex` 256 | 2 064 | 2 487 | 3 026 |
 
-Over `occurrences` a cut takes 25 % less time than over jieba's own dictionary, and 18 % less with
-the HMM, jieba's default, which adds 520–584 ns a character to every row. `DictIndex` is the slowest
-here for the reason the table above gives: a binary search a character boundary.
+Over `occurrences` a cut takes 27 % less time than over jieba's own dictionary, and 21 % less with
+the HMM, jieba's default, which adds 511–557 ns a character to every row. `DictIndex` is the slowest
+here for the reason the table above gives: a binary search a character boundary. Against the same
+harness on 4.4.0, whose control row this one's reads within 1 % of, 4.4.2's first-character table
+took 13 ns a character off the DAG, over `occurrences` and `common_prefix` alike — the walk's
+saving, in a call that spends most of its time elsewhere.
 
-<sub>Measured 2026-09-24 against lexindex 4.4.0 from PyPI (`3a73ed5`)
-([`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt)):
-three Python processes, interleaved with three Rust ones over 4.4.0 that the file also holds, each
-started only once the machine passed a readiness check with the hottest thermal zone under 70 °C
-(it read 48–51 °C). A cell is the minimum over the three. A Python process ran 5 rounds in 33 s and
-ended at 85–94 °C. The DAG column is per character in blocks (178 338), the cut columns per
-character of text (195 832). The control row, jieba's own dictionary, spread 0.4–0.9 % across the
-processes. CPython 3.14.7 with the GIL; `marisa-trie` 1.4.1, `dawg2` 0.13.3. The harness is not in
-the repository; the file records every version, hash and flag. No competitor here is a lexindex
-dependency.</sub>
+<sub>Measured 2026-09-24 against lexindex 4.4.2 from PyPI (`b101076`)
+([`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt)):
+three processes, each started only once the machine passed a readiness check with the hottest
+thermal zone under 70 °C (it read 49–50 °C). A process ran 5 rounds in 33 s and ended at 85–93 °C;
+a cell is the minimum over the three. The DAG column is per character in blocks (178 338), the cut
+columns per character of text (195 832). The control row, jieba's own dictionary, spread 0.6–1.2 %
+across the processes and reads 0.2–0.8 % above the 4.4.0 campaign's
+([`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt),
+which holds 4.4.0's rows). CPython 3.14.7 with the GIL; `marisa-trie` 1.4.1, `dawg2` 0.13.3. The
+harness is not in the repository; the file records every version, hash and flag. No competitor here
+is a lexindex dependency.</sub>
 
 ## Hash quality
 
@@ -1755,6 +1758,25 @@ it, the three blocks routed, and `StringIndex`.
 A routed cell's bytes are the blob's and the restart words' together — 0.5 a key at blocks 32 and
 256, 0.25 at 1024 — which no file holds and every process that routes pays in memory.</sub>
 
+**`paths` again, at 4.4.2.** Since 4.4.1 a lookup that lands among blocks whose samples tie — on
+`paths`, 3 899 of 3 907 at block 256 — is placed by a trie of their eight-byte words rather than by
+comparing their heads one at a time. `paths` alone, re-run with every structure:
+
+<!-- table: frontier bench/results/frontier-named-2026-09-24-arz-b101076.json view=search -->
+| corpus | XCDAT 15 | `Dict` 256 | 32 routed | 256 routed | 1024 routed | `StringIndex` |
+|---|---:|---:|---:|---:|---:|---:|
+| `paths-1000000` | 25.11 @ 618 | 9.87 @ 712 | 13.49 @ 683 | 10.37 @ 715 | 9.57 @ 775 | 17.48 @ 752 |
+<!-- /table -->
+
+<sub>`paths-1000000` alone at `b101076` (4.4.2), three rounds under the campaign's protocol and
+gate, started at load 0.32 with the hottest zone at 48 °C
+([`bench/results/frontier-named-2026-09-24-arz-b101076.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-named-2026-09-24-arz-b101076.json)).
+Every size is byte-identical to the campaign's. The structures from elsewhere read 0.971–1.012 of
+it, XCDAT 15 the lowest; `StringIndex` 0.996; the `DictIndex` rows 0.883–0.920. The `HashedDict`
+rows read 0.929–0.953 with no change in their code between the two commits — 5–6 ns, what memory
+placement and a rebuilt harness move an 80-ns probe here — so the attributable figure for the tie
+trie is 4.4.1's in-process A/B: `id` 768 → 704 ns at block 256 and 812 → 750 at 1024.</sub>
+
 At a million keys lexindex's faster exact search beats XCDAT 15 on one corpus of thirteen, `dna`,
 where block 256 routed reads 260 ns against 282 at 4.88 bytes a key against 22.46. It trails by
 6–11 % on `uuid`, `urls` and `titles-ru`, routed at block 256 each time; by 1.2× to 1.5× on eight
@@ -1764,7 +1786,9 @@ more, through `StringIndex` on seven of them and routed block 256 on `titles-en`
 2.2× — block 256 routed the fastest `DictIndex` on eleven, and 13–29 % faster than the same block
 unrouted on those, a comparison across processes. `paths` is the corpus it cannot help: its restart
 keys tie in the eight bytes the words hold, block 256 routed reads 0.98 of block 256 there, and the
-fastest `DictIndex` is block 32 as loaded, 1.20× behind XCDAT. The rest of the bill is structural.
+fastest `DictIndex` is block 32 as loaded, 1.20× behind XCDAT. 4.4.1's tie trie narrows that without
+turning it over: re-run at 4.4.2, block 32 reads 1.11× behind and block 256 1.15× (the table
+above). The rest of the bill is structural.
 Unrouted, a probe walks a block's restarts to one microblock and scans it — `block / micro + micro
 − 2` header decodes, 62 at block 1024 — and routed it still scans the microblock, where a
 double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys

@@ -1,0 +1,1351 @@
+frontier campaign
+date: 2026-09-24T19:19:10+03:00
+host: arz
+commit: b101076
+table: frontier-named
+lexindex: 4.4.2
+kernel: Linux 7.2.7-200.fc44.x86_64 x86_64
+cpu: AMD Ryzen 7 5800HS with Radeon Graphics
+cores/threads: 8 / 16
+caches: L2 512 KiB, L3 16384 KiB
+governor: powersave
+transparent hugepages: always [madvise] never
+compiler: c++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+load at start: 0.37 1.15 2.09
+rounds: 3, even rounds in the reverse order
+quiet before each process: under 1.0 busy CPUs for 1 s
+clock ticks: 100
+address space cap: 28000000 KB
+timeout: 1800 s a process
+pin c2: 92c1b861456b https://github.com/alexztc/C2
+pin c2/lib/sdsl-lite: 4312ea9c9370 https://github.com/vgteam/sdsl-lite
+pin c2/lib/ds2i: 4f46606cc077 https://github.com/aboffa/ds2i (modified: compact_elias_fano.hpp,succinct)
+pin c2/lib/sux: 5944f6b5c1c7 https://github.com/vigna/sux (modified: sux/util/Vector.hpp)
+pin c2/lib/fsst: e638d4cf8c26 https://github.com/cwida/fsst
+pin c2/baseline_marisa/marisa: e54f296bb52d https://github.com/s-yata/marisa-trie
+pin c2/baseline_ctriepp/ctriepp: 52d2c16a7bb6 https://gitlab.com/ofek.gila1/ctriepp
+pin xcdat: 2451441dcc09 https://github.com/kampersanda/xcdat
+pin c2/lib/ds2i/succinct: ea74747a8b1c (gitlink)
+pin c2/lib/sdsl-lite/external/googletest: 71815bbf7de6 (gitlink)
+pin c2/lib/sdsl-lite/external/libdivsufsort: 0f24acd8de20 (gitlink)
+pin coco adapted headers: ee860d4b1e62 https://github.com/aboffa/CoCo-trie (by sha256)
+
+##### paths-1000000 (1000000 lines, 125978312 bytes)   round 1/3   2026-09-24T19:19:10+03:00
+--- lexindex dict32   load 0.37 1.15 2.09
+1000000 keys
+lexindex DictIndex block 32: build 508 ms, size 12.389 MiB (12.991 B/key), latency cold 706.6 ns, then mean 698.3 / min 696.3 ns
+507.557,12.389187,706.582
+[time 4.12 s, user 6.81 s, sys 0.41 s, maxrss 498528 KB]
+[busy 750 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.42 1.15 2.09
+1000000 keys
+lexindex DictIndex block 256: build 504 ms, size 9.414 MiB (9.871 B/key), latency cold 727.2 ns, then mean 723.0 / min 719.6 ns
+503.774,9.413641,727.166
+[time 4.20 s, user 6.91 s, sys 0.37 s, maxrss 493996 KB]
+[busy 755 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.47 1.15 2.08
+1000000 keys
+lexindex DictIndex block 1024: build 572 ms, size 8.891 MiB (9.323 B/key), latency cold 761.7 ns, then mean 762.4 / min 759.4 ns
+572.185,8.891459,761.659
+[time 4.41 s, user 6.21 s, sys 0.37 s, maxrss 496756 KB]
+[busy 683 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.15 1.28 2.12
+1000000 keys
+lexindex DictIndex block 32 routed: build 495 ms, size 12.866 MiB (13.491 B/key), latency cold 693.1 ns, then mean 686.0 / min 681.4 ns
+495.497,12.866024,693.113
+[time 4.04 s, user 6.69 s, sys 0.40 s, maxrss 492716 KB]
+[busy 734 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.14 1.27 2.11
+1000000 keys
+lexindex DictIndex block 256 routed: build 510 ms, size 9.891 MiB (10.371 B/key), latency cold 721.6 ns, then mean 721.3 / min 719.7 ns
+510.285,9.890570,721.637
+[time 4.19 s, user 6.97 s, sys 0.38 s, maxrss 485580 KB]
+[busy 761 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.13 1.27 2.10
+1000000 keys
+lexindex DictIndex block 1024 routed: build 570 ms, size 9.130 MiB (9.573 B/key), latency cold 781.6 ns, then mean 779.4 / min 778.0 ns
+570.002,9.129984,781.637
+[time 4.50 s, user 6.27 s, sys 0.36 s, maxrss 501176 KB]
+[busy 693 jiffies]
+[exit 0]
+--- lexindex string   load 1.03 1.24 2.09
+1000000 keys
+lexindex StringIndex: build 1463 ms, size 16.673 MiB (17.483 B/key), latency cold 754.5 ns, then mean 739.0 / min 733.1 ns
+1463.234,16.673446,754.549
+[time 5.21 s, user 5.01 s, sys 0.18 s, maxrss 363316 KB]
+[busy 545 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.03 1.24 2.08
+1000000 keys
+lexindex HashedDictIndex closed: build 643 ms, size 12.027 MiB (12.611 B/key), latency cold 77.5 ns, then mean 78.3 / min 77.0 ns
+643.412,12.027206,77.450
+[time 1.74 s, user 4.53 s, sys 0.43 s, maxrss 498676 KB]
+[busy 519 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.03 1.24 2.08
+1000000 keys
+lexindex HashedDictIndex fp=8: build 649 ms, size 12.981 MiB (13.611 B/key), latency cold 103.9 ns, then mean 100.3 / min 99.0 ns
+648.565,12.980881,103.935
+[time 1.85 s, user 4.68 s, sys 0.38 s, maxrss 500236 KB]
+[busy 528 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.10 1.25 2.08
+1000000 keys
+lexindex HashedDictIndex fp=16: build 651 ms, size 13.935 MiB (14.611 B/key), latency cold 109.0 ns, then mean 105.2 / min 104.1 ns
+651.114,13.934555,108.990
+[time 1.86 s, user 4.74 s, sys 0.40 s, maxrss 503532 KB]
+[busy 535 jiffies]
+[exit 0]
+--- c2 case 0 rec 0   load 1.02 1.23 2.07
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1408.125065 ms (1408.125065 ns per key)
+space cost: 14.260756 MB (11.964866% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2415.811943 ms, avg latency: 2415.811943 ns
+topology: 1.699890 MB, link: 2.595201 MB, data: 9.965666 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1408.125065,14.260756,2415.811943
+[PASSED]
+[time 4.82 s, user 4.58 s, sys 0.22 s, maxrss 358576 KB]
+[busy 518 jiffies]
+[exit 0]
+--- c2 case 0 rec 1   load 1.01 1.23 2.06
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 1643.072107 ms (1643.072107 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2625.054987 ms, avg latency: 2625.054987 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1643.072107,12.500864,2625.054987
+[PASSED]
+[time 5.27 s, user 5.03 s, sys 0.22 s, maxrss 356776 KB]
+[busy 549 jiffies]
+[exit 0]
+--- c2 case 0 rec 2   load 1.01 1.22 2.06
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 1746.597513 ms (1746.597513 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2611.533825 ms, avg latency: 2611.533825 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1746.597513,12.500864,2611.533825
+[PASSED]
+[time 5.35 s, user 5.09 s, sys 0.24 s, maxrss 356824 KB]
+[busy 551 jiffies]
+[exit 0]
+--- c2 case 1 rec 0   load 1.01 1.22 2.05
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 5061.872187 ms (5061.872187 ns per key)
+space cost: 14.878411 MB (12.483082% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1625.014737 ms, avg latency: 1625.014737 ns
+topology: 0.476959 MB, link: 4.004946 MB, data: 10.396506 MB
+5061.872187,14.878411,1625.014737
+[PASSED]
+[time 7.68 s, user 7.29 s, sys 0.35 s, maxrss 595884 KB]
+[busy 790 jiffies]
+[exit 0]
+--- c2 case 1 rec 1   load 1.01 1.21 2.04
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 5300.775746 ms (5300.775746 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1802.040011 ms, avg latency: 1802.040011 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5300.775746,13.118518,1802.040011
+[PASSED]
+[time 8.08 s, user 7.71 s, sys 0.34 s, maxrss 587792 KB]
+[busy 837 jiffies]
+[exit 0]
+--- c2 case 1 rec 2   load 1.01 1.20 2.03
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 5479.673862 ms (5479.673862 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1784.552541 ms, avg latency: 1784.552541 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5479.673862,13.118518,1784.552541
+[PASSED]
+[time 8.24 s, user 7.83 s, sys 0.37 s, maxrss 591056 KB]
+[busy 845 jiffies]
+[exit 0]
+--- c2 case 2 rec 0   load 0.93 1.18 2.01
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+Done!
+build time: 1312.101235 ms (1312.101235 ns per key)
+space cost: 11.928165 MB (10.007807% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 904.080550 ms, avg latency: 904.080550 ns
+topology: 0.761036 MB, link: 3.343996 MB, data: 7.802626 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1312.101235,11.928165,904.080550
+[PASSED]
+[time 3.20 s, user 2.95 s, sys 0.23 s, maxrss 356116 KB]
+[busy 338 jiffies]
+[exit 0]
+--- c2 case 2 rec 1   load 0.93 1.18 2.01
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+Done!
+build time: 1620.548403 ms (1620.548403 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1603.569787 ms, avg latency: 1603.569787 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1620.548403,9.839272,1603.569787
+[PASSED]
+[time 4.23 s, user 3.98 s, sys 0.23 s, maxrss 354064 KB]
+[busy 435 jiffies]
+[exit 0]
+--- c2 case 2 rec 2   load 0.78 1.14 1.99
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+trie size: 0.864431 MB
+Done!
+build time: 1799.381066 ms (1799.381066 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1589.403564 ms, avg latency: 1589.403564 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1799.381066,9.839272,1589.403564
+[PASSED]
+[time 4.38 s, user 4.12 s, sys 0.24 s, maxrss 354092 KB]
+[busy 452 jiffies]
+[exit 0]
+--- c2 case 3 rec 0   load 0.72 1.12 1.98
+[TEST FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 3291.417219 ms (3291.417219 ns per key)
+space cost: 14.021067 MB (11.763764% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 4574.340653 ms, avg latency: 4574.340653 ns
+not implemented
+3291.417219,14.021067,4574.340653
+[PASSED]
+[time 8.87 s, user 8.64 s, sys 0.19 s, maxrss 357988 KB]
+[busy 915 jiffies]
+[exit 0]
+--- c2 case 4 rec 0   load 0.68 1.10 1.96
+[TEST COCO]
+Processing dataset...
+Done!
+Building trie...
+num nodes = 584148, average depth = 12.594651
+ef = 0.000038, pa = 0.103241, bv = 0.000608, de = 0.597184
+efr = 0.000176, par = 0.181430, bvr = 0.000135, der = 0.117188
+Done!
+build time: 45135.155597 ms (45135.155597 ns per key)
+space cost: 19.697372 MB (16.526221% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1394.971622 ms, avg latency: 1394.971622 ns
+not implemented
+45135.155597,19.697372,1394.971622
+[PASSED]
+[time 49.21 s, user 38.87 s, sys 10.14 s, maxrss 23293112 KB]
+[busy 5365 jiffies]
+[exit 0]
+--- c2 case 5 rec 0   load 0.87 1.10 1.91
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1626.772322 ms (1626.772322 ns per key)
+space cost: 12.257486 MB (10.284109% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 980.994317 ms, avg latency: 980.994317 ns
+not implemented
+1626.772322,12.257486,980.994317
+[PASSED]
+[time 3.57 s, user 3.30 s, sys 0.25 s, maxrss 411460 KB]
+[busy 384 jiffies]
+[exit 0]
+--- c2 case 5 rec 1   load 0.80 1.08 1.90
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1732.399581 ms (1732.399581 ns per key)
+space cost: 9.428862 MB (7.910875% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1815.842862 ms, avg latency: 1815.842862 ns
+not implemented
+1732.399581,9.428862,1815.842862
+[PASSED]
+[time 4.50 s, user 4.23 s, sys 0.24 s, maxrss 411580 KB]
+[busy 464 jiffies]
+[exit 0]
+--- c2 case 5 rec 2   load 0.74 1.06 1.89
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1786.515752 ms (1786.515752 ns per key)
+space cost: 9.029414 MB (7.575736% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2238.745652 ms, avg latency: 2238.745652 ns
+not implemented
+1786.515752,9.029414,2238.745652
+[PASSED]
+[time 4.97 s, user 4.70 s, sys 0.24 s, maxrss 411656 KB]
+[busy 516 jiffies]
+[exit 0]
+--- c2 case 6 rec 0   load 0.76 1.06 1.89
+[TEST PDT]
+Processing dataset...
+Done!
+Building trie...
+dict size: 153672, stream size: 10323140
+Done!
+build time: 4739.969589 ms (4739.969589 ns per key)
+space cost: 11.267526 MB (9.453526% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1068.877464 ms, avg latency: 1068.877464 ns
+not implemented
+4739.969589,11.267526,1068.877464
+[PASSED]
+[time 6.82 s, user 6.49 s, sys 0.30 s, maxrss 389156 KB]
+[busy 701 jiffies]
+[exit 0]
+--- c2 case 7 rec 0   load 0.78 1.06 1.88
+[TEST ART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 411.684164 ms (411.684164 ns per key)
+space cost: 34.675591 MB (29.093041% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 783.001318 ms, avg latency: 783.001318 ns
+not implemented
+411.684164,34.675591,783.001318
+[PASSED]
+[time 2.23 s, user 1.98 s, sys 0.23 s, maxrss 505400 KB]
+[busy 231 jiffies]
+[exit 0]
+--- c2 case 8 rec 0   load 0.80 1.06 1.88
+[TEST CART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 466.040286 ms (466.040286 ns per key)
+space cost: 18.620093 MB (15.622377% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 834.505883 ms, avg latency: 834.505883 ns
+not implemented
+466.040286,18.620093,834.505883
+[PASSED]
+[time 2.32 s, user 2.05 s, sys 0.25 s, maxrss 496156 KB]
+[busy 240 jiffies]
+[exit 0]
+--- xcdat 7   load 0.81 1.05 1.87
+build time: 1418.160553 ms
+space cost: 18.455355 MiB (15.484160% of original size 119.188606 MiB)
+avg latency: 705.059862 ns
+1418.160553,18.455355,705.059862
+[time 3.13 s, user 2.86 s, sys 0.24 s, maxrss 362316 KB]
+[busy 330 jiffies]
+[exit 0]
+--- xcdat 8   load 0.75 1.04 1.86
+build time: 1346.000488 ms
+space cost: 18.497238 MiB (15.519301% of original size 119.188606 MiB)
+avg latency: 712.520722 ns
+1346.000488,18.497238,712.520722
+[time 3.06 s, user 2.80 s, sys 0.24 s, maxrss 362364 KB]
+[busy 317 jiffies]
+[exit 0]
+--- xcdat 15   load 0.75 1.04 1.86
+build time: 1417.889074 ms
+space cost: 23.949356 MiB (20.093662% of original size 119.188606 MiB)
+avg latency: 624.988513 ns
+1417.889074,23.949356,624.988513
+[time 3.05 s, user 2.81 s, sys 0.23 s, maxrss 367868 KB]
+[busy 313 jiffies]
+[exit 0]
+--- xcdat 16   load 0.77 1.04 1.86
+build time: 1351.585510 ms
+space cost: 25.154240 MiB (21.104567% of original size 119.188606 MiB)
+avg latency: 677.595114 ns
+1351.585510,25.154240,677.595114
+[time 3.03 s, user 2.78 s, sys 0.23 s, maxrss 369544 KB]
+[busy 315 jiffies]
+[exit 0]
+
+##### paths-1000000 (1000000 lines, 125978312 bytes)   round 2/3   2026-09-24T19:22:44+03:00
+--- xcdat 16   load 0.79 1.04 1.85
+build time: 1356.109483 ms
+space cost: 25.154240 MiB (21.104567% of original size 119.188606 MiB)
+avg latency: 685.629149 ns
+1356.109483,25.154240,685.629149
+[time 3.03 s, user 2.77 s, sys 0.25 s, maxrss 369180 KB]
+[busy 313 jiffies]
+[exit 0]
+--- xcdat 15   load 0.80 1.03 1.85
+build time: 1425.689980 ms
+space cost: 23.949356 MiB (20.093662% of original size 119.188606 MiB)
+avg latency: 618.471534 ns
+1425.689980,23.949356,618.471534
+[time 3.05 s, user 2.78 s, sys 0.26 s, maxrss 368124 KB]
+[busy 316 jiffies]
+[exit 0]
+--- xcdat 8   load 0.74 1.02 1.84
+build time: 1353.714142 ms
+space cost: 18.497238 MiB (15.519301% of original size 119.188606 MiB)
+avg latency: 715.525888 ns
+1353.714142,18.497238,715.525888
+[time 3.06 s, user 2.81 s, sys 0.23 s, maxrss 362436 KB]
+[busy 319 jiffies]
+[exit 0]
+--- xcdat 7   load 0.74 1.02 1.84
+build time: 1418.271721 ms
+space cost: 18.455355 MiB (15.484160% of original size 119.188606 MiB)
+avg latency: 704.554555 ns
+1418.271721,18.455355,704.554555
+[time 3.12 s, user 2.86 s, sys 0.24 s, maxrss 362304 KB]
+[busy 322 jiffies]
+[exit 0]
+--- c2 case 8 rec 0   load 0.84 1.03 1.84
+[TEST CART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 460.606627 ms (460.606627 ns per key)
+space cost: 18.620093 MB (15.622377% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 847.567533 ms, avg latency: 847.567533 ns
+not implemented
+460.606627,18.620093,847.567533
+[PASSED]
+[time 2.32 s, user 2.06 s, sys 0.25 s, maxrss 496112 KB]
+[busy 246 jiffies]
+[exit 0]
+--- c2 case 7 rec 0   load 0.85 1.03 1.83
+[TEST ART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 412.954887 ms (412.954887 ns per key)
+space cost: 34.675591 MB (29.093041% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 760.331010 ms, avg latency: 760.331010 ns
+not implemented
+412.954887,34.675591,760.331010
+[PASSED]
+[time 2.20 s, user 1.91 s, sys 0.27 s, maxrss 505312 KB]
+[busy 230 jiffies]
+[exit 0]
+--- c2 case 6 rec 0   load 0.79 1.01 1.82
+[TEST PDT]
+Processing dataset...
+Done!
+Building trie...
+dict size: 153672, stream size: 10323140
+Done!
+build time: 4773.181162 ms (4773.181162 ns per key)
+space cost: 11.267526 MB (9.453526% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1058.233847 ms, avg latency: 1058.233847 ns
+not implemented
+4773.181162,11.267526,1058.233847
+[PASSED]
+[time 6.83 s, user 6.51 s, sys 0.29 s, maxrss 389164 KB]
+[busy 699 jiffies]
+[exit 0]
+--- c2 case 5 rec 2   load 0.80 1.01 1.82
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1783.604984 ms (1783.604984 ns per key)
+space cost: 9.029414 MB (7.575736% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2236.952019 ms, avg latency: 2236.952019 ns
+not implemented
+1783.604984,9.029414,2236.952019
+[PASSED]
+[time 4.96 s, user 4.71 s, sys 0.22 s, maxrss 411648 KB]
+[busy 510 jiffies]
+[exit 0]
+--- c2 case 5 rec 1   load 0.82 1.01 1.81
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1738.743426 ms (1738.743426 ns per key)
+space cost: 9.428862 MB (7.910875% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1812.432148 ms, avg latency: 1812.432148 ns
+not implemented
+1738.743426,9.428862,1812.432148
+[PASSED]
+[time 4.49 s, user 4.25 s, sys 0.22 s, maxrss 411428 KB]
+[busy 463 jiffies]
+[exit 0]
+--- c2 case 5 rec 0   load 0.83 1.01 1.81
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1610.912625 ms (1610.912625 ns per key)
+space cost: 12.257486 MB (10.284109% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 969.920363 ms, avg latency: 969.920363 ns
+not implemented
+1610.912625,12.257486,969.920363
+[PASSED]
+[time 3.53 s, user 3.26 s, sys 0.25 s, maxrss 411500 KB]
+[busy 373 jiffies]
+[exit 0]
+--- c2 case 4 rec 0   load 0.85 1.01 1.81
+[TEST COCO]
+Processing dataset...
+Done!
+Building trie...
+num nodes = 584148, average depth = 12.594651
+ef = 0.000038, pa = 0.103241, bv = 0.000608, de = 0.597184
+efr = 0.000176, par = 0.181430, bvr = 0.000135, der = 0.117188
+Done!
+build time: 45073.976692 ms (45073.976692 ns per key)
+space cost: 19.697372 MB (16.526221% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1397.711179 ms, avg latency: 1397.711179 ns
+not implemented
+45073.976692,19.697372,1397.711179
+[PASSED]
+[time 49.08 s, user 38.74 s, sys 10.15 s, maxrss 23293208 KB]
+[busy 5043 jiffies]
+[exit 0]
+--- c2 case 3 rec 0   load 0.93 1.01 1.76
+[TEST FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 3304.709393 ms (3304.709393 ns per key)
+space cost: 14.021067 MB (11.763764% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 4552.564662 ms, avg latency: 4552.564662 ns
+not implemented
+3304.709393,14.021067,4552.564662
+[PASSED]
+[time 8.87 s, user 8.63 s, sys 0.19 s, maxrss 357524 KB]
+[busy 911 jiffies]
+[exit 0]
+--- c2 case 2 rec 2   load 0.95 1.01 1.75
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+trie size: 0.864431 MB
+Done!
+build time: 1780.722880 ms (1780.722880 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1584.301438 ms, avg latency: 1584.301438 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1780.722880,9.839272,1584.301438
+[PASSED]
+[time 4.35 s, user 4.10 s, sys 0.23 s, maxrss 354084 KB]
+[busy 449 jiffies]
+[exit 0]
+--- c2 case 2 rec 1   load 0.95 1.01 1.75
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+Done!
+build time: 1633.330480 ms (1633.330480 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1611.530473 ms, avg latency: 1611.530473 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1633.330480,9.839272,1611.530473
+[PASSED]
+[time 4.24 s, user 3.98 s, sys 0.23 s, maxrss 354004 KB]
+[busy 441 jiffies]
+[exit 0]
+--- c2 case 2 rec 0   load 0.88 0.99 1.73
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+Done!
+build time: 1324.845912 ms (1324.845912 ns per key)
+space cost: 11.928165 MB (10.007807% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 904.986628 ms, avg latency: 904.986628 ns
+topology: 0.761036 MB, link: 3.343996 MB, data: 7.802626 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1324.845912,11.928165,904.986628
+[PASSED]
+[time 3.21 s, user 2.97 s, sys 0.23 s, maxrss 356232 KB]
+[busy 331 jiffies]
+[exit 0]
+--- c2 case 1 rec 2   load 0.88 0.99 1.73
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 5479.764322 ms (5479.764322 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1789.828554 ms, avg latency: 1789.828554 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5479.764322,13.118518,1789.828554
+[PASSED]
+[time 8.25 s, user 7.88 s, sys 0.34 s, maxrss 591056 KB]
+[busy 854 jiffies]
+[exit 0]
+--- c2 case 1 rec 1   load 0.90 0.99 1.73
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 5327.896920 ms (5327.896920 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1813.000112 ms, avg latency: 1813.000112 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5327.896920,13.118518,1813.000112
+[PASSED]
+[time 8.12 s, user 7.76 s, sys 0.32 s, maxrss 587836 KB]
+[busy 835 jiffies]
+[exit 0]
+--- c2 case 1 rec 0   load 0.91 0.99 1.72
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 5123.407189 ms (5123.407189 ns per key)
+space cost: 14.878411 MB (12.483082% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1647.526769 ms, avg latency: 1647.526769 ns
+topology: 0.476959 MB, link: 4.004946 MB, data: 10.396506 MB
+5123.407189,14.878411,1647.526769
+[PASSED]
+[time 7.77 s, user 7.38 s, sys 0.36 s, maxrss 595940 KB]
+[busy 804 jiffies]
+[exit 0]
+--- c2 case 0 rec 2   load 0.93 0.99 1.71
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 1765.508813 ms (1765.508813 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2616.283961 ms, avg latency: 2616.283961 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1765.508813,12.500864,2616.283961
+[PASSED]
+[time 5.37 s, user 5.12 s, sys 0.22 s, maxrss 356952 KB]
+[busy 553 jiffies]
+[exit 0]
+--- c2 case 0 rec 1   load 0.93 0.99 1.71
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 1640.657669 ms (1640.657669 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2652.666841 ms, avg latency: 2652.666841 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1640.657669,12.500864,2652.666841
+[PASSED]
+[time 5.29 s, user 5.03 s, sys 0.23 s, maxrss 356924 KB]
+[busy 550 jiffies]
+[exit 0]
+--- c2 case 0 rec 0   load 0.94 0.99 1.70
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1384.626153 ms (1384.626153 ns per key)
+space cost: 14.260756 MB (11.964866% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2428.849008 ms, avg latency: 2428.849008 ns
+topology: 1.699890 MB, link: 2.595201 MB, data: 9.965666 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1384.626153,14.260756,2428.849008
+[PASSED]
+[time 4.80 s, user 4.57 s, sys 0.21 s, maxrss 358504 KB]
+[busy 497 jiffies]
+[exit 0]
+--- lexindex hashed16   load 0.87 0.98 1.69
+1000000 keys
+lexindex HashedDictIndex fp=16: build 660 ms, size 13.935 MiB (14.611 B/key), latency cold 108.8 ns, then mean 106.0 / min 105.5 ns
+660.105,13.934555,108.841
+[time 1.89 s, user 4.81 s, sys 0.39 s, maxrss 498104 KB]
+[busy 541 jiffies]
+[exit 0]
+--- lexindex hashed8   load 0.87 0.98 1.69
+1000000 keys
+lexindex HashedDictIndex fp=8: build 656 ms, size 12.981 MiB (13.611 B/key), latency cold 105.0 ns, then mean 102.3 / min 100.8 ns
+656.450,12.980881,104.986
+[time 1.86 s, user 4.73 s, sys 0.39 s, maxrss 498392 KB]
+[busy 535 jiffies]
+[exit 0]
+--- lexindex hashed0   load 0.80 0.96 1.68
+1000000 keys
+lexindex HashedDictIndex closed: build 654 ms, size 12.027 MiB (12.611 B/key), latency cold 77.6 ns, then mean 77.0 / min 76.8 ns
+654.413,12.027206,77.560
+[time 1.75 s, user 4.52 s, sys 0.40 s, maxrss 500436 KB]
+[busy 513 jiffies]
+[exit 0]
+--- lexindex string   load 0.80 0.96 1.68
+1000000 keys
+lexindex StringIndex: build 1472 ms, size 16.673 MiB (17.483 B/key), latency cold 748.5 ns, then mean 746.6 / min 742.6 ns
+1471.613,16.673446,748.488
+[time 5.24 s, user 5.03 s, sys 0.19 s, maxrss 363144 KB]
+[busy 544 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.81 0.96 1.68
+1000000 keys
+lexindex DictIndex block 1024 routed: build 571 ms, size 9.130 MiB (9.573 B/key), latency cold 775.0 ns, then mean 773.9 / min 772.7 ns
+570.833,9.129984,774.974
+[time 4.47 s, user 6.23 s, sys 0.38 s, maxrss 496932 KB]
+[busy 684 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.84 0.96 1.67
+1000000 keys
+lexindex DictIndex block 256 routed: build 518 ms, size 9.891 MiB (10.371 B/key), latency cold 704.9 ns, then mean 704.9 / min 702.0 ns
+517.860,9.890570,704.934
+[time 4.14 s, user 6.94 s, sys 0.39 s, maxrss 498980 KB]
+[busy 765 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.77 0.95 1.66
+1000000 keys
+lexindex DictIndex block 32 routed: build 509 ms, size 12.866 MiB (13.491 B/key), latency cold 677.7 ns, then mean 675.1 / min 671.5 ns
+508.806,12.866024,677.743
+[time 4.00 s, user 6.69 s, sys 0.39 s, maxrss 495300 KB]
+[busy 734 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.71 0.93 1.65
+1000000 keys
+lexindex DictIndex block 1024: build 575 ms, size 8.891 MiB (9.323 B/key), latency cold 752.6 ns, then mean 752.7 / min 747.5 ns
+574.670,8.891459,752.588
+[time 4.38 s, user 6.13 s, sys 0.38 s, maxrss 494320 KB]
+[busy 684 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.65 0.91 1.64
+1000000 keys
+lexindex DictIndex block 256: build 508 ms, size 9.414 MiB (9.871 B/key), latency cold 712.3 ns, then mean 711.1 / min 708.7 ns
+508.087,9.413641,712.339
+[time 4.14 s, user 6.95 s, sys 0.40 s, maxrss 489120 KB]
+[busy 763 jiffies]
+[exit 0]
+--- lexindex dict32   load 0.68 0.92 1.64
+1000000 keys
+lexindex DictIndex block 32: build 507 ms, size 12.389 MiB (12.991 B/key), latency cold 682.5 ns, then mean 682.2 / min 678.5 ns
+507.142,12.389187,682.498
+[time 4.03 s, user 6.68 s, sys 0.42 s, maxrss 497104 KB]
+[busy 737 jiffies]
+[exit 0]
+
+##### paths-1000000 (1000000 lines, 125978312 bytes)   round 3/3   2026-09-24T19:26:18+03:00
+--- lexindex dict32   load 0.70 0.92 1.63
+1000000 keys
+lexindex DictIndex block 32: build 496 ms, size 12.389 MiB (12.991 B/key), latency cold 684.0 ns, then mean 680.9 / min 677.7 ns
+495.849,12.389187,684.013
+[time 4.02 s, user 6.68 s, sys 0.42 s, maxrss 493892 KB]
+[busy 745 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.73 0.92 1.63
+1000000 keys
+lexindex DictIndex block 256: build 508 ms, size 9.414 MiB (9.871 B/key), latency cold 709.4 ns, then mean 701.9 / min 699.9 ns
+507.536,9.413641,709.374
+[time 4.12 s, user 6.89 s, sys 0.40 s, maxrss 493708 KB]
+[busy 755 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.75 0.92 1.63
+1000000 keys
+lexindex DictIndex block 1024: build 565 ms, size 8.891 MiB (9.323 B/key), latency cold 758.0 ns, then mean 750.9 / min 747.4 ns
+565.255,8.891459,757.987
+[time 4.38 s, user 6.14 s, sys 0.36 s, maxrss 495680 KB]
+[busy 682 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.77 0.92 1.62
+1000000 keys
+lexindex DictIndex block 32 routed: build 499 ms, size 12.866 MiB (13.491 B/key), latency cold 682.6 ns, then mean 667.8 / min 666.5 ns
+498.835,12.866024,682.637
+[time 3.99 s, user 6.66 s, sys 0.39 s, maxrss 499140 KB]
+[busy 730 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.79 0.92 1.62
+1000000 keys
+lexindex DictIndex block 256 routed: build 516 ms, size 9.891 MiB (10.371 B/key), latency cold 714.7 ns, then mean 706.3 / min 706.0 ns
+515.921,9.890570,714.671
+[time 4.15 s, user 6.94 s, sys 0.39 s, maxrss 498660 KB]
+[busy 759 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.81 0.92 1.62
+1000000 keys
+lexindex DictIndex block 1024 routed: build 575 ms, size 9.130 MiB (9.573 B/key), latency cold 773.1 ns, then mean 762.6 / min 760.9 ns
+574.649,9.129984,773.107
+[time 4.44 s, user 6.22 s, sys 0.35 s, maxrss 503760 KB]
+[busy 684 jiffies]
+[exit 0]
+--- lexindex string   load 0.82 0.93 1.61
+1000000 keys
+lexindex StringIndex: build 1469 ms, size 16.673 MiB (17.483 B/key), latency cold 751.7 ns, then mean 740.5 / min 739.4 ns
+1469.073,16.673446,751.687
+[time 5.22 s, user 4.99 s, sys 0.21 s, maxrss 363560 KB]
+[busy 546 jiffies]
+[exit 0]
+--- lexindex hashed0   load 0.84 0.93 1.61
+1000000 keys
+lexindex HashedDictIndex closed: build 651 ms, size 12.027 MiB (12.611 B/key), latency cold 78.2 ns, then mean 77.9 / min 77.7 ns
+650.992,12.027206,78.166
+[time 1.76 s, user 4.64 s, sys 0.38 s, maxrss 492456 KB]
+[busy 521 jiffies]
+[exit 0]
+--- lexindex hashed8   load 0.85 0.93 1.61
+1000000 keys
+lexindex HashedDictIndex fp=8: build 650 ms, size 12.981 MiB (13.611 B/key), latency cold 105.9 ns, then mean 104.1 / min 100.8 ns
+650.365,12.980881,105.917
+[time 1.86 s, user 4.65 s, sys 0.41 s, maxrss 498572 KB]
+[busy 525 jiffies]
+[exit 0]
+--- lexindex hashed16   load 0.85 0.93 1.61
+1000000 keys
+lexindex HashedDictIndex fp=16: build 649 ms, size 13.935 MiB (14.611 B/key), latency cold 109.5 ns, then mean 103.1 / min 102.0 ns
+649.373,13.934555,109.468
+[time 1.86 s, user 4.71 s, sys 0.39 s, maxrss 495912 KB]
+[busy 531 jiffies]
+[exit 0]
+--- c2 case 0 rec 0   load 0.86 0.93 1.60
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1438.467299 ms (1438.467299 ns per key)
+space cost: 14.260756 MB (11.964866% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2459.343357 ms, avg latency: 2459.343357 ns
+topology: 1.699890 MB, link: 2.595201 MB, data: 9.965666 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1438.467299,14.260756,2459.343357
+[PASSED]
+[time 4.89 s, user 4.63 s, sys 0.24 s, maxrss 358520 KB]
+[busy 507 jiffies]
+[exit 0]
+--- c2 case 0 rec 1   load 0.87 0.93 1.60
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 1670.875483 ms (1670.875483 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2621.155918 ms, avg latency: 2621.155918 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1670.875483,12.500864,2621.155918
+[PASSED]
+[time 5.30 s, user 5.05 s, sys 0.23 s, maxrss 356900 KB]
+[busy 546 jiffies]
+[exit 0]
+--- c2 case 0 rec 2   load 0.88 0.93 1.60
+[TEST C2-FST]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 1763.305182 ms (1763.305182 ns per key)
+space cost: 12.500864 MB (10.488305% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2607.480658 ms, avg latency: 2607.480658 ns
+topology: 1.942371 MB, link: 2.552141 MB, data: 8.006351 MB
+--- Unary Path Analysis (FST, cutoff=4) ---
+  shared unary steps in main trie: 2658278
+  terminal suffixes: inplace=39819 (avg len=2.28)  links=891354 (95.7% of terminal)
+  link len: avg=14.94  max=443  total_chars=13318660
+  link length distribution (len:count):  4:40001  5:49577  6:45421  7:46380  8:50483  9:55180  10:56608  11:54673  12:51140  13:35047  14:30416  15:36724  16:35248  17:24069  18:19466  19:17073  20:16018  21:15299  22:13878  23:12677  24:11568  25:37816  26:26754  27:6712  28:5420  29:5541  30:5676  31:5365  32:4659  33:5334  34:4520  35:4652  36:5350  37:9255  38:4943  39:11477  40:3024  41:2087  42:2051  43:1854  44:1606  45:1448  46:1135  47:1025  48:963  49:801  50:774  51:907  52:679  53:727  54:589  55:642  56:710  57:689  58:824  59:515  60:781  61:937  62:666  63:360  64:436  65:381  66:289  67:245  68:235  69:250  70:244  71:266  72:444  73:249  74:341  75:214  76:315  77:82  78:131  79:63  80:31  81:46  82:38  83:33  84:32  85:58  86:34  87:20  88:33  89:21  90:5  91:6  92:18  93:7  94:11  95:14  96:12  97:3  98:4  99:4  100:10  101:17  102:11  103:6  104:17  105:9  106:12  107:11  108:7  109:2  110:3  111:1  112:2  113:4  114:3  115:4  116:3  117:4  118:13  119:5  120:1  122:2  123:3  124:38  125:23  126:156  127:15  128:61  129:3  130:1  131:3  132:2  133:1  136:3  137:6  138:1  139:1  142:4  143:1  144:2  145:2  146:2  151:3  152:1  154:2  159:2  160:2  161:2  165:3  167:1  171:1  172:3  173:1  174:1  175:1  182:1  187:3  188:1  190:2  191:1  194:1  195:3  198:1  201:1  202:1  203:1  205:1  206:1  215:1  219:1  233:1  235:1  243:1  247:1  257:1  265:1  444:1
+1763.305182,12.500864,2607.480658
+[PASSED]
+[time 5.38 s, user 5.14 s, sys 0.21 s, maxrss 356552 KB]
+[busy 556 jiffies]
+[exit 0]
+--- c2 case 1 rec 0   load 0.82 0.92 1.58
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 5115.261880 ms (5115.261880 ns per key)
+space cost: 14.878411 MB (12.483082% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1647.905930 ms, avg latency: 1647.905930 ns
+topology: 0.476959 MB, link: 4.004946 MB, data: 10.396506 MB
+5115.261880,14.878411,1647.905930
+[PASSED]
+[time 7.77 s, user 7.35 s, sys 0.38 s, maxrss 595724 KB]
+[busy 805 jiffies]
+[exit 0]
+--- c2 case 1 rec 1   load 0.84 0.92 1.58
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+Done!
+build time: 5373.321738 ms (5373.321738 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1784.572080 ms, avg latency: 1784.572080 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5373.321738,13.118518,1784.572080
+[PASSED]
+[time 8.16 s, user 7.77 s, sys 0.35 s, maxrss 587888 KB]
+[busy 840 jiffies]
+[exit 0]
+--- c2 case 1 rec 2   load 0.86 0.92 1.57
+[TEST C2-CoCo(LOUDS-Sparse)]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.746100 MB
+trie size: 0.687543 MB
+Done!
+build time: 5476.500282 ms (5476.500282 ns per key)
+space cost: 13.118518 MB (11.006521% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1800.262730 ms, avg latency: 1800.262730 ns
+topology: 0.719440 MB, link: 3.961886 MB, data: 8.437192 MB
+5476.500282,13.118518,1800.262730
+[PASSED]
+[time 8.25 s, user 7.87 s, sys 0.34 s, maxrss 590904 KB]
+[busy 850 jiffies]
+[exit 0]
+--- c2 case 2 rec 0   load 0.88 0.93 1.57
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+Done!
+build time: 1334.011506 ms (1334.011506 ns per key)
+space cost: 11.928165 MB (10.007807% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 885.780599 ms, avg latency: 885.780599 ns
+topology: 0.761036 MB, link: 3.343996 MB, data: 7.802626 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1334.011506,11.928165,885.780599
+[PASSED]
+[time 3.22 s, user 2.97 s, sys 0.23 s, maxrss 356088 KB]
+[busy 338 jiffies]
+[exit 0]
+--- c2 case 2 rec 1   load 0.89 0.93 1.56
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+Done!
+build time: 1644.823115 ms (1644.823115 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1559.067646 ms, avg latency: 1559.067646 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1644.823115,9.839272,1559.067646
+[PASSED]
+[time 4.19 s, user 3.93 s, sys 0.24 s, maxrss 354204 KB]
+[busy 433 jiffies]
+[exit 0]
+--- c2 case 2 rec 2   load 0.90 0.93 1.56
+[TEST C2-MARISA]
+Processing dataset...
+Done!
+Building trie...
+trie size: 2.297644 MB
+trie size: 3.841883 MB
+trie size: 0.864431 MB
+Done!
+build time: 1801.940012 ms (1801.940012 ns per key)
+space cost: 9.839272 MB (8.255212% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1593.006511 ms, avg latency: 1593.006511 ns
+topology: 1.073097 MB, link: 3.403300 MB, data: 5.342366 MB
+--- Unary Path Analysis (Marisa, cutoff=3) ---
+  branches: 1534795  |  single-char: 270841 (17.6%)  short-unary: 45134 (2.9%)  links: 1218820 (79.4%)
+  link len: avg=14.88  max=445  total_chars=18132830
+  link length distribution (len:count):  3:37127  4:49365  5:75461  6:91989  7:72185  8:66513  9:63973  10:68956  11:73223  12:65790  13:57380  14:41495  15:36762  16:42631  17:41179  18:27817  19:22377  20:18838  21:17845  22:16718  23:15115  24:13613  25:12555  26:39233  27:27982  28:7379  29:6328  30:6087  31:6172  32:5955  33:5265  34:5643  35:4792  36:4909  37:5534  38:9417  39:5190  40:12044  41:4130  42:3423  43:3194  44:2134  45:1772  46:1642  47:1384  48:1261  49:1057  50:900  51:919  52:1030  53:750  54:799  55:667  56:702  57:772  58:823  59:1198  60:1008  61:899  62:972  63:712  64:409  65:454  66:414  67:320  68:269  69:256  70:270  71:258  72:280  73:453  74:258  75:356  76:221  77:315  78:88  79:138  80:65  81:34  82:48  83:40  84:34  85:38  86:63  87:38  88:23  89:36  90:23  91:6  92:6  93:19  94:8  95:11  96:14  97:13  98:3  99:5  100:4  101:12  102:17  103:11  104:6  105:17  106:9  107:12  108:11  109:7  110:2  111:4  112:1  113:2  114:4  115:4  116:4  117:3  118:4  119:14  120:6  121:1  123:2  124:3  125:38  126:23  127:156  128:15  129:61  130:3  131:1  132:3  133:2  134:1  136:1  137:3  138:6  139:1  140:1  143:4  144:2  145:2  146:2  147:2  149:1  152:3  153:1  155:2  157:1  160:2  161:2  162:2  166:3  167:1  168:1  172:1  173:3  174:1  175:1  176:1  183:2  185:1  188:4  189:2  191:2  192:3  195:2  196:3  199:1  202:1  203:1  204:1  206:1  207:2  216:1  220:1  230:1  234:1  236:1  244:1  248:1  258:1  266:1  445:1
+  short unary avg len: 2.00
+1801.940012,9.839272,1593.006511
+[PASSED]
+[time 4.42 s, user 4.16 s, sys 0.24 s, maxrss 353904 KB]
+[busy 479 jiffies]
+[exit 0]
+--- c2 case 3 rec 0   load 0.91 0.93 1.56
+[TEST FST]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 3288.940535 ms (3288.940535 ns per key)
+space cost: 14.021067 MB (11.763764% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 4574.734801 ms, avg latency: 4574.734801 ns
+not implemented
+3288.940535,14.021067,4574.734801
+[PASSED]
+[time 8.87 s, user 8.62 s, sys 0.21 s, maxrss 357528 KB]
+[busy 912 jiffies]
+[exit 0]
+--- c2 case 4 rec 0   load 0.92 0.93 1.55
+[TEST COCO]
+Processing dataset...
+Done!
+Building trie...
+num nodes = 584148, average depth = 12.594651
+ef = 0.000038, pa = 0.103241, bv = 0.000608, de = 0.597184
+efr = 0.000176, par = 0.181430, bvr = 0.000135, der = 0.117188
+Done!
+build time: 44937.312859 ms (44937.312859 ns per key)
+space cost: 19.697372 MB (16.526221% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1395.010948 ms, avg latency: 1395.010948 ns
+not implemented
+44937.312859,19.697372,1395.010948
+[PASSED]
+[time 48.95 s, user 38.67 s, sys 10.08 s, maxrss 23293148 KB]
+[busy 5032 jiffies]
+[exit 0]
+--- c2 case 5 rec 0   load 0.97 0.95 1.52
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1619.348539 ms (1619.348539 ns per key)
+space cost: 12.257486 MB (10.284109% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 971.271430 ms, avg latency: 971.271430 ns
+not implemented
+1619.348539,12.257486,971.271430
+[PASSED]
+[time 3.55 s, user 3.29 s, sys 0.23 s, maxrss 411380 KB]
+[busy 368 jiffies]
+[exit 0]
+--- c2 case 5 rec 1   load 0.97 0.95 1.52
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1761.393729 ms (1761.393729 ns per key)
+space cost: 9.428862 MB (7.910875% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1785.212534 ms, avg latency: 1785.212534 ns
+not implemented
+1761.393729,9.428862,1785.212534
+[PASSED]
+[time 4.49 s, user 4.24 s, sys 0.23 s, maxrss 411520 KB]
+[busy 461 jiffies]
+[exit 0]
+--- c2 case 5 rec 2   load 0.97 0.95 1.51
+[TEST MARISA]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 1780.203591 ms (1780.203591 ns per key)
+space cost: 9.029414 MB (7.575736% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 2251.541835 ms, avg latency: 2251.541835 ns
+not implemented
+1780.203591,9.029414,2251.541835
+[PASSED]
+[time 4.99 s, user 4.71 s, sys 0.25 s, maxrss 411596 KB]
+[busy 517 jiffies]
+[exit 0]
+--- c2 case 6 rec 0   load 0.98 0.95 1.51
+[TEST PDT]
+Processing dataset...
+Done!
+Building trie...
+dict size: 153672, stream size: 10323140
+Done!
+build time: 4761.281698 ms (4761.281698 ns per key)
+space cost: 11.267526 MB (9.453526% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 1060.456545 ms, avg latency: 1060.456545 ns
+not implemented
+4761.281698,11.267526,1060.456545
+[PASSED]
+[time 6.81 s, user 6.47 s, sys 0.31 s, maxrss 389232 KB]
+[busy 703 jiffies]
+[exit 0]
+--- c2 case 7 rec 0   load 0.98 0.95 1.50
+[TEST ART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 409.453097 ms (409.453097 ns per key)
+space cost: 34.675591 MB (29.093041% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 779.026675 ms, avg latency: 779.026675 ns
+not implemented
+409.453097,34.675591,779.026675
+[PASSED]
+[time 2.22 s, user 1.93 s, sys 0.28 s, maxrss 505336 KB]
+[busy 232 jiffies]
+[exit 0]
+--- c2 case 8 rec 0   load 0.90 0.93 1.50
+[TEST CART]
+Processing dataset...
+Done!
+Building trie...
+Done!
+build time: 461.962594 ms (461.962594 ns per key)
+space cost: 18.620093 MB (15.622377% of original size 119.188606 MB)
+Querying trie...
+Done!
+total time: 853.902106 ms, avg latency: 853.902106 ns
+not implemented
+461.962594,18.620093,853.902106
+[PASSED]
+[time 2.34 s, user 2.07 s, sys 0.25 s, maxrss 496028 KB]
+[busy 243 jiffies]
+[exit 0]
+--- xcdat 7   load 0.90 0.93 1.50
+build time: 1417.521545 ms
+space cost: 18.455355 MiB (15.484160% of original size 119.188606 MiB)
+avg latency: 693.494166 ns
+1417.521545,18.455355,693.494166
+[time 3.11 s, user 2.85 s, sys 0.24 s, maxrss 362472 KB]
+[busy 322 jiffies]
+[exit 0]
+--- xcdat 8   load 0.91 0.94 1.49
+build time: 1350.079514 ms
+space cost: 18.497238 MiB (15.519301% of original size 119.188606 MiB)
+avg latency: 709.941837 ns
+1350.079514,18.497238,709.941837
+[time 3.05 s, user 2.79 s, sys 0.24 s, maxrss 362516 KB]
+[busy 319 jiffies]
+[exit 0]
+--- xcdat 15   load 0.92 0.94 1.49
+build time: 1414.114501 ms
+space cost: 23.949356 MiB (20.093662% of original size 119.188606 MiB)
+avg latency: 614.543205 ns
+1414.114501,23.949356,614.543205
+[time 3.02 s, user 2.76 s, sys 0.23 s, maxrss 367936 KB]
+[busy 312 jiffies]
+[exit 0]
+--- xcdat 16   load 0.84 0.92 1.48
+build time: 1351.951452 ms
+space cost: 25.154240 MiB (21.104567% of original size 119.188606 MiB)
+avg latency: 689.471896 ns
+1351.951452,25.154240,689.471896
+[time 3.03 s, user 2.78 s, sys 0.23 s, maxrss 369360 KB]
+[busy 320 jiffies]
+[exit 0]
+
+campaign done 2026-09-24T19:29:51+03:00, load 0.84 0.92 1.48
