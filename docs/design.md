@@ -372,6 +372,25 @@ the heads alone. Against 4.3.2 in one process, in two builds of the harness
 `id` is 2.7–5.5 % faster on eight of the eleven corpora that take no code, 0.9–4.3 % on identifiers
 and UUIDs, and level on paths.
 
+Since 4.4.1 a run of tied samples has a trie of its own (`src/ties.rs`), derived at load and held in
+no blob. Its root splits the run's heads by their eight-byte word past the prefix they all share; a
+sub-run that ties again becomes a node split the same way past its own, longer prefix, down to one
+block an edge or 32 levels. One more sample level would not have done it: paths nest a directory at
+a time, and a second word past the run's prefix still leaves 3 784 of the 3 907 blocks tied. On
+paths at the default block the trie is 1 136 nodes and 5 035 edges, nine levels at the deepest and
+4.7 on the average probe. The descent reads only the probe and the trie, taking at each node the
+probe's word at the node's prefix without asking whether the probe shares that prefix — it is asked
+once, against the one head the descent arrives at. A probe that shares the deepest prefix on its
+path shares every prefix above it, and the edges placed it; one that does not left the trie at the
+first node whose prefix it does not share, and lies below or above every block under that node, as
+it lies below or above the head it was compared with. So a lookup compares one head where it
+compared eleven, and hands that compare to the block's scan: 16.3 % fewer instructions a member `id`
+at the default block and 10.8 % at 1024, and 8 % less time at both, against 4.4.0 in one process
+([`bench/results/id-ab-2026-09-24-arz-b362f43.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-b362f43.txt)).
+The rest of a paths lookup is the scan — 62 % of its instructions — which the trie does not touch.
+What the trie costs is a load's: a mapped load of paths takes 238 µs against 130 at the default
+block, and holds 0.10 bytes a key more.
+
 That split is the other half of the block ladder: a larger block spends less on the search and more
 on the scan, one for one, so past a million keys `id` barely moves across the ladder while on the
 dictionary it rises steadily. Neither half of the routing is collected by a better structure over
@@ -637,6 +656,17 @@ out of the branch predictor is the standard library's, which selects with `hint:
 over a `u64` slice; a section of a blob is not aligned, and searching the bytes measured 110 ns against
 26 for the pair. In place of the walk over the arrays that `load` makes, every access bounds what they
 say, so a crafted file answers wrong, never out of bounds.
+
+The samples are not all a load builds. A blob in a character code gets the code's tables and,
+where they route better, the samples of its decoded heads; a run of blocks whose samples tie gets a
+trie of their words ([described with the search](#dictindex)); and the symbol tables are decoded
+rather than borrowed. Everything a mapped `DictIndex` holds on the heap came to 0.07–0.39 bytes a
+key over nine corpora and blocks at 4.4.1
+([`bench/results/resident-2026-09-24-arz-b362f43.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/resident-2026-09-24-arz-b362f43.txt)):
+0.07 on words and UUIDs, 0.16 on English titles and URLs, 0.32 on paths — of which the trie is 0.10
+— and 0.28–0.39 on the three that take a code, 0.12–0.27 of it the code's tables. Those tables were
+twice that at 4.4.0, when a load of jieba's lexicon held 3.69 bytes a key against marisa-trie's
+3.58; it holds 3.39 now.
 
 The one caveat is the usual mmap contract: the mapped file must not be mutated while an index
 borrows it. That obligation is the caller's, so the `load_mmap` family are **`unsafe fn`s** on every

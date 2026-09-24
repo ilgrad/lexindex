@@ -1,0 +1,60 @@
+# Resident bytes of a loaded DictIndex: lexindex 4.4.0 (crates.io) against b362f43 (the tie tries and the
+# narrowed character-code tables), 2026-09-24, arz, Linux 7.2.7-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01).
+# A counting global allocator (local/charcode-resident): 'from_bytes' is every byte the owned load
+# holds, blob copy included; 'load_mmap heap' is what a mapped load allocates, the blob being page
+# cache. Both builds write the same blob, byte for byte (checked). Deterministic: sizes, not time.
+# 'working tree' below is b362f43.
+
+jieba-0.42.1/jieba/dict.txt: 349045 keys, block 256
+4.4.0          blob   1061163 (3.040 B/key)  from_bytes   1286907 (+ 225744, 3.687 B/key)  load_mmap heap  225744
+working tree   blob   1061163 (3.040 B/key)  from_bytes   1183959 (+ 122796, 3.392 B/key)  load_mmap heap  122796
+blobs identical: 1061163 bytes
+
+titles-zh-1000000.txt: 1000000 keys, block 256
+4.4.0          blob   5851205 (5.851 B/key)  from_bytes   6473975 (+ 622770, 6.474 B/key)  load_mmap heap  622770
+working tree   blob   5851205 (5.851 B/key)  from_bytes   6243151 (+ 391946, 6.243 B/key)  load_mmap heap  391946
+blobs identical: 5851205 bytes
+
+titles-ru-1000000.txt: 1000000 keys, block 256
+4.4.0          blob   6861688 (6.862 B/key)  from_bytes   7254002 (+ 392314, 7.254 B/key)  load_mmap heap  392314
+working tree   blob   6861688 (6.862 B/key)  from_bytes   7138196 (+ 276508, 7.138 B/key)  load_mmap heap  276508
+blobs identical: 6861688 bytes
+
+paths-1000000.txt: 1000000 keys, block 256
+4.4.0          blob   9870918 (9.871 B/key)  from_bytes  10090211 (+ 219293, 10.090 B/key)  load_mmap heap  219293
+working tree   blob   9870918 (9.871 B/key)  from_bytes  10189099 (+ 318181, 10.189 B/key)  load_mmap heap  318181
+blobs identical: 9870918 bytes
+
+paths-1000000.txt: 1000000 keys, block 1024
+4.4.0          blob   9323370 (9.323 B/key)  from_bytes   9516493 (+ 193123, 9.516 B/key)  load_mmap heap  193123
+working tree   blob   9323370 (9.323 B/key)  from_bytes   9539377 (+ 216007, 9.539 B/key)  load_mmap heap  216007
+blobs identical: 9323370 bytes
+
+titles-en-1000000.txt: 1000000 keys, block 256
+4.4.0          blob   7370097 (7.370 B/key)  from_bytes   7523912 (+ 153815, 7.524 B/key)  load_mmap heap  153815
+working tree   blob   7370097 (7.370 B/key)  from_bytes   7528364 (+ 158267, 7.528 B/key)  load_mmap heap  158267
+blobs identical: 7370097 bytes
+
+urls-1000000.txt: 1000000 keys, block 256
+4.4.0          blob   7511038 (7.511 B/key)  from_bytes   7665614 (+ 154576, 7.666 B/key)  load_mmap heap  154576
+working tree   blob   7511038 (7.511 B/key)  from_bytes   7670202 (+ 159164, 7.670 B/key)  load_mmap heap  159164
+blobs identical: 7511038 bytes
+
+uuid-1000000.txt: 1000000 keys, block 256
+4.4.0          blob  18040375 (18.040 B/key)  from_bytes  18111935 (+  71560, 18.112 B/key)  load_mmap heap   71560
+working tree   blob  18040375 (18.040 B/key)  from_bytes  18111935 (+  71560, 18.112 B/key)  load_mmap heap   71560
+blobs identical: 18040375 bytes
+
+words-full.txt: 479823 keys, block 256
+4.4.0          blob   1264362 (2.635 B/key)  from_bytes   1300186 (+  35824, 2.710 B/key)  load_mmap heap   35824
+working tree   blob   1264362 (2.635 B/key)  from_bytes   1300186 (+  35824, 2.710 B/key)  load_mmap heap   35824
+blobs identical: 1264362 bytes
+
+# marisa-trie 1.4.1 on the same 349 045 words, Python 3.14.7: glibc mallinfo2 (uordblks + hblkhd)
+# around Trie().frombytes(blob) and Trie().mmap(file).
+marisa num_tries=default: file   1252688 (3.589 B/key)  frombytes heap   1253664 (3.592 B/key)  mmap heap    3488
+marisa num_tries=1: file   1526504 (4.373 B/key)  frombytes heap   1527600 (4.377 B/key)  mmap heap    1152
+marisa num_tries=2: file   1280464 (3.668 B/key)  frombytes heap   1281872 (3.673 B/key)  mmap heap    2304
+marisa num_tries=3: file   1252688 (3.589 B/key)  frombytes heap   1253472 (3.591 B/key)  mmap heap    3456
+marisa num_tries=4: file   1249672 (3.580 B/key)  frombytes heap   1249376 (3.579 B/key)  mmap heap    4608
+marisa num_tries=5: file   1249448 (3.580 B/key)  frombytes heap   1248832 (3.578 B/key)  mmap heap    5808

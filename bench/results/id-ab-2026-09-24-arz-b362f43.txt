@@ -1,0 +1,470 @@
+# ab445: lexindex 4.4.0 (crates.io) against local/wt/next at b362f43 (perf(charcode): hold half the tables a coded blob builds at load)
+# 2026-09-24T17:23:03+03:00, up up 3 hours, 9 minutes, Linux 7.2.7-200.fc44.x86_64, AMD Ryzen 7 5800HS with Radeon Graphics, rustc 1.98.1 (48a229cea 2026-09-01)
+# governor powersave; MemTotal: 40443548 kB;MemAvailable: 30114104 kB;SwapTotal: 28310012 kB;SwapFree: 28310012 kB;
+# DIMM layout: not read (needs root). Placement: not read (needs root); each variant is loaded twice a process, separately.
+# three process rounds, each gated (bench-ready exit 0, hottest zone < 70 C); configs forward, reversed, forward.
+# row <corpus> <block> <lane> <variant> <alloc> <min ns> [<each round>]; *_us rows are loads, min of seven alternated.
+# gate ab1: ready 2026-09-24T17:25:14+03:00, load 0.32 2.76 2.86, acpitz=49 iwlwifi_1=38 
+=== round 1 dict.txt 256 2026-09-24T17:25:14+03:00 load 0.32 2.76 2.86 acpitz=49 iwlwifi_1=38 
+# dict: 349045 keys, block 256, blob 1061163 bytes (3.040 B/key), 349045 probes shuffled, 5 rounds
+row dict 256 from_bytes_us old - 371.2
+row dict 256 from_bytes_us new - 376.6
+row dict 256 load_mmap_us old - 157.7
+row dict 256 load_mmap_us new - 162.8
+row dict 256 id old 1 260.0 [290.8 287.9 265.7 272.2 260.0]
+row dict 256 key_into old 1 185.7 [185.7 189.6 187.4 189.8 187.2]
+row dict 256 id new 1 275.2 [275.2 277.6 279.3 282.1 278.6]
+row dict 256 key_into new 1 183.9 [183.9 187.3 186.4 188.3 185.5]
+row dict 256 id new 2 272.0 [277.3 297.5 272.0 289.6 272.9]
+row dict 256 key_into new 2 185.6 [185.9 192.2 186.5 189.0 185.6]
+row dict 256 id old 2 267.0 [267.0 275.8 276.9 275.3 290.7]
+row dict 256 key_into old 2 187.0 [188.3 187.6 187.1 187.8 187.0]
+row dict 256 control_si_id old - 164.5 [190.2 166.7 174.3 164.5 172.0]
+=== round 1 titles-zh-1000000.txt 256 2026-09-24T17:25:18+03:00 load 0.37 2.73 2.85 acpitz=87 iwlwifi_1=38 
+# titles-zh-1000000: 1000000 keys, block 256, blob 5851205 bytes (5.851 B/key), 1000000 probes shuffled, 5 rounds
+row titles-zh-1000000 256 from_bytes_us old - 1569.8
+row titles-zh-1000000 256 from_bytes_us new - 1577.5
+row titles-zh-1000000 256 load_mmap_us old - 340.2
+row titles-zh-1000000 256 load_mmap_us new - 352.5
+row titles-zh-1000000 256 id old 1 417.9 [431.1 419.1 419.0 420.0 417.9]
+row titles-zh-1000000 256 key_into old 1 255.2 [259.2 260.9 256.7 259.5 255.2]
+row titles-zh-1000000 256 id new 1 421.5 [435.2 424.5 428.8 421.5 428.6]
+row titles-zh-1000000 256 key_into new 1 252.2 [258.1 258.5 252.3 257.6 252.2]
+row titles-zh-1000000 256 id new 2 422.0 [435.8 425.2 428.2 422.0 429.1]
+row titles-zh-1000000 256 key_into new 2 251.6 [257.1 256.9 251.9 257.5 251.6]
+row titles-zh-1000000 256 id old 2 417.9 [434.6 420.5 430.7 417.9 425.0]
+row titles-zh-1000000 256 key_into old 2 253.4 [255.3 255.6 254.9 253.9 253.4]
+row titles-zh-1000000 256 control_si_id old - 355.6 [357.2 355.6 357.2 356.8 361.3]
+=== round 1 titles-ru-1000000.txt 256 2026-09-24T17:25:37+03:00 load 0.69 2.65 2.82 acpitz=83 iwlwifi_1=37 
+# titles-ru-1000000: 1000000 keys, block 256, blob 6861688 bytes (6.862 B/key), 1000000 probes shuffled, 5 rounds
+row titles-ru-1000000 256 from_bytes_us old - 1701.0
+row titles-ru-1000000 256 from_bytes_us new - 1706.6
+row titles-ru-1000000 256 load_mmap_us old - 269.4
+row titles-ru-1000000 256 load_mmap_us new - 276.1
+row titles-ru-1000000 256 id old 1 462.8 [479.0 464.1 462.8 463.7 467.1]
+row titles-ru-1000000 256 key_into old 1 303.7 [306.1 306.8 305.0 307.5 303.7]
+row titles-ru-1000000 256 id new 1 470.3 [482.4 470.3 480.4 470.6 475.5]
+row titles-ru-1000000 256 key_into new 1 303.8 [305.3 308.3 304.2 308.7 303.8]
+row titles-ru-1000000 256 id new 2 472.0 [474.7 472.5 474.8 472.0 473.7]
+row titles-ru-1000000 256 key_into new 2 304.1 [304.3 307.3 304.1 308.3 305.4]
+row titles-ru-1000000 256 id old 2 468.6 [476.2 468.6 473.6 474.6 475.2]
+row titles-ru-1000000 256 key_into old 2 304.6 [308.7 306.8 304.6 304.6 310.1]
+row titles-ru-1000000 256 control_si_id old - 564.0 [573.9 564.0 580.0 567.5 581.0]
+=== round 1 paths-1000000.txt 256 2026-09-24T17:26:01+03:00 load 0.78 2.54 2.78 acpitz=91 iwlwifi_1=37 
+# paths-1000000: 1000000 keys, block 256, blob 9870918 bytes (9.871 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 256 from_bytes_us old - 2324.9
+row paths-1000000 256 from_bytes_us new - 2375.8
+row paths-1000000 256 load_mmap_us old - 130.2
+row paths-1000000 256 load_mmap_us new - 238.3
+row paths-1000000 256 id old 1 769.2 [786.5 772.0 771.2 769.4 769.2]
+row paths-1000000 256 key_into old 1 338.7 [349.5 341.3 338.9 344.2 338.7]
+row paths-1000000 256 id new 1 708.5 [721.5 728.6 724.8 714.4 708.5]
+row paths-1000000 256 key_into new 1 342.5 [352.3 352.6 348.6 356.3 342.5]
+row paths-1000000 256 id new 2 711.4 [728.6 722.2 726.0 722.2 711.4]
+row paths-1000000 256 key_into new 2 344.6 [350.1 359.4 355.1 351.8 344.6]
+row paths-1000000 256 id old 2 784.5 [787.5 785.6 786.8 784.5 789.3]
+row paths-1000000 256 key_into old 2 341.3 [343.6 341.3 342.9 341.8 343.2]
+row paths-1000000 256 control_si_id old - 776.5 [793.5 789.6 776.5 780.4 782.7]
+=== round 1 paths-1000000.txt 1024 2026-09-24T17:26:33+03:00 load 0.95 2.38 2.72 acpitz=92 iwlwifi_1=36 
+# paths-1000000: 1000000 keys, block 1024, blob 9323370 bytes (9.323 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 1024 from_bytes_us old - 2059.2
+row paths-1000000 1024 from_bytes_us new - 2080.7
+row paths-1000000 1024 load_mmap_us old - 107.6
+row paths-1000000 1024 load_mmap_us new - 130.3
+row paths-1000000 1024 id old 1 817.8 [820.4 820.9 818.0 819.1 817.8]
+row paths-1000000 1024 key_into old 1 500.9 [503.3 505.9 500.9 505.4 502.0]
+row paths-1000000 1024 id new 1 750.2 [767.4 750.6 759.4 750.2 759.6]
+row paths-1000000 1024 key_into new 1 500.1 [502.1 500.1 500.6 503.0 506.5]
+row paths-1000000 1024 id new 2 761.5 [780.8 761.5 764.8 762.5 767.2]
+row paths-1000000 1024 key_into new 2 505.4 [510.7 506.6 507.6 507.0 505.4]
+row paths-1000000 1024 id old 2 822.2 [823.0 830.0 823.0 823.8 822.2]
+row paths-1000000 1024 key_into old 2 499.4 [499.4 502.0 502.5 500.4 503.6]
+row paths-1000000 1024 control_si_id old - 782.3 [792.2 791.7 789.3 782.3 783.2]
+=== round 1 titles-en-1000000.txt 256 2026-09-24T17:27:09+03:00 load 0.97 2.23 2.65 acpitz=93 iwlwifi_1=36 
+# titles-en-1000000: 1000000 keys, block 256, blob 7370097 bytes (7.370 B/key), 1000000 probes shuffled, 5 rounds
+row titles-en-1000000 256 from_bytes_us old - 1631.7
+row titles-en-1000000 256 from_bytes_us new - 1634.6
+row titles-en-1000000 256 load_mmap_us old - 87.9
+row titles-en-1000000 256 load_mmap_us new - 94.6
+row titles-en-1000000 256 id old 1 424.0 [436.0 424.0 425.6 428.2 427.4]
+row titles-en-1000000 256 key_into old 1 255.6 [258.3 259.7 255.6 262.1 255.8]
+row titles-en-1000000 256 id new 1 432.2 [439.6 432.4 443.0 432.2 439.4]
+row titles-en-1000000 256 key_into new 1 260.2 [260.7 262.6 260.7 262.4 260.2]
+row titles-en-1000000 256 id new 2 417.5 [434.1 417.5 422.3 421.5 424.2]
+row titles-en-1000000 256 key_into new 2 254.1 [264.8 271.3 255.1 260.3 254.1]
+row titles-en-1000000 256 id old 2 419.6 [439.1 436.3 425.2 419.6 428.4]
+row titles-en-1000000 256 key_into old 2 254.4 [258.9 258.0 254.4 255.3 255.8]
+row titles-en-1000000 256 control_si_id old - 388.4 [388.4 394.0 389.4 397.0 391.2]
+=== round 1 urls-1000000.txt 256 2026-09-24T17:27:29+03:00 load 0.98 2.15 2.62 acpitz=85 iwlwifi_1=37 
+# urls-1000000: 1000000 keys, block 256, blob 7511038 bytes (7.511 B/key), 1000000 probes shuffled, 5 rounds
+row urls-1000000 256 from_bytes_us old - 1671.8
+row urls-1000000 256 from_bytes_us new - 1694.5
+row urls-1000000 256 load_mmap_us old - 101.4
+row urls-1000000 256 load_mmap_us new - 108.6
+row urls-1000000 256 id old 1 436.8 [456.9 437.3 442.7 437.5 436.8]
+row urls-1000000 256 key_into old 1 255.8 [265.1 265.6 263.8 261.2 255.8]
+row urls-1000000 256 id new 1 436.3 [444.1 436.3 449.8 440.1 442.5]
+row urls-1000000 256 key_into new 1 256.4 [262.6 267.2 263.2 262.6 256.4]
+row urls-1000000 256 id new 2 436.5 [449.2 444.7 445.0 436.5 445.7]
+row urls-1000000 256 key_into new 2 257.9 [263.0 267.6 262.7 268.3 257.9]
+row urls-1000000 256 id old 2 442.5 [458.1 443.9 452.6 442.5 448.0]
+row urls-1000000 256 key_into old 2 253.1 [261.6 262.0 261.8 262.1 253.1]
+row urls-1000000 256 control_si_id old - 453.3 [487.3 461.6 458.5 465.1 453.3]
+=== round 1 uuid-1000000.txt 256 2026-09-24T17:27:50+03:00 load 0.99 2.07 2.58 acpitz=88 iwlwifi_1=37 
+# uuid-1000000: 1000000 keys, block 256, blob 18040375 bytes (18.040 B/key), 1000000 probes shuffled, 5 rounds
+row uuid-1000000 256 from_bytes_us old - 5664.4
+row uuid-1000000 256 from_bytes_us new - 5660.5
+row uuid-1000000 256 load_mmap_us old - 82.6
+row uuid-1000000 256 load_mmap_us new - 83.3
+row uuid-1000000 256 id old 1 408.2 [414.0 412.5 411.7 408.2 410.5]
+row uuid-1000000 256 key_into old 1 221.4 [221.4 227.5 222.0 232.7 227.2]
+row uuid-1000000 256 id new 1 407.0 [413.7 407.0 409.8 408.5 410.4]
+row uuid-1000000 256 key_into new 1 215.8 [220.6 221.8 215.8 220.8 216.2]
+row uuid-1000000 256 id new 2 400.1 [403.6 400.1 405.0 400.8 405.1]
+row uuid-1000000 256 key_into new 2 214.4 [219.9 231.8 217.3 221.8 214.4]
+row uuid-1000000 256 id old 2 402.1 [403.7 403.0 403.3 402.1 406.0]
+row uuid-1000000 256 key_into old 2 215.0 [216.5 215.5 218.5 215.0 217.9]
+row uuid-1000000 256 control_si_id old - 439.8 [445.3 439.8 444.7 440.9 443.7]
+=== round 1 words-full.txt 256 2026-09-24T17:28:09+03:00 load 0.99 2.00 2.54 acpitz=84 iwlwifi_1=36 
+# words-full: 479823 keys, block 256, blob 1264362 bytes (2.635 B/key), 479823 probes shuffled, 5 rounds
+row words-full 256 from_bytes_us old - 311.0
+row words-full 256 from_bytes_us new - 315.4
+row words-full 256 load_mmap_us old - 46.7
+row words-full 256 load_mmap_us new - 48.0
+row words-full 256 id old 1 291.1 [298.2 301.4 291.1 301.1 295.4]
+row words-full 256 key_into old 1 194.8 [194.8 198.3 196.4 197.7 195.2]
+row words-full 256 id new 1 300.9 [309.6 300.9 307.0 301.9 301.5]
+row words-full 256 key_into new 1 192.2 [194.3 196.2 192.2 194.7 192.8]
+row words-full 256 id new 2 285.3 [297.7 290.3 298.8 285.3 309.1]
+row words-full 256 key_into new 2 192.0 [192.0 195.1 193.4 194.4 198.6]
+row words-full 256 id old 2 287.7 [297.8 287.7 291.4 292.3 293.7]
+row words-full 256 key_into old 2 195.9 [196.7 196.0 196.5 195.9 203.0]
+row words-full 256 control_si_id old - 216.0 [231.5 218.3 228.5 216.0 229.4]
+=== end of round 1 2026-09-24T17:28:16+03:00 acpitz=87 iwlwifi_1=37 
+# gate ab2: ready 2026-09-24T17:29:22+03:00, load 0.34 1.58 2.35, acpitz=51 iwlwifi_1=37 
+=== round 2 words-full.txt 256 2026-09-24T17:29:22+03:00 load 0.34 1.58 2.35 acpitz=51 iwlwifi_1=37 
+# words-full: 479823 keys, block 256, blob 1264362 bytes (2.635 B/key), 479823 probes shuffled, 5 rounds
+row words-full 256 from_bytes_us old - 310.8
+row words-full 256 from_bytes_us new - 311.3
+row words-full 256 load_mmap_us old - 43.4
+row words-full 256 load_mmap_us new - 43.7
+row words-full 256 id old 1 282.8 [296.1 287.6 283.3 288.9 282.8]
+row words-full 256 key_into old 1 199.1 [199.2 199.7 201.3 200.6 199.1]
+row words-full 256 id new 1 291.8 [307.1 296.0 295.9 292.8 291.8]
+row words-full 256 key_into new 1 194.4 [194.4 196.5 195.4 197.0 195.4]
+row words-full 256 id new 2 285.8 [285.8 298.4 291.6 287.7 292.0]
+row words-full 256 key_into new 2 195.2 [195.2 197.7 196.6 198.0 195.5]
+row words-full 256 id old 2 288.6 [292.5 290.6 291.3 292.5 288.6]
+row words-full 256 key_into old 2 198.4 [198.4 200.0 198.4 200.1 198.4]
+row words-full 256 control_si_id old - 207.0 [215.8 207.0 211.5 208.2 211.2]
+=== round 2 uuid-1000000.txt 256 2026-09-24T17:29:28+03:00 load 0.39 1.57 2.35 acpitz=90 iwlwifi_1=37 
+# uuid-1000000: 1000000 keys, block 256, blob 18040375 bytes (18.040 B/key), 1000000 probes shuffled, 5 rounds
+row uuid-1000000 256 from_bytes_us old - 5375.9
+row uuid-1000000 256 from_bytes_us new - 5371.6
+row uuid-1000000 256 load_mmap_us old - 75.1
+row uuid-1000000 256 load_mmap_us new - 74.9
+row uuid-1000000 256 id old 1 401.7 [404.7 406.0 401.7 405.8 403.1]
+row uuid-1000000 256 key_into old 1 220.2 [220.2 220.9 220.9 236.7 231.3]
+row uuid-1000000 256 id new 1 402.0 [411.3 402.0 412.0 402.3 413.9]
+row uuid-1000000 256 key_into new 1 217.5 [219.0 220.1 217.5 222.1 218.0]
+row uuid-1000000 256 id new 2 398.5 [402.6 398.6 405.2 398.5 403.7]
+row uuid-1000000 256 key_into new 2 212.5 [220.6 226.7 212.5 225.0 213.5]
+row uuid-1000000 256 id old 2 401.3 [402.8 401.9 401.7 401.3 401.4]
+row uuid-1000000 256 key_into old 2 216.1 [217.5 217.0 221.2 216.1 219.6]
+row uuid-1000000 256 control_si_id old - 435.9 [445.6 436.5 448.1 435.9 445.5]
+=== round 2 urls-1000000.txt 256 2026-09-24T17:29:48+03:00 load 0.56 1.53 2.32 acpitz=89 iwlwifi_1=38 
+# urls-1000000: 1000000 keys, block 256, blob 7511038 bytes (7.511 B/key), 1000000 probes shuffled, 5 rounds
+row urls-1000000 256 from_bytes_us old - 1654.9
+row urls-1000000 256 from_bytes_us new - 1670.5
+row urls-1000000 256 load_mmap_us old - 97.1
+row urls-1000000 256 load_mmap_us new - 101.8
+row urls-1000000 256 id old 1 439.4 [457.9 440.2 440.3 439.4 444.9]
+row urls-1000000 256 key_into old 1 255.7 [258.5 259.2 255.7 262.9 257.8]
+row urls-1000000 256 id new 1 434.8 [441.2 437.8 445.9 434.8 442.0]
+row urls-1000000 256 key_into new 1 258.2 [258.2 261.3 258.3 261.7 259.7]
+row urls-1000000 256 id new 2 441.4 [443.7 441.4 448.2 442.2 443.7]
+row urls-1000000 256 key_into new 2 258.6 [258.6 261.8 258.8 265.9 259.9]
+row urls-1000000 256 id old 2 435.1 [441.8 437.8 441.5 435.1 441.9]
+row urls-1000000 256 key_into old 2 252.7 [258.8 252.7 257.1 257.2 256.8]
+row urls-1000000 256 control_si_id old - 451.5 [477.0 480.7 481.7 455.5 451.5]
+=== round 2 titles-en-1000000.txt 256 2026-09-24T17:30:09+03:00 load 0.69 1.50 2.29 acpitz=92 iwlwifi_1=37 
+# titles-en-1000000: 1000000 keys, block 256, blob 7370097 bytes (7.370 B/key), 1000000 probes shuffled, 5 rounds
+row titles-en-1000000 256 from_bytes_us old - 1619.3
+row titles-en-1000000 256 from_bytes_us new - 1636.0
+row titles-en-1000000 256 load_mmap_us old - 89.5
+row titles-en-1000000 256 load_mmap_us new - 93.0
+row titles-en-1000000 256 id old 1 419.6 [436.4 424.7 423.0 419.6 421.2]
+row titles-en-1000000 256 key_into old 1 253.2 [264.5 264.4 259.2 260.1 253.2]
+row titles-en-1000000 256 id new 1 417.3 [436.5 428.8 433.6 417.3 429.0]
+row titles-en-1000000 256 key_into new 1 255.8 [263.0 265.9 262.2 264.2 255.8]
+row titles-en-1000000 256 id new 2 418.1 [423.9 419.6 427.8 418.1 426.4]
+row titles-en-1000000 256 key_into new 2 255.0 [260.3 264.8 258.9 264.9 255.0]
+row titles-en-1000000 256 id old 2 414.7 [431.5 415.4 422.7 414.7 427.4]
+row titles-en-1000000 256 key_into old 2 255.2 [260.6 262.5 260.9 260.2 255.2]
+row titles-en-1000000 256 control_si_id old - 386.3 [388.6 388.3 392.8 391.7 386.3]
+=== round 2 paths-1000000.txt 1024 2026-09-24T17:30:28+03:00 load 0.78 1.47 2.26 acpitz=89 iwlwifi_1=37 
+# paths-1000000: 1000000 keys, block 1024, blob 9323370 bytes (9.323 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 1024 from_bytes_us old - 2064.5
+row paths-1000000 1024 from_bytes_us new - 2052.8
+row paths-1000000 1024 load_mmap_us old - 100.3
+row paths-1000000 1024 load_mmap_us new - 117.8
+row paths-1000000 1024 id old 1 812.4 [824.1 812.4 813.1 813.6 812.7]
+row paths-1000000 1024 key_into old 1 495.6 [495.6 513.5 504.1 512.8 508.3]
+row paths-1000000 1024 id new 1 750.0 [763.5 756.7 755.4 750.0 759.0]
+row paths-1000000 1024 key_into new 1 499.4 [499.4 506.4 504.6 507.5 506.9]
+row paths-1000000 1024 id new 2 755.1 [779.2 776.6 769.2 755.1 763.5]
+row paths-1000000 1024 key_into new 2 506.6 [513.5 522.8 506.6 512.9 507.9]
+row paths-1000000 1024 id old 2 813.4 [820.3 813.4 818.0 814.3 819.3]
+row paths-1000000 1024 key_into old 2 505.4 [507.7 506.3 505.4 507.0 510.6]
+row paths-1000000 1024 control_si_id old - 778.8 [795.3 789.2 781.7 781.5 778.8]
+=== round 2 paths-1000000.txt 256 2026-09-24T17:31:05+03:00 load 0.88 1.41 2.21 acpitz=93 iwlwifi_1=37 
+# paths-1000000: 1000000 keys, block 256, blob 9870918 bytes (9.871 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 256 from_bytes_us old - 2280.9
+row paths-1000000 256 from_bytes_us new - 2383.9
+row paths-1000000 256 load_mmap_us old - 131.7
+row paths-1000000 256 load_mmap_us new - 242.0
+row paths-1000000 256 id old 1 769.5 [794.8 794.2 792.8 769.5 769.8]
+row paths-1000000 256 key_into old 1 346.0 [348.4 353.5 346.5 348.4 346.0]
+row paths-1000000 256 id new 1 720.3 [727.6 720.3 730.1 725.4 724.9]
+row paths-1000000 256 key_into new 1 350.3 [350.3 355.4 356.1 363.7 358.7]
+row paths-1000000 256 id new 2 707.0 [714.1 707.0 724.4 707.9 710.5]
+row paths-1000000 256 key_into new 2 350.4 [353.2 350.4 358.1 356.2 352.8]
+row paths-1000000 256 id old 2 778.4 [788.6 785.7 785.4 778.4 787.2]
+row paths-1000000 256 key_into old 2 346.4 [347.9 346.4 347.3 348.9 350.6]
+row paths-1000000 256 control_si_id old - 772.9 [817.0 792.8 790.9 780.4 772.9]
+=== round 2 titles-ru-1000000.txt 256 2026-09-24T17:31:37+03:00 load 1.56 1.56 2.23 acpitz=92 iwlwifi_1=37 
+# titles-ru-1000000: 1000000 keys, block 256, blob 6861688 bytes (6.862 B/key), 1000000 probes shuffled, 5 rounds
+row titles-ru-1000000 256 from_bytes_us old - 1702.9
+row titles-ru-1000000 256 from_bytes_us new - 1722.3
+row titles-ru-1000000 256 load_mmap_us old - 262.8
+row titles-ru-1000000 256 load_mmap_us new - 268.9
+row titles-ru-1000000 256 id old 1 468.8 [481.8 468.8 469.8 473.1 469.1]
+row titles-ru-1000000 256 key_into old 1 309.4 [309.4 310.4 314.0 318.0 313.2]
+row titles-ru-1000000 256 id new 1 474.5 [501.3 474.5 483.3 477.5 480.2]
+row titles-ru-1000000 256 key_into new 1 309.3 [309.3 309.9 315.3 317.1 313.8]
+row titles-ru-1000000 256 id new 2 472.2 [486.7 472.2 483.1 474.0 479.7]
+row titles-ru-1000000 256 key_into new 2 311.1 [311.1 312.3 314.2 319.0 314.6]
+row titles-ru-1000000 256 id old 2 467.7 [482.6 467.7 484.0 469.6 487.9]
+row titles-ru-1000000 256 key_into old 2 304.9 [304.9 307.6 313.5 314.3 313.9]
+row titles-ru-1000000 256 control_si_id old - 566.3 [579.9 582.2 566.3 582.6 568.9]
+=== round 2 titles-zh-1000000.txt 256 2026-09-24T17:32:01+03:00 load 1.40 1.52 2.21 acpitz=92 iwlwifi_1=37 
+# titles-zh-1000000: 1000000 keys, block 256, blob 5851205 bytes (5.851 B/key), 1000000 probes shuffled, 5 rounds
+row titles-zh-1000000 256 from_bytes_us old - 1571.5
+row titles-zh-1000000 256 from_bytes_us new - 1581.6
+row titles-zh-1000000 256 load_mmap_us old - 349.4
+row titles-zh-1000000 256 load_mmap_us new - 357.0
+row titles-zh-1000000 256 id old 1 417.9 [431.4 421.5 420.7 421.2 417.9]
+row titles-zh-1000000 256 key_into old 1 260.3 [260.3 267.6 263.2 266.4 263.4]
+row titles-zh-1000000 256 id new 1 421.4 [444.3 421.4 424.4 426.9 425.2]
+row titles-zh-1000000 256 key_into new 1 262.1 [264.2 264.9 262.1 265.2 262.4]
+row titles-zh-1000000 256 id new 2 420.2 [424.9 430.2 427.8 427.2 420.2]
+row titles-zh-1000000 256 key_into new 2 255.1 [255.7 259.9 255.1 264.7 259.3]
+row titles-zh-1000000 256 id old 2 424.5 [433.3 426.8 432.5 427.0 424.5]
+row titles-zh-1000000 256 key_into old 2 256.8 [256.8 258.2 257.9 257.0 262.7]
+row titles-zh-1000000 256 control_si_id old - 357.5 [364.2 357.5 360.4 367.3 358.5]
+=== round 2 dict.txt 256 2026-09-24T17:32:20+03:00 load 1.29 1.49 2.18 acpitz=92 iwlwifi_1=36 
+# dict: 349045 keys, block 256, blob 1061163 bytes (3.040 B/key), 349045 probes shuffled, 5 rounds
+row dict 256 from_bytes_us old - 379.7
+row dict 256 from_bytes_us new - 379.2
+row dict 256 load_mmap_us old - 163.2
+row dict 256 load_mmap_us new - 164.4
+row dict 256 id old 1 273.0 [273.0 274.0 285.3 278.5 280.5]
+row dict 256 key_into old 1 196.1 [197.0 199.3 196.1 199.5 196.7]
+row dict 256 id new 1 269.0 [274.1 281.9 274.3 275.5 269.0]
+row dict 256 key_into new 1 193.1 [193.1 195.2 193.4 195.1 193.5]
+row dict 256 id new 2 266.1 [272.2 268.3 293.0 266.1 276.1]
+row dict 256 key_into new 2 192.2 [192.2 194.5 192.4 195.5 192.5]
+row dict 256 id old 2 266.3 [266.3 276.0 273.5 267.1 274.3]
+row dict 256 key_into old 2 194.1 [195.2 195.5 194.4 195.1 194.1]
+row dict 256 control_si_id old - 164.6 [173.9 166.8 175.6 164.6 180.2]
+=== end of round 2 2026-09-24T17:32:25+03:00 acpitz=94 iwlwifi_1=36 
+# gate ab3: ready 2026-09-24T17:34:03+03:00, load 0.29 1.07 1.95, acpitz=50 iwlwifi_1=36 
+=== round 3 dict.txt 256 2026-09-24T17:34:03+03:00 load 0.29 1.07 1.95 acpitz=50 iwlwifi_1=36 
+# dict: 349045 keys, block 256, blob 1061163 bytes (3.040 B/key), 349045 probes shuffled, 5 rounds
+row dict 256 from_bytes_us old - 375.3
+row dict 256 from_bytes_us new - 378.9
+row dict 256 load_mmap_us old - 158.6
+row dict 256 load_mmap_us new - 162.1
+row dict 256 id old 1 261.4 [270.9 279.4 264.5 272.5 261.4]
+row dict 256 key_into old 1 187.1 [187.1 190.8 187.6 191.3 188.3]
+row dict 256 id new 1 267.1 [284.4 283.7 267.1 278.4 277.0]
+row dict 256 key_into new 1 185.7 [185.7 190.4 192.1 189.2 186.3]
+row dict 256 id new 2 271.6 [271.7 271.6 289.2 278.7 288.2]
+row dict 256 key_into new 2 184.9 [185.5 188.2 185.2 188.3 184.9]
+row dict 256 id old 2 270.2 [277.7 274.5 277.6 292.5 270.2]
+row dict 256 key_into old 2 186.2 [187.3 189.1 188.6 189.2 186.2]
+row dict 256 control_si_id old - 164.0 [176.3 164.0 219.2 175.3 184.0]
+=== round 3 titles-zh-1000000.txt 256 2026-09-24T17:34:07+03:00 load 0.35 1.07 1.95 acpitz=89 iwlwifi_1=36 
+# titles-zh-1000000: 1000000 keys, block 256, blob 5851205 bytes (5.851 B/key), 1000000 probes shuffled, 5 rounds
+row titles-zh-1000000 256 from_bytes_us old - 1550.9
+row titles-zh-1000000 256 from_bytes_us new - 1582.7
+row titles-zh-1000000 256 load_mmap_us old - 336.1
+row titles-zh-1000000 256 load_mmap_us new - 347.7
+row titles-zh-1000000 256 id old 1 419.6 [432.7 421.4 419.6 421.8 425.8]
+row titles-zh-1000000 256 key_into old 1 254.3 [257.9 258.3 254.3 259.1 255.1]
+row titles-zh-1000000 256 id new 1 423.2 [438.1 423.8 431.3 423.2 428.9]
+row titles-zh-1000000 256 key_into new 1 253.9 [256.9 260.1 253.9 258.2 254.5]
+row titles-zh-1000000 256 id new 2 420.6 [436.1 420.9 428.5 420.6 432.5]
+row titles-zh-1000000 256 key_into new 2 253.2 [256.7 259.3 253.2 258.4 254.6]
+row titles-zh-1000000 256 id old 2 418.1 [424.6 418.1 424.1 423.4 426.3]
+row titles-zh-1000000 256 key_into old 2 253.6 [254.8 253.6 253.9 258.0 256.1]
+row titles-zh-1000000 256 control_si_id old - 358.3 [384.9 388.3 385.5 386.0 358.3]
+=== round 3 titles-ru-1000000.txt 256 2026-09-24T17:34:27+03:00 load 0.53 1.06 1.92 acpitz=87 iwlwifi_1=37 
+# titles-ru-1000000: 1000000 keys, block 256, blob 6861688 bytes (6.862 B/key), 1000000 probes shuffled, 5 rounds
+row titles-ru-1000000 256 from_bytes_us old - 1705.3
+row titles-ru-1000000 256 from_bytes_us new - 1710.4
+row titles-ru-1000000 256 load_mmap_us old - 263.4
+row titles-ru-1000000 256 load_mmap_us new - 272.7
+row titles-ru-1000000 256 id old 1 467.3 [481.0 468.1 469.1 468.8 467.3]
+row titles-ru-1000000 256 key_into old 1 304.4 [307.6 311.2 304.4 313.5 309.2]
+row titles-ru-1000000 256 id new 1 466.0 [488.5 466.0 475.3 471.9 475.6]
+row titles-ru-1000000 256 key_into new 1 304.3 [304.3 312.5 304.9 318.6 305.4]
+row titles-ru-1000000 256 id new 2 469.8 [487.9 470.6 477.5 469.8 474.9]
+row titles-ru-1000000 256 key_into new 2 302.8 [302.8 309.3 303.9 309.2 306.0]
+row titles-ru-1000000 256 id old 2 468.0 [471.6 471.5 473.3 468.0 471.5]
+row titles-ru-1000000 256 key_into old 2 301.4 [302.3 301.4 304.6 305.4 305.1]
+row titles-ru-1000000 256 control_si_id old - 567.7 [570.1 567.7 594.7 579.3 589.3]
+=== round 3 paths-1000000.txt 256 2026-09-24T17:34:50+03:00 load 0.74 1.07 1.91 acpitz=91 iwlwifi_1=36 
+# paths-1000000: 1000000 keys, block 256, blob 9870918 bytes (9.871 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 256 from_bytes_us old - 2295.8
+row paths-1000000 256 from_bytes_us new - 2397.4
+row paths-1000000 256 load_mmap_us old - 157.3
+row paths-1000000 256 load_mmap_us new - 263.7
+row paths-1000000 256 id old 1 767.8 [790.2 775.8 770.2 768.7 767.8]
+row paths-1000000 256 key_into old 1 339.4 [347.7 353.6 340.0 345.8 339.4]
+row paths-1000000 256 id new 1 715.1 [722.9 716.6 723.8 715.4 715.1]
+row paths-1000000 256 key_into new 1 342.4 [348.2 360.8 347.2 354.4 342.4]
+row paths-1000000 256 id new 2 703.8 [719.7 713.4 717.7 710.6 703.8]
+row paths-1000000 256 key_into new 2 348.0 [350.9 349.6 354.0 348.3 348.0]
+row paths-1000000 256 id old 2 773.6 [783.9 773.6 777.5 774.9 779.8]
+row paths-1000000 256 key_into old 2 337.6 [340.9 340.2 338.6 337.6 339.7]
+row paths-1000000 256 control_si_id old - 775.2 [790.9 787.9 778.7 775.2 776.0]
+=== round 3 paths-1000000.txt 1024 2026-09-24T17:35:22+03:00 load 1.48 1.26 1.94 acpitz=91 iwlwifi_1=37 
+# paths-1000000: 1000000 keys, block 1024, blob 9323370 bytes (9.323 B/key), 1000000 probes shuffled, 5 rounds
+row paths-1000000 1024 from_bytes_us old - 2048.0
+row paths-1000000 1024 from_bytes_us new - 2082.9
+row paths-1000000 1024 load_mmap_us old - 95.6
+row paths-1000000 1024 load_mmap_us new - 121.0
+row paths-1000000 1024 id old 1 818.8 [836.5 823.8 819.0 818.8 823.1]
+row paths-1000000 1024 key_into old 1 501.6 [508.8 505.8 501.6 507.9 503.6]
+row paths-1000000 1024 id new 1 750.8 [777.6 750.8 760.4 756.5 757.0]
+row paths-1000000 1024 key_into new 1 502.4 [511.3 502.8 502.4 507.9 504.7]
+row paths-1000000 1024 id new 2 764.3 [766.1 766.0 765.0 764.3 767.4]
+row paths-1000000 1024 key_into new 2 506.0 [506.0 509.3 506.5 509.1 506.8]
+row paths-1000000 1024 id old 2 821.4 [823.3 826.0 830.5 821.4 824.1]
+row paths-1000000 1024 key_into old 2 501.1 [501.1 502.4 502.8 504.1 503.6]
+row paths-1000000 1024 control_si_id old - 774.3 [797.5 794.3 791.9 774.3 782.0]
+=== round 3 titles-en-1000000.txt 256 2026-09-24T17:35:59+03:00 load 1.27 1.23 1.90 acpitz=93 iwlwifi_1=38 
+# titles-en-1000000: 1000000 keys, block 256, blob 7370097 bytes (7.370 B/key), 1000000 probes shuffled, 5 rounds
+row titles-en-1000000 256 from_bytes_us old - 1640.6
+row titles-en-1000000 256 from_bytes_us new - 1642.7
+row titles-en-1000000 256 load_mmap_us old - 88.0
+row titles-en-1000000 256 load_mmap_us new - 91.1
+row titles-en-1000000 256 id old 1 423.6 [433.9 423.6 423.9 423.9 426.2]
+row titles-en-1000000 256 key_into old 1 261.9 [265.7 267.5 262.0 266.2 261.9]
+row titles-en-1000000 256 id new 1 432.4 [437.5 432.9 435.1 432.4 438.6]
+row titles-en-1000000 256 key_into new 1 264.2 [267.6 269.8 268.1 270.1 264.2]
+row titles-en-1000000 256 id new 2 422.4 [432.8 422.4 425.4 422.6 424.0]
+row titles-en-1000000 256 key_into new 2 261.5 [265.2 264.5 261.6 264.9 261.5]
+row titles-en-1000000 256 id old 2 419.8 [435.8 428.5 424.4 419.8 425.8]
+row titles-en-1000000 256 key_into old 2 261.1 [273.3 265.9 261.3 262.3 261.1]
+row titles-en-1000000 256 control_si_id old - 385.1 [387.2 386.6 393.4 385.1 385.7]
+=== round 3 urls-1000000.txt 256 2026-09-24T17:36:18+03:00 load 1.19 1.21 1.88 acpitz=92 iwlwifi_1=37 
+# urls-1000000: 1000000 keys, block 256, blob 7511038 bytes (7.511 B/key), 1000000 probes shuffled, 5 rounds
+row urls-1000000 256 from_bytes_us old - 1663.9
+row urls-1000000 256 from_bytes_us new - 1686.0
+row urls-1000000 256 load_mmap_us old - 99.8
+row urls-1000000 256 load_mmap_us new - 105.1
+row urls-1000000 256 id old 1 440.5 [457.3 443.0 440.5 445.9 446.3]
+row urls-1000000 256 key_into old 1 261.5 [266.3 270.0 261.5 270.7 266.2]
+row urls-1000000 256 id new 1 442.9 [449.9 442.9 450.0 444.7 451.2]
+row urls-1000000 256 key_into new 1 263.3 [266.3 267.0 267.2 267.6 263.3]
+row urls-1000000 256 id new 2 441.8 [441.8 443.0 443.9 442.3 444.4]
+row urls-1000000 256 key_into new 2 262.9 [262.9 265.3 263.2 265.9 263.5]
+row urls-1000000 256 id old 2 444.6 [450.9 448.1 450.9 445.3 444.6]
+row urls-1000000 256 key_into old 2 261.2 [261.2 263.3 261.5 262.0 261.3]
+row urls-1000000 256 control_si_id old - 451.0 [489.4 460.7 474.4 461.9 451.0]
+=== round 3 uuid-1000000.txt 256 2026-09-24T17:36:39+03:00 load 1.27 1.23 1.88 acpitz=92 iwlwifi_1=37 
+# uuid-1000000: 1000000 keys, block 256, blob 18040375 bytes (18.040 B/key), 1000000 probes shuffled, 5 rounds
+row uuid-1000000 256 from_bytes_us old - 5390.8
+row uuid-1000000 256 from_bytes_us new - 5362.5
+row uuid-1000000 256 load_mmap_us old - 79.9
+row uuid-1000000 256 load_mmap_us new - 80.9
+row uuid-1000000 256 id old 1 405.1 [405.1 405.6 408.8 406.4 407.0]
+row uuid-1000000 256 key_into old 1 217.4 [217.4 227.9 218.5 235.3 218.9]
+row uuid-1000000 256 id new 1 403.0 [405.3 403.0 407.7 403.1 406.7]
+row uuid-1000000 256 key_into new 1 217.8 [225.2 224.7 218.8 220.6 217.8]
+row uuid-1000000 256 id new 2 401.3 [404.1 402.4 402.4 401.3 405.0]
+row uuid-1000000 256 key_into new 2 213.9 [216.2 219.9 216.8 218.3 213.9]
+row uuid-1000000 256 id old 2 400.5 [402.7 400.5 404.7 405.7 405.0]
+row uuid-1000000 256 key_into old 2 215.6 [219.4 216.2 220.3 215.6 215.9]
+row uuid-1000000 256 control_si_id old - 436.7 [440.2 436.7 440.7 437.7 441.1]
+=== round 3 words-full.txt 256 2026-09-24T17:36:59+03:00 load 1.19 1.22 1.86 acpitz=84 iwlwifi_1=37 
+# words-full: 479823 keys, block 256, blob 1264362 bytes (2.635 B/key), 479823 probes shuffled, 5 rounds
+row words-full 256 from_bytes_us old - 310.8
+row words-full 256 from_bytes_us new - 311.1
+row words-full 256 load_mmap_us old - 44.0
+row words-full 256 load_mmap_us new - 44.3
+row words-full 256 id old 1 290.4 [303.2 306.8 290.4 300.2 292.6]
+row words-full 256 key_into old 1 196.1 [196.2 198.7 196.1 197.8 196.4]
+row words-full 256 id new 1 289.7 [303.2 289.7 301.1 305.7 300.7]
+row words-full 256 key_into new 1 192.7 [200.4 194.4 192.8 195.0 192.7]
+row words-full 256 id new 2 286.4 [286.4 288.5 296.9 298.5 302.7]
+row words-full 256 key_into new 2 192.5 [196.5 193.4 193.2 194.5 192.5]
+row words-full 256 id old 2 294.4 [301.7 294.4 305.9 307.8 301.8]
+row words-full 256 key_into old 2 195.9 [196.2 196.8 197.1 196.6 195.9]
+row words-full 256 control_si_id old - 213.4 [221.5 213.4 230.9 223.3 229.2]
+=== end of round 3 2026-09-24T17:37:05+03:00 acpitz=87 iwlwifi_1=37 
+
+# summary (local/ab445/summary.py over the rows above): old and new are each the minimum over three
+# processes and two allocations a process; per round, each allocation's minimum over five rounds.
+# Thermal zones rose from ~50 C at each gate to 83-94 C within a round (logged per config); the
+# variants alternate inside every process, and the control row is a StringIndex neither change touches.
+corpus               block lane                  old      new  new/old   per round: old a1/a2 | new b1/b2
+dict                   256 from_bytes_us       371.2    376.6    1.015   r1 371 | 377; r2 380 | 379; r3 375 | 379
+dict                   256 id                  260.0    266.1    1.023   r1 260/267 | 275/272; r2 273/266 | 269/266; r3 261/270 | 267/272
+dict                   256 key_into            185.7    183.9    0.990   r1 186/187 | 184/186; r2 196/194 | 193/192; r3 187/186 | 186/185
+dict                   256 load_mmap_us        157.7    162.1    1.028   r1 158 | 163; r2 163 | 164; r3 159 | 162
+paths-1000000          256 from_bytes_us      2280.9   2375.8    1.042   r1 2325 | 2376; r2 2281 | 2384; r3 2296 | 2397
+paths-1000000          256 id                  767.8    703.8    0.917   r1 769/784 | 708/711; r2 770/778 | 720/707; r3 768/774 | 715/704
+paths-1000000          256 key_into            337.6    342.4    1.014   r1 339/341 | 342/345; r2 346/346 | 350/350; r3 339/338 | 342/348
+paths-1000000          256 load_mmap_us        130.2    238.3    1.830   r1 130 | 238; r2 132 | 242; r3 157 | 264
+paths-1000000         1024 from_bytes_us      2048.0   2052.8    1.002   r1 2059 | 2081; r2 2064 | 2053; r3 2048 | 2083
+paths-1000000         1024 id                  812.4    750.0    0.923   r1 818/822 | 750/762; r2 812/813 | 750/755; r3 819/821 | 751/764
+paths-1000000         1024 key_into            495.6    499.4    1.008   r1 501/499 | 500/505; r2 496/505 | 499/507; r3 502/501 | 502/506
+paths-1000000         1024 load_mmap_us         95.6    117.8    1.232   r1 108 | 130; r2 100 | 118; r3 96 | 121
+titles-en-1000000      256 from_bytes_us      1619.3   1634.6    1.009   r1 1632 | 1635; r2 1619 | 1636; r3 1641 | 1643
+titles-en-1000000      256 id                  414.7    417.3    1.006   r1 424/420 | 432/418; r2 420/415 | 417/418; r3 424/420 | 432/422
+titles-en-1000000      256 key_into            253.2    254.1    1.004   r1 256/254 | 260/254; r2 253/255 | 256/255; r3 262/261 | 264/262
+titles-en-1000000      256 load_mmap_us         87.9     91.1    1.036   r1 88 | 95; r2 90 | 93; r3 88 | 91
+titles-ru-1000000      256 from_bytes_us      1701.0   1706.6    1.003   r1 1701 | 1707; r2 1703 | 1722; r3 1705 | 1710
+titles-ru-1000000      256 id                  462.8    466.0    1.007   r1 463/469 | 470/472; r2 469/468 | 474/472; r3 467/468 | 466/470
+titles-ru-1000000      256 key_into            301.4    302.8    1.005   r1 304/305 | 304/304; r2 309/305 | 309/311; r3 304/301 | 304/303
+titles-ru-1000000      256 load_mmap_us        262.8    268.9    1.023   r1 269 | 276; r2 263 | 269; r3 263 | 273
+titles-zh-1000000      256 from_bytes_us      1550.9   1577.5    1.017   r1 1570 | 1578; r2 1572 | 1582; r3 1551 | 1583
+titles-zh-1000000      256 id                  417.9    420.2    1.006   r1 418/418 | 422/422; r2 418/424 | 421/420; r3 420/418 | 423/421
+titles-zh-1000000      256 key_into            253.4    251.6    0.993   r1 255/253 | 252/252; r2 260/257 | 262/255; r3 254/254 | 254/253
+titles-zh-1000000      256 load_mmap_us        336.1    347.7    1.035   r1 340 | 352; r2 349 | 357; r3 336 | 348
+urls-1000000           256 from_bytes_us      1654.9   1670.5    1.009   r1 1672 | 1694; r2 1655 | 1670; r3 1664 | 1686
+urls-1000000           256 id                  435.1    434.8    0.999   r1 437/442 | 436/436; r2 439/435 | 435/441; r3 440/445 | 443/442
+urls-1000000           256 key_into            252.7    256.4    1.015   r1 256/253 | 256/258; r2 256/253 | 258/259; r3 262/261 | 263/263
+urls-1000000           256 load_mmap_us         97.1    101.8    1.048   r1 101 | 109; r2 97 | 102; r3 100 | 105
+uuid-1000000           256 from_bytes_us      5375.9   5362.5    0.998   r1 5664 | 5660; r2 5376 | 5372; r3 5391 | 5362
+uuid-1000000           256 id                  400.5    398.5    0.995   r1 408/402 | 407/400; r2 402/401 | 402/398; r3 405/400 | 403/401
+uuid-1000000           256 key_into            215.0    212.5    0.988   r1 221/215 | 216/214; r2 220/216 | 218/212; r3 217/216 | 218/214
+uuid-1000000           256 load_mmap_us         75.1     74.9    0.997   r1 83 | 83; r2 75 | 75; r3 80 | 81
+words-full             256 from_bytes_us       310.8    311.1    1.001   r1 311 | 315; r2 311 | 311; r3 311 | 311
+words-full             256 id                  282.8    285.3    1.009   r1 291/288 | 301/285; r2 283/289 | 292/286; r3 290/294 | 290/286
+words-full             256 key_into            194.8    192.0    0.986   r1 195/196 | 192/192; r2 199/198 | 194/195; r3 196/196 | 193/192
+words-full             256 load_mmap_us         43.4     43.7    1.007   r1 47 | 48; r2 43 | 44; r3 44 | 44
+
+control (StringIndex id from 4.4.0, touched by neither change): min per round, spread
+dict                   256  r1 164.5 r2 164.6 r3 164.0   spread 0.4 %
+paths-1000000          256  r1 776.5 r2 772.9 r3 775.2   spread 0.5 %
+paths-1000000         1024  r1 782.3 r2 778.8 r3 774.3   spread 1.0 %
+titles-en-1000000      256  r1 388.4 r2 386.3 r3 385.1   spread 0.9 %
+titles-ru-1000000      256  r1 564.0 r2 566.3 r3 567.7   spread 0.7 %
+titles-zh-1000000      256  r1 355.6 r2 357.5 r3 358.3   spread 0.8 %
+urls-1000000           256  r1 453.3 r2 451.5 r3 451.0   spread 0.5 %
+uuid-1000000           256  r1 439.8 r2 435.9 r3 436.7   spread 0.9 %
+words-full             256  r1 216.0 r2 207.0 r3 213.4   spread 4.3 %

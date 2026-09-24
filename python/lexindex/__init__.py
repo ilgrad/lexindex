@@ -18,7 +18,7 @@ many times:
 
 All serialise to a flat blob (``save`` / ``load``). Every one but ``ClosedHashIndex`` also
 has ``load_mmap``, which maps a huge index and borrows it instantly; ``DictIndex`` builds its
-per-block samples at load and borrows the rest.
+per-block samples and a few tables at load and borrows the rest.
 
 - ``Overlay`` — add and remove keys on top of ``StringIndex``,
   ``PerfectHashIndex`` or ``CompactHashIndex`` without rebuilding.

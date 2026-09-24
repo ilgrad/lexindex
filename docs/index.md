@@ -10,8 +10,8 @@ then query many times: exact `string ↔ id` both ways, plus **prefix**, **range
 range seek directly; a broad fuzzy or subsequence pattern may still traverse most of the automaton).
 The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.24 bytes/key, 2.4× below
 `marisa-trie`**, and `StringIndex` 5.95 — and all but `ClosedHashIndex` can be **memory-mapped and
-borrowed** rather than read, `DictIndex` materialising only its per-block samples, so a
-multi-gigabyte index is ready instantly and its pages are shared across processes.
+borrowed** rather than read, `DictIndex` materialising only its per-block samples and a few
+tables, so a multi-gigabyte index is ready instantly and its pages are shared across processes.
 
 [![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on all thirteen](assets/frontier-1m.svg)](benchmarks.md#the-research-frontier-measured)
 

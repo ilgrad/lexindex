@@ -50,9 +50,10 @@ none is quoted here without the others.</sub>
 | `id`, 1 M word bigrams | 263 ns | 399 ns | 77 ns · `id_unchecked` 62 | 57 ns | the bare perfect hash | 109 ns · `id_unchecked` 49 |
 | Cargo feature | — | — | `mph` | `mph` (default) | `mph` | `mph` |
 
-<sub>¹ `DictIndex` maps every section but the per-block samples — eight bytes a block, one byte per
-thirty-two keys at the default block — which two binary searches read on every lookup and which are
-therefore read into memory rather than borrowed. `HashedDictIndex` maps its dictionary the same way
+<sub>¹ `DictIndex` maps every section and builds in memory what a lookup reads on every call: the
+per-block samples — eight bytes a block, one byte per thirty-two keys at the default block — the
+symbol tables, and where they apply a character code's tables and a trie over blocks whose samples
+tie; 0.07–0.39 bytes a key on the corpora measured. `HashedDictIndex` maps its dictionary the same way
 and its rank table whole. ² At zero fingerprint bits `id` is the dictionary's own search, exact and
 at its cost, and the hash is `id_unchecked`, which answers a stranger with some rank below `n`.</sub>
 
@@ -101,7 +102,7 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
 
 All six assign dense ids in `[0, n)`, **build deterministically** and **serialise to a flat blob**:
 `save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash to map —
-`DictIndex` mapping everything but its per-block samples, eight bytes a block.
+`DictIndex` mapping everything but its per-block samples and a few tables, under 0.4 bytes a key.
 They are immutable; **`Overlay`** adds and removes keys on `StringIndex`, `CompactHashIndex` and
 `PerfectHashIndex` without a rebuild, keeps every id stable, and folds the edits into a fresh base
 with `compact()`. The other three are absent by design rather than omission: an overlay issues a
