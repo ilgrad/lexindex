@@ -1,8 +1,9 @@
 //! lexindex under the C² benchmark's protocol: build from a one-key-per-line file, then look every
 //! key up once in one fixed shuffled order and report `build_ms,size_mib,latency_ns` from that
 //! single pass with no warm-up, which is what `benchmark.cpp` there does. Three more passes follow,
-//! and their mean and minimum are printed beside the cold number. Sizes are the serialised blob.
-//! `bench/frontier/run.sh` runs one index kind a process.
+//! and their mean and minimum are printed beside the cold number. Sizes are the serialised blob,
+//! and a routed dictionary's restart words beside it. `bench/frontier/run.sh` runs one index kind a
+//! process.
 use std::io::BufRead;
 use std::time::Instant;
 
@@ -57,6 +58,24 @@ impl Probe for StringIndex {
     }
     fn probe(&self, key: &str) -> u64 {
         self.id(key).unwrap_or(u64::MAX)
+    }
+}
+
+/// `DictIndex` with its restart words derived, which the build includes. The words are memory the
+/// index holds and no blob carries, so its size is the blob and the words.
+struct Routed(DictIndex, usize);
+
+impl Probe for Routed {
+    fn build(keys: &[String], block: usize) -> Self {
+        let dict = <DictIndex as Probe>::build(keys, block);
+        let words = dict.route_microblocks();
+        Routed(dict, words)
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len() + self.1
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.probe(key)
     }
 }
 
@@ -160,7 +179,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|string|hashed0|hashed8|hashed16>..."
+            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|string|hashed0|hashed8|hashed16>..."
         );
         std::process::exit(2);
     }
@@ -180,6 +199,9 @@ fn main() {
             "dict32" => run::<DictIndex>(&keys, 32, "lexindex DictIndex block 32"),
             "dict256" => run::<DictIndex>(&keys, 256, "lexindex DictIndex block 256"),
             "dict1024" => run::<DictIndex>(&keys, 1024, "lexindex DictIndex block 1024"),
+            "routed32" => run::<Routed>(&keys, 32, "lexindex DictIndex block 32 routed"),
+            "routed256" => run::<Routed>(&keys, 256, "lexindex DictIndex block 256 routed"),
+            "routed1024" => run::<Routed>(&keys, 1024, "lexindex DictIndex block 1024 routed"),
             "string" => run::<StringIndex>(&keys, 0, "lexindex StringIndex"),
             "hashed0" => run::<Closed>(&keys, 0, "lexindex HashedDictIndex closed"),
             "hashed8" => run::<Hashed>(&keys, 8, "lexindex HashedDictIndex fp=8"),

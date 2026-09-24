@@ -12,7 +12,8 @@ their names, after a round of theirs ran beside other work -- and its cells repl
 for those corpora. It has to come from the same commit, machine, toolchain and pins, and the
 artifact names it under `replaced`. The markdown printed is what the docs quote, and what
 bench/tables.py renders from the artifact: an overview, `HashedDictIndex` against XCDAT 15 where
-the campaign ran it, then a table a corpus.
+the campaign ran it, the exact searches against XCDAT 15 where it ran a routed `DictIndex`, then a
+table a corpus.
 
 A cell's `id` and build times are the medians of its rounds, and its spread is the range of the `id`
 times over that median; a structure that fails in any round has no numbers, only the reason. Sizes
@@ -46,6 +47,9 @@ LEXINDEX = {
     "dict32": "lexindex Dict 32",
     "dict256": "lexindex Dict 256",
     "dict1024": "lexindex Dict 1024",
+    "routed32": "lexindex Dict 32 routed",
+    "routed256": "lexindex Dict 256 routed",
+    "routed1024": "lexindex Dict 1024 routed",
     "string": "lexindex StringIndex",
     "hashed0": "lexindex HashedDict closed",
     "hashed8": "lexindex HashedDict fp=8",
@@ -59,6 +63,16 @@ HASHED = {
     "lexindex HashedDict closed": "`HashedDict` closed",
     "lexindex HashedDict fp=8": "fp=8",
     "lexindex HashedDict fp=16": "fp=16",
+}
+# lexindex's exact searches -- the ones that answer a stranger exactly, which the sidecar does
+# not -- against the fastest structure from elsewhere.
+SEARCH = {
+    "XCDAT 15": "XCDAT 15",
+    "lexindex Dict 256": "`Dict` 256",
+    "lexindex Dict 32 routed": "32 routed",
+    "lexindex Dict 256 routed": "256 routed",
+    "lexindex Dict 1024 routed": "1024 routed",
+    "lexindex StringIndex": "`StringIndex`",
 }
 REFERENCE = {"ART", "C-ART"}
 # What GNU timeout exits with when it had to stop the process.
@@ -282,17 +296,27 @@ def overview(corpora: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def hashed(corpora: list[dict]) -> str:
-    """`HashedDictIndex` beside its dictionary and XCDAT 15, bytes a key @ nanoseconds a lookup."""
+def columns(corpora: list[dict], names: dict[str, str]) -> str:
+    """The structures `names` holds, a column each, bytes a key @ nanoseconds a lookup."""
     lines = [
-        "| corpus | " + " | ".join(HASHED.values()) + " |",
-        "|---|" + "---:|" * len(HASHED),
+        "| corpus | " + " | ".join(names.values()) + " |",
+        "|---|" + "---:|" * len(names),
     ]
     for corpus in corpora:
         cells = {c["structure"]: c for c in corpus["cells"] if measured(c)}
-        row = " | ".join(point(cells[name]) if name in cells else "—" for name in HASHED)
+        row = " | ".join(point(cells[name]) if name in cells else "—" for name in names)
         lines.append(f"| `{corpus['corpus']}` | {row} |")
     return "\n".join(lines)
+
+
+def hashed(corpora: list[dict]) -> str:
+    """`HashedDictIndex` beside its dictionary and XCDAT 15."""
+    return columns(corpora, HASHED)
+
+
+def search(corpora: list[dict]) -> str:
+    """lexindex's exact searches, the routed dictionaries among them, beside XCDAT 15."""
+    return columns(corpora, SEARCH)
 
 
 def corpus_table(corpus: dict) -> str:
@@ -400,6 +424,9 @@ def main() -> None:
     if any(cell["structure"].startswith("lexindex HashedDict") for cell in data["cells"]):
         print()
         print(hashed(corpora))
+    if any(cell["structure"].endswith(" routed") for cell in data["cells"]):
+        print()
+        print(search(corpora))
     for corpus in corpora:
         print()
         print(corpus_table(corpus))
