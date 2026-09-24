@@ -210,6 +210,25 @@ pub struct DictIndex {
     /// query's own bytes, before it is spelled, where these separate the blocks as well as the
     /// coded samples do. Derived at load, like the samples; `None` on every other blob.
     raw: Option<Box<RawRoute>>,
+    /// `per` words a block: the bytes every restart key of the block shares with its head, then
+    /// the eight bytes past them of each restart key, the way a sample is taken past `g` —
+    /// [`NO_ROUTE`] in the first word of a block whose restarts did not decode, and `u64::MAX`
+    /// past the last block's restarts. A lookup picks its microblock off these and walks the
+    /// restart run only where the probe's word ties one. Derived at load; empty where every block
+    /// is one microblock.
+    mroute: Vec<u64>,
+}
+
+/// The first word of a block's [`DictIndex::mroute`] group that leaves the block to its restart
+/// run.
+const NO_ROUTE: u64 = u64::MAX;
+
+/// Whether the key a word was taken from may end before the word's byte `i`, most significant
+/// first: the zero bytes past its last nonzero one may be padding as well as the key's own, so a
+/// probe that shares them does not say how far it agrees with the key.
+#[inline(always)]
+fn may_end_before(w: u64, i: usize) -> bool {
+    8 - w.trailing_zeros() / 8 < i as u32
 }
 
 /// A route over the heads as the caller spells them: what [`DictIndex::g`], the first head's
@@ -2509,7 +2528,7 @@ impl DictIndex {
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let samples = samples_of(&heads, &head_ends, g);
-        Ok(Self {
+        let mut idx = Self {
             block,
             micro,
             per: block.div_ceil(micro),
@@ -2531,7 +2550,10 @@ impl DictIndex {
             g,
             code: None,
             raw: None,
-        })
+            mroute: Vec::new(),
+        };
+        idx.mroute = idx.micro_route();
+        Ok(idx)
     }
 
     /// Number of distinct keys.
@@ -3255,9 +3277,90 @@ impl DictIndex {
         }
     }
 
+    /// The words of [`mroute`](Self::mroute), read off every block's restart run as it decodes.
+    fn micro_route(&self) -> Vec<u64> {
+        let per = self.per;
+        if per == 1 {
+            return Vec::new();
+        }
+        let mut out = vec![u64::MAX; self.blocks_len() * per];
+        let (mut cur, mut keys, mut ends) = (Vec::new(), Vec::new(), Vec::with_capacity(per));
+        for (b, group) in out.chunks_exact_mut(per).enumerate() {
+            group[0] = NO_ROUTE;
+            let r = self.micros_in(b);
+            if r < 2 {
+                continue;
+            }
+            let codec = self.codec_of(b);
+            let mut entries = Entries::of(&self.codes_of(b).1, codec, self.restart_data(b), r);
+            let head = self.head(b);
+            cur.clear();
+            cur.extend_from_slice(head);
+            keys.clear();
+            ends.clear();
+            let decoded = (1..r).all(|_| {
+                let ok = self.advance(codec, &mut entries, &mut cur);
+                keys.extend_from_slice(&cur);
+                ends.push(keys.len());
+                ok
+            });
+            if !decoded {
+                continue;
+            }
+            let key = |j: usize| &keys[if j == 1 { 0 } else { ends[j - 2] }..ends[j - 1]];
+            // Every restart lies between the head and the last one, so shares what those two do.
+            let o = lcp(head, key(r - 1));
+            group[0] = o as u64;
+            for (j, word) in group.iter_mut().enumerate().take(r).skip(1) {
+                *word = sample_at(key(j), o);
+            }
+        }
+        out
+    }
+
+    /// The microblock of block `b` — `r` of them — that `probe` falls in, off the block's words in
+    /// [`mroute`](Self::mroute), and how many bytes the probe shares with that microblock's first
+    /// key; `None` where only the restart run can say, which is where a restart's word is the
+    /// probe's own. `matched` is what the probe shares with the head, which it is above.
+    #[inline(always)]
+    fn micro_routed(
+        &self,
+        b: usize,
+        r: usize,
+        probe: &[u8],
+        matched: usize,
+    ) -> Option<(usize, usize)> {
+        let per = self.per;
+        let group = self.mroute.get(b * per..(b + 1) * per)?;
+        let o = group[0];
+        if o == NO_ROUTE {
+            return None;
+        }
+        let o = o as usize;
+        // The probe leaves the prefix every restart shares, above the head: above all of them.
+        if matched < o {
+            return Some((r - 1, matched));
+        }
+        let s = sample_at(probe, o);
+        let words = &group[1..];
+        let j: usize = words.iter().map(|&w| usize::from(w < s)).sum();
+        if words.get(j) == Some(&s) {
+            return None;
+        }
+        let Some(&below) = j.checked_sub(1).map(|i| &words[i]) else {
+            return Some((0, matched));
+        };
+        let i = ((below ^ s).leading_zeros() / 8) as usize;
+        if may_end_before(below, i) {
+            return None;
+        }
+        Some((j, o + i))
+    }
+
     /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
-    /// is the only one that can hold `probe`. Its restart run says which of its microblocks can,
-    /// and that one microblock is scanned — the block itself never is.
+    /// is the only one that can hold `probe`. Its restart words, or its restart run where they
+    /// tie, say which of its microblocks can, and that one microblock is scanned — the block
+    /// itself never is.
     fn locate_in(&self, l: usize, probe: &[u8]) -> (u64, bool) {
         if l == 0 {
             return (0, false);
@@ -3274,17 +3377,22 @@ impl DictIndex {
         let r = self.micros_in(b);
         let block_base = self.blocks.at(b);
         let (j, matched) = if r > 1 {
-            let restarts = Entries::of(
-                &self.codes_of(b).1,
-                codec,
-                self.restart_data_at(b, block_base),
-                r,
-            );
-            let (j, matched, hit) = self.scan_run(codec, &restarts, r, probe, matched);
-            if hit {
-                return ((base + j * self.micro) as u64, true);
+            match self.micro_routed(b, r, probe, matched) {
+                Some(routed) => routed,
+                None => {
+                    let restarts = Entries::of(
+                        &self.codes_of(b).1,
+                        codec,
+                        self.restart_data_at(b, block_base),
+                        r,
+                    );
+                    let (j, matched, hit) = self.scan_run(codec, &restarts, r, probe, matched);
+                    if hit {
+                        return ((base + j * self.micro) as u64, true);
+                    }
+                    (j, matched)
+                }
             }
-            (j, matched)
         } else {
             (0, matched)
         };
@@ -4386,11 +4494,13 @@ impl DictIndex {
             g,
             code,
             raw: None,
+            mroute: Vec::new(),
         };
         if verify {
             idx.check_layout()?;
         }
         idx.raw = idx.raw_route();
+        idx.mroute = idx.micro_route();
         Ok(idx)
     }
 
@@ -4862,6 +4972,77 @@ mod tests {
                 let mapped = DictIndex::from_shared(SharedBytes::from_owned(blob), false).unwrap();
                 check(&mapped, &keys);
             }
+        }
+    }
+
+    /// Every query placed the way [`DictIndex::locate`] places it and, where the restart words
+    /// answer, their microblock and shared prefix checked against the restart run's. How many
+    /// they answered.
+    fn routed_as_scanned(idx: &DictIndex, queries: &[String], what: &str) -> usize {
+        let mut routed = 0;
+        for query in queries {
+            idx.probe(query, |probe, _| {
+                let l = match sample_range(&idx.samples, idx.route(probe)) {
+                    Ok((lo, hi)) => idx.head_boundary(probe, lo, hi),
+                    Err(l) => l,
+                };
+                let Some(b) = l.checked_sub(1) else {
+                    return;
+                };
+                let (head, r) = (idx.head(b), idx.micros_in(b));
+                if head == probe || r < 2 {
+                    return;
+                }
+                let matched = lcp(head, probe);
+                let Some(got) = idx.micro_routed(b, r, probe, matched) else {
+                    return;
+                };
+                let codec = idx.codec_of(b);
+                let restarts = Entries::of(&idx.codes_of(b).1, codec, idx.restart_data(b), r);
+                let (j, m, hit) = idx.scan_run(codec, &restarts, r, probe, matched);
+                assert_eq!((j, m, hit), (got.0, got.1, false), "{what}: {query:?}");
+                routed += 1;
+            });
+        }
+        routed
+    }
+
+    #[test]
+    fn restart_words_place_a_probe_where_the_restart_run_does() {
+        // Eight bytes past a long shared prefix that hold NUL and 0x01: a word that pads a short
+        // key and one that holds a zero read the same.
+        let mut x = 11u32;
+        let mut next = || {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (x >> 16) as usize
+        };
+        let mut zeros: Vec<String> = (0..6000)
+            .map(|_| {
+                let len = next() % 12;
+                let mut k = String::from("a/long/shared/prefix/");
+                k.extend((0..len).map(|_| ['\0', '\u{1}', 'a', 'b'][next() % 4]));
+                k
+            })
+            .collect();
+        zeros.sort_unstable();
+        zeros.dedup();
+        let (golden, cjk) = (corpus(), scripts());
+        for block in [32usize, 64, DEFAULT_BLOCK, MAX_BLOCK] {
+            for (name, keys) in [("golden", &golden), ("zeros", &zeros)] {
+                let what = format!("{name}, block {block}");
+                let idx = DictIndex::build_with_block(keys, block).unwrap();
+                let mut queries = keys.clone();
+                queries.extend(probes(keys));
+                let routed = routed_as_scanned(&idx, &queries, &what);
+                assert!(routed > 0, "{what}: the words place no query");
+                check(&idx, keys);
+            }
+            let what = format!("coded, block {block}");
+            let idx = coded(&cjk, block, false, 5);
+            let mut queries = cjk.clone();
+            queries.extend(script_probes(&cjk));
+            assert!(routed_as_scanned(&idx, &queries, &what) > 0, "{what}");
+            check(&idx, &cjk);
         }
     }
 
