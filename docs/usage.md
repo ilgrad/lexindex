@@ -828,9 +828,9 @@ mistake.
 
 ## C
 
-The `capi` feature exports the six indexes to C: one opaque `LexindexIndex` handle, fourteen
-`lexindex_*` functions, and the header `include/lexindex.h`, generated from `src/capi.rs` by
-`cbindgen` and regenerated in CI so the two cannot drift.
+The `capi` feature exports six of the seven indexes to C — all but `DoubleArrayIndex`: one opaque
+`LexindexIndex` handle, fourteen `lexindex_*` functions, and the header `include/lexindex.h`,
+generated from `src/capi.rs` by `cbindgen` and regenerated in CI so the two cannot drift.
 
 ```bash
 cargo build --release --features capi                           # target/release/liblexindex.so

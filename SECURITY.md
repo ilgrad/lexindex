@@ -92,24 +92,29 @@ HashDoS defence and must not be used as one. If your keys come from an adversary
 is a resource you are protecting, put a keyed hash in front.
 
 **`unsafe` is mapping, page allocation, and reads whose bound is an invariant rather than a
-check.** The library contains fifteen `unsafe fn`s. Eleven carry an obligation a caller outside
+check.** The library contains eighteen `unsafe fn`s. Twelve carry an obligation a caller outside
 the crate has to meet: `load_mmap` and `load_mmap_verified` on the five indexes that have anything
-to map (`ClosedHashIndex` is the perfect hash and nothing else), plus `load_mmap_untrusted` on
-`StringIndex`. The other four are internal and their caller is this crate — `hash::r4` and
-`hash::r8`, the key hash's unchecked loads; `room::commit`, which extends a `Vec` over bytes just
-written into its spare capacity; and `Pages::assume_init`. There are forty-two `unsafe` blocks:
-twelve memory maps, counting the writable one `build_to_file` uses on a temporary file it created
-itself; seven in the huge-page allocator; six that write into a `Vec`'s spare capacity and then
-extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
+to map (`ClosedHashIndex` is the perfect hash and nothing else), `load_mmap_untrusted` on
+`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other six are internal and their caller is
+this crate — `hash::r4` and `hash::r8`, the key hash's unchecked loads; `room::commit`, which
+extends a `Vec` over bytes just written into its spare capacity; `Pages::assume_init`; and the
+double array's `decode` and `slot`, a character of a `&str` and a slot read unchecked. There are
+fifty-five `unsafe` blocks: thirteen memory maps, counting the writable one `build_to_file` uses on
+a temporary file it created itself; seven in the huge-page allocator; six that write into a `Vec`'s
+spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
 class that chose the load; four in `SharedBytes`, two of them cache prefetches; seven
 `get_unchecked` or `assume_init` reads across the perfect hash, the dictionary's stair and the
-phrase trie a `BDX3` build walks; and one `String::from_utf8_unchecked` over what the character
+phrase trie a `BDX3` build walks; one `String::from_utf8_unchecked` over what the character
 code of a `BDX4` blob decodes, which is whole characters out of a table built from `char`s
-whatever the blob holds — a debug build checks it, and so the fuzz targets do. Four `unsafe impl`s make `SharedBytes` and `Pages` `Send` and
-`Sync` — the first reads, through its pointer, bytes that an immutable buffer or a read-only map
+whatever the blob holds — a debug build checks it, and so the fuzz targets do; and twelve in the
+double array's walks, which read a slot, the code table and a character of the text unchecked, and
+decode a text into buffers on the stack. A slot's bound is what the load's walk over every slot
+settles — no row runs past the array, no id past the keys — and a debug build checks every slot
+read against the array's length, so the fuzz targets do that too. Four `unsafe impl`s make
+`SharedBytes` and `Pages` `Send` and `Sync` — the first reads, through its pointer, bytes that an immutable buffer or a read-only map
 owns; the second owns its table outright, as a `Vec` does — and `pages::Zeroed` is an
 `unsafe trait`, implemented for the four unsigned integers, whose all-zero bit pattern is a value.
-The `python` feature adds eleven more blocks, each a one-line call from a `load_mmap*` binding
+The `python` feature adds twelve more blocks, each a one-line call from a `load_mmap*` binding
 into the `unsafe fn` of the same name, forwarding the same obligation to the Python caller. The
 `capi` feature adds the eleven `unsafe extern "C"` functions that take a pointer, five internal
 `unsafe fn`s that read those pointers, and twenty-two `unsafe` blocks under them, each reading or
@@ -117,9 +122,9 @@ writing memory the C caller vouched for in the function's `# Safety` line — th
 verbatim — after a null check on every function that has a status to report one in.
 `unsafe_op_in_unsafe_fn` is denied, so every one names its own justification. Miri and
 AddressSanitizer run weekly over the byte-range code and the C ABI, Miri also on a 32-bit
-target, and libFuzzer daily over the seven parsers a target can hold to a return value: `BCH8`,
-`BMP8`, `BCL2`, `BDX3`, `BDX4` and `BHD1` — loaded and then queried, since a dictionary's block data is
-bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and
+target, and libFuzzer daily over the eight parsers a target can hold to a return value: `BCH8`,
+`BMP8`, `BCL2`, `BDX3`, `BDX4`, `BHD1` and `BDA1` — loaded and then queried, since a dictionary's
+block data is bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and
 the standalone `MPH3`/`MPH2`/`MPH1` from inside, each run
 starting from the
 corpus the last one left. `inspect` has a target of its own, since it reads a header of *any*

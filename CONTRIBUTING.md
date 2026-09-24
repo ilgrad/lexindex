@@ -72,7 +72,7 @@ ruff check . && ruff format --check .
 
 ## Guidelines
 
-- **Blob formats are frozen.** `BIX4`, `BDX3`, `BDX4`, `BHD1`, `MPH3`, `BMP8`, `BCH8`, `BCL2` and `OVL2`
+- **Blob formats are frozen.** `BIX4`, `BDX3`, `BDX4`, `BHD1`, `BDA1`, `MPH3`, `BMP8`, `BCH8`, `BCL2` and `OVL2`
   each have golden blobs in `tests/data`, refusal tests for the formats they replaced, and a
   migration page.
   A version that refuses a blob an earlier version wrote is a **major** release — see *Blob

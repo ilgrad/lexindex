@@ -48,7 +48,7 @@ idx.save("catalog.bix")
 idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into RAM
 ```
 
-## Six indexes
+## Seven indexes
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers typo-tolerant
@@ -79,8 +79,13 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   known to be closed. Use it as a fixed-vocabulary token↔id map on a hot path when you need exact
   membership and `id → key`. Built with `fingerprints=True`, one more byte per key lets a lookup of an
   absent key stop after one cache miss instead of two.
+- **`DoubleArrayIndex`** — a **character-wise double-array trie** for matching a lexicon against
+  running text: the keys a text starts with, the longest of them, and every key occurring anywhere
+  in it, one load a character. 15.62 bytes a word on jieba's Chinese lexicon, below every double
+  array measured there. The ids are `StringIndex`'s ranks, and there is no reverse lookup. Use it
+  for dictionary segmentation, gazetteer tagging and a tokenizer's longest match.
 
-All six assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
+All seven assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
 (`save` / `load`, and `load_mmap` where there is more than the perfect hash to map). None is mutable after building — they are immutable summaries, like
 the clustering features in the companion [`betula-cluster`](https://github.com/ilgrad/betula-cluster)
 crate.
