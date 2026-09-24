@@ -61,8 +61,9 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
   ([`fst`](https://crates.io/crates/fst)) alone: exact `string ↔ id`, **prefix**, **common prefix**
   (the keys a query starts with, in one walk), **range**, **predecessor / successor**, **fuzzy**
   (bounded Levenshtein distance), **subsequence** and lazy in-order iteration, all automata over the
-  FST with no key list to scan. Autocomplete, fuzzy search,
-  ordered browse.
+  FST with no key list to scan. Autocomplete, fuzzy search, ordered browse, dictionary
+  segmentation. For an exact `string ↔ id` and nothing else, `HashedDictIndex` is faster and
+  `DictIndex` smaller (the table above).
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: `string ↔ rank` both
   ways, `lower_bound`, `prefix`, `common_prefix`, `range`, in-order iteration — no automata, so no
   fuzzy. The sorted keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes

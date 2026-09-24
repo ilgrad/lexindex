@@ -52,7 +52,8 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers typo-tolerant
-  queries. Use it for autocomplete, fuzzy search, ordered browse.
+  queries. Use it for autocomplete, fuzzy search, ordered browse, dictionary segmentation. For an
+  exact `string ↔ id` and nothing else, `HashedDictIndex` is faster and `DictIndex` smaller.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
   both ways, `lower_bound`, `prefix`, `range`, in-order iteration, no automata so no fuzzy. The
   sorted keys are front-coded in blocks, the suffixes coded per shard under a symbol table or a

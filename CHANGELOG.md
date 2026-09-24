@@ -24,6 +24,10 @@ All notable changes to this project are documented here. The format follows
   inside the runs' own spread, at a fifth of its bytes; at 3.0.0 it read 636 and 357. `DictIndex`
   at the default block reads 2 358 and 933, where it read 2 925 and 1 143. The three tries read
   within 3 % of the 2026-09-19 run.
+- **The README and the docs' front page say what `StringIndex` is for and what it is not.** It is
+  the automaton index — autocomplete, fuzzy search, ordered browse, and now dictionary segmentation,
+  the lane where it leads — and for an exact `string ↔ id` alone `HashedDictIndex` is faster and
+  `DictIndex` smaller.
 
 ## [4.4.2] — 2026-09-24
 
