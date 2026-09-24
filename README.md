@@ -281,7 +281,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   of its entries out by the header alone and compares the rest against the probe without decoding
   them. Keys mostly outside ASCII are first respelled in an order-keeping code of one or two bytes a
   character (`BDX4`), which takes Chinese and Russian corpora 6.7–17.9 % smaller for up to 3 %
-  on `id` and 4.5 % on `ids_of`.
+  on `id` and 4.5 % on `ids_of`. `route_microblocks()` (4.4) swaps the walk for a count of eight
+  bytes a microblock — 0.5 B/key at the default block, in memory and in no blob — and takes 19–31 %
+  off `id` on twelve corpora of thirteen at a million keys.
 - **`HashedDictIndex` stores the rank at the perfect hash's slot.** One bit-packed value a key,
   `⌈log2 n⌉ + fingerprint_bits` wide, beside the dictionary's own `BDX3` or `BDX4` blob embedded byte for byte:
   `id` never reads the dictionary, and nothing ordered reads the hash.

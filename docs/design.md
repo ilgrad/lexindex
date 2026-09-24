@@ -332,7 +332,12 @@ the walk: a word equal to the probe's, which eight bytes do not order, and a pro
 trailing zero bytes of the word below, which may be padding past a short restart rather than bytes
 of it. At a million keys and block 256 the words settle 77–94 % of lookups on twelve corpora and
 16 % on `paths`, whose restarts tie in the eight bytes past `o`. A routed lookup runs 21–34 % fewer
-instructions than an unrouted one, and 1 % fewer on `paths`.
+instructions than an unrouted one, and 1 % fewer on `paths`. Timed against the same index unrouted,
+in one process and in two builds of the harness
+([`bench/results/id-ab-2026-09-24-arz-0216b39.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-0216b39.txt)),
+`id` takes 19–31 % less time on the twelve at a million keys and 13–22 % on six corpora at ten
+million; `paths` does not move. At 32 keys a block the restart run is a single restart, and the
+words saved at most 15 % — and cost `numeric` at ten million 3–10 %.
 
 It is a method rather than the default because it is paid for twice. The words take `8 / micro`
 bytes a key — 0.5 at the default block, 0.25 at 1024 — in memory and in no blob. The size in every

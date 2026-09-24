@@ -531,8 +531,8 @@ class DictIndex:
         Every lookup -- ``id``, ``ids_of``, ``lower_bound`` and the order queries -- walks one
         block's restart run to the microblock it scans. Routed, it compares eight bytes of every
         restart at once and walks the run only where the query's eight bytes tie one. Against the
-        same index unrouted, at the default block, ``id`` took 19-32 % less time on twelve corpora
-        of thirteen at a million keys and 16-26 % on six at ten million; ``paths``, whose restarts
+        same index unrouted, at the default block, ``id`` took 19-31 % less time on twelve corpora
+        of thirteen at a million keys and 13-22 % on six at ten million; ``paths``, whose restarts
         tie, did not move.
 
         The words are ``8 / micro`` bytes a key -- 0.5 at the default block, 0.25 at 1024 -- held

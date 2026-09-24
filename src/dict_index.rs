@@ -2582,10 +2582,10 @@ impl DictIndex {
     /// eight bytes of every restart key at once instead, and walks the run only for a probe whose
     /// eight bytes tie a restart's. `id`, `contains`, `lower_bound`, `ids_of` and the order queries
     /// all go that way. Against the same index unrouted, in one process at the default block, `id`
-    /// took 19–32 % less time on twelve corpora of thirteen at a million keys and 16–26 % on the
-    /// six measured at ten million; 24–35 % at 1024 keys a block, and 2–15 % at 32, where
-    /// `numeric` at ten million lost 9 %. `paths`, whose restart keys tie in their eight bytes,
-    /// did not move.
+    /// took 19–31 % less time on twelve corpora of thirteen at a million keys and 13–22 % on the
+    /// six measured at ten million, and 23–36 % and 14–28 % at 1024 keys a block. At 32, two
+    /// microblocks a block, it saved at most 15 %, and cost `numeric` at ten million 3–10 %.
+    /// `paths`, whose restart keys tie in their eight bytes, did not move.
     ///
     /// No load does this, because what it buys is paid in memory and at load. The words are eight
     /// bytes a restart, `8 / micro` a key — 0.5 at the default block, 0.25 at 1024 — held beside
