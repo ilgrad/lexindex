@@ -250,19 +250,23 @@ and a blob no shard bought stores no dictionary. At block 1024 over a million ke
 7.27 bytes a key, English titles 9.08 → 7.21, paths 12.48 → 9.32; dna, opaque and numeric buy
 nothing.
 
-**A block is not what a lookup scans.** It is cut into microblocks of `micro` keys — the largest
-divisor of `block` at or below 32, so 32 at the default and at every power of two from 64 up — and
+**A block is not what a lookup scans.** It is cut into microblocks of `micro` keys — the smallest
+divisor of `block` from its square root up, kept between 16 and 32, so 16 at the default and at
+every power of two from 32 to 256, and 32 at 512 and 1024 — and
 the first key of every microblock after the block's own head is a **restart**: front-coded against
 the restart before it, not against the key before it. A block's data is its restart run, one header byte a restart and then
 their suffixes, followed by each microblock's run in the same shape. A lookup walks the restarts to
 the one microblock that can hold the probe and scans only that — `block / micro + micro − 2`
-entries, 38 at the default where one level scanned 255. The square root of the block would minimise
-that count, and 16 was the first rule; but a restart entry costs about four ordinary ones, its suffix
-being coded against a key a microblock away, so 32 measured level with 16 on `id` at every block and
-0.08 B/key smaller, and 64 cost 35–50 ns for 0.05 more. What the block sets is how many keys share a stored head, a sample and two offsets, which is the per-key
+entries, 30 at the default where one level scanned 255. The square root of the block minimises
+that count. `BDX2` took the largest divisor at or below 32 instead: a restart entry costs about four
+ordinary ones, its suffix being coded against a key a microblock away, and with a header a nibble
+32 measured level with 16 on `id` and 0.08 B/key smaller. A coded header is not a nibble, and when
+the rule changed (`a03a167`) 16 was faster than 32 at block 256 on all twelve corpora measured, `id`
+by 1–10 % and `key` by 2–19 %, for 1–4 % more bytes. The floor of 16 keeps a block of 32 below
+`BDX2`'s size, which the square root's 8 would have taken it past. What the block sets is how many keys share a stored head, a sample and two offsets, which is the per-key
 metadata; it is now free to grow without the scan growing with it, and that is the whole point,
 because the two were one number before. A divisor keeps every microblock of a block full but the
-last, which is what makes a restart's rank `j · micro` rather than a running sum. A block of 32 or
+last, which is what makes a restart's rank `j · micro` rather than a running sum. A block of 16 or
 fewer, or a prime one, is a single microblock — the layout of one level, and such a blob stores no
 microblock starts, since the one microblock starts where the block does.
 
