@@ -405,6 +405,8 @@ words.save("words.bdx")
 DictIndex.build_to_file((line.rstrip("\n") for line in open("words.txt")), "words.bdx")
 words = DictIndex.load("words.bdx")        # checked like the others
 words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, tables and 8 B/block read
+words.route_microblocks()  # opt-in: 0.5 B/key more memory at this block, in no blob, for a faster
+                           # search; returns those bytes
 ```
 
 `id` finds the block by its head's first eight bytes, walks the block's restarts to one microblock
@@ -414,6 +416,12 @@ id, a handful rather than one per entry read. A lookup therefore scans `block / 
 entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.64 bytes
 per key, `id` 333–335 ns and `key_into` 194–196, against 5.95 / 256–270 / 441–448 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
+
+`route_microblocks()` trades memory for that walk over the restarts. It derives eight bytes of every
+microblock's first key — 0.5 bytes a key at the default block, 0.25 at 1024, held beside the index
+and in no blob — and every lookup then picks its microblock off those words, walking the restarts
+only where the query's eight bytes tie a restart's. Deriving them reads the start of every block, so
+a `load_mmap` index is paged in whole by the call rather than as queries reach it.
 
 At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
@@ -625,6 +633,7 @@ let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys 
 assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
 assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
 assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
+words.route_microblocks(); // opt-in: ~0.5 B/key of memory, in no blob, for a faster search
 
 let hashed = HashedDictIndex::from_dict(words, 8)?; // the dictionary, and a hash sidecar beside it
 assert_eq!(hashed.id("banana"), Some(2)); // one hash and a read of each table, not a search

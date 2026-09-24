@@ -320,6 +320,28 @@ decodes every entry, which is slower and not wrong. On the dictionary at `block 
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
 removes.
 
+**Restart words, when asked for (4.4).** Past its block, a lookup spends most of its time walking
+the restart run, and `route_microblocks()` swaps that walk for a comparison of words. For each
+block it derives `o`, the bytes every restart shares with the block's head — the least
+shared-prefix length among the restart headers — and each restart's eight bytes past `o`,
+big-endian and zero-padded, the way a sample is taken past `g`. A probe that shares fewer than `o`
+bytes with the head is above every restart, so it falls in the last microblock. Otherwise the words
+below the probe's own eight bytes at `o` count its microblock, without a branch, and the bytes it
+shares with the word below give the prefix that microblock's scan starts from. Two cases go back to
+the walk: a word equal to the probe's, which eight bytes do not order, and a probe that shares the
+trailing zero bytes of the word below, which may be padding past a short restart rather than bytes
+of it. At a million keys and block 256 the words settle 77–94 % of lookups on twelve corpora and
+16 % on `paths`, whose restarts tie in the eight bytes past `o`. A routed lookup runs 21–34 % fewer
+instructions than an unrouted one, and 1 % fewer on `paths`.
+
+It is a method rather than the default because it is paid for twice. The words take `8 / micro`
+bytes a key — 0.5 at the default block, 0.25 at 1024 — in memory and in no blob. The size in every
+table here is the blob's, which is what a load holds. Routed, the default block would give up the
+size lead on four of the thirteen corpora at a million keys: `words`, `domains`, `idents` and `pypi`,
+where its margin over MARISA is 0.34–0.39 B/key. Block 1024 would give it up on `paths`. And
+deriving the words decodes the start of every restart run, some fifteen instructions a key.
+`load_mmap` touches a page only when a query needs it; after routing, the whole file has been read.
+
 Where the lookup spends that time was measured two ways in one process on an idle machine
 ([`bench/results/dict-routing-2026-09-13-arz-dab25e3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-routing-2026-09-13-arz-dab25e3.txt)):
 by timing the routing itself — the sample search and the head boundary, on the code `locate` runs —

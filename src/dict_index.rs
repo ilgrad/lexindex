@@ -32,6 +32,7 @@ use crate::paircode::{self, Code};
 use crate::phrase::{self, Dict, Split, Trie};
 use crate::room::{Room, commit};
 use std::cmp::Ordering;
+use std::sync::OnceLock;
 
 /// `[magic 4][n u64][block u32][heads u64][data u64][codecs u32][payload u64][head width u8]
 /// [block width u8][superblock shift u8][micro width u8][micro u16][shard u16][codes u32]
@@ -214,9 +215,14 @@ pub struct DictIndex {
     /// the eight bytes past them of each restart key, the way a sample is taken past `g` —
     /// [`NO_ROUTE`] in the first word of a block whose restarts did not decode, and `u64::MAX`
     /// past the last block's restarts. A lookup picks its microblock off these and walks the
-    /// restart run only where the probe's word ties one. Derived at load; empty where every block
-    /// is one microblock.
-    mroute: Vec<u64>,
+    /// restart run only where the probe's word ties one. Unset until
+    /// [`route_microblocks`](Self::route_microblocks) derives them, and empty where every block is
+    /// one microblock.
+    ///
+    /// Behind a `OnceLock` rather than a `&mut self` setter because a `DictIndex` is shared
+    /// wherever it is served — the Python object and a `HashedDictIndex` both hold it in an `Arc` —
+    /// and a lookup racing the derivation walks the restart run until the words are in.
+    mroute: OnceLock<Box<[u64]>>,
 }
 
 /// The first word of a block's [`DictIndex::mroute`] group that leaves the block to its restart
@@ -2528,7 +2534,7 @@ impl DictIndex {
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let samples = samples_of(&heads, &head_ends, g);
-        let mut idx = Self {
+        Ok(Self {
             block,
             micro,
             per: block.div_ceil(micro),
@@ -2550,10 +2556,8 @@ impl DictIndex {
             g,
             code: None,
             raw: None,
-            mroute: Vec::new(),
-        };
-        idx.mroute = idx.micro_route();
-        Ok(idx)
+            mroute: OnceLock::new(),
+        })
     }
 
     /// Number of distinct keys.
@@ -2568,6 +2572,33 @@ impl DictIndex {
     /// Keys per block, as given at build time.
     pub fn block(&self) -> usize {
         self.block
+    }
+
+    /// Derive the words that send a lookup straight to its microblock, once, and return the bytes
+    /// they take.
+    ///
+    /// A lookup finds its block off the samples, then walks the block's restart run — the first
+    /// key of each microblock, front-coded — to the one microblock it scans. Routed, it compares
+    /// eight bytes of every restart key at once instead, and walks the run only for a probe whose
+    /// eight bytes tie a restart's. `id`, `contains`, `lower_bound`, `ids_of` and the order queries
+    /// all go that way. Against the same index unrouted, in one process at the default block, `id`
+    /// took 19–32 % less time on twelve corpora of thirteen at a million keys and 16–26 % on the
+    /// six measured at ten million; 24–35 % at 1024 keys a block, and 2–15 % at 32, where
+    /// `numeric` at ten million lost 9 %. `paths`, whose restart keys tie in their eight bytes,
+    /// did not move.
+    ///
+    /// No load does this, because what it buys is paid in memory and at load. The words are eight
+    /// bytes a restart, `8 / micro` a key — 0.5 at the default block, 0.25 at 1024 — held beside
+    /// the index and in no blob, so a routed index is that much larger than
+    /// [`serialized_len`](Self::serialized_len). Deriving them decodes the start of every
+    /// restart, about fifteen instructions a key, and so reads nearly every page of a file
+    /// `load_mmap` borrows. A second call derives nothing; a lookup that runs on another thread
+    /// before the words are in walks the restart run.
+    pub fn route_microblocks(&self) -> usize {
+        let words = self
+            .mroute
+            .get_or_init(|| self.micro_route().into_boxed_slice());
+        size_of_val::<[u64]>(words)
     }
 
     /// Number of blocks.
@@ -3361,7 +3392,7 @@ impl DictIndex {
         matched: usize,
     ) -> Option<(usize, usize)> {
         let per = self.per;
-        let group = self.mroute.get(b * per..(b + 1) * per)?;
+        let group = self.mroute.get()?.get(b * per..(b + 1) * per)?;
         let o = group[0];
         if o == NO_ROUTE {
             return None;
@@ -4524,13 +4555,12 @@ impl DictIndex {
             g,
             code,
             raw: None,
-            mroute: Vec::new(),
+            mroute: OnceLock::new(),
         };
         if verify {
             idx.check_layout()?;
         }
         idx.raw = idx.raw_route();
-        idx.mroute = idx.micro_route();
         Ok(idx)
     }
 
@@ -4610,8 +4640,9 @@ impl DictIndex {
     ];
 
     /// Whether `bytes` loads, and whether what loaded answers without panicking — by the checked
-    /// path and by the mapping's, which takes the arrays as they are. Exists for the libFuzzer
-    /// target in `fuzz/`; see the `lexindex::fuzzing` module.
+    /// path and by the mapping's, which takes the arrays as they are, both as loaded and with the
+    /// mapping's restart words derived. Exists for the libFuzzer target in `fuzz/`; see the
+    /// `lexindex::fuzzing` module.
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_load_and_query(bytes: &[u8]) -> bool {
         let checked = Self::from_bytes(bytes).ok();
@@ -4620,7 +4651,11 @@ impl DictIndex {
             checked.is_none() || framed.is_some(),
             "the framing is the checked path's"
         );
-        for idx in checked.iter().chain(&framed) {
+        let routed = Self::from_shared(SharedBytes::copy_of(bytes), false).ok();
+        if let Some(idx) = &routed {
+            idx.route_microblocks();
+        }
+        for idx in checked.iter().chain(&framed).chain(&routed) {
             let n = idx.len() as u64;
             for probe in Self::FUZZ_PROBES {
                 assert!(idx.id(probe).is_none_or(|id| id < n), "{probe:?}");
@@ -4669,6 +4704,31 @@ impl DictIndex {
         // the walk is left alone, and so is one whose block data decodes to something that is not
         // UTF-8, since `iter` is lossy there and `key` refuses, which is a documented difference
         // rather than a disagreement.
+        // The restart words are a shortcut over a restart run in order, so where every key walks
+        // in order the routed copy must place every probe where the loaded index does: the fixed
+        // probes, each key, and each key short of its last character, which falls between two.
+        if let (Some(idx), Some(routed)) = (&checked, &routed) {
+            let keys: Vec<String> = idx.iter().take(4097).map(|(k, _)| k).collect();
+            let whole = keys.len() == idx.len() && keys.len() <= 4096;
+            let sorted = keys.windows(2).all(|w| w[0] < w[1]);
+            let utf8 = (0..)
+                .zip(&keys)
+                .all(|(i, k)| idx.key(i).as_ref() == Some(k));
+            if whole && sorted && utf8 {
+                let between = keys.iter().flat_map(|k| {
+                    let cut = k.char_indices().last().map_or(0, |(i, _)| i);
+                    [k.as_str(), &k[..cut]]
+                });
+                for probe in Self::FUZZ_PROBES.into_iter().chain(between) {
+                    assert_eq!(routed.id(probe), idx.id(probe), "routed id({probe:?})");
+                    assert_eq!(
+                        routed.lower_bound(probe),
+                        idx.lower_bound(probe),
+                        "routed lower_bound({probe:?})"
+                    );
+                }
+            }
+        }
         if let Some(idx) = &checked {
             let all: Vec<(String, u64)> = idx.iter().take(257).collect();
             for (i, (_, id)) in all.iter().enumerate() {
@@ -5061,19 +5121,34 @@ mod tests {
             for (name, keys) in [("golden", &golden), ("zeros", &zeros)] {
                 let what = format!("{name}, block {block}");
                 let idx = DictIndex::build_with_block(keys, block).unwrap();
+                let blob = idx.to_bytes();
                 let mut queries = keys.clone();
                 queries.extend(probes(keys));
+                assert_eq!(
+                    routed_as_scanned(&idx, &queries, &what),
+                    0,
+                    "{what}: unrouted"
+                );
+                let bytes = idx.route_microblocks();
+                assert_eq!(bytes, idx.blocks_len() * idx.per * 8, "{what}");
+                assert_eq!(idx.route_microblocks(), bytes, "{what}: routed twice");
                 let routed = routed_as_scanned(&idx, &queries, &what);
                 assert!(routed > 0, "{what}: the words place no query");
                 check(&idx, keys);
+                assert_eq!(idx.to_bytes(), blob, "{what}: the words are in the blob");
             }
             let what = format!("coded, block {block}");
             let idx = coded(&cjk, block, false, 5);
+            idx.route_microblocks();
             let mut queries = cjk.clone();
             queries.extend(script_probes(&cjk));
             assert!(routed_as_scanned(&idx, &queries, &what) > 0, "{what}");
             check(&idx, &cjk);
         }
+        // One microblock a block: nothing to route, and nothing held.
+        let idx = DictIndex::build_with_block(&golden, 16).unwrap();
+        assert_eq!(idx.route_microblocks(), 0);
+        check(&idx, &golden);
     }
 
     /// Up to `n` keys of two to five characters drawn from `alphabet` CJK ideographs.

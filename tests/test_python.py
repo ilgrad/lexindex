@@ -407,6 +407,27 @@ def test_dict_index_block_argument_and_persistence(tmp_path):
     assert walked == [(w, i) for i, w in enumerate(words[:1500])]
 
 
+def test_dict_index_route_microblocks_changes_where_a_lookup_reads_not_what_it_answers(tmp_path):
+    words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
+    probes = [*words[::97], *(w[:-1] for w in words[::101]), "", "token-", "token-99999", "zzz"]
+    for block, micro in ((16, 16), (32, 16), (256, 16), (1024, 32)):
+        di = lexindex.DictIndex(words, block=block)
+        want = [di.id(q) for q in probes], [di.lower_bound(q) for q in probes], di.ids_of(probes)
+        blob = di.to_bytes()
+        held = di.route_microblocks()
+        # Eight bytes a microblock, and nothing where a block is one microblock.
+        per = block // micro
+        assert held == (per > 1) * -(-len(words) // block) * per * 8, block
+        assert di.route_microblocks() == held
+        got = [di.id(q) for q in probes], [di.lower_bound(q) for q in probes], di.ids_of(probes)
+        assert got == want, block
+        assert di.to_bytes() == blob and di.serialized_len() == len(blob)
+    p = tmp_path / "words.bdx"
+    lexindex.DictIndex(words).save(p)
+    mapped = lexindex.DictIndex.load_mmap(p)
+    assert mapped.route_microblocks() > 0 and mapped.ids_of(words) == list(range(len(words)))
+
+
 def test_dict_index_in_a_character_code_answers_what_the_fst_does():
     """Keys mostly outside ASCII are stored in a character code (`BDX4`), and every query -- the
     batch and an Arrow column among them -- answers what StringIndex answers over UTF-8, for
