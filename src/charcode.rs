@@ -94,51 +94,86 @@ fn put(out: &mut [u8], at: usize, w: Word) -> usize {
 }
 
 /// Codewords by code point. Below [`LOW`] — ASCII, and every script UTF-8 spells in two bytes,
-/// Cyrillic among them — one flat level of 8 KiB, so that such a character is one read. Above it
-/// two levels: a page of 256 code points, then the point in it, and only the pages the alphabet
-/// touches hold a table — a Chinese alphabet of 12 000 characters touches about a hundred of the
-/// 4 352, a hundred kilobytes beside the first level's eight and a half.
+/// Cyrillic among them — one flat level, so that such a character is one read. Above it two
+/// levels: a page of 256 code points, then the point in it, and only the pages the alphabet
+/// touches hold a table, of two bytes a point. Each level ends at the last entry the alphabet
+/// uses. jieba's 12 045 characters touch 82 pages, 42 kB, and the rest of the index is under
+/// 5 kB; at four bytes a point and every level whole it was 101 kB — built at every load, and so
+/// held beside the blob in every process that reads it, a mapped one included.
 struct Index {
-    low: Box<[Word; LOW]>,
+    low: Box<[Word]>,
     /// `pages[cp >> 8]`: one past the page's place in `words`, or zero for a page the alphabet has
     /// no character on.
     pages: Box<[u16]>,
-    words: Box<[Word]>,
+    /// Codewords [`narrow`]ed, zero for a point the code does not spell.
+    words: Box<[u16]>,
+    /// [`Mode::base`]: the top bit of every lead a page holds.
+    base: u8,
+}
+
+/// A codeword past [`LOW`] in sixteen bits: whether it has a second byte, the lead's low seven,
+/// then the second byte, or a one for a single. Such a character is never ASCII, so its lead's top
+/// bit is the mode's ([`Mode::base`]) and nothing is lost; and no codeword narrows to zero, which
+/// stays free for a character the code does not spell.
+fn narrow(w: Word) -> u16 {
+    let lead = (w >> 8) as u16 & 0x7F;
+    match w >> 16 {
+        2 => 0x8000 | lead << 8 | (w as u16 & 0xFF),
+        _ => lead << 8 | 1,
+    }
+}
+
+/// The codeword [`narrow`] kept, under a mode of `base`. A single's second byte comes back a one
+/// rather than a zero, which [`put`] writes where the next codeword goes and no caller reads.
+#[inline(always)]
+fn widen(n: u16, base: u8) -> Word {
+    let n = u32::from(n);
+    (1 + (n >> 15)) << 16 | (u32::from(base) | n >> 8 & 0x7F) << 8 | n & 0xFF
 }
 
 impl Index {
-    fn build(spelt: impl IntoIterator<Item = (char, Word)>) -> Self {
-        let mut low = Box::new([0; LOW]);
-        let mut pages = vec![0u16; PAGES].into_boxed_slice();
-        let mut words: Vec<Word> = Vec::new();
+    fn build(spelt: impl IntoIterator<Item = (char, Word)>, base: u8) -> Self {
+        let (mut low, mut pages, mut words) = (Vec::new(), Vec::new(), Vec::new());
         for (c, w) in spelt {
             let cp = c as usize;
             if cp < LOW {
+                if low.len() <= cp {
+                    low.resize(cp + 1, 0);
+                }
                 low[cp] = w;
                 continue;
+            }
+            if pages.len() <= cp >> 8 {
+                pages.resize((cp >> 8) + 1, 0u16);
             }
             if pages[cp >> 8] == 0 {
                 words.resize(words.len() + PAGE, 0);
                 pages[cp >> 8] = (words.len() / PAGE) as u16;
             }
-            words[(usize::from(pages[cp >> 8]) - 1) * PAGE + (cp & 0xFF)] = w;
+            words[(usize::from(pages[cp >> 8]) - 1) * PAGE + (cp & 0xFF)] = narrow(w);
         }
         Self {
-            low,
-            pages,
-            words: words.into_boxed_slice(),
+            low: low.into(),
+            pages: pages.into(),
+            words: words.into(),
+            base,
         }
     }
 
+    /// The character's codeword, or zero where the code does not spell it. A point below [`LOW`]
+    /// past the first level falls to the pages, which hold none below it.
     #[inline(always)]
     fn get(&self, c: char) -> Word {
         let cp = c as usize;
-        if cp < LOW {
-            return self.low[cp];
+        if let Some(&w) = self.low.get(cp) {
+            return w;
         }
-        match self.pages[cp >> 8] {
-            0 => 0,
-            p => self.words[(usize::from(p) - 1) * PAGE + (cp & 0xFF)],
+        match self.pages.get(cp >> 8) {
+            Some(&p) if p != 0 => match self.words[(usize::from(p) - 1) * PAGE + (cp & 0xFF)] {
+                0 => 0,
+                n => widen(n, self.base),
+            },
+            _ => 0,
         }
     }
 }
@@ -159,9 +194,6 @@ pub(crate) enum Probe {
 /// An order-keeping code over one blob's characters.
 pub(crate) struct CharCode {
     mode: Mode,
-    /// The characters spelled, ascending: every one the keys hold in [`Mode::Seven`], every one
-    /// past ASCII in [`Mode::Eight`].
-    chars: Box<[char]>,
     /// The rank of each lead's first character, and past the last lead the alphabet's size. A lead
     /// of one character is that character's whole codeword; a wider one is a page of two-byte
     /// codewords, the second byte a character's place in it.
@@ -173,6 +205,8 @@ pub(crate) struct CharCode {
     leads: Box<[u32; 256]>,
     /// Every character spelled, by rank, as [`packed`] UTF-8 — in [`Mode::Eight`] followed by
     /// ASCII's 128, which spell themselves — so that a codeword decodes in two reads and a store.
+    /// The first [`count`](Self::count) are the alphabet, ascending: every character the keys
+    /// hold in [`Mode::Seven`], every one past ASCII in [`Mode::Eight`].
     utf8: Box<[u32]>,
     /// What [`write_to`](Self::write_to) writes, counted once.
     len: usize,
@@ -193,9 +227,25 @@ fn packed_len(u: u32) -> usize {
     ((u as u8).leading_ones() as usize).max(1)
 }
 
+/// The character [`packed`] made `u` of.
+fn unpacked(u: u32) -> char {
+    let bytes = u.to_le_bytes();
+    std::str::from_utf8(&bytes[..packed_len(u)])
+        .ok()
+        .and_then(|s| s.chars().next())
+        .expect("packed from a char")
+}
+
+/// `u`'s place in the order of the characters: [`packed`] UTF-8 read from its first byte, which
+/// orders as the code points do, zero padding and all, since no character's UTF-8 is a prefix of
+/// another's.
+fn packed_order(u: u32) -> u32 {
+    u.swap_bytes()
+}
+
 impl CharCode {
     /// The code over `chars`, ascending, under leads of the widths `firsts` bounds.
-    fn new(mode: Mode, chars: Box<[char]>, firsts: Box<[u16]>) -> Self {
+    fn new(mode: Mode, chars: &[char], firsts: Box<[u16]>) -> Self {
         let spelt = firsts.windows(2).enumerate().flat_map(|(l, pair)| {
             let (first, end) = (usize::from(pair[0]), usize::from(pair[1]));
             let lead = mode.base() + l as u8;
@@ -213,7 +263,7 @@ impl CharCode {
         let ascii = (0..0x80u8)
             .filter(|_| mode == Mode::Eight)
             .map(|b| (char::from(b), word(b, None)));
-        let index = Index::build(spelt.chain(ascii));
+        let index = Index::build(spelt.chain(ascii), mode.base());
         let mut prev = 0u32;
         let deltas: usize = chars
             .iter()
@@ -238,13 +288,17 @@ impl CharCode {
         }
         Self {
             mode,
-            chars,
             firsts,
             index,
             leads,
             utf8: utf8.into_boxed_slice(),
             len,
         }
+    }
+
+    /// Characters in the alphabet: in [`Mode::Eight`], ASCII not among them.
+    fn count(&self) -> usize {
+        usize::from(self.firsts[self.firsts.len() - 1])
     }
 
     /// Append `key`'s code to `out`; `false`, with `out` as it was plus some of the key, for a key
@@ -278,9 +332,11 @@ impl CharCode {
             // No key holds `c` here, so the keys below the query are those below the first
             // character that is spelled and above it — or, above every one, all that carry the
             // prefix, which end where the prefix's code, incremented, begins.
-            let next = self.chars.partition_point(|&x| x < c);
-            return match self.chars.get(next) {
-                Some(&next) => (Probe::Absent, put(out, o, self.index.get(next))),
+            let alphabet = &self.utf8[..self.count()];
+            let c_order = packed_order(packed(c));
+            let next = alphabet.partition_point(|&u| packed_order(u) < c_order);
+            return match alphabet.get(next) {
+                Some(&next) => (Probe::Absent, put(out, o, self.index.get(unpacked(next)))),
                 None => match bump(&mut out[..o]) {
                     Some(len) => (Probe::Absent, len),
                     None => (Probe::Last, 0),
@@ -411,15 +467,16 @@ impl CharCode {
 
     pub(crate) fn write_to(&self, out: &mut Vec<u8>) {
         out.push(self.mode.tag());
-        put_varint(out, self.chars.len());
+        put_varint(out, self.count());
         out.push((self.firsts.len() - 1) as u8);
         for pair in self.firsts.windows(2) {
             out.push((pair[1] - pair[0] - 1) as u8);
         }
         let mut prev = 0u32;
-        for &c in self.chars.iter() {
-            put_varint(out, (c as u32 - prev) as usize);
-            prev = c as u32;
+        for &u in &self.utf8[..self.count()] {
+            let c = unpacked(u) as u32;
+            put_varint(out, (c - prev) as usize);
+            prev = c;
         }
     }
 
@@ -472,7 +529,7 @@ impl CharCode {
             chars.push(c);
             prev = cp;
         }
-        (at == bytes.len()).then(|| Self::new(mode, chars.into(), firsts.into()))
+        (at == bytes.len()).then(|| Self::new(mode, &chars, firsts.into()))
     }
 }
 
@@ -633,8 +690,8 @@ impl Tally {
         for w in &widths {
             firsts.push(firsts[firsts.len() - 1] + *w as u16);
         }
-        let chars: Box<[char]> = spelled.iter().map(|&(c, _)| c).collect();
-        let code = CharCode::new(mode, chars, firsts.into());
+        let chars: Vec<char> = spelled.iter().map(|&(c, _)| c).collect();
+        let code = CharCode::new(mode, &chars, firsts.into());
         let spelt: u64 = alphabet
             .iter()
             .map(|&(c, n)| n * u64::from(code.index.get(c) >> 16))
@@ -712,17 +769,25 @@ impl CharCode {
         for w in &widths {
             firsts.push(firsts[firsts.len() - 1] + *w as u16);
         }
-        CharCode::new(
-            mode,
-            alphabet.iter().map(|&(c, _)| c).collect(),
-            firsts.into(),
-        )
+        let chars: Vec<char> = alphabet.iter().map(|&(c, _)| c).collect();
+        CharCode::new(mode, &chars, firsts.into())
     }
 
     fn encoded(&self, key: &str) -> Vec<u8> {
         let mut out = Vec::new();
         assert!(self.encode_key(key, &mut out), "{key:?}");
         out
+    }
+
+    /// Bytes the code's tables take on the heap: what every load of a coded blob builds.
+    fn heap_len(&self) -> usize {
+        use std::mem::size_of_val;
+        size_of_val(&*self.firsts)
+            + size_of_val(&*self.index.low)
+            + size_of_val(&*self.index.pages)
+            + size_of_val(&*self.index.words)
+            + size_of_val(&*self.leads)
+            + size_of_val(&*self.utf8)
     }
 }
 
@@ -767,7 +832,7 @@ mod tests {
         ) {
             // A build writes no code over no characters, and a loader refuses one.
             let code = CharCode::forced(&keys, seven, singles);
-            let code = if code.chars.is_empty() { code } else { roundtrip(&code) };
+            let code = if code.count() == 0 { code } else { roundtrip(&code) };
             for a in &keys {
                 let ca = code.encoded(a);
                 let mut back = Vec::new();
@@ -1003,6 +1068,50 @@ mod tests {
                 .collect::<String>(),
         );
         assert!(huge.choose().is_none());
+    }
+
+    /// A code's tables are what a load adds to the blob, so they are held to about what a
+    /// character costs to decode: four bytes of UTF-8, and a two-byte codeword on a page that
+    /// jieba's lexicon fills 57 % of. At four-byte codewords, whole levels and a second copy of
+    /// the alphabet, 12 000 ideographs took 16.7 bytes each.
+    #[test]
+    fn the_tables_a_load_builds_stay_near_the_alphabet() {
+        let alphabet: String = (0x4E00u32..)
+            .filter(|cp| cp * 7 % 16 < 9)
+            .take(12_000)
+            .filter_map(char::from_u32)
+            .chain("#+AZaz\u{3b3}".chars())
+            .collect();
+        let keys: Vec<String> = alphabet.chars().map(String::from).collect();
+        for (seven, singles) in [(true, 0), (true, 20), (false, 20)] {
+            let code = roundtrip(&CharCode::forced(&keys, seven, singles));
+            let per = code.heap_len() as f64 / code.count() as f64;
+            assert!(per < 8.5, "{per:.2} bytes a character, seven {seven}");
+            for k in &keys {
+                let mut back = Vec::new();
+                assert!(code.decode_into(&code.encoded(k), &mut back));
+                assert_eq!(back, k.as_bytes());
+            }
+        }
+    }
+
+    /// A seven-bit code's first lead is byte zero, and where the alphabet has no character below
+    /// `U+0800` its first character is on a page: its codeword must not read as none.
+    #[test]
+    fn the_first_codeword_on_a_page_is_a_codeword() {
+        let keys = ["中", "人", "国"];
+        for singles in [0, 3] {
+            let code = CharCode::forced(&keys, true, singles);
+            assert_eq!(code.encoded("中"), [0u8, 0][..2 - usize::from(singles > 0)]);
+            for k in keys {
+                let mut buf = [0u8; 8];
+                let (probe, len) = code.probe_into(k, &mut buf);
+                assert_eq!((probe, &buf[..len]), (Probe::Exact, &code.encoded(k)[..]));
+            }
+            // Below every character of the alphabet: the probe is the first codeword.
+            let (probe, len) = code.probe_into("\u{4e00}", &mut [0u8; 8]);
+            assert_eq!((probe, len), (Probe::Absent, 2 - usize::from(singles > 0)));
+        }
     }
 
     #[test]
