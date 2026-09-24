@@ -178,6 +178,10 @@ impl Ties {
 
     /// The first block of the run rooted at `root` whose head is above `probe`, or the run's end.
     /// `head` reads a block's head; `flat(a, c)` compares heads over a run the trie does not split.
+    ///
+    /// With it, where the head the descent compared the probe with is the one just below that
+    /// boundary, the bytes the two share and that head's length: the block's scan starts from
+    /// both, and would otherwise read the head and compare it again.
     #[inline]
     pub(crate) fn boundary<'h>(
         &self,
@@ -185,7 +189,7 @@ impl Ties {
         probe: &[u8],
         head: impl Fn(usize) -> &'h [u8],
         flat: impl FnOnce(usize, usize) -> usize,
-    ) -> usize {
+    ) -> (usize, Option<(usize, usize)>) {
         let mut node = self.nodes[root];
         let (end, at) = loop {
             let (j, equal) = self.edge(node, probe);
@@ -213,14 +217,16 @@ impl Ties {
             (None, Some(_)) => true,
             (Some(x), Some(y)) => x < y,
         };
-        if shared < node.p as usize {
-            return self.correct(root, probe, shared, below);
-        }
-        match end {
-            End::At(l) => l,
-            End::Leaf(b) => b + usize::from(!below),
-            End::Flat(a, c) => flat(a, c),
-        }
+        let l = if shared < node.p as usize {
+            self.correct(root, probe, shared, below)
+        } else {
+            match end {
+                End::At(l) => l,
+                End::Leaf(b) => b + usize::from(!below),
+                End::Flat(a, c) => flat(a, c),
+            }
+        };
+        (l, (l == at + 1).then_some((shared, h.len())))
     }
 
     /// The boundary for a probe that left the trie inside a prefix: the first node on its path
@@ -272,11 +278,19 @@ mod tests {
             }
             let flat = |a: usize, c: usize| a + plain(&heads[a..c], probe);
             // A run that does not split has no root, and its heads are compared.
-            let got = match ties.root(lo) {
+            let (got, known) = match ties.root(lo) {
                 Some(root) => ties.boundary(root, probe, |b| &heads[b], flat),
-                None => flat(lo, hi),
+                None => (flat(lo, hi), None),
             };
             assert_eq!(got, plain(heads, probe), "probe {probe:?}");
+            if let Some((shared, len)) = known {
+                let below = &heads[got - 1];
+                assert_eq!(
+                    (shared, len),
+                    (lcp(probe, below), below.len()),
+                    "probe {probe:?}"
+                );
+            }
         }
     }
 
@@ -366,7 +380,7 @@ mod tests {
         let ties = Ties::derive(&samples, |b| &heads[b]);
         let root = ties.root(0).expect("the first and last heads differ");
         for probe in probes_of(&heads) {
-            let got = ties.boundary(root, &probe, |b| &heads[b], |a, _| a);
+            let (got, _) = ties.boundary(root, &probe, |b| &heads[b], |a, _| a);
             assert!(got <= heads.len());
         }
     }

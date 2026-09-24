@@ -3193,11 +3193,17 @@ impl DictIndex {
         if self.n == 0 {
             return (0, false);
         }
-        let l = match sample_range(&self.samples, self.route(probe)) {
+        let (l, known) = match sample_range(&self.samples, self.route(probe)) {
             Ok((lo, hi)) => self.run_boundary(probe, lo, hi),
-            Err(l) => l,
+            Err(l) => (l, None),
         };
-        self.locate_in(l, probe)
+        match known {
+            Some((matched, len)) if matched == len && matched == probe.len() => {
+                (((l - 1) * self.block) as u64, true)
+            }
+            Some((matched, _)) => self.locate_past(l - 1, probe, matched),
+            None => self.locate_in(l, probe),
+        }
     }
 
     /// The probe's sample, or the block boundary it lands on outright.
@@ -3258,16 +3264,16 @@ impl DictIndex {
 
     /// [`head_boundary`](Self::head_boundary) over a run of equal samples `[lo, hi)`, placed by the
     /// run's [`Ties`] where it has them: one head compare for the whole run rather than one a
-    /// halving of it.
+    /// halving of it. With the boundary, what [`Ties::boundary`] knows of the head below it.
     #[inline]
-    fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> usize {
+    fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> (usize, Option<(usize, usize)>) {
         if hi - lo >= 2 {
             if let Some(root) = self.ties.root(lo) {
                 let flat = |a: usize, c: usize| self.head_boundary(probe, a, c);
                 return self.ties.boundary(root, probe, |b| self.head(b), flat);
             }
         }
-        self.head_boundary(probe, lo, hi)
+        (self.head_boundary(probe, lo, hi), None)
     }
 
     /// The first block index in `[l, r)` whose head is past `probe`, or `r` — the samples have
@@ -3448,14 +3454,19 @@ impl DictIndex {
             return (0, false);
         }
         let b = l - 1;
-        let base = b * self.block;
-        let codec = self.codec_of(b);
         let head = self.head(b);
         if head == probe {
-            return (base as u64, true);
+            return ((b * self.block) as u64, true);
         }
-        // The probe is above the run's first key and shares `matched` bytes with it.
-        let matched = lcp(head, probe);
+        self.locate_past(b, probe, lcp(head, probe))
+    }
+
+    /// [`locate_in`](Self::locate_in) past block `b`'s head, which is below `probe` and shares
+    /// `matched` bytes with it: what a lookup that has already compared the two starts from.
+    #[inline(always)]
+    fn locate_past(&self, b: usize, probe: &[u8], matched: usize) -> (u64, bool) {
+        let base = b * self.block;
+        let codec = self.codec_of(b);
         let r = self.micros_in(b);
         let block_base = self.blocks.at(b);
         let (j, matched) = if r > 1 {
@@ -3748,7 +3759,7 @@ impl DictIndex {
                 } else if hi_at[j] == lo_at[j] {
                     lo_at[j]
                 } else {
-                    self.run_boundary(key(base + j), lo_at[j], hi_at[j])
+                    self.run_boundary(key(base + j), lo_at[j], hi_at[j]).0
                 };
             }
             // The block start is one load and the data it names another, so they are pulled in as
