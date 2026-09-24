@@ -1,0 +1,107 @@
+# jieba 0.42.1 over each backend, CPython 3.14.7, with DoubleArrayIndex
+# Z-10: date 2026-09-25T00:53:20+03:00; uptime  00:53:20 up 10:39,  1 user,  load average: 0.39, 1.50, 3.14
+# branch char-trie at 902e4b434e6dd483b7010000a71b2adff44c4cfa plus the working tree; diff sha256 82fda4aae29573ca
+# kernel 7.2.7-200.fc44.x86_64; cpu AMD Ryzen 7 5800HS with Radeon Graphics; governor powersave
+# DIMM layout: not read (needs root); buffer placement: not read (needs root)
+# gate: bench-ready green and hottest zone < 70 C, waiting up to 30 min
+# tree: branch char-trie at 902e4b4 plus the uncommitted 4.5.0 version bump and docs; no file
+# under src/ differs from 902e4b4. Harnesses local/cjk/z8 (Rust), local/cjk/z2d.py (Python) and
+# local/cjk/z10.sh (the campaign) are not in the repository; this file records every version, hash
+# and flag they print. swap: 1 MiB of zram in use throughout, a residue bench-ready passes.
+wheel lexindex-4.5.0-cp311-abi3-manylinux_2_34_x86_64.whl sha256 3579d17e492650be
+
+## 5. Python, 3 processes of 5 rounds
+gate before python 1: green after 34 s; thermals acpitz 54.0 C  iwlwifi_1 36.0 C  
+python 1 done 01:05:12; thermals after: acpitz 94.0 C  iwlwifi_1 36.0 C  
+# python 3.14.7 (/home/ilgrad/.cache/uv/builds-v0/.tmpo4xH3J/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.0, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.46
+# round 2/5 done, load 0.51
+# round 3/5 done, load 0.58
+# round 4/5 done, load 0.62
+# round 5/5 done, load 0.68
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            654         1512              2060
+lexindex StringIndex                        918         1425              1942
+lexindex StringIndex occurrences            568         1108              1621
+lexindex DoubleArrayIndex                   849         1372              1873
+lexindex DoubleArrayIndex occurrences          507         1042              1545
+lexindex DictIndex 256                     2105         2526              3072
+marisa-trie                                1436         1938              2531
+dawg2 (dag only)                            998           --                --
+gate before python 2: green after 66 s; thermals acpitz 52.0 C  iwlwifi_1 38.0 C  
+python 2 done 01:07:01; thermals after: acpitz 90.0 C  iwlwifi_1 37.0 C  
+# python 3.14.7 (/home/ilgrad/.cache/uv/builds-v0/.tmp9x9KBz/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.0, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.55
+# round 2/5 done, load 0.59
+# round 3/5 done, load 0.65
+# round 4/5 done, load 0.68
+# round 5/5 done, load 0.71
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            655         1499              2035
+lexindex StringIndex                        913         1449              1949
+lexindex StringIndex occurrences            567         1108              1642
+lexindex DoubleArrayIndex                   862         1374              1882
+lexindex DoubleArrayIndex occurrences          513         1062              1556
+lexindex DictIndex 256                     2094         2532              3076
+marisa-trie                                1452         1942              2547
+dawg2 (dag only)                            993           --                --
+gate before python 3: green after 34 s; thermals acpitz 55.0 C  iwlwifi_1 37.0 C  
+python 3 done 01:08:18; thermals after: acpitz 94.0 C  iwlwifi_1 38.0 C  
+# python 3.14.7 (/home/ilgrad/.cache/uv/builds-v0/.tmpjw4Kl1/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.0, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.53
+# round 2/5 done, load 0.60
+# round 3/5 done, load 0.63
+# round 4/5 done, load 0.66
+# round 5/5 done, load 0.72
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            655         1499              2024
+lexindex StringIndex                        910         1471              1994
+lexindex StringIndex occurrences            569         1139              1681
+lexindex DoubleArrayIndex                   870         1414              1923
+lexindex DoubleArrayIndex occurrences          504         1076              1590
+lexindex DictIndex 256                     2138         2604              3152
+marisa-trie                                1464         2004              2594
+dawg2 (dag only)                           1003           --                --
+
+## end: 2026-09-25T01:08:18+03:00; thermals acpitz 94.0 C  iwlwifi_1 38.0 C  
+    load                   0.72  ABOVE 0.40 -- something else is running
+    swap in use            1 MiB  ok
+    memory available       14.6 GiB  ok
+    page cache             25.4 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+    uptime                 10.9 h
+    governor               powersave
+    temperature            94 C  HOT -- let it settle
+    
+    NOT READY -- do not quote a latency number from this machine now.
+    Sizes are deterministic and may be measured regardless.
+done: /home/ilgrad/Documents/projects/betula/repos/lexindex/local/cjk/results/z10-2026-09-25-0053/z10.txt

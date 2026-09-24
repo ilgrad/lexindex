@@ -1,0 +1,270 @@
+# DoubleArrayIndex's walk over Chinese text against every double array measured, Z8_REGIME=warm
+# tree: branch char-trie at 902e4b4 plus the uncommitted 4.5.0 version bump and docs; no file
+# under src/ differs from 902e4b4. Harnesses local/cjk/z8 (Rust), local/cjk/z2d.py (Python) and
+# local/cjk/z10.sh (the campaign) are not in the repository; this file records every version, hash
+# and flag they print. swap: 1 MiB of zram in use throughout, a residue bench-ready passes.
+# The harness's `lexindex 4.4.2` labels, and the `(all crates.io)` beside them, are strings left
+# from its first version: the lexindex it links is this tree, by path (its lock reads 4.5.0), and
+# StringIndex's code is 4.4.2's -- from b101076 to 902e4b4 src/double_array.rs is new and only
+# capi.rs, cli.rs, inspect.rs, lib.rs and python.rs change.
+
+z8: writing /home/ilgrad/Documents/projects/betula/repos/lexindex/local/cjk/results/z8-2026-09-25-0054-warm/z8.txt
+# Z-8: 3 processes, 20 rounds each, regime warm (see run() in z8/src/main.rs)
+# gate: bench-ready green and hottest zone < 70 C, waiting up to 30 min
+## machine, start
+date: 2026-09-25T00:54:54+03:00
+uptime:  00:54:54 up 10:41,  1 user,  load average: 1.08, 1.46, 2.96
+kernel: 7.2.7-200.fc44.x86_64; cpu: AMD Ryzen 7 5800HS with Radeon Graphics, 16 threads
+governor: powersave
+thermals: acpitz 91.0 C  iwlwifi_1 38.0 C  
+memory: MemAvailable: 15107988 kB;Cached: 26644640 kB;SwapTotal: 28310012 kB;SwapFree: 28308328 kB
+DIMM layout: not read (needs root); buffer placement: not read (needs root). Every structure is
+  allocated anew in each process; a cell is the minimum over them, the ratio paired per process
+bench-ready at the start (informational; the gate is per process):
+    load                   1.08  ABOVE 0.40 -- something else is running
+    swap in use            1 MiB  ok
+    memory available       14.4 GiB  ok
+    page cache             25.4 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+    uptime                 10.7 h
+    governor               powersave
+    temperature            91 C  HOT -- let it settle
+    
+    NOT READY -- do not quote a latency number from this machine now.
+    Sizes are deterministic and may be measured regardless.
+prototype: local/cjk/z8/src/proto.rs sha256 93b48ea4b2460470...
+text sha256 7f7a42d10d0737a9...; lexicon sha256 7197c3211ddd9896...
+
+## build and prepare (untimed)
+warning: z8@0.0.0: In file included from cpp/darts_shim.cc:8:
+warning: z8@0.0.0: ../vendor/darts-clone/include/darts.h:958:3: warning: type qualifiers ignored on function return type [-Wignored-qualifiers]
+warning: z8@0.0.0:   958 |   const value_type values(std::size_t id) const {
+warning: z8@0.0.0:       |   ^~~~~
+warning: constant `UTF8_LEN` is never used
+    --> src/proto.rs:1013:7
+     |
+1013 | const UTF8_LEN: [u8; 32] = [
+     |       ^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `UTF8_MASK` is never used
+    --> src/proto.rs:1016:7
+     |
+1016 | const UTF8_MASK: [u32; 5] = [0x00, 0x7F, 0x1F, 0x0F, 0x07];
+     |       ^^^^^^^^^
+
+warning: constant `UTF8_SHIFT` is never used
+    --> src/proto.rs:1017:7
+     |
+1017 | const UTF8_SHIFT: [u32; 5] = [0, 18, 12, 6, 0];
+     |       ^^^^^^^^^^
+
+warning: function `decode_bl` is never used
+    --> src/proto.rs:1023:4
+     |
+1023 | fn decode_bl(b: &[u8], i: usize) -> (u32, usize) {
+     |    ^^^^^^^^^
+
+warning: `z8` (lib) generated 4 warnings
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.02s
+z8 binary sha256 4eb93efb84bed5033ff2261345ca13d9f614e45b3a1dabf20bd1a7edbeeeed30
+locked: name = "cedarwood" version = "0.5.0" source = "registry+https://github.com/rust-lang/crates.io-index" name = "crawdad" version = "0.4.1" source = "registry+https://github.com/rust-lang/crates.io-index" name = "daachorse" version = "5.0.0" source = "registry+https://github.com/rust-lang/crates.io-index" name = "fst" version = "0.4.7" source = "registry+https://github.com/rust-lang/crates.io-index" name = "jieba-rs" version = "0.11.0" source = "registry+https://github.com/rust-lang/crates.io-index" name = "lexindex" version = "4.5.0" dependencies = [ name = "yada" version = "0.7.0" source = "registry+https://github.com/rust-lang/crates.io-index"
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+lexindex 4.4.2 StringIndex            8.95 B/word own count (3124743 bytes)     15.26 B/word held by malloc
+cedarwood 0.5.0                       0.00 B/word own count (0 bytes)     60.57 B/word held by malloc
+darts-clone 0.32                     17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+yada 0.7.0                           17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+crawdad 0.4.1 Trie                   18.40 B/word own count (6422528 bytes)     24.80 B/word held by malloc
+crawdad 0.4.1 MpTrie                 22.17 B/word own count (7736696 bytes)     30.79 B/word held by malloc
+daachorse 5.0.0 charwise             47.95 B/word own count (16738312 bytes)     55.35 B/word held by malloc
+lexindex DoubleArrayIndex            15.62 B/word own count (5451278 bytes)     15.62 B/word held by malloc
+# prototype digit_bits None widest_first true: 1390205 slots (550115 used, 39.6 %), alphabet 12045, labels up to 12045, code table 40867 entries -> packed 5 B/slot, 14 label bits = 20.38 B/word (built in 3.31s)
+# prototype digit_bits None widest_first false: 1116631 slots (550115 used, 49.3 %), alphabet 12045, labels up to 12045, code table 40867 entries -> packed 5 B/slot, 14 label bits = 16.46 B/word (built in 2.33s)
+# prototype digit_bits Some(8) widest_first true: 990650 slots (745166 used, 75.2 %), alphabet 12045, labels up to 256, code table 40867 entries -> packed 4 B/slot, 9 label bits = 11.82 B/word (built in 692.35ms)
+# prototype digit_bits Some(8) widest_first false: 833267 slots (745166 used, 89.4 %), alphabet 12045, labels up to 256, code table 40867 entries -> packed 4 B/slot, 9 label bits = 10.02 B/word (built in 432.84ms)
+# prototype digit_bits Some(9) widest_first true: 1037462 slots (675105 used, 65.1 %), alphabet 12045, labels up to 512, code table 40867 entries -> packed 4 B/slot, 10 label bits = 12.36 B/word (built in 999.71ms)
+# prototype digit_bits Some(9) widest_first false: 818034 slots (675105 used, 82.5 %), alphabet 12045, labels up to 512, code table 40867 entries -> packed 4 B/slot, 10 label bits = 9.84 B/word (built in 669.34ms)
+# prototype digit_bits Some(10) widest_first true: 1130012 slots (615164 used, 54.4 %), alphabet 12045, labels up to 1024, code table 40867 entries -> packed 5 B/slot, 11 label bits = 16.66 B/word (built in 1.42s)
+# prototype digit_bits Some(10) widest_first false: 874817 slots (615164 used, 70.3 %), alphabet 12045, labels up to 1024, code table 40867 entries -> packed 5 B/slot, 11 label bits = 13.00 B/word (built in 1.02s)
+# prototype digit_bits Some(11) widest_first true: 1270041 slots (573358 used, 45.1 %), alphabet 12045, labels up to 2048, code table 40867 entries -> packed 5 B/slot, 12 label bits = 18.66 B/word (built in 2.00s)
+# prototype digit_bits Some(11) widest_first false: 1015162 slots (573358 used, 56.5 %), alphabet 12045, labels up to 2048, code table 40867 entries -> packed 5 B/slot, 12 label bits = 15.01 B/word (built in 1.48s)
+# prototype digit_bits Some(12) widest_first true: 1370626 slots (553835 used, 40.4 %), alphabet 12045, labels up to 4096, code table 40867 entries -> packed 5 B/slot, 13 label bits = 20.10 B/word (built in 2.44s)
+# prototype digit_bits Some(12) widest_first false: 1100155 slots (553835 used, 50.3 %), alphabet 12045, labels up to 4096, code table 40867 entries -> packed 5 B/slot, 13 label bits = 16.23 B/word (built in 2.41s)
+prototype, packed 5 B/slot, 14 label bits   20.38 B/word own count (7114501 bytes)     20.38 B/word held by malloc
+prototype, 6 B/slot: u16 label, u32 kind+payload   24.37 B/word own count (8504706 bytes)     24.37 B/word held by malloc
+prototype, 8 B/slot aligned          32.33 B/word own count (11285108 bytes)     32.33 B/word held by malloc
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# lexicon: 349046 lines, 349045 distinct words; text: 4997 sentences, 195832 characters; 16736 blocks, 178338 characters in them
+ok   every character of every block, the query running to the block's end: 178338 positions, 161896 with a match, 237465 matches, at most 6 at one position; StringIndex, DictIndex 256, cedarwood, darts-clone, yada, crawdad Trie and MpTrie and the prototype give the same (length, id) set at every one, daachorse the same (start, end, id) set over every block, and every id names the word the text spells
+ok   every timed walk, in order and shuffled, tallies 237465 matches summing to 36484462043 (crawdad's, in characters, 36483804203), the reference's
+ok   every character of every sentence, punctuation included, the query running to the sentence's end: 195832 positions, 161896 with a match, 237465 matches; the same agreement
+
+## timed processes
+gate before process 1: green after 66 s; thermals acpitz 53.0 C  iwlwifi_1 37.0 C  
+### process 1, started 00:56:50
+process 1: exit 0, ended 00:57:15; thermals after: acpitz 85.0 C  iwlwifi_1 38.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              30.4
+lexindex DoubleArrayIndex, in order                    13.4
+DoubleArrayIndex, mapped, in order                     14.3
+DoubleArrayIndex, occurrences, in order                10.6
+lexindex 4.4.2 StringIndex, in order                   58.6
+flat, 8 B slots with the id, in order                  14.2
+cedarwood 0.5.0, in order                              29.0
+darts-clone 0.32, in order                             28.2
+yada 0.7.0, in order                                   26.3
+crawdad 0.4.1 Trie, in order                           15.8
+crawdad 0.4.1 MpTrie, in order                         17.9
+daachorse 5.0.0 (block scan), in order                 15.5
+lexindex DoubleArrayIndex, shuffled                    18.4
+DoubleArrayIndex, mapped, shuffled                     19.4
+DoubleArrayIndex, occurrences, shuffled                11.1
+lexindex 4.4.2 StringIndex, shuffled                   70.5
+flat, 8 B slots with the id, shuffled                  19.3
+cedarwood 0.5.0, shuffled                              36.2
+darts-clone 0.32, shuffled                             34.8
+yada 0.7.0, shuffled                                   32.7
+crawdad 0.4.1 Trie, shuffled                           21.2
+crawdad 0.4.1 MpTrie, shuffled                         23.9
+daachorse 5.0.0 (block scan), shuffled                 16.7
+gate before process 2: green after 34 s; thermals acpitz 54.0 C  iwlwifi_1 37.0 C  
+### process 2, started 00:57:49
+process 2: exit 0, ended 00:58:16; thermals after: acpitz 88.0 C  iwlwifi_1 38.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              32.0
+lexindex DoubleArrayIndex, in order                    13.5
+DoubleArrayIndex, mapped, in order                     14.3
+DoubleArrayIndex, occurrences, in order                10.7
+lexindex 4.4.2 StringIndex, in order                   58.9
+flat, 8 B slots with the id, in order                  14.3
+cedarwood 0.5.0, in order                              29.7
+darts-clone 0.32, in order                             28.2
+yada 0.7.0, in order                                   26.5
+crawdad 0.4.1 Trie, in order                           16.0
+crawdad 0.4.1 MpTrie, in order                         18.2
+daachorse 5.0.0 (block scan), in order                 16.0
+lexindex DoubleArrayIndex, shuffled                    18.5
+DoubleArrayIndex, mapped, shuffled                     19.5
+DoubleArrayIndex, occurrences, shuffled                11.3
+lexindex 4.4.2 StringIndex, shuffled                   70.8
+flat, 8 B slots with the id, shuffled                  19.5
+cedarwood 0.5.0, shuffled                              36.6
+darts-clone 0.32, shuffled                             34.8
+yada 0.7.0, shuffled                                   33.1
+crawdad 0.4.1 Trie, shuffled                           21.5
+crawdad 0.4.1 MpTrie, shuffled                         24.5
+daachorse 5.0.0 (block scan), shuffled                 17.0
+gate before process 3: green after 34 s; thermals acpitz 54.0 C  iwlwifi_1 38.0 C  
+### process 3, started 00:58:50
+process 3: exit 0, ended 00:59:16; thermals after: acpitz 88.0 C  iwlwifi_1 38.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              31.8
+lexindex DoubleArrayIndex, in order                    13.5
+DoubleArrayIndex, mapped, in order                     14.4
+DoubleArrayIndex, occurrences, in order                10.7
+lexindex 4.4.2 StringIndex, in order                   59.4
+flat, 8 B slots with the id, in order                  14.3
+cedarwood 0.5.0, in order                              29.7
+darts-clone 0.32, in order                             27.8
+yada 0.7.0, in order                                   26.4
+crawdad 0.4.1 Trie, in order                           15.9
+crawdad 0.4.1 MpTrie, in order                         18.2
+daachorse 5.0.0 (block scan), in order                 16.0
+lexindex DoubleArrayIndex, shuffled                    18.6
+DoubleArrayIndex, mapped, shuffled                     19.6
+DoubleArrayIndex, occurrences, shuffled                11.2
+lexindex 4.4.2 StringIndex, shuffled                   71.2
+flat, 8 B slots with the id, shuffled                  19.5
+cedarwood 0.5.0, shuffled                              36.6
+darts-clone 0.32, shuffled                             34.5
+yada 0.7.0, shuffled                                   32.7
+crawdad 0.4.1 Trie, shuffled                           21.4
+crawdad 0.4.1 MpTrie, shuffled                         24.2
+daachorse 5.0.0 (block scan), shuffled                 17.2
+
+## machine, end
+date: 2026-09-25T00:59:16+03:00
+uptime:  00:59:16 up 10:45,  1 user,  load average: 0.55, 0.88, 2.35
+kernel: 7.2.7-200.fc44.x86_64; cpu: AMD Ryzen 7 5800HS with Radeon Graphics, 16 threads
+governor: powersave
+thermals: acpitz 88.0 C  iwlwifi_1 38.0 C  
+memory: MemAvailable: 15248268 kB;Cached: 26654056 kB;SwapTotal: 28310012 kB;SwapFree: 28308328 kB
+bench-ready at the end:
+    load                   0.55  ABOVE 0.40 -- something else is running
+    swap in use            1 MiB  ok
+    memory available       14.5 GiB  ok
+    page cache             25.4 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+    uptime                 10.8 h
+    governor               powersave
+    temperature            88 C  HOT -- let it settle
+    
+    NOT READY -- do not quote a latency number from this machine now.
+    Sizes are deterministic and may be measured regardless.
+
+## summary: ns/char, minimum over 3 processes; per process after the bar
+control: jieba-rs 0.11.0 cut_all (blocks)                30.4   | 30.4/32.0/31.8
+lexindex DoubleArrayIndex, in order                      13.4   | 13.4/13.5/13.5
+DoubleArrayIndex, mapped, in order                       14.3   | 14.3/14.3/14.4
+DoubleArrayIndex, occurrences, in order                  10.6   | 10.6/10.7/10.7
+lexindex 4.4.2 StringIndex, in order                     58.6   | 58.6/58.9/59.4
+flat, 8 B slots with the id, in order                    14.2   | 14.2/14.3/14.3
+cedarwood 0.5.0, in order                                29.0   | 29.0/29.7/29.7
+darts-clone 0.32, in order                               27.8   | 28.2/28.2/27.8
+yada 0.7.0, in order                                     26.3   | 26.3/26.5/26.4
+crawdad 0.4.1 Trie, in order                             15.8   | 15.8/16.0/15.9
+crawdad 0.4.1 MpTrie, in order                           17.9   | 17.9/18.2/18.2
+daachorse 5.0.0 (block scan), in order                   15.5   | 15.5/16.0/16.0
+lexindex DoubleArrayIndex, shuffled                      18.4   | 18.4/18.5/18.6
+DoubleArrayIndex, mapped, shuffled                       19.4   | 19.4/19.5/19.6
+DoubleArrayIndex, occurrences, shuffled                  11.1   | 11.1/11.3/11.2
+lexindex 4.4.2 StringIndex, shuffled                     70.5   | 70.5/70.8/71.2
+flat, 8 B slots with the id, shuffled                    19.3   | 19.3/19.5/19.5
+cedarwood 0.5.0, shuffled                                36.2   | 36.2/36.6/36.6
+darts-clone 0.32, shuffled                               34.5   | 34.8/34.8/34.5
+yada 0.7.0, shuffled                                     32.7   | 32.7/33.1/32.7
+crawdad 0.4.1 Trie, shuffled                             21.2   | 21.2/21.5/21.4
+crawdad 0.4.1 MpTrie, shuffled                           23.9   | 23.9/24.5/24.2
+daachorse 5.0.0 (block scan), shuffled                   16.7   | 16.7/17.0/17.2
+lexindex DoubleArrayIndex, in order / rival, paired per process: StringIndex 0.23-0.23; cedarwood 0.45-0.46; darts-clone 0.48-0.49; yada 0.51-0.51; crawdad 0.84-0.85; MpTrie 0.74-0.75; daachorse 0.84-0.86
+DoubleArrayIndex, mapped, in order / rival, paired per process: StringIndex 0.24-0.24; cedarwood 0.48-0.49; darts-clone 0.51-0.52; yada 0.54-0.55; crawdad 0.89-0.91; MpTrie 0.79-0.80; daachorse 0.89-0.92
+DoubleArrayIndex, occurrences, in order / rival, paired per process: StringIndex 0.18-0.18; cedarwood 0.36-0.37; darts-clone 0.38-0.38; yada 0.40-0.41; crawdad 0.67-0.67; MpTrie 0.59-0.59; daachorse 0.67-0.68
+flat, 8 B slots with the id, in order / rival, paired per process: StringIndex 0.24-0.24; cedarwood 0.48-0.49; darts-clone 0.50-0.51; yada 0.54-0.54; crawdad 0.89-0.90; MpTrie 0.79-0.79; daachorse 0.89-0.92
+lexindex DoubleArrayIndex, shuffled / rival, paired per process: StringIndex 0.26-0.26; cedarwood 0.51-0.51; darts-clone 0.53-0.54; yada 0.56-0.57; crawdad 0.86-0.87; MpTrie 0.76-0.77; daachorse 1.08-1.10
+DoubleArrayIndex, mapped, shuffled / rival, paired per process: StringIndex 0.28-0.28; cedarwood 0.53-0.54; darts-clone 0.56-0.57; yada 0.59-0.60; crawdad 0.91-0.92; MpTrie 0.80-0.81; daachorse 1.14-1.16
+DoubleArrayIndex, occurrences, shuffled / rival, paired per process: StringIndex 0.16-0.16; cedarwood 0.31-0.31; darts-clone 0.32-0.32; yada 0.34-0.34; crawdad 0.52-0.53; MpTrie 0.46-0.46; daachorse 0.65-0.66
+flat, 8 B slots with the id, shuffled / rival, paired per process: StringIndex 0.27-0.28; cedarwood 0.53-0.53; darts-clone 0.55-0.57; yada 0.59-0.60; crawdad 0.91-0.91; MpTrie 0.80-0.81; daachorse 1.13-1.16
+control spread across processes +5.3 % -- OUTSIDE the protocol's 5 %
+done: /home/ilgrad/Documents/projects/betula/repos/lexindex/local/cjk/results/z8-2026-09-25-0054-warm/z8.txt
+
+## the per-position check, extended after the timed run (2026-09-25): the same structures, and
+## DoubleArrayIndex, built and mapped, added to the (length, id) set compared at every position;
+## the timed run above checked it by the tallies of its timed walks
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex 4.4.2, cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (all crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# lexicon: 349046 lines, 349045 distinct words; text: 4997 sentences, 195832 characters; 16736 blocks, 178338 characters in them
+ok   every character of every block, the query running to the block's end: 178338 positions, 161896 with a match, 237465 matches, at most 6 at one position; StringIndex, DictIndex 256, DoubleArrayIndex (built and mapped), cedarwood, darts-clone, yada, crawdad Trie and MpTrie and the prototypes give the same (length, id) set at every one, daachorse the same (start, end, id) set over every block, and every id names the word the text spells
+ok   every timed walk, in order and shuffled, tallies 237465 matches summing to 36484462043 (crawdad's, in characters, 36483804203), the reference's
+ok   every character of every sentence, punctuation included, the query running to the sentence's end: 195832 positions, 161896 with a match, 237465 matches; the same agreement

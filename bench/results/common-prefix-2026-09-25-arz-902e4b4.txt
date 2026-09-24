@@ -1,0 +1,80 @@
+# local/cpbench.py -- common_prefix and longest_prefix against marisa-trie, dawg2 and datrie
+# Both regimes of the final harness: the default (each pass right after the previous one, whatever
+# structure that was, the protocol of the 4.4.2 table) and CP_REGIME=warm (an untimed pass of the same
+# call first). Earlier runs of this session with key-only forms for datrie and marisa are superseded.
+# lexindex 4.5.0 wheel built from 902e4b4 (sha256 3579d17e492650be), 2026-09-25, arz (Ryzen 7 5800HS, Zen 3); python 3.14.7 GIL on lexindex 4.5.0 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3
+# The harness is the one the 999e933 and b101076 artifacts ran, plus a DoubleArrayIndex row, and (key, id) forms for marisa-trie and datrie. Three runs, each started once
+# bench-ready passed and the hottest thermal zone read under 70 C; the tables quote the minimum.
+=== cpbench run 1 (CP_REGIME=alternated), 2026-09-25T01:21:14+03:00, load 0.36 0.24 0.75, gate green after 2 s; thermals acpitz 63 C  iwlwifi_1 38 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2391             943 
+DictIndex 512                 2599            1019 
+StringIndex                    578             302 
+marisa-trie                   1123            1216 
+DoubleArrayIndex               691             278 
+dawg2, keys only               695             619 
+datrie                        1067             564 
+datrie, keys only              382             248 
+    thermals after: acpitz 90 C  iwlwifi_1 37 C  
+=== cpbench run 2 (CP_REGIME=alternated), 2026-09-25T01:21:52+03:00, load 0.23 0.23 0.72, gate green after 34 s; thermals acpitz 51 C  iwlwifi_1 36 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2380             929 
+DictIndex 512                 2575            1010 
+StringIndex                    584             294 
+marisa-trie                   1134            1230 
+DoubleArrayIndex               711             254 
+dawg2, keys only               704             612 
+datrie                        1053             528 
+datrie, keys only              356             244 
+    thermals after: acpitz 89 C  iwlwifi_1 36 C  
+=== cpbench run 3 (CP_REGIME=alternated), 2026-09-25T01:22:30+03:00, load 0.13 0.20 0.69, gate green after 34 s; thermals acpitz 51 C  iwlwifi_1 36 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2374             929 
+DictIndex 512                 2567            1013 
+StringIndex                    580             293 
+marisa-trie                   1127            1217 
+DoubleArrayIndex               691             248 
+dawg2, keys only               702             607 
+datrie                        1071             523 
+datrie, keys only              359             240 
+    thermals after: acpitz 81 C  iwlwifi_1 36 C  
+
+=== cpbench run 1 (CP_REGIME=warm), 2026-09-25T01:23:08+03:00, load 0.11 0.19 0.67, gate green after 34 s; thermals acpitz 50 C  iwlwifi_1 35 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2357             938 
+DictIndex 512                 2545            1018 
+StringIndex                    547             300 
+marisa-trie                   1106            1230 
+DoubleArrayIndex               506             242 
+dawg2, keys only               549             619 
+datrie                         780             417 
+datrie, keys only              344             237 
+    thermals after: acpitz 92 C  iwlwifi_1 35 C  
+=== cpbench run 2 (CP_REGIME=warm), 2026-09-25T01:23:48+03:00, load 0.10 0.18 0.64, gate green after 34 s; thermals acpitz 50 C  iwlwifi_1 36 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2335             933 
+DictIndex 512                 2536            1016 
+StringIndex                    532             295 
+marisa-trie                   1091            1214 
+DoubleArrayIndex               482             234 
+dawg2, keys only               557             626 
+datrie                         796             420 
+datrie, keys only              356             245 
+    thermals after: acpitz 92 C  iwlwifi_1 36 C  
+=== cpbench run 3 (CP_REGIME=warm), 2026-09-25T01:24:27+03:00, load 0.09 0.17 0.62, gate green after 34 s; thermals acpitz 50 C  iwlwifi_1 35 C  
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2339             934 
+DictIndex 512                 2540            1010 
+StringIndex                    530             295 
+marisa-trie                   1078            1208 
+DoubleArrayIndex               473             241 
+dawg2, keys only               550             614 
+datrie                         783             420 
+datrie, keys only              348             239 
+    thermals after: acpitz 92 C  iwlwifi_1 35 C  

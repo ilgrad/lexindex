@@ -33,37 +33,39 @@ stranger in 256; an exact answer for a stranger is the dictionary's search above
 [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#hasheddictindex-against-xcdat), and
 none is quoted here without the others.</sub>
 
-## Six indexes
+## Seven indexes
 
-| | `StringIndex` | `DictIndex` | `HashedDictIndex` | `CompactHashIndex` | `ClosedHashIndex` | `PerfectHashIndex` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `string → id` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `id → string` | ✅ | ✅ | ✅ | — | — | ✅ |
-| ordered ids, ranges, `lower_bound` | ✅ | ✅ | ✅ | — | — | — |
-| prefix | ✅ | ✅ | ✅ | — | — | — |
-| common prefix · longest prefix | ✅ | ✅ | ✅ | — | — | — |
-| fuzzy · subsequence | ✅ | — | — | — | — | — |
-| membership | exact | exact | `2^-bits` false positives ² | `2^-bits` false positives | none: closed vocabulary | exact |
-| `Overlay` edits | ✅ | — | — | ✅ | — | ✅ |
-| zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ ¹ | ✅ | — | ✅ |
-| **bytes/key**, 480 k English words | 5.95 | **2.64** | 5.25 · 6.25 at 8 bits | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 |
-| `id`, 1 M word bigrams | 263 ns | 399 ns | 77 ns · `id_unchecked` 62 | 57 ns | the bare perfect hash | 109 ns · `id_unchecked` 49 |
-| Cargo feature | — | — | `mph` | `mph` (default) | `mph` | `mph` |
+| | `StringIndex` | `DictIndex` | `HashedDictIndex` | `CompactHashIndex` | `ClosedHashIndex` | `PerfectHashIndex` | `DoubleArrayIndex` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `string → id` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `id → string` | ✅ | ✅ | ✅ | — | — | ✅ | — |
+| ordered ids, ranges, `lower_bound` | ✅ | ✅ | ✅ | — | — | — | ids only ³ |
+| prefix | ✅ | ✅ | ✅ | — | — | — | — |
+| common prefix · longest prefix | ✅ | ✅ | ✅ | — | — | — | ✅ · every occurrence in a text |
+| fuzzy · subsequence | ✅ | — | — | — | — | — | — |
+| membership | exact | exact | `2^-bits` false positives ² | `2^-bits` false positives | none: closed vocabulary | exact | exact |
+| `Overlay` edits | ✅ | — | — | ✅ | — | ✅ | — |
+| zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ ¹ | ✅ | — | ✅ | ✅ |
+| **bytes/key**, 480 k English words | 5.95 | **2.64** | 5.25 · 6.25 at 8 bits | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 | 24.42 · 15.62 on jieba's Chinese lexicon |
+| `id`, 1 M word bigrams | 263 ns | 399 ns | 77 ns · `id_unchecked` 62 | 57 ns | the bare perfect hash | 109 ns · `id_unchecked` 49 | 231 ns |
+| Cargo feature | — | — | `mph` | `mph` (default) | `mph` | `mph` | — |
 
 <sub>¹ `DictIndex` maps every section and builds in memory what a lookup reads on every call: the
 per-block samples — eight bytes a block, one byte per thirty-two keys at the default block — the
 symbol tables, and where they apply a character code's tables and a trie over blocks whose samples
 tie; 0.07–0.39 bytes a key on the corpora measured. `HashedDictIndex` maps its dictionary the same way
 and its rank table whole. ² At zero fingerprint bits `id` is the dictionary's own search, exact and
-at its cost, and the hash is `id_unchecked`, which answers a stranger with some rank below `n`.</sub>
+at its cost, and the hash is `id_unchecked`, which answers a stranger with some rank below `n`.
+³ The ids are the keys' ranks, the ones `StringIndex` and `DictIndex` give the same keys, so either
+of them turns an id back into its key.</sub>
 
 - **`StringIndex`** — an **ordered** index that is the finite-state transducer
   ([`fst`](https://crates.io/crates/fst)) alone: exact `string ↔ id`, **prefix**, **common prefix**
   (the keys a query starts with, in one walk), **range**, **predecessor / successor**, **fuzzy**
   (bounded Levenshtein distance), **subsequence** and lazy in-order iteration, all automata over the
-  FST with no key list to scan. Autocomplete, fuzzy search, ordered browse, dictionary
-  segmentation. For an exact `string ↔ id` and nothing else, `HashedDictIndex` is faster and
-  `DictIndex` smaller (the table above).
+  FST with no key list to scan. Autocomplete, fuzzy search, ordered browse. For an exact
+  `string ↔ id` and nothing else, `HashedDictIndex` is faster and `DictIndex` smaller (the table
+  above); for matching a lexicon against text, `DoubleArrayIndex`.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: `string ↔ rank` both
   ways, `lower_bound`, `prefix`, `common_prefix`, `range`, in-order iteration — no automata, so no
   fuzzy. The sorted keys front-coded in blocks of 256, each cut into microblocks of 16, the suffixes
@@ -100,18 +102,29 @@ at its cost, and the hash is `id_unchecked`, which answers a stranger with some 
   `std::HashMap`; `fingerprints=True` adds one byte per key so an absent key stops after one cache
   miss instead of two (166 → 74 ns on the dictionary) — a stop list, a block list. A fixed-vocabulary
   token ↔ id map on a hot path.
+- **`DoubleArrayIndex`** (4.5) — a character-wise **double-array trie** for matching a lexicon against
+  running text: the keys a text starts with, the longest of them, and every key occurring anywhere
+  in it, one load a character. A label is a character rather than a byte — a Chinese word of three
+  characters is three steps, not nine — and each eight-byte slot holds everything a step reads, so
+  a match costs no load past the slot that reaches it. Over Chinese text it is the **fastest walk
+  measured**: every word at every position in 10.6 ns a character against daachorse's 15.5, and a
+  walk a position in 13.4 against crawdad's 15.8 and darts-clone's 27.8 — at **15.62 bytes a word**
+  on jieba's 349 045-word lexicon, below every double array measured there (darts-clone and yada
+  17.75, crawdad 18.40, cedar 60.57 held in memory). It builds slower than darts-clone, 0.35 s
+  against 0.06. The ids are `StringIndex`'s for the same keys; nothing comes back out.
+  Segmentation, gazetteer tagging, a tokenizer's longest match.
 
-All six assign dense ids in `[0, n)`, **build deterministically** and **serialise to a flat blob**:
-`save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash to map —
-`DictIndex` mapping everything but its per-block samples and a few tables, under 0.4 bytes a key.
-They are immutable; **`Overlay`** adds and removes keys on `StringIndex`, `CompactHashIndex` and
-`PerfectHashIndex` without a rebuild, keeps every id stable, and folds the edits into a fresh base
-with `compact()`. The other three are absent by design rather than omission: an overlay issues a
-new key the next id after the base, which is exactly what `DictIndex` and `HashedDictIndex` cannot
-accept — their ids *are* the lexicographic rank, and a key added in the middle of the order would
-not get one — and `ClosedHashIndex` has no membership to ask, so there is no "already in the base"
-for an overlay to test against. Every configuration builds on 32-bit targets, `wasm32-unknown-unknown` included
-(leave `mmap` off there — nothing to map).
+All seven assign dense ids in `[0, n)`, **build deterministically** and **serialise to a flat
+blob**: `save` / `load` everywhere, zero-copy `load_mmap` where there is more than the perfect hash
+to map — `DictIndex` mapping everything but its per-block samples and a few tables, under 0.4 bytes
+a key. They are immutable; **`Overlay`** adds and removes keys on `StringIndex`, `CompactHashIndex`
+and `PerfectHashIndex` without a rebuild, keeps every id stable, and folds the edits into a fresh
+base with `compact()`. The other four are absent by design rather than omission: an overlay issues a
+new key the next id after the base, which is exactly what `DictIndex`, `HashedDictIndex` and
+`DoubleArrayIndex` cannot accept — their ids *are* the lexicographic rank, and a key added in the
+middle of the order would not get one — and `ClosedHashIndex` has no membership to ask, so there is
+no "already in the base" for an overlay to test against. Every configuration builds on 32-bit
+targets, `wasm32-unknown-unknown` included (leave `mmap` off there — nothing to map).
 
 ## Install
 
@@ -129,7 +142,9 @@ lexindex = "4.4"
 ## Python
 
 ```python
-from lexindex import ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex, StringIndex
+from lexindex import (
+    ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex, StringIndex,
+)
 
 idx = StringIndex(["apple", "apricot", "banana", "cherry"])
 idx.id("banana")             # 2  (sorted rank)
@@ -155,10 +170,14 @@ h.id("POST")                 # 2; h.dict is w, for key, prefix and range
 
 d = PerfectHashIndex(["GET", "POST", "PUT", "DELETE"])  # verified membership and id → key
 d.key(d.id("POST"))          # "POST"; d.id("PATCH") is None
+
+t = DoubleArrayIndex(["北京", "北京大学", "大学", "大学生"])  # a character a step, for running text
+t.occurrences("北京大学生")   # [(0, 2, 0), (0, 4, 1), (2, 4, 2), (2, 5, 3)] — (start, end, id) in characters
+t.longest_prefix("北京大学生")  # ("北京大学", 1)
 ```
 
 [`examples/quickstart.py`](https://github.com/ilgrad/lexindex/blob/main/examples/quickstart.py) runs
-all six end to end; the [usage guide](https://ilgrad.github.io/lexindex/usage/) covers every
+all seven end to end; the [usage guide](https://ilgrad.github.io/lexindex/usage/) covers every
 interface, including batched lookups into NumPy and Arrow buffers and free-threaded CPython.
 
 **With `betula-cluster`:** the lexindex dense id is the embedding-matrix row, so `string id →
@@ -211,7 +230,9 @@ assert_eq!(idx.id("cherry"), Some(3));                  // the same answers, off
 ```
 
 ```rust
-use lexindex::{ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex};
+use lexindex::{
+    ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex,
+};
 
 let verbs = ["GET", "POST", "PUT", "DELETE"];
 
@@ -243,14 +264,20 @@ assert_eq!(dict.lower_bound("P"), 2);                  // the "P…" keys are id
 let hashed = HashedDictIndex::from_dict(dict, 8)?;
 assert_eq!(hashed.id("POST"), Some(2));
 assert_eq!(hashed.dict().key(2).as_deref(), Some("POST"));
+
+// A character a step, for matching a lexicon against running text: every key at every position.
+let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?;
+let mut found = Vec::new();
+lexicon.for_each_occurrence("北京大学生", |start, end, id| found.push((start, end, id)));
+assert_eq!(found, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]); // byte offsets, and the ranks
 # std::fs::remove_file("verbs.bmp").ok();
 # Ok::<(), lexindex::IndexError>(())
 ```
 
 ## C
 
-Under the `capi` feature the six indexes are one opaque handle behind fourteen `lexindex_*`
-functions, declared in [`include/lexindex.h`](include/lexindex.h):
+Under the `capi` feature six of the seven indexes — all but `DoubleArrayIndex` — are one opaque
+handle behind fourteen `lexindex_*` functions, declared in [`include/lexindex.h`](include/lexindex.h):
 
 ```c
 #include "lexindex.h"
@@ -299,6 +326,10 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   gives, with a signature that says nothing can tell a member from a stranger.
 - **`PerfectHashIndex` verifies every hit against the stored key.** The pair in a billion that
   collides in the 64-bit hash is served, still exactly, from a side table the hot path never reads.
+- **`DoubleArrayIndex` numbers characters by frequency.** A label is a character's rank in the
+  lexicon, 1 for the most frequent, read from a table indexed by code point; bases are unique, so
+  the label a slot holds settles a step. Every row sits at the lowest base where it fits, the widest
+  first: 74 % of the slots are used on jieba's lexicon, 98 % on English words.
 - **Keys are bytes.** No Unicode normalisation, case folding or collation: normalise (NFC/NFKC,
   casefold) before building *and* before querying if the application needs it.
 - **Every build is deterministic.** The same keys give the same blob, byte for byte, on any machine
@@ -315,8 +346,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   blob before `BDX3` (`BDX1`, `BDX2`), which 4.0 rewrote a third smaller; `BIX4` crosses the
   versions unchanged, and an `OVL2` does when its base is one — an overlay embeds its base,
   so one over an older hash blob is refused with it.
-- **`--no-default-features` is `fst` only** (`StringIndex`, `DictIndex`, `Overlay`); `mph` adds no
-  dependency, so the whole tree is `fst` plus `memmap2`, and `cargo audit` reports nothing on either.
+- **`--no-default-features` is `fst` only** (`StringIndex`, `DictIndex`, `DoubleArrayIndex`,
+  `Overlay`); `mph` adds no dependency, so the whole tree is `fst` plus `memmap2`, and `cargo audit`
+  reports nothing on either.
 
 ## Benchmarks
 

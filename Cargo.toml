@@ -72,7 +72,8 @@ mph = []
 mmap = ["dep:memmap2"]
 # Python bindings (PyO3 abi3 extension module); pulls in `mph` + `mmap` for the full API surface.
 python = ["dep:pyo3", "mph", "mmap"]
-# The C ABI (`src/capi.rs`, header `include/lexindex.h`): one opaque handle over the six indexes.
+# The C ABI (`src/capi.rs`, header `include/lexindex.h`): one opaque handle over six of the seven
+# indexes, all but `DoubleArrayIndex`.
 # `cargo build --release --features capi` exports it from the `cdylib`; `cargo rustc --release
 # --features capi --crate-type staticlib` gives the archive. No dependency.
 capi = ["mph"]

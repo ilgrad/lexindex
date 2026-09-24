@@ -716,6 +716,10 @@ the 241 of the 4.0 table, the 285 of v3.0.0, the 295 of 2.1.0, the 289 of 2.0.0 
 tables as the session: against this `HashMap`, `PerfectHashIndex::id_unchecked` is 0.21×,
 `CompactHashIndex::id` 0.25×, `HashedDictIndex::id_unchecked` 0.27× and its `id` 0.33×,
 `PerfectHashIndex::id` 0.47×, `StringIndex` 1.13×, `DictIndex` 1.71×, `BTreeMap` 3.04×.
+`DoubleArrayIndex`, new in 4.5, was timed in a session of its own on 2026-09-25 at `902e4b4`, three
+runs behind the same readiness check
+([`bench/results/latency-rs-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-25-arz-902e4b4.txt)):
+231 ns, where that session's `HashMap` read 241 and its `StringIndex` 272 — 0.96× and 0.85× of them.
 
 | structure | build | lookup | note |
 |---|---|---|---|
@@ -724,6 +728,7 @@ tables as the session: against this `HashMap`, `PerfectHashIndex::id_unchecked` 
 | lexindex `HashedDictIndex::id_unchecked` | ~262 ms | ~62 ns | closed vocabulary; the id is the key's rank, so `key(id)`, prefix and range stay on the same index |
 | lexindex `HashedDictIndex::id` (8 bits) | ~268 ms | ~77 ns | fingerprint-checked, `2^-8`; builds are the dictionary's and the sidecar's together |
 | lexindex `PerfectHashIndex::id` (verified) | ~228 ms | ~109 ns | one extra cache line + full key compare |
+| lexindex `DoubleArrayIndex::id` | ~577 ms | ~231 ns | a character a load, 17.80 B/key here; a session of its own, 0.96× its `HashMap` |
 | `std::HashMap<String, u32>` | ~170 ms | ~233 ns | in-RAM, not serialisable |
 | lexindex `StringIndex` (FST) | ~241 ms | ~263 ns | *and* prefix / range / fuzzy |
 | lexindex `DictIndex` (256 per block) | ~206 ms | ~399 ns | ordered, exact reverse; 1.93 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.64 against 5.95, 291–298 ns against 200–210) |
@@ -1370,46 +1375,62 @@ query — is what a longest-match tokeniser asks of a vocabulary, and it was the
 `marisa-trie`, `dawg2` and `datrie` all answered and lexindex did not. `local/cpbench.py` measures
 it on the same words: 20 000 queries, each a real word with one to three more letters on it except
 every fourth, which is random letters. Every structure is first held to marisa's answer on 2 000 of
-them, so the timings compare the same work.
+them, both calls, and every row returns `(key, id)` pairs where the structure has that form —
+`dawg2`'s `IntCompletionDAWG` has only the keys — so the timings compare the same work.
 
 | | bytes/key | `common_prefix` | `longest_prefix` |
 |---|---:|---:|---:|
-| `datrie` | 30.69 | **544 ns** | **279 ns** |
-| **lexindex `StringIndex`** | 5.95 | **561** | **285** |
-| `dawg2` | 23.96 | 675 | 589 |
-| `marisa-trie` | 2.98 | 1 096 | 848 |
-| **lexindex `DictIndex` 256** (default) | **2.64** | 2 358 | 933 |
-| **lexindex `DictIndex` 512** | **2.52** | 2 563 | 1 014 |
+| **lexindex `DoubleArrayIndex`** | 24.42 | **473 ns** | **234 ns** |
+| **lexindex `StringIndex`** | 5.95 | 530 | 295 |
+| `dawg2`, keys only | 23.96 | 549 | 614 |
+| `datrie` | 30.69 | 780 | 417 |
+| `marisa-trie` | 2.98 | 1 078 | 1 208 |
+| **lexindex `DictIndex` 256** (default) | **2.64** | 2 335 | 933 |
+| **lexindex `DictIndex` 512** | **2.52** | 2 536 | 1 010 |
+| `datrie`, keys only | 30.69 | 344 | 237 |
 
-**This is the query a transducer is shaped for, and the numbers say so.** The query *is* the path:
-one walk down the FST, every final state on it a match, `O(query bytes)` whatever the index holds.
-`StringIndex` and `datrie` are level on both columns — 561 against 544 ns and 285 against 279,
-closer than the three runs' own spread, and the order flips from run to run — at **a fifth of
-`datrie`'s bytes and a quarter of `dawg2`'s**, ahead of `dawg2` on both and of `marisa-trie` by
-2.0× and 3.0× at twice marisa's size. It is the *largest* of the ordered indexes in this crate, and
-on this one query that is where the bytes went. At 3.0.0 it read 636 and 357 ns, second to `datrie`
-on both; 4.3's one-step-at-a-time reader and 4.4.2's first-character table are what closed the gap.
+**`DoubleArrayIndex` answers both fastest, and `StringIndex` is second at a quarter of its bytes.**
+The double array walks a character a load and reads a match's id from the slot that reaches it:
+paired run by run, 8–11 % faster than the transducer on `common_prefix` and 18–21 % on
+`longest_prefix`, and 1.5–1.7× and 1.7–1.8× faster than `datrie`, the other double array, returning
+the same pairs. The query *is* the path, for both:
+one walk, every key it passes a match, `O(query characters)` whatever the index holds. The last row
+is the form the 4.4.2 table timed for `datrie`: the keys without their values, less work than a
+pair — 344 ns against its own 780 — and quicker than any row that returns ids; lexindex has no
+keys-only call. Held to that form, 4.4.2's table had `StringIndex` and `datrie` level.
+
+**Out of cache the ranking of the first column turns.** The table times each call after an untimed
+pass of its own, the steady state of a tokeniser. Timed instead right after another structure's
+pass — the protocol of the 4.4.2 table — `DoubleArrayIndex`'s `common_prefix` reads 691 ns against
+`StringIndex`'s 578: its array is 11.7 MB on these words against the transducer's 2.9, and comes back
+from memory. `datrie`, at 14.7 MB, reads 1 053. The second column, timed there right after the
+structure's own first pass, barely moves: 248 against 293.
 
 **`DictIndex` has no walk to make and the table shows what that costs.** One order lookup per
 character boundary, so a ten-character query is ten binary searches where the trie made one
-descent: 2.2× marisa's time at the default block, 2.3× at 512. `longest_prefix` is the exception —
+descent: 2.2× marisa's time at the default block, 2.4× at 512. `longest_prefix` is the exception —
 it starts at the query and stops at the first hit, so it never pays for the boundaries under the
-match, and both blocks land within 10–20 % of marisa (933 and 1 014 ns against 848) while storing
-fewer bytes than it. A caller who asks this question often should hold a `StringIndex`; one who asks
-it occasionally, alongside the ranks and ranges only `DictIndex` gives, can have it for a binary
-search per character.
+match, and both blocks land below marisa (933 and 1 010 ns against 1 208) while storing fewer bytes
+than it. A caller who asks this question often should hold a `DoubleArrayIndex` or a `StringIndex`;
+one who asks it occasionally, alongside the ranks and ranges only `DictIndex` gives, can have it for
+a binary search per character.
 
-<sub>Measured 2026-09-24 against lexindex 4.4.2 from PyPI (`b101076`)
-([`bench/results/common-prefix-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-24-arz-b101076.txt)),
-the minimum of three runs, each started once the machine passed a readiness check with the hottest
-thermal zone under 70 °C, each the minimum of five rounds. The first run read 1–13 % above the other
-two on every row; those two agree within 2 % on every row but `datrie`'s `common_prefix`, 5 %.
-`marisa-trie` 1.4.1, `dawg2` 0.13.3, `datrie` 0.8.3 read within 3 % of the same harness on
-2026-09-19, when lexindex was 3.0.0
-([`bench/results/common-prefix-2026-09-19-arz-999e933.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-19-arz-999e933.txt)).
-Sizes are each structure's saved file, built as the harness builds it. Nanoseconds per query through
-Python 3.14.7; the call overhead is in every row, and the three tries are C extensions too. None of
-them is a lexindex dependency — reproduce in a throwaway environment.</sub>
+<sub>Measured 2026-09-25 against lexindex 4.5.0 built from `902e4b4`
+([`bench/results/common-prefix-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-25-arz-902e4b4.txt)):
+three runs in each regime, each started once the machine passed a readiness check with the hottest
+thermal zone under 70 °C, each the minimum of five rounds; a cell is the minimum of the three. The
+three agree within 7 % on every cell of the table, and within 8 % in the other regime but for
+`DoubleArrayIndex`'s `longest_prefix`, whose first run read 12 % above the other two. The harness is
+the 4.4.2 table's
+([`bench/results/common-prefix-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/common-prefix-2026-09-24-arz-b101076.txt))
+with the `DoubleArrayIndex` row, `(key, id)` forms for `datrie` (`prefix_items`,
+`longest_prefix_item`) and `marisa-trie` (its prefix iterator with ids; for the longest, which it
+has no call for, its key list and then the last key's id), a check on every `longest_prefix` answer,
+and the warm regime; timed as that table was, the lexindex rows, whose code did not change, read
+within 3 % of it. Sizes are each structure's saved file, built as the harness builds it. Nanoseconds
+per query through Python 3.14.7; the call overhead is in every row, and the three tries are C
+extensions too. `marisa-trie` 1.4.1, `dawg2` 0.13.3, `datrie` 0.8.3; none is a lexindex dependency —
+reproduce in a throwaway environment.</sub>
 
 ### On Chinese running text, from Rust and from Python
 
@@ -1422,74 +1443,124 @@ id) pairs at every position: 237 465 matches.
 
 | Rust, ns a character | bytes/word | in text order | shuffled |
 |---|---:|---:|---:|
-| darts-clone 0.32 | 17.75 | **41.1** | **34.8** |
-| cedarwood 0.5.0 | 60.55 | 49.5 | 46.2 |
-| **lexindex `StringIndex`** 4.4.2 | **9.24** | 63.9 | 76.5 |
-| lexindex `StringIndex` 4.4.1 | 8.95 | 80.8 | 93.5 |
+| **lexindex `DoubleArrayIndex`**, `for_each_occurrence` | **15.62** | **10.6** | **11.1** |
+| **lexindex `DoubleArrayIndex`**, a walk a position | **15.62** | **13.4** | 18.4 |
+| lexindex `DoubleArrayIndex`, mapped, a walk a position | 15.62 | 14.3 | 19.4 |
+| daachorse 5.0.0, charwise, a block at a time | 47.95 | 15.5 | 16.7 |
+| crawdad 0.4.1 `Trie` | 18.40 | 15.8 | 21.2 |
+| crawdad 0.4.1 `MpTrie` | 22.17 | 17.9 | 23.9 |
+| yada 0.7.0 | 17.75 | 26.3 | 32.7 |
+| darts-clone 0.32 | 17.75 | 27.8 | 34.5 |
+| cedarwood 0.5.0 | 60.57 | 29.0 | 36.2 |
+| lexindex `StringIndex` | 9.24 | 58.6 | 70.5 |
 
-**On this walk lexindex still loses, by 1.3–2.2×.** 4.4.2's `StringIndex` takes 1.3–1.7× cedar's
-time and 1.6–2.2× darts-clone's, holding half darts-clone's bytes and a seventh of cedar's. cedar's
-figure is its resident heap: 0.5.0 has no file form, and its array grows by doubling, so a quarter
-of its slots sit idle. The loss is in instructions: at 4.4.1 a walk ran 1 025 a character against
-cedar's 150 and darts-clone's 151. It is 5.9 steps down the transducer, and each reads a node's
-header afresh — its state, the widths its fields are packed in, a target and an output — where a
-double array reads one base/check pair. The first character, which crosses the root and the widest
-nodes under it, took 649 of the 1 025. Since 4.4.2 the first walk derives a table of the state past
-every first character, which takes a walk to 581 instructions and 18–21 % off its time. The table
-is 0.29 of the 9.24 bytes a word and is held in memory only — the file is 8.95 bytes a word, as it
-was; [the design notes](design.md#stringindex) describe both. The steps past the first character
-are what is left.
+**On this walk lexindex is now first, in every lane.** `DoubleArrayIndex` labels a character, not a
+byte, by its frequency in the lexicon, and its eight-byte slot carries everything a step reads, the
+matched word's id included, so a step is one load and a match costs none past it ([the design
+notes](design.md#doublearrayindex)). Walked a position at a time, as the rivals are, it takes
+0.48–0.49 of darts-clone's time in text order and 0.53–0.54 shuffled, 0.45–0.51 of cedar's,
+0.84–0.87 of crawdad's `Trie`, the fastest per-position rival, and 0.74–0.77 of its `MpTrie` — each
+ratio paired within a process. daachorse answers a whole block at a time, so its like is
+`for_each_occurrence`, which decodes a block once and walks from every character: 0.65–0.68 of
+daachorse's time, at a third of its bytes. That like matters shuffled, where daachorse's block scan
+is ahead of the per-position walk, 16.7 against 18.4 ns: a block at a time spreads what a lone
+position pays. Mapped from its file rather than held in the huge pages a build or a `load` puts it
+in, the walk costs about a nanosecond more. And the index is the smallest double array here: 15.62
+bytes a word against 17.75 for darts-clone and yada, 18.40 for crawdad; cedar's figure is its
+resident heap — 0.5.0 has no file form, and its array grows by doubling, so a quarter of its slots
+sit idle.
 
-<sub>Measured 2026-09-24: lexindex 4.4.1 from crates.io and 4.4.2's walk at `dda19a7`, in one binary
-([`bench/results/cjk-prefix-ab-2026-09-24-arz-dda19a7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-ab-2026-09-24-arz-dda19a7.txt)):
-five processes, each started only once the machine passed a readiness check with the hottest
-thermal zone under 70 °C (it read 46–69 °C, and 72–78 °C as each process ended). A process ran 30
-alternated rounds over its rows in 4 s; a cell is the minimum over the five. "In text order" walks
-each block's positions in order, as a segmenter does, with the sentences in a seeded shuffle;
-"shuffled" takes the same positions in a seeded random order. The control row, jieba-rs 0.11.0's
-`cut_all`, spread +25.8 % across the processes and cedar's and darts-clone's rows 6–14 %, outside
-the 5 % the protocol allows; the ranking does not depend on it — every process orders the four rows
-the same way in both lanes. The lexindex rows spread 1.0–2.5 %, and 4.4.2's time over 4.4.1's,
-taken within each process, 0.791–0.804 in text order and 0.808–0.822 shuffled. The instruction
-counts are `perf stat`'s, one row a process
-([`bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt)),
-which also takes the walk apart by node and counts it on five more corpora. rustc 1.98.1;
-darts-clone at `87b71af`, built with g++ 16.2.1 `-O3`. The harness is not in the repository; the
-files record every version, hash and flag. No competitor here is a lexindex dependency.</sub>
+**`StringIndex` is the other end of the same trade.** Its walk takes 3.8–4.4× the double array's,
+at 59 % of its bytes: at 4.4.1 it ran 1 025 instructions a character against cedar's 150 and
+darts-clone's 151, 5.9 steps down the transducer, each reading a node's header afresh — its state,
+the widths its fields are packed in, a target and an output — where a double array reads one slot.
+4.4.2's table of the state past every first character took that to 581
+([`bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/prefix-walk-counts-2026-09-24-arz-dda19a7.txt)).
+The table is 0.29 of the 9.24 bytes a word, held in memory only; the file is 8.95. What the
+transducer has and the double array does not is everything but this walk: a key back from its id,
+prefix enumeration, ranges, fuzzy matching.
+
+| jieba's lexicon | build | load |
+|---|---:|---:|
+| **lexindex `DoubleArrayIndex`** | 0.354 s | 1.07 ms mapped · 2.29 read |
+| darts-clone 0.32 | **0.056** | **0.78** read |
+| cedarwood 0.5.0 | 0.100 | no file form |
+| yada 0.7.0 | 0.349 | 3.18 read |
+| crawdad 0.4.1 `Trie` | 1.479 | 1.17 read |
+| crawdad 0.4.1 `MpTrie` | 1.889 | 1.48 read |
+| daachorse 5.0.0 | 1.546 | 4.58 read unchecked · 6.17 read |
+| lexindex `StringIndex` | 0.081 from sorted keys | 0.47 mapped · 1.18 read, each with its first walk |
+
+**Where the double array loses: the build, and the load against a structure that checks nothing.**
+It builds from the words in 0.354 s — level with yada, a quarter of crawdad's and daachorse's time —
+but in 6.3× darts-clone's time and 3.5× cedar's. Every row takes the lowest base where it fits,
+found over bitmaps; the window of open blocks darts-clone searches instead, and a start that only
+moves up, each cost 9–10 % of the size on this lexicon. A load walks every slot once, so that no
+slot names a row past the array or an id past the keys and no query checks a bound: 1.07 ms mapped,
+2.29 read, which copies the file and checks its hash as well. darts-clone's `open` reads the file
+and checks nothing, in 0.78 ms — and its `set_array`, which takes a mapped array as it lies, costs
+nothing at all, not timed here. crawdad and daachorse deserialise, in 1.2–6.2 ms.
+
+<sub>Measured 2026-09-25 at `902e4b4`
+([`bench/results/cjk-walk-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-walk-2026-09-25-arz-902e4b4.txt)):
+three processes, each started only once the machine passed a readiness check with the hottest
+thermal zone under 70 °C (it read 53–54 °C, and 85–88 °C as each process ended). A process ran 20
+rounds, the rows in a seeded shuffle each round and each timed after two untimed passes of its own —
+the steady state of a segmenter, whose lexicon stays in cache; a cell is the minimum over the three.
+"In text order" walks each block's positions in order with the sentences in a seeded shuffle;
+"shuffled" takes the same positions in a seeded random order; `for_each_occurrence` and daachorse
+take whole blocks, in the same two orders. The lexindex rows spread 0.7–1.8 % across the processes
+and the rivals 0.8–3.2 %, and every ratio above, paired within each process, agrees to 0.03. The
+control row, jieba-rs 0.11.0's `cut_all`, spread 5.3 %, just outside the 5 % the protocol allows.
+The table this one replaces ran the rows alternated, each timed after whatever the rows before it
+had left in cache, which favoured the rows nearest the turn of a round: it had darts-clone at 41.1
+and 34.8 ns and `StringIndex` at 63.9 and 76.5. A cold regime, 64 MiB written before every pass,
+spread the control by 16.5 % and is not quoted. The build and load table
+([`bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt))
+ran one process each behind the same gate, the minimum of 7 builds and 30 loads, the structures in a
+shuffled order each round, the files in the page cache, and each load followed by one lookup so that
+nothing it defers escapes the timing; a `StringIndex` load is timed with its first walk, which
+derives the first-character table. rustc 1.98.1; darts-clone at `87b71af`, built with g++ 16.2.1
+`-O3`. The harness is not in the repository; the files record every version, hash and flag. No
+competitor here is a lexindex dependency.</sub>
 
 **Through Python the walk is the small part of the cost.** Plugged into jieba 0.42.1 in place of
-its own dictionary, one `StringIndex.occurrences` call a block rather than one `common_prefix` call
-a position takes the DAG from 913 to 560 ns a character — the same walk, fewer calls — and makes
-the fastest backend measured. Every backend also answers jieba's one other dictionary read, the
-`FREQ.get` that decides whether a run of single characters goes to the HMM:
+its own dictionary, one `occurrences` call a block rather than one `common_prefix` call a position
+takes the DAG from 849 to 504 ns a character over the double array, and from 910 to 567 over the
+transducer — the same walks, fewer calls. Every backend also answers jieba's one other dictionary
+read, the `FREQ.get` that decides whether a run of single characters goes to the HMM:
 
 | Python, ns a character | DAG | `lcut(HMM=False)` | `lcut()` |
 |---|---:|---:|---:|
-| **`StringIndex.occurrences`** | **560** | **1 098** | **1 609** |
-| jieba's own dictionary | 649 | 1 498 | 2 031 |
-| `StringIndex.common_prefix` | 913 | 1 416 | 1 941 |
-| `dawg2` `prefixes` | 963 | — | — |
-| `marisa-trie` | 1 417 | 1 919 | 2 476 |
-| `DictIndex` 256 | 2 064 | 2 487 | 3 026 |
+| **`DoubleArrayIndex.occurrences`** | **504** | **1 042** | **1 545** |
+| `StringIndex.occurrences` | 567 | 1 108 | 1 621 |
+| jieba's own dictionary | 654 | 1 499 | 2 024 |
+| `DoubleArrayIndex.common_prefix` | 849 | 1 372 | 1 873 |
+| `StringIndex.common_prefix` | 910 | 1 425 | 1 942 |
+| `dawg2` `prefixes` | 993 | — | — |
+| `marisa-trie` | 1 436 | 1 938 | 2 531 |
+| `DictIndex` 256 | 2 094 | 2 526 | 3 072 |
 
-Over `occurrences` a cut takes 27 % less time than over jieba's own dictionary, and 21 % less with
-the HMM, jieba's default, which adds 511–557 ns a character to every row. `DictIndex` is the slowest
-here for the reason the table above gives: a binary search a character boundary. Against the same
-harness on 4.4.0, whose control row this one's reads within 1 % of, 4.4.2's first-character table
-took 13 ns a character off the DAG, over `occurrences` and `common_prefix` alike — the walk's
-saving, in a call that spends most of its time elsewhere.
+Over `DoubleArrayIndex.occurrences` a cut takes 30 % less time than over jieba's own dictionary, and
+24 % less with the HMM, jieba's default, which adds 500–590 ns a character to every row. Against
+`StringIndex.occurrences` the double array takes 9–11 % off the DAG but 4–6 % off a cut, paired
+within each process: in Rust its walk takes a fifth to a sixth of the transducer's time, and through
+Python that saving is a few tens of nanoseconds in a call that spends most of its time building
+tuples and jieba's DAG. `DictIndex` is the slowest here for the reason the English table gives: a
+binary search a character boundary.
 
-<sub>Measured 2026-09-24 against lexindex 4.4.2 from PyPI (`b101076`)
-([`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt)):
+<sub>Measured 2026-09-25 against lexindex 4.5.0 built from `902e4b4`
+([`bench/results/cjk-prefix-py-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-py-2026-09-25-arz-902e4b4.txt)):
 three processes, each started only once the machine passed a readiness check with the hottest
-thermal zone under 70 °C (it read 49–50 °C). A process ran 5 rounds in 33 s and ended at 85–93 °C;
-a cell is the minimum over the three. The DAG column is per character in blocks (178 338), the cut
-columns per character of text (195 832). The control row, jieba's own dictionary, spread 0.6–1.2 %
-across the processes and reads 0.2–0.8 % above the 4.4.0 campaign's
-([`bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-2026-09-24-arz-3a73ed5.txt),
-which holds 4.4.0's rows). CPython 3.14.7 with the GIL; `marisa-trie` 1.4.1, `dawg2` 0.13.3. The
-harness is not in the repository; the file records every version, hash and flag. No competitor here
-is a lexindex dependency.</sub>
+thermal zone under 70 °C (it read 52–55 °C). A process ran 5 rounds in about 40 s and ended at
+90–94 °C; a cell is the minimum over the three. The DAG column is per character in blocks
+(178 338), the cut columns per character of text (195 832). Before any timing every backend gave
+jieba's own DAG on every block and its cuts of every sentence. The control row, jieba's own
+dictionary, spread 0.2–1.8 % across the processes and reads within 1 % of the 4.4.2 campaign's
+([`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt)),
+the `StringIndex` rows, whose code did not change, within 1.3 %. CPython 3.14.7 with the GIL;
+`marisa-trie` 1.4.1, `dawg2` 0.13.3. The harness is not in the repository; the file records every
+version, hash and flag. No competitor here is a lexindex dependency.</sub>
 
 ## Hash quality
 

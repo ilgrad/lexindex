@@ -546,6 +546,72 @@ dictionary's sections and the rank table and reads the perfect hash and the side
 as the other hash indexes do. A crafted rank table can make `id` answer wrong, never past the end:
 a rank at or above `n` is refused by `id` and clamped by `id_unchecked`.
 
+## `DoubleArrayIndex`
+
+A segmenter asks, at every character of a text, which keys start there. A transducer answers by
+walking its automaton, and each step reads a node's header afresh — its state, the widths its
+fields are packed in, a target and an output: `StringIndex` spends 581 instructions a character on
+Chinese text, after 4.4.2's first-character table. A double array answers with one indexed load a
+step: the child of the node at base `b` along label `x` is slot `b + x`, and the label the slot
+holds says whether that child exists.
+
+**A label is a character.** A byte-wise double array — darts-clone, cedar, yada — walks a Chinese
+word of three characters in nine steps, each a load that can miss. Here the lexicon's characters are
+numbered by frequency, 1 for the most frequent and ties by code point, so that the same keys always
+number the same way. The label comes from a table of two bytes a code point, up to the largest the
+lexicon uses in the Basic Multilingual Plane — 82 KB on jieba's lexicon — and for the rare
+characters past it from a sorted side table, searched only when a text holds one. A character the
+lexicon lacks has label 0, which no slot holds. Frequency order is what packs the rows: the common
+characters are the low labels, so the rows under common prefixes crowd the low end and interlock.
+
+**A slot is eight bytes, and a step reads nothing else:** the label (16 bits), whether a key ends
+there, whether anything continues, the child row's base (23 bits) and the id of the key ending there
+(23). Storing the id in the slot, rather than in an end slot at `base + 0` as darts-clone does,
+saves a load a match: the prototype that had end slots spent 10 % more cycles in text order and
+17 % more shuffled. A leaf needs no row. Bases are unique — no two rows share one — so a slot whose
+label matches belongs to the row being walked, and the check is exact without storing the parent.
+
+**Placement is the exact lowest fit, the widest rows first.** The root sits at base 0; every other
+row goes to the lowest base that no row has and whose slots are all free, rows with more children
+before rows with fewer. The search keeps the used slots and the taken bases as bitmaps, with a
+summary bit a word, and tests 64 candidate bases a word at once against each child, 32 words
+together as vector code. Relaxing the fit — a start that only moves up, or darts-clone's window of
+open blocks — cost 9–10 % of the size on jieba's lexicon. What keeps the exact fit fast is a floor:
+a row fits at base `b` when `b` is untaken and every slot `b + c` is free, and slots and bases are
+only ever taken, so the lowest slot the first child of a given set of labels could take never moves
+down. Each search leaves that slot for its first label, its first two and all of them, and the next
+row sharing one starts there. A small alphabet needs it: the free slots left low in the array suit
+no label, and without floors every row rescanned them — a build over 480 k English words took 16.6 s,
+and 0.5 with them, every row placed where it was before. 74 % of the slots are used on jieba's
+lexicon, 98 % on English words.
+
+**The walks.** `for_each_common_prefix` decodes a character, reads its label and reads a slot, and
+stops at the first mismatch or leaf. `for_each_occurrence` decodes the text once into labels — on the
+stack up to 256 bytes of text — with a 0 at the end that stops every walk, then walks from each
+position: 78 instructions a position against 113 for the prefix walk restarted at each. The empty
+key has no slot, since it ends at the root; its id lives in the header, and the prefix walks report
+it first. It is never an occurrence.
+
+**The blob, and what a load checks.** A 64-byte header — `[magic "BDA1"][n][empty][slots][table]
+[supp][max_label][payload][12 reserved bytes, zero][check]` — then the slots, the code table and the
+supplementary characters. Sixty-four rather than the 52 the fields need, so that a slot never
+straddles a cache line — a blob here starts on 16 bytes or better, a page when mapped — since a slot
+split across two lines is two misses on a cold step. Every loader walks every slot. An empty slot
+must be all zero; a key's id must be below `n`, and a slot where no key ends must carry no id; a
+leaf must hold a key and base 0; every other row must fit, `base + max_label` inside the array. The
+code table's labels must not pass `max_label`, and the supplementary characters must be ascending,
+past the BMP and labelled `1..=max_label`. With that settled once, the walks read slots without a
+bounds check, and a crafted blob answers wrong ids, never out-of-range ones. `from_bytes` and `load`
+also check the payload hash, and `load_mmap` skips only that. On jieba's lexicon, 5.45 MB,
+`load_mmap` takes 1.07 ms and `load` 2.29; darts-clone's `open`, which reads its file and checks
+nothing, 0.78 ([the benchmarks](benchmarks.md#on-chinese-running-text-from-rust-and-from-python)).
+
+It stores no key, so there is no `key(id)`, and no prefix enumeration or range: the ids are the
+keys' ranks, so a `StringIndex` or `DictIndex` over the same keys spells them. A build is refused past
+2²³ keys, 65 535 distinct characters or 2²³ slots — about four million Chinese words; a million
+`word.word` pairs of English take 2.2 M. `plan` does not price it — its `Kind` gains variants only
+at 5.0 — `Overlay` does not take it, its ids being ranks, and the C ABI leaves it out.
+
 ## `PerfectHashIndex`
 
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
@@ -870,6 +936,7 @@ or — never — read it wrong.
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
 | `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
+| `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8`, `BCL2` and `BHD1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
@@ -907,11 +974,12 @@ down outside the index belongs with the blob that produced it.
 - `mmap` (default) — the zero-copy `load_mmap` path (pulls `memmap2`). The one feature with a target
   it cannot serve: there is nothing to map on `wasm32`.
 - `python` — the PyO3 abi3 extension module.
-- `capi` — the C ABI: one opaque handle over the six indexes and fourteen `lexindex_*` functions,
-  declared in `include/lexindex.h`. Pulls `mph`, no dependency. `cargo build --release --features
-  capi` exports it from the `cdylib`; `cargo rustc --release --features capi --crate-type
-  staticlib` gives the archive.
+- `capi` — the C ABI: one opaque handle over six of the seven indexes — not `DoubleArrayIndex` — and
+  fourteen `lexindex_*` functions, declared in `include/lexindex.h`. Pulls `mph`, no dependency.
+  `cargo build --release --features capi` exports it from the `cdylib`; `cargo rustc --release
+  --features capi --crate-type staticlib` gives the archive.
 - `--no-default-features` — an `fst`-only build: `StringIndex` with prefix/range/fuzzy/subsequence and
-  owned `save`/`load`, depending on nothing but `fst`. The full default build depends on `fst` and
+  owned `save`/`load`, and `DictIndex` and `DoubleArrayIndex`, which need no feature, depending on
+  nothing but `fst`. The full default build depends on `fst` and
   `memmap2` and nothing else, and `cargo audit` reports nothing on either. CI cross-checks `i686`
   and `wasm32` on both.

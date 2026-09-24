@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`DoubleArrayIndex`: a character-wise double-array trie for matching a lexicon against running
+  text, and the fastest walk measured over Chinese.** Over UD Chinese GSDSimp against jieba 0.42.1's
+  349 045-word lexicon it finds every word at every position in 10.6 ns a character, against
+  daachorse's 15.5 for the same block scan, and walks a position at a time in 13.4 against crawdad's
+  15.8, darts-clone's 27.8, cedar's 29.0 and `StringIndex`'s 58.6
+  (`bench/results/cjk-walk-2026-09-25-arz-902e4b4.txt`). A label is a character — its frequency rank
+  in the lexicon, read from a table indexed by code point — rather than a byte, so a Chinese word of
+  three characters is three steps, not nine, and each eight-byte slot holds everything a step reads:
+  the label, whether a key ends there and whether anything continues, the child row's base and the
+  key's id. A step is one load, and a match costs none past it. It answers `common_prefix`,
+  `longest_prefix`, `for_each_common_prefix`, `for_each_occurrence` — every key at every position,
+  the text decoded once — and `id`, with the ids `StringIndex` gives the same keys; no `key(id)`, no
+  prefix enumeration. 15.62 bytes a word on that lexicon, against 17.75 for darts-clone and yada,
+  18.40 for crawdad, 47.95 for daachorse and 60.57 held in memory by cedarwood. It loses on the
+  build and the load (`bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt`): 0.35 s over the
+  lexicon against darts-clone's 0.06 and cedar's 0.10, and `load_mmap`, which walks every slot, 1.07
+  ms against darts-clone's `open`, which checks nothing, 0.78. Every row goes to the lowest base
+  where it fits, and floors — the lowest slot a set of labels could take never moves down — keep
+  that exact fit fast on a small alphabet: 0.5 s over 480 k English words, where the plain search
+  took 16.6. Limits, refused at build: 2²³ keys, 65 535 distinct characters, 2²³ slots. The blob is
+  `BDA1`, checked slot by slot on every load, `load_mmap` included, so a crafted blob answers wrong
+  ids and never reads out of bounds; a fuzz target (`parse_double_array`) and a golden blob pinned
+  byte for byte. Python: `lexindex.DoubleArrayIndex`, whose `occurrences` counts characters; plugged
+  into jieba it cuts in 30 % less time than jieba's own dictionary, 24 % with the HMM, and 4–6 %
+  less than `StringIndex.occurrences` (`bench/results/cjk-prefix-py-2026-09-25-arz-902e4b4.txt`).
+  `inspect` reports it; `plan`, `Overlay` and the C ABI do not take it.
+
 ### Documentation
 
 - **`paths` is re-measured at 4.4.2 in the million-key frontier, and the Python jieba lane on
@@ -17,17 +46,25 @@ All notable changes to this project are documented here. The format follows
   Through Python (`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`), jieba over
   `StringIndex.occurrences` builds the DAG in 560 ns a character against 649 over its own
   dictionary and cuts in 27 % less time, 21 % with the HMM.
-- **The common-prefix table on English words is re-measured at 4.4.2, and `StringIndex` is level
-  with `datrie` there.** It had stood at 3.0.0's numbers since 2026-09-19. Through Python, over the
-  same 20 000 queries (`bench/results/common-prefix-2026-09-24-arz-b101076.txt`), `StringIndex`
-  reads 561 ns on `common_prefix` and 285 on `longest_prefix` against `datrie`'s 544 and 279, a gap
-  inside the runs' own spread, at a fifth of its bytes; at 3.0.0 it read 636 and 357. `DictIndex`
-  at the default block reads 2 358 and 933, where it read 2 925 and 1 143. The three tries read
-  within 3 % of the 2026-09-19 run.
+- **The common-prefix table on English words compares the same work, and `DoubleArrayIndex`
+  answers both queries fastest there.** Re-measured at 4.4.2 first
+  (`bench/results/common-prefix-2026-09-24-arz-b101076.txt`: `StringIndex` 561 and 285 ns against
+  `datrie`'s 544 and 279, where 3.0.0 read 636 and 357), the table timed `datrie`'s keys alone
+  against lexindex's `(key, id)` pairs. It now times `datrie`'s `prefix_items` and
+  `longest_prefix_item` and marisa's ids, keeps `datrie`'s keys-only row as such, and times each
+  call after an untimed pass of its own (`bench/results/common-prefix-2026-09-25-arz-902e4b4.txt`):
+  `DoubleArrayIndex` 473 and 234, `StringIndex` 530 and 295, `datrie` 780 and 417, its keys alone
+  344 and 237. Timed after another structure's pass instead, as before, `DoubleArrayIndex`'s
+  `common_prefix` reads 691 against `StringIndex`'s 578: its array is 11.7 MB on these words.
+- **The Chinese walk table is re-measured with every double array, each row timed warm.** The table
+  it replaces ran the rows alternated, each after whatever the rows before it had left in cache,
+  which favoured the rows nearest the turn of a round: it had darts-clone at 41.1 and 34.8 ns and
+  cedar at 49.5 and 46.2; timed after two passes of its own they read 27.8 and 34.5, 29.0 and 36.2.
+  yada, crawdad's `Trie` and `MpTrie` and daachorse join them, with a build and load table.
 - **The README and the docs' front page say what `StringIndex` is for and what it is not.** It is
-  the automaton index — autocomplete, fuzzy search, ordered browse, and now dictionary segmentation,
-  the lane where it leads — and for an exact `string ↔ id` alone `HashedDictIndex` is faster and
-  `DictIndex` smaller.
+  the automaton index — autocomplete, fuzzy search, ordered browse — and for an exact `string ↔ id`
+  alone `HashedDictIndex` is faster and `DictIndex` smaller, and for matching a lexicon against text
+  `DoubleArrayIndex`.
 
 ## [4.4.2] — 2026-09-24
 

@@ -52,8 +52,9 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
 
 - **`StringIndex`** — an **ordered** index backed by a finite-state transducer. Exact `string ↔ id`
   plus prefix / range / fuzzy / subsequence iteration. The only one that answers typo-tolerant
-  queries. Use it for autocomplete, fuzzy search, ordered browse, dictionary segmentation. For an
-  exact `string ↔ id` and nothing else, `HashedDictIndex` is faster and `DictIndex` smaller.
+  queries. Use it for autocomplete, fuzzy search and ordered browse. For an exact `string ↔ id`
+  and nothing else, `HashedDictIndex` is faster and `DictIndex` smaller; for matching a lexicon
+  against text, `DoubleArrayIndex` is faster.
 - **`DictIndex`** — an **ordered** dictionary with the key stored for every id: exact `string ↔ rank`
   both ways, `lower_bound`, `prefix`, `range`, in-order iteration, no automata so no fuzzy. The
   sorted keys are front-coded in blocks, the suffixes coded per shard under a symbol table or a
@@ -81,9 +82,10 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   absent key stop after one cache miss instead of two.
 - **`DoubleArrayIndex`** — a **character-wise double-array trie** for matching a lexicon against
   running text: the keys a text starts with, the longest of them, and every key occurring anywhere
-  in it, one load a character. 15.62 bytes a word on jieba's Chinese lexicon, below every double
-  array measured there. The ids are `StringIndex`'s ranks, and there is no reverse lookup. Use it
-  for dictionary segmentation, gazetteer tagging and a tokenizer's longest match.
+  in it, one load a character: the fastest walk measured over Chinese text, at 15.62 bytes a word on
+  jieba's lexicon, below every double array measured there. The ids are `StringIndex`'s ranks, and
+  there is no reverse lookup. Use it for dictionary segmentation, gazetteer tagging and a
+  tokenizer's longest match.
 
 All seven assign dense ids in `[0, n)` and serialise to a flat, relocatable blob
 (`save` / `load`, and `load_mmap` where there is more than the perfect hash to map). None is mutable after building — they are immutable summaries, like
