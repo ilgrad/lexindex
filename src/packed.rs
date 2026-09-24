@@ -205,6 +205,7 @@ impl Alphabet {
     /// [`compare`](Self::compare) for an alphabet that fits its width, over the same word of codes
     /// [`spread`](Self::spread) decodes through: a scan reads a header and then these bytes, so
     /// the load a code used to carry was as much of a lookup as the header walk itself.
+    #[inline(always)]
     fn spread_cmp(&self, codes: &Codes<'_>, rest: &[u8]) -> (usize, Ordering) {
         let (width, mask) = (self.width, top(self.width) as u64);
         let mut c = 0usize;
@@ -304,7 +305,7 @@ impl Alphabet {
 
     /// How many leading bytes `codes` shares with `rest`, and how it orders against it — decoded a
     /// byte at a time, which is what a scan needs and no more.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn compare(&self, codes: &Codes<'_>, rest: &[u8]) -> (usize, Ordering) {
         if self.two.is_empty() {
             return self.spread_cmp(codes, rest);

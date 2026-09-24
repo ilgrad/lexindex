@@ -127,6 +127,14 @@ impl Table {
         self.words.len()
     }
 
+    /// The words and the lengths, as two slices of one length: indexing both by one code checks
+    /// the code once.
+    #[inline(always)]
+    pub(crate) fn parts(&self) -> (&[u64], &[u8]) {
+        let n = self.words.len().min(self.lens.len());
+        (&self.words[..n], &self.lens[..n])
+    }
+
     /// The symbol behind `code` as (word, length); `None` for a code past the table, which is
     /// where the escape always is.
     #[inline(always)]

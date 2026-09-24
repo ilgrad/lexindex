@@ -831,20 +831,6 @@ impl Codec {
         }
     }
 
-    /// How many leading bytes `piece` shares with `rest`, and how it orders against it — read off
-    /// the codes, nothing decoded.
-    #[inline]
-    fn compare(&self, dict: &Dict, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
-        match self {
-            Codec::Symbols {
-                table,
-                split: Some(split),
-            } => compare_tiered(table, *split, dict, piece.bytes(), rest),
-            Codec::Symbols { table, .. } => compare_symbols(table, piece.bytes(), rest),
-            Codec::Packed(a) => a.compare(&piece.codes(a.width()), rest.bytes()),
-        }
-    }
-
     /// `[kind u8][payload]`, behind the `u32` length the tables section gives every shard. A split
     /// is two more bytes at the head of the payload, and a kind of its own so that a shard which
     /// bought no phrases pays nothing for the ones that did.
@@ -1041,17 +1027,6 @@ impl<'a> Entries<'a> {
         }
         self.at += 1;
         self.head_within::<FRAME>()
-    }
-
-    /// [`head`](Self::head) without the entry count, for a walk whose own loop is already bounded
-    /// by it — which is both of the walks that matter, and five instructions a header between them.
-    #[inline(always)]
-    fn head_next(&mut self) -> Option<(usize, usize)> {
-        if self.is_frame() {
-            self.head_within::<true>()
-        } else {
-            self.head_within::<false>()
-        }
     }
 
     /// The next header, counted by the caller. Reading past a run's headers reads its suffixes,
@@ -2717,27 +2692,34 @@ impl DictIndex {
         };
         data.get(start..end).unwrap_or_default()
     }
-
-    /// How many leading bytes an entry's stored suffix shares with `rest`, and how the suffix
-    /// orders against it — read off the codes, nothing decoded. A stream this crate did not write
-    /// ends the suffix where it stops making sense.
-    #[inline]
-    fn compare_piece(&self, codec: &Codec, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
-        codec.compare(&self.phrases, piece, rest)
-    }
 }
 
 /// What a compare has left of the probe: the whole key, and the byte the compare starts at.
 ///
-/// A suffix slice would name the same bytes, and [`fsst::word_at`] reads the two differently: the
-/// last eight bytes of a key eight bytes long are one load shifted down, the last three bytes of a
-/// three-byte slice are a fold a byte at a time. A compare starts where the probe already agrees
+/// A suffix slice would name the same bytes, and read them differently: the last three bytes of a
+/// three-byte slice are a fold a byte at a time, where the key's last eight bytes are one load,
+/// taken once a walk as `tail` and shifted down. A compare starts where the probe already agrees
 /// with the key before it -- 6.3 bytes into a 9.3-byte word on the dictionary -- so the slice is
 /// under eight bytes for most compares and the key it came from never is.
 #[derive(Clone, Copy)]
 struct Rest<'a> {
     key: &'a [u8],
     at: usize,
+    /// [`tail_word`] of `key`, read once a walk rather than once a compare.
+    tail: u64,
+}
+
+/// A key's last eight bytes as a little-endian word, or the whole key zero-padded when it is
+/// shorter: every byte a compare can reach past the last whole word of the key.
+#[inline]
+fn tail_word(key: &[u8]) -> u64 {
+    match key.last_chunk::<8>() {
+        Some(w) => u64::from_le_bytes(*w),
+        None => key
+            .iter()
+            .enumerate()
+            .fold(0, |w, (k, &b)| w | u64::from(b) << (8 * k)),
+    }
 }
 
 impl<'a> Rest<'a> {
@@ -2748,10 +2730,18 @@ impl<'a> Rest<'a> {
         self.key.len() - self.at
     }
 
-    /// The eight bytes at `at + c`, zero-padded past the key.
+    /// The eight bytes at `at + c`, zero-padded past the key: one load where eight remain, and the
+    /// key's tail shifted down where they do not.
     #[inline(always)]
     fn word(self, c: usize) -> u64 {
-        fsst::word_at(self.key, self.at + c)
+        let i = self.at + c;
+        if let Some(w) = self.key.get(i..).and_then(|s| s.first_chunk::<8>()) {
+            return u64::from_le_bytes(*w);
+        }
+        // Past the last whole word, so `i` is above `key.len() - 8`, or the key is under eight
+        // bytes and the tail is all of it.
+        let shift = 8 * (i - self.key.len().saturating_sub(8));
+        self.tail.checked_shr(shift as u32).unwrap_or(0)
     }
 
     /// The suffix itself, for a codec that compares a byte at a time and gains nothing by the
@@ -2778,6 +2768,145 @@ fn compare_word(word: u64, len: usize, rest: Rest<'_>, c: &mut usize) -> Option<
     (m < len).then_some((*c, Ordering::Greater))
 }
 
+/// How a scan compares one entry's coded suffix with the probe: the shard's codec, told apart once
+/// a run rather than once an entry, so that each codec's walk is a loop of its own.
+trait SuffixCmp {
+    /// Bits one unit of a coded suffix takes, which is what a header's `len` counts in.
+    fn unit(&self) -> usize;
+    fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering);
+}
+
+struct SymbolsCmp<'a>(&'a Table);
+
+struct TieredCmp<'a> {
+    table: &'a Table,
+    split: Split,
+    dict: &'a Dict,
+}
+
+struct PackedCmp<'a>(&'a Alphabet);
+
+impl SuffixCmp for SymbolsCmp<'_> {
+    #[inline(always)]
+    fn unit(&self) -> usize {
+        8
+    }
+
+    #[inline(always)]
+    fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
+        compare_symbols(self.0, piece.bytes(), rest)
+    }
+}
+
+impl SuffixCmp for TieredCmp<'_> {
+    #[inline(always)]
+    fn unit(&self) -> usize {
+        8
+    }
+
+    #[inline(always)]
+    fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
+        compare_tiered(self.table, self.split, self.dict, piece.bytes(), rest)
+    }
+}
+
+impl SuffixCmp for PackedCmp<'_> {
+    #[inline(always)]
+    fn unit(&self) -> usize {
+        self.0.width() as usize
+    }
+
+    #[inline(always)]
+    fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
+        self.0.compare(&piece.codes(self.0.width()), rest.bytes())
+    }
+}
+
+/// [`DictIndex::scan_run`] with the header code's kind told apart as well.
+#[inline(always)]
+fn scan_as<C: SuffixCmp>(
+    frame: bool,
+    entries: &Entries<'_>,
+    count: usize,
+    probe: &[u8],
+    matched: usize,
+    cmp: &C,
+) -> (usize, usize, bool) {
+    if frame {
+        scan_with::<true, C>(entries, count, probe, matched, cmp)
+    } else {
+        scan_with::<false, C>(entries, count, probe, matched, cmp)
+    }
+}
+
+/// The walk itself, for one kind of header code and one codec: the run's cursor lives in locals,
+/// so that the loop holds the few words a header needs and nothing a compare does.
+#[inline(never)]
+fn scan_with<const FRAME: bool, C: SuffixCmp>(
+    entries: &Entries<'_>,
+    count: usize,
+    probe: &[u8],
+    mut matched: usize,
+    cmp: &C,
+) -> (usize, usize, bool) {
+    let mut codes = entries.codes;
+    let sfx = entries.sfx;
+    let mut reach = entries.reach;
+    let tail = tail_word(probe);
+    let (end_bits, max_units, unit) = (entries.end_bits, entries.max_units, cmp.unit());
+    for j in 1..count {
+        let code = codes.next_code();
+        let (l, len) = match codes.pair_as::<FRAME>(code) {
+            Some(pair) => pair,
+            None => match escaped(sfx, reach.min(end_bits)) {
+                Some((l, len, at)) => {
+                    reach = at;
+                    (l, len)
+                }
+                None => return (j - 1, matched, false),
+            },
+        };
+        if len > max_units || l < matched {
+            return (j - 1, matched, false);
+        }
+        let start = reach.min(end_bits);
+        reach = reach.wrapping_add(len.wrapping_mul(unit));
+        if l > matched {
+            continue;
+        }
+        let piece = Piece {
+            stream: sfx,
+            start,
+            units: len,
+        };
+        let (c, ord) = cmp.compare(
+            piece,
+            Rest {
+                key: probe,
+                at: matched,
+                tail,
+            },
+        );
+        match ord {
+            Ordering::Equal => return (j, matched + c, true),
+            Ordering::Greater => return (j - 1, matched, false),
+            Ordering::Less => matched += c,
+        }
+    }
+    (count.saturating_sub(1), matched, false)
+}
+
+/// The pair an escape stands for — two varints at the head of the entry's own suffix, on a byte —
+/// and the bit its suffix proper starts at.
+#[cold]
+#[inline(never)]
+fn escaped(sfx: &[u8], off: usize) -> Option<(usize, usize, usize)> {
+    let mut at = off.div_ceil(8);
+    let lcp = varint_at(sfx, &mut at)?;
+    let len = varint_at(sfx, &mut at)?;
+    Some((lcp, len, at * 8))
+}
+
 /// How a suffix that ran out against `rest` orders: equal only if `rest` ran out with it.
 #[inline(always)]
 fn ended(c: usize, rest: Rest<'_>) -> (usize, Ordering) {
@@ -2789,25 +2918,26 @@ fn ended(c: usize, rest: Rest<'_>) -> (usize, Ordering) {
     (c, ord)
 }
 
-/// [`Codec::compare`] for a symbol table: a symbol is up to eight bytes, so the compare is a word
+/// [`SuffixCmp::compare`] for a symbol table: a symbol is up to eight bytes, so the compare is a word
 /// at a time rather than a byte.
 #[inline]
 fn compare_symbols(table: &Table, packed: &[u8], rest: Rest<'_>) -> (usize, Ordering) {
+    let (words, lens) = table.parts();
     let mut c = 0;
     let mut i = 0;
-    while i < packed.len() {
-        let (word, len) = if packed[i] == ESCAPE {
+    while let Some(&code) = packed.get(i) {
+        let k = usize::from(code);
+        let (word, len) = if k < words.len() {
+            i += 1;
+            (words[k], usize::from(lens[k]))
+        } else if code == ESCAPE {
             let Some(&b) = packed.get(i + 1) else {
                 break;
             };
             i += 2;
             (u64::from(b), 1)
         } else {
-            let Some(sym) = table.symbol(packed[i]) else {
-                break;
-            };
-            i += 1;
-            sym
+            break;
         };
         if let Some(answer) = compare_word(word, len, rest, &mut c) {
             return answer;
@@ -2820,7 +2950,7 @@ fn compare_symbols(table: &Table, packed: &[u8], rest: Rest<'_>) -> (usize, Orde
 /// phrase's bytes compared eight at a time. Kept apart from the plain loop rather than branching
 /// inside it — a shard that bought no phrases is the common one, and this is the inner loop of
 /// every lookup.
-#[inline]
+#[inline(always)]
 fn compare_tiered(
     table: &Table,
     split: Split,
@@ -2828,44 +2958,51 @@ fn compare_tiered(
     packed: &[u8],
     rest: Rest<'_>,
 ) -> (usize, Ordering) {
+    // The codes below `symbols` are the table's, so the common code is told apart by one compare
+    // against a bound the loop holds, and a phrase prefix by what is left.
+    let (words, lens) = table.parts();
+    let n = words.len().min(usize::from(split.symbols()));
+    let (words, lens) = (&words[..n], &lens[..n]);
     let mut c = 0;
     let mut i = 0;
-    while i < packed.len() {
-        if let Some((id, took)) = split.read_at(packed, i) {
-            // The padded chunk, not the phrase's own bytes: its last word is a whole load off the
-            // padding, where a slice of its length would have been assembled a byte at a time.
-            let Some((phrase, plen)) = dict.chunk(id) else {
-                break;
-            };
-            i += took;
-            let mut k = 0;
-            for word in phrase.chunks_exact(8) {
-                if k >= plen {
-                    break;
-                }
-                let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
-                if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
-                    return answer;
-                }
-                k += 8;
+    while let Some(&code) = packed.get(i) {
+        let k = usize::from(code);
+        if k < words.len() {
+            i += 1;
+            if let Some(answer) = compare_word(words[k], usize::from(lens[k]), rest, &mut c) {
+                return answer;
             }
             continue;
         }
-        let (word, len) = if packed[i] == ESCAPE {
+        if code == ESCAPE {
             let Some(&b) = packed.get(i + 1) else {
                 break;
             };
             i += 2;
-            (u64::from(b), 1)
-        } else {
-            let Some(sym) = table.symbol(packed[i]) else {
-                break;
-            };
-            i += 1;
-            sym
+            if let Some(answer) = compare_word(u64::from(b), 1, rest, &mut c) {
+                return answer;
+            }
+            continue;
+        }
+        let Some((id, took)) = split.read_at(packed, i) else {
+            break;
         };
-        if let Some(answer) = compare_word(word, len, rest, &mut c) {
-            return answer;
+        // The padded chunk, not the phrase's own bytes: its last word is a whole load off the
+        // padding, where a slice of its length would have been assembled a byte at a time.
+        let Some((phrase, plen)) = dict.chunk(id) else {
+            break;
+        };
+        i += took;
+        let mut k = 0;
+        for word in phrase.chunks_exact(8) {
+            if k >= plen {
+                break;
+            }
+            let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+            if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
+                return answer;
+            }
+            k += 8;
         }
     }
     ended(c, rest)
@@ -3089,38 +3226,33 @@ impl DictIndex {
     fn scan_run(
         &self,
         codec: &Codec,
-        entries: &mut Entries<'_>,
+        entries: &Entries<'_>,
         count: usize,
         probe: &[u8],
-        mut matched: usize,
+        matched: usize,
     ) -> (usize, usize, bool) {
         // What the loop's own bound then stands in for, so that no header pays for it again.
         if entries.count + 1 != count {
             return (0, matched, false);
         }
-        for j in 1..count {
-            let Some((l, len)) = entries.head_next() else {
-                return (j - 1, matched, false);
-            };
-            if l < matched {
-                return (j - 1, matched, false);
+        let frame = entries.is_frame();
+        match codec {
+            Codec::Symbols { table, split: None } => {
+                scan_as(frame, entries, count, probe, matched, &SymbolsCmp(table))
             }
-            if l > matched {
-                entries.skip(len);
-                continue;
+            Codec::Symbols {
+                table,
+                split: Some(split),
+            } => {
+                let cmp = TieredCmp {
+                    table,
+                    split: *split,
+                    dict: &self.phrases,
+                };
+                scan_as(frame, entries, count, probe, matched, &cmp)
             }
-            let rest = Rest {
-                key: probe,
-                at: matched,
-            };
-            let (c, ord) = self.compare_piece(codec, entries.piece(len), rest);
-            match ord {
-                Ordering::Equal => return (j, matched + c, true),
-                Ordering::Greater => return (j - 1, matched, false),
-                Ordering::Less => matched += c,
-            }
+            Codec::Packed(a) => scan_as(frame, entries, count, probe, matched, &PackedCmp(a)),
         }
-        (count.saturating_sub(1), matched, false)
     }
 
     /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
@@ -3142,13 +3274,13 @@ impl DictIndex {
         let r = self.micros_in(b);
         let block_base = self.blocks.at(b);
         let (j, matched) = if r > 1 {
-            let mut restarts = Entries::of(
+            let restarts = Entries::of(
                 &self.codes_of(b).1,
                 codec,
                 self.restart_data_at(b, block_base),
                 r,
             );
-            let (j, matched, hit) = self.scan_run(codec, &mut restarts, r, probe, matched);
+            let (j, matched, hit) = self.scan_run(codec, &restarts, r, probe, matched);
             if hit {
                 return ((base + j * self.micro) as u64, true);
             }
@@ -3157,13 +3289,13 @@ impl DictIndex {
             (0, matched)
         };
         let count = self.micro_count(b, j);
-        let mut entries = Entries::of(
+        let entries = Entries::of(
             &self.codes_of(b).0,
             codec,
             self.micro_data_at(b, j, block_base),
             count,
         );
-        let (k, _, hit) = self.scan_run(codec, &mut entries, count, probe, matched);
+        let (k, _, hit) = self.scan_run(codec, &entries, count, probe, matched);
         let rank = base + j * self.micro + k + usize::from(!hit);
         (rank as u64, hit)
     }

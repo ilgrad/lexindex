@@ -600,6 +600,7 @@ impl<'a> Writer<'a> {
 /// A word holds eight or so codes at the widths a frame takes, so the load, its bounds check and
 /// the shift that aligns it are paid once for all of them rather than once a code. That is most of
 /// what a walk over a microblock's headers costs beyond splitting the pairs themselves.
+#[derive(Clone, Copy)]
 pub(crate) struct Reader<'a> {
     /// The run's whole data — the headers, and past `hdr_end` the suffixes. A header's eight-byte
     /// load may run on into the suffixes, and the mask drops what it took: that keeps it one
@@ -659,7 +660,7 @@ impl<'a> Reader<'a> {
     /// Inlined on purpose: a climb opens two runs and a scan one, so the prologue is paid once a
     /// lookup, and out of line it was a call through the got with the code's kind unknown to the
     /// walk that followed.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn of(code: &'a Code, data: &'a [u8], count: usize) -> Option<(Self, &'a [u8])> {
         let (at, width, frame) = match code {
             Code::Frame(f) => {
