@@ -10,9 +10,10 @@ use crate::IndexError;
 use crate::blob::SharedBytes;
 use crate::extsort::{RUN_BYTES, Run, Runs};
 use crate::fst_bounds;
-use crate::fst_walk::Layout;
+use crate::fst_walk::{FirstChars, Layout};
 use fst::automaton::{Automaton, Levenshtein, Str};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
+use std::sync::OnceLock;
 
 const MAGIC: &[u8; 4] = b"BIX4";
 
@@ -22,6 +23,9 @@ pub struct StringIndex {
     /// Where the walks that follow one path start, read from the footer once: see
     /// [`fst_walk`](crate::fst_walk).
     layout: Layout,
+    /// The prefix walks' state past a query's first character, derived by the first walk rather
+    /// than at load, so an index that never walks never holds it: see [`FirstChars`].
+    first: OnceLock<Option<Box<FirstChars>>>,
 }
 
 impl StringIndex {
@@ -387,8 +391,11 @@ impl StringIndex {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn for_each_common_prefix(&self, query: &str, f: impl FnMut(usize, u64)) {
+        let first = self
+            .first
+            .get_or_init(|| FirstChars::derive(self.map.as_fst()).map(Box::new));
         self.layout
-            .common_prefixes(self.map.as_fst().as_bytes(), query, f);
+            .common_prefixes(self.map.as_fst().as_bytes(), first.as_deref(), query, f);
     }
 
     /// [`for_each_common_prefix`](Self::for_each_common_prefix) through `fst`'s own node decoder:
@@ -914,7 +921,11 @@ impl StringIndex {
     fn from_map(map: Map<SharedBytes>) -> Result<Self, IndexError> {
         let layout = Layout::of(map.as_fst().as_bytes())
             .ok_or(IndexError::Format("fst node address is outside the blob"))?;
-        Ok(Self { map, layout })
+        Ok(Self {
+            map,
+            layout,
+            first: OnceLock::new(),
+        })
     }
 
     /// The lexindex invariant on top of a valid FST: the value stored for the `i`-th key in sorted
@@ -1961,6 +1972,45 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    /// A load holds no first-character table; the first walk derives it, with a state for each
+    /// character of the plane that begins a key — one, two and three bytes long — and the walks
+    /// answer as `fst`'s decoder does past it: the empty key's match, a character no key begins
+    /// with, and one outside the plane, which the table leaves to the walk.
+    #[test]
+    fn the_first_walk_derives_the_first_character_table() {
+        let keys = [
+            "", "a", "ab", "é", "éa", "ж", "中", "中国", "国人", "😀", "😀a",
+        ];
+        let idx = StringIndex::from_bytes(&StringIndex::build(keys).unwrap().to_bytes()).unwrap();
+        assert!(idx.first.get().is_none(), "a load derives nothing");
+        let queries = ["", "b", "北京", "😁", "𝄞x", "中国人", "éa!"];
+        assert_walks_agree(&idx, keys.iter().chain(&queries).map(|q| q.to_string()));
+        let table = idx
+            .first
+            .get()
+            .unwrap()
+            .as_deref()
+            .expect("ranks fit the table");
+        // a, é, ж, 中 and 国 begin keys; 国 is U+56FD, so pages 0..=347 at twelve bytes a page.
+        assert_eq!(table.heap_len(), 348 * 12 + 5 * 8);
+        // No key but the empty one: the root is final, and every walk ends past it.
+        let empty = StringIndex::build([""]).unwrap();
+        assert_walks_agree(&empty, queries.map(String::from));
+    }
+
+    /// A state whose sum does not fit the table's `u32` leaves every first character to the walk,
+    /// which still answers as `fst`'s decoder does.
+    #[test]
+    fn sums_past_u32_leave_the_first_character_to_the_walk() {
+        let mut b = MapBuilder::memory();
+        b.insert("a", 1u64 << 40).unwrap();
+        b.insert("中", 7).unwrap();
+        let map = Map::new(SharedBytes::from_owned(b.into_inner().unwrap())).unwrap();
+        let idx = StringIndex::from_map(map).unwrap();
+        assert_walks_agree(&idx, ["a", "ab", "中", "中文", "b"].map(String::from));
+        assert!(idx.first.get().unwrap().is_none());
     }
 
     /// Versions 1 and 2 of `fst`'s format keep no checksum, and version 1 no transition index: the

@@ -45,6 +45,127 @@ impl Layout {
     }
 }
 
+/// The state a walk is in once it has read a query's first character, for every character of the
+/// Basic Multilingual Plane that begins a key.
+///
+/// A walk down a lexicon of Chinese words spends most of its instructions on its first character:
+/// the root and the two nodes below it take its three bytes, each node decoded in full, before the
+/// walk reaches the words that begin with it. This answers those steps with one lookup — a page of
+/// 64 code points, a bit for each, and a rank into the states. A character outside the plane is left
+/// to the walk; one inside it that no key begins with ends the walk.
+pub(crate) struct FirstChars {
+    /// The empty key's value, if the index holds it: the one match before any character.
+    root: Option<u64>,
+    /// Bit `c % 64` of `bits[c / 64]` is set when code point `c` begins a key.
+    bits: Box<[u64]>,
+    /// Where page `p`'s first state is in `states`.
+    base: Box<[u32]>,
+    /// `(addr, sum)` for each character that begins a key, in code point order: the node the walk
+    /// reaches past the character's bytes, and the outputs summed on the way there.
+    states: Box<[(u32, u32)]>,
+}
+
+impl FirstChars {
+    /// `None` when a state does not fit the table's `u32`s — past 4 GiB of blob or 4 Gi keys — and
+    /// the walk then reads the first character as it reads every other.
+    pub(crate) fn derive<D: AsRef<[u8]>>(fst: &fst::raw::Fst<D>) -> Option<Self> {
+        let root = fst.root();
+        let mut found = Vec::new();
+        let mut spelled = [0u8; 3];
+        for t in root.transitions() {
+            let len = match t.inp {
+                0x00..=0x7F => 1,
+                0xC2..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                // Four bytes, outside the plane, or no character's first byte at all.
+                _ => continue,
+            };
+            spelled[0] = t.inp;
+            descend(fst, t.addr, t.out.value(), &mut spelled, 1, len, &mut found)?;
+        }
+        let pages = found.last().map_or(0, |&(cp, ..)| cp as usize / 64 + 1);
+        let (mut bits, mut base) = (vec![0u64; pages], vec![0u32; pages]);
+        for (i, &(cp, ..)) in found.iter().enumerate() {
+            let page = cp as usize / 64;
+            if bits[page] == 0 {
+                base[page] = u32::try_from(i).ok()?;
+            }
+            bits[page] |= 1 << (cp % 64);
+        }
+        Some(Self {
+            root: root.is_final().then(|| root.final_output().value()),
+            bits: bits.into(),
+            base: base.into(),
+            states: found
+                .into_iter()
+                .map(|(_, addr, sum)| (addr, sum))
+                .collect(),
+        })
+    }
+
+    /// The state past `c`: `Some(None)` when no key begins with it, `None` when `c` is outside the
+    /// plane the table holds.
+    #[inline(always)]
+    fn after(&self, c: char) -> Option<Option<(usize, u64)>> {
+        let cp = u32::from(c);
+        if cp > 0xFFFF {
+            return None;
+        }
+        let page = (cp / 64) as usize;
+        let bit = 1u64 << (cp % 64);
+        let bits = self.bits.get(page).copied().unwrap_or(0);
+        if bits & bit == 0 {
+            return Some(None);
+        }
+        let (addr, sum) =
+            self.states[self.base[page] as usize + (bits & (bit - 1)).count_ones() as usize];
+        Some(Some((addr as usize, u64::from(sum))))
+    }
+
+    /// The bytes the table holds on the heap.
+    #[cfg(test)]
+    pub(crate) fn heap_len(&self) -> usize {
+        self.bits.len() * 8 + self.base.len() * 4 + self.states.len() * 8
+    }
+}
+
+/// Every character of one UTF-8 length that `spelled[..len]` begins, from the node at `addr`,
+/// pushed as `(code point, addr, sum)` in code point order. `None` when a state does not fit `u32`.
+fn descend<D: AsRef<[u8]>>(
+    fst: &fst::raw::Fst<D>,
+    addr: usize,
+    sum: u64,
+    spelled: &mut [u8; 3],
+    len: usize,
+    want: usize,
+    found: &mut Vec<(u32, u32, u32)>,
+) -> Option<()> {
+    if len == want {
+        // A byte path no `&str` spells is one no query reaches: an overlong or surrogate form must
+        // not take the place of the character it would decode to.
+        if let Some(c) = std::str::from_utf8(&spelled[..len])
+            .ok()
+            .and_then(|s| s.chars().next())
+        {
+            found.push((
+                u32::from(c),
+                u32::try_from(addr).ok()?,
+                u32::try_from(sum).ok()?,
+            ));
+        }
+        return Some(());
+    }
+    for t in fst.node(addr).transitions() {
+        // A walk ends where a sum would overflow, so a character past one begins no match.
+        let (0x80..=0xBF, Some(next)) = (t.inp, sum.checked_add(t.out.value())) else {
+            continue;
+        };
+        spelled[len] = t.inp;
+        descend(fst, t.addr, next, spelled, len + 1, want, found)?;
+    }
+    Some(())
+}
+
 /// A little-endian integer of `n` bytes at `at`, as `fst` packs one; one unaligned load where the
 /// blob has eight bytes to give.
 #[inline(always)]
@@ -175,10 +296,26 @@ impl Layout {
     /// Sums are checked, as the rank walk checks them: a transition whose output would overflow
     /// ends the walk, and a final output that would is not reported.
     #[inline(always)]
-    pub(crate) fn common_prefixes(self, bytes: &[u8], query: &str, mut f: impl FnMut(usize, u64)) {
+    pub(crate) fn common_prefixes(
+        self,
+        bytes: &[u8],
+        first: Option<&FirstChars>,
+        query: &str,
+        mut f: impl FnMut(usize, u64),
+    ) {
         let q = query.as_bytes();
-        let (mut addr, mut acc) = (self.root, 0u64);
-        for i in 0..=q.len() {
+        let (mut addr, mut acc, mut from) = (self.root, 0u64, 0);
+        if let Some(table) = first {
+            let c = query.chars().next();
+            if let Some(past) = c.and_then(|c| table.after(c)) {
+                if let Some(v) = table.root {
+                    f(0, v);
+                }
+                let Some((to, sum)) = past else { return };
+                (addr, acc, from) = (to, sum, c.map_or(0, char::len_utf8));
+            }
+        }
+        for i in from..=q.len() {
             let (fin, next) = self.step(bytes, addr, q.get(i).copied());
             // A final state inside a character cannot be a key this crate built, since keys come
             // from `&str` — but `from_bytes` loads any transducer, and slicing there would panic.
