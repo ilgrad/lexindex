@@ -4,6 +4,50 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.1] — 2026-09-24
+
+### Changed
+
+- **A `DictIndex` lookup that lands among blocks whose samples tie is placed by a trie of their
+  words: on a million file paths `id` takes 8 % less time, at the default block and at 1024.** A
+  lookup opens with a binary search over one eight-byte sample a block, taken past the bytes every
+  head shares; where a run of blocks shares the probe's sample, their heads were compared one at a
+  time. On paths that run is the index — 3 899 of 3 907 samples tie at the default block, paths
+  sharing long prefixes — and a lookup made 11.4 head compares, a quarter of its instructions. A
+  load now splits each such run by its heads' eight-byte words past what they share, and a sub-run
+  that ties again the same way past its own prefix: on paths 1 136 nodes and 5 035 edges, nine
+  levels at the deepest. A lookup descends it reading only the probe, checks once against the head
+  it arrives at, and starts the block's scan from that compare: 16.3 % fewer instructions a member
+  `id` at 256 and 10.8 % at 1024, and within 0.6 % — all of it fewer — on words, English titles,
+  URLs and UUIDs. Every answer is the one 4.4.0 gives, and no blob changes, byte for byte. The trie
+  is held in memory only: 0.10 bytes a key on paths at 256, 0.02 at 1024, under 0.005 on titles and
+  URLs, nothing where no samples tie. A load of paths runs 11 % more instructions at 256 and 3 % at
+  1024, and at most 1 % more elsewhere. Against 4.4.0 in one process, each build loaded twice, over
+  three processes (`bench/results/id-ab-2026-09-24-arz-b362f43.txt`): `id` on paths 768 → 704 ns at
+  256 and 812 → 750 at 1024, every allocation of the new build under every one of the old; on
+  English titles, URLs, UUIDs and words, and every `key_into`, within ±1.5 %. What it costs is at
+  load, where the trie is built: a mapped load of paths takes 238 µs against 130 at 256 and 118
+  against 96 at 1024, and `from_bytes`, which reads and checks the whole blob, 4.2 and 0.2 % longer.
+  Elsewhere `from_bytes` moves by at most 1.7 % and `load_mmap` by at most 5 %, 12 µs.
+- **A load of a `DictIndex` in a character code holds half the tables it did.** Every load built the
+  code's lookup tables beside the blob — a mapped one too — and they held the alphabet twice, took
+  four bytes a codeword where sixteen bits carry it, and covered all of Unicode at their first level
+  whatever the keys used. On jieba's lexicon a `from_bytes` index held 3.687 bytes a key, 21 % over
+  its 3.040-byte blob and above `marisa-trie`'s 3.578, whose load is its file to within 0.1 %; it
+  holds 3.392 now, 5.2 % under marisa's. A million Chinese titles go from 6.474 to 6.243 bytes a key
+  and a million Russian ones from 7.254 to 7.138, the tables halving on all three. Blobs are
+  unchanged, byte for byte (`bench/results/resident-2026-09-24-arz-b362f43.txt`, which has the
+  marisa rows). What it costs is in spelling the query, where a codeword is widened from sixteen
+  bits: `id` on the lexicon runs 1 % more instructions and takes 1–2 % more time, 260 → 266 ns in
+  the A/B above, and on the titles 0.6 and 0.7 %; `key_into` is level on all three.
+
+### Documentation
+
+- **What a mapped `DictIndex` builds is stated as it is.** The README, the docs' front page and the
+  Python module said a `load_mmap` builds only the per-block samples; it also decodes the symbol
+  tables and, where they apply, builds a code's tables and the trie above — 0.07–0.39 bytes a key in
+  all over the corpora measured, of which `docs/design.md` gives the parts.
+
 ## [4.4.0] — 2026-09-24
 
 ### Added

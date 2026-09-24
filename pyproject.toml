@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "lexindex"
-version = "4.4.0"
+version = "4.4.1"
 description = "Compact, immutable string<->id indexes for huge catalogs: a front-coded dictionary with prefix and range queries, an ordered FST that adds fuzzy and subsequence search, and minimal-perfect-hash maps (the compact one is 1.24 B/key)."
 readme = "README.md"
 requires-python = ">=3.11"
