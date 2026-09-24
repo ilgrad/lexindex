@@ -39,41 +39,45 @@ vocabulary, never a synthetic `entity-{i}` sequence** — sequential keys collap
 near-regular automaton and report a misleading ~0 B/key, so the benchmark refuses them. Smaller is
 better; the capability columns are why you would still pick a larger one.
 
-<!-- table: compare bench/results/compare-2026-09-22-arz-8e04b0b.json columns=prefix,common_prefix,range,fuzzy,reverse,exact,mmap -->
+<!-- table: compare bench/results/compare-2026-09-24-arz-3a73ed5.json columns=prefix,common_prefix,range,fuzzy,reverse,exact,mmap -->
 | library | prefix | common prefix | range | fuzzy | reverse id→str | exact membership | zero-copy mmap | **bytes/key** | **ns/lookup** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|---:|
-| **lexindex `ClosedHashIndex`** | — | — | — | — | — | none (closed vocabulary) | — | **0.24** | 92 |
-| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.74** | 89 |
-| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.24** | **82** |
+| **lexindex `ClosedHashIndex`** | — | — | — | — | — | none (closed vocabulary) | — | **0.24** | 97 |
+| **lexindex `CompactHashIndex` (fp=4 bits)** | — | — | — | — | — | probabilistic | ✅ | **0.74** | 92 |
+| **lexindex `CompactHashIndex` (fp=1)** | — | — | — | — | — | probabilistic | ✅ | **1.24** | **83** |
 | **lexindex `CompactHashIndex` (fp=2)** | — | — | — | — | — | probabilistic | ✅ | **2.24** | 89 |
-| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.52** | 401 |
-| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.64** | 373 |
-| `marisa-trie` (4 tries, tiny cache — its smallest here) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 484 |
-| `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 467 |
-| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 440 |
-| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 | 304 |
-| **lexindex `HashedDictIndex` (fp=8)** | ✅ | ✅ | ✅ | — | ✅ | probabilistic | ✅ | 6.25 | 103 |
-| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.88 | 170 |
-| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 | 229 |
-| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.91 | 571 |
-| builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 245 |
+| **lexindex `DictIndex` (512 per block)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.52** | 350 |
+| **lexindex `DictIndex` (256 per block, default)** | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | **2.64** | 323 |
+| `marisa-trie` (4 tries, tiny cache — its smallest here) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.96 | 471 |
+| `marisa-trie` (default) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 2.98 | 452 |
+| `marisa-trie` (huge cache) | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | 3.07 | 426 |
+| **lexindex `StringIndex`** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.95 | 232 |
+| **lexindex `HashedDictIndex` (fp=8)** | ✅ | ✅ | ✅ | — | ✅ | probabilistic | ✅ | 6.25 | 100 |
+| lexindex `PerfectHashIndex` | — | — | — | — | ✅ | ✅ | ✅ | 10.88 | 175 |
+| DAWG (`dawg2`) | ✅ | ✅ | — | — | — | ✅ | — | 23.96 | 232 |
+| `datrie` | ✅ | ✅ | — | — | — | ✅ | — | 30.91 | 576 |
+| builtin `dict` | — | — | — | — | — | ✅ | — | — (in RAM only) | 247 |
 <!-- /table -->
 
-<sub>Every cell above is one run at `8e04b0b`, forty-five minutes after a reboot on an otherwise
-idle machine, whose load average went 0.15 into the run and 0.92 out of it
-([`bench/results/compare-2026-09-22-arz-8e04b0b.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-22-arz-8e04b0b.json))
+<sub>Every cell above is one run of the released 4.4.0 wheel (`3a73ed5`), an hour and forty minutes
+after a reboot on an otherwise idle machine, whose load average went 0.26 into the run and 0.92 out
+of it
+([`bench/results/compare-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/compare-2026-09-24-arz-3a73ed5.json))
 — every cell's build and lookup samples, the false-positive measurement, the CPU, kernel, rustc,
-Python and the load average at both ends of the run. **Its Python call floor is 48 ns**, as it was
-in the run this table carried until now — the same measurement earlier the same day, before the
-reboot, on a tree with `HashedDictIndex` uncommitted, which this one reproduces within 0.6 % on the
-floor and 0.6–5.6 % on every row — against the 46 of the one before that and the 51 before it, so
-its latency column sits inside the comparable range. Another session measured a floor of 100 and
-every row fifty nanoseconds higher, two hours apart and within 2 ns of each other; a run on the same corpus earlier the same day, with an
-editor session on the machine, measured 61 and read 15–20 % slower on every row including the
-builtin `dict`. That is the reproducibility problem this page documents further down and the reason
-`bench/reproduce.sh` prints the floor beside the published one. `marisa-trie` appears three times
-because it is a curve: its own documentation says the right configuration depends on the data, so the table carries
-its compact end, its default and its fast end rather than one point somebody could call untuned.</sub>
+Python and the load average at both ends of the run. **Its Python call floor is 51 ns**, against the
+48 of the run this table carried until now (`8e04b0b`, 4.1), the 46 of the one before that and the
+51 before it, so its latency column sits inside the comparable range. Beside that run the rows no
+change to this library can move read within 3.3 % — the builtin `dict` +0.6 %, `marisa-trie` −2.7 to
+−3.3 %, DAWG and `datrie` +0.9 to +1.2 % — and so do the hash rows, −2.4 to +5.2 % where the floor
+alone moved 3 ns; the two `DictIndex` rows read 13 % faster, the search changes of 4.3.3 and 4.4,
+and `StringIndex` 24 %, 4.3's reader of its transducer. Another session measured a floor of 100 and
+every row fifty nanoseconds higher, two hours apart and within 2 ns of each other; a run on the same
+corpus on 2026-09-22, with an editor session on the machine, measured 61 and read 15–20 % slower on
+every row including the builtin `dict`. That is the reproducibility problem this page documents
+further down and the reason `bench/reproduce.sh` prints the floor beside the published one.
+`marisa-trie` appears three times because it is a curve: its own documentation says the right
+configuration depends on the data, so the table carries its compact end, its default and its fast
+end rather than one point somebody could call untuned.</sub>
 
 **What `ns/lookup` measures.** One exact lookup through Python — `id` on a lexindex index, `get` on
 the tries and on the dict — over 100 000 probes, half members and half strangers made by swapping a
@@ -697,55 +701,54 @@ above tested directly and found empty. A version claim needs both builds in one 
 `cargo run --release --example bench` — 1 M **real dictionary-word bigrams** (`word_i.word_j`, the
 same key generator as `bench/scale.py`; mean key 10.9 bytes). Keys are never synthetic
 `entity-000…N` sequences — those arrive pre-sorted and hash-degenerate and flatter every number.
-Measured 2026-09-22 at `8e04b0b`: six runs of the example back to back, each lookup cell the
-minimum of five timed passes after a warm-up pass
-([`bench/results/latency-rs-2026-09-22-arz-8e04b0b.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-22-arz-8e04b0b.txt)).
-The table quotes the minimum over all six. The machine had been rebooted 55 minutes earlier and had
-run the frontier campaign in between, so it is warm: none of the boost-clock head start the v3.0.0
-run showed, whose first two runs read 18–44 % quicker on every row. The first five agree within 2 %
-on every hash row and on the `HashMap` control, while `DictIndex` spreads 3 %, `PerfectHashIndex`
-and `BTreeMap` 7 %, and `StringIndex` climbs 313 → 355 ns across the six with no reversal; the
-sixth, taken with the load average up from 0.33 to 0.89, is the slowest of the six on every row —
-by 1 % on the control and 17 % on `HashedDictIndex`. Absolute numbers are machine-dependent — the
-`std::HashMap` control reads 234 ns here against the 244 of the same six runs before the reboot,
+Measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0: six runs of the example back to back, each lookup
+cell the minimum of five timed passes after a warm-up pass
+([`bench/results/latency-rs-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-rs-2026-09-24-arz-3a73ed5.txt)).
+The table quotes the minimum over all six. The machine had been rebooted an hour and a half earlier
+and had run the ten-million-key frontier subset in between, and the six started once a readiness
+check passed, with the hottest thermal zone at 49 °C; it read 83 at the end. The six agree within
+2 % on `CompactHashIndex`, both `HashedDictIndex` rows and the `HashMap` control; `PerfectHashIndex`
+spreads 6–8 % on one slow pass each, `BTreeMap` 6 % and `DictIndex` 8 % with no trend, and
+`StringIndex` reads 263–268 ns on five runs and 292 on the second. Absolute numbers are
+machine-dependent — the `std::HashMap` control reads 233 ns here against the 234 of the 4.1 table,
 the 241 of the 4.0 table, the 285 of v3.0.0, the 295 of 2.1.0, the 289 of 2.0.0 and the 245 of
 1.1.0 — so compare the **ratios**, only within a column, and read a shift under ~15 % between
 tables as the session: against this `HashMap`, `PerfectHashIndex::id_unchecked` is 0.21×,
-`CompactHashIndex::id` 0.25×, `HashedDictIndex::id_unchecked` 0.27× and its `id` 0.34×,
-`PerfectHashIndex::id` 0.47×, `StringIndex` 1.34×, `DictIndex` 1.89×, `BTreeMap` 3.06×.
+`CompactHashIndex::id` 0.25×, `HashedDictIndex::id_unchecked` 0.27× and its `id` 0.33×,
+`PerfectHashIndex::id` 0.47×, `StringIndex` 1.13×, `DictIndex` 1.71×, `BTreeMap` 3.04×.
 
 | structure | build | lookup | note |
 |---|---|---|---|
-| lexindex `PerfectHashIndex::id_unchecked` | ~243 ms | **~50 ns** | closed vocabulary, no membership check |
-| lexindex `CompactHashIndex::id` (fp=1) | **~37 ms** | ~60 ns | fingerprint-verified, `2^-8` false-positive rate |
+| lexindex `PerfectHashIndex::id_unchecked` | ~243 ms | **~49 ns** | closed vocabulary, no membership check |
+| lexindex `CompactHashIndex::id` (fp=1) | **~37 ms** | ~57 ns | fingerprint-verified, `2^-8` false-positive rate |
 | lexindex `HashedDictIndex::id_unchecked` | ~262 ms | ~62 ns | closed vocabulary; the id is the key's rank, so `key(id)`, prefix and range stay on the same index |
-| lexindex `HashedDictIndex::id` (8 bits) | ~268 ms | ~79 ns | fingerprint-checked, `2^-8`; builds are the dictionary's and the sidecar's together |
-| lexindex `PerfectHashIndex::id` (verified) | ~229 ms | ~110 ns | one extra cache line + full key compare |
-| `std::HashMap<String, u32>` | ~179 ms | ~234 ns | in-RAM, not serialisable |
-| lexindex `StringIndex` (FST) | ~248 ms | ~313 ns | *and* prefix / range / fuzzy |
-| lexindex `DictIndex` (256 per block) | ~206 ms | ~442 ns | ordered, exact reverse; 1.93 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.64 against 5.95, 333–335 ns against 256–270) |
-| `std::BTreeMap<String, u32>` | ~203 ms | ~715 ns | in-RAM |
+| lexindex `HashedDictIndex::id` (8 bits) | ~268 ms | ~77 ns | fingerprint-checked, `2^-8`; builds are the dictionary's and the sidecar's together |
+| lexindex `PerfectHashIndex::id` (verified) | ~228 ms | ~109 ns | one extra cache line + full key compare |
+| `std::HashMap<String, u32>` | ~170 ms | ~233 ns | in-RAM, not serialisable |
+| lexindex `StringIndex` (FST) | ~241 ms | ~263 ns | *and* prefix / range / fuzzy |
+| lexindex `DictIndex` (256 per block) | ~206 ms | ~399 ns | ordered, exact reverse; 1.93 B/key here against the FST's 0.68 — a `word.word` cross product is what a transducer factors out, and what a block of front-coded keys does not (on the dictionary: 2.64 against 5.95, 291–298 ns against 200–210) |
+| `std::BTreeMap<String, u32>` | ~195 ms | ~709 ns | in-RAM |
 
 <sub>**The memory-bound rows swing between sessions; the three hash rows halved at 4.0, and that
-was not a session.** Over six sessions the two rows whose code has not moved since 0.5.1 read
-`StringIndex` 1.30× → 1.47× → 1.32× → 1.47× → 1.32× → **1.34×** of `HashMap` and `BTreeMap` 3.19×
-→ 3.34× → 2.63× → 3.24× → 3.01× → **3.06×**, with no trend and no single outlier, while the FxHash
-map sits at 0.586× → 0.60× → 0.58× → 0.60× → 0.60× → **0.60×** throughout. The two that move are exactly the two that miss to DRAM,
-they move together and in the same direction, and they move across sessions in which their code did
-not change — the signature of the machine, not of a release. Against that flat background the three
-rows the key hash reaches moved at 4.0, by more than any session ever has: `PerfectHashIndex::id`
-0.95× → 1.04× → 1.02× → 1.03× → 0.50× → **0.47×**, `id_unchecked` 0.269× → 0.26× → 0.24× → 0.26×
-→ 0.21× → **0.21×**, `CompactHashIndex::id` 0.435× → 0.45× → 0.45× → 0.45× → 0.25× → **0.25×**;
-4.1, which does not touch them, leaves the last two where they were and verified `id`, the one of
-the three that reads a stored key, 6 % lower — inside what a row that misses to DRAM moves between
-sessions. Verified `id` is now under half the `HashMap` it used to trail. Three controls holding
-still while three rows halve is what the new key hash, the `MPH3` seed layout and the prefetched
-second level look like from outside. `HashedDictIndex`, new in this table, reads 62 ns closed and
-79 at eight fingerprint bits — 7.1× and 5.6× its own dictionary's `id` — and builds in the
-dictionary's 206 ms and 57–62 more for the sidecar. `DictIndex` reads **442 ns for 1.93 B/key** at
-the default of 256 keys a block, where 2.0.0's 32 a block read 507 for 3.19 — the packed offsets
-and the microblocks together. `CompactHashIndex` builds in 37 ms against 48 on 3.0.0 and 69 on
-1.1.0. This corpus is `DictIndex`'s worst case by
+was not a session.** Over seven sessions `BTreeMap` read 3.19× → 3.34× → 2.63× → 3.24× → 3.01× →
+3.06× → **3.04×** of `HashMap`, and `StringIndex`, while its code stood still from 0.5.1 to 4.2,
+1.30× → 1.47× → 1.32× → 1.47× → 1.32× → 1.34×, with no trend and no single outlier, while the
+FxHash map sits at 0.586× → 0.60× → 0.58× → 0.60× → 0.60× → 0.60× → **0.61×** throughout. The two
+that move are exactly the two that miss to DRAM, they move together and in the same direction, and
+they moved across sessions in which their code did not change — the signature of the machine, not
+of a release. Against that background `StringIndex` now reads **1.13×**, below every session
+before it, which is 4.3's reader of its transducer; and the three rows the key hash reaches moved
+at 4.0 by more than any session ever has: `PerfectHashIndex::id` 0.95× → 1.04× → 1.02× → 1.03× →
+0.50× → 0.47× → **0.47×**, `id_unchecked` 0.269× → 0.26× → 0.24× → 0.26× → 0.21× → 0.21× →
+**0.21×**, `CompactHashIndex::id` 0.435× → 0.45× → 0.45× → 0.45× → 0.25× → 0.25× → **0.25×**;
+4.1 and 4.4, which do not touch them, leave all three within 6 %. Verified `id` is now under half
+the `HashMap` it used to trail. Three controls holding still while three rows halve is what the new
+key hash, the `MPH3` seed layout and the prefetched second level look like from outside.
+`HashedDictIndex` reads 62 ns closed and 77 at eight fingerprint bits, as on 4.1 — 6.4× and 5.2×
+its own dictionary's `id` — and builds in the dictionary's 206 ms and 56–62 more for the sidecar.
+`DictIndex` reads **399 ns for 1.93 B/key** at the default of 256 keys a block, against 442 on 4.1
+— the search changes of 4.3.3 and 4.4 — and 2.0.0's 507 for 3.19 at 32 a block. `CompactHashIndex`
+builds in 37 ms against 48 on 3.0.0 and 69 on 1.1.0. This corpus is `DictIndex`'s worst case by
 construction: the 1 M keys are 1 000 words crossed with 1 000, which the transducer stores once per
 factor (0.68 B/key) and a block of front-coded keys stores once per key. Real keys move lookups in
 lexindex's favour versus synthetic ones, while every `build` reads higher than a synthetic sequence
@@ -756,14 +759,14 @@ correspondingly slow on short keys. That is the map most Rust code actually uses
 default comparison, but it is not the fastest map available: the same `HashMap` with a
 non-cryptographic hasher is much quicker, and `cargo run --release --example bench` prints that row
 too (FxHash, written out in the example rather than added as a dependency). In the same session
-as the table above, `HashMap` + FxHash reads **~140 ns** and `PerfectHashIndex::id_unchecked`
-**~50 ns** — so on a closed vocabulary the perfect hash is about **2.8× faster than a
+as the table above, `HashMap` + FxHash reads **~142 ns** and `PerfectHashIndex::id_unchecked`
+**~49 ns** — so on a closed vocabulary the perfect hash is about **2.9× faster than a
 fast-hashed map**, not merely level with it. That reverses what this README said through 0.12, where
 two 12-run sessions on a *shared* machine put FxHash at 196/200 ns against `id_unchecked`'s 216/216
 and concluded the latency advantage was gone. What changed is not the measurement conditions but the
 code: 1.0's own perfect hash and its 8-byte-at-a-time key hash, and then 4.0's replacement of both.
-`CompactHashIndex::id` (~60 ns) is **2.4× faster** than the FxHash map and still carries the
-membership check and the 1.24 B/key blob; `HashedDictIndex::id` (~79 ns) is 1.8× faster with the
+`CompactHashIndex::id` (~57 ns) is **2.5× faster** than the FxHash map and still carries the
+membership check and the 1.24 B/key blob; `HashedDictIndex::id` (~77 ns) is 1.8× faster with the
 same check and the keys kept, in order.
 
 **Two things the table above cannot show, both measured on 0.11 with an independent harness
@@ -785,10 +788,10 @@ same check and the keys kept, in order.
   (105 ns against 56 for `ids_of`). lexindex's lookup advantage is on **members**, and at scale.
 
 **Honest reading:** for a **fixed / closed vocabulary**, `PerfectHashIndex::id_unchecked` is the
-**fastest of the structures in the table above** — 4.7× as quick as the SipHash `HashMap` and 2.8×
+**fastest of the structures in the table above** — 4.7× as quick as the SipHash `HashMap` and 2.9×
 the FxHash one (no probing, no membership comparison) *and* compact + serialisable.
 `CompactHashIndex::id` keeps a probabilistic membership check and *still* beats the SipHash
-`HashMap` on lookup (3.9× here), and builds in a fifth of its time. Full verification (`id`) pays one extra
+`HashMap` on lookup (4.1× here), and builds in a fifth of its time. Full verification (`id`) pays one extra
 cache line + a key comparison; `StringIndex` trades more latency for **ordered / prefix / range /
 fuzzy** queries the hash maps cannot answer at all. So: `CompactHashIndex` when footprint dominates
 and a rare false positive is fine; `HashedDictIndex` when the ids must be the key order and `id` is
@@ -1219,21 +1222,39 @@ within each round, the minimum per cell; `StringIndex` is the control.
 | of which per-block arrays | — | 0.152 | 0.121 | 0.105 | 0.100 | 0.050 | 0.051 |
 | microblocks a block | — | 2 | 4 | 8 | 16 | 16 | 32 |
 | entries a lookup scans | — | 16 | 18 | 22 | **30** | 46 | 62 |
-| build | 107–112 ms | 40–43 | 32–33 | 31–32 | 31–32 | 30–31 | 36–37 |
-| `id`, member | 256–270 ns | 292–298 | 293–300 | 311–313 | **333–335** | 369–374 | 405–410 |
-| `id`, stranger | 206–215 ns | 244–247 | 247–250 | 263–264 | 287–289 | 321–323 | 356 |
-| `key_into` (no allocation) | — | 140–141 | 151–152 | 167–168 | **194–196** | 251–253 | 298 |
-| `key` (owned string) | 441–448 ns | 190–191 | 207–211 | 228–229 | 256–260 | 313–319 | 362–365 |
-| `lower_bound`, stranger | — | 243–246 | 244–248 | 261–262 | 285–288 | 320–321 | 354 |
-| `prefix`, 2 000 three-byte prefixes of ~760 keys | — | 31.5–31.8 µs | 31.4–31.8 | 31.4–31.5 | 31.5–31.9 | 30.8–31.0 | 31.1–31.2 |
+| build | 104–106 ms | 39 | 36–37 | 32–33 | 32 | 31–32 | 36–37 |
+| `id`, member | 200–210 ns | 254–268 | 268–270 | 266–278 | **291–298** | 313–328 | 345–355 |
+| `id`, stranger | 148–151 ns | 205–207 | 206 | 218–221 | 238–240 | 266–267 | 293–294 |
+| `key_into` (no allocation) | — | 136–137 | 147–148 | 166–167 | **193–194** | 253 | 302 |
+| `key` (owned string) | 436–445 ns | 185–187 | 203–207 | 228–230 | 257–262 | 318–323 | 369–371 |
+| `lower_bound`, stranger | — | 203–207 | 205–206 | 218–221 | 236–238 | 264–265 | 292–293 |
+| `prefix`, 2 000 three-byte prefixes of ~760 keys | — | 30.3 µs | 30.1–30.4 | 30.1–30.7 | 30.2–30.6 | 29.7–30.0 | 29.8–29.9 |
+| **routed**: restart words, bytes a key in memory | — | 0.50 | 0.50 | 0.50 | 0.50 | 0.25 | 0.25 |
+| routed `id`, member | — | 238–246 | 224–227 | 216–229 | **217–228** | 240–261 | 239–241 |
+| routed `id`, stranger | — | 183–185 | 174–176 | 167–168 | 165–166 | 189–190 | 191–192 |
+| routed `lower_bound`, stranger | — | 182–183 | 172–174 | 166 | 162–164 | 188–189 | 188–191 |
 
-Three runs of the same ladder; where they differ the table gives the range. At the default 256,
-`DictIndex` answers `id` 23–31 % slower than `StringIndex` and `key_into` at less than half its
-`key`, while storing **56 % less**. The ladder no longer crosses the control anywhere: `BDX3`'s
-codes cost more to decode than the varint pairs `BDX2` stored, so even at 32 per block `id` runs
-8–16 % behind the transducer where it used to lead by 6 %. That is the trade the format made —
-every block got 6–10 % smaller and every `id` 17–24 % slower. The sequential lane does not move
-with the block at all.
+Three runs of the same ladder, each once as a load leaves the index and once after
+`route_microblocks()`; where the runs differ the table gives the range. At the default 256,
+`DictIndex` answers `id` 42–45 % slower than `StringIndex` in the same process and `key_into` at
+less than half its `key`, while storing **56 % less**. The ladder does not cross the control
+anywhere, routed or not, and the gap has widened since 4.1: 4.3's reader of the transducer took 22 %
+off `StringIndex`'s `id`, and the search changes of 4.3.3 and 4.4 took 11–13 % off the
+dictionary's. `BDX3`'s codes had cost more to decode than the varint pairs `BDX2` stored — every
+block got 6–10 % smaller and every `id` 17–24 % slower when it landed. The sequential lane does not
+move with the block at all.
+
+**Routed, the block stops costing the search.** The words take the walk over a block's restarts out
+of the lookup and leave the one microblock's scan, so from 128 keys a block up `id` no longer pays
+for the block's length: 216–229 ns at 128 and 217–228 at 256, both microblocks of 16 keys, and
+239–261 at 512 and 1024, microblocks of 32. Against the same block unrouted, paired run by run, that
+is 23–27 % off `id` at 256 and 30–32 % at 1024, 29–36 % off a stranger's `id` and `lower_bound`
+from 256 up, and 4–11 % off `id` at 32, where the run is a single restart. Beside `StringIndex` in
+the same process the gap at 256 falls from 42–45 % to 8–11 %. The words are paid in memory —
+`8 / micro` bytes a key, 0.5 up to 256 and 0.25 at 512 and 1024, in no blob — so routed, the default
+is no longer the obvious point: **1024 keys a block, routed, holds 2.76 bytes a key and answers `id`
+in 239–241 ns, faster than any block unrouted, 32 included, and still under every `marisa-trie`
+setting's 2.96–3.07**, while the default block routed, at 217–228 ns, holds 3.14 and is no longer.
 
 **A lookup scans a microblock, not a block.** A block is cut into microblocks of 16 to 32 — the
 smallest divisor of the block at or above its square root — and the first key of each is a restart
@@ -1247,9 +1268,8 @@ of 2.701 at 1024 keys a block answers `key_into` in 3 190 ns and `id` in 984, ag
 420–426 for 2.80 here. Both ladders ran alternated by process in one session, the base built from
 the commit before microblocks in a worktree, with `StringIndex` at 340–353 ns as the control
 ([`dict-onelevel-ab-2026-09-12-arz-386b2e6.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dict-onelevel-ab-2026-09-12-arz-386b2e6.txt)).
-That session sits about 30 % above the table at the top of this section — its control says so, at
-340–353 ns where the table's reads 256–270 — so read each comparison inside its own session and
-neither against the other.
+Its control read 340–353 ns, where this section's table reads 200–210 on a transducer reader 4.3
+made 22 % faster, so read each comparison inside its own session and neither against the other.
 
 **The reverse lookup does not decode the whole run.** An entry stores what it shares with its
 predecessor, so an entry whose shared-prefix length is at least a later entry's contributes nothing
@@ -1277,17 +1297,21 @@ and `lower_bound` at all, since a marisa id is not the lexicographic rank (7 051
 consecutive sorted pairs come back with a decreasing id). Pick 32 or 64 if the lookups are hot,
 512 or 1024 if the bytes are — or name the point instead of the number: `DictProfile::Fast`,
 `Balanced` and `Compact` in Rust, `block="fast" | "balanced" | "compact"` in Python, are 32,
-256 and 1024.
+256 and 1024. Where a quarter of a byte a key of memory costs less than the scan, `Compact` routed
+is both smaller and faster than `Fast`: 2.76 bytes a key at 239–241 ns against 2.85 at 254–268.
 
-<sub>Measured 2026-09-23 at `fdc28bc`
-([`bench/results/dictbench-2026-09-23-arz-fdc28bc.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dictbench-2026-09-23-arz-fdc28bc.txt)),
-three runs of the whole ladder in one session, each started only once the machine passed a
-readiness check — load under 0.40, no swap in use, no other busy process — and each the minimum of
-five alternated rounds; the table gives the range over the three. The bytes, the per-block arrays
-and the two structural rows are exact, not measured. `StringIndex` is the control and reads 256–270
-ns against the 262–280 of the 2026-09-19 session these rows replace; every `DictIndex` `id` row
-moved 4–8 %, one to five points more than the control did, which is what the three commits to the
-dictionary's compare path since then bought at this harness's resolution.</sub>
+<sub>Measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0
+([`bench/results/dictbench-2026-09-24-arz-3a73ed5.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dictbench-2026-09-24-arz-3a73ed5.txt)),
+three runs of the whole ladder in one session an hour and a half after a reboot, each started only
+once the machine passed a readiness check — load under 0.40, no swap in use, no other busy process,
+the hottest thermal zone under 70 °C — and each the minimum of five alternated rounds, unrouted and
+routed in two processes whose order alternates between runs; the table gives the range over the
+three. The bytes, the per-block arrays, the restart words and the two structural rows are exact,
+not measured. `StringIndex` is the control inside every process — 200–210 ns in the unrouted ones,
+197–211 in the routed — but no longer across releases: it read 256–270 in the 2026-09-23 session
+these rows replace, before 4.3 changed its reader. `key_into` and `key` do not route and read the
+same in both processes; the table gives the unrouted ones. The thermal zones started each process
+at 47–48 °C and ended it at 83–92, and the control stayed within 8 % across all six.</sub>
 
 ## Prefix queries against the tries
 
@@ -1549,9 +1573,11 @@ The C² paper ships one benchmark that builds its three cache-conscious structur
 and C²-MARISA — beside everything it measures them against: FST, CoCo-trie, MARISA, PDT, ART and
 C-ART. `bench/frontier/build.sh` builds that benchmark with every dependency at a pinned commit, and
 XCDAT's four trie types beside it; `bench/frontier/run.sh` runs all of them against `DictIndex` at
-blocks of 32, 256 and 1024 keys and `StringIndex`, over the corpus set above at a million keys and,
-where a corpus has them, ten million. Nothing of the competitors is vendored or linked: it is fetched
-into a gitignored directory, which is what lets the campaign include GPLv3 and non-commercial code.
+blocks of 32, 256 and 1024 keys — each once as a load leaves it and once routed by 4.4's
+`route_microblocks()` — `HashedDictIndex` at three widths and `StringIndex`, over the corpus set
+above at a million keys and, where a corpus has them, ten million. Nothing of the competitors is
+vendored or linked: it is fetched into a gitignored directory, which is what lets the campaign
+include GPLv3 and non-commercial code.
 
 The protocol is `benchmark.cpp`'s, not this page's: read the file, sort and deduplicate it, build
 once, take the structure's own account of its size, then look every key up **once**, in one fixed
@@ -1568,45 +1594,47 @@ Every structure runs in its own process, three rounds of them, every other round
 and each process first waits until the rest of the machine keeps less than one CPU busy for a
 second. A cell is the median of its three rounds; the logs keep every run, and how busy other work
 kept the machine while it ran. Sizes are each structure's own account: the serialised blob for
-lexindex, `space_cost()` for the benchmark's structures, `memory_in_bytes` for XCDAT. ART and C-ART
-count their nodes and not the keys they point to, so they are kept out of every comparison. ρ is the
-recursion depth `benchmark.cpp` takes as `max_recursion` — for MARISA, one less than its number of
-tries. A structure is on the *front* when no other one is at least as small and at least as fast.
+lexindex — for a routed `DictIndex`, the blob and the restart words it holds beside it, which no
+file carries — `space_cost()` for the benchmark's structures, `memory_in_bytes` for XCDAT. ART and
+C-ART count their nodes and not the keys they point to, so they are kept out of every comparison. ρ
+is the recursion depth `benchmark.cpp` takes as `max_recursion` — for MARISA, one less than its
+number of tries. A structure is on the *front* when no other one is at least as small and at least
+as fast.
 
-<!-- table: frontier bench/results/frontier-1m-2026-09-24-arz-726a783.json -->
+<!-- table: frontier bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |
 |---|---:|---|---|---|
-| `words-full` | 2.64 @ 276 | lexindex Dict 1024 2.51 @ 352 | lexindex HashedDict closed 5.25 @ 15 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `dna-1000000` | 4.37 @ 341 | lexindex Dict 1024 4.23 @ 374 | lexindex HashedDict closed 7.12 @ 44 | Dict 1024, Dict 256, HashedDict closed |
-| `domains-1000000` | 4.50 @ 327 | lexindex Dict 1024 4.36 @ 402 | lexindex HashedDict closed 7.24 @ 30 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `idents-1000000` | 5.23 @ 400 | lexindex Dict 1024 5.07 @ 467 | lexindex HashedDict closed 7.97 @ 38 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `numeric-1000000` | 1.01 @ 269 | lexindex StringIndex 0.0003 @ 83 | lexindex HashedDict closed 3.75 @ 13 | HashedDict closed, StringIndex |
-| `opaque-1000000` | 10.40 @ 354 | lexindex Dict 1024 10.29 @ 397 | lexindex HashedDict closed 13.14 @ 49 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `paths-1000000` | 9.87 @ 799 | lexindex Dict 1024 9.32 @ 835 | lexindex HashedDict closed 12.61 @ 77 | Dict 1024, Dict 256, HashedDict closed |
-| `pypi-full` | 4.17 @ 343 | lexindex Dict 1024 4.02 @ 419 | lexindex HashedDict closed 6.91 @ 30 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `titles-en-1000000` | 7.37 @ 419 | lexindex Dict 1024 7.21 @ 483 | lexindex HashedDict closed 10.11 @ 44 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `titles-ru-1000000` | 6.86 @ 499 | lexindex Dict 1024 6.70 @ 560 | lexindex HashedDict closed 9.60 @ 55 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `titles-zh-1000000` | 5.85 @ 407 | lexindex Dict 1024 5.69 @ 496 | lexindex HashedDict closed 8.59 @ 36 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `urls-1000000` | 7.51 @ 481 | lexindex Dict 1024 7.27 @ 537 | lexindex HashedDict closed 10.25 @ 60 | Dict 1024, Dict 256, Dict 32, HashedDict closed |
-| `uuid-1000000` | 18.04 @ 436 | lexindex Dict 1024 17.89 @ 474 | lexindex HashedDict closed 20.78 @ 58 | Dict 1024, Dict 256, HashedDict closed |
+| `words-full` | 2.64 @ 247 | lexindex Dict 1024 2.51 @ 303 | lexindex HashedDict closed 5.25 @ 15 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `dna-1000000` | 4.37 @ 314 | lexindex Dict 1024 4.23 @ 340 | lexindex HashedDict closed 7.12 @ 48 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `domains-1000000` | 4.50 @ 302 | lexindex Dict 1024 4.36 @ 367 | lexindex HashedDict closed 7.24 @ 28 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `idents-1000000` | 5.23 @ 379 | lexindex Dict 1024 5.07 @ 439 | lexindex HashedDict closed 7.97 @ 38 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `numeric-1000000` | 1.01 @ 244 | lexindex StringIndex 0.0003 @ 82 | lexindex HashedDict closed 3.75 @ 13 | HashedDict closed, StringIndex |
+| `opaque-1000000` | 10.40 @ 334 | lexindex Dict 1024 10.29 @ 365 | lexindex HashedDict closed 13.14 @ 49 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `paths-1000000` | 9.87 @ 794 | lexindex Dict 1024 9.32 @ 826 | lexindex HashedDict closed 12.61 @ 83 | Dict 1024, Dict 256, Dict 256 routed, HashedDict closed |
+| `pypi-full` | 4.17 @ 317 | lexindex Dict 1024 4.02 @ 379 | lexindex HashedDict closed 6.91 @ 30 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `titles-en-1000000` | 7.37 @ 394 | lexindex Dict 1024 7.21 @ 453 | lexindex HashedDict closed 10.11 @ 45 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `titles-ru-1000000` | 6.86 @ 476 | lexindex Dict 1024 6.70 @ 528 | lexindex HashedDict closed 9.60 @ 56 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `titles-zh-1000000` | 5.85 @ 379 | lexindex Dict 1024 5.69 @ 453 | lexindex HashedDict closed 8.59 @ 37 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `urls-1000000` | 7.51 @ 453 | lexindex Dict 1024 7.27 @ 509 | lexindex HashedDict closed 10.25 @ 61 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `uuid-1000000` | 18.04 @ 409 | lexindex Dict 1024 17.89 @ 434 | lexindex HashedDict closed 20.78 @ 59 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
 <!-- /table -->
 
-<sub>A million keys, measured 2026-09-24 at `726a783`, lexindex 4.3.3
-([`bench/results/frontier-1m-2026-09-24-arz-726a783.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-24-arz-726a783.json)),
-Ryzen 7 5800HS, GCC 16.2.1, rustc 1.98.1. A cell reads bytes a key @ nanoseconds a lookup. The
-competitors are rebuilt from the same pinned commits as the 2026-09-20 campaign at `7e42c43`, all 234
-of their cells come back at byte-identical sizes, and their lookups read 0.960–1.034 of that
-campaign's, which is what a few per cent in a latency column is worth here. On lexindex's side the
-sizes moved only on `titles-ru` and `titles-zh`, which 4.3's character code made 10–14 % and 7–8 %
-smaller; `DictIndex` reads 0.93–1.06 of that campaign (median 0.97), more than 1 % slower only on
-`titles-zh`, by 2–6 %, and `StringIndex` 21–33 % faster through 4.3's lazy reader of its
-automaton. The three `HashedDict` rows are new to the full campaign. Other work while the 1066
-processes behind the table ran: median 0.07 busy CPUs, most 0.43.</sub>
+<sub>A million keys, measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0
+([`bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json)),
+Ryzen 7 5800HS, GCC 16.2.1, rustc 1.98.1. A cell reads bytes a key @ nanoseconds a lookup. It
+follows the 4.3.3 campaign of the same morning, at `726a783`, with the same pinned competitors,
+built as in the 2026-09-20 campaign at `7e42c43`: all 234 of their cells
+come back at byte-identical sizes and read 0.957–1.079 of 4.3.3's (median 1.006), XCDAT 15
+0.979–1.030, which is what a few per cent in a latency column is worth here. Every lexindex size is
+byte-identical too. `StringIndex` reads 0.98–1.02 of that campaign and the three `HashedDict` rows
+0.93–1.10, code 4.4 does not touch; `DictIndex` reads 0.86–0.99 (median 0.94 at block 256), 4.4's
+scan loops, and the three routed rows are new. Other work while the 1183 processes behind the table
+ran: median 0.07 busy CPUs, most 0.57.</sub>
 
 lexindex is on the front on all thirteen corpora — `DictIndex` on twelve, `StringIndex` on
 `numeric`, `HashedDictIndex` on every one — and `DictIndex` builds before every other structure on
 all thirteen, ahead of the fastest build from elsewhere by 1.2× on `words`, 1.6× on `numeric` and
-`titles-en` and 1.9–7.1× on the rest. It is the smallest structure outright on twelve of them, by
+`titles-en` and 1.9–7.0× on the rest. It is the smallest structure outright on twelve of them, by
 1.6 % on `paths` up to 45 % on `dna`: 2.51 bytes a key at block 1024 on `words` against MARISA's 2.98
 at ρ=2, 6.70 on `titles-ru` against 8.61, 17.89 on `uuid` against PDT's 21.44 from a 16.5-second
 build. `paths` is both the thinnest margin and the cell that turned over in 4.0: block 1024's 9.32
@@ -1614,44 +1642,81 @@ against MARISA's 9.47 at ρ=2, which reads 2.7 times slower and builds 3.2 times
 `numeric` keeps a trie ahead of `DictIndex` on size, and there the trie is beside the point:
 CoCo-trie's 0.52 against block 1024's 0.92, while `StringIndex` folds a million decimal ids into
 about 300 bytes. The fastest structure on every corpus is `HashedDictIndex` closed — `id_unchecked`,
-which takes a key's membership on trust ([below](#hasheddictindex-against-xcdat)) — at 13–77 ns a
-lookup, 4.1–8.2 times as fast as XCDAT 15. XCDAT 15 is the fastest structure from elsewhere on every
+which takes a key's membership on trust ([below](#hasheddictindex-against-xcdat)) — at 13–83 ns a
+lookup, 4.1–7.6 times as fast as XCDAT 15. XCDAT 15 is the fastest structure from elsewhere on every
 corpus, at 1.9–7.0 times the bytes of `DictIndex` at its default block, and on the front of none.
-C²-MARISA shares the front on six of the thirteen, always larger — 9.14 bytes a key at ρ=2 on
-`titles-ru` against 6.70.
+C²-MARISA at ρ=2 is the one structure from elsewhere on any front, on `titles-ru` and `titles-zh`,
+always larger — 9.14 bytes a key on `titles-ru` against 6.70. At 4.3.3 it shared six: on `words`,
+`domains`, `idents` and `pypi` a routed `DictIndex` is now smaller and faster than every depth of it
+that was on the front there.
 
 **Where this loses, and by how much.** Size is the axis `DictIndex` is built to win and latency is
-the axis it pays on: at a million keys the fastest `DictIndex` row is **1.2× to 3.0× slower than
-XCDAT 15** on twelve corpora, worst on `words` (235 ns at block 32 against 78) and closest on `dna`,
-`urls` and `paths`, 1.23× to 1.24× — and 4.7× on `numeric`, where `StringIndex` is the row to use,
-at 1.55×. The cause is structural rather than incidental. A probe walks a block's restarts to one
-microblock and scans it — `block / micro + micro − 2` header decodes, 62 at block 1024 — where a
-double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys
-its bytes by making a comparison cost work, and that is the bill. Since 4.3 `StringIndex` is the
-faster of the two exact searches on eleven corpora, and the better of the two is 1.19× (`urls`) to
-1.95× (`words`) behind XCDAT 15 — where that is `StringIndex`, at 1.8–3.0 times the bytes of
-`DictIndex` at its default block, `numeric` apart. `HashedDictIndex`, which answers `id` without
-the search, does not pay the bill at all; what it costs instead is
-[measured against XCDAT below](#hasheddictindex-against-xcdat).
+the axis it pays on. The table puts lexindex's exact searches — the ones that answer a stranger
+exactly, which a hash does not — beside XCDAT 15: `DictIndex` at its default block as a load leaves
+it, the three blocks routed, and `StringIndex`.
 
-The bill shrinks with `n`, and then it stops shrinking. The same ratio is 3.0× on `words` at half a
-million keys and 1.6× on `titles-en` at a million; with 4.0's `DictIndex`, which is what every
-campaign past a million keys has run, it is 1.18× at ten million and 1.17× on all 19.2 million
-English titles, while `urls` goes from 1.07× at ten million to 1.08× whole. At a hundred
-million keys `DictIndex` is 1.21× behind on `uuid` (1.24× at ten million) and 1.59× on `opaque`
-(1.72×); `dna` goes from a 9 % lead at ten million to a tie, 844 ns against 864 and inside what
-memory placement alone moves a lookup on this machine; and `StringIndex` answers `numeric` in 156 ns
-against 408. This paragraph used to end on a prediction: that past the last level of cache a blob a
-third the size takes a third of the misses, so the `dna` crossing would generalise at a hundred
-million keys. That campaign has run, and it did not. What the numbers fit instead is one step — from
-a million keys, where a structure this size still sits largely in the 16 MiB last-level cache, to
-ten million, where every one of them pays DRAM misses — after which the ratio is set by how many
-dependent misses a probe takes, not by how many bytes it could touch. That is a reading, not a
-measurement; a miss profile of both lookup paths is what would settle it. The claim for the rows
-above is the measured one: **smallest everywhere, faster than XCDAT on `numeric` at ten and a hundred million
-keys and on `dna` at ten million, 1.1–1.7× behind it on the other four past ten million, and on the
-front of all of them.** The 19.2 M and 100 M numbers are the standalone benchmark suite's, at its
-`a6c13d0` with lexindex 4.0.0 from crates.io:
+<!-- table: frontier bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json view=search -->
+| corpus | XCDAT 15 | `Dict` 256 | 32 routed | 256 routed | 1024 routed | `StringIndex` |
+|---|---:|---:|---:|---:|---:|---:|
+| `words-full` | 7.30 @ 79 | 2.64 @ 247 | 3.35 @ 183 | 3.14 @ 176 | 2.76 @ 195 | 5.95 @ 150 |
+| `dna-1000000` | 22.46 @ 282 | 4.37 @ 314 | 5.50 @ 301 | 4.88 @ 260 | 4.48 @ 267 | 17.74 @ 425 |
+| `domains-1000000` | 10.33 @ 148 | 4.50 @ 302 | 5.32 @ 257 | 5.00 @ 228 | 4.61 @ 256 | 10.50 @ 210 |
+| `idents-1000000` | 13.78 @ 204 | 5.23 @ 379 | 6.12 @ 321 | 5.73 @ 311 | 5.32 @ 342 | 10.55 @ 252 |
+| `numeric-1000000` | 7.05 @ 55 | 1.01 @ 244 | 1.72 @ 199 | 1.51 @ 180 | 1.17 @ 178 | 0.0003 @ 82 |
+| `opaque-1000000` | 20.02 @ 206 | 10.40 @ 334 | 11.14 @ 313 | 10.90 @ 291 | 10.54 @ 298 | 21.44 @ 285 |
+| `paths-1000000` | 25.11 @ 637 | 9.87 @ 794 | 13.49 @ 773 | 10.37 @ 777 | 9.57 @ 842 | 17.48 @ 755 |
+| `pypi-full` | 9.92 @ 136 | 4.17 @ 317 | 4.98 @ 275 | 4.67 @ 250 | 4.27 @ 276 | 10.00 @ 210 |
+| `titles-en-1000000` | 17.13 @ 245 | 7.37 @ 394 | 8.31 @ 347 | 7.87 @ 322 | 7.46 @ 352 | 17.28 @ 331 |
+| `titles-ru-1000000` | 23.08 @ 366 | 6.86 @ 476 | 7.80 @ 424 | 7.36 @ 407 | 6.95 @ 436 | 31.75 @ 546 |
+| `titles-zh-1000000` | 13.58 @ 192 | 5.85 @ 379 | 6.61 @ 336 | 6.35 @ 300 | 5.94 @ 335 | 17.52 @ 284 |
+| `urls-1000000` | 18.14 @ 362 | 7.51 @ 453 | 9.32 @ 411 | 8.01 @ 387 | 7.52 @ 410 | 16.88 @ 436 |
+| `uuid-1000000` | 38.88 @ 331 | 18.04 @ 409 | 19.10 @ 383 | 18.54 @ 350 | 18.14 @ 358 | 37.11 @ 427 |
+<!-- /table -->
+
+<sub>From the same campaign
+([`bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json)).
+A routed cell's bytes are the blob's and the restart words' together — 0.5 a key at blocks 32 and
+256, 0.25 at 1024 — which no file holds and every process that routes pays in memory.</sub>
+
+At a million keys lexindex's faster exact search beats XCDAT 15 on one corpus of thirteen, `dna`,
+where block 256 routed reads 260 ns against 282 at 4.88 bytes a key against 22.46. It trails by
+6–11 % on `uuid`, `urls` and `titles-ru`, routed at block 256 each time; by 1.2× to 1.5× on eight
+more, through `StringIndex` on seven of them and routed block 256 on `titles-en`; and by 1.9× on
+`words`, `StringIndex`'s 150 ns against 79. Routing is most of what moved: at 4.3.3 the fastest
+`DictIndex` row read 1.2× to 3.0× behind XCDAT 15 on twelve corpora, and now it reads 0.93× to
+2.2× — block 256 routed the fastest `DictIndex` on eleven, and 13–29 % faster than the same block
+unrouted on those, a comparison across processes. `paths` is the corpus it cannot help: its restart
+keys tie in the eight bytes the words hold, block 256 routed reads 0.98 of block 256 there, and the
+fastest `DictIndex` is block 32 as loaded, 1.20× behind XCDAT. The rest of the bill is structural.
+Unrouted, a probe walks a block's restarts to one microblock and scans it — `block / micro + micro
+− 2` header decodes, 62 at block 1024 — and routed it still scans the microblock, where a
+double-array trie takes one indexed load per byte of the key and decodes nothing. Front coding buys
+its bytes by making a comparison cost work, and that is the bill; routing pays part of it back in
+memory, which costs the size lead where it was thinnest — block 256 routed is larger than MARISA at
+ρ=2 on `words`, `domains`, `idents` and `pypi`, and every routed block is on `paths`.
+`HashedDictIndex`, which answers `id` without the search, does not pay the bill at all; what it
+costs instead is [measured against XCDAT below](#hasheddictindex-against-xcdat).
+
+The bill shrinks with `n`, and then it stops shrinking. Unrouted, the same ratio is 2.6× on `words`
+at half a million keys and 1.5× on `titles-en` at a million, and 1.18× on `titles-en` at ten million
+in 4.4's subset below; with 4.0's `DictIndex`, which is what the campaigns past ten million keys
+ran, it is 1.17× on all 19.2 million English titles, while `urls` goes from 1.07× at ten million to
+1.08× whole. At a hundred million keys 4.0's `DictIndex` is 1.21× behind on `uuid` (1.24× at ten
+million) and 1.59× on `opaque` (1.72×); `dna` goes from a 9 % lead at ten million to a tie, 844 ns
+against 864 and inside what memory placement alone moves a lookup on this machine; and `StringIndex`
+answers `numeric` in 156 ns against 408. This paragraph used to end on a prediction: that past the
+last level of cache a blob a third the size takes a third of the misses, so the `dna` crossing would
+generalise at a hundred million keys. That campaign has run, and it did not. What the numbers fit
+instead is one step — from a million keys, where a structure this size still sits largely in the 16
+MiB last-level cache, to ten million, where every one of them pays DRAM misses — after which the
+ratio is set by how many dependent misses a probe takes, not by how many bytes it could touch. That
+is a reading, not a measurement; a miss profile of both lookup paths is what would settle it. The
+claim for the rows above is the measured one: **smallest everywhere and on the front of all of them;
+at ten million keys, with 4.4's routing, faster than XCDAT on `numeric`, `dna` and `urls`, level on
+`titles-en` and `uuid` and 1.36× behind on `opaque`; at a hundred million, with 4.0 and no routing,
+faster on `numeric`, level on `dna` and 1.2× and 1.6× behind on `uuid` and `opaque`.** The 19.2 M
+and 100 M numbers are the standalone benchmark suite's, at its `a6c13d0` with lexindex 4.0.0 from
+crates.io:
 [`frontier-full-2026-09-21-arz-a6c13d0.json`](https://github.com/ilgrad/string-index-benchmarks/blob/main/results/frontier-full-2026-09-21-arz-a6c13d0.json)
 runs every structure over both corpora whole, and
 [`frontier-100m-2026-09-21-arz-a6c13d0.json`](https://github.com/ilgrad/string-index-benchmarks/blob/main/results/frontier-100m-2026-09-21-arz-a6c13d0.json)
@@ -1727,6 +1792,38 @@ at 5.53 bytes a key against MARISA's 5.83 at ρ=2, block 256 at 5.78 and 18 ns f
 9 % faster than block 1024 at 2.7 times the bytes. `bench/frontier/tables.py` prints this table for
 every corpus at both scales from the logs.</sub>
 
+The ten-million campaign above is 4.0's. 4.4 has run at ten million keys in a subset —
+`bench/frontier/run.sh --scale 10m --only 'lexindex|xcdat 15'`, every lexindex row beside XCDAT 15
+on the same protocol — and these are its exact searches:
+
+<!-- table: frontier bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json view=search -->
+| corpus | XCDAT 15 | `Dict` 256 | 32 routed | 256 routed | 1024 routed | `StringIndex` |
+|---|---:|---:|---:|---:|---:|---:|
+| `dna-10000000` | 16.00 @ 545 | 3.95 @ 496 | 5.08 @ 604 | 4.45 @ 445 | 4.06 @ 424 | 15.98 @ 672 |
+| `numeric-10000000` | 7.06 @ 192 | 1.02 @ 302 | 1.76 @ 338 | 1.52 @ 265 | 1.17 @ 231 | 3.6e-05 @ 95 |
+| `opaque-10000000` | 21.66 @ 323 | 10.05 @ 543 | 10.79 @ 539 | 10.55 @ 460 | 10.20 @ 442 | 21.47 @ 440 |
+| `titles-en-10000000` | 13.95 @ 548 | 5.65 @ 646 | 6.62 @ 603 | 6.15 @ 531 | 5.73 @ 563 | 13.25 @ 622 |
+| `urls-10000000` | 14.75 @ 673 | 5.78 @ 716 | 7.63 @ 699 | 6.28 @ 611 | 5.78 @ 624 | 13.10 @ 745 |
+| `uuid-10000000` | 38.58 @ 537 | 17.56 @ 645 | 18.64 @ 612 | 18.06 @ 517 | 17.67 @ 527 | 36.07 @ 542 |
+<!-- /table -->
+
+<sub>Ten million keys, measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0
+([`bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json)),
+on a machine rebooted for it. XCDAT 15 reads 0.95–0.98 of the campaign above and every size is
+byte-identical to it; `DictIndex` reads 0.87–0.96 of it, the search changes since 4.0, and
+`StringIndex` 0.71–0.83, 4.3's reader. Other work while the 198 processes ran: median 0.03 busy
+CPUs, most 0.06.</sub>
+
+With routing the exact search is ahead of XCDAT 15 on three corpora of six at ten million keys:
+`numeric`, where `StringIndex` reads 95 ns against 192 and holds all ten million keys in 357 bytes;
+`dna`, block 1024 routed at 424 against 545; and `urls`, block 256 routed at 611 against 673. On
+`titles-en` and `uuid` block 256 routed is 3–4 % ahead, inside the 2–5 % XCDAT 15 itself moved
+between runs, so those two are level. `opaque` is the loss: 440 ns for `StringIndex` and 442 for
+block 1024 routed against 323, 1.36×. Unrouted, block 256 is ahead only on `dna` and trails by
+1.06–1.68× on the other five. Routing keeps the size lead where it was wide — block 1024 routed is
+still under every structure from elsewhere on `dna`, `opaque`, `urls` and `uuid` — and loses it on
+`titles-en`, 5.73 bytes a key against MARISA's 5.71 at ρ=2.
+
 Not every structure runs everywhere, and a cell that failed says why instead of carrying a number.
 C²'s three structures crash with a segmentation fault on `numeric` at every depth and both scales,
 and on `dna` at ten million keys at ρ=2. CoCo-trie stops with `Sequence is not sorted` on the three
@@ -1740,9 +1837,10 @@ million keys and 357 at ten million and beats both by three to four orders of ma
 still shares only with its own neighbours, so where long fragments repeat across the whole key
 set — URLs, titles, paths — the lead is narrowest: 4 % on `titles-en` and 5 % on `urls` at ten
 million keys, and 1.6 % over MARISA at ρ=2 on `paths` at a million, the cell 4.0 turned over.
-Where C²'s cache-conscious MARISA reads faster than `DictIndex`, on nine of the thirteen corpora at a
-million keys, it is larger, and both are on the front on six of them; on `opaque`, `titles-en` and
-`uuid` a `HashedDictIndex` row now reads faster than it at fewer bytes.
+Where C²'s cache-conscious MARISA reads faster than `DictIndex` as a load leaves it, on eight of the
+twelve corpora it runs at a million keys, it is larger. Routed, `DictIndex` reads faster than it on
+six of those eight; the two left, `titles-ru` and `titles-zh`, are the two it shares the front on,
+and on `titles-ru` a `HashedDictIndex` row reads faster than it at fewer bytes as well.
 
 ### `HashedDictIndex` against XCDAT
 
@@ -1756,80 +1854,84 @@ below takes its rows from that run, beside `Dict` 256, the dictionary it is buil
 the fastest structure from elsewhere on every corpus. Before that campaign it had run at a million
 keys only in a subset run of 2026-09-22
 ([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-subset-2026-09-22-arz-8e04b0b.json)),
-against which XCDAT 15 now reads 0.97–1.05 and the sidecar's own cells 0.94–1.14 — the widest on
-`pypi` at sixteen bits, 32 → 36 ns, where a nanosecond is 3 %.
+against which XCDAT 15 read 0.97–1.05 in the 4.3.3 campaign and the sidecar's own cells 0.94–1.14 —
+the widest on `pypi` at sixteen bits, 32 → 36 ns, where a nanosecond is 3 % — and the 4.4 campaign
+reads the sidecar at 0.93–1.10 of 4.3.3's.
 
-At ten million keys it has still run only in that subset, `bench/frontier/run.sh --only 'lexindex
-(dict256|hashed)|xcdat 15$'`, on the campaign's protocol — a process a structure and corpus, three
-rounds, every other one in reverse order — beside the same two rows. There XCDAT 15 is the fastest
-structure of the ten-million campaign on every corpus but `dna` and `numeric`, where lexindex's own
-rows were. Neither it nor `Dict` 256 had changed code since that campaign, and they are the control:
-all twelve of their cells read within 4.9 % of its medians — `Dict` 256 at 0.976–1.014 of them,
-XCDAT 15 at 0.951–0.983 — and every size is byte-identical, so the new columns stand beside the
-tables above. The subset ran twice on 2026-09-22, first on the working tree that added the index
-([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-22-arz-41478d0-dirty.json)),
-then on the committed code after a reboot, which is what the second table shows; between the two
-every row moved together, the controls to 0.93–1.01 of the first run and the sidecar to 0.94–0.98.
-Every ratio below is taken inside one run: the full campaign at a million keys, the second subset
-run at ten million.
+At ten million keys it has run only in subsets, on the campaign's protocol — a process a structure
+and corpus, three rounds, every other one in reverse order. The first ran on 2026-09-22 beside
+`Dict` 256 and XCDAT 15 alone, twice: on the working tree that added the index
+([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-22-arz-41478d0-dirty.json)), then on the committed code
+after a reboot ([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-22-arz-8e04b0b.json)). The second table
+below is 4.4's run, which put every lexindex row beside XCDAT 15, and which the ten-million exact
+searches above come from as well. Against the 2026-09-22 run XCDAT 15 reads 0.97–1.01, every size
+is byte-identical, and the sidecar, whose code has not changed, reads 0.99–1.03 on every cell but
+closed on `dna`, 69 → 61 ns; `Dict` 256 reads 0.89–0.96, the search changes of 4.3.3 and 4.4.
+XCDAT 15 is the fastest structure of the 2026-09-20 ten-million campaign on every corpus but `dna`
+and `numeric`, where lexindex's own rows were. Every ratio below is taken inside one run: the full
+campaign at a million keys, 4.4's subset at ten million.
 
-<!-- table: frontier bench/results/frontier-1m-2026-09-24-arz-726a783.json view=hashed -->
+<!-- table: frontier bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json view=hashed -->
 | corpus | XCDAT 15 | `Dict` 256 | `HashedDict` closed | fp=8 | fp=16 |
 |---|---:|---:|---:|---:|---:|
-| `words-full` | 7.30 @ 78 | 2.64 @ 276 | 5.25 @ 15 | 6.25 @ 18 | 7.25 @ 18 |
-| `dna-1000000` | 22.46 @ 277 | 4.37 @ 341 | 7.12 @ 44 | 8.12 @ 59 | 9.12 @ 60 |
-| `domains-1000000` | 10.33 @ 145 | 4.50 @ 327 | 7.24 @ 30 | 8.24 @ 35 | 9.24 @ 36 |
-| `idents-1000000` | 13.78 @ 198 | 5.23 @ 400 | 7.97 @ 38 | 8.97 @ 44 | 9.97 @ 47 |
-| `numeric-1000000` | 7.05 @ 54 | 1.01 @ 269 | 3.75 @ 13 | 4.75 @ 18 | 5.75 @ 19 |
-| `opaque-1000000` | 20.02 @ 204 | 10.40 @ 354 | 13.14 @ 49 | 14.14 @ 57 | 15.14 @ 60 |
-| `paths-1000000` | 25.11 @ 625 | 9.87 @ 799 | 12.61 @ 77 | 13.61 @ 100 | 14.61 @ 104 |
-| `pypi-full` | 9.92 @ 139 | 4.17 @ 343 | 6.91 @ 30 | 7.91 @ 32 | 8.91 @ 36 |
-| `titles-en-1000000` | 17.13 @ 241 | 7.37 @ 419 | 10.11 @ 44 | 11.11 @ 52 | 12.11 @ 53 |
-| `titles-ru-1000000` | 23.08 @ 357 | 6.86 @ 499 | 9.60 @ 55 | 10.60 @ 65 | 11.60 @ 65 |
-| `titles-zh-1000000` | 13.58 @ 192 | 5.85 @ 407 | 8.59 @ 36 | 9.59 @ 40 | 10.59 @ 44 |
-| `urls-1000000` | 18.14 @ 360 | 7.51 @ 481 | 10.25 @ 60 | 11.25 @ 73 | 12.25 @ 75 |
-| `uuid-1000000` | 38.88 @ 332 | 18.04 @ 436 | 20.78 @ 58 | 21.78 @ 70 | 22.78 @ 71 |
+| `words-full` | 7.30 @ 79 | 2.64 @ 247 | 5.25 @ 15 | 6.25 @ 17 | 7.25 @ 18 |
+| `dna-1000000` | 22.46 @ 282 | 4.37 @ 314 | 7.12 @ 48 | 8.12 @ 58 | 9.12 @ 60 |
+| `domains-1000000` | 10.33 @ 148 | 4.50 @ 302 | 7.24 @ 28 | 8.24 @ 33 | 9.24 @ 37 |
+| `idents-1000000` | 13.78 @ 204 | 5.23 @ 379 | 7.97 @ 38 | 8.97 @ 45 | 9.97 @ 46 |
+| `numeric-1000000` | 7.05 @ 55 | 1.01 @ 244 | 3.75 @ 13 | 4.75 @ 18 | 5.75 @ 18 |
+| `opaque-1000000` | 20.02 @ 206 | 10.40 @ 334 | 13.14 @ 49 | 14.14 @ 58 | 15.14 @ 58 |
+| `paths-1000000` | 25.11 @ 637 | 9.87 @ 794 | 12.61 @ 83 | 13.61 @ 111 | 14.61 @ 114 |
+| `pypi-full` | 9.92 @ 136 | 4.17 @ 317 | 6.91 @ 30 | 7.91 @ 35 | 8.91 @ 34 |
+| `titles-en-1000000` | 17.13 @ 245 | 7.37 @ 394 | 10.11 @ 45 | 11.11 @ 52 | 12.11 @ 52 |
+| `titles-ru-1000000` | 23.08 @ 366 | 6.86 @ 476 | 9.60 @ 56 | 10.60 @ 64 | 11.60 @ 66 |
+| `titles-zh-1000000` | 13.58 @ 192 | 5.85 @ 379 | 8.59 @ 37 | 9.59 @ 43 | 10.59 @ 42 |
+| `urls-1000000` | 18.14 @ 362 | 7.51 @ 453 | 10.25 @ 61 | 11.25 @ 74 | 12.25 @ 75 |
+| `uuid-1000000` | 38.88 @ 331 | 18.04 @ 409 | 20.78 @ 59 | 21.78 @ 69 | 22.78 @ 71 |
 <!-- /table -->
 
-<sub>A million keys, from the full campaign measured 2026-09-24 at `726a783`
-([`bench/results/frontier-1m-2026-09-24-arz-726a783.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-24-arz-726a783.json)).
+<sub>A million keys, from the full campaign measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0
+([`bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-09-24-arz-3a73ed5.json)).
 A cell reads bytes a key @ nanoseconds a lookup, the median of three rounds.</sub>
 
-<!-- table: frontier bench/results/frontier-10m-subset-2026-09-22-arz-8e04b0b.json view=hashed -->
+<!-- table: frontier bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json view=hashed -->
 | corpus | XCDAT 15 | `Dict` 256 | `HashedDict` closed | fp=8 | fp=16 |
 |---|---:|---:|---:|---:|---:|
-| `dna-10000000` | 16.00 @ 550 | 3.95 @ 530 | 7.19 @ 69 | 8.19 @ 75 | 9.19 @ 76 |
-| `numeric-10000000` | 7.06 @ 198 | 1.02 @ 338 | 4.25 @ 36 | 5.25 @ 49 | 6.25 @ 51 |
-| `opaque-10000000` | 21.66 @ 320 | 10.05 @ 565 | 13.29 @ 72 | 14.29 @ 76 | 15.29 @ 77 |
-| `titles-en-10000000` | 13.95 @ 553 | 5.65 @ 691 | 8.89 @ 69 | 9.89 @ 73 | 10.89 @ 74 |
-| `urls-10000000` | 14.75 @ 688 | 5.78 @ 770 | 9.02 @ 77 | 10.02 @ 101 | 11.02 @ 103 |
-| `uuid-10000000` | 38.58 @ 532 | 17.56 @ 698 | 20.80 @ 75 | 21.80 @ 98 | 22.80 @ 101 |
+| `dna-10000000` | 16.00 @ 545 | 3.95 @ 496 | 7.19 @ 61 | 8.19 @ 75 | 9.19 @ 75 |
+| `numeric-10000000` | 7.06 @ 192 | 1.02 @ 302 | 4.25 @ 36 | 5.25 @ 50 | 6.25 @ 52 |
+| `opaque-10000000` | 21.66 @ 323 | 10.05 @ 543 | 13.29 @ 72 | 14.29 @ 77 | 15.29 @ 79 |
+| `titles-en-10000000` | 13.95 @ 548 | 5.65 @ 646 | 8.89 @ 70 | 9.89 @ 74 | 10.89 @ 75 |
+| `urls-10000000` | 14.75 @ 673 | 5.78 @ 716 | 9.02 @ 77 | 10.02 @ 103 | 11.02 @ 105 |
+| `uuid-10000000` | 38.58 @ 537 | 17.56 @ 645 | 20.80 @ 77 | 21.80 @ 101 | 22.80 @ 103 |
 <!-- /table -->
 
-<sub>Ten million keys, measured 2026-09-22 at `8e04b0b`
-([`bench/results/frontier-10m-subset-2026-09-22-arz-8e04b0b.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-22-arz-8e04b0b.json)).
-Other work while the 90 processes ran: median 0.04 busy CPUs, most 0.06.</sub>
+<sub>Ten million keys, measured 2026-09-24 at `3a73ed5`, lexindex 4.4.0
+([`bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json)).
+Other work while the 198 processes ran: median 0.03 busy CPUs, most 0.06.</sub>
 
 **On all nineteen, `HashedDictIndex` is both faster than XCDAT and smaller.** Closed,
-`id_unchecked` is 4.1× faster (`numeric` at a million keys) to 8.9× (`urls` at ten million), median
-5.6×, at 1.39× (`words`) to 3.16× (`dna` at a million) less space; `id` at eight fingerprint bits is
-3.0–7.6× faster and 1.17–2.77× smaller; at sixteen, 2.9–7.5× faster, and the size lead narrows to
-0.7 % on `words`, 7.25 bytes a key against 7.30. At all three widths, faster than XCDAT is faster
-than every structure the campaigns measured, the two corpora XCDAT did not lead included: on `dna`
-at ten million keys 69 ns against block 1024's 520, on `numeric` 36 against `StringIndex`'s 134.
-Against the search of the dictionary it carries, the hash is 7.2–20.6× faster closed and 5.8–15.1×
-at eight bits, for 2.6–3.2 bytes a key more — 2.62 on `words`, 2.74 at a million keys and 3.24 at
-ten million, where a rank takes 24 bits. And it builds before XCDAT on every corpus, from 1.11× on
-`words` to 5.2× on `dna` at ten million, in 1.3–2.2× the time of the dictionary alone.
+`id_unchecked` is 4.1× faster (`numeric` at a million keys) to 9.0× (`dna` at ten million), median
+5.5×, at 1.39× (`words`) to 3.16× (`dna` at a million) less space; `id` at eight fingerprint bits is
+3.1–7.4× faster and 1.17–2.77× smaller; at sixteen, 3.0–7.3× faster, and the size lead narrows to
+0.7 % on `words`, 7.25 bytes a key against 7.30. At all three widths it is faster than every
+structure either campaign measured, the searches that beat XCDAT included: on `dna` at ten million
+keys 61 ns against block 1024 routed's 424, on `numeric` 36 against `StringIndex`'s 95. Against the
+search of the dictionary it carries, the hash is 6.5–18.3× faster closed and 5.4–14.2× at eight
+bits — 5.4–13.5× and 4.5–10.1× against the same dictionary routed — for 2.6–3.2 bytes a key more:
+2.62 on `words`, 2.74 at a million keys and 3.24 at ten million, where a rank takes 24 bits. And it
+builds before XCDAT on every corpus, from 1.09× on `words` to 5.7× on `dna` at ten million, in
+1.25–2.37× the time of the dictionary alone.
 
 **What it does not do.** XCDAT answers a stranger exactly. `HashedDictIndex` does only through the
-dictionary's search — `id` at zero bits, the `Dict` 256 column — and there XCDAT keeps the lead:
-1.2–5.0× at a million keys, 1.1–1.8× at ten million on five of the six corpora, and `dna` at ten
-million the one cell that turns over (0.96×). With fingerprint bits, `id` answers a stranger as
-present at `2^-bits` — 0.4 % at eight, 0.0015 % at sixteen, `CompactHashIndex`'s rate — and with
-none, `id_unchecked` gives it some rank below `n`. The sidecar is also bytes the dictionary does
-not spend: where size is the only column, `DictIndex` is still the answer, and the smallest
-structure on every corpus above but `numeric`, which `StringIndex` holds.
+dictionary's search — `id` at zero bits, the `Dict` 256 column, which `dict().route_microblocks()`
+routes like any other `DictIndex` — so for a stranger the exact searches earlier in this section are
+the comparison. Unrouted, XCDAT leads by 1.1–4.5× at a million keys and 1.06–1.68× at ten million on
+five corpora of six, `dna` there the one cell that turns over (0.91×); routed at block 256, the
+dictionary is ahead on `dna` at both scales and on `urls` at ten million, level on `titles-en` and
+`uuid` there, and 1.06–3.3× behind everywhere else. With fingerprint bits, `id` answers a stranger
+as present at `2^-bits` — 0.4 % at eight, 0.0015 % at sixteen, `CompactHashIndex`'s rate — and with
+none, `id_unchecked` gives it some rank below `n`. The sidecar is also bytes the dictionary does not
+spend: where size is the only column, `DictIndex` is still the answer, and the smallest structure on
+every corpus above but `numeric`, which `StringIndex` holds.
 
 ## Scaling to millions of keys
 

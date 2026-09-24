@@ -396,7 +396,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 293–300 ns against 333–335
+faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 268–270 ns against 291–298
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
 words.save("words.bdx")
@@ -414,19 +414,21 @@ and compares the stored suffixes there against the query without decoding them; 
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
 entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.64 bytes
-per key, `id` 333–335 ns and `key_into` 194–196, against 5.95 / 256–270 / 441–448 for
+per key, `id` 291–298 ns and `key_into` 193–194, against 5.95 / 200–210 / 436–445 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
 `route_microblocks()` trades memory for that walk over the restarts. It derives eight bytes of every
 microblock's first key — 0.5 bytes a key at the default block, 0.25 at 1024, held beside the index
 and in no blob — and every lookup then picks its microblock off those words, walking the restarts
 only where the query's eight bytes tie a restart's. Deriving them reads the start of every block, so
-a `load_mmap` index is paged in whole by the call rather than as queries reach it.
+a `load_mmap` index is paged in whole by the call rather than as queries reach it. On the
+dictionary, routed, `id` reads 217–228 ns at the default block, and 239–241 at `block="compact"`
+for 2.76 bytes a key in memory — faster than `"fast"` unrouted, at fewer bytes.
 
 At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 251–253 ns
-against 194–196 at the default, and `id` 369–374 against 333–335.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 253 ns
+against 193–194 at the default, and `id` 313–328 against 291–298.
 
 ## `HashedDictIndex` — a `DictIndex` whose `id` is a hash
 

@@ -1,0 +1,1475 @@
+frontier campaign
+date: 2026-09-24T14:20:40+03:00
+host: arz
+commit: 3a73ed5
+table: frontier-10m-subset
+lexindex: 4.4.0
+kernel: Linux 7.2.7-200.fc44.x86_64 x86_64
+cpu: AMD Ryzen 7 5800HS with Radeon Graphics
+cores/threads: 8 / 16
+caches: L2 512 KiB, L3 16384 KiB
+governor: powersave
+transparent hugepages: always [madvise] never
+compiler: c++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+load at start: 0.41 0.74 0.42
+rounds: 3, even rounds in the reverse order
+only: lexindex|xcdat 15
+quiet before each process: under 1.0 busy CPUs for 1 s
+clock ticks: 100
+address space cap: 28000000 KB
+timeout: 7200 s a process
+pin c2: 92c1b861456b https://github.com/alexztc/C2
+pin c2/lib/sdsl-lite: 4312ea9c9370 https://github.com/vgteam/sdsl-lite
+pin c2/lib/ds2i: 4f46606cc077 https://github.com/aboffa/ds2i (modified: compact_elias_fano.hpp,succinct)
+pin c2/lib/sux: 5944f6b5c1c7 https://github.com/vigna/sux (modified: sux/util/Vector.hpp)
+pin c2/lib/fsst: e638d4cf8c26 https://github.com/cwida/fsst
+pin c2/baseline_marisa/marisa: e54f296bb52d https://github.com/s-yata/marisa-trie
+pin c2/baseline_ctriepp/ctriepp: 52d2c16a7bb6 https://gitlab.com/ofek.gila1/ctriepp
+pin xcdat: 2451441dcc09 https://github.com/kampersanda/xcdat
+pin c2/lib/ds2i/succinct: ea74747a8b1c (gitlink)
+pin c2/lib/sdsl-lite/external/googletest: 71815bbf7de6 (gitlink)
+pin c2/lib/sdsl-lite/external/libdivsufsort: 0f24acd8de20 (gitlink)
+pin coco adapted headers: ee860d4b1e62 https://github.com/aboffa/CoCo-trie (by sha256)
+
+##### dna-10000000 (10000000 lines, 250000000 bytes)   round 1/3   2026-09-24T14:20:40+03:00
+--- lexindex dict32   load 0.41 0.74 0.42
+10000000 keys
+lexindex DictIndex block 32: build 885 ms, size 43.682 MiB (4.580 B/key), latency cold 594.7 ns, then mean 594.6 / min 593.6 ns
+885.463,43.681956,594.656
+[time 30.78 s, user 36.35 s, sys 0.92 s, maxrss 1526928 KB]
+[busy 3836 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.64 0.76 0.44
+10000000 keys
+lexindex DictIndex block 256: build 882 ms, size 37.650 MiB (3.948 B/key), latency cold 496.1 ns, then mean 497.5 / min 496.6 ns
+882.445,37.650213,496.084
+[time 26.88 s, user 32.50 s, sys 0.90 s, maxrss 1517276 KB]
+[busy 3433 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.79 0.79 0.46
+10000000 keys
+lexindex DictIndex block 1024: build 862 ms, size 36.361 MiB (3.813 B/key), latency cold 472.5 ns, then mean 473.0 / min 472.3 ns
+861.571,36.360937,472.529
+[time 25.90 s, user 31.39 s, sys 0.86 s, maxrss 1519620 KB]
+[busy 3307 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.86 0.80 0.47
+10000000 keys
+lexindex DictIndex block 32 routed: build 896 ms, size 48.450 MiB (5.080 B/key), latency cold 603.9 ns, then mean 604.2 / min 603.2 ns
+896.469,48.450328,603.868
+[time 31.17 s, user 36.65 s, sys 0.90 s, maxrss 1538192 KB]
+[busy 3849 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.92 0.83 0.49
+10000000 keys
+lexindex DictIndex block 256 routed: build 901 ms, size 42.419 MiB (4.448 B/key), latency cold 445.3 ns, then mean 446.2 / min 445.8 ns
+900.526,42.418646,445.330
+[time 24.87 s, user 30.55 s, sys 0.89 s, maxrss 1517640 KB]
+[busy 3214 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.95 0.84 0.51
+10000000 keys
+lexindex DictIndex block 1024 routed: build 873 ms, size 38.745 MiB (4.063 B/key), latency cold 427.0 ns, then mean 426.6 / min 426.3 ns
+872.659,38.745214,427.003
+[time 24.07 s, user 29.53 s, sys 0.88 s, maxrss 1522416 KB]
+[busy 3114 jiffies]
+[exit 0]
+--- lexindex string   load 0.97 0.86 0.52
+10000000 keys
+lexindex StringIndex: build 9689 ms, size 152.422 MiB (15.983 B/key), latency cold 681.6 ns, then mean 685.7 / min 680.8 ns
+9688.676,152.421832,681.576
+[time 43.10 s, user 42.19 s, sys 0.74 s, maxrss 1604372 KB]
+[busy 4403 jiffies]
+[exit 0]
+--- lexindex hashed0   load 0.99 0.88 0.55
+10000000 keys
+lexindex HashedDictIndex closed: build 1861 ms, size 68.543 MiB (7.187 B/key), latency cold 60.6 ns, then mean 60.1 / min 59.9 ns
+1860.529,68.542706,60.630
+[time 10.38 s, user 16.69 s, sys 0.98 s, maxrss 1543060 KB]
+[busy 1812 jiffies]
+[exit 0]
+--- lexindex hashed8   load 0.99 0.88 0.55
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1860 ms, size 78.079 MiB (8.187 B/key), latency cold 74.7 ns, then mean 74.3 / min 74.2 ns
+1860.101,78.079450,74.676
+[time 10.97 s, user 17.35 s, sys 1.00 s, maxrss 1555728 KB]
+[busy 1888 jiffies]
+[exit 0]
+--- lexindex hashed16   load 0.99 0.89 0.56
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1881 ms, size 87.616 MiB (9.187 B/key), latency cold 75.6 ns, then mean 74.8 / min 74.8 ns
+1881.133,87.616193,75.599
+[time 10.99 s, user 17.34 s, sys 1.00 s, maxrss 1561980 KB]
+[busy 1880 jiffies]
+[exit 0]
+--- xcdat 15   load 0.99 0.89 0.57
+build time: 10568.339811 ms
+space cost: 152.576344 MiB (66.661622% of original size 228.881836 MiB)
+avg latency: 552.777251 ns
+10568.339811,152.576344,552.777251
+[time 25.34 s, user 23.66 s, sys 1.57 s, maxrss 1722164 KB]
+[busy 2603 jiffies]
+[exit 0]
+
+##### numeric-10000000 (10000000 lines, 78888890 bytes)   round 1/3   2026-09-24T14:25:16+03:00
+--- lexindex dict32   load 1.00 0.90 0.58
+10000000 keys
+lexindex DictIndex block 32: build 670 ms, size 11.972 MiB (1.255 B/key), latency cold 320.4 ns, then mean 320.9 / min 319.3 ns
+670.387,11.971594,320.416
+[time 18.94 s, user 22.24 s, sys 0.75 s, maxrss 1170020 KB]
+[busy 2366 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.00 0.91 0.59
+10000000 keys
+lexindex DictIndex block 256: build 684 ms, size 9.685 MiB (1.016 B/key), latency cold 299.8 ns, then mean 300.5 / min 299.6 ns
+684.363,9.685040,299.760
+[time 18.11 s, user 21.66 s, sys 0.70 s, maxrss 1154552 KB]
+[busy 2294 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.00 0.92 0.60
+10000000 keys
+lexindex DictIndex block 1024: build 651 ms, size 8.762 MiB (0.919 B/key), latency cold 307.3 ns, then mean 306.6 / min 303.3 ns
+650.660,8.762317,307.251
+[time 18.35 s, user 21.54 s, sys 0.73 s, maxrss 1153880 KB]
+[busy 2281 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.00 0.92 0.61
+10000000 keys
+lexindex DictIndex block 32 routed: build 691 ms, size 16.740 MiB (1.755 B/key), latency cold 336.4 ns, then mean 335.5 / min 333.9 ns
+691.164,16.739965,336.441
+[time 19.55 s, user 22.74 s, sys 0.74 s, maxrss 1170924 KB]
+[busy 2408 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.00 0.93 0.62
+10000000 keys
+lexindex DictIndex block 256 routed: build 692 ms, size 14.453 MiB (1.516 B/key), latency cold 265.0 ns, then mean 267.7 / min 265.9 ns
+692.322,14.453472,264.979
+[time 16.79 s, user 20.14 s, sys 0.72 s, maxrss 1158460 KB]
+[busy 2140 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.92 0.92 0.62
+10000000 keys
+lexindex DictIndex block 1024 routed: build 664 ms, size 11.147 MiB (1.169 B/key), latency cold 231.4 ns, then mean 228.9 / min 227.8 ns
+663.722,11.146594,231.429
+[time 15.27 s, user 18.44 s, sys 0.71 s, maxrss 1157820 KB]
+[busy 1971 jiffies]
+[exit 0]
+--- lexindex string   load 0.94 0.92 0.63
+10000000 keys
+lexindex StringIndex: build 1770 ms, size 0.000 MiB (0.000 B/key), latency cold 95.3 ns, then mean 95.4 / min 95.3 ns
+1770.200,0.000340,95.337
+[time 10.97 s, user 10.42 s, sys 0.50 s, maxrss 1125796 KB]
+[busy 1130 jiffies]
+[exit 0]
+--- lexindex hashed0   load 0.95 0.92 0.63
+10000000 keys
+lexindex HashedDictIndex closed: build 1574 ms, size 40.578 MiB (4.255 B/key), latency cold 36.2 ns, then mean 35.2 / min 35.1 ns
+1574.227,40.577571,36.230
+[time 8.42 s, user 12.43 s, sys 0.78 s, maxrss 1188984 KB]
+[busy 1360 jiffies]
+[exit 0]
+--- lexindex hashed8   load 0.96 0.93 0.64
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1583 ms, size 50.114 MiB (5.255 B/key), latency cold 50.1 ns, then mean 48.5 / min 48.3 ns
+1583.080,50.114314,50.054
+[time 8.97 s, user 13.05 s, sys 0.83 s, maxrss 1199600 KB]
+[busy 1430 jiffies]
+[exit 0]
+--- lexindex hashed16   load 0.96 0.93 0.64
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1579 ms, size 59.651 MiB (6.255 B/key), latency cold 51.9 ns, then mean 50.8 / min 50.4 ns
+1578.928,59.651057,51.936
+[time 9.07 s, user 13.11 s, sys 0.84 s, maxrss 1209460 KB]
+[busy 1437 jiffies]
+[exit 0]
+--- xcdat 15   load 0.97 0.93 0.65
+build time: 2070.982263 ms
+space cost: 67.281871 MiB (102.411514% of original size 65.697565 MiB)
+avg latency: 198.362482 ns
+2070.982263,67.281871,198.362482
+[time 7.93 s, user 7.23 s, sys 0.67 s, maxrss 775912 KB]
+[busy 825 jiffies]
+[exit 0]
+
+##### opaque-10000000 (10000000 lines, 170000000 bytes)   round 1/3   2026-09-24T14:28:00+03:00
+--- lexindex dict32   load 0.97 0.94 0.65
+10000000 keys
+lexindex DictIndex block 32: build 1109 ms, size 98.166 MiB (10.293 B/key), latency cold 555.0 ns, then mean 552.3 / min 551.5 ns
+1108.798,98.166037,555.025
+[time 28.94 s, user 36.05 s, sys 1.80 s, maxrss 1425372 KB]
+[busy 3871 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.99 0.94 0.66
+10000000 keys
+lexindex DictIndex block 256: build 1092 ms, size 95.809 MiB (10.046 B/key), latency cold 542.9 ns, then mean 544.1 / min 542.5 ns
+1091.672,95.808618,542.871
+[time 28.55 s, user 35.56 s, sys 1.70 s, maxrss 1418760 KB]
+[busy 3824 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.99 0.95 0.67
+10000000 keys
+lexindex DictIndex block 1024: build 1085 ms, size 94.924 MiB (9.953 B/key), latency cold 537.5 ns, then mean 537.1 / min 536.6 ns
+1085.044,94.923699,537.522
+[time 28.26 s, user 35.22 s, sys 1.79 s, maxrss 1407840 KB]
+[busy 3792 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.76 1.18 0.76
+10000000 keys
+lexindex DictIndex block 32 routed: build 1129 ms, size 102.934 MiB (10.793 B/key), latency cold 539.4 ns, then mean 538.5 / min 538.0 ns
+1128.690,102.934408,539.421
+[time 28.38 s, user 35.32 s, sys 1.76 s, maxrss 1429864 KB]
+[busy 3812 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.38 1.15 0.77
+10000000 keys
+lexindex DictIndex block 256 routed: build 1130 ms, size 100.577 MiB (10.546 B/key), latency cold 452.8 ns, then mean 452.2 / min 451.9 ns
+1129.822,100.577050,452.793
+[time 24.94 s, user 32.02 s, sys 1.77 s, maxrss 1427728 KB]
+[busy 3465 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.25 1.13 0.77
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1115 ms, size 97.308 MiB (10.203 B/key), latency cold 441.2 ns, then mean 440.3 / min 440.0 ns
+1115.393,97.307977,441.244
+[time 24.46 s, user 31.48 s, sys 1.90 s, maxrss 1406944 KB]
+[busy 3423 jiffies]
+[exit 0]
+--- lexindex string   load 1.97 1.34 0.85
+10000000 keys
+lexindex StringIndex: build 10911 ms, size 204.743 MiB (21.469 B/key), latency cold 436.3 ns, then mean 437.3 / min 436.3 ns
+10911.251,204.742606,436.318
+[time 34.00 s, user 33.14 s, sys 0.72 s, maxrss 1501936 KB]
+[busy 3474 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.54 1.30 0.86
+10000000 keys
+lexindex HashedDictIndex closed: build 2070 ms, size 126.701 MiB (13.286 B/key), latency cold 72.3 ns, then mean 71.2 / min 70.1 ns
+2070.337,126.701365,72.337
+[time 10.65 s, user 18.49 s, sys 1.92 s, maxrss 1452524 KB]
+[busy 2095 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.45 1.29 0.86
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2087 ms, size 136.238 MiB (14.286 B/key), latency cold 77.4 ns, then mean 75.3 / min 74.5 ns
+2087.473,136.238108,77.444
+[time 10.81 s, user 18.60 s, sys 1.88 s, maxrss 1460396 KB]
+[busy 2101 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.27 1.26 0.86
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2117 ms, size 145.775 MiB (15.286 B/key), latency cold 78.8 ns, then mean 75.9 / min 75.0 ns
+2117.035,145.774851,78.787
+[time 10.89 s, user 18.74 s, sys 1.95 s, maxrss 1472744 KB]
+[busy 2121 jiffies]
+[exit 0]
+--- xcdat 15   load 1.23 1.25 0.86
+build time: 10519.225473 ms
+space cost: 206.548369 MiB (135.363539% of original size 152.587891 MiB)
+avg latency: 323.118763 ns
+10519.225473,206.548369,323.118763
+[time 22.81 s, user 21.18 s, sys 1.54 s, maxrss 1674812 KB]
+[busy 2328 jiffies]
+[exit 0]
+
+##### titles-en-10000000 (10000000 lines, 219718589 bytes)   round 1/3   2026-09-24T14:32:24+03:00
+--- lexindex dict32   load 1.07 1.21 0.86
+10000000 keys
+lexindex DictIndex block 32: build 2181 ms, size 58.395 MiB (6.123 B/key), latency cold 645.7 ns, then mean 642.6 / min 642.1 ns
+2180.848,58.395205,645.739
+[time 34.31 s, user 49.75 s, sys 1.13 s, maxrss 1712264 KB]
+[busy 5201 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.04 1.19 0.87
+10000000 keys
+lexindex DictIndex block 256: build 2241 ms, size 53.891 MiB (5.651 B/key), latency cold 646.5 ns, then mean 643.3 / min 638.1 ns
+2241.492,53.891209,646.491
+[time 34.34 s, user 50.27 s, sys 1.14 s, maxrss 1702944 KB]
+[busy 5246 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.02 1.17 0.87
+10000000 keys
+lexindex DictIndex block 1024: build 2229 ms, size 52.239 MiB (5.478 B/key), latency cold 675.8 ns, then mean 674.4 / min 674.1 ns
+2229.179,52.238668,675.757
+[time 35.58 s, user 51.21 s, sys 1.13 s, maxrss 1695732 KB]
+[busy 5342 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.01 1.14 0.88
+10000000 keys
+lexindex DictIndex block 32 routed: build 2221 ms, size 63.164 MiB (6.623 B/key), latency cold 605.1 ns, then mean 602.9 / min 601.0 ns
+2220.877,63.163577,605.079
+[time 32.70 s, user 48.20 s, sys 1.16 s, maxrss 1716480 KB]
+[busy 5036 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.00 1.13 0.89
+10000000 keys
+lexindex DictIndex block 256 routed: build 2286 ms, size 58.660 MiB (6.151 B/key), latency cold 532.2 ns, then mean 531.9 / min 530.2 ns
+2286.469,58.659641,532.159
+[time 29.94 s, user 45.92 s, sys 1.19 s, maxrss 1708848 KB]
+[busy 4809 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.00 1.11 0.89
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2223 ms, size 54.623 MiB (5.728 B/key), latency cold 563.2 ns, then mean 563.1 / min 562.5 ns
+2222.904,54.622946,563.231
+[time 31.10 s, user 46.76 s, sys 1.12 s, maxrss 1699800 KB]
+[busy 4887 jiffies]
+[exit 0]
+--- lexindex string   load 1.00 1.10 0.90
+10000000 keys
+lexindex StringIndex: build 7980 ms, size 126.354 MiB (13.249 B/key), latency cold 620.2 ns, then mean 619.1 / min 618.4 ns
+7980.211,126.354340,620.222
+[time 39.03 s, user 38.11 s, sys 0.76 s, maxrss 1572332 KB]
+[busy 3982 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.04 1.10 0.91
+10000000 keys
+lexindex HashedDictIndex closed: build 3348 ms, size 84.783 MiB (8.890 B/key), latency cold 70.1 ns, then mean 68.7 / min 68.5 ns
+3348.191,84.782593,70.055
+[time 12.46 s, user 29.20 s, sys 1.29 s, maxrss 1731824 KB]
+[busy 3110 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.99 1.31 0.98
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3376 ms, size 94.319 MiB (9.890 B/key), latency cold 73.4 ns, then mean 72.4 / min 72.2 ns
+3376.385,94.319336,73.431
+[time 12.64 s, user 29.40 s, sys 1.25 s, maxrss 1741852 KB]
+[busy 3123 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.77 1.29 0.98
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3385 ms, size 103.856 MiB (10.890 B/key), latency cold 75.1 ns, then mean 73.7 / min 73.4 ns
+3384.534,103.856079,75.138
+[time 12.73 s, user 29.49 s, sys 1.24 s, maxrss 1751028 KB]
+[busy 3132 jiffies]
+[exit 0]
+--- xcdat 15   load 1.52 1.26 0.98
+build time: 7348.759278 ms
+space cost: 133.023680 MiB (66.510765% of original size 200.003232 MiB)
+avg latency: 548.064441 ns
+7348.759278,133.023680,548.064441
+[time 20.69 s, user 19.25 s, sys 1.35 s, maxrss 1503492 KB]
+[busy 2114 jiffies]
+[exit 0]
+
+##### urls-10000000 (10000000 lines, 533677969 bytes)   round 1/3   2026-09-24T14:37:30+03:00
+--- lexindex dict32   load 1.37 1.25 0.98
+10000000 keys
+lexindex DictIndex block 32: build 2313 ms, size 68.020 MiB (7.132 B/key), latency cold 753.1 ns, then mean 749.1 / min 748.4 ns
+2312.878,68.020096,753.111
+[time 39.44 s, user 55.87 s, sys 1.37 s, maxrss 2295292 KB]
+[busy 5841 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.19 1.21 0.99
+10000000 keys
+lexindex DictIndex block 256: build 2347 ms, size 55.162 MiB (5.784 B/key), latency cold 715.9 ns, then mean 717.9 / min 713.1 ns
+2347.139,55.161706,715.936
+[time 38.15 s, user 55.06 s, sys 1.35 s, maxrss 2258400 KB]
+[busy 5752 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.10 1.18 0.99
+10000000 keys
+lexindex DictIndex block 1024: build 2303 ms, size 52.739 MiB (5.530 B/key), latency cold 738.2 ns, then mean 735.8 / min 735.5 ns
+2303.132,52.739459,738.154
+[time 38.88 s, user 55.41 s, sys 1.35 s, maxrss 2245204 KB]
+[busy 5791 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.05 1.16 0.99
+10000000 keys
+lexindex DictIndex block 32 routed: build 2331 ms, size 72.788 MiB (7.632 B/key), latency cold 699.0 ns, then mean 696.5 / min 695.5 ns
+2330.949,72.788467,699.008
+[time 37.31 s, user 53.75 s, sys 1.36 s, maxrss 2299280 KB]
+[busy 5625 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.94 1.12 0.99
+10000000 keys
+lexindex DictIndex block 256 routed: build 2382 ms, size 59.930 MiB (6.284 B/key), latency cold 621.4 ns, then mean 619.6 / min 617.8 ns
+2381.564,59.930139,621.367
+[time 34.33 s, user 51.29 s, sys 1.32 s, maxrss 2261404 KB]
+[busy 5373 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.61 1.31 1.06
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2332 ms, size 55.124 MiB (5.780 B/key), latency cold 624.3 ns, then mean 623.3 / min 622.6 ns
+2331.677,55.123736,624.316
+[time 34.37 s, user 50.81 s, sys 1.30 s, maxrss 2250364 KB]
+[busy 5323 jiffies]
+[exit 0]
+--- lexindex string   load 1.34 1.28 1.06
+10000000 keys
+lexindex StringIndex: build 8916 ms, size 124.922 MiB (13.099 B/key), latency cold 744.6 ns, then mean 739.3 / min 724.0 ns
+8916.087,124.921756,744.585
+[time 45.58 s, user 44.40 s, sys 0.99 s, maxrss 2137320 KB]
+[busy 4673 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.16 1.24 1.06
+10000000 keys
+lexindex HashedDictIndex closed: build 3535 ms, size 86.056 MiB (9.024 B/key), latency cold 77.8 ns, then mean 77.2 / min 77.1 ns
+3535.201,86.055507,77.779
+[time 13.76 s, user 31.48 s, sys 1.46 s, maxrss 2289196 KB]
+[busy 3360 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.12 1.22 1.05
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3514 ms, size 95.592 MiB (10.024 B/key), latency cold 104.3 ns, then mean 99.5 / min 98.0 ns
+3513.801,95.592250,104.328
+[time 14.65 s, user 32.43 s, sys 1.41 s, maxrss 2299160 KB]
+[busy 3449 jiffies]
+[exit 0]
+--- lexindex hashed16   load 2.20 1.46 1.13
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3523 ms, size 105.129 MiB (11.024 B/key), latency cold 104.4 ns, then mean 102.0 / min 100.4 ns
+3523.265,105.128993,104.403
+[time 14.74 s, user 32.45 s, sys 1.46 s, maxrss 2309044 KB]
+[busy 3453 jiffies]
+[exit 0]
+--- xcdat 15   load 1.93 1.44 1.13
+build time: 12809.869573 ms
+space cost: 140.648740 MiB (28.162516% of original size 499.418229 MiB)
+avg latency: 669.272181 ns
+12809.869573,140.648740,669.272181
+[time 29.51 s, user 27.64 s, sys 1.75 s, maxrss 2125320 KB]
+[busy 3014 jiffies]
+[exit 0]
+
+##### uuid-10000000 (10000000 lines, 370000000 bytes)   round 1/3   2026-09-24T14:43:22+03:00
+--- lexindex dict32   load 1.56 1.39 1.12
+10000000 keys
+lexindex DictIndex block 32: build 1422 ms, size 173.033 MiB (18.144 B/key), latency cold 697.8 ns, then mean 697.3 / min 696.6 ns
+1421.883,173.033094,697.843
+[time 35.49 s, user 44.75 s, sys 2.16 s, maxrss 1921896 KB]
+[busy 4805 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.21 1.32 1.11
+10000000 keys
+lexindex DictIndex block 256: build 1412 ms, size 167.461 MiB (17.560 B/key), latency cold 647.6 ns, then mean 647.2 / min 646.5 ns
+1411.869,167.461316,647.580
+[time 33.47 s, user 42.62 s, sys 2.07 s, maxrss 1905884 KB]
+[busy 4578 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.78 1.50 1.18
+10000000 keys
+lexindex DictIndex block 1024: build 1398 ms, size 166.102 MiB (17.417 B/key), latency cold 610.6 ns, then mean 610.3 / min 610.1 ns
+1397.668,166.101995,610.610
+[time 32.00 s, user 41.11 s, sys 2.07 s, maxrss 1901836 KB]
+[busy 4420 jiffies]
+[exit 0]
+--- lexindex routed32   load 2.21 1.66 1.25
+10000000 keys
+lexindex DictIndex block 32 routed: build 1445 ms, size 177.801 MiB (18.644 B/key), latency cold 603.9 ns, then mean 606.2 / min 603.7 ns
+1444.560,177.801466,603.863
+[time 31.85 s, user 41.08 s, sys 2.12 s, maxrss 1926360 KB]
+[busy 4427 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.74 1.60 1.24
+10000000 keys
+lexindex DictIndex block 256 routed: build 1428 ms, size 172.230 MiB (18.060 B/key), latency cold 504.5 ns, then mean 504.2 / min 503.1 ns
+1428.012,172.229749,504.474
+[time 27.76 s, user 36.93 s, sys 2.11 s, maxrss 1911224 KB]
+[busy 3999 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.37 1.53 1.23
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1404 ms, size 168.486 MiB (17.667 B/key), latency cold 529.0 ns, then mean 528.0 / min 526.7 ns
+1403.943,168.486272,529.047
+[time 28.71 s, user 37.91 s, sys 2.05 s, maxrss 1904464 KB]
+[busy 4094 jiffies]
+[exit 0]
+--- lexindex string   load 1.24 1.49 1.22
+10000000 keys
+lexindex StringIndex: build 23510 ms, size 343.964 MiB (36.067 B/key), latency cold 540.7 ns, then mean 540.3 / min 539.7 ns
+23509.956,343.963631,540.716
+[time 51.21 s, user 50.06 s, sys 0.94 s, maxrss 1957228 KB]
+[busy 5223 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.13 1.42 1.21
+10000000 keys
+lexindex HashedDictIndex closed: build 2436 ms, size 198.354 MiB (20.799 B/key), latency cold 77.6 ns, then mean 77.2 / min 77.0 ns
+2435.760,198.353765,77.634
+[time 11.68 s, user 21.64 s, sys 2.16 s, maxrss 1937772 KB]
+[busy 2441 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.11 1.40 1.21
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2421 ms, size 207.891 MiB (21.799 B/key), latency cold 101.8 ns, then mean 97.8 / min 95.7 ns
+2421.072,207.890509,101.814
+[time 12.55 s, user 22.59 s, sys 2.16 s, maxrss 1946940 KB]
+[busy 2536 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.08 1.38 1.20
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2491 ms, size 217.427 MiB (22.799 B/key), latency cold 103.0 ns, then mean 98.5 / min 96.3 ns
+2490.988,217.427252,102.960
+[time 12.64 s, user 22.68 s, sys 2.20 s, maxrss 1957100 KB]
+[busy 2544 jiffies]
+[exit 0]
+--- xcdat 15   load 1.06 1.36 1.20
+build time: 10389.152051 ms
+space cost: 367.954617 MiB (107.174550% of original size 343.322754 MiB)
+avg latency: 531.214929 ns
+10389.152051,367.954617,531.214929
+[time 24.74 s, user 22.88 s, sys 1.76 s, maxrss 1946856 KB]
+[busy 2529 jiffies]
+[exit 0]
+
+##### uuid-10000000 (10000000 lines, 370000000 bytes)   round 2/3   2026-09-24T14:48:36+03:00
+--- xcdat 15   load 1.04 1.33 1.19
+build time: 10397.254495 ms
+space cost: 367.954617 MiB (107.174550% of original size 343.322754 MiB)
+avg latency: 536.700178 ns
+10397.254495,367.954617,536.700178
+[time 24.82 s, user 22.89 s, sys 1.83 s, maxrss 1946640 KB]
+[busy 2536 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.03 1.30 1.18
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2454 ms, size 217.427 MiB (22.799 B/key), latency cold 103.7 ns, then mean 98.7 / min 95.8 ns
+2453.927,217.427252,103.715
+[time 12.64 s, user 22.72 s, sys 2.24 s, maxrss 1957304 KB]
+[busy 2556 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.02 1.29 1.18
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2477 ms, size 207.891 MiB (21.799 B/key), latency cold 101.5 ns, then mean 96.2 / min 94.4 ns
+2476.729,207.890509,101.458
+[time 12.56 s, user 22.54 s, sys 2.27 s, maxrss 1948344 KB]
+[busy 2548 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.02 1.27 1.18
+10000000 keys
+lexindex HashedDictIndex closed: build 2438 ms, size 198.354 MiB (20.799 B/key), latency cold 76.8 ns, then mean 76.2 / min 76.0 ns
+2438.478,198.353765,76.799
+[time 11.70 s, user 21.72 s, sys 2.26 s, maxrss 1938784 KB]
+[busy 2464 jiffies]
+[exit 0]
+--- lexindex string   load 1.97 1.48 1.24
+10000000 keys
+lexindex StringIndex: build 23512 ms, size 343.964 MiB (36.067 B/key), latency cold 542.4 ns, then mean 540.7 / min 539.7 ns
+23512.472,343.963631,542.389
+[time 51.25 s, user 50.05 s, sys 1.00 s, maxrss 1956980 KB]
+[busy 5232 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.31 1.38 1.22
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1399 ms, size 168.486 MiB (17.667 B/key), latency cold 525.4 ns, then mean 524.6 / min 524.5 ns
+1399.422,168.486272,525.435
+[time 28.56 s, user 37.76 s, sys 2.02 s, maxrss 1905000 KB]
+[busy 4071 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.10 1.32 1.21
+10000000 keys
+lexindex DictIndex block 256 routed: build 1422 ms, size 172.230 MiB (18.060 B/key), latency cold 517.3 ns, then mean 517.2 / min 516.7 ns
+1421.892,172.229749,517.289
+[time 28.28 s, user 37.45 s, sys 2.11 s, maxrss 1910620 KB]
+[busy 4046 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.81 1.50 1.27
+10000000 keys
+lexindex DictIndex block 32 routed: build 1448 ms, size 177.801 MiB (18.644 B/key), latency cold 612.0 ns, then mean 608.9 / min 607.4 ns
+1448.265,177.801466,611.994
+[time 32.04 s, user 41.32 s, sys 2.13 s, maxrss 1926904 KB]
+[busy 4450 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.45 1.44 1.26
+10000000 keys
+lexindex DictIndex block 1024: build 1402 ms, size 166.102 MiB (17.417 B/key), latency cold 638.2 ns, then mean 638.9 / min 638.3 ns
+1402.047,166.101995,638.242
+[time 33.11 s, user 42.26 s, sys 2.10 s, maxrss 1901356 KB]
+[busy 4537 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.25 1.39 1.25
+10000000 keys
+lexindex DictIndex block 256: build 1409 ms, size 167.461 MiB (17.560 B/key), latency cold 644.7 ns, then mean 644.8 / min 644.4 ns
+1408.818,167.461316,644.741
+[time 33.36 s, user 42.63 s, sys 2.09 s, maxrss 1907416 KB]
+[busy 4572 jiffies]
+[exit 0]
+--- lexindex dict32   load 1.14 1.35 1.24
+10000000 keys
+lexindex DictIndex block 32: build 1412 ms, size 173.033 MiB (18.144 B/key), latency cold 698.4 ns, then mean 698.5 / min 697.6 ns
+1412.372,173.033094,698.416
+[time 35.55 s, user 44.78 s, sys 2.08 s, maxrss 1921128 KB]
+[busy 4795 jiffies]
+[exit 0]
+
+##### urls-10000000 (10000000 lines, 533677969 bytes)   round 2/3   2026-09-24T14:53:51+03:00
+--- xcdat 15   load 1.08 1.31 1.23
+build time: 12774.816567 ms
+space cost: 140.648740 MiB (28.162516% of original size 499.418229 MiB)
+avg latency: 686.755448 ns
+12774.816567,140.648740,686.755448
+[time 29.63 s, user 27.84 s, sys 1.67 s, maxrss 2125216 KB]
+[busy 3026 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.05 1.28 1.22
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3534 ms, size 105.129 MiB (11.024 B/key), latency cold 104.7 ns, then mean 101.6 / min 99.9 ns
+3534.106,105.128993,104.726
+[time 14.76 s, user 32.42 s, sys 1.48 s, maxrss 2308156 KB]
+[busy 3458 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.03 1.26 1.22
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3500 ms, size 95.592 MiB (10.024 B/key), latency cold 101.8 ns, then mean 99.5 / min 98.1 ns
+3499.878,95.592250,101.806
+[time 14.63 s, user 32.40 s, sys 1.47 s, maxrss 2298132 KB]
+[busy 3451 jiffies]
+[exit 0]
+--- lexindex hashed0   load 2.06 1.48 1.29
+10000000 keys
+lexindex HashedDictIndex closed: build 3554 ms, size 86.056 MiB (9.024 B/key), latency cold 77.4 ns, then mean 77.1 / min 77.0 ns
+3554.257,86.055507,77.353
+[time 13.76 s, user 31.56 s, sys 1.41 s, maxrss 2291384 KB]
+[busy 3364 jiffies]
+[exit 0]
+--- lexindex string   load 1.89 1.47 1.29
+10000000 keys
+lexindex StringIndex: build 9133 ms, size 124.922 MiB (13.099 B/key), latency cold 747.3 ns, then mean 745.3 / min 744.9 ns
+9132.729,124.921756,747.328
+[time 45.99 s, user 44.77 s, sys 1.03 s, maxrss 2137520 KB]
+[busy 4693 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.38 1.40 1.27
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2177 ms, size 55.124 MiB (5.780 B/key), latency cold 621.1 ns, then mean 620.6 / min 620.4 ns
+2177.161,55.123736,621.060
+[time 34.13 s, user 50.94 s, sys 1.29 s, maxrss 2247640 KB]
+[busy 5325 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.21 1.35 1.26
+10000000 keys
+lexindex DictIndex block 256 routed: build 2387 ms, size 59.930 MiB (6.284 B/key), latency cold 610.7 ns, then mean 607.9 / min 607.8 ns
+2387.390,59.930139,610.667
+[time 33.84 s, user 50.82 s, sys 1.36 s, maxrss 2264576 KB]
+[busy 5319 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.12 1.31 1.25
+10000000 keys
+lexindex DictIndex block 32 routed: build 2324 ms, size 72.788 MiB (7.632 B/key), latency cold 704.3 ns, then mean 705.0 / min 704.0 ns
+2323.714,72.788467,704.289
+[time 37.63 s, user 54.13 s, sys 1.36 s, maxrss 2291612 KB]
+[busy 5659 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.98 1.25 1.23
+10000000 keys
+lexindex DictIndex block 1024: build 2315 ms, size 52.739 MiB (5.530 B/key), latency cold 738.7 ns, then mean 737.0 / min 736.6 ns
+2315.158,52.739459,738.674
+[time 38.93 s, user 55.36 s, sys 1.35 s, maxrss 2249536 KB]
+[busy 5790 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.58 1.42 1.29
+10000000 keys
+lexindex DictIndex block 256: build 2324 ms, size 55.162 MiB (5.784 B/key), latency cold 726.0 ns, then mean 712.4 / min 710.7 ns
+2324.034,55.161706,726.014
+[time 38.07 s, user 55.07 s, sys 1.39 s, maxrss 2257728 KB]
+[busy 5760 jiffies]
+[exit 0]
+--- lexindex dict32   load 2.00 1.59 1.35
+10000000 keys
+lexindex DictIndex block 32: build 2292 ms, size 68.020 MiB (7.132 B/key), latency cold 740.2 ns, then mean 739.3 / min 738.5 ns
+2291.619,68.020096,740.239
+[time 38.98 s, user 55.48 s, sys 1.39 s, maxrss 2295108 KB]
+[busy 5807 jiffies]
+[exit 0]
+
+##### titles-en-10000000 (10000000 lines, 219718589 bytes)   round 2/3   2026-09-24T14:59:43+03:00
+--- xcdat 15   load 2.19 1.72 1.41
+build time: 7351.132393 ms
+space cost: 133.023680 MiB (66.510765% of original size 200.003232 MiB)
+avg latency: 540.545699 ns
+7351.132393,133.023680,540.545699
+[time 20.60 s, user 19.14 s, sys 1.37 s, maxrss 1503560 KB]
+[busy 2108 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.78 1.66 1.40
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3361 ms, size 103.856 MiB (10.890 B/key), latency cold 75.1 ns, then mean 73.6 / min 73.3 ns
+3360.690,103.856079,75.074
+[time 12.68 s, user 29.56 s, sys 1.27 s, maxrss 1751656 KB]
+[busy 3147 jiffies]
+[exit 0]
+--- lexindex hashed8   load 2.84 1.90 1.48
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3347 ms, size 94.319 MiB (9.890 B/key), latency cold 74.3 ns, then mean 72.7 / min 72.4 ns
+3347.055,94.319336,74.268
+[time 12.62 s, user 29.29 s, sys 1.28 s, maxrss 1744100 KB]
+[busy 3115 jiffies]
+[exit 0]
+--- lexindex hashed0   load 3.24 2.04 1.53
+10000000 keys
+lexindex HashedDictIndex closed: build 3347 ms, size 84.783 MiB (8.890 B/key), latency cold 69.9 ns, then mean 68.5 / min 68.3 ns
+3347.472,84.782593,69.869
+[time 12.46 s, user 29.23 s, sys 1.29 s, maxrss 1733796 KB]
+[busy 3110 jiffies]
+[exit 0]
+--- lexindex string   load 2.75 1.99 1.52
+10000000 keys
+lexindex StringIndex: build 7808 ms, size 126.354 MiB (13.249 B/key), latency cold 624.7 ns, then mean 624.3 / min 624.0 ns
+7808.139,126.354340,624.678
+[time 39.09 s, user 38.17 s, sys 0.76 s, maxrss 1572284 KB]
+[busy 3991 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.89 1.86 1.50
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2195 ms, size 54.623 MiB (5.728 B/key), latency cold 564.8 ns, then mean 564.5 / min 564.0 ns
+2195.065,54.622946,564.814
+[time 31.14 s, user 46.44 s, sys 1.12 s, maxrss 1699332 KB]
+[busy 4857 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.54 1.78 1.48
+10000000 keys
+lexindex DictIndex block 256 routed: build 2286 ms, size 58.660 MiB (6.151 B/key), latency cold 529.8 ns, then mean 529.3 / min 528.8 ns
+2285.917,58.659641,529.759
+[time 29.81 s, user 45.88 s, sys 1.15 s, maxrss 1707292 KB]
+[busy 4802 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.33 1.70 1.46
+10000000 keys
+lexindex DictIndex block 32 routed: build 2229 ms, size 63.164 MiB (6.623 B/key), latency cold 599.6 ns, then mean 601.7 / min 596.1 ns
+2229.272,63.163577,599.643
+[time 32.64 s, user 48.23 s, sys 1.11 s, maxrss 1718200 KB]
+[busy 5105 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.87 1.82 1.51
+10000000 keys
+lexindex DictIndex block 1024: build 2212 ms, size 52.239 MiB (5.478 B/key), latency cold 676.6 ns, then mean 674.6 / min 673.5 ns
+2212.382,52.238668,676.566
+[time 35.55 s, user 51.14 s, sys 1.12 s, maxrss 1693536 KB]
+[busy 5327 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.42 1.72 1.49
+10000000 keys
+lexindex DictIndex block 256: build 2261 ms, size 53.891 MiB (5.651 B/key), latency cold 640.9 ns, then mean 650.1 / min 637.5 ns
+2261.291,53.891209,640.880
+[time 34.54 s, user 50.56 s, sys 1.13 s, maxrss 1701752 KB]
+[busy 5275 jiffies]
+[exit 0]
+--- lexindex dict32   load 1.83 1.83 1.54
+10000000 keys
+lexindex DictIndex block 32: build 2188 ms, size 58.395 MiB (6.123 B/key), latency cold 647.6 ns, then mean 643.3 / min 642.3 ns
+2188.366,58.395205,647.608
+[time 34.29 s, user 49.71 s, sys 1.09 s, maxrss 1712116 KB]
+[busy 5189 jiffies]
+[exit 0]
+
+##### opaque-10000000 (10000000 lines, 170000000 bytes)   round 2/3   2026-09-24T15:04:49+03:00
+--- xcdat 15   load 1.46 1.74 1.52
+build time: 10505.933073 ms
+space cost: 206.548369 MiB (135.363539% of original size 152.587891 MiB)
+avg latency: 315.696845 ns
+10505.933073,206.548369,315.696845
+[time 22.71 s, user 21.15 s, sys 1.46 s, maxrss 1675224 KB]
+[busy 2328 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.33 1.69 1.50
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2091 ms, size 145.775 MiB (15.286 B/key), latency cold 78.7 ns, then mean 75.8 / min 74.9 ns
+2090.525,145.774851,78.721
+[time 10.84 s, user 18.64 s, sys 1.79 s, maxrss 1471732 KB]
+[busy 2096 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.26 1.65 1.50
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2064 ms, size 136.238 MiB (14.286 B/key), latency cold 77.5 ns, then mean 74.8 / min 74.0 ns
+2064.291,136.238108,77.487
+[time 10.78 s, user 18.54 s, sys 1.85 s, maxrss 1462648 KB]
+[busy 2088 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.22 1.63 1.49
+10000000 keys
+lexindex HashedDictIndex closed: build 2054 ms, size 126.701 MiB (13.286 B/key), latency cold 72.3 ns, then mean 71.4 / min 70.4 ns
+2053.934,126.701365,72.295
+[time 10.60 s, user 18.35 s, sys 1.79 s, maxrss 1452724 KB]
+[busy 2062 jiffies]
+[exit 0]
+--- lexindex string   load 1.09 1.58 1.48
+10000000 keys
+lexindex StringIndex: build 10789 ms, size 204.743 MiB (21.469 B/key), latency cold 440.1 ns, then mean 440.1 / min 439.8 ns
+10788.784,204.742606,440.126
+[time 34.01 s, user 33.12 s, sys 0.76 s, maxrss 1501936 KB]
+[busy 3475 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.97 1.50 1.45
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1095 ms, size 97.308 MiB (10.203 B/key), latency cold 441.9 ns, then mean 440.5 / min 440.3 ns
+1095.439,97.307977,441.914
+[time 24.45 s, user 31.31 s, sys 1.80 s, maxrss 1404960 KB]
+[busy 3393 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.90 1.44 1.43
+10000000 keys
+lexindex DictIndex block 256 routed: build 1121 ms, size 100.577 MiB (10.546 B/key), latency cold 459.8 ns, then mean 457.3 / min 456.7 ns
+1120.812,100.577050,459.793
+[time 25.14 s, user 32.15 s, sys 1.74 s, maxrss 1426724 KB]
+[busy 3471 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.93 1.41 1.42
+10000000 keys
+lexindex DictIndex block 32 routed: build 1118 ms, size 102.934 MiB (10.793 B/key), latency cold 538.2 ns, then mean 529.6 / min 528.4 ns
+1118.182,102.934408,538.183
+[time 28.10 s, user 35.13 s, sys 1.74 s, maxrss 1436040 KB]
+[busy 3771 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.96 1.37 1.41
+10000000 keys
+lexindex DictIndex block 1024: build 1083 ms, size 94.924 MiB (9.953 B/key), latency cold 537.4 ns, then mean 537.4 / min 536.9 ns
+1083.398,94.923699,537.419
+[time 28.26 s, user 35.13 s, sys 1.69 s, maxrss 1405784 KB]
+[busy 3768 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.90 1.31 1.39
+10000000 keys
+lexindex DictIndex block 256: build 1105 ms, size 95.809 MiB (10.046 B/key), latency cold 539.2 ns, then mean 540.0 / min 539.7 ns
+1105.456,95.808618,539.245
+[time 28.42 s, user 35.52 s, sys 1.80 s, maxrss 1425616 KB]
+[busy 3823 jiffies]
+[exit 0]
+--- lexindex dict32   load 0.93 1.29 1.37
+10000000 keys
+lexindex DictIndex block 32: build 1106 ms, size 98.166 MiB (10.293 B/key), latency cold 550.6 ns, then mean 552.3 / min 551.6 ns
+1106.001,98.166037,550.597
+[time 28.89 s, user 35.98 s, sys 1.75 s, maxrss 1426316 KB]
+[busy 3865 jiffies]
+[exit 0]
+
+##### numeric-10000000 (10000000 lines, 78888890 bytes)   round 2/3   2026-09-24T15:09:13+03:00
+--- xcdat 15   load 0.96 1.26 1.36
+build time: 2130.873636 ms
+space cost: 67.281871 MiB (102.411514% of original size 65.697565 MiB)
+avg latency: 190.904751 ns
+2130.873636,67.281871,190.904751
+[time 7.87 s, user 7.14 s, sys 0.70 s, maxrss 775684 KB]
+[busy 808 jiffies]
+[exit 0]
+--- lexindex hashed16   load 0.97 1.25 1.36
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1602 ms, size 59.651 MiB (6.255 B/key), latency cold 52.0 ns, then mean 51.5 / min 51.2 ns
+1601.652,59.651057,51.976
+[time 9.12 s, user 13.23 s, sys 0.83 s, maxrss 1204712 KB]
+[busy 1449 jiffies]
+[exit 0]
+--- lexindex hashed8   load 0.97 1.24 1.35
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1551 ms, size 50.114 MiB (5.255 B/key), latency cold 50.2 ns, then mean 48.8 / min 48.5 ns
+1550.602,50.114314,50.191
+[time 8.97 s, user 13.07 s, sys 0.83 s, maxrss 1200784 KB]
+[busy 1428 jiffies]
+[exit 0]
+--- lexindex hashed0   load 0.98 1.23 1.35
+10000000 keys
+lexindex HashedDictIndex closed: build 1597 ms, size 40.578 MiB (4.255 B/key), latency cold 36.0 ns, then mean 35.1 / min 35.1 ns
+1597.292,40.577571,36.045
+[time 8.44 s, user 12.51 s, sys 0.86 s, maxrss 1196068 KB]
+[busy 1374 jiffies]
+[exit 0]
+--- lexindex string   load 0.98 1.22 1.34
+10000000 keys
+lexindex StringIndex: build 1773 ms, size 0.000 MiB (0.000 B/key), latency cold 95.0 ns, then mean 95.6 / min 95.5 ns
+1772.766,0.000340,95.006
+[time 10.98 s, user 10.39 s, sys 0.54 s, maxrss 1125612 KB]
+[busy 1129 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.91 1.19 1.33
+10000000 keys
+lexindex DictIndex block 1024 routed: build 668 ms, size 11.147 MiB (1.169 B/key), latency cold 233.6 ns, then mean 234.3 / min 230.6 ns
+667.530,11.146594,233.555
+[time 15.48 s, user 18.71 s, sys 0.72 s, maxrss 1153600 KB]
+[busy 2000 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.93 1.18 1.33
+10000000 keys
+lexindex DictIndex block 256 routed: build 700 ms, size 14.453 MiB (1.516 B/key), latency cold 266.1 ns, then mean 266.4 / min 265.5 ns
+700.029,14.453472,266.116
+[time 16.77 s, user 20.19 s, sys 0.75 s, maxrss 1158252 KB]
+[busy 2146 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.96 1.42 1.40
+10000000 keys
+lexindex DictIndex block 32 routed: build 697 ms, size 16.740 MiB (1.755 B/key), latency cold 342.4 ns, then mean 341.7 / min 339.5 ns
+697.305,16.739965,342.397
+[time 19.84 s, user 23.20 s, sys 0.73 s, maxrss 1177536 KB]
+[busy 2455 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.55 1.36 1.38
+10000000 keys
+lexindex DictIndex block 1024: build 660 ms, size 8.762 MiB (0.919 B/key), latency cold 309.2 ns, then mean 312.3 / min 309.5 ns
+659.816,8.762317,309.246
+[time 18.53 s, user 21.83 s, sys 0.72 s, maxrss 1152624 KB]
+[busy 2312 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.43 1.35 1.38
+10000000 keys
+lexindex DictIndex block 256: build 673 ms, size 9.685 MiB (1.016 B/key), latency cold 302.4 ns, then mean 301.4 / min 300.5 ns
+673.400,9.685040,302.387
+[time 18.16 s, user 21.52 s, sys 0.72 s, maxrss 1157624 KB]
+[busy 2279 jiffies]
+[exit 0]
+--- lexindex dict32   load 1.31 1.32 1.37
+10000000 keys
+lexindex DictIndex block 32: build 666 ms, size 11.972 MiB (1.255 B/key), latency cold 329.8 ns, then mean 325.4 / min 323.6 ns
+665.604,11.971594,329.752
+[time 19.16 s, user 22.46 s, sys 0.74 s, maxrss 1166612 KB]
+[busy 2380 jiffies]
+[exit 0]
+
+##### dna-10000000 (10000000 lines, 250000000 bytes)   round 2/3   2026-09-24T15:11:57+03:00
+--- xcdat 15   load 1.22 1.30 1.36
+build time: 10528.416932 ms
+space cost: 152.576344 MiB (66.661622% of original size 228.881836 MiB)
+avg latency: 543.909418 ns
+10528.416932,152.576344,543.909418
+[time 25.32 s, user 23.63 s, sys 1.58 s, maxrss 1722484 KB]
+[busy 2583 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.05 1.25 1.34
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1895 ms, size 87.616 MiB (9.187 B/key), latency cold 75.4 ns, then mean 75.0 / min 74.9 ns
+1895.439,87.616193,75.358
+[time 11.04 s, user 17.37 s, sys 1.01 s, maxrss 1561396 KB]
+[busy 1890 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.12 1.26 1.34
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1866 ms, size 78.079 MiB (8.187 B/key), latency cold 74.6 ns, then mean 74.5 / min 73.9 ns
+1865.645,78.079450,74.612
+[time 11.02 s, user 17.32 s, sys 1.03 s, maxrss 1553144 KB]
+[busy 1879 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.10 1.25 1.34
+10000000 keys
+lexindex HashedDictIndex closed: build 1861 ms, size 68.543 MiB (7.187 B/key), latency cold 60.9 ns, then mean 59.9 / min 59.6 ns
+1860.780,68.542706,60.862
+[time 10.39 s, user 16.73 s, sys 1.00 s, maxrss 1541616 KB]
+[busy 1816 jiffies]
+[exit 0]
+--- lexindex string   load 1.00 1.22 1.33
+10000000 keys
+lexindex StringIndex: build 9888 ms, size 152.422 MiB (15.983 B/key), latency cold 671.8 ns, then mean 667.2 / min 664.1 ns
+9888.036,152.421832,671.782
+[time 42.70 s, user 41.76 s, sys 0.78 s, maxrss 1603972 KB]
+[busy 4362 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.00 1.19 1.31
+10000000 keys
+lexindex DictIndex block 1024 routed: build 872 ms, size 38.745 MiB (4.063 B/key), latency cold 424.1 ns, then mean 426.3 / min 425.9 ns
+872.474,38.745214,424.139
+[time 24.02 s, user 29.58 s, sys 0.83 s, maxrss 1523888 KB]
+[busy 3109 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.00 1.18 1.30
+10000000 keys
+lexindex DictIndex block 256 routed: build 905 ms, size 42.419 MiB (4.448 B/key), latency cold 440.4 ns, then mean 439.6 / min 438.0 ns
+905.010,42.418646,440.425
+[time 24.62 s, user 30.24 s, sys 0.93 s, maxrss 1515856 KB]
+[busy 3192 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.92 1.14 1.28
+10000000 keys
+lexindex DictIndex block 32 routed: build 901 ms, size 48.450 MiB (5.080 B/key), latency cold 609.9 ns, then mean 608.8 / min 608.1 ns
+900.701,48.450328,609.880
+[time 31.43 s, user 37.01 s, sys 0.87 s, maxrss 1537004 KB]
+[busy 3883 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.95 1.13 1.27
+10000000 keys
+lexindex DictIndex block 1024: build 863 ms, size 36.361 MiB (3.813 B/key), latency cold 474.9 ns, then mean 474.4 / min 474.1 ns
+863.289,36.360937,474.890
+[time 25.98 s, user 31.34 s, sys 0.98 s, maxrss 1520936 KB]
+[busy 3308 jiffies]
+[exit 0]
+--- lexindex dict256   load 0.97 1.12 1.27
+10000000 keys
+lexindex DictIndex block 256: build 883 ms, size 37.650 MiB (3.948 B/key), latency cold 493.7 ns, then mean 493.5 / min 492.2 ns
+882.562,37.650213,493.704
+[time 26.76 s, user 32.41 s, sys 0.88 s, maxrss 1509488 KB]
+[busy 3401 jiffies]
+[exit 0]
+--- lexindex dict32   load 0.98 1.10 1.26
+10000000 keys
+lexindex DictIndex block 32: build 897 ms, size 43.682 MiB (4.580 B/key), latency cold 590.7 ns, then mean 590.1 / min 589.2 ns
+897.176,43.681956,590.658
+[time 30.64 s, user 36.09 s, sys 0.93 s, maxrss 1526128 KB]
+[busy 3793 jiffies]
+[exit 0]
+
+##### dna-10000000 (10000000 lines, 250000000 bytes)   round 3/3   2026-09-24T15:16:33+03:00
+--- lexindex dict32   load 0.99 1.09 1.25
+10000000 keys
+lexindex DictIndex block 32: build 887 ms, size 43.682 MiB (4.580 B/key), latency cold 595.2 ns, then mean 596.3 / min 595.8 ns
+886.567,43.681956,595.240
+[time 30.87 s, user 36.33 s, sys 0.91 s, maxrss 1529756 KB]
+[busy 3809 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.00 1.08 1.24
+10000000 keys
+lexindex DictIndex block 256: build 884 ms, size 37.650 MiB (3.948 B/key), latency cold 496.6 ns, then mean 495.0 / min 494.7 ns
+884.038,37.650213,496.564
+[time 26.85 s, user 32.51 s, sys 0.94 s, maxrss 1510168 KB]
+[busy 3418 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.80 1.29 1.30
+10000000 keys
+lexindex DictIndex block 1024: build 865 ms, size 36.361 MiB (3.813 B/key), latency cold 473.0 ns, then mean 472.5 / min 471.9 ns
+865.159,36.360937,473.022
+[time 25.91 s, user 31.38 s, sys 0.88 s, maxrss 1518332 KB]
+[busy 3298 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.40 1.24 1.29
+10000000 keys
+lexindex DictIndex block 32 routed: build 895 ms, size 48.450 MiB (5.080 B/key), latency cold 600.5 ns, then mean 598.2 / min 597.6 ns
+895.393,48.450328,600.484
+[time 30.96 s, user 36.50 s, sys 0.92 s, maxrss 1532256 KB]
+[busy 3829 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.98 1.43 1.35
+10000000 keys
+lexindex DictIndex block 256 routed: build 900 ms, size 42.419 MiB (4.448 B/key), latency cold 449.0 ns, then mean 448.0 / min 447.4 ns
+899.990,42.418646,448.981
+[time 24.99 s, user 30.52 s, sys 0.94 s, maxrss 1518724 KB]
+[busy 3220 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.64 1.40 1.34
+10000000 keys
+lexindex DictIndex block 1024 routed: build 868 ms, size 38.745 MiB (4.063 B/key), latency cold 422.2 ns, then mean 422.2 / min 422.0 ns
+868.253,38.745214,422.225
+[time 23.88 s, user 29.34 s, sys 0.90 s, maxrss 1523980 KB]
+[busy 3096 jiffies]
+[exit 0]
+--- lexindex string   load 1.42 1.36 1.33
+10000000 keys
+lexindex StringIndex: build 9918 ms, size 152.422 MiB (15.983 B/key), latency cold 667.4 ns, then mean 669.7 / min 666.8 ns
+9917.676,152.421832,667.441
+[time 42.77 s, user 41.87 s, sys 0.74 s, maxrss 1604264 KB]
+[busy 4359 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.20 1.31 1.31
+10000000 keys
+lexindex HashedDictIndex closed: build 1868 ms, size 68.543 MiB (7.187 B/key), latency cold 60.5 ns, then mean 60.8 / min 59.5 ns
+1868.024,68.542706,60.511
+[time 10.41 s, user 16.80 s, sys 0.98 s, maxrss 1544364 KB]
+[busy 1821 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.17 1.30 1.31
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1873 ms, size 78.079 MiB (8.187 B/key), latency cold 75.3 ns, then mean 74.5 / min 74.4 ns
+1872.536,78.079450,75.334
+[time 10.99 s, user 17.37 s, sys 1.02 s, maxrss 1556504 KB]
+[busy 1883 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.13 1.29 1.30
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1898 ms, size 87.616 MiB (9.187 B/key), latency cold 75.4 ns, then mean 74.8 / min 74.7 ns
+1898.202,87.616193,75.443
+[time 11.03 s, user 17.42 s, sys 1.01 s, maxrss 1563124 KB]
+[busy 1888 jiffies]
+[exit 0]
+--- xcdat 15   load 2.21 1.52 1.38
+build time: 10554.707657 ms
+space cost: 152.576344 MiB (66.661622% of original size 228.881836 MiB)
+avg latency: 545.116197 ns
+10554.707657,152.576344,545.116197
+[time 25.32 s, user 23.66 s, sys 1.55 s, maxrss 1722548 KB]
+[busy 2589 jiffies]
+[exit 0]
+
+##### numeric-10000000 (10000000 lines, 78888890 bytes)   round 3/3   2026-09-24T15:21:08+03:00
+--- lexindex dict32   load 1.80 1.48 1.37
+10000000 keys
+lexindex DictIndex block 32: build 674 ms, size 11.972 MiB (1.255 B/key), latency cold 324.7 ns, then mean 321.5 / min 320.3 ns
+673.543,11.971594,324.713
+[time 19.02 s, user 22.35 s, sys 0.74 s, maxrss 1167080 KB]
+[busy 2369 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.57 1.45 1.36
+10000000 keys
+lexindex DictIndex block 256: build 675 ms, size 9.685 MiB (1.016 B/key), latency cold 302.6 ns, then mean 301.4 / min 300.2 ns
+674.531,9.685040,302.555
+[time 18.19 s, user 21.57 s, sys 0.74 s, maxrss 1154472 KB]
+[busy 2284 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.41 1.42 1.35
+10000000 keys
+lexindex DictIndex block 1024: build 653 ms, size 8.762 MiB (0.919 B/key), latency cold 306.5 ns, then mean 305.7 / min 305.3 ns
+653.046,8.762317,306.480
+[time 18.32 s, user 21.53 s, sys 0.70 s, maxrss 1152292 KB]
+[busy 2280 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.29 1.39 1.34
+10000000 keys
+lexindex DictIndex block 32 routed: build 693 ms, size 16.740 MiB (1.755 B/key), latency cold 338.2 ns, then mean 338.1 / min 337.4 ns
+693.204,16.739965,338.218
+[time 19.62 s, user 22.90 s, sys 0.77 s, maxrss 1172164 KB]
+[busy 2430 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.21 1.36 1.34
+10000000 keys
+lexindex DictIndex block 256 routed: build 699 ms, size 14.453 MiB (1.516 B/key), latency cold 264.8 ns, then mean 265.3 / min 264.8 ns
+699.362,14.453472,264.786
+[time 16.75 s, user 20.13 s, sys 0.75 s, maxrss 1161688 KB]
+[busy 2137 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.15 1.34 1.33
+10000000 keys
+lexindex DictIndex block 1024 routed: build 665 ms, size 11.147 MiB (1.169 B/key), latency cold 230.2 ns, then mean 231.2 / min 230.4 ns
+665.424,11.146594,230.157
+[time 15.35 s, user 18.62 s, sys 0.70 s, maxrss 1157128 KB]
+[busy 1988 jiffies]
+[exit 0]
+--- lexindex string   load 2.06 1.55 1.40
+10000000 keys
+lexindex StringIndex: build 1776 ms, size 0.000 MiB (0.000 B/key), latency cold 95.4 ns, then mean 95.5 / min 95.3 ns
+1776.370,0.000340,95.355
+[time 10.97 s, user 10.45 s, sys 0.47 s, maxrss 1125592 KB]
+[busy 1129 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.90 1.53 1.39
+10000000 keys
+lexindex HashedDictIndex closed: build 1600 ms, size 40.578 MiB (4.255 B/key), latency cold 36.1 ns, then mean 35.4 / min 34.9 ns
+1599.954,40.577571,36.051
+[time 8.49 s, user 12.64 s, sys 0.88 s, maxrss 1191944 KB]
+[busy 1393 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.76 1.51 1.39
+10000000 keys
+lexindex HashedDictIndex fp=8: build 1558 ms, size 50.114 MiB (5.255 B/key), latency cold 50.1 ns, then mean 49.0 / min 48.6 ns
+1558.226,50.114314,50.142
+[time 8.97 s, user 13.04 s, sys 0.84 s, maxrss 1199188 KB]
+[busy 1428 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.64 1.49 1.38
+10000000 keys
+lexindex HashedDictIndex fp=16: build 1601 ms, size 59.651 MiB (6.255 B/key), latency cold 51.4 ns, then mean 50.3 / min 50.2 ns
+1600.851,59.651057,51.366
+[time 9.04 s, user 13.05 s, sys 0.81 s, maxrss 1209124 KB]
+[busy 1424 jiffies]
+[exit 0]
+--- xcdat 15   load 1.54 1.48 1.38
+build time: 2067.495292 ms
+space cost: 67.281871 MiB (102.411514% of original size 65.697565 MiB)
+avg latency: 192.374935 ns
+2067.495292,67.281871,192.374935
+[time 7.86 s, user 7.16 s, sys 0.66 s, maxrss 775876 KB]
+[busy 802 jiffies]
+[exit 0]
+
+##### opaque-10000000 (10000000 lines, 170000000 bytes)   round 3/3   2026-09-24T15:23:52+03:00
+--- lexindex dict32   load 1.46 1.46 1.37
+10000000 keys
+lexindex DictIndex block 32: build 1104 ms, size 98.166 MiB (10.293 B/key), latency cold 551.5 ns, then mean 549.8 / min 549.4 ns
+1104.141,98.166037,551.478
+[time 28.84 s, user 35.82 s, sys 1.79 s, maxrss 1426248 KB]
+[busy 3843 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.28 1.41 1.36
+10000000 keys
+lexindex DictIndex block 256: build 1108 ms, size 95.809 MiB (10.046 B/key), latency cold 549.4 ns, then mean 550.9 / min 550.4 ns
+1107.800,95.808618,549.431
+[time 28.85 s, user 35.83 s, sys 1.65 s, maxrss 1421916 KB]
+[busy 3838 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.17 1.37 1.35
+10000000 keys
+lexindex DictIndex block 1024: build 1089 ms, size 94.924 MiB (9.953 B/key), latency cold 535.4 ns, then mean 535.6 / min 534.8 ns
+1089.052,94.923699,535.435
+[time 28.21 s, user 35.06 s, sys 1.75 s, maxrss 1403984 KB]
+[busy 3766 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.10 1.34 1.34
+10000000 keys
+lexindex DictIndex block 32 routed: build 1124 ms, size 102.934 MiB (10.793 B/key), latency cold 543.1 ns, then mean 540.2 / min 540.0 ns
+1123.770,102.934408,543.072
+[time 28.48 s, user 35.46 s, sys 1.73 s, maxrss 1431100 KB]
+[busy 3802 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.06 1.30 1.32
+10000000 keys
+lexindex DictIndex block 256 routed: build 1134 ms, size 100.577 MiB (10.546 B/key), latency cold 459.7 ns, then mean 458.3 / min 458.0 ns
+1134.487,100.577050,459.702
+[time 25.21 s, user 32.16 s, sys 1.82 s, maxrss 1425440 KB]
+[busy 3473 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.90 1.51 1.39
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1099 ms, size 97.308 MiB (10.203 B/key), latency cold 442.3 ns, then mean 442.1 / min 441.6 ns
+1099.386,97.307977,442.326
+[time 24.49 s, user 31.52 s, sys 1.64 s, maxrss 1405792 KB]
+[busy 3390 jiffies]
+[exit 0]
+--- lexindex string   load 1.59 1.47 1.38
+10000000 keys
+lexindex StringIndex: build 10873 ms, size 204.743 MiB (21.469 B/key), latency cold 441.0 ns, then mean 441.0 / min 440.7 ns
+10872.853,204.742606,441.050
+[time 34.14 s, user 33.28 s, sys 0.72 s, maxrss 1501608 KB]
+[busy 3486 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.33 1.41 1.36
+10000000 keys
+lexindex HashedDictIndex closed: build 2069 ms, size 126.701 MiB (13.286 B/key), latency cold 72.8 ns, then mean 71.8 / min 71.2 ns
+2068.887,126.701365,72.762
+[time 10.66 s, user 18.51 s, sys 1.95 s, maxrss 1455960 KB]
+[busy 2097 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.17 1.38 1.35
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2078 ms, size 136.238 MiB (14.286 B/key), latency cold 77.7 ns, then mean 75.0 / min 74.1 ns
+2077.827,136.238108,77.737
+[time 10.83 s, user 18.54 s, sys 1.93 s, maxrss 1466944 KB]
+[busy 2097 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.15 1.36 1.35
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2103 ms, size 145.775 MiB (15.286 B/key), latency cold 78.8 ns, then mean 76.3 / min 75.3 ns
+2103.431,145.774851,78.815
+[time 10.90 s, user 18.71 s, sys 1.80 s, maxrss 1474664 KB]
+[busy 2098 jiffies]
+[exit 0]
+--- xcdat 15   load 1.12 1.35 1.34
+build time: 10499.617191 ms
+space cost: 206.548369 MiB (135.363539% of original size 152.587891 MiB)
+avg latency: 330.145493 ns
+10499.617191,206.548369,330.145493
+[time 22.91 s, user 21.28 s, sys 1.54 s, maxrss 1675252 KB]
+[busy 2333 jiffies]
+[exit 0]
+
+##### titles-en-10000000 (10000000 lines, 219718589 bytes)   round 3/3   2026-09-24T15:28:16+03:00
+--- lexindex dict32   load 1.08 1.32 1.33
+10000000 keys
+lexindex DictIndex block 32: build 2211 ms, size 58.395 MiB (6.123 B/key), latency cold 654.9 ns, then mean 649.2 / min 647.9 ns
+2211.134,58.395205,654.931
+[time 34.62 s, user 50.21 s, sys 1.13 s, maxrss 1711444 KB]
+[busy 5226 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.04 1.29 1.32
+10000000 keys
+lexindex DictIndex block 256: build 2263 ms, size 53.891 MiB (5.651 B/key), latency cold 651.1 ns, then mean 649.1 / min 648.3 ns
+2262.942,53.891209,651.124
+[time 34.61 s, user 50.61 s, sys 1.17 s, maxrss 1700996 KB]
+[busy 5280 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.02 1.25 1.31
+10000000 keys
+lexindex DictIndex block 1024: build 2177 ms, size 52.239 MiB (5.478 B/key), latency cold 676.1 ns, then mean 675.4 / min 674.8 ns
+2176.816,52.238668,676.086
+[time 35.53 s, user 51.08 s, sys 1.14 s, maxrss 1695924 KB]
+[busy 5325 jiffies]
+[exit 0]
+--- lexindex routed32   load 0.93 1.20 1.29
+10000000 keys
+lexindex DictIndex block 32 routed: build 2175 ms, size 63.164 MiB (6.623 B/key), latency cold 603.3 ns, then mean 601.3 / min 599.6 ns
+2175.334,63.163577,603.324
+[time 32.60 s, user 48.03 s, sys 1.10 s, maxrss 1718528 KB]
+[busy 5022 jiffies]
+[exit 0]
+--- lexindex routed256   load 0.96 1.18 1.27
+10000000 keys
+lexindex DictIndex block 256 routed: build 2285 ms, size 58.660 MiB (6.151 B/key), latency cold 531.0 ns, then mean 530.8 / min 530.1 ns
+2285.160,58.659641,530.983
+[time 29.91 s, user 45.87 s, sys 1.14 s, maxrss 1706404 KB]
+[busy 4797 jiffies]
+[exit 0]
+--- lexindex routed1024   load 0.90 1.14 1.26
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2204 ms, size 54.623 MiB (5.728 B/key), latency cold 557.8 ns, then mean 557.9 / min 557.3 ns
+2203.653,54.622946,557.845
+[time 30.84 s, user 46.47 s, sys 1.10 s, maxrss 1696464 KB]
+[busy 4852 jiffies]
+[exit 0]
+--- lexindex string   load 1.68 1.34 1.32
+10000000 keys
+lexindex StringIndex: build 7965 ms, size 126.354 MiB (13.249 B/key), latency cold 621.5 ns, then mean 647.5 / min 641.6 ns
+7965.099,126.354340,621.500
+[time 39.86 s, user 38.95 s, sys 0.75 s, maxrss 1572488 KB]
+[busy 4067 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.35 1.30 1.31
+10000000 keys
+lexindex HashedDictIndex closed: build 3351 ms, size 84.783 MiB (8.890 B/key), latency cold 69.5 ns, then mean 68.8 / min 68.6 ns
+3351.469,84.782593,69.538
+[time 12.48 s, user 29.38 s, sys 1.22 s, maxrss 1734096 KB]
+[busy 3115 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.27 1.28 1.30
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3373 ms, size 94.319 MiB (9.890 B/key), latency cold 74.1 ns, then mean 73.0 / min 72.8 ns
+3372.554,94.319336,74.066
+[time 12.65 s, user 29.47 s, sys 1.24 s, maxrss 1746540 KB]
+[busy 3130 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.21 1.27 1.30
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3346 ms, size 103.856 MiB (10.890 B/key), latency cold 74.8 ns, then mean 73.6 / min 73.3 ns
+3346.089,103.856079,74.828
+[time 12.65 s, user 29.47 s, sys 1.26 s, maxrss 1754684 KB]
+[busy 3131 jiffies]
+[exit 0]
+--- xcdat 15   load 2.21 1.49 1.37
+build time: 7354.520708 ms
+space cost: 133.023680 MiB (66.510765% of original size 200.003232 MiB)
+avg latency: 554.425532 ns
+7354.520708,133.023680,554.425532
+[time 20.73 s, user 19.29 s, sys 1.36 s, maxrss 1503624 KB]
+[busy 2114 jiffies]
+[exit 0]
+
+##### urls-10000000 (10000000 lines, 533677969 bytes)   round 3/3   2026-09-24T15:33:24+03:00
+--- lexindex dict32   load 1.71 1.43 1.35
+10000000 keys
+lexindex DictIndex block 32: build 2292 ms, size 68.020 MiB (7.132 B/key), latency cold 739.0 ns, then mean 738.4 / min 737.5 ns
+2292.125,68.020096,738.983
+[time 38.96 s, user 55.40 s, sys 1.35 s, maxrss 2292592 KB]
+[busy 5787 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.28 1.36 1.33
+10000000 keys
+lexindex DictIndex block 256: build 2365 ms, size 55.162 MiB (5.784 B/key), latency cold 712.9 ns, then mean 711.6 / min 710.3 ns
+2364.719,55.161706,712.857
+[time 37.96 s, user 54.94 s, sys 1.32 s, maxrss 2256184 KB]
+[busy 5749 jiffies]
+[exit 0]
+--- lexindex dict1024   load 1.89 1.54 1.39
+10000000 keys
+lexindex DictIndex block 1024: build 2325 ms, size 52.739 MiB (5.530 B/key), latency cold 731.6 ns, then mean 734.4 / min 730.5 ns
+2324.962,52.739459,731.588
+[time 38.80 s, user 55.25 s, sys 1.37 s, maxrss 2246064 KB]
+[busy 5781 jiffies]
+[exit 0]
+--- lexindex routed32   load 2.13 1.68 1.45
+10000000 keys
+lexindex DictIndex block 32 routed: build 2286 ms, size 72.788 MiB (7.632 B/key), latency cold 688.1 ns, then mean 687.7 / min 685.5 ns
+2286.150,72.788467,688.116
+[time 36.94 s, user 53.62 s, sys 1.34 s, maxrss 2298032 KB]
+[busy 5609 jiffies]
+[exit 0]
+--- lexindex routed256   load 2.26 1.81 1.50
+10000000 keys
+lexindex DictIndex block 256 routed: build 2374 ms, size 59.930 MiB (6.284 B/key), latency cold 610.4 ns, then mean 607.9 / min 607.7 ns
+2374.371,59.930139,610.438
+[time 33.85 s, user 50.87 s, sys 1.30 s, maxrss 2264884 KB]
+[busy 5323 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.75 1.73 1.49
+10000000 keys
+lexindex DictIndex block 1024 routed: build 2256 ms, size 55.124 MiB (5.780 B/key), latency cold 624.2 ns, then mean 623.3 / min 622.7 ns
+2255.601,55.123736,624.239
+[time 34.31 s, user 50.74 s, sys 1.26 s, maxrss 2251208 KB]
+[busy 5299 jiffies]
+[exit 0]
+--- lexindex string   load 1.42 1.65 1.47
+10000000 keys
+lexindex StringIndex: build 8960 ms, size 124.922 MiB (13.099 B/key), latency cold 724.8 ns, then mean 723.5 / min 715.0 ns
+8959.815,124.921756,724.814
+[time 44.93 s, user 43.72 s, sys 1.03 s, maxrss 2137600 KB]
+[busy 4586 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.20 1.56 1.44
+10000000 keys
+lexindex HashedDictIndex closed: build 3506 ms, size 86.056 MiB (9.024 B/key), latency cold 76.1 ns, then mean 75.6 / min 75.5 ns
+3505.955,86.055507,76.072
+[time 13.66 s, user 31.44 s, sys 1.40 s, maxrss 2288972 KB]
+[busy 3348 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.23 1.55 1.44
+10000000 keys
+lexindex HashedDictIndex fp=8: build 3532 ms, size 95.592 MiB (10.024 B/key), latency cold 103.3 ns, then mean 100.9 / min 99.5 ns
+3532.100,95.592250,103.321
+[time 14.73 s, user 32.30 s, sys 1.49 s, maxrss 2297480 KB]
+[busy 3446 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.18 1.52 1.43
+10000000 keys
+lexindex HashedDictIndex fp=16: build 3532 ms, size 105.129 MiB (11.024 B/key), latency cold 104.7 ns, then mean 101.4 / min 99.9 ns
+3532.180,105.128993,104.706
+[time 14.75 s, user 32.52 s, sys 1.43 s, maxrss 2306936 KB]
+[busy 3459 jiffies]
+[exit 0]
+--- xcdat 15   load 1.21 1.51 1.43
+build time: 12721.762429 ms
+space cost: 140.648740 MiB (28.162516% of original size 499.418229 MiB)
+avg latency: 672.701480 ns
+12721.762429,140.648740,672.701480
+[time 29.43 s, user 27.61 s, sys 1.70 s, maxrss 2125160 KB]
+[busy 3006 jiffies]
+[exit 0]
+
+##### uuid-10000000 (10000000 lines, 370000000 bytes)   round 3/3   2026-09-24T15:39:14+03:00
+--- lexindex dict32   load 1.04 1.43 1.41
+10000000 keys
+lexindex DictIndex block 32: build 1410 ms, size 173.033 MiB (18.144 B/key), latency cold 699.7 ns, then mean 700.0 / min 699.2 ns
+1409.910,173.033094,699.725
+[time 35.57 s, user 44.77 s, sys 2.02 s, maxrss 1921084 KB]
+[busy 4787 jiffies]
+[exit 0]
+--- lexindex dict256   load 1.02 1.38 1.39
+10000000 keys
+lexindex DictIndex block 256: build 1424 ms, size 167.461 MiB (17.560 B/key), latency cold 633.2 ns, then mean 630.5 / min 622.5 ns
+1423.960,167.461316,633.208
+[time 32.84 s, user 42.13 s, sys 2.04 s, maxrss 1906308 KB]
+[busy 4530 jiffies]
+[exit 0]
+--- lexindex dict1024   load 0.93 1.32 1.37
+10000000 keys
+lexindex DictIndex block 1024: build 1399 ms, size 166.102 MiB (17.417 B/key), latency cold 641.4 ns, then mean 640.0 / min 638.8 ns
+1398.682,166.101995,641.405
+[time 33.22 s, user 42.19 s, sys 2.02 s, maxrss 1902764 KB]
+[busy 4524 jiffies]
+[exit 0]
+--- lexindex routed32   load 1.75 1.52 1.44
+10000000 keys
+lexindex DictIndex block 32 routed: build 1440 ms, size 177.801 MiB (18.644 B/key), latency cold 624.1 ns, then mean 624.5 / min 623.6 ns
+1439.680,177.801466,624.057
+[time 32.60 s, user 41.69 s, sys 2.00 s, maxrss 1926668 KB]
+[busy 4475 jiffies]
+[exit 0]
+--- lexindex routed256   load 1.46 1.48 1.42
+10000000 keys
+lexindex DictIndex block 256 routed: build 1420 ms, size 172.230 MiB (18.060 B/key), latency cold 517.6 ns, then mean 517.0 / min 515.4 ns
+1420.077,172.229749,517.609
+[time 28.28 s, user 37.49 s, sys 2.15 s, maxrss 1910424 KB]
+[busy 4056 jiffies]
+[exit 0]
+--- lexindex routed1024   load 1.28 1.43 1.41
+10000000 keys
+lexindex DictIndex block 1024 routed: build 1417 ms, size 168.486 MiB (17.667 B/key), latency cold 527.4 ns, then mean 526.7 / min 526.3 ns
+1416.551,168.486272,527.373
+[time 28.68 s, user 37.83 s, sys 2.25 s, maxrss 1905036 KB]
+[busy 4106 jiffies]
+[exit 0]
+--- lexindex string   load 1.17 1.39 1.40
+10000000 keys
+lexindex StringIndex: build 23553 ms, size 343.964 MiB (36.067 B/key), latency cold 541.8 ns, then mean 542.3 / min 540.8 ns
+23552.551,343.963631,541.776
+[time 51.32 s, user 50.08 s, sys 1.04 s, maxrss 1956720 KB]
+[busy 5229 jiffies]
+[exit 0]
+--- lexindex hashed0   load 1.07 1.33 1.37
+10000000 keys
+lexindex HashedDictIndex closed: build 2469 ms, size 198.354 MiB (20.799 B/key), latency cold 76.8 ns, then mean 76.0 / min 75.8 ns
+2468.548,198.353765,76.774
+[time 11.70 s, user 21.57 s, sys 2.30 s, maxrss 1937488 KB]
+[busy 2450 jiffies]
+[exit 0]
+--- lexindex hashed8   load 1.06 1.31 1.36
+10000000 keys
+lexindex HashedDictIndex fp=8: build 2468 ms, size 207.891 MiB (21.799 B/key), latency cold 101.4 ns, then mean 97.5 / min 94.9 ns
+2467.997,207.890509,101.384
+[time 12.60 s, user 22.62 s, sys 2.26 s, maxrss 1947052 KB]
+[busy 2548 jiffies]
+[exit 0]
+--- lexindex hashed16   load 1.04 1.29 1.36
+10000000 keys
+lexindex HashedDictIndex fp=16: build 2453 ms, size 217.427 MiB (22.799 B/key), latency cold 102.5 ns, then mean 98.0 / min 95.8 ns
+2452.853,217.427252,102.481
+[time 12.59 s, user 22.48 s, sys 2.23 s, maxrss 1957048 KB]
+[busy 2538 jiffies]
+[exit 0]
+--- xcdat 15   load 2.14 1.53 1.43
+build time: 10390.110624 ms
+space cost: 367.954617 MiB (107.174550% of original size 343.322754 MiB)
+avg latency: 537.829100 ns
+10390.110624,367.954617,537.829100
+[time 24.82 s, user 22.91 s, sys 1.81 s, maxrss 1946832 KB]
+[busy 2538 jiffies]
+[exit 0]
+
+campaign done 2026-09-24T15:44:29+03:00, load 1.75 1.49 1.42

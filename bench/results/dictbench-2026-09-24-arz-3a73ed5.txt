@@ -1,0 +1,243 @@
+# local/dictbench -- DictIndex against StringIndex on /usr/share/dict/words, the block ladder
+# lexindex 4.4.0 at 3a73ed5, 2026-09-24, arz (Ryzen 7 5800HS, Zen 3), Linux 7.2.7-200.fc44.x86_64, rustc 1.98.1 (48a229cea 2026-09-01); clean tree.
+# Three runs of the whole ladder, each the minimum of five alternated rounds in one process, once
+# as a load leaves the index and once after route_microblocks(), the two in alternating order;
+# each run started only once a readiness check passed -- one-minute load under 0.40, no swap in
+# use, no other process over 15 % CPU. Thermal zones are read at each run's start and end.
+=== dictbench run 1 unrouted, 2026-09-24T15:48:53+03:00, load 0.29 0.83 1.16, acpitz=48 iwlwifi_1=36 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 106 ms
+DictIndex k=32       2.850 B/key  build 39 ms
+  id member   dict  267.7  string  210.3
+  id stranger dict  207.1  string  148.5
+  key_into    dict  135.9  key dict  185.4  string  437.9
+  lower_bound dict  206.8
+  prefix      dict    30306
+DictIndex k=64       2.721 B/key  build 36 ms
+  id member   dict  269.8  string  210.2
+  id stranger dict  206.5  string  150.5
+  key_into    dict  147.0  key dict  202.7  string  436.4
+  lower_bound dict  206.4
+  prefix      dict    30418
+DictIndex k=128      2.663 B/key  build 32 ms
+  id member   dict  273.6  string  201.0
+  id stranger dict  219.4  string  150.4
+  key_into    dict  166.6  key dict  228.5  string  440.8
+  lower_bound dict  218.0
+  prefix      dict    30720
+DictIndex k=256      2.635 B/key  build 32 ms
+  id member   dict  297.5  string  209.9
+  id stranger dict  237.5  string  150.7
+  key_into    dict  193.0  key dict  256.9  string  436.5
+  lower_bound dict  236.1
+  prefix      dict    30454
+DictIndex k=512      2.519 B/key  build 32 ms
+  id member   dict  327.7  string  210.5
+  id stranger dict  266.9  string  151.2
+  key_into    dict  252.7  key dict  317.9  string  438.4
+  lower_bound dict  264.4
+  prefix      dict    29702
+DictIndex k=1024     2.513 B/key  build 36 ms
+  id member   dict  355.0  string  210.3
+  id stranger dict  293.4  string  150.8
+  key_into    dict  301.8  key dict  369.8  string  438.4
+  lower_bound dict  292.1
+  prefix      dict    29906
+=== dictbench run 1 routed, 2026-09-24T15:49:25+03:00, load 0.61 0.85 1.15, acpitz=84 iwlwifi_1=35 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 105 ms
+DictIndex k=32       2.850 B/key  build 39 ms  routed, words 0.500 B/key
+  id member   dict  238.3  string  208.0
+  id stranger dict  184.0  string  155.4
+  key_into    dict  136.7  key dict  187.7  string  444.4
+  lower_bound dict  183.0
+  prefix      dict    30429
+DictIndex k=64       2.721 B/key  build 36 ms  routed, words 0.500 B/key
+  id member   dict  226.7  string  207.6
+  id stranger dict  175.8  string  155.7
+  key_into    dict  150.0  key dict  207.5  string  442.7
+  lower_bound dict  174.2
+  prefix      dict    30462
+DictIndex k=128      2.663 B/key  build 33 ms  routed, words 0.500 B/key
+  id member   dict  223.9  string  200.8
+  id stranger dict  168.3  string  148.5
+  key_into    dict  164.7  key dict  229.1  string  439.5
+  lower_bound dict  165.8
+  prefix      dict    30448
+DictIndex k=256      2.635 B/key  build 32 ms  routed, words 0.500 B/key
+  id member   dict  217.3  string  197.5
+  id stranger dict  165.9  string  148.5
+  key_into    dict  192.5  key dict  261.5  string  438.6
+  lower_bound dict  163.1
+  prefix      dict    30303
+DictIndex k=512      2.519 B/key  build 33 ms  routed, words 0.250 B/key
+  id member   dict  240.1  string  196.7
+  id stranger dict  190.3  string  149.7
+  key_into    dict  252.6  key dict  318.8  string  438.8
+  lower_bound dict  188.7
+  prefix      dict    29700
+DictIndex k=1024     2.513 B/key  build 37 ms  routed, words 0.250 B/key
+  id member   dict  241.1  string  196.9
+  id stranger dict  192.2  string  149.4
+  key_into    dict  306.8  key dict  376.0  string  439.8
+  lower_bound dict  190.6
+  prefix      dict    30551
+=== end of run 1, 2026-09-24T15:49:54+03:00, acpitz=92 iwlwifi_1=35 
+=== dictbench run 2 routed, 2026-09-24T15:51:00+03:00, load 0.26 0.70 1.06, acpitz=48 iwlwifi_1=35 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 109 ms
+DictIndex k=32       2.850 B/key  build 39 ms  routed, words 0.500 B/key
+  id member   dict  246.5  string  209.9
+  id stranger dict  184.8  string  150.3
+  key_into    dict  137.2  key dict  188.1  string  439.5
+  lower_bound dict  182.1
+  prefix      dict    30285
+DictIndex k=64       2.721 B/key  build 36 ms  routed, words 0.500 B/key
+  id member   dict  224.5  string  197.3
+  id stranger dict  174.2  string  147.7
+  key_into    dict  146.1  key dict  203.5  string  437.1
+  lower_bound dict  171.9
+  prefix      dict    30047
+DictIndex k=128      2.663 B/key  build 34 ms  routed, words 0.500 B/key
+  id member   dict  228.7  string  209.0
+  id stranger dict  168.5  string  148.0
+  key_into    dict  164.7  key dict  226.5  string  436.6
+  lower_bound dict  166.1
+  prefix      dict    30074
+DictIndex k=256      2.635 B/key  build 32 ms  routed, words 0.500 B/key
+  id member   dict  228.4  string  205.0
+  id stranger dict  164.6  string  148.2
+  key_into    dict  191.4  key dict  259.8  string  437.4
+  lower_bound dict  162.2
+  prefix      dict    30349
+DictIndex k=512      2.519 B/key  build 31 ms  routed, words 0.250 B/key
+  id member   dict  260.8  string  211.0
+  id stranger dict  189.8  string  148.3
+  key_into    dict  251.0  key dict  318.5  string  436.0
+  lower_bound dict  187.9
+  prefix      dict    29427
+DictIndex k=1024     2.513 B/key  build 37 ms  routed, words 0.250 B/key
+  id member   dict  240.8  string  196.6
+  id stranger dict  190.7  string  148.5
+  key_into    dict  301.0  key dict  368.7  string  438.8
+  lower_bound dict  188.5
+  prefix      dict    29438
+=== dictbench run 2 unrouted, 2026-09-24T15:51:29+03:00, load 0.52 0.72 1.06, acpitz=83 iwlwifi_1=35 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 104 ms
+DictIndex k=32       2.850 B/key  build 39 ms
+  id member   dict  255.4  string  200.6
+  id stranger dict  205.4  string  150.2
+  key_into    dict  137.0  key dict  186.7  string  441.2
+  lower_bound dict  204.0
+  prefix      dict    30292
+DictIndex k=64       2.721 B/key  build 37 ms
+  id member   dict  268.5  string  209.3
+  id stranger dict  206.3  string  151.0
+  key_into    dict  148.0  key dict  207.4  string  442.4
+  lower_bound dict  205.7
+  prefix      dict    30119
+DictIndex k=128      2.663 B/key  build 33 ms
+  id member   dict  278.4  string  208.7
+  id stranger dict  217.9  string  150.7
+  key_into    dict  165.5  key dict  229.5  string  440.3
+  lower_bound dict  217.7
+  prefix      dict    30107
+DictIndex k=256      2.635 B/key  build 32 ms
+  id member   dict  297.2  string  208.1
+  id stranger dict  238.3  string  151.1
+  key_into    dict  193.8  key dict  261.9  string  443.6
+  lower_bound dict  237.2
+  prefix      dict    30213
+DictIndex k=512      2.519 B/key  build 31 ms
+  id member   dict  327.2  string  210.2
+  id stranger dict  266.4  string  150.6
+  key_into    dict  253.0  key dict  322.6  string  441.4
+  lower_bound dict  264.5
+  prefix      dict    29768
+DictIndex k=1024     2.513 B/key  build 37 ms
+  id member   dict  344.7  string  200.2
+  id stranger dict  293.8  string  150.5
+  key_into    dict  302.5  key dict  371.2  string  441.4
+  lower_bound dict  292.9
+  prefix      dict    29771
+=== end of run 2, 2026-09-24T15:52:01+03:00, acpitz=84 iwlwifi_1=35 
+=== dictbench run 3 unrouted, 2026-09-24T15:53:07+03:00, load 0.25 0.60 0.98, acpitz=47 iwlwifi_1=35 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 104 ms
+DictIndex k=32       2.850 B/key  build 39 ms
+  id member   dict  253.5  string  200.7
+  id stranger dict  205.1  string  150.6
+  key_into    dict  137.0  key dict  185.7  string  443.4
+  lower_bound dict  203.4
+  prefix      dict    30250
+DictIndex k=64       2.721 B/key  build 37 ms
+  id member   dict  268.0  string  210.3
+  id stranger dict  206.2  string  150.4
+  key_into    dict  147.4  key dict  203.5  string  445.3
+  lower_bound dict  205.4
+  prefix      dict    30256
+DictIndex k=128      2.663 B/key  build 32 ms
+  id member   dict  266.3  string  199.8
+  id stranger dict  221.0  string  150.4
+  key_into    dict  165.5  key dict  229.6  string  444.6
+  lower_bound dict  220.9
+  prefix      dict    30478
+DictIndex k=256      2.635 B/key  build 32 ms
+  id member   dict  291.3  string  200.4
+  id stranger dict  239.8  string  149.9
+  key_into    dict  193.6  key dict  262.1  string  444.9
+  lower_bound dict  238.3
+  prefix      dict    30591
+DictIndex k=512      2.519 B/key  build 31 ms
+  id member   dict  313.3  string  202.1
+  id stranger dict  267.3  string  150.2
+  key_into    dict  252.8  key dict  318.9  string  444.3
+  lower_bound dict  265.2
+  prefix      dict    30043
+DictIndex k=1024     2.513 B/key  build 37 ms
+  id member   dict  349.7  string  200.0
+  id stranger dict  294.0  string  150.2
+  key_into    dict  302.1  key dict  369.1  string  444.3
+  lower_bound dict  293.4
+  prefix      dict    29909
+=== dictbench run 3 routed, 2026-09-24T15:53:39+03:00, load 0.54 0.64 0.98, acpitz=92 iwlwifi_1=34 
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 106 ms
+DictIndex k=32       2.850 B/key  build 39 ms  routed, words 0.500 B/key
+  id member   dict  241.5  string  207.0
+  id stranger dict  183.1  string  154.6
+  key_into    dict  136.5  key dict  186.3  string  444.2
+  lower_bound dict  181.8
+  prefix      dict    30274
+DictIndex k=64       2.721 B/key  build 36 ms  routed, words 0.500 B/key
+  id member   dict  225.7  string  206.8
+  id stranger dict  175.0  string  155.0
+  key_into    dict  147.2  key dict  205.6  string  445.5
+  lower_bound dict  173.8
+  prefix      dict    30200
+DictIndex k=128      2.663 B/key  build 33 ms  routed, words 0.500 B/key
+  id member   dict  215.9  string  199.6
+  id stranger dict  167.3  string  150.0
+  key_into    dict  166.6  key dict  228.2  string  443.3
+  lower_bound dict  166.4
+  prefix      dict    30438
+DictIndex k=256      2.635 B/key  build 33 ms  routed, words 0.500 B/key
+  id member   dict  218.0  string  201.0
+  id stranger dict  164.7  string  149.8
+  key_into    dict  193.2  key dict  261.4  string  442.0
+  lower_bound dict  163.7
+  prefix      dict    30330
+DictIndex k=512      2.519 B/key  build 31 ms  routed, words 0.250 B/key
+  id member   dict  242.4  string  205.2
+  id stranger dict  189.0  string  150.0
+  key_into    dict  251.2  key dict  316.3  string  439.7
+  lower_bound dict  188.5
+  prefix      dict    29479
+DictIndex k=1024     2.513 B/key  build 37 ms  routed, words 0.250 B/key
+  id member   dict  239.2  string  200.0
+  id stranger dict  191.1  string  150.0
+  key_into    dict  305.3  key dict  372.8  string  444.8
+  lower_bound dict  191.4
+  prefix      dict    30264
+=== end of run 3, 2026-09-24T15:54:08+03:00, acpitz=92 iwlwifi_1=33 
