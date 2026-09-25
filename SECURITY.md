@@ -91,23 +91,29 @@ costs a side-table probe, and construction cannot be made to fail by one — but
 HashDoS defence and must not be used as one. If your keys come from an adversary and lookup latency
 is a resource you are protecting, put a keyed hash in front.
 
-**`unsafe` is mapping, page allocation, and reads whose bound is an invariant rather than a
-check.** The library contains eighteen `unsafe fn`s. Twelve carry an obligation a caller outside
-the crate has to meet: `load_mmap` and `load_mmap_verified` on the five indexes that have anything
+**`unsafe` is mapping, page allocation, reads whose bound is an invariant rather than a check,
+and a call into code built for an instruction the CPU was checked for.** The library contains
+nineteen `unsafe fn`s. Twelve carry an obligation a caller outside the crate has to meet:
+`load_mmap` and `load_mmap_verified` on the five indexes that have anything
 to map (`ClosedHashIndex` is the perfect hash and nothing else), `load_mmap_untrusted` on
-`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other six are internal and their caller is
-this crate — `hash::r4` and `hash::r8`, the key hash's unchecked loads; `room::commit`, which
-extends a `Vec` over bytes just written into its spare capacity; `Pages::assume_init`; and the
-double array's `decode` and `slot`, a character of a `&str` and a slot read unchecked. There are
-fifty-five `unsafe` blocks: thirteen memory maps, counting the writable one `build_to_file` uses on
+`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other seven are internal and their caller
+is this crate — `hash::r4` and `hash::r8`, the key hash's unchecked loads; `room::commit`, which
+extends a `Vec` over bytes just written into its spare capacity; `Pages::assume_init`; the double
+array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; and the perfect
+hash's `Remap::get_popcnt`, its remap lookup built with `popcnt`, whose one obligation is that the
+CPU has it. There are fifty-six `unsafe` blocks:
+thirteen memory maps, counting the writable one `build_to_file` uses on
 a temporary file it created itself; seven in the huge-page allocator; six that write into a `Vec`'s
 spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
 class that chose the load; four in `SharedBytes`, two of them cache prefetches; seven
 `get_unchecked` or `assume_init` reads across the perfect hash, the dictionary's stair and the
 phrase trie a `BDX3` build walks; one `String::from_utf8_unchecked` over what the character
 code of a `BDX4` blob decodes, which is whole characters out of a table built from `char`s
-whatever the blob holds — a debug build checks it, and so the fuzz targets do; and twelve in the
-double array's walks, which read a slot, the code table and a character of the text unchecked, and
+whatever the blob holds — a debug build checks it, and so the fuzz targets do; one call to
+`Remap::get_popcnt`, on x86-64 only and only once `is_x86_feature_detected!` has found the
+instruction — every other target and Miri run the portable build, and a property test holds the
+two to the same answers; and twelve in the double array's walks, which read a slot, the code table
+and a character of the text unchecked, and
 decode a text into buffers on the stack. A slot's bound is what the load's walk over every slot
 settles — no row runs past the array, no id past the keys — and a debug build checks every slot
 read against the array's length, so the fuzz targets do that too. Four `unsafe impl`s make

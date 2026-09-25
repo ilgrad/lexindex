@@ -1116,12 +1116,48 @@ impl Remap {
     /// The `j`-th value, for `j < len`. On a validated table this is exact; on anything else it
     /// is some number, which is all the caller needs.
     ///
-    /// The high part is the position of the `j`-th one less `j`, and the one is counted to from
-    /// its block's sample: the window's words are counted, the counts all compared against the
-    /// ones to skip at once, and the bit is found inside its word without a loop. A block whose
-    /// ones and zeros run past the window goes on word by word.
+    /// [`get_portable`](Self::get_portable), built with the `popcnt` instruction where the CPU
+    /// has it. The x86-64 baseline has no population count, so each of the window's four counts
+    /// is a ladder of shifts, masks and adds, part of it in vector registers; with `popcnt` a
+    /// bumped key at 1 M keys is 233 instructions where it was 279. Both builds are called out of
+    /// line there: with the portable one inline, the caller carried its registers and the
+    /// `popcnt` path paid 9 instructions more. The check is std's cached detection, 6 of the 233
+    /// and two branches, and only a bumped key pays it.
     #[inline(always)]
     fn get(&self, j: u64) -> u64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::arch::is_x86_feature_detected!("popcnt") {
+            // SAFETY: `get_popcnt` needs POPCNT and nothing else, and the CPU has it.
+            return unsafe { self.get_popcnt(j) };
+        }
+        self.get_fallback(j)
+    }
+
+    /// [`get_portable`](Self::get_portable) with the `popcnt` instruction.
+    ///
+    /// # Safety
+    ///
+    /// The CPU has POPCNT.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "popcnt")]
+    unsafe fn get_popcnt(&self, j: u64) -> u64 {
+        self.get_portable(j)
+    }
+
+    /// [`get_portable`](Self::get_portable) where [`get`](Self::get) has no faster build: inline,
+    /// except on x86-64, where it is the other arm of the check.
+    #[cfg_attr(target_arch = "x86_64", inline(never))]
+    #[cfg_attr(not(target_arch = "x86_64"), inline(always))]
+    fn get_fallback(&self, j: u64) -> u64 {
+        self.get_portable(j)
+    }
+
+    /// [`get`](Self::get) for any CPU. The high part is the position of the `j`-th one less `j`,
+    /// and the one is counted to from its block's sample: the window's words are counted, the
+    /// counts all compared against the ones to skip at once, and the bit is found inside its word
+    /// without a loop. A block whose ones and zeros run past the window goes on word by word.
+    #[inline(always)]
+    fn get_portable(&self, j: u64) -> u64 {
         let (Some(&hi), Some(&lo)) = (
             self.supers.get(j as usize / SUPER),
             self.subs.get(j as usize / BLOCK),
@@ -5090,6 +5126,46 @@ mod tests {
             if let Ok(mphf) = Mphf::from_bytes(&with_scalar(blob, field, value)) {
                 proptest::prop_assert!(mphf.n() > 0);
                 proptest::prop_assert!(mphf.index(probe) < mphf.n());
+            }
+        }
+    }
+
+    proptest::proptest! {
+        // Miri interprets every instruction; a few short sequences still take each path.
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(if cfg!(miri) { 4 } else { 256 }))]
+
+        /// Both builds of [`Remap::get`] return every value of a sequence: the `popcnt` one, which
+        /// every CI machine runs, and the portable one, which is all a CPU without POPCNT, every
+        /// other target and Miri have. Steps of a random scale fill a block's window anywhere
+        /// from one word to all four, and one step in a hundred jumps by up to 2^40, which moves
+        /// the low bits and runs a block's ones past its window.
+        #[test]
+        fn both_builds_of_the_remap_return_every_value(
+            scale in 0u32..=16,
+            steps in proptest::collection::vec(
+                (proptest::prelude::any::<u8>(), proptest::prelude::any::<u64>()),
+                1..if cfg!(miri) { 300 } else { 3_000 },
+            ),
+        ) {
+            let mut values = Vec::with_capacity(steps.len());
+            let mut v = 0u64;
+            for &(jump, raw) in &steps {
+                v += raw & ((1u64 << if jump < 3 { 40 } else { scale }) - 1);
+                values.push(v);
+            }
+            let u = v + 1;
+            let remap = Remap::encode(&values, u).expect("encode");
+            proptest::prop_assert!(remap.validate(u));
+            #[cfg(target_arch = "x86_64")]
+            let popcnt = std::arch::is_x86_feature_detected!("popcnt");
+            for (j, &want) in values.iter().enumerate() {
+                proptest::prop_assert_eq!(remap.get_portable(j as u64), want, "value {}", j);
+                #[cfg(target_arch = "x86_64")]
+                if popcnt {
+                    // SAFETY: the CPU has POPCNT, checked above.
+                    let got = unsafe { remap.get_popcnt(j as u64) };
+                    proptest::prop_assert_eq!(got, want, "value {} with popcnt", j);
+                }
             }
         }
     }
