@@ -1133,9 +1133,13 @@ fn part_of(key: u64, parts: usize) -> usize {
 /// A candidate's first eight bytes as one big-endian word, zero-padded — the order this gives is
 /// the order the bytes give, because a span shorter than eight pads with the byte that loses.
 fn head(s: &[u8]) -> u64 {
+    // Eight bytes as one load where there are eight: a copy of a length known only at run time
+    // is a call to `memcpy`.
+    if let Some(w) = s.first_chunk::<8>() {
+        return u64::from_be_bytes(*w);
+    }
     let mut w = [0u8; 8];
-    let n = s.len().min(8);
-    w[..n].copy_from_slice(&s[..n]);
+    w[..s.len()].copy_from_slice(s);
     u64::from_be_bytes(w)
 }
 
@@ -1176,11 +1180,21 @@ fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, u64, &[u8])> {
             gain.entry(k).or_insert((0, s)).0 += g;
         }
     }
-    let mut ranked: Vec<(u64, u64, &[u8])> =
-        gain.into_values().map(|(g, s)| (g, head(s), s)).collect();
+    let mut ranked: Vec<(u64, u64, &[u8])> = gain.into_values().map(|(g, s)| (g, 0, s)).collect();
+    // A span lies wherever its key does, so its head is a miss to memory: asked for a few dozen
+    // candidates early, rather than one at a time.
+    for i in 0..ranked.len() {
+        if let Some(&(_, _, ahead)) = ranked.get(i + AHEAD) {
+            crate::blob::prefetch(ahead, 0);
+        }
+        ranked[i].1 = head(ranked[i].2);
+    }
     cut(&mut ranked, take);
     ranked
 }
+
+/// Candidates [`merge`] asks for a span's bytes ahead of the one it reads.
+const AHEAD: usize = 32;
 
 /// Whether every shard of a spread would rather pack its bytes than name them with symbols.
 ///
