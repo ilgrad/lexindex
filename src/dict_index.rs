@@ -3483,7 +3483,7 @@ impl DictIndex {
         let mut entries = run.entries();
         cur.clear();
         cur.extend_from_slice(head);
-        for word in words {
+        for word in words.iter_mut() {
             let (l, len) = entries.head()?;
             let piece = entries.piece(len);
             if l < need {
@@ -3497,7 +3497,12 @@ impl DictIndex {
             }
             *word = sample_at(cur, o);
         }
-        Some(o)
+        // Restarts this crate wrote ascend, and so do their words. The route counts on it: the
+        // word it takes as the one below a probe must be below it, or the two can agree past the
+        // probe's last byte, on its padding, and hand the scan more matched bytes than the probe
+        // has. A blob's restarts are not checked at load, so words out of order leave the block to
+        // its restart run.
+        words.is_sorted().then_some(o)
     }
 
     /// The microblock of block `b` — `r` of them — that `probe` falls in, off the block's words in
@@ -3536,6 +3541,10 @@ impl DictIndex {
         if may_end_before(below, i) {
             return None;
         }
+        debug_assert!(
+            o + i < probe.len(),
+            "a route word below the probe agrees with its padding"
+        );
         Some((j, o + i))
     }
 

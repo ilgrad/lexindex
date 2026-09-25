@@ -1293,6 +1293,25 @@ fn the_pinned_tiered_blob_answers_every_key_through_the_phrase_codec() {
     assert_eq!(walked, sorted, "the walk is not in key order");
 }
 
+/// `panicking-4.5.0-dict-route.bdx` is libFuzzer's, from the `parse_dict` target's daily run on
+/// 2026-09-25 against 4.5.0, and would not minimise below its 10 410 bytes: a `BDX4` blob whose
+/// restart keys run out of order. A block's restart words route a lookup to its microblock, and
+/// the route counts the bytes the probe shares with the word below it. Ascending words make that
+/// word's first difference a byte the probe has; these were not ascending, the word taken as below
+/// was above, and the two agreed on the probe's zero padding, so the scan began past the probe's
+/// end. The fuzz build and debug panicked on the subtraction; a release build compared the stored
+/// suffix against bytes past the key, and a packed dictionary's compare slices the probe from
+/// there, which panics in any build. Words out of order now leave the block to its restart run.
+/// The shim loads the blob every way it loads -- checked, framed and routed -- and queries each.
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
+#[test]
+fn a_dictionary_whose_restarts_run_out_of_order_answers_without_panicking() {
+    let bytes = std::fs::read(data("panicking-4.5.0-dict-route.bdx")).expect("the specimen");
+    assert_eq!(bytes.len(), 10_410);
+    assert_eq!(&bytes[..4], b"BDX4");
+    lexindex::fuzzing::load_dict(&bytes);
+}
+
 /// `panicking-3.0.0-mphf-slice.bin` is libFuzzer's too, from the run that followed the fix above:
 /// an `MPH3` blob whose first level claims a slice of one. A level's stride is its slice shifted
 /// down by the geometry's mode bits, so a slice narrower than one shift leaves a stride of zero
