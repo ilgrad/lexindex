@@ -1006,6 +1006,10 @@ const SELECT_WORDS: usize = 4;
 /// ten thousand on a real table — word by word. A lookup is the two samples, whose tables are
 /// small enough to stay in cache and whose addresses both come from `j` alone, then the window
 /// and the low word, which depend on nothing but the value.
+///
+/// [`get`](Self::get) reads the tables unchecked: a remap is empty, laid out by
+/// [`encode`](Self::encode), or read from a blob and kept only once [`validate`](Self::validate)
+/// has checked its lengths and samples.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Remap {
     /// Values of the levels below the first and of the tail, together: the sequence's length.
@@ -1023,8 +1027,12 @@ struct Remap {
 }
 
 impl Remap {
-    fn low_words(len: u64, low_bits: u32) -> usize {
-        (len as usize * low_bits as usize).div_ceil(64)
+    /// Words the low parts of `len` values take, `None` where that does not fit in memory: on a
+    /// 32-bit target the product wraps well within a blob's reach, and [`get`](Self::get) reads
+    /// the low words unchecked on the strength of this count.
+    fn low_words(len: u64, low_bits: u32) -> Option<usize> {
+        let bits = usize::try_from(len).ok()?.checked_mul(low_bits as usize)?;
+        Some(bits.div_ceil(64))
     }
 
     /// Words of the high-part stream a blob stores for `len` values below `u`: every one lies at
@@ -1084,7 +1092,7 @@ impl Remap {
         let mut remap = Self {
             len,
             low_bits,
-            low: Pages::zeroed(Self::low_words(len, low_bits)),
+            low: Pages::zeroed(Self::low_words(len, low_bits).ok_or(SIZE)?),
             high: Pages::zeroed(high_words),
             supers: Pages::zeroed(Self::super_count(len)),
             subs: Pages::zeroed(Self::sub_count(len)),
@@ -1113,8 +1121,9 @@ impl Remap {
         Ok(remap)
     }
 
-    /// The `j`-th value, for `j < len`. On a validated table this is exact; on anything else it
-    /// is some number, which is all the caller needs.
+    /// The `j`-th value, for `j < len`, and 0 for any other `j`. On a validated table this is
+    /// exact; on one whose values `validate` is still checking it is some number, which is all
+    /// the caller needs.
     ///
     /// [`get_portable`](Self::get_portable), built with the `popcnt` instruction where the CPU
     /// has it. The x86-64 baseline has no population count, so each of the window's four counts
@@ -1156,19 +1165,29 @@ impl Remap {
     /// and the one is counted to from its block's sample: the window's words are counted, the
     /// counts all compared against the ones to skip at once, and the bit is found inside its word
     /// without a loop. A block whose ones and zeros run past the window goes on word by word.
+    ///
+    /// Past the check on `j`, every read is in bounds by what a remap is — `encode` lays one out
+    /// so, and `validate` refuses a blob's laid out any other way — and none is checked again,
+    /// which took 12 instructions and four branches off the 233 a bumped key took at 1 M keys.
+    /// The check on `j` alone does not let LLVM drop the five, since nothing in a lookup ties
+    /// the tables' lengths to `len`.
     #[inline(always)]
     fn get_portable(&self, j: u64) -> u64 {
-        let (Some(&hi), Some(&lo)) = (
-            self.supers.get(j as usize / SUPER),
-            self.subs.get(j as usize / BLOCK),
-        ) else {
+        if j >= self.len {
             return 0;
-        };
+        }
+        let (sb, b) = (j as usize / SUPER, j as usize / BLOCK);
+        debug_assert!(sb < self.supers.len() && b < self.subs.len());
+        // SAFETY: `j < len`, and there are `len / SUPER` super-samples and `len / BLOCK` samples,
+        // rounded up: `encode` allocates that many and `validate` refuses any other count.
+        let (hi, lo) = unsafe { (*self.supers.get_unchecked(sb), *self.subs.get_unchecked(b)) };
         let s = hi as usize + lo as usize;
         let (w0, o) = (s / 64, s % 64);
-        let Some(words) = self.high.get(w0..w0 + SELECT_WORDS) else {
-            return 0;
-        };
+        debug_assert!(w0 + SELECT_WORDS <= self.high.len());
+        // SAFETY: the samples add up to the position of the block's first one, a bit of the
+        // stored stream — `validate` checks every block's — and the stream is held with
+        // SELECT_WORDS words after its last.
+        let words = unsafe { self.high.get_unchecked(w0..w0 + SELECT_WORDS) };
         let r = j % BLOCK as u64;
         // The window is read from where it lies, not copied: a copy on the stack is written in
         // wide stores and read back in loads that straddle them, which forwarding cannot serve.
@@ -1193,9 +1212,15 @@ impl Remap {
         } else {
             let at = j * u64::from(self.low_bits);
             let (w, o) = ((at / 64) as usize, at % 64);
-            let mut x = self.low[w] >> o;
+            debug_assert!(w < self.low.len());
+            // SAFETY: `j < len`, and the low words hold `len * low_bits` bits: `encode` allocates
+            // that many and `validate` refuses any other count. So bit `at` is in one.
+            let mut x = unsafe { *self.low.get_unchecked(w) } >> o;
             if o + u64::from(self.low_bits) > 64 {
-                x |= self.low[w + 1] << (64 - o);
+                debug_assert!(w + 1 < self.low.len());
+                // SAFETY: the value's last bit, `at + low_bits - 1`, is below `len * low_bits`
+                // and past word `w`.
+                x |= unsafe { *self.low.get_unchecked(w + 1) } << (64 - o);
             }
             x & ((1 << self.low_bits) - 1)
         };
@@ -1236,10 +1261,11 @@ impl Remap {
 
     /// One pass over the stream: as many ones as values, every block's sample on its first one,
     /// nothing in the window's words past the end, and every value below `u`. What keeps
-    /// [`get`](Self::get) exact and inside the image for every `j` below the length.
+    /// [`get`](Self::get) exact and inside the image for every `j` below the length, and what its
+    /// unchecked reads stand on: the lengths and the samples are checked before it is called.
     fn validate(&self, u: u64) -> bool {
         if self.low_bits >= 64
-            || self.low.len() != Self::low_words(self.len, self.low_bits)
+            || Some(self.low.len()) != Self::low_words(self.len, self.low_bits)
             || Some(self.high.len())
                 != Self::high_words(self.len, u, self.low_bits)
                     .and_then(|stored| Self::held_words(self.len, stored))
@@ -2590,10 +2616,9 @@ impl V2 {
     /// Bytes of the seeds (the levels' and the tail's), of the remap's low bits, and of its high
     /// parts with their samples.
     fn sections(&self) -> (usize, usize, usize) {
-        let (m, l) = (self.remap.len, self.remap.low_bits);
         (
             self.levels().map(|l| l.seeds.len()).sum::<usize>() + self.tail.seeds.len() * 2,
-            Remap::low_words(m, l) * 8,
+            self.remap.low.len() * 8,
             self.remap.stored_high().len() * 8
                 + self.remap.supers.len() * 4
                 + self.remap.subs.len() * 2,
@@ -2883,7 +2908,7 @@ impl V2 {
             let low = take(
                 bytes,
                 &mut p,
-                Remap::low_words(entries as u64, low_bits),
+                Remap::low_words(entries as u64, low_bits).ok_or(SIZE)?,
                 u64::from_le_bytes,
             );
             let high_words = Remap::high_words(entries as u64, n, low_bits).ok_or(SIZE)?;
@@ -5134,11 +5159,11 @@ mod tests {
         // Miri interprets every instruction; a few short sequences still take each path.
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(if cfg!(miri) { 4 } else { 256 }))]
 
-        /// Both builds of [`Remap::get`] return every value of a sequence: the `popcnt` one, which
-        /// every CI machine runs, and the portable one, which is all a CPU without POPCNT, every
-        /// other target and Miri have. Steps of a random scale fill a block's window anywhere
-        /// from one word to all four, and one step in a hundred jumps by up to 2^40, which moves
-        /// the low bits and runs a block's ones past its window.
+        /// Both builds of [`Remap::get`] return every value of a sequence, and 0 past its end: the
+        /// `popcnt` one, which every CI machine runs, and the portable one, which is all a CPU
+        /// without POPCNT, every other target and Miri have. Steps of a random scale fill a
+        /// block's window anywhere from one word to all four, and one step in a hundred jumps by
+        /// up to 2^40, which moves the low bits and runs a block's ones past its window.
         #[test]
         fn both_builds_of_the_remap_return_every_value(
             scale in 0u32..=16,
@@ -5167,6 +5192,24 @@ mod tests {
                     proptest::prop_assert_eq!(got, want, "value {} with popcnt", j);
                 }
             }
+            for j in [values.len() as u64, u64::MAX] {
+                proptest::prop_assert_eq!(remap.get_portable(j), 0, "past the end, {}", j);
+            }
+        }
+
+        /// [`Remap::low_words`] is the exact count wherever the bits fit in memory and `None`
+        /// elsewhere — never a count that wrapped, which `get`'s unchecked reads would trust.
+        #[test]
+        fn the_low_word_count_is_exact_or_refused(
+            len in proptest::prelude::any::<u64>(),
+            low_bits in 0u32..64,
+        ) {
+            let bits = u128::from(len) * u128::from(low_bits);
+            let want = usize::try_from(len)
+                .ok()
+                .and_then(|_| usize::try_from(bits).ok())
+                .map(|b| b.div_ceil(64));
+            proptest::prop_assert_eq!(Remap::low_words(len, low_bits), want);
         }
     }
 }
