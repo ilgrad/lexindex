@@ -1164,6 +1164,87 @@ fn cut(ranked: &mut Vec<(u64, u64, &[u8])>, take: usize) {
     }
 }
 
+/// One partition's candidates handed out in [`rank`] order. Only the `lead` that rank first are
+/// sorted up front, on the partition's own thread — a partition holds about its share of the
+/// round's first `take` — and the rest only if the round reaches past them. Cutting sixteen times
+/// `take` down to `take` and sorting those, on the one thread that builds, was 45.6 ms of a million
+/// article titles; merging the partitions' prefixes is 18.9, half of it freeing their vectors.
+struct Ranked<'a> {
+    cands: Vec<(u64, u64, &'a [u8])>,
+    sorted: usize,
+    at: usize,
+}
+
+impl<'a> Ranked<'a> {
+    fn of(mut cands: Vec<(u64, u64, &'a [u8])>, lead: usize) -> Self {
+        let sorted = lead.min(cands.len());
+        if sorted < cands.len() {
+            cands.select_nth_unstable_by(sorted, rank);
+        }
+        cands[..sorted].sort_unstable_by(rank);
+        Self {
+            cands,
+            sorted,
+            at: 0,
+        }
+    }
+
+    fn next(&mut self) -> Option<(u64, u64, &'a [u8])> {
+        if self.at == self.sorted {
+            self.cands[self.sorted..].sort_unstable_by(rank);
+            self.sorted = self.cands.len();
+        }
+        let next = self.cands.get(self.at).copied();
+        self.at += 1;
+        next
+    }
+}
+
+/// A partition's best candidate not yet taken, ordered so that a max-heap hands out the one that
+/// ranks first.
+struct Lead<'a>((u64, u64, &'a [u8]), usize);
+
+impl PartialEq for Lead<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for Lead<'_> {}
+
+impl PartialOrd for Lead<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Lead<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        rank(&other.0, &self.0)
+    }
+}
+
+/// The first `take` candidates of the union of `parts`, in [`rank`] order. The partitions share
+/// no span, so these are the first `take` of the union.
+fn first_of<'a>(mut parts: Vec<Ranked<'a>>, take: usize) -> Vec<(u64, u64, &'a [u8])> {
+    let mut heap: std::collections::BinaryHeap<Lead<'a>> = parts
+        .iter_mut()
+        .enumerate()
+        .filter_map(|(p, part)| Some(Lead(part.next()?, p)))
+        .collect();
+    let mut out = Vec::with_capacity(take);
+    while out.len() < take {
+        let Some(Lead(cand, p)) = heap.pop() else {
+            break;
+        };
+        out.push(cand);
+        if let Some(next) = parts[p].next() {
+            heap.push(Lead(next, p));
+        }
+    }
+    out
+}
+
 /// One partition's candidates summed over every thread's map of it, cut to the `take` that rank
 /// first — which is all a partition can contribute to the round's first `take`.
 fn merge(maps: Vec<Gains<'_>>, take: usize) -> Vec<(u64, u64, &[u8])> {
@@ -1401,10 +1482,11 @@ pub(crate) fn mine(
         // of millions scores whole rare spans as one phrase and ranks length above reuse.
         let take = if r + 1 == ROUNDS { pool } else { cap };
         // The union is never built and never sorted whole: each partition is merged on its own
-        // thread and cut to `take`, the cuts are cut again, and only those are ranked. The ranking
-        // is total, so the survivors are the union's first `take`. Merging every map into one and
-        // sorting the union was most of the miner's wall clock — the sort's tie-break reads the
-        // span's bytes, a cache miss a compare, and ties on the gain are the common case.
+        // thread, cut to `take` and sorted as far as its share of the answer, and the partitions
+        // are merged in rank order until `take` are out. The ranking is total, so those are the
+        // union's first `take`. Merging every map into one and sorting the union was most of the
+        // miner's wall clock — the sort's tie-break reads the span's bytes, a cache miss a
+        // compare, and ties on the gain are the common case.
         let mut by_part: Vec<Vec<Gains<'_>>> =
             (0..parts).map(|_| Vec::with_capacity(maps.len())).collect();
         for thread in maps {
@@ -1412,22 +1494,21 @@ pub(crate) fn mine(
                 by_part[p].push(part);
             }
         }
-        let tops: Vec<Vec<(u64, u64, &[u8])>> = std::thread::scope(|scope| {
+        // Twice a partition's even share: the partitions split the spans by their hash, so one
+        // that holds more of the answer than that is a fluke, and costs a sort of its rest.
+        let lead = 2 * take.div_ceil(parts);
+        let tops: Vec<Ranked<'_>> = std::thread::scope(|scope| {
             let running: Vec<_> = by_part
                 .into_iter()
-                .map(|part| scope.spawn(move || merge(part, take)))
+                .map(|part| scope.spawn(move || Ranked::of(merge(part, take), lead)))
                 .collect();
             running
                 .into_iter()
                 .map(|h| h.join().expect("merging a partition cannot panic"))
                 .collect()
         });
-        let mut ranked = tops.concat();
-        cut(&mut ranked, take);
-        ranked.sort_unstable_by(rank);
-        phrases = ranked
+        phrases = first_of(tops, take)
             .iter()
-            .take(take)
             // A candidate has to clear its own storage — its bytes, a `u16` end and its share of a
             // group's `u32` base — against what it saves over the whole blob rather than over the
             // sample the gain was counted on. Applied every round, not only the last, so that a
@@ -1656,6 +1737,38 @@ mod tests {
                     (node, base) = (child, child_base);
                 }
             }
+        }
+
+        /// Sorted a prefix at a time and merged across partitions, the candidates come out as the
+        /// first `take` of their union sorted whole — for any prefix, so partitions that run past
+        /// theirs are merged too.
+        #[test]
+        fn partitions_merged_by_rank_are_their_union_sorted(
+            parts in proptest::collection::vec(
+                proptest::collection::vec(
+                    (0u64..4, proptest::collection::vec(0u8..3, 0..10)),
+                    0..40,
+                ),
+                1..6,
+            ),
+            take in 0usize..100,
+            lead in 0usize..12,
+        ) {
+            // The miner's partitions share no span.
+            let mut seen = std::collections::HashSet::new();
+            let parts: Vec<Vec<(u64, Vec<u8>)>> = parts
+                .into_iter()
+                .map(|p| p.into_iter().filter(|(_, s)| seen.insert(s.clone())).collect())
+                .collect();
+            let cands: Vec<Vec<(u64, u64, &[u8])>> = parts
+                .iter()
+                .map(|p| p.iter().map(|(g, s)| (*g, head(s), s.as_slice())).collect())
+                .collect();
+            let mut want = cands.concat();
+            want.sort_unstable_by(rank);
+            want.truncate(take);
+            let got = first_of(cands.into_iter().map(|c| Ranked::of(c, lead)).collect(), take);
+            proptest::prop_assert_eq!(got, want);
         }
     }
 }
