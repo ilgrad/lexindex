@@ -680,8 +680,29 @@ fn read_ahead<'a, 'k>(keys: &'a [&'k str]) -> impl Iterator<Item = &'k str> + 'a
 /// The keys as `str`s every thread of the build can share, which the caller's `S` need not be:
 /// sixteen bytes a key, taken once for the whole build. Taken before the keys are sorted, so that
 /// the order is checked on the view, a range of keys a thread, where on `S` it could only be one.
-fn view_of<S: AsRef<str>>(keys: &[S]) -> Vec<&str> {
-    keys.iter().map(AsRef::as_ref).collect()
+///
+/// Its pages are touched a range a thread before the one pass that fills it, which cannot be split,
+/// since `S` need not be `Sync`: the first touch of a page is a fault the kernel serves on the
+/// thread that takes it, and the pass took all of them in turn — 9 to 10 ms of a million keys,
+/// against 5.4 with the faults taken first.
+fn view_of<S: AsRef<str>>(keys: &[S], threads: usize) -> Vec<&str> {
+    let mut view = Vec::with_capacity(keys.len());
+    if threads > 1 {
+        let spare = view.spare_capacity_mut();
+        let size = spare.len().div_ceil(threads).max(1);
+        std::thread::scope(|scope| {
+            for range in spare.chunks_mut(size) {
+                // One write a page, to a slot the vector still counts as uninitialised.
+                scope.spawn(move || {
+                    for slot in range.iter_mut().step_by(4096 / size_of::<&str>()) {
+                        *slot = std::mem::MaybeUninit::zeroed();
+                    }
+                });
+            }
+        });
+    }
+    view.extend(keys.iter().map(AsRef::as_ref));
+    view
 }
 
 /// Whether every key is above the one before it — what keys that come sorted and distinct are —
@@ -1868,7 +1889,7 @@ impl DictIndex {
         // peak for a caller that already owned the corpus.
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
-        let mut view = view_of(&keys);
+        let mut view = view_of(&keys, threads);
         sort_distinct(&mut view, threads);
         Self::from_view(view, block, micro_for(block))
     }
@@ -1919,7 +1940,7 @@ impl DictIndex {
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
-        let mut view = view_of(&keys);
+        let mut view = view_of(&keys, threads);
         if !distinct_ascending(&mut view, threads) {
             return Err(IndexError::Format(
                 "dict: build_sorted got a key below its predecessor",
@@ -1946,7 +1967,7 @@ impl DictIndex {
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
-        let mut view = view_of(&keys);
+        let mut view = view_of(&keys, threads);
         sort_distinct(&mut view, threads);
         Self::from_view(view, block, micro)
     }
@@ -5540,15 +5561,15 @@ mod tests {
             let mut want = keys.clone();
             want.sort_unstable();
             want.dedup();
-            let mut got = view_of(&keys);
+            let mut got = view_of(&keys, threads);
             sort_distinct(&mut got, threads);
             proptest::prop_assert_eq!(&got, &want);
             proptest::prop_assert_eq!(
-                strictly_ascending(&view_of(&keys), threads),
+                strictly_ascending(&view_of(&keys, threads), threads),
                 keys.windows(2).all(|w| w[0] < w[1])
             );
             let ascends = keys.windows(2).all(|w| w[0] <= w[1]);
-            let mut once = view_of(&keys);
+            let mut once = view_of(&keys, threads);
             proptest::prop_assert_eq!(distinct_ascending(&mut once, threads), ascends);
             if ascends {
                 proptest::prop_assert_eq!(&once, &want);
