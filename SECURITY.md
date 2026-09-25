@@ -93,15 +93,17 @@ is a resource you are protecting, put a keyed hash in front.
 
 **`unsafe` is mapping, page allocation, reads whose bound is an invariant rather than a check,
 and a call into code built for an instruction the CPU was checked for.** The library contains
-nineteen `unsafe fn`s. Twelve carry an obligation a caller outside the crate has to meet:
+twenty-one `unsafe fn`s. Twelve carry an obligation a caller outside the crate has to meet:
 `load_mmap` and `load_mmap_verified` on the five indexes that have anything
 to map (`ClosedHashIndex` is the perfect hash and nothing else), `load_mmap_untrusted` on
-`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other seven are internal and their caller
+`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other nine are internal and their caller
 is this crate — `hash::r4` and `hash::r8`, the key hash's unchecked loads; `room::commit`, which
 extends a `Vec` over bytes just written into its spare capacity; `Pages::assume_init`; the double
-array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; and the perfect
-hash's `Remap::get_popcnt`, its remap lookup built with `popcnt`, whose one obligation is that the
-CPU has it. There are sixty `unsafe` blocks:
+array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; and three builds
+for an instruction the x86-64 baseline lacks, whose one obligation is that the CPU has it — the
+perfect hash's `Remap::get_popcnt`, its remap lookup with `popcnt`, and the double array's
+`place_avx2` and `slots_malformed_avx2`, its build's placement and its load's slot check with AVX2.
+There are sixty-two `unsafe` blocks:
 thirteen memory maps, counting the writable one `build_to_file` uses on
 a temporary file it created itself; seven in the huge-page allocator; six that write into a `Vec`'s
 spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
@@ -111,10 +113,10 @@ phrase trie a `BDX3` build walks — four of them in the perfect hash's remap, p
 entry is below its length, on tables whose lengths and samples the loader has checked; one
 `String::from_utf8_unchecked` over what the character
 code of a `BDX4` blob decodes, which is whole characters out of a table built from `char`s
-whatever the blob holds — a debug build checks it, and so the fuzz targets do; one call to
-`Remap::get_popcnt`, on x86-64 only and only once `is_x86_feature_detected!` has found the
-instruction — every other target and Miri run the portable build, and a property test holds the
-two to the same answers; and twelve in the double array's walks, which read a slot, the code table
+whatever the blob holds — a debug build checks it, and so the fuzz targets do; three calls into
+those builds, on x86-64 only and each only once `is_x86_feature_detected!` has found its
+instruction — every other target and Miri run the portable build, and tests hold each pair to
+the same answers; and twelve in the double array's walks, which read a slot, the code table
 and a character of the text unchecked, and
 decode a text into buffers on the stack. A slot's bound is what the load's walk over every slot
 settles — no row runs past the array, no id past the keys — and a debug build checks every slot
