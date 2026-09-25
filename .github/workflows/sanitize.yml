@@ -65,6 +65,19 @@ jobs:
         run: |
           cargo +nightly miri test --no-default-features --lib blob::
           cargo +nightly miri test --no-default-features --lib subsequence::
+      # `DoubleArrayIndex` reads its slots and its code table without a bounds check once a load has
+      # walked them, and its occurrence walk decodes a text into `MaybeUninit` buffers -- a read of
+      # an entry never written is invisible to ASan. `agrees_with_string_index` runs every walk
+      # against `StringIndex`'s answers, through both buffers, on the characters at the ends of the
+      # code table (U+FFFF, U+10FFFF) and with the empty key in and out; 1 420 s measured.
+      # The module's other tests build over the same keys, whose count of characters up to U+10FFFF
+      # takes minutes a build here, and walk nothing this one does not.
+      - name: cargo miri test (the double array's walks)
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: |
+          cargo +nightly miri test --no-default-features --lib \
+            double_array::tests::agrees_with_string_index
       # The C ABI's `unsafe` blocks read and write what a C caller's pointers name. Under Miri the
       # test calls through the module's own types (`lexindex::capi_miri`): the copies of the
       # header's enums it uses everywhere else are, to Miri, a call with the wrong types.
@@ -86,6 +99,11 @@ jobs:
       # stores the first eight bytes of each block head as a *big-endian* word inside an otherwise
       # little-endian blob, which is exactly the mix this job exists to catch. Three tests, 781 s
       # measured -- the round trip, the length/table checks, and the varints.
+      #
+      # `BDA1`, the double array's, is pinned by a committed file: a fresh build over the golden
+      # keys must reproduce it byte for byte, and every load of it answer every key. Measured
+      # negative control -- writing the slots with `to_ne_bytes` fails it here: the build's own walk
+      # refuses them. Without `mmap`, which the interpreter cannot map a file for; 314 s measured.
       - name: cargo miri test on a big-endian target (the byte formats)
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
@@ -95,6 +113,9 @@ jobs:
             dict_index::tests::save_and_load \
             dict_index::tests::every_length_and_table_in_a_blob_is_checked \
             dict_index::tests::varints_round_trip_and_a_cut_or_oversized_one_is_refused
+          cargo +nightly miri test --target s390x-unknown-linux-gnu --no-default-features \
+            --test golden -- \
+            the_double_array_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key
       # The only place 32-bit code actually *runs*. `cargo check --target i686` is its own CI job,
       # but a compilation check cannot see a `u64 -> usize` truncation, and there is no 32-bit
       # runner to test on — Miri needs neither, since it interprets. It earned this on its first
@@ -105,6 +126,9 @@ jobs:
       # without the walk relies on). `every_length_and_table_in_a_blob_is_checked` is not on this
       # list: it is about byte layout rather than pointer width, the big-endian job runs it, and it
       # is the expensive one (the three-test i686 set measured 1 758 s with it, far less without).
+      # The double array's golden-blob test runs here too: its loader turns the header's u64 and u32
+      # fields into `usize` offsets, bounding each before the sums, and this is the one run of that
+      # on a 32-bit `usize`. Without `mmap`, as above; 321 s measured.
       - name: cargo miri test on a 32-bit target (the parsers)
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
@@ -112,6 +136,9 @@ jobs:
           cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay:: \
             dict_index::tests::a_load_without_the_walk_bounds_what_the_arrays_say \
             dict_index::tests::corrupted_block_data_never_panics
+          cargo +nightly miri test --target i686-unknown-linux-gnu --no-default-features \
+            --test golden -- \
+            the_double_array_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key
 
   # The hash's own quality battery. It is `#[ignore]`d and behind `bench-mphf` because it runs for
   # tens of seconds, and until now CI only *compiled* it -- `ci.yml` runs `clippy --features
