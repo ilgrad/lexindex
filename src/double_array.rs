@@ -195,6 +195,7 @@ impl Occupancy {
     }
 
     /// The same for the `CHUNK` words from `w0`.
+    #[inline(always)]
     fn candidates_chunk(&self, w0: usize, c0: usize) -> [u64; CHUNK] {
         let (q, s) = self.base_at(w0, c0);
         let used: &[u64; CHUNK] = self.used[w0..w0 + CHUNK].try_into().expect("CHUNK words");
@@ -354,6 +355,7 @@ fn pair_key(a: u16, b: u16) -> u32 {
 }
 
 /// The slot of the lowest set bit of `fit`, whose word 0 is word `w0` of the array.
+#[inline(always)]
 fn lowest(fit: &[u64; CHUNK], w0: usize) -> Option<usize> {
     let j = fit.iter().position(|&f| f != 0)?;
     Some(64 * (w0 + j) + fit[j].trailing_zeros() as usize)
@@ -368,6 +370,27 @@ fn lowest(fit: &[u64; CHUNK], w0: usize) -> Option<usize> {
 /// take, `CHUNK` words of 64 at a time, and tests the bases they imply against the other children's
 /// slots, 64 bases a word at once.
 fn place(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        // SAFETY: the CPU has AVX2.
+        return unsafe { place_avx2(t, max_label) };
+    }
+    place_with(t, max_label)
+}
+
+/// [`place`], its chunk tests four words an instruction rather than two.
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn place_avx2(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
+    place_with(t, max_label)
+}
+
+/// Inlined into each entry point, so that each compiles it for its own instruction set.
+#[inline(always)]
+fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
     let too_many = || {
         IndexError::Format(
             "double-array: the trie needs more than 8 388 608 slots; bases are 23 bits",
@@ -1356,6 +1379,50 @@ mod tests {
         let long: String = std::iter::repeat_n("北京大学生😀abc", 40).collect();
         assert!(long.len() > STACK_TEXT);
         check(&keys(), &[long]);
+    }
+
+    /// `place` takes the AVX2 copy where the CPU has one; the baseline copy places every row alike.
+    #[test]
+    fn every_instruction_set_places_alike() {
+        // Keys of one to four characters drawn from 512, skewed, so that rows run from one child
+        // to hundreds.
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut keys: Vec<String> = (0..20_000)
+            .map(|_| {
+                let len = 1 + next() % 4;
+                (0..len)
+                    .map(|_| {
+                        let c = (next() % 512).min(next() % 512) as u32;
+                        char::from_u32(0x4E00 + c).unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut chars: Vec<char> = keys.iter().flat_map(|k| k.chars()).collect();
+        chars.sort_unstable();
+        chars.dedup();
+        let (mut labels, mut starts) = (Vec::new(), Vec::new());
+        for k in &keys {
+            starts.push(labels.len());
+            labels.extend(
+                k.chars()
+                    .map(|c| chars.binary_search(&c).unwrap() as u16 + 1),
+            );
+        }
+        starts.push(labels.len());
+        let t = Trie::build(&labels, &starts, 0);
+        assert_eq!(
+            place(&t, chars.len()).unwrap(),
+            place_with(&t, chars.len()).unwrap()
+        );
     }
 
     #[test]
