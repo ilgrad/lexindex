@@ -195,37 +195,48 @@ struct Trie {
 }
 
 impl Trie {
-    /// `keys[id]` as labels are `labels[starts[id] .. starts[id + 1]]`; `order` holds the ids of
-    /// the non-empty keys, sorted by their labels.
-    fn build(labels: &[u16], starts: &[usize], order: &[u32]) -> Self {
-        let key = |i: u32| &labels[starts[i as usize]..starts[i as usize + 1]];
+    /// `keys[id]` as labels are `labels[starts[id] .. starts[id + 1]]`, the keys distinct and in
+    /// byte order from `first_key` on, and none of them empty.
+    ///
+    /// Byte order puts the keys under a node in one run of ids, as label order would, but runs
+    /// its children in code-point order: each node's are sorted by label before they are numbered.
+    fn build(labels: &[u16], starts: &[usize], first_key: usize) -> Self {
+        let n = starts.len() - 1;
         let mut t = Trie {
             label: vec![0],
             word: vec![NO_WORD],
             first: Vec::new(),
         };
-        // (lo, hi, depth): the keys under each node, as a range of `order`.
-        let mut span: Vec<(u32, u32, u32)> = vec![(0, order.len() as u32, 0)];
+        // (lo, hi, depth): the keys under each node, a range of ids.
+        let mut span: Vec<(u32, u32, u32)> = vec![(first_key as u32, n as u32, 0)];
+        let mut runs: Vec<(u16, u32, u32)> = Vec::new();
         let mut v = 0;
         while v < t.label.len() {
             let (mut lo, hi, d) = span[v];
             let d = d as usize;
-            if lo < hi && key(order[lo as usize]).len() == d {
-                t.word[v] = order[lo as usize];
+            // The key the node spells sorts first among the keys under it.
+            if lo < hi && starts[lo as usize + 1] - starts[lo as usize] == d {
+                t.word[v] = lo;
                 lo += 1;
             }
             t.first.push(t.label.len() as u32);
+            // Every key left is longer than `d`: it extends the node's, and is not it.
+            runs.clear();
             let mut i = lo;
             while i < hi {
-                let c = key(order[i as usize])[d];
+                let c = labels[starts[i as usize] + d];
                 let mut j = i + 1;
-                while j < hi && key(order[j as usize])[d] == c {
+                while j < hi && labels[starts[j as usize] + d] == c {
                     j += 1;
                 }
+                runs.push((c, i, j));
+                i = j;
+            }
+            runs.sort_unstable_by_key(|r| r.0);
+            for &(c, i, j) in &runs {
                 t.label.push(c);
                 t.word.push(NO_WORD);
                 span.push((i, j, d as u32 + 1));
-                i = j;
             }
             v += 1;
         }
@@ -502,8 +513,12 @@ impl DoubleArrayIndex {
         S: AsRef<str>,
     {
         let mut keys: Vec<S> = items.into_iter().collect();
-        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
+        // Keys that arrive strictly ascending are what the sort and the dedup would leave, and one
+        // comparison a key finds out.
+        if !keys.is_sorted_by(|a, b| a.as_ref() < b.as_ref()) {
+            keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+            keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
+        }
         Self::build_ranked(&keys)
     }
 
@@ -520,17 +535,20 @@ impl DoubleArrayIndex {
             .is_some_and(|k| k.as_ref().is_empty())
             .then_some(0);
 
+        // Every key's characters, decoded once.
+        let mut cps: Vec<u32> = Vec::new();
+        let mut starts: Vec<usize> = Vec::with_capacity(n + 1);
+        for k in keys {
+            starts.push(cps.len());
+            cps.extend(k.as_ref().chars().map(u32::from));
+        }
+        starts.push(cps.len());
+
         // Labels: 1 for the most frequent character, ties by code point, so the same keys always
         // number the same way.
-        let mut freq: Vec<u64> = Vec::new();
-        for k in keys {
-            for c in k.as_ref().chars() {
-                let cp = c as usize;
-                if cp >= freq.len() {
-                    freq.resize(cp + 1, 0);
-                }
-                freq[cp] += 1;
-            }
+        let mut freq = vec![0u64; cps.iter().max().map_or(0, |&cp| cp as usize + 1)];
+        for &cp in &cps {
+            freq[cp as usize] += 1;
         }
         let mut chars: Vec<(u64, u32)> = freq
             .iter()
@@ -563,8 +581,7 @@ impl DoubleArrayIndex {
             }
         }
         supp.sort_unstable();
-        let label_of = |c: char| -> u16 {
-            let cp = c as u32;
+        let label_of = |cp: u32| -> u16 {
             if cp < BMP {
                 table[cp as usize]
             } else {
@@ -575,24 +592,10 @@ impl DoubleArrayIndex {
             }
         };
 
-        // Every key as labels, and the non-empty ones in label order: frequency order does not
-        // group what byte order does.
-        let mut labels: Vec<u16> = Vec::new();
-        let mut starts: Vec<usize> = Vec::with_capacity(n + 1);
-        for k in keys {
-            starts.push(labels.len());
-            labels.extend(k.as_ref().chars().map(label_of));
-        }
-        starts.push(labels.len());
-        let mut order: Vec<u32> = (0..n as u32)
-            .filter(|&i| starts[i as usize] < starts[i as usize + 1])
-            .collect();
-        order.sort_unstable_by(|&a, &b| {
-            labels[starts[a as usize]..starts[a as usize + 1]]
-                .cmp(&labels[starts[b as usize]..starts[b as usize + 1]])
-        });
-        let trie = Trie::build(&labels, &starts, &order);
-        drop((labels, starts, order));
+        let labels: Vec<u16> = cps.iter().map(|&cp| label_of(cp)).collect();
+        drop(cps);
+        let trie = Trie::build(&labels, &starts, usize::from(empty.is_some()));
+        drop((labels, starts));
 
         let base = place(&trie, max_label)?;
         let n_slots = if max_label == 0 {
