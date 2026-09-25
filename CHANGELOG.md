@@ -4,6 +4,82 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.1] — 2026-09-25
+
+### Fixed
+
+- **A `DictIndex` lookup at ten million keys and block 32 is back at 4.4.0's time; 4.4.1 had made
+  it up to 23 % slower.** 4.4.1 gave every run of two or more blocks whose samples tie a trie of
+  their words — a threshold measured on file paths, whose runs are 183 and 3 572 blocks long. Where
+  runs are short, the trie's reads (its roots,
+  a node, three edge arrays megabytes apart) replaced two or three head compares on adjacent lines:
+  over ten million DNA reads at block 32 all 312 500 blocks sit in 65 536 runs of 3–7, so every
+  lookup took a trie, 6.3 MB of them, for 6.4 more L2-missing fills and 2.3 more page walks a probe.
+  Only a run of eight blocks or more gets a trie now. In a quiet A/B, three processes a variant,
+  alternated (`bench/results/ties-ab-2026-09-25-arz-2be75f3.txt`): DNA 724 → 595 ns (4.4.0: 588),
+  the routed layout 705 → 605 (600), English titles 677 → 661 (646), URLs 774 → 747 (738); paths at
+  block 256 keep 4.4.1's gain, 700 against 4.4.0's 782; and DNA at 1024, where no samples tie, reads
+  472–475 in all three. A minimum of 32 read as 8 does on titles and URLs, 660 and 749. Blobs are
+  unchanged.
+- **On a 32-bit target, a crafted blob of a hash index could make a load panic rather than fail.**
+  The count of the perfect hash's remap low words was multiplied in `usize`, which wraps there for a
+  header claiming enough entries over a wide enough image; the table came out short, and only the
+  bounds checks on its reads kept a load inside it, by panicking. The count is now checked, and such
+  a blob is refused as too large — which the remap's reads, unchecked since this release (below),
+  depend on. A property test holds the count to the exact one worked out in 128 bits.
+
+### Changed
+
+- **`DictIndex` builds 9–33 % faster, on every one of 13 corpora at blocks 32, 256 and 1024, blobs
+  byte for byte the same.** A build already ran on every thread; the gain is in the part no thread
+  shared. Training draws
+  its samples from the runs it keeps rather than walking every key; the order check and the key
+  view's page faults run on every thread; the phrase trie a round builds is laid out 64 slots at a
+  time and reads a candidate's head in one load; and a round ranks its candidates by merging the
+  partitions' sorted leads. In a quiet A/B, one build a process, 11 rounds alternated
+  (`bench/results/dict-build-ab-2026-09-25-arz-8c99766.txt`): English titles at block 32 397 →
+  349 ms, Chinese titles 272 → 224, URLs 404 → 367, numbers 85 → 60 — the least gain 9.3 % (URLs),
+  the most 32.5 % (numbers at 1024). ART, the quickest builder in the string-index suite, built the
+  English titles in 161 ms in its 4.5.0 campaign, where lexindex's quickest took 400: the gap is
+  narrower, not closed.
+- **`DoubleArrayIndex` builds in under half the time, and maps its file as fast as darts-clone opens
+  one.** Over jieba 0.42.1's 349 045 words
+  (`bench/results/cjk-build-load-2026-09-25-arz-6623184.txt`), a build takes 0.159 s where 4.5.0
+  took 0.354, 6.49 G instructions → 2.49 G: the trie is built from the keys in byte order, each
+  decoded once; a narrow row's search tests a sparse stretch of the array word by word; and the
+  placement tests four words an instruction where the CPU has AVX2. darts-clone still builds in
+  0.055 s and cedarwood in 0.099 — 2.9× and 1.6× quicker. A load's walk over every slot, which is
+  what lets no query check a bound, now runs on the slots' 32-bit halves, eight slots an AVX2
+  instruction or four with SSE2, 15.0 M → 2.7 M instructions: `load_mmap` 1.03 → 0.62 ms in a
+  pairwise run against darts-clone's `open` at 0.59–0.66 in the same processes, and 0.70 against
+  0.81 in the table's run; `load` 2.1 → 1.6. The same slots are refused, and blobs are byte for byte
+  4.5.0's.
+- **The perfect hash's lookup: a key the first level bumps runs 22.5 % fewer instructions, and the
+  single lookup is ahead of PtrHash's fast set at a million keys where it was level.** The seed's
+  shift is added to the hash before its field is cut out, one instruction fewer on every placed key.
+  A bumped key decodes its later level through the step table the first level ships; counts the
+  remap's window with `popcnt` where the CPU has it, found by std's cached detection — every other
+  target and Miri run the portable build, and a property test holds the two to the same answers;
+  and reads the remap's tables without a bounds check past the one on its entry, on lengths and
+  samples the loader has validated. Per key at a million keys, the harness's loop included: 284.8 →
+  220.7 instructions a bumped key, 24.7 → 22.8 over all keys, and 2.85 fewer in the `id` of
+  `ClosedHashIndex`, `CompactHashIndex`, `HashedDictIndex` and `PerfectHashIndex`. In a cool A/B of
+  `bench/mphf_vs`, one lookup thread, six processes a commit
+  (`bench/results/mphf-cool-ab-2026-09-25-arz-e523ecd.txt`): the single lookup 1.8 → 1.65 ns at
+  1 M against fast's 1.8, and 2.5 → 2.4 at 10 M against 2.9; `index_all` 2.0 → 1.9 and 2.5 → 2.45,
+  against 2.4 and 2.8.
+
+### Documentation
+
+- **`SECURITY.md` counts 21 `unsafe fn`s and 62 blocks,** the three builds for an instruction the
+  x86-64 baseline lacks among them — the remap's `popcnt` lookup and the double array's AVX2
+  placement and slot check — each entered only once `is_x86_feature_detected!` has found it.
+- **The double array's build and load numbers are 4.5.1's** in the README, the design notes and
+  the benchmarks, whose table now says where it still loses (the build) and where it no longer does
+  (the load); the perfect hash's benchmarks record the single lookup's lead.
+- **The frontier harness times `DoubleArrayIndex`,** and reports a corpus past its limits as
+  refused rather than as a failure; the tables list only the structures a campaign ran.
+
 ## [4.5.0] — 2026-09-25
 
 ### Added
