@@ -1009,29 +1009,41 @@ a key — on a `CompactHashIndex` at 1.24 bytes a key, 5 % of the index — for 
 33–60× the lookup at 10 M. That is the right answer for an archive written once and read rarely;
 this crate's tables are read on every `id`, and 1.92 bits is where its lookup stays first.
 
-What this campaign does not have. A second CPU: one Ryzen 7 5800HS, a mobile part with 16 MB of
-L3, and the 100 M rows are where its memory system shows — a server part with a larger cache and
-more channels moves every row there. A 1 B row in the tables: one process and one round, eight
-build and eight lookup threads, the probe order sampled to 10 M keys because the full one is
-another 8 GB beside a 14 GB construction peak, started at 48.1 °C and ended at 83 °C
-([`bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt)).
-It built `MPH3` over 10⁹ keys in 7.7 s at 1.914 bits and **2.6 GB above the keys**, against
-26.5–433 s and 8.1–14.4 GB for PtrHash's three sets and 21–100 s and 9.7 GB for the `ph` rows. Its
-batch is the fastest there, 7.5 ns against PtrHash fast's 8.0 and compact's 8.4, and its single
-lookup the fastest near 2 bits, 14.3 ns against PHast's 19.6 and compact's 24.8, with fast's
-0.3 ns ahead at 14.0. With eight lookup threads it is behind: fast's single lookups read 4.0 ns
-against 4.3, and PtrHash compact's and balanced's batches 3.2 and 3.3 against 4.1. Those two
-columns are the least settled here — over the same lookup code they moved by up to 58 % between
-processes: the run at `e147b05` read `MPH3` at 3.1 / 2.6 ns single / batch against fast's 3.0 and
-compact's 2.5, and a second process after this run, lexindex and compact only, 3.2 / 2.8 against
-compact's 3.9 / 2.2 — so compact's eight-thread batch is ahead in all three. The 1 B run before
-the harness corrections above, on a hot machine, read 30.0 and 9.9 ns for `MPH3`'s single and
-batch lookups over sorted keys, behind every PtrHash set. Confidence intervals: in their place,
-every cell's minimum with the spread of its repeats, in the results file — builds repeat within
-6 % on one thread and within 7 % on eight but for lexindex's 12 ms build at 1 M (38 %); lookups
-within 10 % at 1 M but for PtrHash fast's (15 %), within 6 % at 10 M but for lexindex's (19 %:
-passes of 26 ms) and within 5 % at 100 M; batches within 8 % but for lexindex's at 1 M (18 %:
-passes of 2.2 ms).
+What this campaign does not have. A second CPU: one Ryzen 7 5800HS, a mobile part with 16 MB of L3,
+and the 100 M rows are where its memory system shows — a server part with a larger cache and more
+channels moves every row there. A 1 B row in the tables — it has runs of its own, eight build and
+eight lookup threads with the probe order sampled to 10 M keys, because the full one is another 8 GB
+beside a 14 GB construction peak. The first, on 2026-09-17 at `08094a1`
+([`bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt)),
+built `MPH3` over 10⁹ keys in 7.7 s at 1.914 bits and **2.6 GB above the keys**, against 26.5–433 s
+and 8.1–14.4 GB for PtrHash's three sets and 21–100 s and 9.7 GB for the `ph` rows, whose PHast
+answered a lookup in 19.6 ns. At 4.5.2, three processes with four copies of each table and where
+each copy landed read beside it, and a fourth with huge pages off
+([`bench/results/mphf-vs-1b-2026-09-26-arz-8537f35.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-26-arz-8537f35.txt)):
+`MPH3`'s single lookup is the fastest of the four rows there, 12.8 ns against PtrHash fast's 13.9
+and compact's 24.6, and so is its batch, 7.0 against 7.7 and 8.4 (medians over twelve copies). With
+eight lookup threads every row waits on how fast the memory under its table answers random loads,
+and on this machine — two unequal modules, the top 16 GiB of memory interleaved across both channels
+— that is where the table lands: `MPH3`'s tables, on the huge pages they ask for, landed on memory
+21–23 % slower for random loads than PtrHash's on small pages (3.20 against 2.60–2.64 ns a load,
+each copy's own pages read by eight threads), and its eight-thread columns followed that rate within
+3 %. So with eight threads its lookup read 3.5 ns against fast's 2.9 and compact's 4.0, and its
+batch 3.1 against compact's 2.5, balanced's 2.3 and fast's 2.7. With huge pages off its tables land
+where PtrHash's do, and the eight-thread lookup reads 3.1 against fast's 2.9 — level on the same
+memory, 1.16 and 1.13 times its rate, where compact and balanced take 1.5 — but the batch 2.9
+against compact's and balanced's 2.4: **the eight-thread batch is where `MPH3` loses at a billion
+keys, 21 % behind PtrHash compact on the same memory.** Without huge pages its one-thread batch also
+reads 8 % faster here and its single lookup 10 % slower; a machine with matched modules has no
+slower part for huge pages to land in, and this campaign has none to measure that on. On 2026-09-17
+the eight-thread columns moved by up to 58 % between processes over the same code, and that is the
+size of this: `MPH3`'s copies here moved as much with where they landed, 32–58 % between the table
+built and its clones in a run that read the sequential rate only. The 1 B run before the harness
+corrections above, on a hot machine, read 30.0 and 9.9 ns for `MPH3`'s single and batch lookups over
+sorted keys, behind every PtrHash set. Confidence intervals: in their place, every cell's minimum
+with the spread of its repeats, in the results file — builds repeat within 6 % on one thread and
+within 7 % on eight but for lexindex's 12 ms build at 1 M (38 %); lookups within 10 % at 1 M but for
+PtrHash fast's (15 %), within 6 % at 10 M but for lexindex's (19 %: passes of 26 ms) and within 5 %
+at 100 M; batches within 8 % but for lexindex's at 1 M (18 %: passes of 2.2 ms).
 
 <sub>The three tables were measured 2026-09-17 at `08094a1`
 ([`bench/results/mphf-vs-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-17-arz-08094a1.txt)),

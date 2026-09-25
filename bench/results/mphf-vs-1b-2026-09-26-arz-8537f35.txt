@@ -1,0 +1,183 @@
+bench/mphf_vs at 8537f35, the 1 B row with where each table landed read beside it: lexindex 4.5.2 (`6969644`),
+ptr_hash 2.1.1. Four processes on 2026-09-26, 01:35-02:35 +03:00, each
+`MPHF_VS_ROWS=lexindex,compact,balanced,fast MPHF_VS_COPIES=4 MPHF_VS_PLACEMENT=1 MPHF_VS_LOOKUP_THREADS=8
+MPHF_VS_PROBES=10000000 mphf_vs 1000000000 1 8`, the fourth with `MPHF_VS_NO_THP=1` as well: eight build threads
+and one round; four copies of every table, lexindex's and PtrHash fast's cloned from the table built, compact's
+and balanced's built again; every lookup column the median over the copies of each copy's fastest of three
+passes, over 10 M probe keys drawn at random with replacement; x8 = wall ns a key with eight lookup threads over
+shares of the probe order. Placement, per copy: its resident MB (the pages of the allocations of 1 MiB or more
+made while it was built or cloned that are resident and the process's own, by /proc/self/pagemap); the GB/s at
+which eight threads read every line of those pages, 4 KiB at a time in a shuffled order; and the wall ns a load
+of eight threads' independent loads of random lines of them, 2.5 M each, the fastest of three passes -- each
+read before the lookups and after. Each process started after a 1-minute load under 0.3 and Tctl under 60 C
+had held for a minute and bench-ready was green (45-48 C at the starts, 75-79 C at the ends), on mains, an
+editor open and idle; 2 MiB of zram swap was in use from an earlier run and nothing was swapped in or out during
+these. Ryzen 7 5800HS (8 cores, 16 MB L3), 38 GB: an 8 GB module in one rank on channel A and a 32 GB module in
+two ranks on channel B (dmidecode, read 2026-09-21 as root; this run had no root), so the top 16 GiB of physical
+memory interleaves both channels and the rest is B alone; transparent_hugepage/enabled = madvise.
+
+What it says, over the twelve copies of each row in the first three processes (medians, ranges):
+- One thread: MPH3's lookup 12.85 ns (12.72-13.05) against PtrHash fast's 13.86 (13.80-13.92), compact's 24.62
+  and balanced's 24.72; its batch 6.96 (6.79-7.38) against 7.71, 8.43 and 8.41.
+- Eight threads, every row follows the random-load rate of its own table's pages: MPH3's lookup x8 3.12-3.68
+  over a rate of 2.83-3.45 ns a load, correlation 0.99, 1.07-1.10 times it (batch x8 0.96-0.99 times it).
+  PtrHash's tables, on 4 KiB pages, sat on memory that answered random loads faster: 2.56-2.87 ns a load,
+  medians 2.60-2.64 against MPH3's 3.20. At the rate of its own pages a lookup x8 takes 1.09 of it for MPH3,
+  1.12 for fast, 1.52 for compact and 1.53 for balanced; a batch x8 0.98, 1.03, 0.93 and 0.91.
+- The fourth process is the control: huge pages off, MPH3's tables land where PtrHash's do -- 2.62-2.70 ns a
+  load, sequential 25-27 GB/s against 31-32 with them -- and its lookup x8 reads 3.08 (1.16 times the rate: a
+  small page costs a walk) against fast's 2.92, compact's 3.95 and balanced's 3.98; its batch x8 2.88 (1.09)
+  against 2.37, 2.38 and 2.68. The PtrHash rows read as in the other three.
+- So on this machine a table on huge pages lands on memory about a fifth slower for random loads -- mostly the
+  interleaved part, by the sequential rate -- and that, not the lookup, is MPH3's eight-thread gap to fast:
+  3.48 against 2.91 with huge pages, 3.08 against 2.92 without; at the same rate it is 3 % ahead of fast with
+  them and 3 % behind without. The eight-thread batch gap is the lookup's: on the same memory compact and
+  balanced read 2.37 and 2.38 and MPH3 2.88, 21 % slower (1.09 of the rate against 0.91 and 0.92).
+- Without huge pages MPH3's one-thread batch reads 8 % faster here (6.41 against 6.96: its lines come from the
+  faster memory) and its single lookup 10 % slower (14.09 against 12.85: a walk on the chain).
+
+The first run, at 8d90863, read the sequential rate only (three processes, below the others). It read the table
+MPH3 built 32-58 % slower with eight threads than its three clones in each process, at the same sequential
+rate; a clone made onto the pages the built table had freed then read as the built table had, in two
+processes of three at the same page walks a key (a separate local harness), and the random-load rate was added
+for that: it follows each copy's lookups, where the sequential one sees the channel only.
+
+process 1 of 3, huge pages as the tables ask:
+2026-09-26T01:35:32+03:00 process 1, Tctl 45.0 C, load 0.10 0.51 0.98
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      8.0   +0.0%     12.7   +1.3%      6.9   +2.7%      3.3  +11.9%      3.0  +14.2%        2602.3    220.0
+ptr_hash 2.1.1 compact                   2.143     44.3   +0.0%     24.6   +0.2%      8.4   +1.1%      3.9   +7.9%      2.4  +18.4%        8410.8    888.0
+ptr_hash 2.1.1 balanced                  2.378     25.6   +0.0%     24.7   +0.7%      8.4   +2.9%      3.9   +0.6%      2.3   +3.0%        7991.6    888.0
+ptr_hash 2.1.1 fast                      2.990    429.6   +0.0%     13.9   +0.6%      7.7   +0.6%      2.9   +4.1%      2.6   +8.6%       14510.6    888.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        238 MB 31.26 -> 31.94 GB/s 3.16 -> 3.19 ns | 238 MB 32.02 -> 32.05 GB/s 3.05 -> 3.06 ns | 238 MB 31.86 -> 31.74 GB/s 3.17 -> 3.19 ns | 238 MB 31.67 -> 31.67 GB/s 2.83 -> 2.84 ns
+ptr_hash 2.1.1 compact               269 MB 23.03 -> 23.25 GB/s 2.88 -> 2.85 ns | 269 MB 27.16 -> 27.88 GB/s 2.62 -> 2.60 ns | 269 MB 27.34 -> 27.73 GB/s 2.60 -> 2.58 ns | 269 MB 27.57 -> 27.79 GB/s 2.59 -> 2.58 ns
+ptr_hash 2.1.1 balanced              298 MB 27.98 -> 28.20 GB/s 2.59 -> 2.57 ns | 298 MB 28.75 -> 28.93 GB/s 2.57 -> 2.55 ns | 298 MB 30.50 -> 30.35 GB/s 2.60 -> 2.59 ns | 298 MB 30.51 -> 30.73 GB/s 2.62 -> 2.62 ns
+ptr_hash 2.1.1 fast                  374 MB 30.72 -> 30.83 GB/s 2.64 -> 2.63 ns | 374 MB 26.90 -> 26.18 GB/s 2.67 -> 2.67 ns | 374 MB 29.30 -> 29.43 GB/s 2.59 -> 2.59 ns | 374 MB 28.93 -> 28.84 GB/s 2.59 -> 2.59 ns
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        12.89 12.72 12.73 12.76 / 6.97 6.92 6.94 6.79 / 3.46 3.34 3.49 3.12 / 3.10 2.98 3.13 2.74
+ptr_hash 2.1.1 compact               24.56 24.60 24.60 24.59 / 8.44 8.40 8.35 8.36 / 4.23 3.96 3.94 3.92 / 2.75 2.42 2.38 2.32
+ptr_hash 2.1.1 balanced              24.73 24.89 24.87 24.74 / 8.52 8.62 8.41 8.38 / 3.94 3.94 3.93 3.96 / 2.35 2.34 2.28 2.31
+ptr_hash 2.1.1 fast                  13.88 13.84 13.92 13.86 / 7.70 7.75 7.71 7.71 / 2.88 3.00 2.89 2.89 / 2.59 2.82 2.63 2.65
+2026-09-26T01:48:00+03:00 end, Tctl 78.1 C, rc 0
+
+process 2 of 3, huge pages as the tables ask:
+2026-09-26T01:51:15+03:00 process 2, Tctl 47.5 C, load 0.10 1.16 1.79
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      7.9   +0.0%     12.8   +1.7%      7.0   +1.5%      3.5   +5.0%      3.1   +7.0%        2602.3    220.0
+ptr_hash 2.1.1 compact                   2.143     44.1   +0.0%     24.7   +0.4%      8.4   +1.3%      4.0   +1.7%      2.4   +3.1%        8384.8    888.0
+ptr_hash 2.1.1 balanced                  2.378     25.8   +0.0%     24.7   +0.6%      8.4   +1.5%      3.9   +2.8%      2.2  +11.0%        7976.0    888.0
+ptr_hash 2.1.1 fast                      2.990    427.9   +0.0%     13.9   +0.2%      7.7   +0.6%      2.9   +2.2%      2.7   +4.2%       14469.8    888.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        238 MB 31.71 -> 31.87 GB/s 3.14 -> 3.15 ns | 238 MB 31.38 -> 31.40 GB/s 3.37 -> 3.35 ns | 238 MB 31.68 -> 31.70 GB/s 3.21 -> 3.22 ns | 238 MB 31.46 -> 31.40 GB/s 3.32 -> 3.32 ns
+ptr_hash 2.1.1 compact               269 MB 26.39 -> 26.48 GB/s 2.65 -> 2.63 ns | 269 MB 26.48 -> 26.75 GB/s 2.64 -> 2.64 ns | 269 MB 27.56 -> 27.51 GB/s 2.59 -> 2.59 ns | 269 MB 26.27 -> 26.32 GB/s 2.68 -> 2.66 ns
+ptr_hash 2.1.1 balanced              298 MB 27.14 -> 27.14 GB/s 2.62 -> 2.62 ns | 298 MB 27.75 -> 27.40 GB/s 2.60 -> 2.61 ns | 298 MB 29.93 -> 29.97 GB/s 2.56 -> 2.56 ns | 298 MB 31.33 -> 31.09 GB/s 2.64 -> 2.65 ns
+ptr_hash 2.1.1 fast                  374 MB 27.96 -> 27.73 GB/s 2.61 -> 2.63 ns | 374 MB 29.10 -> 29.12 GB/s 2.57 -> 2.59 ns | 374 MB 28.10 -> 27.99 GB/s 2.60 -> 2.62 ns | 374 MB 27.66 -> 27.39 GB/s 2.62 -> 2.65 ns
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        12.80 12.79 12.72 12.93 / 6.94 7.04 6.95 7.05 / 3.46 3.63 3.47 3.61 / 3.11 3.32 3.13 3.29
+ptr_hash 2.1.1 compact               24.65 24.69 24.71 24.62 / 8.43 8.52 8.44 8.41 / 3.99 4.01 3.94 3.99 / 2.43 2.46 2.42 2.49
+ptr_hash 2.1.1 balanced              24.65 24.67 24.73 24.79 / 8.43 8.41 8.31 8.37 / 4.00 3.98 3.89 3.89 / 2.46 2.39 2.24 2.21
+ptr_hash 2.1.1 fast                  13.88 13.87 13.87 13.89 / 7.73 7.72 7.74 7.77 / 2.92 2.89 2.92 2.95 / 2.70 2.64 2.70 2.75
+2026-09-26T02:03:40+03:00 end, Tctl 76.8 C, rc 0
+
+process 3 of 3, huge pages as the tables ask:
+2026-09-26T02:06:45+03:00 process 3, Tctl 47.5 C, load 0.11 1.21 2.14
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      7.8   +0.0%     12.9   +1.0%      7.0   +6.6%      3.6   +9.5%      3.2  +13.8%        2601.9    218.0
+ptr_hash 2.1.1 compact                   2.143     44.0   +0.0%     24.6   +0.8%      8.5   +1.7%      4.0   +1.0%      2.5   +2.5%        8409.1    888.0
+ptr_hash 2.1.1 balanced                  2.378     25.7   +0.0%     24.6   +0.7%      8.4   +0.8%      4.0   +2.3%      2.3  +11.1%        8047.0    888.0
+ptr_hash 2.1.1 fast                      2.990    428.3   +0.0%     13.8   +0.2%      7.7   +0.6%      2.9   +2.0%      2.7   +7.1%       14468.2    888.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        238 MB 31.28 -> 31.70 GB/s 3.31 -> 3.31 ns | 238 MB 31.41 -> 31.70 GB/s 3.30 -> 3.30 ns | 238 MB 30.89 -> 30.82 GB/s 3.44 -> 3.45 ns | 238 MB 32.21 -> 31.93 GB/s 3.10 -> 3.10 ns
+ptr_hash 2.1.1 compact               269 MB 26.40 -> 26.38 GB/s 2.66 -> 2.66 ns | 269 MB 26.25 -> 26.34 GB/s 2.66 -> 2.66 ns | 269 MB 26.10 -> 26.21 GB/s 2.67 -> 2.68 ns | 269 MB 26.96 -> 26.82 GB/s 2.64 -> 2.64 ns
+ptr_hash 2.1.1 balanced              298 MB 27.66 -> 27.65 GB/s 2.62 -> 2.62 ns | 298 MB 26.18 -> 27.52 GB/s 2.61 -> 2.60 ns | 298 MB 29.71 -> 29.56 GB/s 2.57 -> 2.57 ns | 298 MB 30.09 -> 30.09 GB/s 2.59 -> 2.58 ns
+ptr_hash 2.1.1 fast                  374 MB 30.98 -> 31.05 GB/s 2.67 -> 2.67 ns | 374 MB 28.34 -> 28.40 GB/s 2.60 -> 2.58 ns | 374 MB 28.27 -> 28.47 GB/s 2.62 -> 2.60 ns | 374 MB 27.99 -> 28.19 GB/s 2.62 -> 2.60 ns
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        13.05 12.93 13.02 12.93 / 7.00 7.29 7.38 6.92 / 3.57 3.56 3.68 3.36 / 3.24 3.22 3.41 2.99
+ptr_hash 2.1.1 compact               24.75 24.62 24.63 24.56 / 8.41 8.55 8.48 8.47 / 4.05 4.03 4.06 4.02 / 2.51 2.56 2.58 2.54
+ptr_hash 2.1.1 balanced              24.71 24.53 24.63 24.64 / 8.36 8.40 8.42 8.40 / 4.03 4.00 3.96 3.94 / 2.50 2.45 2.33 2.25
+ptr_hash 2.1.1 fast                  13.83 13.83 13.80 13.81 / 7.66 7.65 7.70 7.67 / 2.89 2.90 2.95 2.94 / 2.56 2.68 2.73 2.74
+2026-09-26T02:19:10+03:00 end, Tctl 74.8 C, rc 0
+
+process 4, the control, MPHF_VS_NO_THP=1:
+2026-09-26T02:22:54+03:00 process 1, Tctl 47.8 C, load 0.10 1.14 2.20
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      8.3   +0.0%     14.1   +0.4%      6.4   +0.7%      3.0   +3.1%      2.9   +4.7%        2601.9      0.0
+ptr_hash 2.1.1 compact                   2.143     44.4   +0.0%     24.4   +0.4%      8.3   +0.8%      3.9   +1.4%      2.3   +5.2%        8427.2      0.0
+ptr_hash 2.1.1 balanced                  2.378     25.3   +0.0%     24.5   +0.7%      8.4   +0.5%      4.0   +2.4%      2.4   +7.0%        7938.7      0.0
+ptr_hash 2.1.1 fast                      2.990    429.1   +0.0%     13.8   +0.7%      7.7   +0.3%      2.9   +2.8%      2.7   +5.2%       14463.2      0.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        238 MB 25.16 -> 25.51 GB/s 2.70 -> 2.69 ns | 238 MB 26.10 -> 26.55 GB/s 2.67 -> 2.67 ns | 238 MB 26.69 -> 26.58 GB/s 2.62 -> 2.61 ns | 238 MB 26.64 -> 26.78 GB/s 2.63 -> 2.62 ns
+ptr_hash 2.1.1 compact               269 MB 27.16 -> 27.11 GB/s 2.62 -> 2.63 ns | 269 MB 28.81 -> 28.80 GB/s 2.56 -> 2.56 ns | 269 MB 28.03 -> 28.10 GB/s 2.58 -> 2.57 ns | 269 MB 27.53 -> 27.30 GB/s 2.59 -> 2.60 ns
+ptr_hash 2.1.1 balanced              298 MB 26.24 -> 26.76 GB/s 2.65 -> 2.64 ns | 298 MB 28.08 -> 28.10 GB/s 2.59 -> 2.58 ns | 298 MB 29.17 -> 29.45 GB/s 2.56 -> 2.55 ns | 298 MB 28.67 -> 28.92 GB/s 2.57 -> 2.56 ns
+ptr_hash 2.1.1 fast                  374 MB 28.63 -> 28.42 GB/s 2.59 -> 2.58 ns | 374 MB 27.57 -> 27.75 GB/s 2.63 -> 2.62 ns | 374 MB 28.46 -> 28.84 GB/s 2.57 -> 2.58 ns | 374 MB 28.89 -> 28.87 GB/s 2.58 -> 2.58 ns
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        14.10 14.07 14.04 14.10 / 6.43 6.40 6.41 6.38 / 3.14 3.10 3.04 3.05 / 2.97 2.92 2.83 2.85
+ptr_hash 2.1.1 compact               24.45 24.44 24.42 24.51 / 8.34 8.39 8.35 8.41 / 3.97 3.92 3.94 3.96 / 2.40 2.28 2.34 2.39
+ptr_hash 2.1.1 balanced              24.49 24.46 24.62 24.55 / 8.38 8.43 8.41 8.41 / 4.03 4.01 3.96 3.94 / 2.51 2.41 2.34 2.35
+ptr_hash 2.1.1 fast                  13.73 13.82 13.83 13.78 / 7.73 7.74 7.72 7.71 / 2.90 2.98 2.92 2.91 / 2.64 2.78 2.69 2.67
+2026-09-26T02:35:21+03:00 end, Tctl 79.1 C, rc 0
+
+the first run, at 8d90863 (the sequential rate only), process 1 of 3:
+2026-09-26T00:27:53+03:00 process 1, Tctl 48.1 C, load 0.25 1.06 0.89
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      7.8   +0.0%     12.7   +4.2%      6.7   +9.1%      2.9  +39.3%      2.7  +50.6%        2602.1    220.0
+ptr_hash 2.1.1 compact                   2.143     46.8   +0.0%     24.6   +0.7%      8.2   +2.1%      4.4   +6.1%      3.0  +14.0%        8410.6    888.0
+ptr_hash 2.1.1 balanced                  2.378     26.9   +0.0%     24.6   +0.5%      8.3   +1.0%      4.4   +5.2%      3.1   +9.7%        7962.0    888.0
+ptr_hash 2.1.1 fast                      2.990    439.6   +0.0%     13.9   +0.8%      7.9   +3.1%      3.2  +28.9%      3.2  +25.7%       14463.0    888.0
+placement, per copy and round: resident MB, then GB/s at which 8 threads read its pages 4 KiB at a time in a shuffled order, before the lookups -> after
+lexindex MPH3                        238 MB 27.49 -> 27.51 | 238 MB 27.87 -> 27.73 | 238 MB 29.03 -> 29.11 | 238 MB 27.19 -> 27.40
+ptr_hash 2.1.1 compact               269 MB 32.13 -> 31.28 | 269 MB 30.24 -> 29.71 | 269 MB 31.97 -> 31.23 | 269 MB 32.22 -> 32.06
+ptr_hash 2.1.1 balanced              298 MB 32.70 -> 31.83 | 298 MB 30.03 -> 29.70 | 298 MB 32.01 -> 31.77 | 298 MB 29.99 -> 29.66
+ptr_hash 2.1.1 fast                  374 MB 32.97 -> 32.85 | 374 MB 23.44 -> 23.52 | 374 MB 24.62 -> 24.56 | 374 MB 29.95 -> 29.97
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        13.21 12.72 12.68 12.90 / 7.31 6.71 6.76 6.70 / 4.02 2.92 2.89 2.90 / 3.88 2.69 2.58 2.71
+ptr_hash 2.1.1 compact               24.63 24.66 24.67 24.50 / 8.39 8.28 8.22 8.21 / 4.37 4.55 4.38 4.28 / 3.03 3.25 3.01 2.85
+ptr_hash 2.1.1 balanced              24.64 24.74 24.61 24.69 / 8.24 8.30 8.32 8.30 / 4.40 4.62 4.43 4.57 / 3.04 3.34 3.06 3.26
+ptr_hash 2.1.1 fast                  13.96 13.94 13.88 13.99 / 8.00 7.88 7.84 8.08 / 3.94 3.23 3.16 4.07 / 3.66 3.16 3.03 3.81
+2026-09-26T00:40:40+03:00 end, Tctl 74.8 C, rc 0
+
+the first run, at 8d90863 (the sequential rate only), process 2 of 3:
+2026-09-26T00:43:15+03:00 process 2, Tctl 48.6 C, load 0.16 1.22 1.83
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      8.0   +0.0%     12.6   +3.6%      6.7   +7.8%      2.9  +32.9%      2.7  +40.8%        2601.6    218.0
+ptr_hash 2.1.1 compact                   2.143     45.3   +0.0%     24.5   +1.2%      8.2   +1.0%      3.9   +5.4%      2.2  +18.3%        8430.5    888.0
+ptr_hash 2.1.1 balanced                  2.378     26.5   +0.0%     24.8   +0.9%      8.3   +2.4%      4.0   +4.3%      2.5  +12.1%        7959.9    888.0
+ptr_hash 2.1.1 fast                      2.990    435.5   +0.0%     13.8   +0.5%      8.0   +3.4%      3.9  +20.4%      3.6  +24.6%       14464.9    888.0
+placement, per copy and round: resident MB, then GB/s at which 8 threads read its pages 4 KiB at a time in a shuffled order, before the lookups -> after
+lexindex MPH3                        238 MB 29.27 -> 29.84 | 238 MB 30.02 -> 29.93 | 238 MB 27.93 -> 27.99 | 238 MB 27.92 -> 27.93
+ptr_hash 2.1.1 compact               269 MB 25.40 -> 25.42 | 269 MB 33.20 -> 32.76 | 269 MB 31.04 -> 30.94 | 269 MB 31.54 -> 31.43
+ptr_hash 2.1.1 balanced              298 MB 33.52 -> 33.00 | 298 MB 33.22 -> 32.92 | 298 MB 33.54 -> 33.54 | 298 MB 33.37 -> 33.64
+ptr_hash 2.1.1 fast                  374 MB 33.64 -> 33.37 | 374 MB 30.94 -> 31.18 | 374 MB 31.36 -> 31.48 | 374 MB 29.37 -> 29.56
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        13.06 12.63 12.61 12.63 / 7.20 6.74 6.68 6.75 / 3.85 2.90 2.92 2.91 / 3.64 2.59 2.67 2.71
+ptr_hash 2.1.1 compact               24.36 24.46 24.57 24.65 / 8.25 8.20 8.17 8.16 / 4.09 4.00 3.89 3.88 / 2.59 2.45 2.19 2.20
+ptr_hash 2.1.1 balanced              24.81 24.86 24.83 24.62 / 8.26 8.40 8.26 8.20 / 4.00 4.00 4.03 4.17 / 2.47 2.47 2.51 2.76
+ptr_hash 2.1.1 fast                  13.82 13.82 13.85 13.88 / 7.78 7.95 7.96 8.04 / 3.39 3.95 3.93 4.08 / 3.08 3.66 3.64 3.84
+2026-09-26T00:55:51+03:00 end, Tctl 75.6 C, rc 0
+
+the first run, at 8d90863 (the sequential rate only), process 3 of 3:
+2026-09-26T00:59:26+03:00 process 3, Tctl 47.0 C, load 0.21 1.16 2.11
+n 1000000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 10000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096; each lookup column the median over 4 copies of a table of the copy's fastest pass, spread = slowest copy over fastest; ptr_hash compact's and balanced's copies built again; x8 = wall ns a key with 8 lookup threads over shares of the probe order
+                                      bits/key     build ns/key        lookup ns         batch ns        lookup x8         batch x8 build peak MB  huge MB
+lexindex MPH3                            1.911      7.8   +0.0%     12.7   +4.1%      6.7  +10.8%      2.9  +42.8%      2.6  +58.4%        2602.0    220.0
+ptr_hash 2.1.1 compact                   2.143     46.4   +0.0%     24.5   +0.4%      8.2   +0.8%      3.9   +5.9%      2.2  +20.0%        8449.6    888.0
+ptr_hash 2.1.1 balanced                  2.378     26.8   +0.0%     24.8   +1.0%      8.4   +3.3%      4.0  +15.8%      2.4  +38.5%        7962.3    888.0
+ptr_hash 2.1.1 fast                      2.990    438.1   +0.0%     13.8   +1.2%      7.7   +3.6%      3.1  +32.6%      3.0  +30.4%       14463.2    888.0
+placement, per copy and round: resident MB, then GB/s at which 8 threads read its pages 4 KiB at a time in a shuffled order, before the lookups -> after
+lexindex MPH3                        238 MB 28.00 -> 28.53 | 238 MB 30.00 -> 29.81 | 238 MB 29.45 -> 29.30 | 238 MB 27.74 -> 27.40
+ptr_hash 2.1.1 compact               269 MB 29.14 -> 29.28 | 269 MB 33.42 -> 32.95 | 269 MB 31.64 -> 31.35 | 269 MB 29.72 -> 29.71
+ptr_hash 2.1.1 balanced              298 MB 31.96 -> 31.68 | 298 MB 32.30 -> 31.37 | 298 MB 34.46 -> 32.15 | 298 MB 34.24 -> 31.81
+ptr_hash 2.1.1 fast                  374 MB 33.25 -> 33.29 | 374 MB 24.30 -> 24.17 | 374 MB 25.34 -> 25.11 | 374 MB 24.69 -> 24.46
+per copy, fastest pass (ns): lookup / batch / lookup x / batch x
+lexindex MPH3                        13.18 12.77 12.69 12.65 / 7.37 6.70 6.68 6.65 / 4.11 2.95 2.88 2.90 / 3.97 2.56 2.51 2.60
+ptr_hash 2.1.1 compact               24.46 24.57 24.56 24.46 / 8.19 8.19 8.23 8.16 / 3.90 4.09 3.91 3.87 / 2.19 2.59 2.30 2.16
+ptr_hash 2.1.1 balanced              24.58 24.77 24.81 24.83 / 8.21 8.37 8.43 8.49 / 3.96 3.95 4.54 4.58 / 2.39 2.39 3.23 3.31
+ptr_hash 2.1.1 fast                  13.91 13.79 13.75 13.78 / 7.99 7.74 7.71 7.75 / 4.06 3.13 3.06 3.11 / 3.77 2.97 2.89 2.95
+2026-09-26T01:12:11+03:00 end, Tctl 78.8 C, rc 0
