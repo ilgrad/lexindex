@@ -677,19 +677,48 @@ fn read_ahead<'a, 'k>(keys: &'a [&'k str]) -> impl Iterator<Item = &'k str> + 'a
     })
 }
 
+/// The keys as `str`s every thread of the build can share, which the caller's `S` need not be:
+/// sixteen bytes a key, taken once for the whole build. Taken before the keys are sorted, so that
+/// the order is checked on the view, a range of keys a thread, where on `S` it could only be one.
+fn view_of<S: AsRef<str>>(keys: &[S]) -> Vec<&str> {
+    keys.iter().map(AsRef::as_ref).collect()
+}
+
+/// Whether every key is above the one before it — what keys that come sorted and distinct are —
+/// a range of keys a thread, and each range's last key against the next one's first. Over keys
+/// that came in order the one pass of [`dedup_ascending`] was a step of the build no thread shared:
+/// 13.6 ms of a million article titles and 9.8 of the 68.7 a word list built in, against 4.9 and
+/// 2.4 a range a thread.
+fn strictly_ascending(keys: &[&str], threads: usize) -> bool {
+    let size = keys.len().div_ceil(threads.max(1)).max(1);
+    in_ranges(keys, threads, |range| {
+        let mut prev: Option<&str> = None;
+        read_ahead(range).all(|key| {
+            let above = prev.is_none_or(|p| p < key);
+            prev = Some(key);
+            above
+        })
+    })
+    .into_iter()
+    .all(|above| above)
+        && (size..keys.len())
+            .step_by(size)
+            .all(|i| keys[i - 1] < keys[i])
+}
+
 /// Drop adjacent duplicates from `keys` in place, in the one pass that checks they ascend: `false`
 /// at the first key below its predecessor, with `keys` then a permutation of what it was. It reads
 /// ahead, and stands for the two passes a sort's check for a run and `dedup_by` made over keys
 /// scattered through the heap: 34 ns a key over a million DNA reads against 7 for this one, and 41
 /// against 27 over a million paths.
-fn dedup_ascending<S: AsRef<str>>(keys: &mut Vec<S>) -> bool {
+fn dedup_ascending(keys: &mut Vec<&str>) -> bool {
     let mut kept = 0;
     for i in 0..keys.len() {
         if let Some(next) = keys.get(i + READ_AHEAD) {
-            crate::blob::prefetch_key(next.as_ref().as_bytes());
+            crate::blob::prefetch_key(next.as_bytes());
         }
         if kept > 0 {
-            match keys[i].as_ref().cmp(keys[kept - 1].as_ref()) {
+            match keys[i].cmp(keys[kept - 1]) {
                 Ordering::Less => return false,
                 Ordering::Equal => continue,
                 Ordering::Greater => {}
@@ -704,10 +733,17 @@ fn dedup_ascending<S: AsRef<str>>(keys: &mut Vec<S>) -> bool {
     true
 }
 
+/// Whether `keys` ascend, with their duplicates dropped if they do: [`strictly_ascending`] first,
+/// which answers keys that are distinct already on every thread, and the serial pass only for keys
+/// that are not.
+fn distinct_ascending(keys: &mut Vec<&str>, threads: usize) -> bool {
+    strictly_ascending(keys, threads) || dedup_ascending(keys)
+}
+
 /// `keys` sorted, unless they ascend already, and their duplicates dropped.
-fn sort_distinct<S: AsRef<str>>(keys: &mut Vec<S>) {
-    if !dedup_ascending(keys) {
-        keys.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+fn sort_distinct(keys: &mut Vec<&str>, threads: usize) {
+    if !distinct_ascending(keys, threads) {
+        keys.sort_unstable();
         assert!(dedup_ascending(keys), "sorted keys ascend");
     }
 }
@@ -1827,12 +1863,14 @@ impl DictIndex {
         if !(1..=MAX_BLOCK).contains(&block) {
             return Err(IndexError::Format("dict: block must be in 1..=1024"));
         }
-        // Sorted and deduplicated in place, comparing through `AsRef` rather than collecting owned
-        // `String`s: every key is copied into a block below in either case, so the intermediate
-        // copy only doubled the peak for a caller that already owned the corpus.
-        let mut keys: Vec<S> = items.into_iter().collect();
-        sort_distinct(&mut keys);
-        Self::from_keys(&keys, block, micro_for(block))
+        // Sorted and deduplicated as a view of the keys rather than as owned `String`s: every key
+        // is copied into a block below in either case, so the intermediate copy only doubled the
+        // peak for a caller that already owned the corpus.
+        let keys: Vec<S> = items.into_iter().collect();
+        let threads = build_threads(keys.len(), block);
+        let mut view = view_of(&keys);
+        sort_distinct(&mut view, threads);
+        Self::from_view(view, block, micro_for(block))
     }
 
     /// Build from keys that are **already in ascending byte order** — a sorted file, a database
@@ -1879,13 +1917,15 @@ impl DictIndex {
         if !(1..=MAX_BLOCK).contains(&block) {
             return Err(IndexError::Format("dict: block must be in 1..=1024"));
         }
-        let mut keys: Vec<S> = items.into_iter().collect();
-        if !dedup_ascending(&mut keys) {
+        let keys: Vec<S> = items.into_iter().collect();
+        let threads = build_threads(keys.len(), block);
+        let mut view = view_of(&keys);
+        if !distinct_ascending(&mut view, threads) {
             return Err(IndexError::Format(
                 "dict: build_sorted got a key below its predecessor",
             ));
         }
-        Self::from_keys(&keys, block, micro_for(block))
+        Self::from_view(view, block, micro_for(block))
     }
 
     /// [`build_with_block`](Self::build_with_block) with the microblock size chosen by the caller
@@ -1904,9 +1944,11 @@ impl DictIndex {
         if micro == 0 || block % micro != 0 {
             return Err(IndexError::Format("dict: micro must divide block"));
         }
-        let mut keys: Vec<S> = items.into_iter().collect();
-        sort_distinct(&mut keys);
-        Self::from_keys(&keys, block, micro)
+        let keys: Vec<S> = items.into_iter().collect();
+        let threads = build_threads(keys.len(), block);
+        let mut view = view_of(&keys);
+        sort_distinct(&mut view, threads);
+        Self::from_view(view, block, micro)
     }
 
     /// The constructor for a corpus that does not fit in memory, written straight to `path`: the
@@ -2321,23 +2363,16 @@ impl DictIndex {
         Self::from_sorted_on(keys, block, micro, build_threads(keys.len(), block))
     }
 
-    /// The in-memory build over sorted, distinct keys, spelled in the [character code](charcode)
-    /// they pay for, if any.
-    fn from_keys<S: AsRef<str>>(
-        keys: &[S],
-        block: usize,
-        micro: usize,
-    ) -> Result<Self, IndexError> {
-        // The keys as `str`s every thread of the build can share, which the caller's `S` need not
-        // be: sixteen bytes a key, taken once for the whole build.
-        let view: Vec<&str> = keys.iter().map(AsRef::as_ref).collect();
+    /// The in-memory build over sorted, distinct keys — a [view](view_of) of the caller's — spelled
+    /// in the [character code](charcode) they pay for, if any.
+    fn from_view(view: Vec<&str>, block: usize, micro: usize) -> Result<Self, IndexError> {
         match choose_code(&view, build_threads(view.len(), block)) {
             None => Self::from_sorted(&view, block, micro),
             Some(code) => Self::from_coded(view, block, micro, code),
         }
     }
 
-    /// [`from_keys`](Self::from_keys) under `code`: every key spelled, a range of them a thread,
+    /// [`from_view`](Self::from_view) under `code`: every key spelled, a range of them a thread,
     /// each range into an arena of its own, and the build run over the spellings.
     fn from_coded(
         keys: Vec<&str>,
@@ -5490,21 +5525,31 @@ mod tests {
     }
 
     proptest::proptest! {
-        /// The one pass that checks the order and drops duplicates leaves what a sort and `dedup`
-        /// leave, and refuses exactly the keys that do not ascend, leaving them all.
+        /// The pass that checks the order and drops duplicates leaves what a sort and `dedup`
+        /// leave, and refuses exactly the keys that do not ascend, leaving them all — on any
+        /// number of threads, over keys that come sorted as well as over keys that do not.
         #[test]
         fn one_pass_dedups_as_sort_and_dedup_do(
-            keys in proptest::collection::vec("[ab\u{e9}\u{4e2d}]{0,3}", 0..40),
+            mut keys in proptest::collection::vec("[ab\u{e9}\u{4e2d}]{0,3}", 0..40),
+            sorted in proptest::bool::ANY,
+            threads in 1usize..8,
         ) {
+            if sorted {
+                keys.sort_unstable();
+            }
             let mut want = keys.clone();
             want.sort_unstable();
             want.dedup();
-            let mut got = keys.clone();
-            sort_distinct(&mut got);
+            let mut got = view_of(&keys);
+            sort_distinct(&mut got, threads);
             proptest::prop_assert_eq!(&got, &want);
+            proptest::prop_assert_eq!(
+                strictly_ascending(&view_of(&keys), threads),
+                keys.windows(2).all(|w| w[0] < w[1])
+            );
             let ascends = keys.windows(2).all(|w| w[0] <= w[1]);
-            let mut once = keys.clone();
-            proptest::prop_assert_eq!(dedup_ascending(&mut once), ascends);
+            let mut once = view_of(&keys);
+            proptest::prop_assert_eq!(distinct_ascending(&mut once, threads), ascends);
             if ascends {
                 proptest::prop_assert_eq!(&once, &want);
             } else {
