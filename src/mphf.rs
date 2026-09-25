@@ -812,14 +812,14 @@ impl Level {
 
     /// [`value`](Self::value) under `form`, the level's own or [`Self::SHIPPED`] where a caller
     /// has checked they agree: a loop over many keys then reads the geometry as immediates. Under
-    /// [`MODE_BITS`] mode bits the mode's shift is read from [`FIELD_SHIFT`].
+    /// [`MODE_BITS`] mode bits the mode's shift is read from [`SEED_READS`].
     #[inline(always)]
     fn value_in(&self, form: Form, h: u64, seed: u8) -> u64 {
         let seed = u64::from(seed);
         let shift_bits = 8 - form.mode_bits;
         let t = seed & ((1u64 << shift_bits) - 1);
         let field = if form.mode_bits == MODE_BITS {
-            u32::from(FIELD_SHIFT[seed as usize])
+            u32::from(SEED_READS.field[seed as usize])
         } else {
             8 * (seed >> shift_bits) as u32
         };
@@ -846,6 +846,18 @@ impl Level {
         shift: (SLICE >> (8 - MODE_BITS)).trailing_zeros(),
         mask: SLICE - 1,
     };
+
+    /// [`value_in`](Self::value_in) under [`SHIPPED`](Self::SHIPPED), for the single lookup: the
+    /// seed's shift read from [`SEED_READS`] already at the offset field, and added to the hash
+    /// before the field is cut out of it.
+    #[inline(always)]
+    fn shipped_value(&self, h: u64, seed: u8) -> u64 {
+        let reads = &SEED_READS;
+        let s = usize::from(seed);
+        let offset = h.wrapping_add(u64::from(reads.step[s]) << 2) >> reads.field[s];
+        let v = scale(h, self.n) + (offset & (SLICE - 1));
+        if v >= self.n { wrapped(v, self.n) } else { v }
+    }
 }
 
 /// `v - n` for a key whose slice wraps past the range's end — `slice / n` of them, so out of the
@@ -857,18 +869,42 @@ fn wrapped(v: u64, n: u64) -> u64 {
     v - n
 }
 
-/// The shift that brings a seed's offset field to the bottom of the hash, by seed, under
-/// [`MODE_BITS`] mode bits: eight bits a mode. A load where decoding the mode is a copy of the
-/// seed and two instructions more on every placed key: 7–12 % of a single lookup from 10 M to 1 B
-/// keys, and 1–5 % of `index_all`.
-const FIELD_SHIFT: [u8; 256] = {
-    let mut shifts = [0u8; 256];
+/// What a lookup reads by seed under [`MODE_BITS`] mode bits, one table so that one register
+/// addresses both reads: through a loop of lookups the addresses of two tables do not both stay
+/// in registers, and the one rebuilt on every key is the instruction the second read saved.
+struct SeedReads {
+    /// The shift that brings a seed's offset field to the bottom of the hash: eight bits a mode.
+    /// A load where decoding the mode is a copy of the seed and two instructions more on every
+    /// placed key: 7–12 % of a single lookup from 10 M to 1 B keys, and 1–5 % of `index_all`.
+    field: [u8; 256],
+    /// A seed's shift in values on a level of the [`Level::SHIPPED`] geometry — its shift bits
+    /// times the stride — moved up to its offset field and stored over four, which the largest,
+    /// `63 · 16 << 24`, needs to fit. Added to the hash before the field is cut out, since a sum
+    /// carries only upward: `(h + 4 · step) >> field` is `(h >> field) + shift` in the ten bits
+    /// the slice reads. So the add is `lea`, three operands, and the hash needs no copy; and the
+    /// table is read before the range's multiply. Added after the shift instead, the read came
+    /// after the multiply, the table's address held a register across it, and
+    /// `CompactHashIndex::id` spilled one around it. Measured on 1 M keys: 20 instructions a
+    /// placed key against 21 in a loop of `Mphf::index`, and two fewer in the `id` of each index
+    /// that pays one. A table of multipliers that also folds the mask away is 19, but it puts a
+    /// third multiply on the path beside the bucket's and the range's, which on Zen 3 share one
+    /// multiplier, and no cycle came back.
+    step: [u32; 256],
+}
+
+const SEED_READS: SeedReads = {
+    let mut reads = SeedReads {
+        field: [0; 256],
+        step: [0; 256],
+    };
     let mut seed = 0;
     while seed < 256 {
-        shifts[seed] = (8 * (seed >> (8 - MODE_BITS))) as u8;
+        reads.field[seed] = (8 * (seed >> (8 - MODE_BITS))) as u8;
+        reads.step[seed] = ((seed as u32) & ((1 << (8 - MODE_BITS)) - 1))
+            << (Level::SHIPPED.shift + reads.field[seed] as u32 - 2);
         seed += 1;
     }
-    shifts
+    reads
 };
 
 /// What [`Level::value`] needs of a level's geometry.
@@ -1856,7 +1892,7 @@ impl V2 {
                 // The shipped geometry as immediates: three registers and three moves fewer in
                 // the placed path, and a loop over many keys is unswitched on the invariant.
                 return if l.form() == Level::SHIPPED {
-                    l.value_in(Level::SHIPPED, h, seed)
+                    l.shipped_value(h, seed)
                 } else {
                     l.value(h, seed)
                 };
@@ -1917,7 +1953,19 @@ impl V2 {
             .as_ref()
             .filter(|l| l.seeds.len() >= prefetch_seeds)
         else {
-            return hashes.iter().map(|&h| self.index(h)).collect();
+            // Unswitched by hand: LLVM leaves the loop whole, and with the geometry checked inside
+            // it where the shipped path landed followed unrelated edits — a jump more a key in
+            // one build, none in the next. Out here it is one path, and no check a key.
+            return match &self.first {
+                Some(l) if l.form() == Level::SHIPPED => hashes
+                    .iter()
+                    .map(|&h| match l.seed_of(h) {
+                        0 => self.index_bumped(h),
+                        seed => l.shipped_value(h, seed),
+                    })
+                    .collect(),
+                _ => hashes.iter().map(|&h| self.index(h)).collect(),
+            };
         };
         match (l.form() == Level::SHIPPED, l.seeds.len() >= retry_seeds) {
             (true, false) => self.batch::<true, false>(l, hashes),
@@ -4160,6 +4208,7 @@ mod tests {
                 let offset = (h >> (8 * mode)).wrapping_add(shift * stride) % SLICE;
                 let want = (scale(h, l.n) + offset) % l.n;
                 assert_eq!(l.value(h, seed), want, "seed {seed} h {h:#x}");
+                assert_eq!(l.shipped_value(h, seed), want, "seed {seed} h {h:#x}");
             }
         }
     }
