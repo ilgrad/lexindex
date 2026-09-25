@@ -858,6 +858,34 @@ impl Level {
         let v = scale(h, self.n) + (offset & (SLICE - 1));
         if v >= self.n { wrapped(v, self.n) } else { v }
     }
+
+    /// [`value`](Self::value) on a level after the first. Its slice is its own — 512 at a million
+    /// keys, [`SLICE`] from a few million — so no geometry is compiled in, but under [`MODE_BITS`]
+    /// mode bits the decode is [`shipped_value`](Self::shipped_value)'s all the same: the seed's
+    /// step moved from the shipped stride to the level's, exact because the table holds it with
+    /// its low bits zero. Measured on 1 M and 10 M keys: 278.8 instructions a bumped key where the
+    /// decode was 284.8, and a branch fewer. The shipped geometry and the 512 one as immediates,
+    /// picked by the level's form, were 277.0 at 1 M but 279.7 at 10 M, and a branch more.
+    #[inline(always)]
+    fn later_value(&self, h: u64, seed: u8) -> u64 {
+        if self.mode_bits != MODE_BITS {
+            return self.decoded_value(h, seed);
+        }
+        let reads = &SEED_READS;
+        let s = usize::from(seed);
+        let step = (u64::from(reads.step[s]) << self.shift) >> (Self::SHIPPED.shift - 2);
+        let offset = h.wrapping_add(step) >> reads.field[s];
+        let v = scale(h, self.n) + (offset & (self.slice - 1));
+        if v >= self.n { wrapped(v, self.n) } else { v }
+    }
+
+    /// [`value`](Self::value) out of line, for a level whose seeds have other mode bits: an
+    /// `MPH2` blob's. Inline, its decode shares the step's tail and costs every bumped key a jump.
+    #[cold]
+    #[inline(never)]
+    fn decoded_value(&self, h: u64, seed: u8) -> u64 {
+        self.value(h, seed)
+    }
 }
 
 /// `v - n` for a key whose slice wraps past the range's end — `slice / n` of them, so out of the
@@ -1919,7 +1947,7 @@ impl V2 {
             let hi = level_hash(h, i + 1);
             let seed = l.seed_of(hi);
             if seed != 0 {
-                return Some(shift + l.value(hi, seed));
+                return Some(shift + l.later_value(hi, seed));
             }
             shift += l.n;
         }
@@ -4209,6 +4237,39 @@ mod tests {
                 let want = (scale(h, l.n) + offset) % l.n;
                 assert_eq!(l.value(h, seed), want, "seed {seed} h {h:#x}");
                 assert_eq!(l.shipped_value(h, seed), want, "seed {seed} h {h:#x}");
+            }
+        }
+    }
+
+    /// The same law on a level after the first, over every slice a blob may give one — the
+    /// narrowest its mode bits allow up to far past what a build writes — and on an `MPH2` level,
+    /// which is decoded.
+    #[test]
+    fn a_later_value_is_the_law_on_every_slice() {
+        let hs: Vec<u64> = hashes(1 << 12).into_iter().chain([0, u64::MAX]).collect();
+        for slice in (6..=20).map(|b| 1u64 << b) {
+            for n in [slice, 3 * slice + 7] {
+                let level = |mode_bits| Level {
+                    n,
+                    buckets: 1,
+                    slice,
+                    shift: stride_for(slice, mode_bits).trailing_zeros(),
+                    mode_bits,
+                    seeds: Pages::default(),
+                };
+                let (l, old) = (level(MODE_BITS), level(0));
+                let stride = slice >> (8 - MODE_BITS);
+                for seed in 1..=u8::MAX {
+                    let mode = u64::from(seed) >> (8 - MODE_BITS);
+                    let shift = u64::from(seed) & ((1 << (8 - MODE_BITS)) - 1);
+                    for &h in hs.iter().step_by(61) {
+                        let offset = (h >> (8 * mode)).wrapping_add(shift * stride) % slice;
+                        let want = (scale(h, n) + offset) % n;
+                        let at = || format!("slice {slice} n {n} seed {seed} h {h:#x}");
+                        assert_eq!(l.later_value(h, seed), want, "{}", at());
+                        assert_eq!(old.later_value(h, seed), old.value(h, seed), "{}", at());
+                    }
+                }
             }
         }
     }
