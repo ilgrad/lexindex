@@ -1,14 +1,15 @@
-//! Where a table's pages landed, read as a rate — for a machine whose memory is not uniform.
+//! Where a table's pages landed, read as rates — for a machine whose memory is not uniform.
 //!
 //! Which physical memory a table gets is the history of the process's allocations, and where the
 //! memory is not uniform that moves every lookup that misses the cache. The machine these results
-//! come from pairs an 8 GB module with a 32 GB one: the top 16 GiB of physical memory interleaves
-//! both channels and the rest is the larger module alone, and there random reads with eight
-//! threads are 22 % slower than in the other part and sequential reads 28 % faster. Without root a
-//! page's physical address is hidden, so what is read is the rate: every page a copy of a table
-//! occupies, by [`READERS`] threads 4 KiB at a time in a shuffled order, so that a table on huge
-//! pages and one on small pages are read alike. More of a table in the interleaved part reads
-//! faster here and slower in a lookup.
+//! come from pairs an 8 GB module in one rank with a 32 GB one in two: the top 16 GiB of physical
+//! memory interleaves both channels and the rest is the larger module alone. Without root a
+//! page's physical address is hidden, so what is read is two rates over every page a copy of a
+//! table occupies, each by [`READERS`] threads. Every line, 4 KiB at a time in a shuffled order so
+//! that a table on huge pages and one on small pages are read alike: the more of the table the
+//! channels interleave, the faster. And independent loads of random lines, the access a lookup
+//! makes, which a lookup follows where the first rate does not: that sees which channel a page is
+//! on, not how many ranks and banks a table's lines are spread over.
 //!
 //! The pages are found through the allocator, so that no competitor's private fields have to be
 //! reached into: [`Tracked`] notes every live allocation of [`LARGE`] bytes or more made while a
@@ -35,6 +36,9 @@ const READERS: usize = 8;
 
 /// Passes over a table's pages; the fastest is the one reported.
 const PASSES: usize = 3;
+
+/// Independent loads each reader makes of random lines of a table, a pass.
+const LOADS: usize = 2_500_000;
 
 const PAGE: usize = 4096;
 const LINE: usize = 64;
@@ -189,16 +193,54 @@ fn pages(table: usize) -> Vec<usize> {
     pages
 }
 
-/// `table`'s resident pages in MB, and the rate at which [`READERS`] threads read every line of
-/// them, 4 KiB at a time in a shuffled order and each thread a share: the fastest of [`PASSES`]
-/// passes, in GB/s.
-pub fn read(table: usize) -> (f64, f64) {
+/// Where a copy of a table landed, as [`read`] finds it.
+#[derive(Clone, Copy)]
+pub struct Read {
+    /// Resident MB.
+    pub mb: f64,
+    /// GB/s at which every line is read, 4 KiB at a time in a shuffled order.
+    pub seq: f64,
+    /// Wall ns a load, of independent loads of random lines.
+    pub rnd: f64,
+}
+
+/// `table`'s resident pages, and the fastest of [`PASSES`] passes of [`READERS`] threads over
+/// them: reading every line of each page, the pages in a shuffled order and each thread a share
+/// of them; and making [`LOADS`] independent loads each of lines drawn at random.
+pub fn read(table: usize) -> Read {
     let pages = pages(table);
+    let mb = (pages.len() * PAGE) as f64 / 1e6;
+    if pages.is_empty() {
+        return Read {
+            mb,
+            seq: f64::NAN,
+            rnd: f64::NAN,
+        };
+    }
+    Read {
+        mb,
+        seq: sequential(&pages),
+        rnd: random(&pages),
+    }
+}
+
+/// Reads one line of this process's memory.
+///
+/// # Safety
+///
+/// `line` is inside a live allocation of this process. It is read as `MaybeUninit` because part
+/// of a table's allocation may never have been written; nothing writes the tables while they are
+/// read.
+unsafe fn touch(line: usize) {
+    std::hint::black_box(unsafe { std::ptr::read_volatile(line as *const MaybeUninit<u64>) });
+}
+
+fn sequential(pages: &[usize]) -> f64 {
     let order: Vec<usize> = crate::shuffled(pages.len())
         .into_iter()
         .map(|i| pages[i as usize])
         .collect();
-    let share = order.len().div_ceil(READERS).max(1);
+    let share = order.len().div_ceil(READERS);
     let bytes = (order.len() * PAGE) as f64;
     let mut best = 0.0f64;
     for _ in 0..PASSES {
@@ -208,12 +250,8 @@ pub fn read(table: usize) -> (f64, f64) {
                 scope.spawn(move || {
                     for &page in part {
                         for line in (page..page + PAGE).step_by(LINE) {
-                            // SAFETY: a whole page inside a live allocation of this process, read
-                            // as `MaybeUninit` because part of a table's allocation may never
-                            // have been written; nothing writes the tables while they are read.
-                            std::hint::black_box(unsafe {
-                                std::ptr::read_volatile(line as *const MaybeUninit<u64>)
-                            });
+                            // SAFETY: a line of a whole page of a live table.
+                            unsafe { touch(line) };
                         }
                     }
                 });
@@ -221,5 +259,30 @@ pub fn read(table: usize) -> (f64, f64) {
         });
         best = best.max(bytes / t.elapsed().as_nanos() as f64);
     }
-    (bytes / 1e6, best)
+    best
+}
+
+fn random(pages: &[usize]) -> f64 {
+    let mut best = f64::INFINITY;
+    for _ in 0..PASSES {
+        let t = Instant::now();
+        std::thread::scope(|scope| {
+            for reader in 0..READERS as u64 {
+                scope.spawn(move || {
+                    let mut r =
+                        0x9E37_79B9_7F4A_7C15 ^ (reader + 1).wrapping_mul(0x2545_F491_4F6C_DD1D);
+                    for _ in 0..LOADS {
+                        r ^= r << 13;
+                        r ^= r >> 7;
+                        r ^= r << 17;
+                        let page = pages[((r as u128 * pages.len() as u128) >> 64) as usize];
+                        // SAFETY: a line of a whole page of a live table.
+                        unsafe { touch(page + (r as usize % (PAGE / LINE)) * LINE) };
+                    }
+                });
+            }
+        });
+        best = best.min(t.elapsed().as_nanos() as f64 / (READERS * LOADS) as f64);
+    }
+    best
 }

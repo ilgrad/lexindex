@@ -36,8 +36,9 @@
 //! compact's and balanced's: `CompactPtrHash` is not `Clone`, so those are built again, and at
 //! 1 B keys a build does not give the same table twice.
 //! `MPHF_VS_PLACEMENT=1` reads, before the lookups and after them, where each copy's pages
-//! landed: its resident megabytes and the rate at which eight threads read them (the `placement`
-//! module), on a machine whose memory is not uniform the variable a lookup column carries.
+//! landed: its resident megabytes and two rates of eight threads over them, a sequential read and
+//! independent loads of random lines (the `placement` module) — on a machine whose memory is not
+//! uniform, the variable a lookup column carries.
 use lexindex::Mphf;
 use ph::phast::{
     Function, Function2, Params, SeedOnly, ShiftOnlyWrapped, bits_per_seed_to_100_bucket_size,
@@ -160,9 +161,9 @@ struct Row {
     /// Wall time a key with `lookup_threads` threads each taking a share of the probe order.
     lookup_mt: Vec<Stat>,
     batch_mt: Vec<Stat>,
-    /// A list a copy of the table, one entry a round when `MPHF_VS_PLACEMENT` is set: its
-    /// resident MB and its pages' read rate in GB/s before the lookups and after them.
-    place: Vec<Vec<(f64, f64, f64)>>,
+    /// A list a copy of the table, one entry a round when `MPHF_VS_PLACEMENT` is set: where it
+    /// landed, read before the lookups and after them.
+    place: Vec<Vec<(placement::Read, placement::Read)>>,
 }
 
 /// A pass over a slice of the probe order: the wrapping sum of the answers.
@@ -672,16 +673,15 @@ fn main() {
                     .fold(0usize, usize::wrapping_add) as u64
             }),
         );
-        let before: Vec<(f64, f64)> = if place {
+        let before: Vec<placement::Read> = if place {
             (0..tables.len()).map(placement::read).collect()
         } else {
             Vec::new()
         };
         lookups(&mut rows, &tables, &order, lookup_threads, counter.as_ref());
-        for (i, (mb, was)) in before.into_iter().enumerate() {
+        for (i, was) in before.into_iter().enumerate() {
             let t = &tables[i];
-            let (_, now) = placement::read(i);
-            rows[t.row].place[t.copy].push((mb, was, now));
+            rows[t.row].place[t.copy].push((was, placement::read(i)));
         }
     }
     let sample = if probes < n {
@@ -770,7 +770,7 @@ fn main() {
     }
     if place {
         println!(
-            "placement, per copy and round: resident MB, then GB/s at which 8 threads read its pages 4 KiB at a time in a shuffled order, before the lookups -> after"
+            "placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after"
         );
         for r in rows.iter().filter(|r| r.run) {
             let copies: Vec<String> = r
@@ -779,7 +779,12 @@ fn main() {
                 .map(|rounds| {
                     rounds
                         .iter()
-                        .map(|(mb, was, now)| format!("{mb:.0} MB {was:.2} -> {now:.2}"))
+                        .map(|(was, now)| {
+                            format!(
+                                "{:.0} MB {:.2} -> {:.2} GB/s {:.2} -> {:.2} ns",
+                                was.mb, was.seq, now.seq, was.rnd, now.rnd
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join(", ")
                 })
