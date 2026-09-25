@@ -537,28 +537,59 @@ fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
 /// walk would follow out of range, or is one no build writes: an empty slot with bits set, an id
 /// where no key ends, a leaf with a base or without a key.
 ///
-/// No branch a slot — which slots are empty follows no pattern a predictor learns — and no compare:
-/// flags become masks, and a bound is a wrapping subtraction whose top bit is set exactly when the
-/// value is past it, so the loop is ands, ors and subtractions, which vectorise.
+/// No branch a slot — which slots are empty follows no pattern a predictor learns: flags become
+/// masks, each field is held to one bound the flags pick, and a field past its bound is a
+/// subtraction whose top bit is set. The loop runs on the slot's two 32-bit halves, four or eight
+/// slots an instruction; every field and bound is under 2^23 (a base and an id are 23 bits, and
+/// the header checks bounded `n` and `n_slots`), so only a field past its bound sets the top bit.
 fn slots_malformed(slots: &[u8], n: u64, max_label: usize, n_slots: usize) -> bool {
-    const TOP: u64 = 1 << 63;
-    // The highest base whose row fits; unused when there are no slots.
-    let last_base = n_slots.saturating_sub(max_label + 1) as u64;
-    let mut stray = 0u64;
-    for e in slots.chunks_exact(8) {
-        let v = u64::from_le_bytes(e.try_into().expect("eight bytes"));
-        let word = ((v >> 16) & 1).wrapping_neg();
-        let leaf = ((v >> 17) & 1).wrapping_neg();
-        let empty = ((v & LABEL_MASK).wrapping_sub(1) >> 63).wrapping_neg();
-        let base = (v >> BASE_SHIFT) & BASE_MASK;
-        let id = v >> ID_SHIFT;
-        stray |= v & empty
-            | id & !word
-            | (base | !word & 1) & leaf
-            | last_base.wrapping_sub(base) & !leaf & TOP
-            | n.wrapping_sub(id + 1) & word & TOP;
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        // SAFETY: the CPU has AVX2.
+        return unsafe { slots_malformed_avx2(slots, n, max_label, n_slots) };
     }
-    stray != 0
+    slots_malformed_with(slots, n, max_label, n_slots)
+}
+
+/// [`slots_malformed`], eight slots an instruction rather than four.
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn slots_malformed_avx2(slots: &[u8], n: u64, max_label: usize, n_slots: usize) -> bool {
+    slots_malformed_with(slots, n, max_label, n_slots)
+}
+
+/// Inlined into each entry point, so that each compiles it for its own instruction set.
+#[inline(always)]
+fn slots_malformed_with(slots: &[u8], n: u64, max_label: usize, n_slots: usize) -> bool {
+    // The highest base whose row fits; unused when there are no slots.
+    let last_base = n_slots.saturating_sub(max_label + 1) as u32;
+    // All ones when there are no keys, which puts every id past it.
+    let last_id = (n as u32).wrapping_sub(1);
+    let mut stray = 0u32;
+    for e in slots.chunks_exact(8) {
+        let lo = u32::from_le_bytes(e[..4].try_into().expect("four bytes"));
+        let hi = u32::from_le_bytes(e[4..].try_into().expect("four bytes"));
+        let word = ((lo << 15) as i32 >> 31) as u32;
+        let leaf = ((lo << 14) as i32 >> 31) as u32;
+        let empty = if lo & LABEL_MASK as u32 == 0 {
+            u32::MAX
+        } else {
+            0
+        };
+        let base = (lo >> BASE_SHIFT | hi << (32 - BASE_SHIFT)) & BASE_MASK as u32;
+        let id = hi >> (ID_SHIFT - 32);
+        // An id only where a key ends, a base only under an inner node, nothing in an empty slot
+        // (one that says a key ends there is refused outright): a field past its bound sets the
+        // top bit of the difference.
+        let id_bound = word & last_id;
+        let base_bound = !leaf & last_base & !empty;
+        stray |=
+            leaf & !word | word & empty | id_bound.wrapping_sub(id) | base_bound.wrapping_sub(base);
+    }
+    stray >> 31 != 0
 }
 
 /// The blob's header.
@@ -1212,12 +1243,14 @@ impl DoubleArrayIndex {
         if verify_payload && u64_at(bytes, 40) != crate::blob::hash_block(&bytes[HEADER..]) {
             return Err(IndexError::Format("payload checksum mismatch"));
         }
-        for e in bytes[table_at..supp_at].chunks_exact(2) {
-            if usize::from(u16::from_le_bytes([e[0], e[1]])) > max_label {
-                return Err(IndexError::Format(
-                    "double-array: a code-table label past the largest",
-                ));
-            }
+        let widest = bytes[table_at..supp_at]
+            .chunks_exact(2)
+            .map(|e| u16::from_le_bytes(e.try_into().expect("two bytes")))
+            .fold(0, u16::max);
+        if usize::from(widest) > max_label {
+            return Err(IndexError::Format(
+                "double-array: a code-table label past the largest",
+            ));
         }
         let mut supp = Vec::with_capacity(supp_len);
         for e in bytes[supp_at..].chunks_exact(SUPP_ENTRY) {
@@ -1536,6 +1569,83 @@ mod tests {
         let mut b = bytes.clone();
         rehash(&mut b);
         assert!(DoubleArrayIndex::from_bytes(&b).is_ok());
+    }
+
+    /// The checks [`slots_malformed`] makes, one slot at a time and spelled out.
+    fn slot_malformed(v: u64, n: u64, last_base: u64) -> bool {
+        let (word, leaf) = (v & WORD != 0, v & LEAF != 0);
+        let (base, id) = ((v >> BASE_SHIFT) & BASE_MASK, v >> ID_SHIFT);
+        if v & LABEL_MASK == 0 {
+            return v != 0;
+        }
+        !word && id != 0
+            || leaf && (!word || base != 0)
+            || !leaf && base > last_base
+            || word && id >= n
+    }
+
+    /// One slot among well-formed ones, anywhere in the array: every field on either side of
+    /// every bound the walk checks, and bits at random, whole or in either half.
+    #[test]
+    fn the_slot_walk_refuses_exactly_what_the_checks_spell() {
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        let mut random = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let bounds = [
+            (0, 0, 1),
+            (1, 0, 1),
+            (2, 1, 3),
+            (1000, 5000, 700),
+            (
+                MAX_KEYS as u64,
+                (MAX_SLOTS - MAX_ALPHABET - 1) as u64,
+                MAX_ALPHABET,
+            ),
+        ];
+        for (n, last_base, max_label) in bounds {
+            let n_slots = last_base as usize + max_label + 1;
+            let near = |x: u64| [0, 1, x.saturating_sub(1), x, x + 1, 1 << 14, x & !0x3FFF];
+            let mut cases = Vec::new();
+            for label in [0, 1, LABEL_MASK] {
+                for flags in 0..4 {
+                    for base in near(last_base).into_iter().chain([BASE_MASK]) {
+                        for id in near(n).into_iter().chain([MAX_KEYS as u64 - 1]) {
+                            cases.push(
+                                label
+                                    | flags << 16
+                                    | (base & BASE_MASK) << BASE_SHIFT
+                                    | (id % MAX_KEYS as u64) << ID_SHIFT,
+                            );
+                        }
+                    }
+                }
+            }
+            for _ in 0..1000 {
+                cases.extend([random(), random() << 32, random() >> 32]);
+            }
+            for v in cases {
+                for (len, at) in [(1, 0), (5, 4), (8, 3), (9, 8), (33, 17)] {
+                    let mut slots = vec![0u64; len];
+                    slots[at] = v;
+                    let bytes: Vec<u8> = slots.iter().flat_map(|s| s.to_le_bytes()).collect();
+                    let want = slot_malformed(v, n, last_base);
+                    // `slots_malformed` takes the AVX2 copy where the CPU has one.
+                    for got in [
+                        slots_malformed(&bytes, n, max_label, n_slots),
+                        slots_malformed_with(&bytes, n, max_label, n_slots),
+                    ] {
+                        assert_eq!(
+                            got, want,
+                            "slot {v:#x} at {at} of {len}, n {n}, last base {last_base}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
