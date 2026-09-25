@@ -1300,7 +1300,7 @@ fn the_pinned_tiered_blob_answers_every_key_through_the_phrase_codec() {
 /// word's first difference a byte the probe has; these were not ascending, the word taken as below
 /// was above, and the two agreed on the probe's zero padding, so the scan began past the probe's
 /// end. The fuzz build and debug panicked on the subtraction; a release build compared the stored
-/// suffix against bytes past the key, and a packed dictionary's compare slices the probe from
+/// suffix against more of the padding, and a packed dictionary's compare slices the probe from
 /// there, which panics in any build. Words out of order now leave the block to its restart run.
 /// The shim loads the blob every way it loads -- checked, framed and routed -- and queries each.
 #[cfg(all(feature = "fuzzing", feature = "mph"))]

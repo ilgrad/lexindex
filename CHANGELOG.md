@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.2] — 2026-09-25
+
+### Fixed
+
+- **A crafted `DictIndex` blob whose restart keys run out of order could make a routed lookup
+  panic.** Since 4.4.0 `route_microblocks` sends a lookup to its microblock by words it reads off
+  each block's restart keys, and the route counts the bytes the probe shares with the word below
+  it. That count stays inside the probe only while the words ascend, and nothing checked that they
+  did: in a blob libFuzzer's daily `parse_dict` run found, the word taken as below was above and
+  agreed with the probe's zero padding, so the scan began past the probe's end. A debug build
+  panicked on the subtraction; a release build compared the stored suffix against more padding,
+  and a dictionary in a packed code slices the probe from there, which panics in any build. Every
+  read is bounds-checked, so none left the probe. Words out of order now leave their block to its
+  restart run. Only a dictionary `route_microblocks` was called on was exposed, a
+  `HashedDictIndex`'s included; an index this crate built always has its words in order, so none
+  changes. The blob is kept with a test that fails without the check
+  (`tests/data/panicking-4.5.0-dict-route.bdx`).
+
 ## [4.5.1] — 2026-09-25
 
 ### Fixed
