@@ -469,42 +469,46 @@ fn build_threads(n: usize, block: usize) -> usize {
 /// sample does: a hundred thousand keys standing in for a million hold a tenth of the evidence, and
 /// the miner prices a span on the pieces it is shown — at a sixth of them it reads a span seen twice
 /// as a hundred uses of the blob rather than ten.
+///
+/// Only the runs drawn are visited: a key's piece is coded against the key a microblock before it
+/// when it opens a microblock and against the one before it otherwise, and both are a subtraction
+/// away. Walking every key to carry the two along cost three divisions a key and read every one of
+/// them: 16 ms of a million article titles, against 4.5 for the sixth of them that are drawn.
 fn build_pieces<K: AsKey>(keys: &[K], block: usize, micro: usize, dense: usize) -> Vec<Vec<&[u8]>> {
     let n = keys.len();
     let nb = n.div_ceil(block);
     let shard = shard_blocks_for(block);
     let span = shard * block;
     let mut pieces: Vec<Vec<&[u8]>> = vec![Vec::new(); nb.div_ceil(shard).max(1)];
-    let mut restart: &[u8] = keys.first().map_or(&[][..], AsKey::key_bytes);
-    let mut prev: &[u8] = restart;
-    let step_over = |left: usize| {
-        if dense > 0 {
+    for (s, out) in pieces.iter_mut().enumerate() {
+        let (start, end) = (s * span, ((s + 1) * span).min(n));
+        let step = if dense > 0 {
             dense
         } else {
-            (left / TRAIN_PIECES).max(1)
-        }
-    };
-    let mut step = step_over(span.min(n));
-    for (i, key) in keys.iter().enumerate().skip(1) {
-        let key = key.key_bytes();
-        let off = i % block;
-        if off == 0 {
-            if i % span == 0 {
-                step = step_over((n - i).min(span));
+            ((end - start) / TRAIN_PIECES).max(1)
+        };
+        for from in (start..end).step_by(TRAIN_RUN * step) {
+            let to = (from + TRAIN_RUN).min(end);
+            // A run is a stride past the last one, so neither its first keys nor the ones they are
+            // coded against are in any cache: those are asked for together, and every later key a
+            // [`READ_AHEAD`] early, as the other passes over a caller's keys ask for them.
+            for key in &keys[from.saturating_sub(micro)..to.min(from + READ_AHEAD)] {
+                crate::blob::prefetch_key(key.key_bytes());
             }
-            restart = key;
-            prev = key;
-            continue;
+            for i in from..to {
+                if let Some(next) = keys[..to].get(i + READ_AHEAD) {
+                    crate::blob::prefetch_key(next.key_bytes());
+                }
+                let off = i % block;
+                // A block's head is stored whole, so it is no piece.
+                if off == 0 {
+                    continue;
+                }
+                let against = keys[if off % micro == 0 { i - micro } else { i - 1 }].key_bytes();
+                let key = keys[i].key_bytes();
+                out.push(&key[lcp(against, key)..]);
+            }
         }
-        let starts = off % micro == 0;
-        if (i % span / TRAIN_RUN) % step == 0 {
-            let against = if starts { restart } else { prev };
-            pieces[i / span].push(&key[lcp(against, key)..]);
-        }
-        if starts {
-            restart = key;
-        }
-        prev = key;
     }
     pieces
 }
