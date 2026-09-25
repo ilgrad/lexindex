@@ -864,7 +864,11 @@ PHast's 1.933 / 1.921 / 1.920 — and its lookups lead at 10 M and 100 M, single
 5.0. At 1 M its batch leads too, 2.2 against 2.4, and its single lookup is level with fast's at
 1.9 ns, where the run before had fast a tenth of a nanosecond ahead, inside both rows' spreads:
 3 bits a key, a table half again as large whose one probe is a seed byte with no bumped keys' chain
-behind it. Among the rows near 2 bits `MPH3`'s lookups are the fastest at every size — PtrHash
+behind it. 4.5.1 took the single lookup ahead: in a cool A/B of these two rows alone, one lookup
+thread, six processes a commit
+([`bench/results/mphf-cool-ab-2026-09-25-arz-e523ecd.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-cool-ab-2026-09-25-arz-e523ecd.txt)),
+`MPH3`'s went 1.8 → 1.65 ns at 1 M against fast's 1.8, and 2.5 → 2.4 at 10 M against 2.9, and its
+batch 2.0 → 1.9 and 2.5 → 2.45 against 2.4 and 2.8. Among the rows near 2 bits `MPH3`'s lookups are the fastest at every size — PtrHash
 compact's 4.0 / 5.5 / 16.8 ns single and 4.2 / 4.7 / 6.2 in a batch, PHast+'s 3.5 / 5.4 / 17.1,
 and regular PHast's 2.8 / 4.2 / 13.3 at fourteen to sixteen times the build and without a batch
 form. The bits column is the serialised table, which `MPH3` loads as it is — the rank and select
@@ -1482,24 +1486,29 @@ prefix enumeration, ranges, fuzzy matching.
 
 | jieba's lexicon | build | load |
 |---|---:|---:|
-| **lexindex `DoubleArrayIndex`** | 0.354 s | 1.07 ms mapped · 2.29 read |
-| darts-clone 0.32 | **0.056** | **0.78** read |
-| cedarwood 0.5.0 | 0.100 | no file form |
-| yada 0.7.0 | 0.349 | 3.18 read |
-| crawdad 0.4.1 `Trie` | 1.479 | 1.17 read |
-| crawdad 0.4.1 `MpTrie` | 1.889 | 1.48 read |
-| daachorse 5.0.0 | 1.546 | 4.58 read unchecked · 6.17 read |
-| lexindex `StringIndex` | 0.081 from sorted keys | 0.47 mapped · 1.18 read, each with its first walk |
+| **lexindex `DoubleArrayIndex`** | 0.159 s | **0.70** ms mapped · 2.03 read |
+| darts-clone 0.32 | **0.055** | 0.81 read |
+| cedarwood 0.5.0 | 0.099 | no file form |
+| yada 0.7.0 | 0.342 | 3.25 read |
+| crawdad 0.4.1 `Trie` | 1.448 | 1.64 read |
+| crawdad 0.4.1 `MpTrie` | 1.862 | 1.72 read |
+| daachorse 5.0.0 | 1.523 | 4.72 read unchecked · 6.01 read |
+| lexindex `StringIndex` | 0.081 from sorted keys | 0.44 mapped · 1.45 read, each with its first walk |
 
-**Where the double array loses: the build, and the load against a structure that checks nothing.**
-It builds from the words in 0.354 s — level with yada, a quarter of crawdad's and daachorse's time —
-but in 6.3× darts-clone's time and 3.5× cedar's. Every row takes the lowest base where it fits,
-found over bitmaps; the window of open blocks darts-clone searches instead, and a start that only
-moves up, each cost 9–10 % of the size on this lexicon. A load walks every slot once, so that no
-slot names a row past the array or an id past the keys and no query checks a bound: 1.07 ms mapped,
-2.29 read, which copies the file and checks its hash as well. darts-clone's `open` reads the file
-and checks nothing, in 0.78 ms — and its `set_array`, which takes a mapped array as it lies, costs
-nothing at all, not timed here. crawdad and daachorse deserialise, in 1.2–6.2 ms.
+**Where the double array loses: the build.** It builds from the words in 0.159 s — under half of
+yada's time, a ninth of crawdad's and daachorse's — but in 2.9× darts-clone's time and 1.6×
+cedar's. Every row takes the lowest base where it fits, found over bitmaps; the window of open
+blocks darts-clone searches instead, and a start that only moves up, each cost 9–10 % of the size
+on this lexicon. 4.5.1 brought the build down from 0.354 s: the trie is built from the keys in byte
+order, each decoded once, and the search for a row's base tests a sparse stretch word by word and a
+dense one four words an instruction where the CPU has AVX2. **The load no longer loses.** It walks
+every slot once, so that no slot names a row past the array or an id past the keys and no query
+checks a bound, and since 4.5.1 that walk runs on the slots' 32-bit halves, eight slots an
+instruction with AVX2: 0.70 ms mapped, 2.03 read, which copies the file and checks its hash as
+well, where darts-clone's `open`, which reads the file and checks nothing, took 0.81 ms. In a
+pairwise run, both timed in each of four processes, the mapped load read 0.62 ms against `open`'s
+0.59–0.66 across the four: level. darts-clone's `set_array`, which takes a mapped array as it lies, costs nothing at
+all, not timed here. crawdad and daachorse deserialise, in 1.6–6.0 ms.
 
 <sub>Measured 2026-09-25 at `902e4b4`
 ([`bench/results/cjk-walk-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-walk-2026-09-25-arz-902e4b4.txt)):
@@ -1515,12 +1524,17 @@ control row, jieba-rs 0.11.0's `cut_all`, spread 5.3 %, just outside the 5 % the
 The table this one replaces ran the rows alternated, each timed after whatever the rows before it
 had left in cache, which favoured the rows nearest the turn of a round: it had darts-clone at 41.1
 and 34.8 ns and `StringIndex` at 63.9 and 76.5. A cold regime, 64 MiB written before every pass,
-spread the control by 16.5 % and is not quoted. The build and load table
-([`bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt))
+spread the control by 16.5 % and is not quoted. The build and load table, measured 2026-09-25 at
+`6623184`, 4.5.1's source
+([`bench/results/cjk-build-load-2026-09-25-arz-6623184.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-build-load-2026-09-25-arz-6623184.txt)),
 ran one process each behind the same gate, the minimum of 7 builds and 30 loads, the structures in a
 shuffled order each round, the files in the page cache, and each load followed by one lookup so that
 nothing it defers escapes the timing; a `StringIndex` load is timed with its first walk, which
-derives the first-character table. rustc 1.98.1; darts-clone at `87b71af`, built with g++ 16.2.1
+derives the first-character table. Against 4.5.0's run of the same table
+([`bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-build-load-2026-09-25-arz-902e4b4.txt))
+the builds no change touched moved by at most 2.1 %; the loads read from the page cache moved by up to
+41 % between the two runs (crawdad's `Trie` 1.17 → 1.64 ms), which is why the double array's own
+before and after is the pairwise run in the same file, 1.03 → 0.62 ms mapped. rustc 1.98.1; darts-clone at `87b71af`, built with g++ 16.2.1
 `-O3`. The harness is not in the repository; the files record every version, hash and flag. No
 competitor here is a lexindex dependency.</sub>
 

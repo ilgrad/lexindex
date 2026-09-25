@@ -1,0 +1,90 @@
+# Builds and loads over jieba 0.42.1's lexicon, every structure measured
+# date 2026-09-25T21:02:07+03:00; uptime  21:02:07 up 15 min,  1 user,  load average: 0.09, 0.37, 0.30
+# branch rel-451 at 6623184c74e7b1bf087a9b66de6560349b33d4e3 plus the working tree; diff sha256 e3b0c44298fc1c14
+# kernel 7.2.7-200.fc44.x86_64; cpu AMD Ryzen 7 5800HS with Radeon Graphics; governor powersave
+# DIMM layout: not read (needs root); buffer placement: not read (needs root)
+# gate: bench-ready green and hottest zone < 70 C, waiting up to 30 min
+# harness: local/cjk/z8 as the 902e4b4 file ran it, lexindex's path moved to this tree; binary sha256 ab9b6cfa99a699d7
+
+## 2. builds
+gate before builds: green after 2 s; thermals acpitz 46.0 C  iwlwifi_1 35.0 C  
+thermals after: acpitz 87.0 C  iwlwifi_1 35.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex              0.159
+lexindex StringIndex (sorted)          0.081
+cedarwood 0.5.0                        0.099
+darts-clone 0.32                       0.055
+yada 0.7.0                             0.342
+crawdad 0.4.1 Trie                     1.448
+crawdad 0.4.1 MpTrie                   1.862
+daachorse 5.0.0                        1.523
+
+## 3. loads
+gate before loads: green after 34 s; thermals acpitz 48.0 C  iwlwifi_1 35.0 C  
+thermals after: acpitz 85.0 C  iwlwifi_1 35.0 C  
+# rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.5.0, yada 0.7.0, crawdad 0.4.1, daachorse 5.0.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+load                                                    ms    file bytes   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       2.031       5451278   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  0.700       5451278   (probe checksum 54701)
+lexindex StringIndex load + first walk               1.451       3124743   (probe checksum 54701)
+lexindex StringIndex load_mmap + first walk          0.443       3124743   (probe checksum 54701)
+darts-clone 0.32 open                                0.807       6195200   (probe checksum 54701)
+yada 0.7.0 read + new                                3.252       6195200   (probe checksum 54701)
+crawdad 0.4.1 Trie read + deserialize                1.644       6422540   (probe checksum 54673)
+crawdad 0.4.1 MpTrie read + deserialize              1.719       7736714   (probe checksum 13727)
+daachorse 5.0.0 read + deserialize                   6.009      16738335   (probe checksum 757002)
+daachorse 5.0.0 read + deserialize_unchecked         4.723      16738335   (probe checksum 757002)
+
+## 4. pairwise: the double array against 4.5.0's, darts-clone the control in every process
+# local/tmp/da-speed/work/ab.sh: harness local/cjk/z8-da (lexindex at branch da-speed, ae3efad,
+# whose src/double_array.rs is this tree's) against local/cjk/z8-da-base (418ee18); processes in the
+# order new, main, main, new; builds min of 7 rounds, loads min of 30, the files on tmpfs in the
+# page cache; the blobs checked byte-identical before any timing.
+# new = da-speed ae3efad, main = 418ee18
+# 2026-09-25T21:00:46+03:00;  21:00:46 up 13 min,  1 user,  load average: 0.18, 0.45, 0.32; governor powersave
+# blob sha256 5214f5930695d5a4 (identical in both); load files on tmpfs
+# thermals before: acpitz 64 C  iwlwifi_1 35 C  
+## new: builds
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex             0.1511
+darts-clone 0.32 (control)            0.0569
+## new: loads
+load                                                    ms   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       1.647   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  0.616   (probe checksum 54701)
+darts-clone 0.32 open (control)                      0.653   (probe checksum 54701)
+## main: builds
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex             0.3356
+darts-clone 0.32 (control)            0.0549
+## main: loads
+load                                                    ms   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       2.119   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  1.028   (probe checksum 54701)
+darts-clone 0.32 open (control)                      0.664   (probe checksum 54701)
+## main: builds
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex             0.3390
+darts-clone 0.32 (control)            0.0558
+## main: loads
+load                                                    ms   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       2.155   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  1.034   (probe checksum 54701)
+darts-clone 0.32 open (control)                      0.661   (probe checksum 54701)
+## new: builds
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex             0.1606
+darts-clone 0.32 (control)            0.0594
+## new: loads
+load                                                    ms   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       1.645   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  0.619   (probe checksum 54701)
+darts-clone 0.32 open (control)                      0.587   (probe checksum 54701)
+# thermals after: acpitz 93 C  iwlwifi_1 35 C  

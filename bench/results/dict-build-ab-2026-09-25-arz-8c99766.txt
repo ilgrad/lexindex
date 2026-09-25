@@ -1,0 +1,100 @@
+# DictIndex whole builds, main against P-6: one build a process, the two binaries alternated A B
+# within every round, 11 rounds, min and median of each per corpus and block (build ms). The
+# harness (local/p6, not in the repository) reads a corpus as frontier_lex does -- lines, empties
+# dropped, sorted, deduplicated -- and times DictIndex::build_with_block; built as frontier_lex is:
+# thin LTO, one codegen unit, no target-cpu.
+#   base  418ee18 (4.5.0's src/)
+#   new   branch dict-build at 2971a0c: 418ee18 plus P-6's six commits, which this tree carries as
+#         1569965..8c99766. All 39 blobs are byte-identical between the two.
+# Corpora: string-index-benchmarks/corpora, the eleven at 1 M plus words-full and pypi-full.
+# A quiet window after a reboot; bench-ready before the first build:
+#   load                   0.11  ok
+#   swap in use            0 MiB  ok
+#   memory available       35.5 GiB  ok
+#   page cache             7.4 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+#   uptime                 0.3 h
+#   governor               powersave
+#   
+#   READY
+# DIMM layout: not read (needs root); buffer placement: not read (needs root).
+# base 8f5741b95dfcf3c5 = 418ee18, new 15795c57c950c150 = dict-build 2971a0c
+# 2026-09-25T21:04:52+03:00;  21:04:52 up 18 min,  1 user,  load average: 0.11, 0.32, 0.29; Tctl 45.6 C
+dna-1000000 block 32 dictbuild-base: min 101.2 med 101.9 n 11
+dna-1000000 block 32 dictbuild-new: min 84.3 med 85.8 n 11
+domains-1000000 block 32 dictbuild-base: min 208.0 med 212.0 n 11
+domains-1000000 block 32 dictbuild-new: min 183.2 med 185.9 n 11
+idents-1000000 block 32 dictbuild-base: min 259.2 med 260.8 n 11
+idents-1000000 block 32 dictbuild-new: min 217.6 med 222.8 n 11
+numeric-1000000 block 32 dictbuild-base: min 84.9 med 86.8 n 11
+numeric-1000000 block 32 dictbuild-new: min 59.5 med 61.0 n 11
+opaque-1000000 block 32 dictbuild-base: min 134.1 med 139.4 n 11
+opaque-1000000 block 32 dictbuild-new: min 112.7 med 113.7 n 11
+paths-1000000 block 32 dictbuild-base: min 302.9 med 305.3 n 11
+paths-1000000 block 32 dictbuild-new: min 266.6 med 269.2 n 11
+titles-en-1000000 block 32 dictbuild-base: min 396.8 med 404.1 n 11
+titles-en-1000000 block 32 dictbuild-new: min 348.7 med 357.9 n 11
+titles-ru-1000000 block 32 dictbuild-base: min 324.4 med 328.7 n 11
+titles-ru-1000000 block 32 dictbuild-new: min 285.8 med 290.9 n 11
+titles-zh-1000000 block 32 dictbuild-base: min 271.6 med 276.8 n 11
+titles-zh-1000000 block 32 dictbuild-new: min 224.0 med 226.5 n 11
+urls-1000000 block 32 dictbuild-base: min 404.2 med 412.2 n 11
+urls-1000000 block 32 dictbuild-new: min 366.8 med 373.4 n 11
+uuid-1000000 block 32 dictbuild-base: min 219.4 med 223.7 n 11
+uuid-1000000 block 32 dictbuild-new: min 181.3 med 183.9 n 11
+words-full block 32 dictbuild-base: min 51.8 med 53.0 n 11
+words-full block 32 dictbuild-new: min 42.6 med 43.1 n 11
+pypi-full block 32 dictbuild-base: min 174.7 med 176.0 n 11
+pypi-full block 32 dictbuild-new: min 149.0 med 152.3 n 11
+dna-1000000 block 256 dictbuild-base: min 102.5 med 103.4 n 11
+dna-1000000 block 256 dictbuild-new: min 85.4 med 86.2 n 11
+domains-1000000 block 256 dictbuild-base: min 210.9 med 214.3 n 11
+domains-1000000 block 256 dictbuild-new: min 186.0 med 187.7 n 11
+idents-1000000 block 256 dictbuild-base: min 264.2 med 268.8 n 11
+idents-1000000 block 256 dictbuild-new: min 224.2 med 228.8 n 11
+numeric-1000000 block 256 dictbuild-base: min 85.5 med 86.9 n 11
+numeric-1000000 block 256 dictbuild-new: min 58.6 med 60.2 n 11
+opaque-1000000 block 256 dictbuild-base: min 137.6 med 139.6 n 11
+opaque-1000000 block 256 dictbuild-new: min 112.6 med 114.9 n 11
+paths-1000000 block 256 dictbuild-base: min 314.0 med 316.5 n 11
+paths-1000000 block 256 dictbuild-new: min 270.6 med 275.4 n 11
+titles-en-1000000 block 256 dictbuild-base: min 409.1 med 415.4 n 11
+titles-en-1000000 block 256 dictbuild-new: min 361.7 med 368.4 n 11
+titles-ru-1000000 block 256 dictbuild-base: min 341.7 med 344.6 n 11
+titles-ru-1000000 block 256 dictbuild-new: min 297.1 med 300.2 n 11
+titles-zh-1000000 block 256 dictbuild-base: min 277.9 med 282.2 n 11
+titles-zh-1000000 block 256 dictbuild-new: min 227.5 med 230.2 n 11
+urls-1000000 block 256 dictbuild-base: min 412.8 med 419.9 n 11
+urls-1000000 block 256 dictbuild-new: min 372.2 med 379.5 n 11
+uuid-1000000 block 256 dictbuild-base: min 223.1 med 226.0 n 11
+uuid-1000000 block 256 dictbuild-new: min 184.2 med 187.3 n 11
+words-full block 256 dictbuild-base: min 51.4 med 52.5 n 11
+words-full block 256 dictbuild-new: min 42.7 med 43.0 n 11
+pypi-full block 256 dictbuild-base: min 175.1 med 178.3 n 11
+pypi-full block 256 dictbuild-new: min 148.8 med 150.9 n 11
+dna-1000000 block 1024 dictbuild-base: min 104.1 med 105.9 n 11
+dna-1000000 block 1024 dictbuild-new: min 86.7 med 87.5 n 11
+domains-1000000 block 1024 dictbuild-base: min 225.2 med 226.5 n 11
+domains-1000000 block 1024 dictbuild-new: min 200.1 med 201.9 n 11
+idents-1000000 block 1024 dictbuild-base: min 276.8 med 280.7 n 11
+idents-1000000 block 1024 dictbuild-new: min 241.1 med 244.2 n 11
+numeric-1000000 block 1024 dictbuild-base: min 82.2 med 83.7 n 11
+numeric-1000000 block 1024 dictbuild-new: min 55.5 med 56.5 n 11
+opaque-1000000 block 1024 dictbuild-base: min 136.2 med 139.2 n 11
+opaque-1000000 block 1024 dictbuild-new: min 112.0 med 113.4 n 11
+paths-1000000 block 1024 dictbuild-base: min 337.0 med 338.6 n 11
+paths-1000000 block 1024 dictbuild-new: min 292.5 med 295.4 n 11
+titles-en-1000000 block 1024 dictbuild-base: min 425.5 med 435.3 n 11
+titles-en-1000000 block 1024 dictbuild-new: min 383.1 med 388.8 n 11
+titles-ru-1000000 block 1024 dictbuild-base: min 349.2 med 353.0 n 11
+titles-ru-1000000 block 1024 dictbuild-new: min 311.2 med 313.4 n 11
+titles-zh-1000000 block 1024 dictbuild-base: min 289.8 med 291.0 n 11
+titles-zh-1000000 block 1024 dictbuild-new: min 236.9 med 240.1 n 11
+urls-1000000 block 1024 dictbuild-base: min 439.6 med 445.8 n 11
+urls-1000000 block 1024 dictbuild-new: min 398.7 med 403.9 n 11
+uuid-1000000 block 1024 dictbuild-base: min 214.1 med 216.0 n 11
+uuid-1000000 block 1024 dictbuild-new: min 174.8 med 177.6 n 11
+words-full block 1024 dictbuild-base: min 60.6 med 61.1 n 11
+words-full block 1024 dictbuild-new: min 50.0 med 50.9 n 11
+pypi-full block 1024 dictbuild-base: min 191.9 med 194.2 n 11
+pypi-full block 1024 dictbuild-new: min 171.5 med 173.2 n 11
+# 2026-09-25T21:13:09+03:00; Tctl 90.1 C

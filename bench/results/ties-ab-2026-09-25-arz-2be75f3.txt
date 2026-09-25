@@ -1,0 +1,127 @@
+# DictIndex lookups against the tie tries' minimum run: frontier_lex processes, one build and one
+# lookup lane a process, variants alternated per cell (odd rounds forward, even rounds reversed),
+# three rounds; each process started only once the rest of the machine had kept under 0.5 CPU busy
+# for a second ("others" = the CPUs it had). The line is frontier_lex's own: the cold pass is the
+# campaign's number, then the mean / min of three warm passes. A quiet window after a reboot.
+# variants (each binary's sha256 below):
+#   v440  4.4.0 (3a73ed5): no tie tries
+#   main  4.5.0's source (418ee18, whose src/ is 951868c's) plus the harness's DoubleArrayIndex row
+#         (a537fab): a trie for every run of two or more tied blocks, as 4.4.1 shipped it
+#   m8    MIN_RUN = 8: branch ties-min at 1bc458f, whose src/ is 2be75f3's
+#   m32   the same with MIN_RUN = 32
+# control: dna 10 M at block 1024, where no samples tie. DIMM layout: not read (needs root);
+# buffer placement: not read (needs root) -- each process allocates its own index.
+date: 2026-09-25T21:16:29+03:00
+uptime:  21:16:29 up 29 min,  1 user,  load average: 0.11, 1.30, 1.18
+bench-ready:
+  load                   0.11  ok
+  swap in use            0 MiB  ok
+  memory available       35.5 GiB  ok
+  page cache             7.7 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+  uptime                 0.5 h
+  governor               powersave
+  
+  READY
+binary m8: 6620bfb465324f5b
+binary v440: a7233fd88b38dead
+binary m32: f25b1f8904cd4df7
+binary main: dc6a85deac684e8f
+thermal max at start: 47000
+dna-10000000 dict32 round 1 v440 others 0.11 | lexindex DictIndex block 32: build 855 ms, size 43.682 MiB (4.580 B/key), latency cold 593.2 ns, then mean 592.6 / min 592.2 ns
+dna-10000000 dict32 round 1 main others 0.10 | lexindex DictIndex block 32: build 868 ms, size 43.682 MiB (4.580 B/key), latency cold 724.4 ns, then mean 723.5 / min 722.5 ns
+dna-10000000 dict32 round 1 m8 others 0.08 | lexindex DictIndex block 32: build 864 ms, size 43.682 MiB (4.580 B/key), latency cold 589.8 ns, then mean 591.6 / min 591.2 ns
+dna-10000000 dict32 round 2 m8 others 0.11 | lexindex DictIndex block 32: build 866 ms, size 43.682 MiB (4.580 B/key), latency cold 597.8 ns, then mean 596.0 / min 595.6 ns
+dna-10000000 dict32 round 2 main others 0.10 | lexindex DictIndex block 32: build 870 ms, size 43.682 MiB (4.580 B/key), latency cold 722.5 ns, then mean 722.5 / min 721.1 ns
+dna-10000000 dict32 round 2 v440 others 0.10 | lexindex DictIndex block 32: build 865 ms, size 43.682 MiB (4.580 B/key), latency cold 585.6 ns, then mean 584.7 / min 583.7 ns
+dna-10000000 dict32 round 3 v440 others 0.08 | lexindex DictIndex block 32: build 862 ms, size 43.682 MiB (4.580 B/key), latency cold 588.2 ns, then mean 582.8 / min 582.1 ns
+dna-10000000 dict32 round 3 main others 0.08 | lexindex DictIndex block 32: build 873 ms, size 43.682 MiB (4.580 B/key), latency cold 724.2 ns, then mean 723.5 / min 722.9 ns
+dna-10000000 dict32 round 3 m8 others 0.09 | lexindex DictIndex block 32: build 866 ms, size 43.682 MiB (4.580 B/key), latency cold 594.6 ns, then mean 591.7 / min 591.5 ns
+dna-10000000 routed32 round 1 v440 others 0.07 | lexindex DictIndex block 32 routed: build 885 ms, size 48.450 MiB (5.080 B/key), latency cold 597.2 ns, then mean 596.6 / min 596.0 ns
+dna-10000000 routed32 round 1 main others 0.09 | lexindex DictIndex block 32 routed: build 887 ms, size 48.450 MiB (5.080 B/key), latency cold 702.3 ns, then mean 702.0 / min 700.7 ns
+dna-10000000 routed32 round 1 m8 others 0.09 | lexindex DictIndex block 32 routed: build 886 ms, size 48.450 MiB (5.080 B/key), latency cold 609.3 ns, then mean 614.7 / min 608.9 ns
+dna-10000000 routed32 round 2 m8 others 0.11 | lexindex DictIndex block 32 routed: build 892 ms, size 48.450 MiB (5.080 B/key), latency cold 598.8 ns, then mean 604.3 / min 597.8 ns
+dna-10000000 routed32 round 2 main others 0.09 | lexindex DictIndex block 32 routed: build 886 ms, size 48.450 MiB (5.080 B/key), latency cold 705.1 ns, then mean 702.4 / min 701.9 ns
+dna-10000000 routed32 round 2 v440 others 0.10 | lexindex DictIndex block 32 routed: build 884 ms, size 48.450 MiB (5.080 B/key), latency cold 599.9 ns, then mean 594.3 / min 592.0 ns
+dna-10000000 routed32 round 3 v440 others 0.09 | lexindex DictIndex block 32 routed: build 878 ms, size 48.450 MiB (5.080 B/key), latency cold 608.4 ns, then mean 606.6 / min 606.4 ns
+dna-10000000 routed32 round 3 main others 0.06 | lexindex DictIndex block 32 routed: build 890 ms, size 48.450 MiB (5.080 B/key), latency cold 715.4 ns, then mean 708.4 / min 707.0 ns
+dna-10000000 routed32 round 3 m8 others 0.08 | lexindex DictIndex block 32 routed: build 884 ms, size 48.450 MiB (5.080 B/key), latency cold 604.9 ns, then mean 611.7 / min 606.5 ns
+titles-en-10000000 dict32 round 1 v440 others 0.08 | lexindex DictIndex block 32: build 2144 ms, size 58.395 MiB (6.123 B/key), latency cold 652.0 ns, then mean 653.6 / min 648.9 ns
+titles-en-10000000 dict32 round 1 main others 0.08 | lexindex DictIndex block 32: build 2159 ms, size 58.395 MiB (6.123 B/key), latency cold 677.2 ns, then mean 681.9 / min 678.7 ns
+titles-en-10000000 dict32 round 1 m8 others 0.08 | lexindex DictIndex block 32: build 2191 ms, size 58.395 MiB (6.123 B/key), latency cold 667.6 ns, then mean 665.8 / min 665.3 ns
+titles-en-10000000 dict32 round 1 m32 others 0.08 | lexindex DictIndex block 32: build 2193 ms, size 58.395 MiB (6.123 B/key), latency cold 660.4 ns, then mean 657.7 / min 656.8 ns
+titles-en-10000000 dict32 round 2 m32 others 0.07 | lexindex DictIndex block 32: build 2184 ms, size 58.395 MiB (6.123 B/key), latency cold 663.9 ns, then mean 660.1 / min 658.8 ns
+titles-en-10000000 dict32 round 2 m8 others 0.07 | lexindex DictIndex block 32: build 2162 ms, size 58.395 MiB (6.123 B/key), latency cold 661.2 ns, then mean 659.0 / min 658.6 ns
+titles-en-10000000 dict32 round 2 main others 0.07 | lexindex DictIndex block 32: build 2157 ms, size 58.395 MiB (6.123 B/key), latency cold 671.3 ns, then mean 670.9 / min 667.8 ns
+titles-en-10000000 dict32 round 2 v440 others 0.11 | lexindex DictIndex block 32: build 2178 ms, size 58.395 MiB (6.123 B/key), latency cold 645.1 ns, then mean 649.3 / min 645.0 ns
+titles-en-10000000 dict32 round 3 v440 others 0.09 | lexindex DictIndex block 32: build 2146 ms, size 58.395 MiB (6.123 B/key), latency cold 645.5 ns, then mean 646.6 / min 642.4 ns
+titles-en-10000000 dict32 round 3 main others 0.10 | lexindex DictIndex block 32: build 2194 ms, size 58.395 MiB (6.123 B/key), latency cold 680.4 ns, then mean 678.5 / min 675.3 ns
+titles-en-10000000 dict32 round 3 m8 others 0.08 | lexindex DictIndex block 32: build 2201 ms, size 58.395 MiB (6.123 B/key), latency cold 658.8 ns, then mean 656.5 / min 654.2 ns
+titles-en-10000000 dict32 round 3 m32 others 0.09 | lexindex DictIndex block 32: build 2186 ms, size 58.395 MiB (6.123 B/key), latency cold 657.7 ns, then mean 655.7 / min 654.7 ns
+urls-10000000 dict32 round 1 v440 others 0.10 | lexindex DictIndex block 32: build 2257 ms, size 68.020 MiB (7.132 B/key), latency cold 737.6 ns, then mean 742.5 / min 737.8 ns
+urls-10000000 dict32 round 1 main others 0.10 | lexindex DictIndex block 32: build 2312 ms, size 68.020 MiB (7.132 B/key), latency cold 774.2 ns, then mean 774.0 / min 771.0 ns
+urls-10000000 dict32 round 1 m8 others 0.09 | lexindex DictIndex block 32: build 2275 ms, size 68.020 MiB (7.132 B/key), latency cold 758.0 ns, then mean 751.0 / min 747.2 ns
+urls-10000000 dict32 round 1 m32 others 0.08 | lexindex DictIndex block 32: build 2278 ms, size 68.020 MiB (7.132 B/key), latency cold 748.8 ns, then mean 745.3 / min 743.3 ns
+urls-10000000 dict32 round 2 m32 others 0.09 | lexindex DictIndex block 32: build 2259 ms, size 68.020 MiB (7.132 B/key), latency cold 751.8 ns, then mean 751.3 / min 750.8 ns
+urls-10000000 dict32 round 2 m8 others 0.08 | lexindex DictIndex block 32: build 2304 ms, size 68.020 MiB (7.132 B/key), latency cold 746.8 ns, then mean 743.5 / min 741.3 ns
+urls-10000000 dict32 round 2 main others 0.06 | lexindex DictIndex block 32: build 2294 ms, size 68.020 MiB (7.132 B/key), latency cold 766.4 ns, then mean 766.5 / min 764.7 ns
+urls-10000000 dict32 round 2 v440 others 0.08 | lexindex DictIndex block 32: build 2292 ms, size 68.020 MiB (7.132 B/key), latency cold 741.5 ns, then mean 746.1 / min 742.0 ns
+urls-10000000 dict32 round 3 v440 others 0.08 | lexindex DictIndex block 32: build 2262 ms, size 68.020 MiB (7.132 B/key), latency cold 734.0 ns, then mean 737.3 / min 733.2 ns
+urls-10000000 dict32 round 3 main others 0.10 | lexindex DictIndex block 32: build 2305 ms, size 68.020 MiB (7.132 B/key), latency cold 780.3 ns, then mean 783.6 / min 781.2 ns
+urls-10000000 dict32 round 3 m8 others 0.11 | lexindex DictIndex block 32: build 2261 ms, size 68.020 MiB (7.132 B/key), latency cold 743.5 ns, then mean 741.9 / min 740.1 ns
+urls-10000000 dict32 round 3 m32 others 0.10 | lexindex DictIndex block 32: build 2291 ms, size 68.020 MiB (7.132 B/key), latency cold 746.3 ns, then mean 745.0 / min 743.6 ns
+paths-1000000 dict256 round 1 v440 others 0.10 | lexindex DictIndex block 256: build 527 ms, size 9.414 MiB (9.871 B/key), latency cold 772.7 ns, then mean 779.6 / min 773.2 ns
+paths-1000000 dict256 round 1 main others 0.07 | lexindex DictIndex block 256: build 524 ms, size 9.414 MiB (9.871 B/key), latency cold 703.3 ns, then mean 691.8 / min 686.6 ns
+paths-1000000 dict256 round 1 m8 others 0.09 | lexindex DictIndex block 256: build 527 ms, size 9.414 MiB (9.871 B/key), latency cold 705.3 ns, then mean 695.7 / min 690.5 ns
+paths-1000000 dict256 round 2 m8 others 0.10 | lexindex DictIndex block 256: build 529 ms, size 9.414 MiB (9.871 B/key), latency cold 700.0 ns, then mean 690.9 / min 686.9 ns
+paths-1000000 dict256 round 2 main others 0.09 | lexindex DictIndex block 256: build 532 ms, size 9.414 MiB (9.871 B/key), latency cold 710.1 ns, then mean 707.3 / min 703.2 ns
+paths-1000000 dict256 round 2 v440 others 0.07 | lexindex DictIndex block 256: build 527 ms, size 9.414 MiB (9.871 B/key), latency cold 781.9 ns, then mean 772.0 / min 766.2 ns
+paths-1000000 dict256 round 3 v440 others 0.10 | lexindex DictIndex block 256: build 526 ms, size 9.414 MiB (9.871 B/key), latency cold 782.6 ns, then mean 780.2 / min 769.3 ns
+paths-1000000 dict256 round 3 main others 0.10 | lexindex DictIndex block 256: build 535 ms, size 9.414 MiB (9.871 B/key), latency cold 695.4 ns, then mean 692.6 / min 688.3 ns
+paths-1000000 dict256 round 3 m8 others 0.08 | lexindex DictIndex block 256: build 532 ms, size 9.414 MiB (9.871 B/key), latency cold 700.3 ns, then mean 694.4 / min 687.2 ns
+dna-10000000 dict1024 round 1 v440 others 0.07 | lexindex DictIndex block 1024: build 849 ms, size 36.361 MiB (3.813 B/key), latency cold 473.8 ns, then mean 473.8 / min 473.6 ns
+dna-10000000 dict1024 round 1 main others 0.09 | lexindex DictIndex block 1024: build 851 ms, size 36.361 MiB (3.813 B/key), latency cold 476.3 ns, then mean 473.4 / min 473.1 ns
+dna-10000000 dict1024 round 1 m8 others 0.09 | lexindex DictIndex block 1024: build 852 ms, size 36.361 MiB (3.813 B/key), latency cold 475.6 ns, then mean 473.6 / min 473.1 ns
+dna-10000000 dict1024 round 2 m8 others 0.09 | lexindex DictIndex block 1024: build 846 ms, size 36.361 MiB (3.813 B/key), latency cold 475.3 ns, then mean 474.6 / min 474.0 ns
+dna-10000000 dict1024 round 2 main others 0.12 | lexindex DictIndex block 1024: build 854 ms, size 36.361 MiB (3.813 B/key), latency cold 471.9 ns, then mean 469.8 / min 469.7 ns
+dna-10000000 dict1024 round 2 v440 others 0.11 | lexindex DictIndex block 1024: build 847 ms, size 36.361 MiB (3.813 B/key), latency cold 472.6 ns, then mean 471.5 / min 471.3 ns
+dna-10000000 dict1024 round 3 v440 others 0.09 | lexindex DictIndex block 1024: build 849 ms, size 36.361 MiB (3.813 B/key), latency cold 472.3 ns, then mean 471.8 / min 471.5 ns
+dna-10000000 dict1024 round 3 main others 0.08 | lexindex DictIndex block 1024: build 851 ms, size 36.361 MiB (3.813 B/key), latency cold 469.7 ns, then mean 466.7 / min 466.5 ns
+dna-10000000 dict1024 round 3 m8 others 0.07 | lexindex DictIndex block 1024: build 851 ms, size 36.361 MiB (3.813 B/key), latency cold 473.7 ns, then mean 472.8 / min 472.1 ns
+thermal max at end: 79000
+done: 2026-09-25T21:46:42+03:00
+
+## medians (local/ties-ab/summary.py)
+
+dna-10000000 dict32
+  v440  cold   588.2 ns [593, 586, 588]  warm mean   584.7  /4.4.0 1.000  /main 0.812
+  main  cold   724.2 ns [724, 722, 724]  warm mean   723.5  /4.4.0 1.231  /main 1.000
+  m8    cold   594.6 ns [590, 598, 595]  warm mean   591.7  /4.4.0 1.011  /main 0.821
+
+dna-10000000 routed32
+  v440  cold   599.9 ns [597, 600, 608]  warm mean   596.6  /4.4.0 1.000  /main 0.851
+  main  cold   705.1 ns [702, 705, 715]  warm mean   702.4  /4.4.0 1.175  /main 1.000
+  m8    cold   604.9 ns [609, 599, 605]  warm mean   611.7  /4.4.0 1.008  /main 0.858
+
+titles-en-10000000 dict32
+  v440  cold   645.5 ns [652, 645, 646]  warm mean   649.3  /4.4.0 1.000  /main 0.953
+  main  cold   677.2 ns [677, 671, 680]  warm mean   678.5  /4.4.0 1.049  /main 1.000
+  m8    cold   661.2 ns [668, 661, 659]  warm mean   659.0  /4.4.0 1.024  /main 0.976
+  m32   cold   660.4 ns [660, 664, 658]  warm mean   657.7  /4.4.0 1.023  /main 0.975
+
+urls-10000000 dict32
+  v440  cold   737.6 ns [738, 742, 734]  warm mean   742.5  /4.4.0 1.000  /main 0.953
+  main  cold   774.2 ns [774, 766, 780]  warm mean   774.0  /4.4.0 1.050  /main 1.000
+  m8    cold   746.8 ns [758, 747, 744]  warm mean   743.5  /4.4.0 1.012  /main 0.965
+  m32   cold   748.8 ns [749, 752, 746]  warm mean   745.3  /4.4.0 1.015  /main 0.967
+
+paths-1000000 dict256
+  v440  cold   781.9 ns [773, 782, 783]  warm mean   779.6  /4.4.0 1.000  /main 1.112
+  main  cold   703.3 ns [703, 710, 695]  warm mean   692.6  /4.4.0 0.899  /main 1.000
+  m8    cold   700.3 ns [705, 700, 700]  warm mean   694.4  /4.4.0 0.896  /main 0.996
+
+dna-10000000 dict1024
+  v440  cold   472.6 ns [474, 473, 472]  warm mean   471.8  /4.4.0 1.000  /main 1.001
+  main  cold   471.9 ns [476, 472, 470]  warm mean   469.8  /4.4.0 0.999  /main 1.000
+  m8    cold   475.3 ns [476, 475, 474]  warm mean   473.6  /4.4.0 1.006  /main 1.007
+
+other work before each process: median 0.09, most 0.12 CPUs

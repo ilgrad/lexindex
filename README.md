@@ -110,7 +110,7 @@ of them turns an id back into its key.</sub>
   measured**: every word at every position in 10.6 ns a character against daachorse's 15.5, and a
   walk a position in 13.4 against crawdad's 15.8 and darts-clone's 27.8 — at **15.62 bytes a word**
   on jieba's 349 045-word lexicon, below every double array measured there (darts-clone and yada
-  17.75, crawdad 18.40, cedar 60.57 held in memory). It builds slower than darts-clone, 0.35 s
+  17.75, crawdad 18.40, cedar 60.57 held in memory). It builds slower than darts-clone, 0.16 s
   against 0.06. The ids are `StringIndex`'s for the same keys; nothing comes back out.
   Segmentation, gazetteer tagging, a tokenizer's longest match.
 

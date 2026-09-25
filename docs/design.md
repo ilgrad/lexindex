@@ -603,8 +603,8 @@ code table's labels must not pass `max_label`, and the supplementary characters 
 past the BMP and labelled `1..=max_label`. With that settled once, the walks read slots without a
 bounds check, and a crafted blob answers wrong ids, never out-of-range ones. `from_bytes` and `load`
 also check the payload hash, and `load_mmap` skips only that. On jieba's lexicon, 5.45 MB,
-`load_mmap` takes 1.07 ms and `load` 2.29; darts-clone's `open`, which reads its file and checks
-nothing, 0.78 ([the benchmarks](benchmarks.md#on-chinese-running-text-from-rust-and-from-python)).
+`load_mmap` takes 0.70 ms and `load` 2.03; darts-clone's `open`, which reads its file and checks
+nothing, 0.81 ([the benchmarks](benchmarks.md#on-chinese-running-text-from-rust-and-from-python)).
 
 It stores no key, so there is no `key(id)`, and no prefix enumeration or range: the ids are the
 keys' ranks, so a `StringIndex` or `DictIndex` over the same keys spells them. A build is refused past
