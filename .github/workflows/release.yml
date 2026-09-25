@@ -163,6 +163,10 @@ jobs:
           z = lexindex.ClosedHashIndex(["a", "b"])
           assert sorted([z.id("a"), z.id("b")]) == [0, 1]
           assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
+          a = lexindex.DoubleArrayIndex(["\u5317\u4eac", "\u5317\u4eac\u5927\u5b66", "\u5927\u5b66"])
+          a.save("smoke.bda")
+          m = lexindex.DoubleArrayIndex.load_mmap("smoke.bda")
+          assert m.occurrences("\u5317\u4eac\u5927\u5b66\u751f") == [(0, 2, 0), (0, 4, 1), (2, 4, 2)]
           print("smoke ok:", lexindex.__version__)
           EOF
           # The command line the wheel carries, both ways a pip install runs it.
@@ -240,6 +244,10 @@ jobs:
           z = lexindex.ClosedHashIndex(["a", "b"])
           assert sorted([z.id("a"), z.id("b")]) == [0, 1]
           assert lexindex.inspect(d.to_bytes())["kind"] == "DictIndex"
+          a = lexindex.DoubleArrayIndex(["\u5317\u4eac", "\u5317\u4eac\u5927\u5b66", "\u5927\u5b66"])
+          a.save("smoke.bda")
+          m = lexindex.DoubleArrayIndex.load_mmap("smoke.bda")
+          assert m.occurrences("\u5317\u4eac\u5927\u5b66\u751f") == [(0, 2, 0), (0, 4, 1), (2, 4, 2)]
           print("smoke ok:", lexindex.__version__)
           EOF
           # The command line the wheel carries, run the way a pip install runs it.
@@ -288,6 +296,8 @@ jobs:
           assert sorted([z.id("a"), z.id("b")]) == [0, 1]
           p = lexindex.PerfectHashIndex(["x", "y"])
           assert p.key(p.id("y")) == "y"
+          a = lexindex.DoubleArrayIndex(["\u5317\u4eac", "\u5317\u4eac\u5927\u5b66", "\u5927\u5b66"])
+          assert a.occurrences("\u5317\u4eac\u5927\u5b66\u751f") == [(0, 2, 0), (0, 4, 1), (2, 4, 2)]
           print("sdist ok:", lexindex.__version__)
           EOF
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
