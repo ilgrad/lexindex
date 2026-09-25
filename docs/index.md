@@ -19,15 +19,16 @@ tables, so a multi-gigabyte index is ready instantly and its pages are shared ac
 structures, each at its own best configuration — the protocol, the ten-million-key table and every
 other structure are in [the benchmarks](benchmarks.md#the-research-frontier-measured). The figure is
 the size axis, which `DictIndex` wins. On an exact lookup XCDAT is still ahead on most corpora at a
-million keys: lexindex's faster exact search there — `DictIndex` after 4.4's opt-in
-`route_microblocks()`, which holds 0.25–0.5 bytes a key more in memory, or `StringIndex` — beats
-XCDAT 15 on `dna`, trails it by 6–11 % on `uuid`, `urls` and `titles-ru` and by 1.2× to 1.9× on the
-other nine. At ten million keys it is ahead on `dna`, `numeric` and `urls`, level on `titles-en` and
-`uuid`, and 1.36× behind on `opaque`. **`HashedDictIndex` (4.1) wins the latency axis outright:**
-the same dictionary with its `id` answered by a perfect hash is 4.1× to 9.0× faster than XCDAT 15
-and 1.4× to 3.2× smaller, on all thirteen corpora at a million keys and all six at ten million — and
-3.1× to 7.4× faster and 1.2× to 2.8× smaller with an 8-bit fingerprint that turns away all but one
-stranger in 256; an exact answer for a stranger is the dictionary's search above. Every column is in
+million keys: lexindex's fastest exact search there — `DictIndex` after 4.4's opt-in
+`route_microblocks()`, which holds 0.25–0.5 bytes a key more in memory, `StringIndex`, or 4.5's
+`DoubleArrayIndex` where its trie is small — beats XCDAT 15 on `numeric`, `words` and `dna`, trails
+it by 4–11 % on `urls`, `uuid`, `paths` and `titles-ru` and by 1.2× to 1.6× on the other six. At ten
+million keys it is ahead on `dna`, `numeric` and `urls`, level on `titles-en` and `uuid`, and 1.36×
+behind on `opaque`. **`HashedDictIndex` (4.1) wins the latency axis outright:** the same dictionary
+with its `id` answered by a perfect hash is 3.8× to 9.0× faster than XCDAT 15 and 1.4× to 3.2×
+smaller, on all thirteen corpora at a million keys and all six at ten million — and 2.8× to 7.4×
+faster and 1.2× to 2.8× smaller with an 8-bit fingerprint that turns away all but one stranger in
+256; an exact answer for a stranger is the dictionary's search above. Every column is in
 [the benchmarks](benchmarks.md#hasheddictindex-against-xcdat), and none is quoted here without the
 others.</sub>
 
@@ -65,7 +66,7 @@ idx = lexindex.StringIndex.load_mmap("catalog.bix")   # zero-copy: no read into 
   queries, with `id` answered by a minimal perfect hash and a table of ranks instead of a search.
   2.62 bytes/key on top of the dictionary, one more per eight fingerprint bits for `id` to reject a
   non-member at `2^-bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
-  the closed-vocabulary path — 4.1–9.0× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
+  the closed-vocabulary path — 3.8–9.0× faster than XCDAT, the fastest trie measured, at 1.4–3.2×
   less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member (a
   minimal perfect hash plus a fingerprint per key, no keys stored). 1.24 bytes/key, at the cost of
