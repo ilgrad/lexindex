@@ -35,6 +35,9 @@
 //! checked to answer the first 2^20 probe keys as the table built does, but for PtrHash
 //! compact's and balanced's: `CompactPtrHash` is not `Clone`, so those are built again, and at
 //! 1 B keys a build does not give the same table twice.
+//! `MPHF_VS_PLACEMENT=1` reads, before the lookups and after them, where each copy's pages
+//! landed: its resident megabytes and the rate at which eight threads read them (the `placement`
+//! module), on a machine whose memory is not uniform the variable a lookup column carries.
 use lexindex::Mphf;
 use ph::phast::{
     Function, Function2, Params, SeedOnly, ShiftOnlyWrapped, bits_per_seed_to_100_bucket_size,
@@ -45,6 +48,11 @@ use ptr_hash::hash::FastIntHash;
 use ptr_hash::{CompactPtrHash, DefaultPtrHash, PtrHashParams};
 use std::sync::Arc;
 use std::time::Instant;
+
+mod placement;
+
+#[global_allocator]
+static ALLOCATOR: placement::Tracked = placement::Tracked;
 
 const CHUNK: usize = 4096;
 
@@ -152,6 +160,9 @@ struct Row {
     /// Wall time a key with `lookup_threads` threads each taking a share of the probe order.
     lookup_mt: Vec<Stat>,
     batch_mt: Vec<Stat>,
+    /// A list a copy of the table, one entry a round when `MPHF_VS_PLACEMENT` is set: its
+    /// resident MB and its pages' read rate in GB/s before the lookups and after them.
+    place: Vec<Vec<(f64, f64, f64)>>,
 }
 
 /// A pass over a slice of the probe order: the wrapping sum of the answers.
@@ -240,6 +251,7 @@ impl Row {
             misses: Stat::NONE,
             lookup_mt: vec![Stat::NONE; copies],
             batch_mt: vec![Stat::NONE; copies],
+            place: vec![Vec::new(); copies],
         }
     }
 
@@ -264,18 +276,27 @@ impl Row {
         }
         reset_high_water();
         let before = status_kb("VmRSS:");
+        // A copy's large allocations are noted as the table it will be in `tables`.
+        let first = tables.len();
+        placement::attribute(Some(first));
         let t = Instant::now();
         let f = build();
         self.build
             .add(t.elapsed().as_secs_f64() * 1e9 / keys as f64);
+        placement::attribute(None);
         self.peak_mb = self.peak_mb.max((status_kb("VmHWM:") - before) / 1024.0);
         self.huge_mb = self.huge_mb.max(smaps_kb("AnonHugePages:") / 1024.0);
         self.bits = bits(&f);
         let exact = matches!(copies, Copies::Of(_));
         let more: Vec<T> = (1..self.lookup.len())
-            .map(|_| match copies {
-                Copies::Of(copy) => copy(&f),
-                Copies::Rebuilt(build) => build(),
+            .map(|c| {
+                placement::attribute(Some(first + c));
+                let f = match copies {
+                    Copies::Of(copy) => copy(&f),
+                    Copies::Rebuilt(build) => build(),
+                };
+                placement::attribute(None);
+                f
             })
             .collect();
         for (c, f) in std::iter::once(f).chain(more).enumerate() {
@@ -484,6 +505,7 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1)
         .max(1);
+    let place = std::env::var_os("MPHF_VS_PLACEMENT").is_some();
     // In generation order: every function here buckets its keys in the build, and a sorted input
     // would spare one of them that. splitmix64 is a bijection, so the keys are distinct.
     let keys: Vec<u64> = (0..n as u64).map(splitmix).collect();
@@ -650,7 +672,17 @@ fn main() {
                     .fold(0usize, usize::wrapping_add) as u64
             }),
         );
+        let before: Vec<(f64, f64)> = if place {
+            (0..tables.len()).map(placement::read).collect()
+        } else {
+            Vec::new()
+        };
         lookups(&mut rows, &tables, &order, lookup_threads, counter.as_ref());
+        for (i, (mb, was)) in before.into_iter().enumerate() {
+            let t = &tables[i];
+            let (_, now) = placement::read(i);
+            rows[t.row].place[t.copy].push((mb, was, now));
+        }
     }
     let sample = if probes < n {
         format!(" of {probes} keys drawn at random")
@@ -735,6 +767,25 @@ fn main() {
                 String::new()
             }
         );
+    }
+    if place {
+        println!(
+            "placement, per copy and round: resident MB, then GB/s at which 8 threads read its pages 4 KiB at a time in a shuffled order, before the lookups -> after"
+        );
+        for r in rows.iter().filter(|r| r.run) {
+            let copies: Vec<String> = r
+                .place
+                .iter()
+                .map(|rounds| {
+                    rounds
+                        .iter()
+                        .map(|(mb, was, now)| format!("{mb:.0} MB {was:.2} -> {now:.2}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .collect();
+            println!("{:<36} {}", r.name, copies.join(" | "));
+        }
     }
     if copies > 1 {
         println!("per copy, fastest pass (ns): lookup / batch / lookup x / batch x");
