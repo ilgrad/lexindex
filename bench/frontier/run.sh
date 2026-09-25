@@ -150,7 +150,8 @@ log=bench/results/$table-$(date +%F)-$host-$commit.log
 
 # One process a structure, labelled as tables.py reads them.
 processes=()
-for kind in dict32 dict256 dict1024 routed32 routed256 routed1024 string hashed0 hashed8 hashed16; do
+for kind in dict32 dict256 dict1024 routed32 routed256 routed1024 string hashed0 hashed8 hashed16 \
+  da; do
   processes+=("lexindex $kind")
 done
 # C²'s fourth argument is the depth of the recursion its paper ablates; for the MARISA baseline it is

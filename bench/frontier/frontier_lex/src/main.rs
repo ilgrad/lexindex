@@ -7,7 +7,7 @@
 use std::io::BufRead;
 use std::time::Instant;
 
-use lexindex::{DictIndex, HashedDictIndex, StringIndex};
+use lexindex::{DictIndex, DoubleArrayIndex, HashedDictIndex, StringIndex};
 
 /// The longest key libstdc++'s `std::string` keeps inside the object rather than behind a pointer.
 const SSO: usize = 15;
@@ -52,6 +52,24 @@ impl Probe for DictIndex {
 impl Probe for StringIndex {
     fn build(keys: &[String], _: usize) -> Self {
         StringIndex::build(keys).expect("string build")
+    }
+    fn bytes(&self) -> usize {
+        self.serialized_len()
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.id(key).unwrap_or(u64::MAX)
+    }
+}
+
+/// The character-wise double array. Its slots and ids are 23 bits, so a corpus past 8 388 608 keys
+/// or slots is refused; that is a property of the structure and the corpus, printed as the one line
+/// `tables.py` reads rather than a panic.
+impl Probe for DoubleArrayIndex {
+    fn build(keys: &[String], _: usize) -> Self {
+        DoubleArrayIndex::build(keys).unwrap_or_else(|e| {
+            println!("lexindex DoubleArrayIndex refused: {e}");
+            std::process::exit(3)
+        })
     }
     fn bytes(&self) -> usize {
         self.serialized_len()
@@ -179,7 +197,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|string|hashed0|hashed8|hashed16>..."
+            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|string|hashed0|hashed8|hashed16|da>..."
         );
         std::process::exit(2);
     }
@@ -206,6 +224,7 @@ fn main() {
             "hashed0" => run::<Closed>(&keys, 0, "lexindex HashedDictIndex closed"),
             "hashed8" => run::<Hashed>(&keys, 8, "lexindex HashedDictIndex fp=8"),
             "hashed16" => run::<Hashed>(&keys, 16, "lexindex HashedDictIndex fp=16"),
+            "da" => run::<DoubleArrayIndex>(&keys, 0, "lexindex DoubleArrayIndex"),
             other => {
                 eprintln!("unknown kind {other}");
                 std::process::exit(2);

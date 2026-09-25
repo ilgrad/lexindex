@@ -54,6 +54,7 @@ LEXINDEX = {
     "hashed0": "lexindex HashedDict closed",
     "hashed8": "lexindex HashedDict fp=8",
     "hashed16": "lexindex HashedDict fp=16",
+    "da": "lexindex DoubleArray",
 }
 # `HashedDictIndex` against the structure that was the fastest on every corpus before it, and beside
 # the dictionary it is built over.
@@ -73,6 +74,7 @@ SEARCH = {
     "lexindex Dict 256 routed": "256 routed",
     "lexindex Dict 1024 routed": "1024 routed",
     "lexindex StringIndex": "`StringIndex`",
+    "lexindex DoubleArray": "`DoubleArray`",
 }
 REFERENCE = {"ART", "C-ART"}
 # What GNU timeout exits with when it had to stop the process.
@@ -98,6 +100,8 @@ BUSY = re.compile(r"^\[busy (?P<ticks>\d+) jiffies\]$")
 EXIT = re.compile(r"^\[exit (?P<code>\d+)\]$")
 SIGNAL = re.compile(r"Command terminated by signal (?P<signal>\d+)")
 WHAT = re.compile(r"^\s*what\(\):\s+(?P<what>.+)$")
+# frontier_lex's line for a corpus a structure cannot hold, printed before it exits.
+REFUSED = re.compile(r"^lexindex .+ refused: (?P<why>.+)$")
 
 
 def structure(label: str) -> str:
@@ -161,6 +165,8 @@ def parse(text: str) -> tuple[dict[str, str], list[dict]]:
             run["signal"] = int(m["signal"])
         elif m := WHAT.match(line):
             run["what"] = m["what"]
+        elif m := REFUSED.match(line):
+            run["refused"] = m["why"]
     return environment, list(corpora.values())
 
 
@@ -168,6 +174,8 @@ def failure(run: dict) -> str | None:
     """Why a run has no numbers, or None where it has them."""
     if "what" in run:
         return f"aborted: {run['what']}"
+    if "refused" in run:
+        return f"refused: {run['refused']}"
     if "signal" in run:
         return f"signal {run['signal']}"
     if run.get("exit") == TIMED_OUT:
@@ -297,7 +305,10 @@ def overview(corpora: list[dict]) -> str:
 
 
 def columns(corpora: list[dict], names: dict[str, str]) -> str:
-    """The structures `names` holds, a column each, bytes a key @ nanoseconds a lookup."""
+    """The structures `names` holds that the campaign ran, a column each, bytes a key @
+    nanoseconds a lookup."""
+    ran = {cell["structure"] for corpus in corpora for cell in corpus["cells"]}
+    names = {name: title for name, title in names.items() if name in ran}
     lines = [
         "| corpus | " + " | ".join(names.values()) + " |",
         "|---|" + "---:|" * len(names),
