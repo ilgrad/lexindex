@@ -571,10 +571,14 @@ impl Trie {
             }
             slot
         };
-        let is_free = |taken: &[u64], slot: usize| {
-            taken
-                .get(slot / 64)
-                .is_none_or(|w| (w >> (slot % 64)) & 1 == 0)
+        // The 64 bits of the map from `slot` up, a slot past the end free.
+        let window = |taken: &[u64], slot: usize| {
+            let (at, shift) = (slot / 64, slot % 64);
+            let low = taken.get(at).copied().unwrap_or(0);
+            if shift == 0 {
+                return low;
+            }
+            low >> shift | taken.get(at + 1).copied().unwrap_or(0) << (64 - shift)
         };
         // The nodes in the order they are laid out, each with its slot: the root, then children
         // as their parents place them.
@@ -593,17 +597,26 @@ impl Trie {
                 continue;
             };
             // First fit: the lowest free slot the first child can take whose siblings' slots are
-            // free too.
-            let mut f = free_from(&taken, lowest);
-            let base = loop {
-                let base = f - usize::from(first);
-                if kids
-                    .iter()
-                    .all(|&(_, b, _)| is_free(&taken, base + usize::from(b)))
-                {
-                    break base;
+            // free too. Asked of 64 slots at once, a window of the map a child: the region above
+            // `lowest` is holes between taken runs, and a node of several children tried them one
+            // slot at a time — 39 ms of the eight tries a million article titles build, against 22.
+            let base = if kids.len() == 1 {
+                free_from(&taken, lowest) - usize::from(first)
+            } else {
+                let mut f = lowest;
+                loop {
+                    let mut fits = !0u64;
+                    for &(_, b, _) in kids {
+                        fits &= !window(&taken, f + usize::from(b - first));
+                        if fits == 0 {
+                            break;
+                        }
+                    }
+                    if fits != 0 {
+                        break f + fits.trailing_zeros() as usize - usize::from(first);
+                    }
+                    f += 64;
                 }
-                f = free_from(&taken, f + 1);
             };
             trie.slots[parent as usize].base = base as u32;
             for &(_, b, c) in kids {
@@ -1584,5 +1597,51 @@ mod tests {
         let alone = price(&pieces, &table.encoder(), &trie, None, &mut w);
         let with = price(&pieces, &kept.encoder(), &trie, Some(split), &mut w);
         assert!(with < alone, "{with} against {alone}");
+    }
+
+    /// Bytes from a few values, so that phrases share prefixes and nodes have several children,
+    /// and from anywhere, so that some have many.
+    fn phrase_bytes() -> impl proptest::strategy::Strategy<Value = Vec<u8>> {
+        proptest::collection::vec(
+            proptest::prop_oneof![0u8..4, 250u8..=255, proptest::num::u8::ANY],
+            1..10,
+        )
+    }
+
+    proptest::proptest! {
+        /// A walk of the double array answers as the phrases do, whatever slots the layout found
+        /// them: every prefix of a phrase is a node, a phrase's last node names it, and every other
+        /// step fails.
+        #[test]
+        fn the_trie_walks_every_phrase_and_nothing_else(
+            phrases in proptest::collection::vec(phrase_bytes(), 0..200),
+            probes in proptest::collection::vec(phrase_bytes(), 0..50),
+        ) {
+            let mut seen = std::collections::HashSet::new();
+            let phrases: Vec<Vec<u8>> =
+                phrases.into_iter().filter(|p| seen.insert(p.clone())).collect();
+            let trie = Trie::of(phrases.iter().map(Vec::as_slice));
+            let prefixes: std::collections::HashSet<&[u8]> = phrases
+                .iter()
+                .flat_map(|p| (1..=p.len()).map(move |k| &p[..k]))
+                .collect();
+            let ids: HashMap<&[u8], u32> = (1..)
+                .zip(&phrases)
+                .map(|(id, p)| (p.as_slice(), id))
+                .collect();
+            for probe in phrases.iter().chain(&probes) {
+                let (mut node, mut base) = (0u32, trie.root());
+                for k in 0..probe.len() {
+                    let at = &probe[..=k];
+                    let step = trie.step(node, base, probe[k]);
+                    proptest::prop_assert_eq!(step.is_some(), prefixes.contains(at), "{:?}", at);
+                    let Some((child, child_base, phrase)) = step else {
+                        break;
+                    };
+                    proptest::prop_assert_eq!(phrase, ids.get(at).copied().unwrap_or(0));
+                    (node, base) = (child, child_base);
+                }
+            }
+        }
     }
 }
