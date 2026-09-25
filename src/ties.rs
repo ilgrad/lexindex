@@ -1,5 +1,5 @@
 //! What places a probe among block heads whose samples tie: a trie of eight-byte words over each
-//! run of equal samples, derived at load and held beside the index, in no blob.
+//! long run of equal samples, derived at load and held beside the index, in no blob.
 //!
 //! A [`DictIndex`](crate::DictIndex) routes a probe off one eight-byte sample a block, taken past
 //! the prefix every head shares. Where a run of blocks shares the sample as well, the heads
@@ -23,8 +23,25 @@
 //! not share, and it is then below or above all of that node's blocks, as it is below or above
 //! the head it was compared with. That leaves one head compare a lookup where there were eleven.
 //!
-//! Only a run whose words do not split — heads that differ past `p` by NUL bytes a shorter head's
-//! padding matches — and a node [`MAX_DEPTH`] levels down leave their blocks to the head compares.
+//! A trie pays for a long run and costs a short one. Over a run of a few blocks the head compares
+//! read two or three heads that sit side by side, where a descent reads `roots`, a node, and an
+//! edge's word, start and kid out of three more arrays. Ten million DNA reads at block 32 hold
+//! every one of the 4^8 possible samples, 65 536 runs of 3 to 7 blocks, and tries over all of
+//! them — 6.3 MB beside the index — took 50 instructions off a lookup and added 6.4 L2 misses and
+//! 2.3 page walks. So only a run of [`MIN_RUN`] blocks or more is given a trie, which leaves that
+//! index none and its lookups counting what they counted before the tries. Eight is where the
+//! counters turn on ten million English titles at block 32, four passes over every key: tries over
+//! runs of 2 and 3 blocks cost 10 instructions and 2.2 L2 misses a lookup, over runs of 4 to 7 they
+//! are a wash, and from 8 up every run left to the head compares costs instructions — 5 a lookup at
+//! a minimum of 16, 15 at 32, 28 at 64 — and saves no misses. URLs count the same instructions;
+//! their page walks, the noisiest counter here, run the other way, 0.45 a lookup more at 8 than at
+//! 32. The paths the tries were built for lose only their shortest run, 2 of 3 907 blocks at the
+//! default block, and a lookup there still counts 3 932 instructions where the head compares took
+//! 4 696.
+//!
+//! Runs shorter than [`MIN_RUN`] aside, only a run whose words do not split — heads that differ
+//! past `p` by NUL bytes a shorter head's padding matches — and a node [`MAX_DEPTH`] levels down
+//! leave their blocks to the head compares.
 
 use crate::dict_index::{lcp, sample_at};
 
@@ -37,6 +54,9 @@ const FLAT: u32 = u32::MAX - 1;
 /// set can nest deeper than any real one — heads that each extend the one before by a byte — and
 /// paths, the deepest measured, reach nine.
 const MAX_DEPTH: usize = 32;
+/// Blocks a run of equal samples must span to be given a trie; a shorter run's heads are compared.
+/// Eight is where a lookup's counters turn, as the module notes say.
+pub(crate) const MIN_RUN: usize = 8;
 
 /// A run of blocks: the prefix their heads share, its edges, and where the run ends.
 #[derive(Clone, Copy, Default)]
@@ -57,7 +77,7 @@ enum End {
     Flat(usize, usize),
 }
 
-/// The tries of every run of two or more equal samples, one root a run.
+/// The tries of every run of [`MIN_RUN`] or more equal samples that splits, one root a run.
 #[derive(Default)]
 pub(crate) struct Ties {
     /// The first block of each run, ascending; the root of `roots[i]`'s run is node `i`.
@@ -73,7 +93,7 @@ pub(crate) struct Ties {
 
 impl Ties {
     /// The tries over the heads `head(b)` whose samples are `samples`: `None` where no run of
-    /// equal neighbours splits, and past what a `u32` numbers.
+    /// [`MIN_RUN`] or more equal samples splits, and past what a `u32` numbers.
     pub(crate) fn derive<'h>(
         samples: &[u64],
         head: impl Fn(usize) -> &'h [u8],
@@ -90,14 +110,20 @@ impl Ties {
             let p32 = u32::try_from(p).ok()?;
             (sample_at(first, p) != sample_at(last, p)).then_some(p32)
         };
-        // The roots first, so that run `r`'s root is node `r`. Most indexes have no run at all,
-        // and a scan for the next pair of equal neighbours is what it costs them.
+        // The roots first, so that run `r`'s root is node `r`. Most indexes have no such run, and
+        // a scan for the next sample equal to the one `MIN_RUN - 1` past it is what it costs
+        // them: the samples are in order, so the two are equal exactly when the `MIN_RUN` from
+        // the first on all are, and the first such sample is where its run starts. A probe makes
+        // the same test.
         let mut at = 0;
-        while let Some(k) = samples[at..].windows(2).position(|w| w[0] == w[1]) {
+        while let Some(k) = samples[at..]
+            .windows(MIN_RUN)
+            .position(|w| w[0] == w[MIN_RUN - 1])
+        {
             let lo = at + k;
             let hi = lo
-                + 2
-                + samples[lo + 2..]
+                + MIN_RUN
+                + samples[lo + MIN_RUN..]
                     .iter()
                     .take_while(|&&s| s == samples[lo])
                     .count();
@@ -290,10 +316,12 @@ mod tests {
     }
 
     /// Every run of equal samples of `heads` at `g`, placed by the tries against the plain search.
-    fn check(heads: &[Vec<u8>], g: usize, probes: &[Vec<u8>]) {
+    /// How many probes a trie placed.
+    fn check(heads: &[Vec<u8>], g: usize, probes: &[Vec<u8>]) -> usize {
         let samples: Vec<u64> = heads.iter().map(|h| sample_at(h, g)).collect();
         let ties = Ties::derive(&samples, |b| &heads[b]);
         let ties = ties.as_deref();
+        let mut placed = 0;
         for probe in probes {
             if probe.get(..g) != heads[0].get(..g) {
                 continue;
@@ -305,9 +333,15 @@ mod tests {
                 continue;
             }
             let flat = |a: usize, c: usize| a + plain(&heads[a..c], probe);
-            // A run that does not split has no root, and its heads are compared.
-            let (got, known) = match ties.and_then(|t| Some((t, t.root(lo)?))) {
-                Some((ties, root)) => ties.boundary(root, probe, |b| &heads[b], flat),
+            // A run that does not split, or is shorter than `MIN_RUN`, has no root, and its heads
+            // are compared.
+            let root = ties.and_then(|t| Some((t, t.root(lo)?)));
+            assert!(root.is_none() || hi - lo >= MIN_RUN, "a run of {}", hi - lo);
+            let (got, known) = match root {
+                Some((ties, root)) => {
+                    placed += 1;
+                    ties.boundary(root, probe, |b| &heads[b], flat)
+                }
                 None => (flat(lo, hi), None),
             };
             assert_eq!(got, plain(heads, probe), "probe {probe:?}");
@@ -320,6 +354,7 @@ mod tests {
                 );
             }
         }
+        placed
     }
 
     fn probes_of(heads: &[Vec<u8>]) -> Vec<Vec<u8>> {
@@ -365,8 +400,8 @@ mod tests {
         heads.sort();
         heads.dedup();
         let probes = probes_of(&heads);
-        check(&heads, 1, &probes);
-        check(&heads, 0, &probes);
+        assert!(check(&heads, 1, &probes) > 0);
+        assert!(check(&heads, 0, &probes) > 0);
     }
 
     #[test]
@@ -384,9 +419,15 @@ mod tests {
             b"abcdefghijklmnopqrstuvwxyz0".to_vec(),
             b"abcdefghijklmnopqrstuvwxyz1".to_vec(),
         ];
+        // Both runs made longer than `MIN_RUN` by heads past their last: the first still does not
+        // split, and the second has a trie.
+        for i in 0..MIN_RUN {
+            heads.push(format!("ab\0\0\0\0\0\0\0\0y{i:03}").into_bytes());
+            heads.push(format!("abcdefghijklmnopqrstuvwxyz1{i:03}").into_bytes());
+        }
         heads.sort();
         let probes = probes_of(&heads);
-        check(&heads, 0, &probes);
+        assert!(check(&heads, 0, &probes) > 0);
     }
 
     #[test]
@@ -395,13 +436,30 @@ mod tests {
             .map(|k| std::iter::repeat_n(b'a', 8 * k).collect())
             .collect();
         let probes = probes_of(&heads);
-        check(&heads, 0, &probes);
+        assert!(check(&heads, 0, &probes) > 0);
+    }
+
+    #[test]
+    fn a_run_one_block_short_of_the_minimum_has_no_trie_and_is_placed_all_the_same() {
+        // Two runs whose heads split past the sample they share, the second exactly `MIN_RUN`
+        // blocks long and the last in the index.
+        let mut heads: Vec<Vec<u8>> = Vec::new();
+        for (sample, k) in [("a short ", MIN_RUN - 1), ("b long r", MIN_RUN)] {
+            heads.extend((0..k).map(|i| format!("{sample}/{i:04}").into_bytes()));
+        }
+        let samples: Vec<u64> = heads.iter().map(|h| sample_at(h, 0)).collect();
+        let ties = Ties::derive(&samples, |b| &heads[b]).expect("the long run splits");
+        assert!(ties.root(0).is_none());
+        assert!(ties.root(MIN_RUN - 1).is_some());
+        assert!(check(&heads, 0, &probes_of(&heads)) > 0);
     }
 
     #[test]
     fn unsorted_heads_derive_and_answer_without_panicking() {
+        // Repeated to a run at least `MIN_RUN` long, so that it is given a trie.
         let heads: Vec<Vec<u8>> = [&b"zz"[..], b"aa", b"", b"zzzzzzzzzq", b"zz", b"a\0"]
-            .iter()
+            .repeat(MIN_RUN.div_ceil(6))
+            .into_iter()
             .map(|h| h.to_vec())
             .collect();
         let samples: Vec<u64> = vec![7; heads.len()];

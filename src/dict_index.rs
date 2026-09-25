@@ -12,15 +12,16 @@
 //! word an entry ([`offsets`](crate::offsets)): where a block's head ends, and where its entries
 //! start.
 //!
-//! `id` is a binary search over the samples, then, where a run of blocks shares the probe's
-//! sample, a descent of the run's trie of words past what its heads share and one head compare
-//! ([`ties`](crate::ties)), then one block scanned without decoding anything: an entry's stored
-//! suffix is compared against the probe symbol by symbol, and the shared-prefix length says on its
-//! own when the probe has been passed. `key(id)` is the block's head plus the entries between it
-//! and the id whose shared-prefix length strictly increases — a monotonic stack over the headers
-//! finds them, and only those are decoded, each one eight-byte store per code. There are no
-//! automata, so a fuzzy query is a `StringIndex` question; prefix and range are two order lookups
-//! and a walk, which this index answers itself at 3–4 bytes per key.
+//! `id` is a binary search over the samples, then, where a run of blocks shares the probe's sample,
+//! a binary search of their heads or, over a long run, a descent of the run's trie of words past
+//! what its heads share and one head compare ([`ties`](crate::ties)), then one block scanned
+//! without decoding anything: an entry's stored suffix is compared against the probe symbol by
+//! symbol, and the shared-prefix length says on its own when the probe has been passed. `key(id)`
+//! is the block's head plus the entries between it and the id whose shared-prefix length strictly
+//! increases — a monotonic stack over the headers finds them, and only those are decoded, each one
+//! eight-byte store per code. There are no automata, so a fuzzy query is a `StringIndex` question;
+//! prefix and range are two order lookups and a walk, which this index answers itself at 3–4 bytes
+//! per key.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
@@ -32,7 +33,7 @@ use crate::packed::{self, Alphabet};
 use crate::paircode::{self, Code};
 use crate::phrase::{self, Dict, Split, Trie};
 use crate::room::{Room, commit};
-use crate::ties::Ties;
+use crate::ties::{MIN_RUN, Ties};
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -177,9 +178,9 @@ pub struct DictIndex {
     /// so neither the load nor a lookup moved — five corpora, load within 0.9 % and `id` and `key`
     /// within 3 %, both ways.
     samples: Vec<u64>,
-    /// What places a probe among the heads of a run of equal samples, derived from the heads the
-    /// way the samples are and held in no blob. See [`Ties`]. Boxed, so that an index with no such
-    /// run carries eight bytes for it rather than a hundred and twenty.
+    /// What places a probe among the heads of a long run of equal samples, derived from the heads
+    /// the way the samples are and held in no blob. See [`Ties`]. Boxed, so that an index with no
+    /// such run carries eight bytes for it rather than a hundred and twenty.
     ties: Option<Box<Ties>>,
     /// Where block `b`'s restart stream starts in `data`, packed the same way; its microblocks
     /// follow it.
@@ -3210,7 +3211,9 @@ impl DictIndex {
 
     /// [`sample_range`] and [`run_boundary`](Self::run_boundary) for one probe whose sample is
     /// `s`. A run of equal samples that has a trie is not measured: its root knows where it ends,
-    /// and on paths the gallop to that end was two dozen steps of a lookup.
+    /// and on paths the gallop to that end was two dozen steps of a lookup. Only a run of
+    /// [`MIN_RUN`] or more can have one, and the sample `MIN_RUN - 1` past the first says whether
+    /// it is that long; a shorter run is measured and its heads compared.
     #[inline(always)]
     fn sample_boundary(&self, probe: &[u8], s: u64) -> (usize, Option<(usize, usize)>) {
         let samples = &self.samples;
@@ -3218,7 +3221,7 @@ impl DictIndex {
         if samples.get(lo) != Some(&s) {
             return (lo, None);
         }
-        if samples.get(lo + 1) == Some(&s) {
+        if samples.get(lo + MIN_RUN - 1) == Some(&s) {
             if let Some(placed) = self.tie_boundary(probe, lo) {
                 return placed;
             }
@@ -3290,7 +3293,7 @@ impl DictIndex {
     /// halving of it. With the boundary, what [`Ties::boundary`] knows of the head below it.
     #[inline]
     fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> (usize, Option<(usize, usize)>) {
-        if hi - lo >= 2 {
+        if hi - lo >= MIN_RUN {
             if let Some(placed) = self.tie_boundary(probe, lo) {
                 return placed;
             }
@@ -6239,6 +6242,34 @@ mod tests {
                     "{stranger:?} at {block}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn runs_either_side_of_the_tie_minimum_place_every_probe() {
+        // Keys that share their first eight bytes a run of them: at block 1 every key heads a
+        // block, and the runs of equal samples are one block short of `MIN_RUN`, `MIN_RUN`, and
+        // well past it.
+        let mut keys: Vec<String> = Vec::new();
+        for (sample, k) in [
+            ("a-short-", MIN_RUN - 1),
+            ("b-exact-", MIN_RUN),
+            ("c-longer", 3 * MIN_RUN),
+        ] {
+            keys.extend((0..k).map(|i| format!("{sample}/{i:04}")));
+        }
+        let idx = DictIndex::build_with_block(&keys, 1).unwrap();
+        assert_eq!(idx.g, 0);
+        let ties = idx.ties.as_deref().expect("the runs split");
+        assert!(ties.root(0).is_none());
+        assert!(ties.root(MIN_RUN - 1).is_some());
+        assert!(ties.root(2 * MIN_RUN - 1).is_some());
+        let mut queries = keys.clone();
+        queries.extend(probes(&keys));
+        for block in [1usize, 2, 3] {
+            let idx = DictIndex::build_with_block(&keys, block).unwrap();
+            check(&idx, &keys);
+            batch_matches(&idx, &queries, &format!("block {block}"));
         }
     }
 
