@@ -133,8 +133,10 @@ unsafe fn slot(slots: *const u8, len: usize, s: usize) -> u64 {
 struct Occupancy {
     used: Vec<u64>,
     open: Vec<u64>,
-    /// Bases taken, one bit each: bases are unique.
+    /// Bases taken, one bit each, `pad` words up: bases are unique, and a search reads the bits up
+    /// to `max_label` below a first child's slot, which near slot 0 lie below base 0, and are clear.
     taken: Vec<u64>,
+    pad: usize,
 }
 
 impl Occupancy {
@@ -142,10 +144,12 @@ impl Occupancy {
         // A search stops at the last base that fits, tests `CHUNK` words from there, and reads
         // the word after each; a row's last child is `max_label` past its base.
         let words = (MAX_SLOTS + max_label) / 64 + CHUNK + 4;
+        let pad = max_label / 64 + 1;
         Self {
             used: vec![0; words],
             open: vec![u64::MAX; words / 64 + 2],
-            taken: vec![0; words],
+            taken: vec![0; words + pad],
+            pad,
         }
     }
 
@@ -155,6 +159,11 @@ impl Occupancy {
         if self.used[w] == u64::MAX {
             self.open[w / 64] &= !(1 << (w % 64));
         }
+    }
+
+    fn take_base(&mut self, b: usize) {
+        let x = b + 64 * self.pad;
+        self.taken[x / 64] |= 1 << (x % 64);
     }
 
     /// The first word at or after `w` with a free slot.
@@ -167,23 +176,60 @@ impl Occupancy {
         }
         j * 64 + m.trailing_zeros() as usize
     }
+
+    /// Bit `j` set while word `w + j` has a free slot, for the `CHUNK` words from `w`.
+    fn open_words(&self, w: usize) -> u64 {
+        window(&self.open, w / 64, (w % 64) as u32) & (u64::MAX >> (64 - CHUNK))
+    }
+
+    /// The bit offset in `taken` of the base whose child `c0` is word `w`'s first slot.
+    fn base_at(&self, w: usize, c0: usize) -> (usize, u32) {
+        let x = 64 * (w + self.pad) - c0;
+        (x / 64, (x % 64) as u32)
+    }
+
+    /// Word `w`'s slots a child with label `c0` could take: free, and its base not taken.
+    fn candidates(&self, w: usize, c0: usize) -> u64 {
+        let (q, s) = self.base_at(w, c0);
+        !self.used[w] & !window(&self.taken, q, s)
+    }
+
+    /// The same for the `CHUNK` words from `w0`.
+    fn candidates_chunk(&self, w0: usize, c0: usize) -> [u64; CHUNK] {
+        let (q, s) = self.base_at(w0, c0);
+        let used: &[u64; CHUNK] = self.used[w0..w0 + CHUNK].try_into().expect("CHUNK words");
+        let taken: &[u64; CHUNK + 1] = self.taken[q..q + CHUNK + 1]
+            .try_into()
+            .expect("CHUNK + 1 words");
+        let mut fit = [0u64; CHUNK];
+        if s == 0 {
+            for j in 0..CHUNK {
+                fit[j] = !used[j] & !taken[j];
+            }
+        } else {
+            for j in 0..CHUNK {
+                fit[j] = !used[j] & !(taken[j] >> s | taken[j + 1] << (64 - s));
+            }
+        }
+        fit
+    }
 }
 
 /// Words of candidate bases a search tests together: a wide row needs dozens of its children's
 /// slots to rule out 64 bases, and the same test over several words at once runs as vector code.
 const CHUNK: usize = 32;
 
-/// Bits `x .. x + 64` of a bitmap; `x` may be negative, and the bits below 0 are clear.
+/// A chunk with this few words holding a free slot is tested a word at a time: past the densely
+/// packed bottom, a two-child row's search crosses chunks with one such word each.
+const SPARSE: u32 = 4;
+
+/// Bits `64 q + s .. 64 q + s + 64` of a bitmap, `s < 64`.
 #[inline(always)]
-fn window(words: &[u64], x: isize) -> u64 {
-    if x < 0 {
-        return if x > -64 { words[0] << -x } else { 0 };
-    }
-    let (w, s) = (x as usize / 64, x as usize % 64);
+fn window(words: &[u64], q: usize, s: u32) -> u64 {
     if s == 0 {
-        return words[w];
+        return words[q];
     }
-    words[w] >> s | words[w + 1] << (64 - s)
+    words[q] >> s | words[q + 1] << (64 - s)
 }
 
 /// The explicit trie placement works from, breadth first from the root at 0: node `v`'s children
@@ -331,7 +377,7 @@ fn place(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
     let mut base = vec![0u32; nodes];
     let mut o = Occupancy::new(max_label);
     o.take(0);
-    o.taken[0] |= 1;
+    o.take_base(0);
     for k in t.kids(0) {
         o.take(usize::from(t.label[k]));
     }
@@ -364,64 +410,98 @@ fn place(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
         let e2 = e1.max(f2);
         let mut e = e2.max(fall);
         let (mut learn1, mut learn2) = (e == e1, e == e2 && labels.len() > 1);
-        let b = loop {
+        let s = 'search: loop {
             let w0 = o.open_from(e / 64);
             if w0 > last_word {
                 return Err(too_many());
             }
-            // Bit `i` of `fit[j]` stands for the base whose first child is slot `64 (w0 + j) + i`.
-            let mut fit = [0u64; CHUNK];
-            for (j, f) in fit.iter_mut().enumerate() {
-                let w = w0 + j;
-                let mut free = !o.used[w];
-                if w == e / 64 {
-                    free &= u64::MAX << (e % 64);
+            let mask0 = if w0 == e / 64 {
+                u64::MAX << (e % 64)
+            } else {
+                u64::MAX
+            };
+            let open = o.open_words(w0);
+            if rel.is_empty() || open.count_ones() <= SPARSE {
+                let mut m = open;
+                while m != 0 {
+                    let j = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    let w = w0 + j;
+                    let mut f = o.candidates(w, c0);
+                    if j == 0 {
+                        f &= mask0;
+                    }
+                    if f == 0 {
+                        continue;
+                    }
+                    if learn1 {
+                        floors.first[c0] = 64 * w + f.trailing_zeros() as usize;
+                        learn1 = false;
+                    }
+                    for (r, &(dq, sh)) in rel.iter().enumerate() {
+                        f &= !window(&o.used, w + dq, sh);
+                        if f == 0 {
+                            break;
+                        }
+                        if r == 0 && learn2 {
+                            floors.set_pair(labels, 64 * w + f.trailing_zeros() as usize);
+                            learn2 = false;
+                        }
+                    }
+                    if f != 0 {
+                        break 'search 64 * w + f.trailing_zeros() as usize;
+                    }
                 }
-                *f = free & !window(&o.taken, (64 * w) as isize - c0 as isize);
-            }
-            if learn1 {
+            } else {
+                // Bit `i` of `fit[j]` stands for the base whose first child is slot
+                // `64 (w0 + j) + i`.
+                let mut fit = o.candidates_chunk(w0, c0);
+                fit[0] &= mask0;
+                if learn1 {
+                    if let Some(s) = lowest(&fit, w0) {
+                        floors.first[c0] = s;
+                        learn1 = false;
+                    }
+                }
+                for (r, &(dq, sh)) in rel.iter().enumerate() {
+                    let from: &[u64; CHUNK + 1] = o.used[w0 + dq..w0 + dq + CHUNK + 1]
+                        .try_into()
+                        .expect("CHUNK + 1 words");
+                    let mut any = 0;
+                    if sh == 0 {
+                        for j in 0..CHUNK {
+                            fit[j] &= !from[j];
+                            any |= fit[j];
+                        }
+                    } else {
+                        for j in 0..CHUNK {
+                            fit[j] &= !(from[j] >> sh | from[j + 1] << (64 - sh));
+                            any |= fit[j];
+                        }
+                    }
+                    if any == 0 {
+                        break;
+                    }
+                    if r == 0 && learn2 {
+                        floors.set_pair(labels, lowest(&fit, w0).expect("a bit is set"));
+                        learn2 = false;
+                    }
+                }
                 if let Some(s) = lowest(&fit, w0) {
-                    floors.first[c0] = s;
-                    learn1 = false;
+                    break 'search s;
                 }
-            }
-            for (r, &(dq, s)) in rel.iter().enumerate() {
-                let from: &[u64; CHUNK + 1] = o.used[w0 + dq..w0 + dq + CHUNK + 1]
-                    .try_into()
-                    .expect("CHUNK + 1 words");
-                let mut any = 0;
-                if s == 0 {
-                    for j in 0..CHUNK {
-                        fit[j] &= !from[j];
-                        any |= fit[j];
-                    }
-                } else {
-                    for j in 0..CHUNK {
-                        fit[j] &= !(from[j] >> s | from[j + 1] << (64 - s));
-                        any |= fit[j];
-                    }
-                }
-                if any == 0 {
-                    break;
-                }
-                if r == 0 && learn2 {
-                    floors.set_pair(labels, lowest(&fit, w0).expect("a bit is set"));
-                    learn2 = false;
-                }
-            }
-            if let Some(s) = lowest(&fit, w0) {
-                if labels.len() > 2 {
-                    floors.set_all(labels, s);
-                }
-                // No fit lies below `e`, which is at least `c0`.
-                break s - c0;
             }
             e = 64 * (w0 + CHUNK);
         };
+        if labels.len() > 2 {
+            floors.set_all(labels, s);
+        }
+        // No fit lies below `e`, which is at least `c0`.
+        let b = s - c0;
         if b + max_label >= MAX_SLOTS {
             return Err(too_many());
         }
-        o.taken[b / 64] |= 1 << (b % 64);
+        o.take_base(b);
         for &c in labels {
             o.take(b + usize::from(c));
         }
