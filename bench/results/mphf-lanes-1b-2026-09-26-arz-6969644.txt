@@ -1,0 +1,206 @@
+local/m2/lanes (a local harness, not in the repository; the T-23 lanes of 2026-09-17 with more counters),
+the 1 B row's eight-thread batch with hardware counters a key: lexindex 4.5.2 (the library as tagged at
+`6969644`; the tree it was built from, `b768ac5`, differs in one doc comment), ptr_hash 2.1.1, rayon 1.12.0,
+binary sha256 13cdf38ea7d985cf442e7cc0f8caa5f28c01aa6f946eb8e0ea4e674adf7552aa. Three processes on
+2026-09-26, 02:47-02:58 +03:00, each `PROBES=10000000 lanes 1000000000 6 mphb8,cmpb8,mph8,cmp8,mphb1,cmpb1 8`:
+huge pages as the tables ask, then with `NO_THP=1` (PR_SET_THP_DISABLE for the process: every table on 4 KiB
+pages), then as asked again. Each builds MPH3 over 10^9 splitmix64 keys on eight threads
+(`Mphf::build_with_threads`) and PtrHash compact (`CompactPtrHash<FastIntHash, u64>` with
+`PtrHashParams::default_compact()`, a CubicEps bucket function at lambda 3.9) on an eight-thread rayon pool,
+draws 10 M probe keys at random with replacement, and times six lanes over them in six rounds, the lanes in
+turn and in reverse order every other round, each pass after an untimed pass of its own over the first 2^20
+probes. mphb8 / cmpb8: MPH3's `index_all` / compact's `index_stream::<32>` over chunks of 4096, eight threads
+on shares of the probe order; mph8 / cmp8: one `index` a key, eight threads; mphb1 / cmpb1: the batches on one
+thread. min / med: wall ns a key, fastest and median of the six passes. Every count is a key, user space,
+summed over the lane's threads and the six passes (a fresh counter each pass, opened with perf_event_open(2)
+and inherited by the threads, scaled for multiplexing), Zen 3 raw events: 0x43 demand and 0x59
+software-prefetch data-cache fills by source, umask 0x08 local DRAM and 0x02 the L3 or another core's L2;
+0x52/0x01 software prefetches that hit the data cache; 0x4b/0xff prefetch instructions dispatched; 0x46/0x03
+data-side page-table walks; 0x5a/0x08 hardware-prefetch fills from DRAM; 0x5f the data-cache misses in flight,
+summed each cycle. The probe order is read sequentially, eight keys a line, by both batches alike.
+
+Each process started after a 1-minute load under 0.3 and Tctl under 60 C had held for a minute and
+bench-ready was green (45-46 C at the starts, 87-88 C at the ends), on mains, an editor open and idle, 2 MiB
+of zram swap in use from an earlier run. Ryzen 7 5800HS (8 cores, 16 MB L3), 38 GB: an 8 GB module in one
+rank on channel A and a 32 GB module in two ranks on channel B (dmidecode, read 2026-09-21 as root; this run
+had no root), so the top 16 GiB of physical memory interleaves both channels and the rest is B alone;
+transparent_hugepage/enabled = madvise.
+
+What it says:
+- On the same memory -- huge pages off, the second process -- MPH3's batch x8 reads 2.88 ns a key against
+  compact's 2.41 (medians), and fetches 0.965 lines a key from DRAM (0.934 by its prefetches, 0.031 on
+  demand) against compact's 0.826 (0.758 and 0.068), 17 % more, while compact finds 0.173 a key in the L3
+  against MPH3's 0.093. The lines compact does not fetch from DRAM are the ones it finds in the cache.
+- That is the bucket function. Compact's sends keys to its buckets unevenly, so the pilots of its dense
+  buckets answer a large share of the keys and stay in the 16 MB L3. MPH3's buckets are uniform
+  (`bucket_of` is `scale(h, buckets)`): over its 240 MB about 16/240 = 6.7 % of a lookup's lines can be in
+  the L3, and its prefetches found 0.061-0.064 lines a key there.
+- With huge pages on, MPH3 fetches 0.881 and 0.898 lines a key from DRAM against compact's 0.844 and 0.845,
+  and its batch reads 3.46 and 3.31 against 2.68 and 2.63: its tables on huge pages land on memory about a
+  fifth slower for random loads here (bench/results/mphf-vs-1b-2026-09-26-arz-8537f35.txt), compact's on
+  4 KiB pages do not.
+- No lane is an imbalance: in the three fastest passes of every lane, which hold its minimum and its median,
+  the eight threads finish within 2.5 % of each other (the per-thread lines below); the slower passes spread
+  to 15 %.
+- On one thread MPH3's batch keeps its lead, 6.50 (off) and 7.21-7.25 (on) against compact's 8.70-8.77: 3.1
+  prefetches a key against 1.0, of which 1.35-1.66 find the line already in the cache, the retries that keep
+  a dropped prefetch from costing a demand miss.
+
+2026-09-26T02:47:11+03:00 settled after 180 s
+load                   0.12  ok
+swap in use            2 MiB  ok
+memory available       33.7 GiB  ok
+page cache             7.8 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+uptime                 6.0 h
+governor               powersave
+
+READY
+=== 2026-09-26T02:47:13+03:00 THP on, Tctl 45.2 C, load 0.11 0.63 1.53, swap 2 MiB
+mph built 8.1 s
+compact built 45.3 s
+fast built 0.0 s
+mphb8 round 0: wall 3.42, per thread min 26.84 mean 27.01 max 27.15 (x8 = 3.36 / 3.38 / 3.39)
+cmpb8 round 0: wall 2.72, per thread min 21.37 mean 21.47 max 21.55 (x8 = 2.67 / 2.68 / 2.69)
+mph8 round 0: wall 3.70, per thread min 29.04 mean 29.29 max 29.44 (x8 = 3.63 / 3.66 / 3.68)
+cmp8 round 0: wall 5.01, per thread min 36.72 mean 37.30 max 39.86 (x8 = 4.59 / 4.66 / 4.98)
+cmp8 round 1: wall 4.34, per thread min 33.52 mean 33.89 max 34.62 (x8 = 4.19 / 4.24 / 4.33)
+mph8 round 1: wall 3.72, per thread min 29.22 mean 29.41 max 29.53 (x8 = 3.65 / 3.68 / 3.69)
+cmpb8 round 1: wall 2.68, per thread min 21.13 mean 21.20 max 21.25 (x8 = 2.64 / 2.65 / 2.66)
+mphb8 round 1: wall 3.47, per thread min 27.11 mean 27.24 max 27.51 (x8 = 3.39 / 3.41 / 3.44)
+mphb8 round 2: wall 3.87, per thread min 29.59 mean 30.11 max 30.86 (x8 = 3.70 / 3.76 / 3.86)
+cmpb8 round 2: wall 2.65, per thread min 20.71 mean 20.82 max 20.90 (x8 = 2.59 / 2.60 / 2.61)
+mph8 round 2: wall 4.36, per thread min 30.19 mean 31.21 max 34.64 (x8 = 3.77 / 3.90 / 4.33)
+cmp8 round 2: wall 4.15, per thread min 32.82 mean 32.95 max 33.05 (x8 = 4.10 / 4.12 / 4.13)
+cmp8 round 3: wall 4.19, per thread min 32.99 mean 33.15 max 33.34 (x8 = 4.12 / 4.14 / 4.17)
+mph8 round 3: wall 3.72, per thread min 29.25 mean 29.41 max 29.57 (x8 = 3.66 / 3.68 / 3.70)
+cmpb8 round 3: wall 2.69, per thread min 21.13 mean 21.28 max 21.36 (x8 = 2.64 / 2.66 / 2.67)
+mphb8 round 3: wall 3.46, per thread min 27.11 mean 27.23 max 27.54 (x8 = 3.39 / 3.40 / 3.44)
+mphb8 round 4: wall 3.86, per thread min 29.74 mean 30.21 max 30.68 (x8 = 3.72 / 3.78 / 3.83)
+cmpb8 round 4: wall 2.66, per thread min 20.95 mean 21.04 max 21.09 (x8 = 2.62 / 2.63 / 2.64)
+mph8 round 4: wall 3.99, per thread min 28.95 mean 29.46 max 31.73 (x8 = 3.62 / 3.68 / 3.97)
+cmp8 round 4: wall 4.50, per thread min 34.37 mean 34.88 max 35.75 (x8 = 4.30 / 4.36 / 4.47)
+cmp8 round 5: wall 4.33, per thread min 33.53 mean 33.80 max 34.36 (x8 = 4.19 / 4.22 / 4.30)
+mph8 round 5: wall 3.71, per thread min 29.24 mean 29.40 max 29.58 (x8 = 3.65 / 3.67 / 3.70)
+cmpb8 round 5: wall 2.69, per thread min 21.22 mean 21.31 max 21.39 (x8 = 2.65 / 2.66 / 2.67)
+mphb8 round 5: wall 3.46, per thread min 26.99 mean 27.19 max 27.48 (x8 = 3.37 / 3.40 / 3.43)
+n 1000000000, probes 10000000, rounds 6, x 8; ns = wall ns a key; counts a key (user space, all threads, scaled)
+lane       min    med        cycles  instructions branch-misses     dmnd-DRAM       dmnd-L3     swpf-DRAM       swpf-L3      swpf-hit     pref-disp         walks     hwpf-DRAM     mab-count
+mphb8     3.42   3.46       106.345        50.077         0.028         0.040         0.022         0.841         0.061         1.101         2.853         0.006         0.036       634.821
+        passes: 3.42 3.47 3.87 3.46 3.86 3.46
+cmpb8     2.65   2.68        74.714        57.108         0.017         0.076         0.028         0.768         0.171         0.007         0.941         0.783         0.047       424.642
+        passes: 2.72 2.68 2.65 2.69 2.66 2.69
+mph8      3.70   3.72       112.715        22.491         0.019         0.971         0.097         0.000         0.000         0.000         0.000         0.005         0.010       287.019
+        passes: 3.70 3.72 4.36 3.72 3.99 3.71
+cmp8      4.15   4.33       124.233        41.760         0.016         0.795         0.188         0.000         0.000         0.000         0.000         0.955         0.017       187.288
+        passes: 5.01 4.34 4.15 4.19 4.50 4.33
+mphb1     7.14   7.25        30.638        49.701         0.025         0.023         0.024         0.965         0.057         1.350         3.117         0.004         0.030       228.492
+        passes: 7.25 7.14 7.87 7.17 7.84 7.25
+cmpb1     8.62   8.73        37.011        60.194         0.017         0.029         0.019         0.811         0.184         0.006         1.018         0.961         0.026       183.912
+        passes: 9.44 8.62 8.79 8.72 8.76 8.73
+=== 2026-09-26T02:48:13+03:00 rc 0 Tctl 87.0 C
+2026-09-26T02:52:04+03:00 settled after 240 s
+load                   0.11  ok
+swap in use            2 MiB  ok
+memory available       33.7 GiB  ok
+page cache             7.8 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+uptime                 6.1 h
+governor               powersave
+
+READY
+=== 2026-09-26T02:52:06+03:00 THP off, Tctl 45.8 C, load 0.11 0.91 1.51, swap 2 MiB
+transparent huge pages off
+mph built 8.3 s
+compact built 46.5 s
+fast built 0.0 s
+mphb8 round 0: wall 2.90, per thread min 22.78 mean 22.87 max 22.96 (x8 = 2.85 / 2.86 / 2.87)
+cmpb8 round 0: wall 2.44, per thread min 19.03 mean 19.15 max 19.23 (x8 = 2.38 / 2.39 / 2.40)
+mph8 round 0: wall 3.13, per thread min 24.45 mean 24.60 max 24.91 (x8 = 3.06 / 3.08 / 3.11)
+cmp8 round 0: wall 4.33, per thread min 32.52 mean 32.91 max 34.39 (x8 = 4.07 / 4.11 / 4.30)
+cmp8 round 1: wall 4.04, per thread min 31.58 mean 31.86 max 32.20 (x8 = 3.95 / 3.98 / 4.02)
+mph8 round 1: wall 3.10, per thread min 24.45 mean 24.50 max 24.56 (x8 = 3.06 / 3.06 / 3.07)
+cmpb8 round 1: wall 2.41, per thread min 18.80 mean 18.90 max 19.17 (x8 = 2.35 / 2.36 / 2.40)
+mphb8 round 1: wall 2.87, per thread min 22.57 mean 22.66 max 22.78 (x8 = 2.82 / 2.83 / 2.85)
+mphb8 round 2: wall 3.18, per thread min 23.85 mean 24.12 max 25.24 (x8 = 2.98 / 3.02 / 3.16)
+cmpb8 round 2: wall 2.97, per thread min 20.63 mean 21.59 max 23.64 (x8 = 2.58 / 2.70 / 2.95)
+mph8 round 2: wall 3.10, per thread min 24.41 mean 24.51 max 24.63 (x8 = 3.05 / 3.06 / 3.08)
+cmp8 round 2: wall 4.67, per thread min 32.67 mean 33.41 max 37.14 (x8 = 4.08 / 4.18 / 4.64)
+cmp8 round 3: wall 4.10, per thread min 32.00 mean 32.21 max 32.60 (x8 = 4.00 / 4.03 / 4.07)
+mph8 round 3: wall 3.11, per thread min 24.50 mean 24.58 max 24.63 (x8 = 3.06 / 3.07 / 3.08)
+cmpb8 round 3: wall 2.38, per thread min 18.67 mean 18.77 max 18.81 (x8 = 2.33 / 2.35 / 2.35)
+mphb8 round 3: wall 2.86, per thread min 22.39 mean 22.54 max 22.66 (x8 = 2.80 / 2.82 / 2.83)
+mphb8 round 4: wall 3.20, per thread min 23.98 mean 24.39 max 25.36 (x8 = 3.00 / 3.05 / 3.17)
+cmpb8 round 4: wall 2.91, per thread min 21.35 mean 21.84 max 22.88 (x8 = 2.67 / 2.73 / 2.86)
+mph8 round 4: wall 3.09, per thread min 24.42 mean 24.49 max 24.54 (x8 = 3.05 / 3.06 / 3.07)
+cmp8 round 4: wall 4.70, per thread min 32.77 mean 33.52 max 37.37 (x8 = 4.10 / 4.19 / 4.67)
+cmp8 round 5: wall 4.01, per thread min 31.56 mean 31.75 max 31.90 (x8 = 3.94 / 3.97 / 3.99)
+mph8 round 5: wall 3.11, per thread min 24.52 mean 24.58 max 24.64 (x8 = 3.07 / 3.07 / 3.08)
+cmpb8 round 5: wall 2.39, per thread min 18.78 mean 18.88 max 18.96 (x8 = 2.35 / 2.36 / 2.37)
+mphb8 round 5: wall 2.88, per thread min 22.65 mean 22.75 max 22.85 (x8 = 2.83 / 2.84 / 2.86)
+n 1000000000, probes 10000000, rounds 6, x 8; ns = wall ns a key; counts a key (user space, all threads, scaled)
+lane       min    med        cycles  instructions branch-misses     dmnd-DRAM       dmnd-L3     swpf-DRAM       swpf-L3      swpf-hit     pref-disp         walks     hwpf-DRAM     mab-count
+mphb8     2.86   2.88        76.858        43.746         0.024         0.031         0.029         0.934         0.064         1.309         3.123         0.925         0.076       660.909
+        passes: 2.90 2.87 3.18 2.86 3.20 2.88
+cmpb8     2.38   2.41        72.842        57.964         0.017         0.068         0.026         0.758         0.147         0.006         0.927         0.864         0.049       420.868
+        passes: 2.44 2.41 2.97 2.38 2.91 2.39
+mph8      3.09   3.10        91.504        18.645         0.017         0.868         0.090         0.000         0.000         0.000         0.000         0.922         0.039       310.677
+        passes: 3.13 3.10 3.10 3.11 3.09 3.11
+cmp8      4.01   4.10       113.710        41.562         0.016         0.807         0.197         0.000         0.000         0.000         0.000         0.961         0.016       162.196
+        passes: 4.33 4.04 4.67 4.10 4.70 4.01
+mphb1     6.42   6.50        26.991        49.684         0.025         0.008         0.029         0.976         0.058         1.661         3.091         0.928         0.062       232.215
+        passes: 6.80 6.42 6.59 6.48 6.62 6.50
+cmpb1     8.59   8.70        37.337        59.508         0.016         0.030         0.016         0.816         0.175         0.006         1.029         0.974         0.026       186.799
+        passes: 9.39 8.59 9.50 8.70 9.44 8.64
+=== 2026-09-26T02:53:08+03:00 rc 0 Tctl 88.0 C
+2026-09-26T02:56:49+03:00 settled after 230 s
+load                   0.12  ok
+swap in use            2 MiB  ok
+memory available       33.7 GiB  ok
+page cache             7.8 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+uptime                 6.2 h
+governor               powersave
+
+READY
+=== 2026-09-26T02:56:51+03:00 THP on, Tctl 46.2 C, load 0.12 1.01 1.48, swap 2 MiB
+mph built 7.9 s
+compact built 45.5 s
+fast built 0.0 s
+mphb8 round 0: wall 3.27, per thread min 25.81 mean 25.87 max 25.96 (x8 = 3.23 / 3.23 / 3.24)
+cmpb8 round 0: wall 2.73, per thread min 21.13 mean 21.35 max 21.70 (x8 = 2.64 / 2.67 / 2.71)
+mph8 round 0: wall 3.61, per thread min 28.43 mean 28.54 max 28.69 (x8 = 3.55 / 3.57 / 3.59)
+cmp8 round 0: wall 4.91, per thread min 35.97 mean 36.69 max 39.13 (x8 = 4.50 / 4.59 / 4.89)
+cmp8 round 1: wall 4.13, per thread min 32.62 mean 32.74 max 32.92 (x8 = 4.08 / 4.09 / 4.12)
+mph8 round 1: wall 3.63, per thread min 28.38 mean 28.62 max 28.93 (x8 = 3.55 / 3.58 / 3.62)
+cmpb8 round 1: wall 2.65, per thread min 20.59 mean 20.71 max 20.98 (x8 = 2.57 / 2.59 / 2.62)
+mphb8 round 1: wall 3.31, per thread min 25.91 mean 26.04 max 26.29 (x8 = 3.24 / 3.26 / 3.29)
+mphb8 round 2: wall 3.74, per thread min 28.82 mean 29.15 max 29.67 (x8 = 3.60 / 3.64 / 3.71)
+cmpb8 round 2: wall 2.67, per thread min 20.78 mean 20.98 max 21.12 (x8 = 2.60 / 2.62 / 2.64)
+mph8 round 2: wall 3.78, per thread min 28.31 mean 28.67 max 30.02 (x8 = 3.54 / 3.58 / 3.75)
+cmp8 round 2: wall 4.45, per thread min 34.47 mean 34.81 max 35.29 (x8 = 4.31 / 4.35 / 4.41)
+cmp8 round 3: wall 4.14, per thread min 32.62 mean 32.76 max 32.92 (x8 = 4.08 / 4.09 / 4.11)
+mph8 round 3: wall 3.61, per thread min 28.35 mean 28.60 max 28.75 (x8 = 3.54 / 3.57 / 3.59)
+cmpb8 round 3: wall 2.63, per thread min 20.68 mean 20.73 max 20.80 (x8 = 2.58 / 2.59 / 2.60)
+mphb8 round 3: wall 3.31, per thread min 25.82 mean 26.04 max 26.30 (x8 = 3.23 / 3.25 / 3.29)
+mphb8 round 4: wall 3.79, per thread min 27.76 mean 28.51 max 30.09 (x8 = 3.47 / 3.56 / 3.76)
+cmpb8 round 4: wall 2.60, per thread min 20.50 mean 20.57 max 20.63 (x8 = 2.56 / 2.57 / 2.58)
+mph8 round 4: wall 3.80, per thread min 28.31 mean 28.64 max 30.15 (x8 = 3.54 / 3.58 / 3.77)
+cmp8 round 4: wall 4.55, per thread min 34.07 mean 34.78 max 36.17 (x8 = 4.26 / 4.35 / 4.52)
+cmp8 round 5: wall 4.13, per thread min 32.50 mean 32.68 max 32.84 (x8 = 4.06 / 4.09 / 4.10)
+mph8 round 5: wall 3.62, per thread min 28.44 mean 28.65 max 28.82 (x8 = 3.55 / 3.58 / 3.60)
+cmpb8 round 5: wall 2.61, per thread min 20.50 mean 20.56 max 20.61 (x8 = 2.56 / 2.57 / 2.58)
+mphb8 round 5: wall 3.31, per thread min 25.88 mean 26.01 max 26.23 (x8 = 3.24 / 3.25 / 3.28)
+n 1000000000, probes 10000000, rounds 6, x 8; ns = wall ns a key; counts a key (user space, all threads, scaled)
+lane       min    med        cycles  instructions branch-misses     dmnd-DRAM       dmnd-L3     swpf-DRAM       swpf-L3      swpf-hit     pref-disp         walks     hwpf-DRAM     mab-count
+mphb8     3.27   3.31       103.017        49.613         0.025         0.038         0.022         0.860         0.063         1.144         2.983         0.006         0.038       621.102
+        passes: 3.27 3.31 3.74 3.31 3.79 3.31
+cmpb8     2.60   2.63        74.394        57.743         0.017         0.075         0.027         0.770         0.169         0.007         0.875         0.795         0.047       418.124
+        passes: 2.73 2.65 2.67 2.63 2.60 2.61
+mph8      3.61   3.62       110.085        22.607         0.019         0.971         0.098         0.000         0.000         0.000         0.000         0.004         0.009       285.662
+        passes: 3.61 3.63 3.78 3.61 3.80 3.62
+cmp8      4.13   4.14       123.602        42.043         0.016         0.798         0.185         0.000         0.000         0.000         0.000         0.960         0.018       179.004
+        passes: 4.91 4.13 4.45 4.14 4.55 4.13
+mphb1     7.17   7.21        30.664        49.115         0.025         0.024         0.021         0.961         0.059         1.365         3.157         0.004         0.031       227.034
+        passes: 7.44 7.17 7.88 7.20 7.93 7.21
+cmpb1     8.70   8.77        37.209        59.978         0.017         0.030         0.017         0.803         0.187         0.006         1.020         0.963         0.026       184.305
+        passes: 9.52 8.72 8.77 8.84 8.88 8.70
+=== 2026-09-26T02:57:51+03:00 rc 0 Tctl 87.6 C
+2026-09-26T02:57:51+03:00 RUN DONE

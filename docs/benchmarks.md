@@ -1032,7 +1032,13 @@ batch 3.1 against compact's 2.5, balanced's 2.3 and fast's 2.7. With huge pages 
 where PtrHash's do, and the eight-thread lookup reads 3.1 against fast's 2.9 — level on the same
 memory, 1.16 and 1.13 times its rate, where compact and balanced take 1.5 — but the batch 2.9
 against compact's and balanced's 2.4: **the eight-thread batch is where `MPH3` loses at a billion
-keys, 21 % behind PtrHash compact on the same memory.** Without huge pages its one-thread batch also
+keys, 21 % behind PtrHash compact on the same memory.** Hardware counters over the two batches in a
+separate harness say what that is made of
+([`bench/results/mphf-lanes-1b-2026-09-26-arz-6969644.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-lanes-1b-2026-09-26-arz-6969644.txt)):
+with huge pages off, compact's batch fetches 0.83 lines a key from DRAM against `MPH3`'s 0.97 and
+finds 0.17 in the L3 against 0.09. Its bucket function is skewed, so the pilots of its dense buckets
+answer a large share of the keys and stay in the 16 MB cache; `MPH3`'s buckets are uniform, and over
+its 240 MB about one line in fifteen can be cached. Without huge pages its one-thread batch also
 reads 8 % faster here and its single lookup 10 % slower; a machine with matched modules has no
 slower part for huge pages to land in, and this campaign has none to measure that on. On 2026-09-17
 the eight-thread columns moved by up to 58 % between processes over the same code, and that is the
