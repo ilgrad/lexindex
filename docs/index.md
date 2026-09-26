@@ -13,12 +13,16 @@ The blobs are tiny — on real dictionary words, **`CompactHashIndex` reaches 1.
 borrowed** rather than read, `DictIndex` materialising only its per-block samples and a few
 tables, so a multi-gigabyte index is ready instantly and its pages are shared across processes.
 
-[![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on all thirteen](assets/frontier-1m.svg)](benchmarks.md#the-research-frontier-measured)
+[![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on twelve, and MARISA at its smallest is 5.8 % smaller on paths](assets/frontier-1m.svg)](benchmarks.md#the-research-frontier-measured)
 
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
-structures, each at its own best configuration — the protocol, the ten-million-key table and every
-other structure are in [the benchmarks](benchmarks.md#the-research-frontier-measured). The figure is
-the size axis, which `DictIndex` wins. On an exact lookup XCDAT is still ahead on most corpora at a
+structures at the configurations the campaign times, and MARISA at its smallest — 1 to 32 tries
+under the tiny cache, untimed — which is 5.8 % smaller than `DictIndex` on `paths`. The protocol,
+the ten-million-key table and every other structure are in
+[the benchmarks](benchmarks.md#the-research-frontier-measured). The figure is the size axis:
+lexindex's smallest index wins it on twelve of the thirteen by file, and a mapped `DictIndex` also
+holds the 0.02–0.33 bytes a key of tables it derives at load,
+[counted beside MARISA's](benchmarks.md#marisa-at-its-smallest). On an exact lookup XCDAT is still ahead on most corpora at a
 million keys: lexindex's fastest exact search there — `DictIndex` after 4.4's opt-in
 `route_microblocks()`, which holds 0.25–0.5 bytes a key more in memory, `StringIndex`, or 4.5's
 `DoubleArrayIndex` where its trie is small — beats XCDAT 15 on `numeric`, `words` and `dna`, trails

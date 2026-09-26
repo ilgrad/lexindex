@@ -1,0 +1,4225 @@
+{
+  "table": "marisa-floor-1m",
+  "environment": {
+    "date": "2026-09-26T19:46:43+03:00",
+    "host": "arz",
+    "commit": "f5a486e",
+    "table": "marisa-floor-1m",
+    "kernel": "Linux 7.2.7-200.fc44.x86_64 x86_64",
+    "compiler": "c++ (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "binaries": "build/marisa_floor, build/marisa_resident and harness/lex's resident of github.com/ilgrad/string-index-benchmarks at 156b1a7",
+    "marisa": "marisa-trie at e54f296bb52d, the suite's pin; configurations 1-32 tries under the tiny and the default cache",
+    "lexindex": "4.5.2 from crates.io; every blob is frontier-1m-2026-09-25-arz-6969644.json's size, to the precision it logged",
+    "corpora": "bench/corpora.py's files at 1 M, sha256 per corpus. Ten are byte-identical to string-index-benchmarks' files; paths, idents and pypi are not.",
+    "sizes": "bytes_io is io_size(), what save() writes; bytes_total is total_size(); from_bytes_heap, mmap_heap and load_heap are the bytes asked for by every allocation a load keeps, after a pass of lookups",
+    "quiet-machine gates": "none: sizes are deterministic"
+  },
+  "corpora": [
+    {
+      "corpus": "words-full",
+      "sha256": "cee5da174ade14c9bc146b2f67495a745b0c952b03c7ed91e9a6142a74d31bd4",
+      "keys": 479823,
+      "raw_bytes": 4473734,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 1621952,
+            "bytes_total": 1621692
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 1438120,
+            "bytes_total": 1437633
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 1429144,
+            "bytes_total": 1428425
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 1612736,
+            "bytes_total": 1612476
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 1427752,
+            "bytes_total": 1427265
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 1418704,
+            "bytes_total": 1417985
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 1418040,
+            "bytes_total": 1417087
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 1418232,
+            "bytes_total": 1417055
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 1418552,
+            "bytes_total": 1417151
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 1418896,
+            "bytes_total": 1417273
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 1419248,
+            "bytes_total": 1417404
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 1419616,
+            "bytes_total": 1417541
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 1419968,
+            "bytes_total": 1417678
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 1420336,
+            "bytes_total": 1417816
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 1420696,
+            "bytes_total": 1417956
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 1421064,
+            "bytes_total": 1418094
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 1421424,
+            "bytes_total": 1418234
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 1421784,
+            "bytes_total": 1418374
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 1422144,
+            "bytes_total": 1418514
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 1422504,
+            "bytes_total": 1418654
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 1422864,
+            "bytes_total": 1418794
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 1423224,
+            "bytes_total": 1418934
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 1423584,
+            "bytes_total": 1419074
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 1423944,
+            "bytes_total": 1419214
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 1424304,
+            "bytes_total": 1419354
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 1424664,
+            "bytes_total": 1419494
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 1425024,
+            "bytes_total": 1419634
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 1425384,
+            "bytes_total": 1419774
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 1425744,
+            "bytes_total": 1419914
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 1426104,
+            "bytes_total": 1420054
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 1426464,
+            "bytes_total": 1420194
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 1426824,
+            "bytes_total": 1420334
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 1427184,
+            "bytes_total": 1420474
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 1427544,
+            "bytes_total": 1420614
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 1427904,
+            "bytes_total": 1420754
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 4,
+          "tries_built": 4,
+          "bytes_io": 1418040,
+          "bytes_total": 1417087
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 5,
+          "tries_built": 5,
+          "bytes_io": 1418232,
+          "bytes_total": 1417055
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 1367403,
+            "from_bytes_heap": 1508187,
+            "mmap_heap": 140784
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 1264362,
+            "from_bytes_heap": 1300186,
+            "mmap_heap": 35824
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 1205985,
+            "from_bytes_heap": 1230251,
+            "mmap_heap": 24266
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 2856332,
+            "from_bytes_heap": 2856364,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io"
+            ],
+            "cache": "tiny",
+            "tries": 4,
+            "bytes_io": 1418040,
+            "mmap_heap": 4544,
+            "load_heap": 1421631
+          },
+          {
+            "roles": [
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 5,
+            "bytes_io": 1418232,
+            "mmap_heap": 5680,
+            "load_heap": 1422735
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 1429144,
+            "mmap_heap": 3408,
+            "load_heap": 1431833
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "dna-1000000",
+      "sha256": "1c2d604e3d1f39197f26e4072d697c46ba2137c3894de223133c46993da3e2a8",
+      "keys": 1000000,
+      "raw_bytes": 24000000,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 19784256,
+            "bytes_total": 19784015
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 8011632,
+            "bytes_total": 8011166
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 7561808,
+            "bytes_total": 7561121
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 19765824,
+            "bytes_total": 19765583
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 7974768,
+            "bytes_total": 7974302
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 7524656,
+            "bytes_total": 7523969
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 4,
+            "bytes_io": 7524936,
+            "bytes_total": 7524026
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 3,
+          "tries_built": 3,
+          "bytes_io": 7524656,
+          "bytes_total": 7523969
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 3,
+          "tries_built": 3,
+          "bytes_io": 7524656,
+          "bytes_total": 7523969
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 4999748,
+            "from_bytes_heap": 5261274,
+            "mmap_heap": 261526
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 4374995,
+            "from_bytes_heap": 4417811,
+            "mmap_heap": 42816
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 4230538,
+            "from_bytes_heap": 4249810,
+            "mmap_heap": 19272
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 17741490,
+            "from_bytes_heap": 17741522,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 3,
+            "bytes_io": 7524656,
+            "mmap_heap": 3408,
+            "load_heap": 7527377
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 7561808,
+            "mmap_heap": 3408,
+            "load_heap": 7564529
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "domains-1000000",
+      "sha256": "473b7f076864fd41a1da6c030269bc0a90f399b9e2db8d2a5696b0154b5b527a",
+      "keys": 1000000,
+      "raw_bytes": 13782044,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 7220560,
+            "bytes_total": 7220314
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 5061256,
+            "bytes_total": 5060790
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 4874416,
+            "bytes_total": 4873725
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 7202128,
+            "bytes_total": 7201882
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 5033608,
+            "bytes_total": 5033142
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 4844464,
+            "bytes_total": 4843773
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 4808656,
+            "bytes_total": 4807731
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 4798936,
+            "bytes_total": 4797780
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 4796176,
+            "bytes_total": 4794792
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 4795744,
+            "bytes_total": 4794133
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 4795712,
+            "bytes_total": 4793877
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 4795888,
+            "bytes_total": 4793819
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 4796192,
+            "bytes_total": 4793889
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 4796472,
+            "bytes_total": 4793945
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 4796800,
+            "bytes_total": 4794042
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 4797104,
+            "bytes_total": 4794126
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 4797448,
+            "bytes_total": 4794248
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 4797800,
+            "bytes_total": 4794370
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 4798152,
+            "bytes_total": 4794499
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 4798496,
+            "bytes_total": 4794628
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 4798848,
+            "bytes_total": 4794756
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 4799200,
+            "bytes_total": 4794888
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 4799576,
+            "bytes_total": 4795034
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 4799936,
+            "bytes_total": 4795171
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 4800280,
+            "bytes_total": 4795297
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 4800648,
+            "bytes_total": 4795443
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 4801008,
+            "bytes_total": 4795574
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 4801336,
+            "bytes_total": 4795685
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 4801680,
+            "bytes_total": 4795804
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 4802024,
+            "bytes_total": 4795918
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 4802368,
+            "bytes_total": 4796041
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 4802704,
+            "bytes_total": 4796160
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 4803048,
+            "bytes_total": 4796279
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 4803384,
+            "bytes_total": 4796395
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 4803728,
+            "bytes_total": 4796511
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 8,
+          "tries_built": 8,
+          "bytes_io": 4795712,
+          "bytes_total": 4793877
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 9,
+          "tries_built": 9,
+          "bytes_io": 4795888,
+          "bytes_total": 4793819
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 4822372,
+            "from_bytes_heap": 5138642,
+            "mmap_heap": 316270
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 4499605,
+            "from_bytes_heap": 4594854,
+            "mmap_heap": 95249
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 4362536,
+            "from_bytes_heap": 4433396,
+            "mmap_heap": 70860
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 10503601,
+            "from_bytes_heap": 10503633,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io"
+            ],
+            "cache": "tiny",
+            "tries": 8,
+            "bytes_io": 4795712,
+            "mmap_heap": 9088,
+            "load_heap": 4802965
+          },
+          {
+            "roles": [
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 9,
+            "bytes_io": 4795888,
+            "mmap_heap": 10224,
+            "load_heap": 4804043
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 4874416,
+            "mmap_heap": 3408,
+            "load_heap": 4877133
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "idents-1000000",
+      "sha256": "14bb9d0e447bf99aaeab56ac99b71f87be27d1bfe4940891098bc145389d7d53",
+      "keys": 1000000,
+      "raw_bytes": 17283976,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 7633656,
+            "bytes_total": 7633395
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 5930480,
+            "bytes_total": 5929997
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 5615192,
+            "bytes_total": 5614472
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 7615224,
+            "bytes_total": 7614963
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 5902832,
+            "bytes_total": 5902349
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 5582168,
+            "bytes_total": 5581448
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 5448312,
+            "bytes_total": 5447369
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 5405024,
+            "bytes_total": 5403861
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 5384136,
+            "bytes_total": 5382738
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 5361800,
+            "bytes_total": 5360183
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 5338904,
+            "bytes_total": 5337056
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 5310464,
+            "bytes_total": 5308381
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 5300408,
+            "bytes_total": 5298098
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 5298608,
+            "bytes_total": 5296060
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 5299480,
+            "bytes_total": 5296713
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 5300496,
+            "bytes_total": 5297505
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 5301888,
+            "bytes_total": 5298661
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 5303320,
+            "bytes_total": 5299854
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 5304752,
+            "bytes_total": 5301066
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 5305920,
+            "bytes_total": 5302012
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 5307344,
+            "bytes_total": 5303200
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 5308640,
+            "bytes_total": 5304263
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 5309624,
+            "bytes_total": 5305026
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 5310896,
+            "bytes_total": 5306066
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 5312200,
+            "bytes_total": 5307145
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 5313192,
+            "bytes_total": 5307897
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 5314168,
+            "bytes_total": 5308639
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 5315064,
+            "bytes_total": 5309306
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 5315928,
+            "bytes_total": 5309942
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 5316688,
+            "bytes_total": 5310477
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 5317584,
+            "bytes_total": 5311143
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 5318464,
+            "bytes_total": 5311796
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 5319320,
+            "bytes_total": 5312432
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 5320064,
+            "bytes_total": 5312938
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 5320744,
+            "bytes_total": 5313377
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 11,
+          "tries_built": 11,
+          "bytes_io": 5298608,
+          "bytes_total": 5296060
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 11,
+          "tries_built": 11,
+          "bytes_io": 5298608,
+          "bytes_total": 5296060
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 5616638,
+            "from_bytes_heap": 5968389,
+            "mmap_heap": 351751
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 5228340,
+            "from_bytes_heap": 5338801,
+            "mmap_heap": 110461
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 5065510,
+            "from_bytes_heap": 5148344,
+            "mmap_heap": 82834
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 10551839,
+            "from_bytes_heap": 10551871,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 11,
+            "bytes_io": 5298608,
+            "mmap_heap": 12496,
+            "load_heap": 5308556
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 5615192,
+            "mmap_heap": 3408,
+            "load_heap": 5617880
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "numeric-1000000",
+      "sha256": "2418335116789387fc71485b4fa1a60b2340fbfa71211602a9f43f7e79663c01",
+      "keys": 1000000,
+      "raw_bytes": 5888890,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 1642136,
+            "bytes_total": 1641877
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 1,
+            "bytes_io": 1642136,
+            "bytes_total": 1641877
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 1,
+            "bytes_io": 1642136,
+            "bytes_total": 1641877
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 1,
+            "bytes_io": 1623704,
+            "bytes_total": 1623445
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 1,
+          "tries_built": 1,
+          "bytes_io": 1623704,
+          "bytes_total": 1623445
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 1,
+          "tries_built": 1,
+          "bytes_io": 1623704,
+          "bytes_total": 1623445
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 1216213,
+            "from_bytes_heap": 1477765,
+            "mmap_heap": 261552
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 1010907,
+            "from_bytes_heap": 1053715,
+            "mmap_heap": 42808
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 917975,
+            "from_bytes_heap": 937343,
+            "mmap_heap": 19368
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 301,
+            "from_bytes_heap": 333,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 1,
+            "bytes_io": 1623704,
+            "mmap_heap": 1136,
+            "load_heap": 1624581
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 1642136,
+            "mmap_heap": 1136,
+            "load_heap": 1643013
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "opaque-1000000",
+      "sha256": "9a25670b24fe72f8bc618c6b2e045e0e379d37a49160830adde88fea41c7abf6",
+      "keys": 1000000,
+      "raw_bytes": 16000000,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 18036568,
+            "bytes_total": 18036312
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 18491872,
+            "bytes_total": 18491384
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 18822056,
+            "bytes_total": 18821340
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 18018136,
+            "bytes_total": 18017880
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 18455008,
+            "bytes_total": 18454520
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 18766760,
+            "bytes_total": 18766044
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 18234144,
+            "bytes_total": 18233190
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 15566928,
+            "bytes_total": 15565750
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 15547856,
+            "bytes_total": 15546455
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 15548144,
+            "bytes_total": 15546524
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 15548488,
+            "bytes_total": 15546642
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 15548832,
+            "bytes_total": 15546760
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 15549176,
+            "bytes_total": 15546878
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 15549520,
+            "bytes_total": 15546996
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 15549864,
+            "bytes_total": 15547114
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 15550208,
+            "bytes_total": 15547232
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 15550552,
+            "bytes_total": 15547350
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 15550896,
+            "bytes_total": 15547468
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 15551240,
+            "bytes_total": 15547586
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 15551584,
+            "bytes_total": 15547704
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 15551928,
+            "bytes_total": 15547822
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 15552272,
+            "bytes_total": 15547940
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 15552616,
+            "bytes_total": 15548058
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 15552960,
+            "bytes_total": 15548176
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 15553304,
+            "bytes_total": 15548294
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 15553648,
+            "bytes_total": 15548412
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 15553992,
+            "bytes_total": 15548530
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 15554336,
+            "bytes_total": 15548648
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 15554680,
+            "bytes_total": 15548766
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 15555024,
+            "bytes_total": 15548884
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 15555368,
+            "bytes_total": 15549002
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 15555712,
+            "bytes_total": 15549120
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 15556056,
+            "bytes_total": 15549238
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 15556400,
+            "bytes_total": 15549356
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 15556744,
+            "bytes_total": 15549474
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 6,
+          "tries_built": 6,
+          "bytes_io": 15547856,
+          "bytes_total": 15546455
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 6,
+          "tries_built": 6,
+          "bytes_io": 15547856,
+          "bytes_total": 15546455
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 10637762,
+            "from_bytes_heap": 10900020,
+            "mmap_heap": 262258
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 10398695,
+            "from_bytes_heap": 10442239,
+            "mmap_heap": 43544
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 10290593,
+            "from_bytes_heap": 10310697,
+            "mmap_heap": 20104
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 21435828,
+            "from_bytes_heap": 21435860,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 6,
+            "bytes_io": 15547856,
+            "mmap_heap": 6816,
+            "load_heap": 15553271
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 18822056,
+            "mmap_heap": 3408,
+            "load_heap": 18824748
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "paths-1000000",
+      "sha256": "578be82f50a06b6137fa108d70728b119afa4434056b87e0424e9bd5384b3d05",
+      "keys": 1000000,
+      "raw_bytes": 124978312,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 12853160,
+            "bytes_total": 12852906
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9887368,
+            "bytes_total": 9886878
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 9468744,
+            "bytes_total": 9468027
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 12834728,
+            "bytes_total": 12834474
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9859720,
+            "bytes_total": 9859230
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 9436488,
+            "bytes_total": 9435771
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 9261736,
+            "bytes_total": 9260798
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 9135088,
+            "bytes_total": 9133910
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 9091136,
+            "bytes_total": 9089740
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 9072408,
+            "bytes_total": 9070785
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 9035552,
+            "bytes_total": 9033700
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 8953264,
+            "bytes_total": 8951186
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 8899064,
+            "bytes_total": 8896764
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 8883496,
+            "bytes_total": 8880966
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 8864336,
+            "bytes_total": 8861596
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 8849808,
+            "bytes_total": 8846843
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 8842656,
+            "bytes_total": 8839465
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 8834936,
+            "bytes_total": 8831514
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 8826040,
+            "bytes_total": 8822383
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 8819456,
+            "bytes_total": 8815586
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 8818272,
+            "bytes_total": 8814178
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 8817920,
+            "bytes_total": 8813596
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 8817704,
+            "bytes_total": 8813147
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 8815760,
+            "bytes_total": 8810983
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 8814328,
+            "bytes_total": 8809328
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 8813552,
+            "bytes_total": 8808319
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 8813624,
+            "bytes_total": 8808163
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 8813976,
+            "bytes_total": 8808275
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 8814240,
+            "bytes_total": 8808306
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 8814776,
+            "bytes_total": 8808611
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 8815320,
+            "bytes_total": 8808932
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 8815984,
+            "bytes_total": 8809372
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 8816480,
+            "bytes_total": 8809626
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 8817024,
+            "bytes_total": 8809937
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 8817648,
+            "bytes_total": 8810323
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 23,
+          "tries_built": 23,
+          "bytes_io": 8813552,
+          "bytes_total": 8808319
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 24,
+          "tries_built": 24,
+          "bytes_io": 8813624,
+          "bytes_total": 8808163
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 12991004,
+            "from_bytes_heap": 14173553,
+            "mmap_heap": 1182549
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 9870918,
+            "from_bytes_heap": 10189047,
+            "mmap_heap": 318129
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 9323370,
+            "from_bytes_heap": 9539193,
+            "mmap_heap": 215823
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 17483375,
+            "from_bytes_heap": 17483407,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io"
+            ],
+            "cache": "tiny",
+            "tries": 23,
+            "bytes_io": 8813552,
+            "mmap_heap": 26128,
+            "load_heap": 8834447
+          },
+          {
+            "roles": [
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 24,
+            "bytes_io": 8813624,
+            "mmap_heap": 27264,
+            "load_heap": 8835427
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 9468744,
+            "mmap_heap": 3408,
+            "load_heap": 9471435
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "pypi-full",
+      "sha256": "980aab52c4e3839948b91bf5d14dc48e87f319a8eee27c80decf37a6701837d4",
+      "keys": 889864,
+      "raw_bytes": 11866535,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 5574736,
+            "bytes_total": 5574479
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 4234952,
+            "bytes_total": 4234459
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 4016960,
+            "bytes_total": 4016252
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 5556304,
+            "bytes_total": 5556047
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 4207304,
+            "bytes_total": 4206811
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 3987008,
+            "bytes_total": 3986300
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 3930888,
+            "bytes_total": 3929950
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 3912776,
+            "bytes_total": 3911611
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 3905736,
+            "bytes_total": 3904334
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 3903320,
+            "bytes_total": 3901684
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 3902376,
+            "bytes_total": 3900522
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 3902264,
+            "bytes_total": 3900180
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 3902560,
+            "bytes_total": 3900248
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 3902744,
+            "bytes_total": 3900198
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 3903168,
+            "bytes_total": 3900393
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 3903608,
+            "bytes_total": 3900605
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 3904048,
+            "bytes_total": 3900811
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 3904360,
+            "bytes_total": 3900889
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 3904632,
+            "bytes_total": 3900933
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 3904952,
+            "bytes_total": 3901029
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 3905272,
+            "bytes_total": 3901123
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 3905624,
+            "bytes_total": 3901244
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 3906000,
+            "bytes_total": 3901400
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 3906384,
+            "bytes_total": 3901557
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 3906744,
+            "bytes_total": 3901694
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 3907120,
+            "bytes_total": 3901842
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 3907504,
+            "bytes_total": 3901999
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 3907872,
+            "bytes_total": 3902148
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 3908232,
+            "bytes_total": 3902285
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 3908600,
+            "bytes_total": 3902438
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 3908976,
+            "bytes_total": 3902588
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 3909352,
+            "bytes_total": 3902737
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 3909720,
+            "bytes_total": 3902884
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 3910088,
+            "bytes_total": 3903034
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 3910456,
+            "bytes_total": 3903176
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 9,
+          "tries_built": 9,
+          "bytes_io": 3902264,
+          "bytes_total": 3900180
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 9,
+          "tries_built": 9,
+          "bytes_io": 3902264,
+          "bytes_total": 3900180
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 3984484,
+            "from_bytes_heap": 4306443,
+            "mmap_heap": 321959
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 3706628,
+            "from_bytes_heap": 3792410,
+            "mmap_heap": 85782
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 3578889,
+            "from_bytes_heap": 3641634,
+            "mmap_heap": 62745
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 8896619,
+            "from_bytes_heap": 8896651,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 9,
+            "bytes_io": 3902264,
+            "mmap_heap": 10224,
+            "load_heap": 3910404
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 4016960,
+            "mmap_heap": 3408,
+            "load_heap": 4019660
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "titles-en-1000000",
+      "sha256": "f83123abcccb1469b1c5e62497e3d81352f31386887e4566ea9d7f61391fbe28",
+      "keys": 1000000,
+      "raw_bytes": 20984647,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 13146328,
+            "bytes_total": 13146067
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9102832,
+            "bytes_total": 9102349
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8186624,
+            "bytes_total": 8185903
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 13127896,
+            "bytes_total": 13127635
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9065968,
+            "bytes_total": 9065485
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8140544,
+            "bytes_total": 8139823
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 7787704,
+            "bytes_total": 7786753
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 7638760,
+            "bytes_total": 7637595
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 7572984,
+            "bytes_total": 7571597
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 7535704,
+            "bytes_total": 7534081
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 7517904,
+            "bytes_total": 7516059
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 7506624,
+            "bytes_total": 7504549
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 7501600,
+            "bytes_total": 7499306
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 7497728,
+            "bytes_total": 7495202
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 7495840,
+            "bytes_total": 7493089
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 7495008,
+            "bytes_total": 7492041
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 7494504,
+            "bytes_total": 7491308
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 7494136,
+            "bytes_total": 7490700
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 7494360,
+            "bytes_total": 7490700
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 7494656,
+            "bytes_total": 7490756
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 7495032,
+            "bytes_total": 7490902
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 7495512,
+            "bytes_total": 7491150
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 7495944,
+            "bytes_total": 7491347
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 7496552,
+            "bytes_total": 7491729
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 7497080,
+            "bytes_total": 7492024
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 7497648,
+            "bytes_total": 7492360
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 7498264,
+            "bytes_total": 7492739
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 7498824,
+            "bytes_total": 7493078
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 7499448,
+            "bytes_total": 7493470
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 7500056,
+            "bytes_total": 7493848
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 7500680,
+            "bytes_total": 7494239
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 7501160,
+            "bytes_total": 7494488
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 7501704,
+            "bytes_total": 7494810
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 7502264,
+            "bytes_total": 7495136
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 7502800,
+            "bytes_total": 7495445
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 15,
+          "tries_built": 15,
+          "bytes_io": 7494136,
+          "bytes_total": 7490700
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 15,
+          "tries_built": 15,
+          "bytes_io": 7494136,
+          "bytes_total": 7490700
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 7808640,
+            "from_bytes_heap": 8219962,
+            "mmap_heap": 411322
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 7370097,
+            "from_bytes_heap": 7525664,
+            "mmap_heap": 155567
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 7211896,
+            "from_bytes_heap": 7342072,
+            "mmap_heap": 130176
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 17282957,
+            "from_bytes_heap": 17282989,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 15,
+            "bytes_io": 7494136,
+            "mmap_heap": 17040,
+            "load_heap": 7507740
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 8186624,
+            "mmap_heap": 3408,
+            "load_heap": 8189311
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "titles-ru-1000000",
+      "sha256": "588cb1a01e9d8e3dbce5fe6907ac81a00c83269af32c980207bb91b29fc199d0",
+      "keys": 1000000,
+      "raw_bytes": 35819661,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 15650384,
+            "bytes_total": 15650116
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9904848,
+            "bytes_total": 9904357
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8608704,
+            "bytes_total": 8607997
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 15631952,
+            "bytes_total": 15631684
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9867984,
+            "bytes_total": 9867493
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8567232,
+            "bytes_total": 8566525
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 8074288,
+            "bytes_total": 8073362
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 7858072,
+            "bytes_total": 7856915
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 7756304,
+            "bytes_total": 7754918
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 7698776,
+            "bytes_total": 7697170
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 7667680,
+            "bytes_total": 7665836
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 7646720,
+            "bytes_total": 7644645
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 7635016,
+            "bytes_total": 7632719
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 7627048,
+            "bytes_total": 7624524
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 7621448,
+            "bytes_total": 7618695
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 7617600,
+            "bytes_total": 7614614
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 7614920,
+            "bytes_total": 7611713
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 7613176,
+            "bytes_total": 7609735
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 7611808,
+            "bytes_total": 7608137
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 7611136,
+            "bytes_total": 7607225
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 7610560,
+            "bytes_total": 7606414
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 7610368,
+            "bytes_total": 7605994
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 7610384,
+            "bytes_total": 7605790
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 7610464,
+            "bytes_total": 7605645
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 7610672,
+            "bytes_total": 7605619
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 7610864,
+            "bytes_total": 7605570
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 7611152,
+            "bytes_total": 7605621
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 7611528,
+            "bytes_total": 7605765
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 7611920,
+            "bytes_total": 7605931
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 7612280,
+            "bytes_total": 7606058
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 7612784,
+            "bytes_total": 7606332
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 7613264,
+            "bytes_total": 7606580
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 7613688,
+            "bytes_total": 7606780
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 7614120,
+            "bytes_total": 7606985
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 7614584,
+            "bytes_total": 7607223
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 19,
+          "tries_built": 19,
+          "bytes_io": 7610368,
+          "bytes_total": 7605994
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 23,
+          "tries_built": 23,
+          "bytes_io": 7610864,
+          "bytes_total": 7605570
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 7301591,
+            "from_bytes_heap": 7836241,
+            "mmap_heap": 534650
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 6861688,
+            "from_bytes_heap": 7135240,
+            "mmap_heap": 273552
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 6697959,
+            "from_bytes_heap": 6945421,
+            "mmap_heap": 247462
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 31746190,
+            "from_bytes_heap": 31746222,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io"
+            ],
+            "cache": "tiny",
+            "tries": 19,
+            "bytes_io": 7610368,
+            "mmap_heap": 21584,
+            "load_heap": 7627578
+          },
+          {
+            "roles": [
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 23,
+            "bytes_io": 7610864,
+            "mmap_heap": 26128,
+            "load_heap": 7631698
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 8608704,
+            "mmap_heap": 3408,
+            "load_heap": 8611405
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "titles-zh-1000000",
+      "sha256": "45af8baaa8179d51231d285eb3d2f72b46f36ca4f397afeb52879662e5093434",
+      "keys": 1000000,
+      "raw_bytes": 16871822,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 9504736,
+            "bytes_total": 9504481
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 7029192,
+            "bytes_total": 7028712
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 6537312,
+            "bytes_total": 6536615
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 9486304,
+            "bytes_total": 9486049
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 6992328,
+            "bytes_total": 6991848
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 6495840,
+            "bytes_total": 6495143
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 6334600,
+            "bytes_total": 6333665
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 6269640,
+            "bytes_total": 6268476
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 6241256,
+            "bytes_total": 6239871
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 6227240,
+            "bytes_total": 6225620
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 6221056,
+            "bytes_total": 6219213
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 6217040,
+            "bytes_total": 6214967
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 6215992,
+            "bytes_total": 6213688
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 6215752,
+            "bytes_total": 6213229
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 6215480,
+            "bytes_total": 6212723
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 6215928,
+            "bytes_total": 6212937
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 6216712,
+            "bytes_total": 6213497
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 6217320,
+            "bytes_total": 6213873
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 6217912,
+            "bytes_total": 6214231
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 6218496,
+            "bytes_total": 6214590
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 6219224,
+            "bytes_total": 6215094
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 6220000,
+            "bytes_total": 6215640
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 6220680,
+            "bytes_total": 6216093
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 6221336,
+            "bytes_total": 6216508
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 6222032,
+            "bytes_total": 6216972
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 6222688,
+            "bytes_total": 6217396
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 6223288,
+            "bytes_total": 6217762
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 6223944,
+            "bytes_total": 6218183
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 6224608,
+            "bytes_total": 6218619
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 6225136,
+            "bytes_total": 6218914
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 6225696,
+            "bytes_total": 6219247
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 6226264,
+            "bytes_total": 6219589
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 6226840,
+            "bytes_total": 6219933
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 6227400,
+            "bytes_total": 6220265
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 6227960,
+            "bytes_total": 6220604
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 12,
+          "tries_built": 12,
+          "bytes_io": 6215480,
+          "bytes_total": 6212723
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 12,
+          "tries_built": 12,
+          "bytes_io": 6215480,
+          "bytes_total": 6212723
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 6105470,
+            "from_bytes_heap": 6703367,
+            "mmap_heap": 597897
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 5851205,
+            "from_bytes_heap": 6240327,
+            "mmap_heap": 389122
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 5686608,
+            "from_bytes_heap": 6018812,
+            "mmap_heap": 332204
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 17523388,
+            "from_bytes_heap": 17523420,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 12,
+            "bytes_io": 6215480,
+            "mmap_heap": 13632,
+            "load_heap": 6226355
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 6537312,
+            "mmap_heap": 3408,
+            "load_heap": 6540023
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "urls-1000000",
+      "sha256": "02f15be6525d5412f6d51ca2c11d4fdafe9a6593b3126468d2d6bff6622ffdbe",
+      "keys": 1000000,
+      "raw_bytes": 52361181,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 13877848,
+            "bytes_total": 13877587
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9410008,
+            "bytes_total": 9409521
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8394920,
+            "bytes_total": 8394203
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 13859416,
+            "bytes_total": 13859155
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 9373144,
+            "bytes_total": 9372657
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 8348840,
+            "bytes_total": 8348123
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 7946520,
+            "bytes_total": 7945580
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 7769432,
+            "bytes_total": 7768262
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 7687224,
+            "bytes_total": 7685823
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 7638736,
+            "bytes_total": 7637117
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 7614880,
+            "bytes_total": 7613026
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 7598480,
+            "bytes_total": 7596393
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 7589520,
+            "bytes_total": 7587208
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 7582896,
+            "bytes_total": 7580367
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 7578784,
+            "bytes_total": 7576023
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 7575752,
+            "bytes_total": 7572760
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 7573616,
+            "bytes_total": 7570391
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 7572312,
+            "bytes_total": 7568848
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 7571520,
+            "bytes_total": 7567830
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 7570968,
+            "bytes_total": 7567052
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 7570296,
+            "bytes_total": 7566154
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 7569984,
+            "bytes_total": 7565616
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 7569896,
+            "bytes_total": 7565296
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 7569960,
+            "bytes_total": 7565137
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 7569944,
+            "bytes_total": 7564890
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 7569992,
+            "bytes_total": 7564697
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 7570064,
+            "bytes_total": 7564532
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 7570320,
+            "bytes_total": 7564555
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 7570640,
+            "bytes_total": 7564637
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 7570984,
+            "bytes_total": 7564754
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 7571288,
+            "bytes_total": 7564826
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 7571576,
+            "bytes_total": 7564885
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 7571872,
+            "bytes_total": 7564956
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 7572144,
+            "bytes_total": 7564997
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 7572520,
+            "bytes_total": 7565143
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 20,
+          "tries_built": 20,
+          "bytes_io": 7569896,
+          "bytes_total": 7565296
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 24,
+          "tries_built": 24,
+          "bytes_io": 7570064,
+          "bytes_total": 7564532
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 8823149,
+            "from_bytes_heap": 9235158,
+            "mmap_heap": 412009
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 7511038,
+            "from_bytes_heap": 7667482,
+            "mmap_heap": 156444
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 7271039,
+            "from_bytes_heap": 7402019,
+            "mmap_heap": 130980
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 16881383,
+            "from_bytes_heap": 16881415,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io"
+            ],
+            "cache": "tiny",
+            "tries": 20,
+            "bytes_io": 7569896,
+            "mmap_heap": 22720,
+            "load_heap": 7588016
+          },
+          {
+            "roles": [
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 24,
+            "bytes_io": 7570064,
+            "mmap_heap": 27264,
+            "load_heap": 7591796
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 8394920,
+            "mmap_heap": 3408,
+            "load_heap": 8397611
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "uuid-1000000",
+      "sha256": "08fbcbe4352b7f526d9246199f6f098357d3c7bdb9e59ceaa7a0b33ca7a60837",
+      "keys": 1000000,
+      "raw_bytes": 36000000,
+      "floor": {
+        "configurations": [
+          {
+            "cache": "default",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 36675192,
+            "bytes_total": 36674931
+          },
+          {
+            "cache": "default",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 35625352,
+            "bytes_total": 35624871
+          },
+          {
+            "cache": "default",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 34575072,
+            "bytes_total": 34574364
+          },
+          {
+            "cache": "tiny",
+            "tries": 1,
+            "tries_built": 1,
+            "bytes_io": 36656760,
+            "bytes_total": 36656499
+          },
+          {
+            "cache": "tiny",
+            "tries": 2,
+            "tries_built": 2,
+            "bytes_io": 35588488,
+            "bytes_total": 35588007
+          },
+          {
+            "cache": "tiny",
+            "tries": 3,
+            "tries_built": 3,
+            "bytes_io": 34519776,
+            "bytes_total": 34519068
+          },
+          {
+            "cache": "tiny",
+            "tries": 4,
+            "tries_built": 4,
+            "bytes_io": 32932560,
+            "bytes_total": 32931626
+          },
+          {
+            "cache": "tiny",
+            "tries": 5,
+            "tries_built": 5,
+            "bytes_io": 30098160,
+            "bytes_total": 30097006
+          },
+          {
+            "cache": "tiny",
+            "tries": 6,
+            "tries_built": 6,
+            "bytes_io": 24979816,
+            "bytes_total": 24978430
+          },
+          {
+            "cache": "tiny",
+            "tries": 7,
+            "tries_built": 7,
+            "bytes_io": 23121008,
+            "bytes_total": 23119389
+          },
+          {
+            "cache": "tiny",
+            "tries": 8,
+            "tries_built": 8,
+            "bytes_io": 22994296,
+            "bytes_total": 22992440
+          },
+          {
+            "cache": "tiny",
+            "tries": 9,
+            "tries_built": 9,
+            "bytes_io": 22978192,
+            "bytes_total": 22976109
+          },
+          {
+            "cache": "tiny",
+            "tries": 10,
+            "tries_built": 10,
+            "bytes_io": 22977776,
+            "bytes_total": 22975465
+          },
+          {
+            "cache": "tiny",
+            "tries": 11,
+            "tries_built": 11,
+            "bytes_io": 22978064,
+            "bytes_total": 22975531
+          },
+          {
+            "cache": "tiny",
+            "tries": 12,
+            "tries_built": 12,
+            "bytes_io": 22978376,
+            "bytes_total": 22975619
+          },
+          {
+            "cache": "tiny",
+            "tries": 13,
+            "tries_built": 13,
+            "bytes_io": 22978704,
+            "bytes_total": 22975720
+          },
+          {
+            "cache": "tiny",
+            "tries": 14,
+            "tries_built": 14,
+            "bytes_io": 22979032,
+            "bytes_total": 22975821
+          },
+          {
+            "cache": "tiny",
+            "tries": 15,
+            "tries_built": 15,
+            "bytes_io": 22979360,
+            "bytes_total": 22975922
+          },
+          {
+            "cache": "tiny",
+            "tries": 16,
+            "tries_built": 16,
+            "bytes_io": 22979688,
+            "bytes_total": 22976023
+          },
+          {
+            "cache": "tiny",
+            "tries": 17,
+            "tries_built": 17,
+            "bytes_io": 22980016,
+            "bytes_total": 22976124
+          },
+          {
+            "cache": "tiny",
+            "tries": 18,
+            "tries_built": 18,
+            "bytes_io": 22980344,
+            "bytes_total": 22976225
+          },
+          {
+            "cache": "tiny",
+            "tries": 19,
+            "tries_built": 19,
+            "bytes_io": 22980672,
+            "bytes_total": 22976326
+          },
+          {
+            "cache": "tiny",
+            "tries": 20,
+            "tries_built": 20,
+            "bytes_io": 22981000,
+            "bytes_total": 22976427
+          },
+          {
+            "cache": "tiny",
+            "tries": 21,
+            "tries_built": 21,
+            "bytes_io": 22981328,
+            "bytes_total": 22976528
+          },
+          {
+            "cache": "tiny",
+            "tries": 22,
+            "tries_built": 22,
+            "bytes_io": 22981656,
+            "bytes_total": 22976629
+          },
+          {
+            "cache": "tiny",
+            "tries": 23,
+            "tries_built": 23,
+            "bytes_io": 22981984,
+            "bytes_total": 22976730
+          },
+          {
+            "cache": "tiny",
+            "tries": 24,
+            "tries_built": 24,
+            "bytes_io": 22982312,
+            "bytes_total": 22976831
+          },
+          {
+            "cache": "tiny",
+            "tries": 25,
+            "tries_built": 25,
+            "bytes_io": 22982640,
+            "bytes_total": 22976932
+          },
+          {
+            "cache": "tiny",
+            "tries": 26,
+            "tries_built": 26,
+            "bytes_io": 22982968,
+            "bytes_total": 22977033
+          },
+          {
+            "cache": "tiny",
+            "tries": 27,
+            "tries_built": 27,
+            "bytes_io": 22983296,
+            "bytes_total": 22977134
+          },
+          {
+            "cache": "tiny",
+            "tries": 28,
+            "tries_built": 28,
+            "bytes_io": 22983624,
+            "bytes_total": 22977235
+          },
+          {
+            "cache": "tiny",
+            "tries": 29,
+            "tries_built": 29,
+            "bytes_io": 22983952,
+            "bytes_total": 22977336
+          },
+          {
+            "cache": "tiny",
+            "tries": 30,
+            "tries_built": 30,
+            "bytes_io": 22984280,
+            "bytes_total": 22977437
+          },
+          {
+            "cache": "tiny",
+            "tries": 31,
+            "tries_built": 31,
+            "bytes_io": 22984608,
+            "bytes_total": 22977538
+          },
+          {
+            "cache": "tiny",
+            "tries": 32,
+            "tries_built": 32,
+            "bytes_io": 22984936,
+            "bytes_total": 22977639
+          }
+        ],
+        "smallest_io": {
+          "cache": "tiny",
+          "tries": 10,
+          "tries_built": 10,
+          "bytes_io": 22977776,
+          "bytes_total": 22975465
+        },
+        "smallest_total": {
+          "cache": "tiny",
+          "tries": 10,
+          "tries_built": 10,
+          "bytes_io": 22977776,
+          "bytes_total": 22975465
+        }
+      },
+      "resident": {
+        "lexindex": [
+          {
+            "structure": "Dict 32",
+            "blob": 18603155,
+            "from_bytes_heap": 18893459,
+            "mmap_heap": 290304
+          },
+          {
+            "structure": "Dict 256",
+            "blob": 18040375,
+            "from_bytes_heap": 18111935,
+            "mmap_heap": 71560
+          },
+          {
+            "structure": "Dict 1024",
+            "blob": 17893932,
+            "from_bytes_heap": 17942052,
+            "mmap_heap": 48120
+          },
+          {
+            "structure": "StringIndex",
+            "blob": 37108466,
+            "from_bytes_heap": 37108498,
+            "mmap_heap": 32
+          }
+        ],
+        "marisa": [
+          {
+            "roles": [
+              "smallest_io",
+              "smallest_total"
+            ],
+            "cache": "tiny",
+            "tries": 10,
+            "bytes_io": 22977776,
+            "mmap_heap": 11360,
+            "load_heap": 22986825
+          },
+          {
+            "roles": [
+              "default"
+            ],
+            "cache": "default",
+            "tries": 3,
+            "bytes_io": 34575072,
+            "mmap_heap": 3408,
+            "load_heap": 34577772
+          }
+        ]
+      }
+    }
+  ]
+}

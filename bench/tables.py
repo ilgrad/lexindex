@@ -22,7 +22,9 @@ wording of a membership cell that is neither yes nor no, and whether a library a
 common-prefix queries -- a capability `bench/compare.py` does not measure. A `frontier` table is a
 research-frontier campaign's overview, with `view=hashed` its `HashedDictIndex` table, with
 `view=search` its exact searches, or with `corpus=` one corpus's table, rendered by
-`bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed.
+`bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed. A
+`marisa-floor` table is MARISA at its smallest against lexindex's smallest, as files and as mapped
+loads.
 """
 
 import argparse
@@ -39,7 +41,7 @@ OPEN = re.compile(r"^<!-- table: (?P<kind>[\w-]+) (?P<artifact>\S+)(?P<opts>[^>]
 CLOSE = "<!-- /table -->"
 # How far past a block the caption is looked for; a citation further away than this is prose.
 CAPTION_LINES = 20
-ARTIFACT_LINK = re.compile(r"bench/results/((?:compare|frontier)-[\w.-]+\.json)")
+ARTIFACT_LINK = re.compile(r"bench/results/((?:compare|frontier|marisa-floor)-[\w.-]+\.json)")
 
 # Loaded by path: its module name, `tables`, is this file's own.
 _spec = importlib.util.spec_from_file_location("frontier_tables", ROOT / "bench/frontier/tables.py")
@@ -161,7 +163,45 @@ def render_frontier(artifact: dict, opts: dict[str, str]) -> str:
     raise ValueError(f"the artifact has no corpus `{opts['corpus']}`")
 
 
-RENDERERS = {"compare": render_compare, "frontier": render_frontier}
+def render_floor(artifact: dict, opts: dict[str, str]) -> str:
+    """MARISA at its smallest against lexindex's smallest, bytes a key: the files, then each file
+    with the heap its mapped load keeps. The smaller of each pair is bold."""
+
+    def size(nbytes: int, keys: int) -> str:
+        # Two decimals round an fst on a dense id space to 0.00; under a hundredth, bytes.
+        return f"{nbytes / keys:.2f}" if nbytes >= keys / 100 else f"{nbytes:,} B"
+
+    def pair(ours: int, theirs: int, keys: int) -> tuple[str, str, str]:
+        a, b = size(ours, keys), size(theirs, keys)
+        value = 100 * (theirs - ours) / theirs
+        # One decimal rounds `StringIndex`'s 301 bytes on `numeric` to +100.0 %, which reads as no
+        # bytes at all; that margin gets three.
+        margin = f"{value:+.{1 if value < 99.95 else 3}f} %"
+        return (f"**{a}**", b, margin) if ours < theirs else (a, f"**{b}**", margin)
+
+    lines = [
+        "| corpus | lexindex, smallest | MARISA, smallest | margin "
+        "| mapped: lexindex | mapped: MARISA | margin |",
+        "|---|---|---|---:|---:|---:|---:|",
+    ]
+    for corpus in artifact["corpora"]:
+        keys = corpus["keys"]
+        ours = min(corpus["resident"]["lexindex"], key=lambda row: row["blob"])
+        theirs = next(m for m in corpus["resident"]["marisa"] if "smallest_io" in m["roles"])
+        a, b, filed = pair(ours["blob"], theirs["bytes_io"], keys)
+        c, d, mapped = pair(
+            ours["blob"] + ours["mmap_heap"], theirs["bytes_io"] + theirs["mmap_heap"], keys
+        )
+        lines.append(
+            f"| `{corpus['corpus']}` | {a} ({ours['structure']}) "
+            f"| {b} ({theirs['tries']} {'try' if theirs['tries'] == 1 else 'tries'}, "
+            f"{theirs['cache']}) | {filed} "
+            f"| {c} | {d} | {mapped} |"
+        )
+    return "\n".join(lines)
+
+
+RENDERERS = {"compare": render_compare, "frontier": render_frontier, "marisa-floor": render_floor}
 
 
 def blocks(text: str):

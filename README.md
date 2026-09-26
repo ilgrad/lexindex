@@ -15,12 +15,15 @@ persist a flat blob, and query it many times, memory-mapped where the structure 
 [`betula-cluster`](https://github.com/ilgrad/betula-cluster) (string ids ↔ cluster ids, both ways)
 but stands on its own.
 
-[![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on all thirteen](https://raw.githubusercontent.com/ilgrad/lexindex/main/docs/assets/frontier-1m.svg)](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
+[![lexindex against the smallest trie anyone else built, on thirteen corpora at a million keys: smaller on twelve, and MARISA at its smallest is 5.8 % smaller on paths](https://raw.githubusercontent.com/ilgrad/lexindex/main/docs/assets/frontier-1m.svg)](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured)
 
 <sub>Thirteen corpora at a million keys against MARISA, XCDAT, CoCo-trie, PDT and the C² benchmark's
-structures, each at its own best configuration — the protocol, the ten-million-key table and every
-other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
-The figure is the size axis, which `DictIndex` wins. On an exact lookup XCDAT is still ahead on most
+structures at the configurations the campaign times, and MARISA at its smallest — 1 to 32 tries
+under the tiny cache, untimed — which is 5.8 % smaller than `DictIndex` on `paths`. The protocol,
+the ten-million-key table and every other structure are in [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-research-frontier-measured).
+The figure is the size axis: lexindex's smallest index wins it on twelve of the thirteen by file,
+and a mapped `DictIndex` also holds the 0.02–0.33 bytes a key of tables it derives at load,
+[counted beside MARISA's](https://ilgrad.github.io/lexindex/benchmarks/#marisa-at-its-smallest). On an exact lookup XCDAT is still ahead on most
 corpora at a million keys: lexindex's fastest exact search there — `DictIndex` after 4.4's opt-in
 `route_microblocks()`, which holds 0.25–0.5 bytes a key more in memory, `StringIndex`, or 4.5's
 `DoubleArrayIndex` where its trie is small — beats XCDAT 15 on `numeric`, `words` and `dna`, trails
@@ -408,10 +411,12 @@ with how much the keys share, which one word list cannot show.</sub>
 Two claims, scoped to libraries a Python or Rust project can install. The research-grade C++
 frontier has no binding, so it is measured in a harness of its own, on the C² paper's protocol:
 lexindex is on the size–latency front on all thirteen corpora at a million keys and all six at ten
-million, `DictIndex` is the smallest structure on twelve and five of them and builds faster than
-every compressed trie there, `HashedDictIndex` answers `id` faster than every structure there on
-all nineteen while smaller than XCDAT, the fastest of them, on every one, and the one corpus that
-keeps a trie smaller than `DictIndex` is `numeric`, where `StringIndex` is smaller still
+million, `DictIndex` is the smallest structure on eleven and five of them — counting MARISA at its
+smallest, a configuration the campaign does not time — and builds faster than every compressed trie
+there, `HashedDictIndex` answers `id` faster than every structure there on all nineteen while
+smaller than XCDAT, the fastest of them, on every one, and two corpora keep a trie smaller than
+`DictIndex`: `numeric`, where `StringIndex` is smaller still, and `paths`, where MARISA at its
+smallest is 5.8 % smaller
 ([measured in the benchmark notes](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-measured);
 papers, code and licences [cited](https://github.com/ilgrad/lexindex/blob/main/docs/benchmarks.md#the-research-frontier-cited)).
 **`CompactHashIndex` is the smallest `string → dense id` map here that can reject a non-member,
