@@ -219,7 +219,7 @@ entry's suffix — or against a learned table of the `2^w - 1` costliest pairs a
 each. Which of the two wins is a property of the shard, not of the format, so one byte a group
 picks it from every run of that shard at once. That is why a shard is collected before any of it is
 written: the code cannot be chosen from a block. At block 1024 the A-B that justified it read paths
-14.34 → 12.46 bytes a key, urls 11.25 → 9.28 and dna 7.70 → 7.27 — the codec's own share, measured
+14.34 → 12.46 bytes a key, urls 11.11 → 9.28 and dna 7.62 → 7.27 — the codec's own share, measured
 when it landed, not the format's current size; the sweep in `docs/benchmarks.md` has that.
 
 The suffix goes under a static symbol table in the manner of FSST (Boncz, Neumann and Leis, VLDB
@@ -257,7 +257,7 @@ cheapest coding in bits — a symbol eight, an escaped byte sixteen, a phrase ei
 its id takes — and the miner is three rounds of that parse and a count of windows of up to three
 adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain clears six
 times what they cost to store. Mining stops after the first round unless one of three sampled
-shards would take a split by 2 % on its own bytes: what the miner ranks is what coding a span once
+shards would take a split by 3 % on its own bytes: what the miner ranks is what coding a span once
 would save, and what decides the format is whether a shard would rather spend those byte codes on
 symbols — on a million opaque keys 40 000 spans clear the first bar and no shard takes one. Each
 shard then decides for itself and has its table retrained on the spans its phrases did not cover,

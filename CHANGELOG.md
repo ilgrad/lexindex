@@ -654,7 +654,7 @@ All notable changes to this project are documented here. The format follows
 - **`DictIndex` came down on every cell of the size sweep, and the format is `BDX3`.** Thirteen
   corpora at a hundred thousand keys, eleven at a million and six at ten million, each at blocks of
   128, 256 and 1024: ninety cells against 3.0.0, ninety of them smaller. The median is 13 % at a
-  hundred thousand, 25 % at a million and 38 % at ten million; the ends are 0.9 % on `pypi` at the
+  hundred thousand, 25 % at a million and 33 % at ten million; the ends are 0.9 % on `pypi` at the
   smallest scale and 56 % on `numeric`. Seven changes, each priced on its own:
 
   *The entry headers are one stream a shard wide.* `BDX2` spent a byte on every front-coded entry's
@@ -666,7 +666,7 @@ All notable changes to this project are documented here. The format follows
   from every run at once. That is why a shard is now collected before any of it is written — the
   code cannot be chosen from a block — and both builds go through the same collection, so a streamed
   blob is still byte-identical to one held in memory. At block 1024: paths 14.34 → 12.46 bytes a
-  key, urls 11.25 → 9.28, dna 7.70 → 7.27.
+  key, urls 11.11 → 9.28, dna 7.62 → 7.27.
 
   *A shard whose alphabet is narrow skips the symbols.* A symbol table spends eight bits on a code
   and earns them back by naming runs of bytes; on a shard drawn from four characters, or sixteen, or
@@ -696,7 +696,7 @@ All notable changes to this project are documented here. The format follows
   cheapest coding in bits, and the miner is three rounds of that parse and a count of windows of up
   to three adjacent tokens covering three to thirty-two bytes, keeping only candidates whose gain
   clears six times what they cost to store. Mining stops after the first round unless one of three
-  sampled shards would take a split by 2 % on its own bytes — what the miner ranks is what coding a
+  sampled shards would take a split by 3 % on its own bytes — what the miner ranks is what coding a
   span once would save, and what decides the format is whether a shard would rather spend those byte
   codes on symbols; on a million opaque keys 40 000 spans clear the first bar and no shard takes
   one. Each shard then decides for itself and has its table retrained on what its phrases did not
@@ -743,8 +743,8 @@ All notable changes to this project are documented here. The format follows
   → **9.87**, article titles 9.37 → **7.37** in English, 11.36 → **7.67** in Russian and 8.28 →
   **6.27** in Chinese, DNA 7.70 → **4.37**, opaque ids 13.80 → **10.40**, numeric 2.13 → **1.01**,
   identifiers 6.66 → **5.23**, domains 5.07 → **4.50**, UUIDs 20.45 → **18.04**; the dictionary's
-  479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.17**. That is 7.0 % off the word
-  list at one end and 52.5 % off decimal ids at the other. Against `marisa-trie` at its own best
+  479 823 words 2.84 → **2.64** and 889 864 PyPI names 4.91 → **4.17**. That is 7.2 % off the word
+  list at one end and 52.4 % off decimal ids at the other. Against `marisa-trie` at its own best
   `num_tries` on each corpus, that makes `DictIndex` the smallest key-storing structure on ten of
   the eleven sweep corpora at a million keys and on **all six at ten million**, where 3.0.0 gave
   English titles and urls back to the trie — the two it takes back are won by 0.11 % and 0.33 %,
