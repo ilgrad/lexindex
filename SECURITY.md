@@ -8,7 +8,9 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 4.3.x | yes |
+| 4.5.x | yes |
+| 4.4.x | no — 4.5 reads every blob 4.4 wrote and adds `DoubleArrayIndex`, whose `BDA1` 4.4 refuses. Two fixes a 4.4 reader lacks: a crafted `DictIndex` blob could make a routed lookup panic (4.4.0 to 4.5.1, fixed in 4.5.2), and on a 32-bit target a crafted hash-index blob could make a load panic rather than fail (fixed in 4.5.1) |
+| 4.3.x | no — 4.4 is a drop-in upgrade: it adds `DictIndex::route_microblocks` and changes no blob, byte for byte |
 | 4.2.x | no — 4.3 reads every blob 4.2 wrote; where a character code pays it writes `BDX4`, which 4.2 refuses, so upgrade the readers before the writers |
 | 4.1.x | no — 4.2 is a drop-in upgrade: it adds `StringIndex.occurrences` and reads every blob 4.1 wrote |
 | 4.0.x | no — 4.1 is a drop-in upgrade: it adds `BHD1` and reads every blob 4.0 wrote |
