@@ -2021,7 +2021,7 @@ byte-identical to it; `DictIndex` reads 0.87–0.96 of it, the search changes si
 CPUs, most 0.06.</sub>
 
 With routing the exact search is ahead of XCDAT 15 on three corpora of six at ten million keys:
-`numeric`, where `StringIndex` reads 95 ns against 192 and holds all ten million keys in 357 bytes;
+`numeric`, where `StringIndex` reads 95 ns against 192 and holds all ten million keys in 356 bytes;
 `dna`, block 1024 routed at 424 against 545; and `urls`, block 256 routed at 611 against 673. On
 `titles-en` and `uuid` block 256 routed is 3–4 % ahead, inside the 2–5 % XCDAT 15 itself moved
 between runs, so those two are level. `opaque` is the loss: 440 ns for `StringIndex` and 442 for
