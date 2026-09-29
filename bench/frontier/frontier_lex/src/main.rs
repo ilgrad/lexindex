@@ -190,7 +190,9 @@ fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
         "{label}: build {build_ms:.0} ms, size {size_mib:.3} MiB ({:.3} B/key), latency cold {cold:.1} ns, then mean {mean:.1} / min {min:.1} ns",
         index.bytes() as f64 / keys.len() as f64,
     );
-    println!("{build_ms:.3},{size_mib:.6},{cold:.3}");
+    // `tables.py` reads the size back as MiB × 2^20: nine decimals keep that to the byte, where six
+    // leave a blob of a few hundred bytes a byte either way.
+    println!("{build_ms:.3},{size_mib:.9},{cold:.3}");
 }
 
 fn main() {
