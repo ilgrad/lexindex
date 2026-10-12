@@ -681,8 +681,8 @@ layout spends 10.5 (`0x11`) or 16.2 (`0x12`), so it pays only where the keys ove
 still one slice of the data, so `key(id)` stays a zero-copy `&str` and membership one comparison.
 
 The merge runs on an Aho–Corasick automaton over the sorted keys, built level by level with each
-node's children a sorted run: `O(N log σ)` for `N` key bytes. A key inside another is a failure-link
-target or a prefix of the next key in order. The rest are chained by decreasing overlap — Ukkonen's
+node's children a sorted run: `O(N log σ)` for `N` key bytes. A key inside another ends at a node
+some failure link points to, or is a prefix of the next key in order. The rest are chained by decreasing overlap — Ukkonen's
 greedy, each depth's keys in slot order taking the smallest free key in byte order under their
 node — and the chains are written in their heads' slot order: `O(N + n log n)` in all, and
 deterministic, so the blob is reproducible like every other. The automaton is 9 bytes a node, at
