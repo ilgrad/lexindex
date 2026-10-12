@@ -18,6 +18,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "aliasable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
+
+[[package]]
 name = "aligned-vec"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -42,6 +48,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "ambassador"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd3d4da7fddbc6567cbd7b5c30364f91313701b1857ab5b925eb3acf06162eed"
+dependencies = [
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -117,6 +135,12 @@ name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
+name = "atomic-primitive"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d0f69ca9522465c166bd988f9e0d9840f6ad141a4b66a55e94b601f14c289c2"
 
 [[package]]
 name = "autocfg"
@@ -844,6 +868,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "impl-tools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b03e37277215a23886b25b386775553bf5f380691ea0b5fad6e74a6c2a8617a2"
+dependencies = [
+ "autocfg",
+ "impl-tools-lib 0.13.0",
+ "proc-macro-error3",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "impl-tools-lib"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -865,6 +901,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "impl-tools-lib"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd7947353f97f01aadba80214d75253db73a66c0310f4e4608f4a71ffcea8217"
+dependencies = [
+ "proc-macro-error3",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -1013,6 +1061,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lender"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71ee39582f2e2a4dd0de3c898e944f5cba919eb2f61aecaaeb5279d1e6b9ae6f"
+dependencies = [
+ "aliasable",
+ "fallible-iterator",
+ "lender-derive",
+ "maybe-dangling",
+ "stable_try_trait_v2",
+]
+
+[[package]]
 name = "lender-derive"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1057,6 +1118,12 @@ checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "maybe-dangling"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59dbb09ed53f8e4f314e353dc6c1853ae5b4c480a668a422657804a544ea9f65"
 
 [[package]]
 name = "mem_dbg"
@@ -1157,10 +1224,13 @@ dependencies = [
 name = "mphf_vs"
 version = "0.0.0"
 dependencies = [
+ "dsi-progress-logger",
  "lexindex",
+ "mem_dbg 0.4.4",
  "ph",
  "ptr_hash",
  "rayon",
+ "sux 0.15.0",
 ]
 
 [[package]]
@@ -1209,6 +1279,12 @@ dependencies = [
  "arrayvec",
  "itoa",
 ]
+
+[[package]]
+name = "num-primitive"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfdc70e0a1e90099a7a67c7d4c076ed2cc9bd16ac83ddc9e0b6cab5c5590ff4"
 
 [[package]]
 name = "num-traits"
@@ -1277,7 +1353,7 @@ dependencies = [
  "mem_dbg 0.3.4",
  "rayon",
  "seedable_hash",
- "sux",
+ "sux 0.10.3",
  "voracious_radix_sort",
 ]
 
@@ -1756,7 +1832,7 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29949eff4a64e05149a5147f1695fd8576c990504a217f28391c09e007d831dc"
 dependencies = [
- "ambassador",
+ "ambassador 0.4.2",
  "anyhow",
  "arbitrary-chunks",
  "bitflags 2.13.1",
@@ -1774,7 +1850,7 @@ dependencies = [
  "itertools 0.14.0",
  "jiff",
  "lambert_w",
- "lender",
+ "lender 0.4.2",
  "libc",
  "log",
  "mem_dbg 0.3.4",
@@ -1785,10 +1861,41 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "thread-priority",
- "value-traits",
+ "value-traits 0.2.1",
  "xxhash-rust",
  "zerocopy",
  "zstd",
+]
+
+[[package]]
+name = "sux"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce63dc1cf36938e70e043d9e2fa18be05291a602ce67237ed9a47ae41529c38e"
+dependencies = [
+ "ambassador 0.5.1",
+ "anyhow",
+ "arbitrary-chunks",
+ "atomic-primitive",
+ "crossbeam-channel",
+ "derive_setters",
+ "dsi-progress-logger",
+ "fallible-iterator",
+ "impl-tools 0.13.0",
+ "lender 0.8.0",
+ "log",
+ "mem_dbg 0.4.4",
+ "num-primitive",
+ "rand 0.10.2",
+ "rayon",
+ "rdst",
+ "sync-cell-slice",
+ "tempfile",
+ "thiserror 2.0.20",
+ "thread-priority",
+ "value-traits 0.3.1",
+ "xxhash-rust",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1985,7 +2092,16 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17e73c7053d8fa8e9c3c6b16c32d079ed5642a7156514820486a9c4e109cf48d"
 dependencies = [
- "value-traits-derive",
+ "value-traits-derive 0.2.1",
+]
+
+[[package]]
+name = "value-traits"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7af225b5d51f7e3660b23d053cd437559d441d5127df1394754bda8c9e5ded9d"
+dependencies = [
+ "value-traits-derive 0.3.1",
 ]
 
 [[package]]
@@ -1993,6 +2109,17 @@ name = "value-traits-derive"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d301d1ee4b3eced3e73aa5740a303c7e068f1d4450c5dae4c8cf6bfa266954f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "value-traits-derive"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ccc7b12e5565a38e155d8ab274654500601b90cc71477f905f3217120292dc"
 dependencies = [
  "proc-macro2",
  "quote",

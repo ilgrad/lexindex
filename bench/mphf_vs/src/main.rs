@@ -1,19 +1,24 @@
 //! One process, A-B-A-B: lexindex's `Mphf` (the `bench-mphf` export) against `ph` 0.11.0's PHast
 //! (`Function`, `SeedOnly`) and PHast+ (`Function2`, `ShiftOnlyWrapped`), both at 8-bit seeds and
-//! bucket size 4.5, and `ptr_hash` 2.1.1's three parameter sets, over the same distinct
-//! splitmix64 keys and the same shuffled probe order. Builds: the minimum over the rounds, and
+//! bucket size 4.5, `ptr_hash` 2.1.1's three parameter sets, and `sux` 0.15.0's PHastR at five:
+//! 8-bit seeds at expected bucket sizes 4.25 (its default), 4.5 and 4.75, and 10-bit seeds over
+//! slices of 2048 at 5.75 and 6, read unaligned as its documentation advises — over the same
+//! distinct splitmix64 keys and the same shuffled probe order. Builds: the minimum over the rounds, and
 //! the spread (the slowest round over the fastest, minus one). Lookups: every key once per pass
 //! in the one shuffled order, three passes a round, the minimum and the spread over all passes;
 //! and where a function has a batch or streaming form — lexindex `index_all`, `ptr_hash`
-//! `index_stream` — that too, over the same order in chunks of 4096 keys; `ph` has none.
+//! `index_stream` — that too, over the same order in chunks of 4096 keys; `ph` has none, and
+//! PHastR's `get_batch` is hidden from its documentation and marked experimental, so it is not timed.
 //! A round builds every row first and then times the lookups with the rows in turn within each
 //! pass, so that a machine warming through the round slows every row alike; each turn starts
 //! with an untimed sweep over the first 2^20 probe keys, which brings back into the cache what
 //! the previous row's turn took out of it.
 //! lexindex takes the keys as hashes; `ph` hashes each key with its default seeded hasher
-//! (wyhash) at build and on every lookup level, `ptr_hash` with `FastIntHash` (one multiply).
-//! Threads: lexindex and `ph` take the count directly, `ptr_hash` runs inside a rayon pool of
-//! that size. Every build takes the keys in generation order, as they were drawn.
+//! (wyhash) at build and on every lookup level, `ptr_hash` with `FastIntHash` (one multiply),
+//! PHastR with its own `ToSig` for `u64` (xxh3). PHastR's size is its `mem_size`, as `ph`'s is
+//! its `size_bytes`.
+//! Threads: lexindex and `ph` take the count directly, `ptr_hash` and PHastR run inside a rayon
+//! pool of that size. Every build takes the keys in generation order, as they were drawn.
 //!
 //! `cd bench/mphf_vs && cargo run --release -- [n] [rounds] [threads]`
 //!
@@ -39,7 +44,9 @@
 //! landed: its resident megabytes and two rates of eight threads over them, a sequential read and
 //! independent loads of random lines (the `placement` module) — on a machine whose memory is not
 //! uniform, the variable a lookup column carries.
+use dsi_progress_logger::no_logging;
 use lexindex::Mphf;
+use mem_dbg::{MemSize, SizeFlags};
 use ph::phast::{
     Function, Function2, Params, SeedOnly, ShiftOnlyWrapped, bits_per_seed_to_100_bucket_size,
 };
@@ -49,8 +56,15 @@ use ptr_hash::hash::FastIntHash;
 use ptr_hash::{CompactPtrHash, DefaultPtrHash, PtrHashParams};
 use std::sync::Arc;
 use std::time::Instant;
+use sux::bits::BitFieldVec;
+use sux::func::{PHastR, PHastRBuilder};
+use sux::traits::TryIntoUnaligned;
 
 mod placement;
+
+/// PHastR with seeds wider than a byte: built over a bit-field vector, then converted to the
+/// unaligned reads its documentation recommends for such seeds.
+type PHastRWide = <PHastR<u64, BitFieldVec<Box<[usize]>>> as TryIntoUnaligned>::Unaligned;
 
 #[global_allocator]
 static ALLOCATOR: placement::Tracked = placement::Tracked;
@@ -545,6 +559,11 @@ fn main() {
         "ptr_hash 2.1.1 compact",
         "ptr_hash 2.1.1 balanced",
         "ptr_hash 2.1.1 fast",
+        "sux 0.15 PHastR (8-bit, 4.25)",
+        "sux 0.15 PHastR (8-bit, 4.5)",
+        "sux 0.15 PHastR (8-bit, 4.75)",
+        "sux 0.15 PHastR (10-bit, 5.75)",
+        "sux 0.15 PHastR (10-bit, 6)",
     ];
     let mut rows = names.map(|name| Row::new(name, wanted(name), copies));
     // `CompactPtrHash` is not `Clone` (its `EliasFano` remap is not), so its copies are built
@@ -673,6 +692,53 @@ fn main() {
                     .fold(0usize, usize::wrapping_add) as u64
             }),
         );
+        for (row, size) in [(6, 4.25), (7, 4.5), (8, 4.75)] {
+            rows[row].build(
+                row,
+                n,
+                &mut tables,
+                || {
+                    pool.install(|| {
+                        <PHastR<u64>>::try_par_new_with_builder(
+                            &keys,
+                            PHastRBuilder::default().bucket_size(size),
+                            no_logging![],
+                        )
+                        .expect("PHastR build")
+                    })
+                },
+                |f| f.mem_size(SizeFlags::default()) as f64 * 8.0 / n as f64,
+                Copies::Of(&<PHastR<u64>>::clone),
+                |f, k| f.get(k) as u64,
+                None,
+            );
+        }
+        for (row, size) in [(9, 5.75), (10, 6.0)] {
+            rows[row].build(
+                row,
+                n,
+                &mut tables,
+                || -> PHastRWide {
+                    pool.install(|| {
+                        <PHastR<u64, BitFieldVec<Box<[usize]>>>>::try_par_new_with_builder(
+                            &keys,
+                            PHastRBuilder::default()
+                                .seed_bits(10)
+                                .log2_slice_len(11)
+                                .bucket_size(size),
+                            no_logging![],
+                        )
+                        .expect("PHastR build")
+                        .try_into_unaligned()
+                        .expect("PHastR unaligned")
+                    })
+                },
+                |f| f.mem_size(SizeFlags::default()) as f64 * 8.0 / n as f64,
+                Copies::Of(&PHastRWide::clone),
+                |f, k| f.get(k) as u64,
+                None,
+            );
+        }
         let before: Vec<placement::Read> = if place {
             (0..tables.len()).map(placement::read).collect()
         } else {
