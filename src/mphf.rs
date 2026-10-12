@@ -5748,4 +5748,52 @@ mod spike {
             n / parts
         );
     }
+
+    /// How often the tail needs another hash seed, over `LEXINDEX_TAIL_SETS` (10 000) random
+    /// tails of the full [`TAIL_KEYS`]. The idealised model -- each attempt a fresh draw of the
+    /// buckets, its seeds searched independently -- has about 9 % of attempts fail, so all
+    /// [`TAIL_TRIES`] failing on distinct hashes is about `0.09^64 ≈ 1e-67`. The histogram is of
+    /// the attempt that succeeded; the bounds hold the first attempt's failure rate to the model,
+    /// and the second's to the first's, which is the independence that product rests on.
+    ///
+    /// Measured at 10 000 sets (2026-10): 9 095, 832, 67, 4 and 2 sets on attempts 0 to 4 --
+    /// 9.05 % of first attempts fail, 8.1 % of second ones; a geometric law at 9.05 % expects
+    /// 9 095, 823, 74.5, 6.7, and 0.7 from attempt 4 on.
+    ///
+    /// `cargo test --features bench-mphf --release --lib mphf::spike::tail -- --ignored --nocapture`
+    #[test]
+    #[ignore = "measurement, not a test"]
+    fn tail_attempt_histogram() {
+        let sets = env("LEXINDEX_TAIL_SETS", 10_000) as u64;
+        let attempt_seeds: Vec<u64> = (0..TAIL_TRIES)
+            .map(|a| mix(0x7A11_5EED_0000_0000 ^ u64::from(a)))
+            .collect();
+        let mut histogram = vec![0u64; TAIL_TRIES as usize];
+        for set in 0..sets {
+            // `mix` is a bijection, so the hashes of a set, and of all sets, are distinct.
+            let hs: Vec<u64> = (0..TAIL_KEYS)
+                .map(|i| mix((set * TAIL_KEYS + i) ^ 0x7A11_7E57_0000_0000))
+                .collect();
+            let (tail, _) = V2::build_tail(&hs).expect("distinct hashes place");
+            let attempt = attempt_seeds.iter().position(|&s| s == tail.seed).unwrap();
+            histogram[attempt] += 1;
+        }
+        let at_least = |a: usize| histogram[a..].iter().sum::<u64>();
+        let last = histogram.iter().rposition(|&c| c > 0).unwrap();
+        for (a, &count) in histogram.iter().enumerate().take(last + 1) {
+            println!(
+                "attempt {a:>2}: {count:>6} sets   {:>6} took more",
+                at_least(a + 1)
+            );
+        }
+        let first_fails = at_least(1) as f64 / sets as f64;
+        let second_fails = at_least(2) as f64 / at_least(1).max(1) as f64;
+        println!(
+            "first attempt fails {first_fails:.4}, a second one fails {second_fails:.4}, last \
+             attempt used {last}"
+        );
+        assert!((0.06..=0.12).contains(&first_fails), "{first_fails}");
+        assert!((0.04..=0.14).contains(&second_fails), "{second_fails}");
+        assert!(last < 8, "{last}");
+    }
 }
