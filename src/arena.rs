@@ -6,11 +6,12 @@
 //!
 //! # Offset encoding
 //!
-//! Four encodings, chosen per arena at build time and named by the tag byte in the header. The two
+//! Five encodings, chosen per arena at build time and named by the tag byte in the header. The two
 //! flat ones are a table of `n + 1` absolute offsets. The two blocked ones cut the slots into
 //! fixed-size runs and give each run a base plus a row of *cumulative* one- or two-byte offsets, so
 //! a key is `data[base + off[k] .. base + off[k + 1]]` — two adjacent reads out of a header that is
-//! one cache line wide.
+//! one cache line wide. The merged one stores the keys as one superstring and each slot as a
+//! packed `(start, length)`.
 //!
 //! | tag | block header | slots/block | bytes/key |
 //! |---|---|---|---|
@@ -20,6 +21,21 @@
 //! | `0x32` | `[base u64][off u16 × 257]` | 256 | 2.04 |
 //! | `4` | — | — | 4 |
 //! | `8` | — | — | 8 |
+//! | `0x13` | `[min_len u32][len_bits u8][start_bits u8]`, then one entry per slot | — | `(start_bits + len_bits) / 8` |
+//!
+//! **Merged** (`0x13`, since 4.6). The four layouts above store every key whole, in slot order.
+//! This one stores a greedy shortest common superstring of the keys ([`crate::superstring`]): a key
+//! that occurs inside another costs no bytes, and two keys where one ends as the other begins
+//! share the overlap. An entry is wider than a blocked layout's share of its header — 23 to 32
+//! bits on the benchmark corpora, against 10.5 for `0x11` and 16.2 for `0x12` — so the layout
+//! pays only where the keys overlap enough: on the 479 823-word dictionary the arena goes 10.64 →
+//! 9.01 bytes per key, while URLs, domains and paths would grow and keep the blocked layout.
+//! `PerfectHashIndex::build` prices it beside the blocked layout and keeps the smaller, a tie to
+//! the blocked one, so no key set grows. A key is still a slice of the data, so `key(id)` stays a
+//! zero-copy `&str` and membership one comparison; every slice starts on a character boundary,
+//! because a byte-wise occurrence of one UTF-8 string in another can start nowhere else. The keys
+//! overlap, so the two ends of the data say nothing about the entries between them, and the load
+//! checks every entry once: `O(n)` where the blocked layouts check two.
 //!
 //! Bit `0x80` of the tag marks the same four layouts with one fingerprint byte per slot behind
 //! the offsets — after a block's fencepost, or after a flat table — so `0x91` is
@@ -88,6 +104,21 @@ const OVERFLOW: u8 = 0x40;
 const TRAILER: usize = 8;
 /// `[n_off: u64][tag: u8]`.
 const HEADER: usize = 9;
+/// The keys as one superstring ([`crate::superstring`]), each slot a packed entry — its
+/// fingerprint under [`FP`], then `length − min_len`, then where it starts — `width` bits, least
+/// significant first, behind `[min_len u32][len_bits u8][start_bits u8]`. A length past what the
+/// field holds is all ones in it and sits in an overflow table of `[slot u32][len u32]` behind the
+/// data, sorted by slot, under [`OVERFLOW`]. Never with [`WIDE_BASE`]: the header names the start's
+/// width.
+const MERGED: u8 = 0x13;
+/// `[min_len u32][len_bits u8][start_bits u8]`, behind a merged arena's tag.
+const PARAMS: usize = 6;
+/// Zero bytes behind the packed entries, so that the eight-byte read of the last one stays in them.
+const PAD: usize = 7;
+/// The widest entry one unaligned eight-byte read holds at any bit offset.
+const MAX_WIDTH: u32 = 57;
+/// One entry of a merged arena's overflow table: `[slot u32][len u32]`.
+const SLOT_LEN: usize = 8;
 
 /// A contiguous arena of UTF-8 strings addressable by index, viewing a shared byte source.
 #[derive(Clone, Debug)]
@@ -98,6 +129,15 @@ pub(crate) struct StringArena {
     data_end: usize,   // where the data stops: the overflow table's start, or the blob's end
     overflow_end: usize, // where the overflow table stops: before its trailer, or the blob's end
     tag: u8, // NARROW, WIDE, BLOCK_U8 or BLOCK_U16 (those two also `| WIDE_BASE`, `| OVERFLOW`), any `| FP`
+    packed: Packed, // a merged arena's entry geometry; unused by every other layout
+}
+
+/// What a merged arena's header says about its entries.
+#[derive(Clone, Copy, Debug, Default)]
+struct Packed {
+    width: u32,
+    len_bits: u32,
+    min_len: usize,
 }
 
 impl StringArena {
@@ -186,6 +226,59 @@ impl StringArena {
                 )
             }
         }
+    }
+
+    /// The arena of `keys` — sorted, distinct — in the slot order `order`, a permutation of their
+    /// indices, in whichever layout is the smaller: [`build_exact`](Self::build_exact)'s, or the
+    /// keys merged into one superstring under [`MERGED`]. A tie keeps the blocked layout, which
+    /// every reader since 2.0 knows. `data_len` is the keys' total length, as for `build_exact`.
+    ///
+    /// The superstring is computed to be priced, so a build that keeps the blocked layout has
+    /// still paid for it — see [`crate::superstring`] for what that costs. It is gone before the
+    /// blocked arena is laid out.
+    pub(crate) fn build_cheapest<S: AsRef<str>>(
+        keys: &[S],
+        order: &[u32],
+        data_len: usize,
+        fps: Option<&[u8]>,
+    ) -> Self {
+        let in_order = || order.iter().map(|&k| keys[k as usize].as_ref());
+        let lens: Option<Vec<u32>> = in_order().map(|k| u32::try_from(k.len()).ok()).collect();
+        if let Some(lens) = lens {
+            let blocked = blocked_len(&lens, data_len, fps.is_some(), NARROW_LIMIT);
+            if let Some(merged) = Self::merged(keys, order, &lens, fps, blocked) {
+                return merged;
+            }
+        }
+        Self::build_exact(in_order(), order.len(), data_len, fps)
+    }
+
+    /// The merged arena, if it comes out smaller than `beat` bytes.
+    fn merged<S: AsRef<str>>(
+        keys: &[S],
+        order: &[u32],
+        lens: &[u32],
+        fps: Option<&[u8]>,
+        beat: Option<usize>,
+    ) -> Option<Self> {
+        if fps.is_some_and(|f| f.len() != order.len()) {
+            return None;
+        }
+        let merged = crate::superstring::merge(keys, order)?;
+        let spans: Vec<(u64, u32)> = order
+            .iter()
+            .zip(lens)
+            .map(|(&k, &len)| (merged.starts[k as usize], len))
+            .collect();
+        let data = merged.data;
+        let shape = MergedShape::of(&spans, data.len(), fps.is_some())?;
+        if beat.is_some_and(|beat| shape.bytes >= beat) {
+            return None;
+        }
+        let blob = lay_out_merged(&data, &spans, fps, &shape);
+        Some(
+            Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
+        )
     }
 
     /// Write the whole arena into one buffer sized for `n` strings holding `data_len` bytes.
@@ -365,6 +458,11 @@ impl StringArena {
             return;
         }
         let bytes = self.blob.as_ref();
+        if split(self.tag).layout == MERGED {
+            let bit = i as u64 * u64::from(self.packed.width);
+            crate::blob::prefetch_byte(bytes, HEADER + PARAMS + (bit / 8) as usize);
+            return;
+        }
         let at = offsets_start(self.tag, i);
         crate::blob::prefetch_byte(bytes, at);
         let g = split(self.tag);
@@ -406,6 +504,9 @@ impl StringArena {
             return None;
         }
         let bytes = self.blob.as_ref();
+        if split(self.tag).layout == MERGED {
+            return self.merged_entry(bytes, i, want);
+        }
         let overflow = || &bytes[self.data_end..self.overflow_end];
         let ((lo, hi), fp) = entry_of(bytes, overflow, self.tag, self.n, i, want)?;
         Some((
@@ -415,6 +516,31 @@ impl StringArena {
             ),
             fp,
         ))
+    }
+
+    /// [`entry`](Self::entry) under the merged layout: the fingerprint, when the tag stores them,
+    /// decides before the length and the start are taken out of the same word.
+    #[inline(always)]
+    fn merged_entry(
+        &self,
+        bytes: &[u8],
+        i: usize,
+        want: Option<u8>,
+    ) -> Option<((usize, usize), u8)> {
+        let p = self.packed;
+        let word = p.word(bytes, i)?;
+        let fp = if self.tag & FP != 0 { word as u8 } else { 0 };
+        if self.tag & FP != 0 && want.is_some_and(|w| w != fp) {
+            return None;
+        }
+        let (start, field) = p.fields(word, self.tag);
+        let len = if p.len_bits > 0 && field == p.escape() {
+            escaped_len(&bytes[self.data_end..self.overflow_end], i)?
+        } else {
+            p.min_len.checked_add(usize::try_from(field).ok()?)?
+        };
+        let lo = self.data_start.checked_add(usize::try_from(start).ok()?)?;
+        Some(((lo, lo.checked_add(len)?), fp))
     }
 
     #[inline(always)]
@@ -457,7 +583,9 @@ impl StringArena {
     /// one this format defines, the offset structure must fit, an overflow table must fit behind
     /// the data, and the offsets' ends must span the data.
     /// Individual offsets are bounds-checked lazily in [`get`](StringArena::get), so a
-    /// memory-mapped load stays instant (no `O(n)` scan).
+    /// memory-mapped load stays instant (no `O(n)` scan). A merged arena is the exception: its
+    /// keys overlap, so no two ends say anything about the rest, and every entry is checked here
+    /// once — `O(n)` — to start and end on a character boundary inside the data.
     pub(crate) fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
         // Header-supplied, so converted checked: a count that does not fit this platform's `usize`
@@ -472,10 +600,17 @@ impl StringArena {
         let tag = match bytes.get(8) {
             Some(&t) if matches!(split(t).layout, BLOCK_U8 | BLOCK_U16) => t,
             Some(&t) if matches!(t & !FP, 4 | 8) => t,
+            Some(&t) if t & !(FP | OVERFLOW) == MERGED => t,
             _ => return Err(IndexError::Format("arena: unknown offset encoding")),
         };
-        let data_start =
-            prefix_len(tag, n).ok_or(IndexError::Format("arena: offset table too large"))?;
+        let merged = split(tag).layout == MERGED;
+        let (data_start, packed) = if merged {
+            Packed::read(bytes, tag, n)?
+        } else {
+            let start =
+                prefix_len(tag, n).ok_or(IndexError::Format("arena: offset table too large"))?;
+            (start, Packed::default())
+        };
         if bytes.len() < data_start {
             return Err(IndexError::Format("arena: truncated offset table"));
         }
@@ -494,6 +629,24 @@ impl StringArena {
             (bytes.len(), bytes.len())
         };
         let data_len = data_end - data_start;
+        if merged {
+            packed.validate(
+                bytes,
+                tag,
+                n,
+                data_start..data_end,
+                &bytes[data_end..overflow_end],
+            )?;
+            return Ok(Self {
+                blob,
+                n,
+                data_start,
+                data_end,
+                overflow_end,
+                tag,
+                packed,
+            });
+        }
         let overflow = || &bytes[data_end..overflow_end];
         // The two ends: the first key starts the data (so a blocked layout's first base is 0) and
         // the last one finishes it. Everything between is checked at the access that reads it.
@@ -517,7 +670,110 @@ impl StringArena {
             data_end,
             overflow_end,
             tag,
+            packed,
         })
+    }
+}
+
+impl Packed {
+    /// The entry geometry a merged arena's header names, and where its data starts.
+    fn read(bytes: &[u8], tag: u8, n: usize) -> Result<(usize, Self), IndexError> {
+        let p = bytes
+            .get(HEADER..HEADER + PARAMS)
+            .ok_or(IndexError::Format("arena: truncated merged header"))?;
+        let min_len = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
+        let (len_bits, start_bits) = (u32::from(p[4]), u32::from(p[5]));
+        let width = start_bits + len_bits + 8 * u32::from(tag & FP != 0);
+        if width > MAX_WIDTH {
+            return Err(IndexError::Format("arena: merged entries too wide"));
+        }
+        let entries = (n as u64)
+            .checked_mul(u64::from(width))
+            .map(|bits| bits.div_ceil(8))
+            .and_then(|b| usize::try_from(b).ok())
+            .and_then(|b| b.checked_add(HEADER + PARAMS + PAD))
+            .ok_or(IndexError::Format("arena: offset table too large"))?;
+        Ok((
+            entries,
+            Self {
+                width,
+                len_bits,
+                min_len,
+            },
+        ))
+    }
+
+    /// Slot `i`'s entry, `width` bits read least significant first.
+    #[inline(always)]
+    fn word(self, bytes: &[u8], i: usize) -> Option<u64> {
+        let bit = (i as u64).checked_mul(u64::from(self.width))?;
+        let at = HEADER + PARAMS + usize::try_from(bit / 8).ok()?;
+        let raw = u64::from_le_bytes(bytes.get(at..at.checked_add(8)?)?.try_into().unwrap());
+        Some((raw >> (bit % 8)) & ((1u64 << self.width) - 1))
+    }
+
+    /// `(start, length field)` of an entry, past its fingerprint.
+    #[inline(always)]
+    fn fields(self, word: u64, tag: u8) -> (u64, u64) {
+        let rest = word >> (8 * u32::from(tag & FP != 0));
+        (rest >> self.len_bits, rest & self.escape())
+    }
+
+    /// The all-ones length field, which sends a length to the overflow table; `0` when the field
+    /// has no bits and every key is `min_len` long.
+    #[inline(always)]
+    fn escape(self) -> u64 {
+        (1u64 << self.len_bits) - 1
+    }
+
+    /// Every entry, once: a start and an end inside `data`, each on a character boundary, and an
+    /// overflow entry for exactly the slots whose length field escapes, in slot order — which
+    /// the lookup's bisection then relies on.
+    fn validate(
+        self,
+        bytes: &[u8],
+        tag: u8,
+        n: usize,
+        data: std::ops::Range<usize>,
+        overflow: &[u8],
+    ) -> Result<(), IndexError> {
+        let data = &bytes[data];
+        let size = data.len() as u64;
+        // `str::is_char_boundary` on the bytes: the end, or anything but a continuation byte.
+        let boundary = |at: u64| at == size || (data[at as usize] as i8) >= -0x40;
+        let mut escaped = overflow.chunks_exact(SLOT_LEN);
+        for i in 0..n {
+            let word = self
+                .word(bytes, i)
+                .ok_or(IndexError::Format("arena: truncated offset table"))?;
+            let (start, field) = self.fields(word, tag);
+            let len = if self.len_bits > 0 && field == self.escape() {
+                let entry = escaped.next().ok_or(IndexError::Format(
+                    "arena: an escaped length has no overflow entry",
+                ))?;
+                if u32::from_le_bytes(entry[..4].try_into().unwrap()) as usize != i {
+                    return Err(IndexError::Format(
+                        "arena: overflow table out of slot order",
+                    ));
+                }
+                u64::from(u32::from_le_bytes(entry[4..].try_into().unwrap()))
+            } else {
+                self.min_len as u64 + field
+            };
+            let end = start
+                .checked_add(len)
+                .filter(|&end| end <= size)
+                .ok_or(IndexError::Format("arena: a merged key runs past the data"))?;
+            if !boundary(start) || !boundary(end) {
+                return Err(IndexError::Format("arena: a merged key splits a character"));
+            }
+        }
+        if escaped.next().is_some() {
+            return Err(IndexError::Format(
+                "arena: an overflow entry names a slot that does not escape",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -568,9 +824,13 @@ fn prefix_len(tag: u8, n: usize) -> Option<usize> {
     table.checked_add(HEADER)
 }
 
-/// One overflow entry: `slots + 1` cumulative offsets, each as wide as the block's base.
+/// One overflow entry: `slots + 1` cumulative offsets, each as wide as the block's base, or a
+/// merged arena's `[slot u32][len u32]`.
 fn overflow_entry_bytes(tag: u8) -> usize {
     let g = split(tag);
+    if g.layout == MERGED {
+        return SLOT_LEN;
+    }
     let slots = if g.layout == BLOCK_U16 { B_U16 } else { B_U8 };
     (slots + 1) * g.base
 }
@@ -713,6 +973,32 @@ fn overflow_span<const B: usize>(
     span_from(base, lo, hi)
 }
 
+/// The length of merged slot `i`, whose field escaped, from the overflow table: its entries are
+/// in slot order, which the load checked. Cold, as [`overflow_span`] is, for the same reason.
+#[cold]
+#[inline(never)]
+fn escaped_len(table: &[u8], i: usize) -> Option<usize> {
+    let slot = u32::try_from(i).ok()?;
+    let at =
+        |j: usize| u32::from_le_bytes(table[j * SLOT_LEN..j * SLOT_LEN + 4].try_into().unwrap());
+    let (mut lo, mut hi) = (0, table.len() / SLOT_LEN);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if at(mid) < slot {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    (lo < table.len() / SLOT_LEN && at(lo) == slot).then(|| {
+        u32::from_le_bytes(
+            table[lo * SLOT_LEN + 4..(lo + 1) * SLOT_LEN]
+                .try_into()
+                .unwrap(),
+        ) as usize
+    })
+}
+
 /// A base-wide word — a block's base, an overflow entry's index or offset — `u32` or `u64` by `B`;
 /// `None` where a `u64` one does not fit this platform's `usize`: a blob past 4 GiB answers "no
 /// such key" on a 32-bit target, never a truncated address.
@@ -773,6 +1059,150 @@ fn tag_for(lens: &[u32], data_len: usize, fingerprints: bool, limit: usize) -> u
         best.1
     };
     tag_with(kind, fingerprints)
+}
+
+/// The bytes [`lay_out_blocked`](StringArena::lay_out_blocked) writes for these lengths: the
+/// prefix of the layout [`tag_for`] picks, the data, and the overflow table with its trailer.
+/// `None` only where the prefix would not fit a `usize`, which no arena the build can hold reaches.
+fn blocked_len(lens: &[u32], data_len: usize, fingerprints: bool, limit: usize) -> Option<usize> {
+    let tag = tag_for(lens, data_len, fingerprints, limit);
+    let tail = if tag & OVERFLOW != 0 {
+        let (slots, most) = match split(tag).layout {
+            BLOCK_U16 => (B_U16, u64::from(u16::MAX)),
+            _ => (B_U8, u64::from(u8::MAX)),
+        };
+        let overflowing = lens
+            .chunks(slots)
+            .filter(|c| c.iter().map(|&l| u64::from(l)).sum::<u64>() > most)
+            .count();
+        overflowing * overflow_entry_bytes(tag) + TRAILER
+    } else {
+        0
+    };
+    prefix_len(tag, lens.len())?
+        .checked_add(data_len)?
+        .checked_add(tail)
+}
+
+/// The geometry of a merged arena over `spans` — `(start, length)` per slot — and the bytes it
+/// takes. The length field is as wide as makes the whole smallest: every bit it saves on `n`
+/// entries is weighed against the eight bytes of each length it then sends to the overflow table.
+/// `None` when no width fits an entry in [`MAX_WIDTH`] bits.
+struct MergedShape {
+    min_len: u32,
+    len_bits: u32,
+    start_bits: u32,
+    width: u32,
+    escaped: usize,
+    bytes: usize,
+}
+
+impl MergedShape {
+    fn of(spans: &[(u64, u32)], data_len: usize, fingerprints: bool) -> Option<Self> {
+        let n = spans.len();
+        let min_len = spans.iter().map(|s| s.1).min()?;
+        // One bit at least, so that no entry is empty: with every field zero bits wide, as one
+        // key alone would have them, the eight-byte read would start where the padding ends.
+        let start_bits = (64 - spans.iter().map(|s| s.0).max()?.leading_zeros()).max(1);
+        let fp_bits = if fingerprints { 8 } else { 0 };
+        // `need[b]`: entries whose length past `min_len` takes a field of `b` bits at least, all
+        // ones being the escape — the bit length of the excess plus one.
+        let mut need = [0usize; 34];
+        for &(_, len) in spans {
+            need[(64 - (u64::from(len - min_len) + 1).leading_zeros()) as usize] += 1;
+        }
+        let widest = (1..need.len()).rev().find(|&b| need[b] > 0)?;
+        let mut best: Option<Self> = None;
+        let mut escaped = n;
+        for len_bits in 0..=widest as u32 {
+            // Zero bits hold one length and no escape: only for keys all of one length.
+            escaped -= need[len_bits as usize];
+            let escaped = if len_bits == 0 {
+                if widest > 1 {
+                    continue;
+                }
+                0
+            } else {
+                escaped
+            };
+            let width = start_bits + len_bits + fp_bits;
+            if width > MAX_WIDTH {
+                continue;
+            }
+            let entries = usize::try_from((n as u64 * u64::from(width)).div_ceil(8)).ok()?;
+            let tail = if escaped > 0 {
+                escaped * SLOT_LEN + TRAILER
+            } else {
+                0
+            };
+            let bytes = (HEADER + PARAMS + PAD)
+                .checked_add(entries)?
+                .checked_add(data_len)?
+                .checked_add(tail)?;
+            if best.as_ref().is_none_or(|b| bytes < b.bytes) {
+                best = Some(Self {
+                    min_len,
+                    len_bits,
+                    start_bits,
+                    width,
+                    escaped,
+                    bytes,
+                });
+            }
+        }
+        best
+    }
+}
+
+/// Write a merged arena: header, packed entries and their padding, the superstring, and the
+/// overflow table with its trailer when some length escapes.
+fn lay_out_merged(
+    data: &[u8],
+    spans: &[(u64, u32)],
+    fps: Option<&[u8]>,
+    shape: &MergedShape,
+) -> Vec<u8> {
+    let tag = tag_with(MERGED, fps.is_some()) | if shape.escaped > 0 { OVERFLOW } else { 0 };
+    let mut blob = Vec::with_capacity(shape.bytes);
+    blob.extend_from_slice(&(spans.len() as u64 + 1).to_le_bytes());
+    blob.push(tag);
+    blob.extend_from_slice(&shape.min_len.to_le_bytes());
+    blob.extend_from_slice(&[shape.len_bits as u8, shape.start_bits as u8]);
+    let fp_bits = if fps.is_some() { 8 } else { 0 };
+    let escape = (1u64 << shape.len_bits) - 1;
+    let mut overflow = Vec::with_capacity(shape.escaped * SLOT_LEN + TRAILER);
+    let (mut acc, mut filled) = (0u128, 0u32);
+    for (slot, &(start, len)) in spans.iter().enumerate() {
+        let excess = u64::from(len - shape.min_len);
+        let field = if shape.len_bits > 0 && excess >= escape {
+            overflow.extend_from_slice(&(slot as u32).to_le_bytes());
+            overflow.extend_from_slice(&len.to_le_bytes());
+            escape
+        } else {
+            excess
+        };
+        let fp = fps.map_or(0, |f| u64::from(f[slot]));
+        let entry = fp | field << fp_bits | start << (fp_bits + shape.len_bits);
+        acc |= u128::from(entry) << filled;
+        filled += shape.width;
+        while filled >= 8 {
+            blob.push(acc as u8);
+            acc >>= 8;
+            filled -= 8;
+        }
+    }
+    if filled > 0 {
+        blob.push(acc as u8);
+    }
+    blob.resize(blob.len() + PAD, 0);
+    blob.extend_from_slice(data);
+    if shape.escaped > 0 {
+        let len = overflow.len() as u64;
+        overflow.extend_from_slice(&len.to_le_bytes());
+        blob.extend_from_slice(&overflow);
+    }
+    debug_assert_eq!(blob.len(), shape.bytes);
+    blob
 }
 
 fn write_head(blob: &mut [u8], n: usize, tag: u8) {
@@ -1354,7 +1784,7 @@ mod tests {
     fn a_fingerprinted_header_is_validated_like_a_plain_one() {
         let mut blob =
             StringArena::build_exact(["apple", "banana"], 2, 11, Some(&[1, 2][..])).to_bytes();
-        blob[8] = 0x13 | FP;
+        blob[8] = 0x14 | FP;
         assert!(StringArena::from_bytes(&blob).is_err());
         blob[8] = BLOCK_U8 | FP;
         assert!(StringArena::from_bytes(&blob).is_ok());
@@ -1445,6 +1875,286 @@ mod tests {
         assert_eq!(arena.to_bytes().len(), HEADER + 3 * WIDE + 70_004);
         assert_eq!(arena.get(0), Some(long.as_str()));
         assert_eq!(arena.get(1), Some("tail"));
+    }
+
+    /// Keys sorted, slots in sorted order, as `build_cheapest` takes them.
+    fn cheapest(keys: &[&str], fps: Option<&[u8]>) -> StringArena {
+        let mut sorted = keys.to_vec();
+        sorted.sort_unstable();
+        let order: Vec<u32> = (0..sorted.len() as u32).collect();
+        let data_len = sorted.iter().map(|k| k.len()).sum();
+        StringArena::build_cheapest(&sorted, &order, data_len, fps)
+    }
+
+    /// The merged layout byte for byte. `"ab"` is a prefix of `"abd"` and costs nothing; `"cab"`
+    /// ends in the `"ab"` that `"abd"` starts with, so the two share it: the data is `"cabd"`.
+    /// Lengths 2, 3, 3 over a minimum of 2 take a two-bit field (all ones would escape), starts
+    /// 1, 1, 0 one bit, so each entry is three bits: `field | start << 2` — 4, 5, 1 — packed
+    /// least significant first into `0x6C 0x00`, then seven bytes of padding. 28 bytes where the
+    /// blocked layout takes 38.
+    #[test]
+    fn a_merged_arena_is_laid_out_byte_for_byte() {
+        let arena = cheapest(&["ab", "abd", "cab"], None);
+        assert_eq!(arena.tag(), MERGED);
+        let mut want = Vec::new();
+        want.extend_from_slice(&4u64.to_le_bytes()); // n_off = 3 keys + 1
+        want.push(MERGED);
+        want.extend_from_slice(&2u32.to_le_bytes()); // min_len
+        want.extend_from_slice(&[2, 1]); // len_bits, start_bits
+        want.extend_from_slice(&[0x6C, 0x00]); // 4 | 5 << 3 | 1 << 6
+        want.extend_from_slice(&[0; PAD]);
+        want.extend_from_slice(b"cabd");
+        assert_eq!(arena.to_bytes(), want);
+        assert_eq!(
+            StringArena::build(["ab", "abd", "cab"]).to_bytes().len(),
+            38
+        );
+        let got: Vec<Option<&str>> = (0..4).map(|i| arena.get(i)).collect();
+        assert_eq!(got, [Some("ab"), Some("abd"), Some("cab"), None]);
+        let restored = StringArena::from_bytes(&want).unwrap();
+        assert_eq!(restored.get(1), Some("abd"));
+    }
+
+    /// One key alone has every field zero bits wide but its start's, which is one bit so that the
+    /// entry is never empty — the case the property tests found, an empty key whose eight-byte
+    /// read began where the padding ended. A hand-written blob with an empty entry is refused, not
+    /// read past its end.
+    #[test]
+    fn a_single_key_merges_into_a_readable_arena() {
+        for key in ["", "é", "x"] {
+            for fps in [None, Some(&[0x5A][..])] {
+                let arena = cheapest(&[key], fps);
+                assert_eq!(arena.tag() & !FP, MERGED, "{key:?}");
+                let restored = StringArena::from_bytes(&arena.to_bytes()).unwrap();
+                assert_eq!((restored.get(0), restored.get(1)), (Some(key), None));
+            }
+        }
+        let empty = merged_blob(MERGED, (0, 0, 0), &[0], b"", &[]);
+        assert_eq!(empty.len(), HEADER + PARAMS + PAD);
+        assert!(StringArena::from_bytes(&empty).is_err());
+    }
+
+    /// One long key among short overlapping ones: its length escapes to the overflow table rather
+    /// than widening every entry, with and without fingerprints — whose filter decides from the
+    /// entry before the length is read.
+    #[test]
+    fn a_long_key_escapes_to_the_overflow_table() {
+        let long = "q".repeat(300);
+        let mut keys: Vec<String> = (0..200).map(|i| format!("{i:03}")).collect();
+        keys.push(long.clone());
+        keys.sort_unstable();
+        let n = keys.len();
+        let order: Vec<u32> = (0..n as u32).rev().collect();
+        let data_len = keys.iter().map(String::len).sum();
+        let fps: Vec<u8> = (0..n).map(|i| (i * 37 + 11) as u8).collect();
+        for fp in [None, Some(&fps[..])] {
+            let arena = StringArena::build_cheapest(&keys, &order, data_len, fp);
+            assert_eq!(arena.tag(), tag_with(MERGED | OVERFLOW, fp.is_some()));
+            let restored = StringArena::from_bytes(&arena.to_bytes()).unwrap();
+            for (slot, &k) in order.iter().enumerate() {
+                let key = keys[k as usize].as_str();
+                assert_eq!(restored.get(slot), Some(key), "slot {slot}");
+                if let Some(fps) = fp {
+                    assert_eq!(restored.get_matching(slot, fps[slot]), Some(key));
+                    assert_eq!(restored.get_matching(slot, fps[slot] ^ 1), None);
+                }
+            }
+            assert_eq!(restored.get(n), None);
+            let bytes = arena.to_bytes();
+            let trailer = bytes.len() - TRAILER;
+            assert_eq!(read_u64(&bytes, trailer).unwrap(), SLOT_LEN as u64);
+        }
+    }
+
+    /// The comparison `build_cheapest` makes is only as honest as the size it prices the blocked
+    /// layout at: `blocked_len` is the blob `build_exact` writes, to the byte, on every layout it
+    /// can pick. And a corpus the merge cannot shrink keeps that blob exactly.
+    #[test]
+    fn the_blocked_price_is_the_blocked_blob() {
+        let long = "x".repeat(70_000);
+        let mut overflowing: Vec<String> = (0..1000).map(|i| format!("k{i}")).collect();
+        overflowing[500] = "x".repeat(10_000);
+        let corpora: [Vec<String>; 4] = [
+            (0..40).map(|i| format!("k{i}")).collect(),
+            (0..200).map(|i| format!("{i:020}")).collect(),
+            vec![long, "tail".into(), String::new()],
+            overflowing,
+        ];
+        for keys in corpora {
+            let lens: Vec<u32> = keys.iter().map(|k| k.len() as u32).collect();
+            let data_len = keys.iter().map(String::len).sum();
+            for fp in [false, true] {
+                let fps = fp.then(|| vec![7u8; keys.len()]);
+                let built = StringArena::build_exact(&keys, keys.len(), data_len, fps.as_deref());
+                assert_eq!(
+                    blocked_len(&lens, data_len, fp, NARROW_LIMIT),
+                    Some(built.to_bytes().len()),
+                    "{:#x}",
+                    built.tag()
+                );
+            }
+        }
+        // Keys that open with `<` and close with `>` overlap nowhere and hold no other, so an
+        // entry per slot costs more than a block's share and the blocked arena stays.
+        let mut keys: Vec<String> = (0..5000).map(|i| format!("<{i}>")).collect();
+        keys.sort_unstable();
+        let order: Vec<u32> = (0..keys.len() as u32).collect();
+        let data_len = keys.iter().map(String::len).sum();
+        let arena = StringArena::build_cheapest(&keys, &order, data_len, None);
+        let blocked = StringArena::build_exact(&keys, keys.len(), data_len, None);
+        assert_eq!(arena.to_bytes(), blocked.to_bytes());
+    }
+
+    /// A merged blob written by hand, so the reader is pinned independently of the writer:
+    /// `entries` are already packed values — fingerprint, field, start — `width` bits each.
+    fn merged_blob(
+        tag: u8,
+        (min_len, len_bits, start_bits): (u32, u8, u8),
+        entries: &[u64],
+        data: &[u8],
+        overflow: &[(u32, u32)],
+    ) -> Vec<u8> {
+        let width = u32::from(start_bits + len_bits) + if tag & FP != 0 { 8 } else { 0 };
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&(entries.len() as u64 + 1).to_le_bytes());
+        blob.push(tag);
+        blob.extend_from_slice(&min_len.to_le_bytes());
+        blob.extend_from_slice(&[len_bits, start_bits]);
+        let mut bits = vec![false; entries.len() * width as usize];
+        for (i, &e) in entries.iter().enumerate() {
+            for b in 0..width as usize {
+                bits[i * width as usize + b] = (e >> b) & 1 == 1;
+            }
+        }
+        for chunk in bits.chunks(8) {
+            blob.push(
+                chunk
+                    .iter()
+                    .rev()
+                    .fold(0u8, |acc, &b| acc << 1 | u8::from(b)),
+            );
+        }
+        blob.extend_from_slice(&[0; PAD]);
+        blob.extend_from_slice(data);
+        if tag & OVERFLOW != 0 {
+            for &(slot, len) in overflow {
+                blob.extend_from_slice(&slot.to_le_bytes());
+                blob.extend_from_slice(&len.to_le_bytes());
+            }
+            blob.extend_from_slice(&((overflow.len() * SLOT_LEN) as u64).to_le_bytes());
+        }
+        blob
+    }
+
+    /// `"aé"`, `"é"`, `"éa"` merge to `"aéa"`: the first and last overlap by `é`, which is a
+    /// prefix of the last. The builder's blob is the hand-written one, and a blob is checked entry
+    /// by entry at load — each refusal below is one check doing its job.
+    #[test]
+    fn a_crafted_merged_arena_is_refused() {
+        let data = "aéa".as_bytes(); // 61 C3 A9 61: é at 1..3
+        // Lengths 3, 2, 3 over 2: a two-bit field; starts 0, 1, 1: one bit; `field | start << 2`.
+        let shape = (2, 2, 1);
+        let good = merged_blob(MERGED, shape, &[1, 4, 5], data, &[]);
+        assert_eq!(cheapest(&["é", "éa", "aé"], None).to_bytes(), good);
+        let arena = StringArena::from_bytes(&good).unwrap();
+        let got: Vec<Option<&str>> = (0..4).map(|i| arena.get(i)).collect();
+        assert_eq!(got, [Some("aé"), Some("é"), Some("éa"), None]);
+        let err = |blob: Vec<u8>| StringArena::from_bytes(&blob).unwrap_err().to_string();
+        // Wider starts, so they can point anywhere.
+        let wide = (2, 2, 3);
+        let at = |field: u64, start: u64| field | start << 2;
+        assert!(StringArena::from_bytes(&merged_blob(MERGED, wide, &[1, 4, 5], data, &[])).is_ok());
+        // é from byte 2: its start inside its own encoding.
+        let bad = merged_blob(MERGED, wide, &[1, at(0, 2), 5], data, &[]);
+        assert!(err(bad).contains("splits a character"));
+        // "a" and é's lead byte: an end inside a character.
+        let bad = merged_blob(MERGED, wide, &[at(0, 0), 4, 5], data, &[]);
+        assert!(err(bad).contains("splits a character"));
+        // Three bytes from byte 3 of four.
+        let bad = merged_blob(MERGED, wide, &[1, 4, at(1, 3)], data, &[]);
+        assert!(err(bad).contains("runs past the data"));
+        // A field of all ones with no overflow table to send it to.
+        let bad = merged_blob(MERGED, wide, &[1, at(3, 1), 5], data, &[]);
+        assert!(err(bad).contains("has no overflow entry"));
+        // The same escape with the table, which names the slot: it loads, and it reads.
+        let escaped = merged_blob(MERGED | OVERFLOW, wide, &[1, at(3, 1), 5], data, &[(1, 2)]);
+        assert_eq!(StringArena::from_bytes(&escaped).unwrap().get(1), Some("é"));
+        // The table naming another slot, or one more slot than escapes.
+        let bad = merged_blob(MERGED | OVERFLOW, wide, &[1, at(3, 1), 5], data, &[(2, 2)]);
+        assert!(err(bad).contains("out of slot order"));
+        let bad = merged_blob(
+            MERGED | OVERFLOW,
+            wide,
+            &[1, at(3, 1), 5],
+            data,
+            &[(1, 2), (2, 3)],
+        );
+        assert!(err(bad).contains("names a slot that does not escape"));
+        // Entries past what one eight-byte read holds, a header cut short, entries cut short.
+        let bad = merged_blob(MERGED, (2, 2, 56), &[1, 4, 5], data, &[]);
+        assert!(err(bad).contains("too wide"));
+        assert!(err(good[..HEADER + 3].to_vec()).contains("truncated merged header"));
+        assert!(err(good[..HEADER + PARAMS + 3].to_vec()).contains("truncated offset table"));
+        // The wide-base bit means nothing here.
+        let mut bad = good.clone();
+        bad[8] = MERGED | WIDE_BASE;
+        assert!(err(bad).contains("unknown offset encoding"));
+    }
+
+    /// The overflow table of a merged arena is held to the entries that escape: one entry per
+    /// escaped slot, in slot order, and none for a slot that does not escape.
+    #[test]
+    fn a_merged_overflow_table_matches_the_escapes() {
+        let long = "q".repeat(300);
+        let mut keys: Vec<String> = (0..200).map(|i| format!("{i:03}")).collect();
+        keys.push(long);
+        keys.sort_unstable();
+        let order: Vec<u32> = (0..keys.len() as u32).collect();
+        let data_len = keys.iter().map(String::len).sum();
+        let good = StringArena::build_cheapest(&keys, &order, data_len, None).to_bytes();
+        assert_eq!(good[8], MERGED | OVERFLOW);
+        let err = |blob: &[u8]| StringArena::from_bytes(blob).unwrap_err().to_string();
+        let entry = good.len() - TRAILER - SLOT_LEN;
+        let mut bad = good.clone();
+        bad[entry] ^= 1; // the slot it names
+        assert!(err(&bad).contains("out of slot order"), "{}", err(&bad));
+        // Two entries where one slot escapes: the table grows by one and its trailer says so.
+        let mut bad = good[..good.len() - TRAILER].to_vec();
+        bad.extend_from_slice(&good[entry..entry + SLOT_LEN]);
+        bad.extend_from_slice(&(2 * SLOT_LEN as u64).to_le_bytes());
+        assert!(
+            err(&bad).contains("names a slot that does not escape"),
+            "{}",
+            err(&bad)
+        );
+    }
+
+    /// Every single-byte change to a merged blob either fails to load or loads into an arena
+    /// whose every read stays inside it: a crafted blob answers wrong, never out of bounds.
+    #[test]
+    fn a_mutated_merged_arena_never_reads_out_of_bounds() {
+        let long = "q".repeat(300);
+        let mut keys: Vec<String> = (0..60).map(|i| format!("{i:02}é")).collect();
+        keys.push(long);
+        keys.sort_unstable();
+        let order: Vec<u32> = (0..keys.len() as u32).rev().collect();
+        let data_len = keys.iter().map(String::len).sum();
+        let fps = vec![0xA5u8; keys.len()];
+        for fp in [None, Some(&fps[..])] {
+            let good = StringArena::build_cheapest(&keys, &order, data_len, fp).to_bytes();
+            assert_eq!(good[8] & !(FP | OVERFLOW), MERGED);
+            for at in 0..good.len() {
+                for xor in [0x01, 0x80, 0xFF] {
+                    let mut bad = good.clone();
+                    bad[at] ^= xor;
+                    if let Ok(arena) = StringArena::from_bytes(&bad) {
+                        for i in 0..=arena.len() {
+                            let _ = (arena.get(i), arena.get_matching(i, 0xA5));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The wide-base bit means nothing on a flat table, and on a blocked one it changes the

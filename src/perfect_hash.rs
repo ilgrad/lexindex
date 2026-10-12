@@ -458,12 +458,7 @@ impl PerfectHashIndex {
         // Before the arena allocates: neither hash vector is needed alongside it.
         drop(sorted);
         drop(hashes);
-        let arena = StringArena::build_exact(
-            by_slot.iter().map(|&i| keys[i as usize].as_ref()),
-            n,
-            data_len,
-            fps_by_slot.as_deref(),
-        );
+        let arena = StringArena::build_cheapest(&keys, &by_slot, data_len, fps_by_slot.as_deref());
         Ok(Self {
             mph: Some(mph),
             arena,
@@ -516,15 +511,13 @@ impl PerfectHashIndex {
         });
         drop(hashes);
         drop(mph_hashes);
-        let arena = StringArena::build_exact(
-            by_slot
-                .iter()
-                .map(|&i| keys[i as usize].as_ref())
-                .chain(extras.iter().map(|&(_, i)| keys[i as usize].as_ref())),
-            n,
-            data_len,
-            fps_by_slot.as_deref(),
-        );
+        let order: Vec<u32> = by_slot
+            .iter()
+            .copied()
+            .chain(extras.iter().map(|&(_, i)| i))
+            .collect();
+        drop(by_slot);
+        let arena = StringArena::build_cheapest(&keys, &order, data_len, fps_by_slot.as_deref());
         let mut side: Vec<(u64, u32)> = extras
             .iter()
             .enumerate()
@@ -942,11 +935,14 @@ impl PerfectHashIndex {
     /// in memory. Returns the number of keys written.
     ///
     /// The file is a blob that answers exactly as [`build`](Self::build) + [`save`](Self::save)
-    /// would have for the same key set — every key a member, every `key(id)` round trip intact —
-    /// and, short of two keys sharing a 64-bit hash, **the same bytes**, which a test holds it to:
-    /// the arena's offset encoding is chosen from the key lengths, which pass one records, and the
-    /// MPH is deterministic. With a collision the colliding keys' tail ids follow the source's
-    /// order instead of sorted order; every other id still agrees.
+    /// would have for the same key set — every key a member, every `key(id)` round trip intact,
+    /// the same ids — and, short of two keys sharing a 64-bit hash, **the same bytes** whenever
+    /// `build` keeps a blocked arena, which a test holds it to: the arena's offset encoding is
+    /// chosen from the key lengths, which pass one records, and the MPH is deterministic. Where
+    /// `build` merges the keys into one superstring instead, this file keeps the blocked arena and
+    /// is that much larger — merging needs every key at once, which is what this build exists not
+    /// to hold. With a collision the colliding keys' tail ids follow the source's order instead of
+    /// sorted order; every other id still agrees.
     ///
     /// `source` is a *factory*, not an iterator, and it is called **twice**. That is the shape the
     /// problem has, not an inconvenience: the arena stores keys in slot order, slot order is only
@@ -1298,6 +1294,28 @@ impl PerfectHashIndex {
     }
 }
 
+/// The arena's layout byte without its fingerprint and overflow bits.
+#[cfg(test)]
+fn split_tag(idx: &PerfectHashIndex) -> u8 {
+    idx.arena.tag() & !0xC0
+}
+
+/// `idx`'s blob with its arena laid out blocked, from its own keys in slot order — what the
+/// streamed build writes, never holding the keys it would need to merge them, and what `build`
+/// wrote before it could.
+#[cfg(test)]
+fn blocked_blob(mut idx: PerfectHashIndex) -> Vec<u8> {
+    let keys: Vec<String> = (0..idx.n as u32)
+        .map(|id| idx.key(id).unwrap().to_owned())
+        .collect();
+    let data_len = keys.iter().map(String::len).sum();
+    let fps: Option<Vec<u8>> = idx
+        .has_fingerprints()
+        .then(|| keys.iter().map(|k| hash_pair(k).1 as u8).collect());
+    idx.arena = StringArena::build_exact(&keys, keys.len(), data_len, fps.as_deref());
+    idx.to_bytes().unwrap()
+}
+
 #[cfg(all(test, feature = "mmap"))]
 mod stream_build_tests {
     use super::*;
@@ -1508,6 +1526,9 @@ mod stream_build_tests {
     /// of a prefix rather than a finished arena, so that second encoding has its own arithmetic in
     /// `span_at`, and this is the corpus that runs it — through the windowed path, where a wrong
     /// span would scatter a record into the wrong window rather than merely read the wrong bytes.
+    ///
+    /// These keys overlap, so the in-memory build merges them: the streamed blob is held to that
+    /// index with its arena laid out blocked, the layout the stream writes.
     #[test]
     fn build_to_file_lays_out_two_byte_blocks_for_long_keys() {
         let keys: Vec<String> = (0..300).map(|i| format!("{i:040}")).collect();
@@ -1515,8 +1536,13 @@ mod stream_build_tests {
         PerfectHashIndex::build_to_file_windowed(&path, || keys.iter(), || Ok(()), 512, false)
             .unwrap();
 
-        let in_memory = PerfectHashIndex::build(&keys).unwrap().to_bytes().unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), in_memory, "streamed blob");
+        let in_memory = PerfectHashIndex::build(&keys).unwrap();
+        assert_eq!(split_tag(&in_memory), 0x13, "these keys merge in memory");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            blocked_blob(in_memory),
+            "streamed blob"
+        );
 
         let idx = PerfectHashIndex::load(&path).unwrap();
         assert_eq!(
@@ -2202,6 +2228,87 @@ mod tests {
         let first = PerfectHashIndex::build(&words).unwrap().to_bytes().unwrap();
         let again = PerfectHashIndex::build(&words).unwrap().to_bytes().unwrap();
         assert_eq!(first, again);
+    }
+
+    /// The merged arena is a function of the key set and the slot order, and the merge runs on
+    /// the calling thread with nothing shared: builds one after another and four at once give the
+    /// same bytes, with fingerprints and without. The perfect hash's own thread count is held to
+    /// the same promise in `mphf`.
+    #[test]
+    fn a_merged_arena_is_the_same_on_every_build() {
+        let keys: Vec<String> = (0..20_000).map(|i| (i * 7).to_string()).collect();
+        for fingerprints in [false, true] {
+            let first = PerfectHashIndex::build_with(&keys, fingerprints).unwrap();
+            assert_eq!(split_tag(&first), 0x13, "numbers merge");
+            let blob = first.to_bytes().unwrap();
+            let again = PerfectHashIndex::build_with(&keys, fingerprints).unwrap();
+            assert!(again.to_bytes().unwrap() == blob);
+            std::thread::scope(|scope| {
+                let builds: Vec<_> = (0..4)
+                    .map(|_| scope.spawn(|| PerfectHashIndex::build_with(&keys, fingerprints)))
+                    .collect();
+                for build in builds {
+                    assert!(build.join().unwrap().unwrap().to_bytes().unwrap() == blob);
+                }
+            });
+        }
+    }
+
+    /// No key set grows: the merged arena is taken only when it is smaller than the blocked one,
+    /// over sets that merge and sets that do not, of one to four bytes a character.
+    #[test]
+    fn merging_never_grows_the_blob() {
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let alphabets: [&[char]; 3] = [
+            &['a', 'b'],
+            &['a', 'é', '中', '🎉', 'z'],
+            &['<', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+        ];
+        let (mut merged, mut kept) = (0, 0);
+        for round in 0..80 {
+            let n = 1 + (next() % 3000) as usize;
+            let keys: Vec<String> = if round % 4 == 3 {
+                // Bracketed numbers overlap nowhere and hold no other: past a few hundred, an
+                // entry per slot costs more than a block's share.
+                (0..n.max(300))
+                    .map(|_| format!("<{}>", next() % 100_000_000))
+                    .collect()
+            } else {
+                let alphabet = alphabets[round % 4];
+                (0..n)
+                    .map(|_| {
+                        let len = (next() % 12) as usize;
+                        (0..len)
+                            .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+                            .collect()
+                    })
+                    .collect()
+            };
+            for fingerprints in [false, true] {
+                let idx = PerfectHashIndex::build_with(&keys, fingerprints).unwrap();
+                let is_merged = split_tag(&idx) == 0x13;
+                let got = idx.to_bytes().unwrap().len();
+                let blocked = blocked_blob(idx).len();
+                assert!(got <= blocked, "round {round}: {got} > {blocked}");
+                if is_merged {
+                    assert!(
+                        got < blocked,
+                        "round {round}: a tie must keep the blocked layout"
+                    );
+                    merged += 1;
+                } else {
+                    assert_eq!(got, blocked, "round {round}");
+                    kept += 1;
+                }
+            }
+        }
+        assert!(merged > 0 && kept > 0, "{merged} merged, {kept} kept");
     }
 
     #[test]

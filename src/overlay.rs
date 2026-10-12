@@ -477,7 +477,8 @@ impl<I: OverlayKeys> Overlay<I> {
     /// holds them and the additions follow. Returns how many keys the file holds. Load it with the
     /// base's `load` or `load_mmap` and wrap it in a new overlay. Ids are renumbered exactly as
     /// `compact` renumbers them, so [`compact_with_remap`](Self::compact_with_remap) is how an id
-    /// held elsewhere is carried across.
+    /// held elsewhere is carried across. A `PerfectHashIndex` base streams its blocked arena where
+    /// `compact` may merge the keys into a smaller one: the same ids, not always the same bytes.
     pub fn compact_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<usize, IndexError> {
         let base_n = self.base.base_len() as u64;
         let additions: Vec<&str> = (0..self.added_starts.len())
@@ -1416,6 +1417,8 @@ mod tests {
 
     /// `compact_to_file` writes the blob `compact` would have saved — streamed on the two indexes
     /// that can, through the default on a base that can only rebuild — and returns the live count.
+    /// The perfect hash streams the blocked arena, never having the keys to merge, so against a
+    /// `compact` that merged them it is held to the same ids rather than the same bytes.
     #[test]
     fn compact_to_file_writes_what_compact_saves() {
         let dir = std::env::temp_dir().join(format!("lexindex-ovl-compact-{}", std::process::id()));
@@ -1433,7 +1436,18 @@ mod tests {
         check(fruit(StringIndex::build(keys).unwrap()), &path);
         // Not under Miri: it cannot map a file, and this base streams its arena through one.
         #[cfg(all(feature = "mph", not(miri)))]
-        check(fruit(crate::PerfectHashIndex::build(keys).unwrap()), &path);
+        {
+            let ov = fruit(crate::PerfectHashIndex::build(keys).unwrap());
+            assert_eq!(ov.compact_to_file(&path).unwrap(), 3);
+            let folded = ov.compact().unwrap();
+            let streamed = crate::PerfectHashIndex::load(&path).unwrap();
+            assert_eq!(streamed.len(), 3);
+            for key in ["apple", "cherry", "kiwi"] {
+                let id = streamed.id(key).unwrap();
+                assert_eq!(Some(id), folded.base.id(key), "{key}");
+                assert_eq!(streamed.key(id), Some(key));
+            }
+        }
         check(
             fruit(VecBase::rebuild(keys.map(str::to_owned).to_vec()).unwrap()),
             &path,

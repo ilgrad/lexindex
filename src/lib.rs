@@ -140,6 +140,8 @@ mod hashed_dict;
 #[cfg(feature = "mph")]
 mod perfect_hash;
 #[cfg(feature = "mph")]
+mod superstring;
+#[cfg(feature = "mph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mph")))]
 pub use closed_hash::ClosedHashIndex;
 #[cfg(feature = "mph")]
