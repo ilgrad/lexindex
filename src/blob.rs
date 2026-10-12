@@ -250,8 +250,10 @@ pub(crate) fn write_atomically_with(
     }
     written?;
     // fsync the directory so the rename entry itself — not just the file's bytes — survives a power
-    // loss. A no-op on Windows, where directories are not fsync targets and rename is durable.
-    #[cfg(unix)]
+    // loss. A no-op on Windows, where directories are not fsync targets and rename is durable. Miri
+    // stops on a directory's fsync as an unsupported operation instead of returning an error, and the
+    // call is best effort, so the interpreter skips it.
+    #[cfg(all(unix, not(miri)))]
     if let Ok(d) = std::fs::File::open(dir) {
         let _ = d.sync_all();
     }
