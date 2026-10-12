@@ -25,7 +25,7 @@ env:
 jobs:
   fuzz:
     name: libFuzzer (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Thirty minutes of fuzzing plus the build and the minimisation; a job past an hour has hung.
     timeout-minutes: 60
     strategy:

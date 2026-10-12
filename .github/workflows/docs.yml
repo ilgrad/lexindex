@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,4 +48,4 @@ jobs:
           uv pip install maturin mkdocs-material "mkdocstrings[python]" ruff
           # mkdocstrings imports the package, so the compiled core must be built first.
           uv run maturin develop --release
-          uv run mkdocs gh-deploy --force --no-history
+          uv run mkdocs build

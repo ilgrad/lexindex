@@ -7,6 +7,7 @@ name: ClusterFuzzLite
 # OSS-Fuzz points a project to before it has the user base OSS-Fuzz itself asks for.
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "src/**"
@@ -27,7 +28,7 @@ permissions:
 jobs:
   fuzz:
     name: libFuzzer on the pull request
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # The image build, eleven targets, ten minutes of fuzzing and a reproduction of anything it finds.
     timeout-minutes: 45
     concurrency:

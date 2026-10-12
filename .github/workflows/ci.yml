@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
   # Reused by release.yml: a tag must not publish what a push to main would have rejected.
   workflow_call:
 
@@ -20,7 +21,7 @@ env:
 jobs:
   rust:
     name: rust (fmt · clippy · test · audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -103,7 +104,7 @@ jobs:
 
   python-build:
     name: python (ruff · clippy · build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
     steps:
@@ -153,7 +154,7 @@ jobs:
   python-test:
     name: python (pytest · stubtest · py${{ matrix.python-version }})
     needs: python-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -195,7 +196,7 @@ jobs:
   # build, because the GIL is what stops the interleaving they are about.
   python-freethreaded:
     name: python (pytest · py3.14t, free-threaded)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -232,7 +233,7 @@ jobs:
   # a load path is a `try_from` that fails identically at any width.
   capi:
     name: c abi (header in sync · clippy · test · a C caller)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -261,7 +262,7 @@ jobs:
 
   targets:
     name: targets (32-bit and wasm, with mph)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -287,7 +288,7 @@ jobs:
   # half a human writes.
   semver:
     name: semver-checks (public API against the published version)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -309,7 +310,7 @@ jobs:
   # the commit that breaks packaging is the one that reports it.
   package:
     name: cargo publish --dry-run (the tarball builds from what ships)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -343,7 +344,7 @@ jobs:
   # made `: ` a mapping indicator. This job is the parser the workflows otherwise never meet.
   workflows:
     name: actionlint (the workflows parse and typecheck)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # actionlint is a Go binary, not a crate: `taiki-e/install-action` does not carry it, and its
@@ -365,7 +366,7 @@ jobs:
 
   msrv:
     name: msrv (rust-version from Cargo.toml)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
     steps:
