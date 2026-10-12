@@ -1985,8 +1985,7 @@ impl DictIndex {
     /// **What is still held.** Not the corpus, and not the block data, which is the bulk of the
     /// index. The block heads, the per-block arrays and one start a microblock are, at roughly
     /// `(mean head length + 20) / block + 8 / micro` bytes per key — 0.36 at the default on English
-    /// words, 0.31 at 512 keys a block. An index whose heads alone pass 4 GiB is refused with
-    /// an error naming the larger block that would fit it.
+    /// words, 0.31 at 512 keys a block.
     ///
     /// **Transient disk**: one run file per `RUN_BYTES` of keys, in a directory beside the output,
     /// removed however the build ends. **Three passes** over the sorted keys: the symbol table is

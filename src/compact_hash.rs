@@ -32,7 +32,6 @@ const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
 
 /// One `(hash, second hash)` pair in a run or the merged file.
 const PAIR_BYTES: usize = 16;
-/// One `(slot u32, fingerprint u64)` record in a range file.
 /// Bytes a fingerprint thread stages per range file before writing them under the file's lock.
 const STAGE: usize = 1 << 16;
 /// The merge splits the hash space on these top bits: every run counts its pairs per bin as it
