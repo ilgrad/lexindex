@@ -687,6 +687,14 @@ impl Packed {
         if width > MAX_WIDTH {
             return Err(IndexError::Format("arena: merged entries too wide"));
         }
+        // The table's size bounds `n` only through `n · width`: at zero width any count fits, and
+        // `validate` would walk all of them. Distinct keys never share a `(start, length)`, so a
+        // zero-width entry can describe one key and no more.
+        if width == 0 && n > 1 {
+            return Err(IndexError::Format(
+                "arena: zero-width merged entries for more than one key",
+            ));
+        }
         let entries = (n as u64)
             .checked_mul(u64::from(width))
             .map(|bits| bits.div_ceil(8))
@@ -2099,6 +2107,20 @@ mod tests {
         let mut bad = good.clone();
         bad[8] = MERGED | WIDE_BASE;
         assert!(err(bad).contains("unknown offset encoding"));
+    }
+
+    /// An entry of no bits leaves the slot count unbounded by the table, which is then empty for any
+    /// count: a fuzzed header claimed some 10¹⁸ slots in 695 bytes, and the load checked them one
+    /// by one.
+    /// Distinct keys never share a `(start, length)`, so only a single key has a zero-width entry.
+    #[test]
+    fn zero_width_entries_hold_one_key_at_most() {
+        let one = merged_blob(MERGED, (1, 0, 0), &[0], b"a", &[]);
+        assert_eq!(StringArena::from_bytes(&one).unwrap().get(0), Some("a"));
+        let mut many = one;
+        many[..8].copy_from_slice(&((1u64 << 40) + 1).to_le_bytes());
+        let err = StringArena::from_bytes(&many).unwrap_err().to_string();
+        assert!(err.contains("zero-width"), "{err}");
     }
 
     /// The overflow table of a merged arena is held to the entries that escape: one entry per

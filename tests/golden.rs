@@ -1416,3 +1416,19 @@ fn the_mphf_loader_refuses_a_level_whose_slice_is_narrower_than_its_stride() {
         "the blob loaded; it must be refused"
     );
 }
+
+/// `hanging-4.6.0-perfect-zero-width.bmp` is libFuzzer's, from the `parse_perfect` target's daily
+/// run on 2026-10-12 against the unreleased merged arena: one of four inputs that each held a load
+/// for the run's whole half hour. A merged arena whose entries have no bits makes a table of no
+/// bytes for any slot count, so the header's count went unchecked and the load validated every
+/// slot it claimed. A zero-width entry now describes one key at most. The unverified frame is the
+/// path that hung; the checked load stops at the payload checksum first.
+#[cfg(all(feature = "fuzzing", feature = "mph"))]
+#[test]
+fn a_merged_arena_of_zero_width_entries_is_refused_at_once() {
+    let bytes = std::fs::read(data("hanging-4.6.0-perfect-zero-width.bmp")).expect("the specimen");
+    assert_eq!(bytes.len(), 695);
+    assert_eq!(&bytes[..4], b"BMP8");
+    assert!(!lexindex::fuzzing::parse_perfect_frame(&bytes, false));
+    assert!(!lexindex::fuzzing::parse_perfect_frame(&bytes, true));
+}
