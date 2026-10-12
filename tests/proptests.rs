@@ -541,6 +541,71 @@ mod mph {
         }
     }
 
+    /// Many short keys over four characters of one to four bytes each: sets whose keys overlap and
+    /// contain one another, so the arena merges them into one superstring.
+    fn overlapping_keys() -> impl Strategy<Value = Vec<String>> {
+        let key = prop::collection::vec(prop::sample::select(vec!['a', 'é', '中', '🎉']), 0..7)
+            .prop_map(|cs| cs.into_iter().collect::<String>());
+        prop::collection::vec(key, 0..200)
+    }
+
+    fn arena_tag(blob: &[u8]) -> u8 {
+        let mph_len = u64::from_le_bytes(blob[12..20].try_into().unwrap()) as usize;
+        blob[36 + mph_len + 8]
+    }
+
+    fn check_merged_roundtrip(keys: &[String], probes: &[String], fingerprints: bool) {
+        let build = |keys: &[String]| {
+            if fingerprints {
+                PerfectHashIndex::build_with_fingerprints(keys).unwrap()
+            } else {
+                PerfectHashIndex::build(keys).unwrap()
+            }
+        };
+        let idx = build(keys);
+        let blob = idx.to_bytes().unwrap();
+        assert_eq!(
+            blob,
+            build(keys).to_bytes().unwrap(),
+            "rebuild changed the bytes"
+        );
+        assert!(
+            [0x11, 0x12, 0x13].contains(&(arena_tag(&blob) & 0x3F)),
+            "{:#x}",
+            arena_tag(&blob)
+        );
+        let restored = PerfectHashIndex::from_bytes(&blob).unwrap();
+        let expected = distinct_sorted(keys.to_vec());
+        assert_eq!(idx.len(), expected.len());
+        for index in [&idx, &restored] {
+            let mut seen = vec![false; expected.len()];
+            for key in &expected {
+                let id = index.id(key).expect("member is present") as usize;
+                assert!(!seen[id], "ids must be a bijection onto [0, n)");
+                seen[id] = true;
+                assert_eq!(index.key(id as u32), Some(key.as_str()));
+            }
+            assert_eq!(index.key(expected.len() as u32), None);
+            // Neighbours of the members -- one character longer or shorter -- are the misses a
+            // superstring makes likely: they sit inside the data right next to a stored key.
+            let mut misses: Vec<String> = probes.to_vec();
+            for key in &expected {
+                misses.push(format!("{key}a"));
+                misses.push(format!("é{key}"));
+                let mut shorter = key.clone();
+                shorter.pop();
+                misses.push(shorter);
+            }
+            misses.retain(|m| expected.binary_search(m).is_err());
+            for miss in &misses {
+                assert_eq!(index.id(miss), None, "{miss:?} is not a member");
+            }
+            let all: Vec<&String> = expected.iter().chain(&misses).collect();
+            let one_by_one: Vec<Option<u32>> = all.iter().map(|k| index.id(k)).collect();
+            assert_eq!(index.ids_of(&all), one_by_one);
+        }
+    }
+
     fn check_compact_no_false_negative(keys: &[String], fp: usize) {
         let idx = CompactHashIndex::build(keys, fp).unwrap();
         let expected = distinct_sorted(keys.to_vec());
@@ -558,6 +623,18 @@ mod mph {
         #[test]
         fn perfect_hash_roundtrip(keys in multibyte_keys()) {
             check_perfect_hash_roundtrip(&keys);
+        }
+
+        /// The merged arena against the keys it was built from: every member round-trips, every
+        /// neighbour of a member misses, the batch path agrees, and a load and a rebuild change
+        /// nothing -- with and without fingerprints.
+        #[test]
+        fn merged_arena_roundtrips_and_misses(
+            keys in overlapping_keys(),
+            probes in overlapping_keys(),
+            fingerprints in any::<bool>(),
+        ) {
+            check_merged_roundtrip(&keys, &probes, fingerprints);
         }
 
         #[test]

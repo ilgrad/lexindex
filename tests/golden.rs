@@ -391,6 +391,81 @@ mod mph {
             assert_eq!(perfect.id(&format!("{key}~")), None);
         }
     }
+
+    /// The keys of 4.6's merged blobs. The golden keys above do not overlap enough to merge, so
+    /// these do: multiples of 7, a hundred multibyte keys, and one key of 160 bytes whose length
+    /// escapes to the overflow table.
+    fn merged_keys() -> Vec<String> {
+        let mut keys: Vec<String> = (0..900u32).map(|i| (i * 7).to_string()).collect();
+        keys.extend((0..100u32).map(|i| format!("中{}é", i * 3)));
+        keys.push("🎉".repeat(40));
+        keys
+    }
+
+    const MERGED: [&str; 2] = [
+        "golden-4.6.0-perfect-merged.bmp",
+        "golden-4.6.0-perfect-merged-fp.bmp",
+    ];
+
+    fn check_merged(name: &str, perfect: &lexindex::PerfectHashIndex) {
+        let keys = merged_keys();
+        assert_eq!(perfect.len(), keys.len(), "{name}");
+        assert_eq!(perfect.has_fingerprints(), name.ends_with("-fp.bmp"));
+        for key in &keys {
+            let id = perfect.id(key).unwrap_or_else(|| panic!("{name}: {key:?}"));
+            assert_eq!(perfect.key(id), Some(key.as_str()), "{name}");
+            assert_eq!(perfect.id(&format!("{key}~")), None, "{name}");
+        }
+        // Pieces of members, which the superstring holds without their being keys.
+        for miss in ["中3", "3é", "71", "715", "🎉"] {
+            assert!(!keys.iter().any(|k| k == miss), "{miss:?} is a member");
+            assert_eq!(perfect.id(miss), None, "{name}: {miss:?}");
+        }
+    }
+
+    /// 4.6's merged arena, pinned by its bytes with and without fingerprints: the greedy merge's
+    /// order and its tie-breaking are part of the format, and a change to either shows up here
+    /// before it reaches a reader. Both blobs carry an overflow table (tags `0x53` and `0xD3`).
+    ///
+    /// Regenerating them, if the format is deliberately changed: write the two fresh builds below
+    /// to these paths.
+    #[test]
+    fn the_merged_hash_blobs_are_byte_identical_to_a_fresh_build() {
+        let keys = merged_keys();
+        let plain = lexindex::PerfectHashIndex::build(&keys).unwrap();
+        let fingerprinted = lexindex::PerfectHashIndex::build_with_fingerprints(&keys).unwrap();
+        for (name, fresh, tag) in [
+            (MERGED[0], plain.to_bytes().unwrap(), 0x53),
+            (MERGED[1], fingerprinted.to_bytes().unwrap(), 0xD3),
+        ] {
+            let path = data(name);
+            let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let mph_len = u64::from_le_bytes(stored[12..20].try_into().unwrap()) as usize;
+            assert_eq!(stored[36 + mph_len + 8], tag, "{name}");
+            assert!(
+                stored == fresh,
+                "{name} changed; regenerate {}",
+                path.display()
+            );
+            check_merged(
+                name,
+                &lexindex::PerfectHashIndex::from_bytes(&stored).unwrap(),
+            );
+        }
+    }
+
+    /// The merged arenas mapped from disk: the loader's one pass over the entries accepts them,
+    /// and every key answers.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn the_merged_blobs_load_zero_copy() {
+        for name in MERGED {
+            // SAFETY: a committed blob, and nothing in this process writes to it while mapped.
+            let perfect = unsafe { lexindex::PerfectHashIndex::load_mmap(data(name)) }
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            check_merged(name, &perfect);
+        }
+    }
 }
 
 /// The fuzz targets in `fuzz/` are seeded from these same files, and a target that rejected every
@@ -439,11 +514,14 @@ fn the_fuzz_shims_accept_a_real_blob() {
         );
     }
     // The 4.0 hash blobs, `MPH3` inside, through the same targets: the fingerprinted arena and
-    // the one with an overflow table behind its data among them.
+    // the one with an overflow table behind its data among them. 4.6's merged arenas seed the
+    // superstring loader the same way.
     for name in [
         "golden-4.0.0-perfect.bmp",
         "golden-4.0.0-perfect-fp.bmp",
         "golden-4.0.0-perfect-overflow.bmp",
+        "golden-4.6.0-perfect-merged.bmp",
+        "golden-4.6.0-perfect-merged-fp.bmp",
     ] {
         let blob = std::fs::read(data(name)).unwrap();
         assert!(
