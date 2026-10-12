@@ -1010,7 +1010,7 @@ $ lexindex plan words.txt
   DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
   DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
   StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-  PerfectHashIndex       5218708 bytes  10.88 B/key    135 ns  estimated
+  PerfectHashIndex       4641399 bytes   9.67 B/key    131 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is

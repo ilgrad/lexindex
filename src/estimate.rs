@@ -1415,7 +1415,9 @@ fn suffix_bytes(shape: &Shape, entries: f64, restarts: f64) -> f64 {
 /// half of it. Their size is a straight line in `n` -- a perfect hash and a per-key table over a
 /// header -- so two points fit it exactly, and neither depends on what the keys say beyond their
 /// length. The key arena is taken out of `PerfectHashIndex` here and put back at `n`, where the
-/// corpus's own byte count is known exactly.
+/// corpus's own byte count is known exactly. A merged arena breaks the line: what its overlap
+/// saves grows with `n`, so the fit reads high -- 9.67 bytes a key on the 479 823-word
+/// dictionary against 9.25 built.
 #[cfg(feature = "mph")]
 fn hash_fits(keys: &[&str]) -> Result<[(f64, f64); 3], IndexError> {
     let bytes = |ks: &[&str]| -> Result<[f64; 3], IndexError> {

@@ -50,7 +50,7 @@ none is quoted here without the others.</sub>
 | membership | exact | exact | `2^-bits` false positives ² | `2^-bits` false positives | none: closed vocabulary | exact | exact |
 | `Overlay` edits | ✅ | — | — | ✅ | — | ✅ | — |
 | zero-copy `load_mmap` | ✅ | ✅ ¹ | ✅ ¹ | ✅ | — | ✅ | ✅ |
-| **bytes/key**, 480 k English words | 5.95 | **2.64** | 5.25 · 6.25 at 8 bits | **1.24** · 0.74 at 4 bits | **0.24** | 10.88 | 24.42 · 15.62 on jieba's Chinese lexicon |
+| **bytes/key**, 480 k English words | 5.95 | **2.64** | 5.25 · 6.25 at 8 bits | **1.24** · 0.74 at 4 bits | **0.24** | 9.25 | 24.42 · 15.62 on jieba's Chinese lexicon |
 | `id`, 1 M word bigrams | 263 ns | 399 ns | 77 ns · `id_unchecked` 62 | 57 ns | the bare perfect hash | 109 ns · `id_unchecked` 49 | 231 ns |
 | Cargo feature | — | — | `mph` | `mph` (default) | `mph` | `mph` | — |
 

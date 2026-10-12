@@ -119,7 +119,9 @@ the same key set produce the same bytes, on any thread count and any machine: th
 fixed and every part is placed independently of the others. Two nodes building the same corpus agree
 on ids, and a blob can be checksummed against a rebuild. `build_to_file` writes the same bytes as `build` + `save`
 for the same key set, and is tested that way: both derive the arena's encoding from the same key
-lengths in the same slot order.
+lengths in the same slot order. The one exception is a `PerfectHashIndex` whose `build` merges its
+keys into one superstring (see [below](#perfecthashindex)): the file build holds no key set to
+merge and writes the blocked arena — the same ids, a larger blob.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
@@ -127,7 +129,12 @@ and the measured surface at 10 M real-word bigram hashes is flat around the ship
 bits/key at 4.4, 1.917 at 4.5, 1.914 at 4.6, within a few nanoseconds per key of each other to
 build, and the bumped share — the lookup's cost — rises through it, 1.0 % to 1.7 %. The table
 has no load factor at all — every level's range is exactly its key count, and the
-slack that lets the last buckets place is the bumping. A knob whose settings differ by two percent
+slack that lets the last buckets place is the bumping. The tail, the last 256 keys or fewer, is the
+exception: it cannot bump, so it has 4 % slack, two-byte seeds searched exhaustively, and 64 hash
+seeds to try before the build fails — and only duplicate hashes exhaust them, since over 10 000
+random 256-key tails 9.05 % needed a second hash seed and 8.1 % of those a third, the geometric law
+of independent attempts under which 64 failures are about 10⁻⁶⁷ (`mphf::spike::tail_attempt_histogram`).
+A knob whose settings differ by two percent
 one way and nothing the other is not worth the API surface; `fingerprint_bits` is the knob that
 *does* have a monotone trade, and it is public.
 
@@ -640,7 +647,7 @@ key in the side probe.
 where membership is already guaranteed. The serialised blob is `[magic "BMP8"][n][mph length]
 [side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
-names one of four encodings.
+names one of five encodings.
 
 Addressing the keys was for a long time the largest part of this index. Before 0.5.0 every offset was
 a `u64`: 8.0 of 17.6 bytes per key on the dictionary, to address a 4.9 MB arena. Choosing 4 or 8
@@ -658,6 +665,40 @@ bytes per key. Past 4 GiB of data the blocks keep their offsets and widen their 
 only a handful of keys none of which any block holds keeps the flat table. The encoding is chosen
 once at build time and recorded in the tag, so reading it is a branch that never changes for the
 life of the index.
+
+**Since 4.6 the keys can be stored overlapped** (tag `0x13`). `build` also prices a greedy shortest
+common superstring of the keys: a key that occurs inside another costs no bytes, and two keys where
+one ends as the other begins share the overlap. Each slot is then one packed entry —
+`[fingerprint][length − min][start]`, least significant first, at most 57 bits so one unaligned
+`u64` read holds it — and a length too long for its field escapes to an overflow table of
+`(slot, length)` pairs behind the data (bit `0x40` again). `build` keeps whichever layout is
+smaller, a tie going to the blocked one, so no key set grows. On the dictionary the index goes
+10.88 → **9.25 B/key** (the arena 10.64 → 9.01). Over sixteen benchmark corpora the arena shrinks
+by 46 % on numbers, 33 % on DNA, 13–15 % on words, Chinese words, identifiers and package names,
+11 % on Russian titles, 9–10 % on hex keys and UUIDs, and 0.1–5 % on other titles; it would grow
+on URLs, domains and paths, which keep the blocked layout. An entry is 23–32 bits where a blocked
+layout spends 10.5 (`0x11`) or 16.2 (`0x12`), so it pays only where the keys overlap. A key is
+still one slice of the data, so `key(id)` stays a zero-copy `&str` and membership one comparison.
+
+The merge runs on an Aho–Corasick automaton over the sorted keys, built level by level with each
+node's children a sorted run: `O(N log σ)` for `N` key bytes. A key inside another is a failure-link
+target or a prefix of the next key in order. The rest are chained by decreasing overlap — Ukkonen's
+greedy, each depth's keys in slot order taking the smallest free key in byte order under their
+node — and the chains are written in their heads' slot order: `O(N + n log n)` in all, and
+deterministic, so the blob is reproducible like every other. The automaton is 9 bytes a node, at
+most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key, all freed before the
+arena is laid out; past 2³² nodes the merge is not attempted.
+
+The overlap costs the loader its shortcut. A blocked arena's load checks that its first and last
+offsets span the data and leaves the rest to the access that reads them. Merged entries can point
+anywhere in the data, so the load checks each one — start and end inside the data, both on a
+character boundary — in `O(n)`, and a `load_mmap` of a merged arena reads its entry table. A
+crafted entry is refused at load rather than answered. The magic stays
+`BMP8`: 4.0–4.5 refuse a merged arena as an unknown offset encoding, and a blob that keeps a
+blocked arena crosses the versions in both directions. `build_to_file` and an overlay's
+`compact_to_file` hold no key set to merge and write the blocked layout. `plan` fits the arena by
+the same two-point line as the rest of the index, and the overlap grows with `n`, so it reads
+high: 9.67 B/key on the dictionary against 9.25 built.
 
 `build_with_fingerprints` sets bit `0x80` of the tag and stores one byte per slot behind the offsets —
 a fingerprint from the second hash, the one `CompactHashIndex` keeps — so a probe whose fingerprint
@@ -716,8 +757,9 @@ them; that is the whole migration.
 
 Every index but `ClosedHashIndex`, whose blob is the perfect hash and nothing to map, loads two ways. `load` reads the whole blob into memory; `load_mmap` memory-maps the
 file and **borrows** the index from the mapped pages — no read, no copy — so load time is independent of
-the index size and the OS shares the pages across processes. Two shades of the mapping exist for
-files that were not carried by their author: `load_mmap_verified` is the same mapping with the
+the index size and the OS shares the pages across processes. A merged `PerfectHashIndex` arena is
+the exception: its load reads the entry table once to check it ([above](#perfecthashindex)).
+Two shades of the mapping exist for files that were not carried by their author: `load_mmap_verified` is the same mapping with the
 payload checksum `load` makes, one pass at load; `load_mmap_untrusted` (`StringIndex`) runs
 `from_untrusted_bytes`'s validation over the mapping.
 
@@ -960,7 +1002,9 @@ is a magic neither has heard of, so they refuse it as malformed rather than as a
 direction, and so does an `OVL2` over a `StringIndex` base. An overlay embeds its base verbatim,
 so an `OVL2` over a `BMP5`, `BMP6` or `BCH6` base is refused by 2.0 with that base, and the
 migration is the base's: list its live keys on the old version, rebuild on 2.0, and put a fresh
-overlay over it.
+overlay over it. 4.6's merged `PerfectHashIndex` arena keeps the magic and adds an arena tag, `0x13`:
+4.0–4.5 refuse such a blob as an unknown offset encoding, and one whose `build` kept a blocked arena
+loads on every 4.x.
 
 What a blob does *not* promise is that it will load into the same **ids** across a format change.
 Since 1.0 construction is deterministic, so the same keys rebuilt on the same version give the same

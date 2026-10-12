@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`PerfectHashIndex` stores its keys overlapped where that is smaller: 10.88 → 9.25 bytes a key
+  on the 479 823-word dictionary.** A new arena encoding, tag `0x13`, holds a greedy shortest
+  common superstring of the keys — a key inside another costs no bytes, and an overlap between two
+  is stored once — with one packed `(start, length − min)` entry a slot, the fingerprint in the
+  same entry, and an overflow table for lengths past the entry's field. `build` and
+  `build_with_fingerprints` price it beside the blocked layout and keep the smaller, a tie to the
+  blocked one, so no key set grows. Over sixteen benchmark corpora the arena shrinks by 46 % on
+  numbers, 33 % on DNA, 13–15 % on words, Chinese words, identifiers and package names, 11 % on
+  Russian titles, 9–10 % on hex keys and UUIDs and 0.1–5 % on other titles; URLs, domains and
+  paths keep the blocked layout. `key(id)` is still a zero-copy `&str` and membership one
+  comparison. The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
+  bytes, deterministically, ties to the lower slot; it holds 9 bytes a trie node and a few dozen a
+  key, freed before the arena is laid out. A load checks every merged entry once — inside the data
+  and on character boundaries — so `load_mmap` of a merged arena is `O(n)`, and a crafted entry is
+  refused. Two golden blobs pin the encoding byte for byte and seed the `parse_perfect` fuzz target.
+- **Compatibility: upgrade readers first.** The magic stays `BMP8`; lexindex 4.0–4.5 refuse a
+  merged arena as `arena: unknown offset encoding`, and a blob whose arena stays blocked loads on
+  every 4.x. `build_to_file`, `build_to_file_with_fingerprints`, a streamed `lexindex build` and
+  `Overlay::compact_to_file` write the blocked layout as before: the same ids as `build` + `save`,
+  not always the same bytes. `plan` prices the merged arena from a sample and reads high where the
+  overlap grows with `n`: 9.67 bytes a key on the dictionary against 9.25 built.
+
+### Documentation
+
+- **The perfect hash's tail exhausts its 64 hash seeds only on duplicate hashes, now measured.**
+  Over 10 000 random 256-key tails 9.05 % needed a second hash seed and 8.1 % of those a third —
+  independent attempts, under which 64 failures are about 10⁻⁶⁷
+  (`mphf::spike::tail_attempt_histogram`, behind `bench-mphf`).
+
 ## [4.5.2] — 2026-09-25
 
 ### Fixed
