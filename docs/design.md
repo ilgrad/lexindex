@@ -114,6 +114,17 @@ single-bit scan over every position pair of a 24-byte key finds no weak pair whe
 load, side-table ids are structurally required to be exactly the tail range `[m, n)` — the
 checksums vouch for transport, not construction.
 
+**How far the default is from any structure's floor.** A map that sends the `n` members to distinct
+ids in `[0, n)` and lets through a share `ε` of other keys needs, for almost every member set, at
+least `log₂e + log₂(1/ε)` bits a key, less `O(log n)` bits in all. Such a structure accepts at most
+`n + ε·u` of the `u` possible keys, and among them it can pick out at most `((n + ε·u)/n)ⁿ` member
+sets — one accepted key for each id — of the `C(u, n)` it has to tell apart. At `ε = 2⁻⁸` that is
+9.443 bits a key (9.4427 at 10 M keys and `u = 2⁶⁴`). The 8-bit default stores 9.918, the perfect
+hash's 1.918 and the fingerprint's 8: 0.475 bits, 5.0 %, above the floor, and all of it is the
+perfect hash's. Given the slots, the fingerprints already sit at `log₂(1/ε)`, so moving them into
+any other structure, a retrieval table or a ribbon, cannot save a bit; only a smaller perfect hash
+can, down to `log₂e` = 1.443.
+
 **Construction is deterministic, so a blob *is* a reproducible artefact.** Two `build` calls over
 the same key set produce the same bytes, on any thread count and any machine: the seed sequence is
 fixed and every part is placed independently of the others. Two nodes building the same corpus agree
