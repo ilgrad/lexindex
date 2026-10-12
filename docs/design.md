@@ -700,6 +700,12 @@ deterministic, so the blob is reproducible like every other. The automaton is 9 
 most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key, all freed before the
 arena is laid out; past 2³² nodes the merge is not attempted.
 
+No worst-case ratio is claimed for greedy here, but on these keys it can be bracketed: a
+minimum-weight cycle cover of the keys' overlap graph is never longer than the shortest superstring
+(Blum, Jiang, Li, Tromp and Yannakakis, 1994), and on the same sixteen corpora the merge comes
+within 0.12 % of that cover — at most 0.11 % on Russian titles and 0.07 % on Chinese words, under
+0.015 % on the rest — and equals it, so is the shortest, on eight.
+
 The overlap costs the loader its shortcut. A blocked arena's load checks that its first and last
 offsets span the data and leaves the rest to the access that reads them. Merged entries can point
 anywhere in the data, so the load checks each one — start and end inside the data, both on a
