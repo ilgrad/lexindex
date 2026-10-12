@@ -48,4 +48,5 @@ jobs:
           uv pip install maturin mkdocs-material "mkdocstrings[python]" ruff
           # mkdocstrings imports the package, so the compiled core must be built first.
           uv run maturin develop --release
-          uv run mkdocs gh-deploy --force --no-history
+          # --strict: a broken link or a missing page fails the deploy instead of shipping.
+          uv run mkdocs gh-deploy --strict --force --no-history
