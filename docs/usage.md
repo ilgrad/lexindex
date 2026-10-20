@@ -933,6 +933,16 @@ $ lexindex dump words.bin | head -3
 'em
 ```
 
+`inspect --json` prints the same fields as one JSON object on one line, for a script that would
+otherwise parse the text. A field the kind does not have is left out, as it is from the text; an
+overlay's own fields and its base nest under `overlay`, and with `--sections` the split is a
+`sections` member. Here over a `--index dict` build of the same file:
+
+```console
+$ lexindex inspect words.bin --json
+{"path":"words.bin","kind":"DictIndex","format":"BDX3","bytes":1264362,"keys":479823,"arena_bytes":1208211}
+```
+
 `inspect --sections` reads a `DictIndex` whole and says where its bytes went. The sections always
 sum to the blob, so the output is an accounting rather than an estimate, and each is given per key
 and as a share:

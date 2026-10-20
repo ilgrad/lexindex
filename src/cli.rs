@@ -28,13 +28,14 @@ usage:
   lexindex plan    <keys-file> [--objective NAME] [needs]
   lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--stream MODE]
                    [--objective NAME] [needs]
-  lexindex inspect <blob> [--sections]
+  lexindex inspect <blob> [--sections] [--json]
   lexindex dump    <blob>
 
   plan     what every index that answers the needs would weigh, cheapest first
   build    build one index and save it; `--index auto` asks plan and builds the winner
   inspect  what a blob already on disk is, from its header alone; `--sections` reads a
-           DictIndex whole and prints where its bytes went
+           DictIndex whole and prints where its bytes went; `--json` prints the same
+           fields as one JSON object on one line
   dump     the keys a blob holds, one per line, in id order — `dump | build` is the
            migration path off a format a later version stops reading
 
@@ -70,6 +71,7 @@ options (`--name value` or `--name=value`):
                  says is available. Needs a named `--index`: `auto` prices the corpus,
                  which means reading it
   --sections     with `inspect`, on a DictIndex: the blob's byte split
+  --json         with `inspect`: one line of JSON instead of the text
   -h, --help     this text
   -V, --version  the version
 
@@ -107,7 +109,7 @@ fn io_fail(e: std::io::Error) -> Fail {
 enum Accepts {
     /// `dump`: the blob, and nothing else.
     Nothing,
-    /// `inspect`: the blob, and whether to read it whole.
+    /// `inspect`: the blob, whether to read it whole, and whether to print JSON.
     Sections,
     /// `plan`: the needs.
     Needs,
@@ -130,6 +132,7 @@ struct Cmd {
     index: Choice,
     block: Option<usize>,
     sections: bool,
+    json: bool,
     stream: Stream,
     objective: Objective,
     /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
@@ -315,6 +318,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         index: Choice::Auto,
         block: None,
         sections: false,
+        json: false,
         stream: Stream::Auto,
         objective: Objective::Memory,
         implied_exact: false,
@@ -330,6 +334,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         };
         match name {
             "--sections" if accepts == Accepts::Sections => cmd.sections = true,
+            "--json" if accepts == Accepts::Sections => cmd.json = true,
             "--closed-vocabulary" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
                 closed_vocabulary = true;
             }
@@ -822,43 +827,137 @@ fn dump_overlay(path: &str, info: &BlobInfo, out: &mut dyn Write) -> Result<(), 
 fn cmd_inspect(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     let path = &cmd.positional[0];
     let info = lexindex::inspect_file(path).map_err(|e| Fail::Failed(format!("{path}: {e}")))?;
-    print_info(&info, "", out)?;
-    if cmd.sections {
+    let sections = || -> Result<Option<DictIndex>, Fail> {
+        if !cmd.sections {
+            return Ok(None);
+        }
         if info.kind != BlobKind::DictIndex {
             return Err(Fail::Failed(format!(
                 "{path}: --sections is a DictIndex's byte split, and this is a {:?}",
                 info.kind
             )));
         }
-        print_sections(&DictIndex::load(path)?, out)?;
+        Ok(Some(DictIndex::load(path)?))
+    };
+    if cmd.json {
+        // Refused before anything is printed: half a JSON object is not one.
+        let sections = sections()?;
+        let mut fields = vec![format!("\"path\":{}", json_str(path))];
+        info_fields(&info, &mut fields);
+        if let Some(index) = &sections {
+            let (bytes, counts) = section_rows(index);
+            let pairs: Vec<String> = bytes
+                .iter()
+                .chain(&counts)
+                .map(|(name, v)| format!("\"{name}\":{v}"))
+                .collect();
+            fields.push(format!("\"sections\":{{{}}}", pairs.join(",")));
+        }
+        return writeln!(out, "{{{}}}", fields.join(",")).map_err(io_fail);
+    }
+    // The text prints what the header said before a refusal names the kind.
+    print_info(&info, "", out)?;
+    if let Some(index) = sections()? {
+        print_sections(&index, out)?;
     }
     Ok(())
+}
+
+/// One `--sections` line: a section's name and its bytes, or a count's name and the count.
+type Row = (&'static str, u64);
+
+/// The byte split's sections, `total` last, then the three counts. One list, so that the text and
+/// the JSON cannot name different sections.
+fn section_rows(index: &DictIndex) -> ([Row; 16], [Row; 3]) {
+    let s = index.sections();
+    (
+        [
+            ("header", s.header),
+            ("tables", s.tables),
+            ("header_codes", s.header_codes),
+            ("phrases", s.phrases),
+            ("heads", s.heads),
+            ("head_ends", s.head_ends),
+            ("block_offsets", s.block_offsets),
+            ("micro_offsets", s.micro_offsets),
+            ("chars", s.chars),
+            ("restart_headers", s.restart_headers),
+            ("restart_wide", s.restart_wide),
+            ("restart_codes", s.restart_codes),
+            ("entry_headers", s.entry_headers),
+            ("entry_wide", s.entry_wide),
+            ("entry_codes", s.entry_codes),
+            ("total", s.total()),
+        ],
+        [
+            ("restarts", s.restarts),
+            ("entries", s.entries),
+            ("wide", s.wide),
+        ],
+    )
+}
+
+/// `text` as a JSON string. The format magic is read off a stranger's header, and a path may hold
+/// any character, so a quote, a backslash and every control character are escaped.
+fn json_str(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// [`print_info`]'s fields as JSON members, an absent one left out as it is there.
+fn info_fields(info: &BlobInfo, fields: &mut Vec<String>) {
+    fields.push(format!(
+        "\"kind\":{}",
+        json_str(&format!("{:?}", info.kind))
+    ));
+    fields.push(format!("\"format\":{}", json_str(&info.format)));
+    fields.push(format!("\"bytes\":{}", info.bytes));
+    for (name, field) in [
+        ("keys", info.keys),
+        ("fingerprint_bits", info.fingerprint_bits.map(u64::from)),
+        ("mph_bytes", info.mph_bytes),
+        ("arena_bytes", info.arena_bytes),
+        ("side_entries", info.side_entries),
+    ] {
+        if let Some(v) = field {
+            fields.push(format!("\"{name}\":{v}"));
+        }
+    }
+    if let Some(o) = &info.overlay {
+        let mut members = vec![
+            format!("\"base_tag\":{}", o.base_tag),
+            format!("\"additions\":{}", o.additions),
+            format!("\"retired\":{}", o.retired),
+        ];
+        if let Some(base) = &o.base {
+            let mut inner = Vec::new();
+            info_fields(base, &mut inner);
+            members.push(format!("\"base\":{{{}}}", inner.join(",")));
+        }
+        fields.push(format!("\"overlay\":{{{}}}", members.join(",")));
+    }
 }
 
 /// Where a `DictIndex`'s bytes went: one line a section, with what it costs a key and what share
 /// of the blob it is, since a section is only ever read against those two.
 fn print_sections(index: &DictIndex, out: &mut dyn Write) -> Result<(), Fail> {
-    let s = index.sections();
-    let total = s.total();
+    let (bytes_rows, counts) = section_rows(index);
+    let total = bytes_rows[bytes_rows.len() - 1].1;
     let keys = index.len().max(1) as f64;
-    for (name, bytes) in [
-        ("header", s.header),
-        ("tables", s.tables),
-        ("header_codes", s.header_codes),
-        ("phrases", s.phrases),
-        ("heads", s.heads),
-        ("head_ends", s.head_ends),
-        ("block_offsets", s.block_offsets),
-        ("micro_offsets", s.micro_offsets),
-        ("chars", s.chars),
-        ("restart_headers", s.restart_headers),
-        ("restart_wide", s.restart_wide),
-        ("restart_codes", s.restart_codes),
-        ("entry_headers", s.entry_headers),
-        ("entry_wide", s.entry_wide),
-        ("entry_codes", s.entry_codes),
-        ("total", total),
-    ] {
+    for (name, bytes) in bytes_rows {
         let share = if total == 0 {
             0.0
         } else {
@@ -871,11 +970,7 @@ fn print_sections(index: &DictIndex, out: &mut dyn Write) -> Result<(), Fail> {
         )
         .map_err(io_fail)?;
     }
-    for (name, count) in [
-        ("restarts", s.restarts),
-        ("entries", s.entries),
-        ("wide", s.wide),
-    ] {
+    for (name, count) in counts {
         writeln!(out, "sections.{name}: {count}").map_err(io_fail)?;
     }
     Ok(())
@@ -944,7 +1039,12 @@ fn dispatch(
             err,
         ),
         "inspect" => cmd_inspect(
-            &parse(rest, Accepts::Sections, 1, "inspect <blob> [--sections]")?,
+            &parse(
+                rest,
+                Accepts::Sections,
+                1,
+                "inspect <blob> [--sections] [--json]",
+            )?,
             out,
         ),
         "dump" => cmd_dump(&parse(rest, Accepts::Nothing, 1, "dump <blob>")?, out),
@@ -1831,6 +1931,88 @@ mod tests {
     }
 
     #[test]
+    fn inspect_json_is_one_line_of_the_same_fields() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(500));
+        let blob = dir.join("json.bin");
+        let dest = blob.to_str().unwrap();
+        assert_eq!(
+            go(&["build", keys.as_str(), dest, "--index", "compact"], "").0,
+            0
+        );
+        let info = lexindex::inspect_file(&blob).unwrap();
+        let (code, out, err) = go(&["inspect", dest, "--json"], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        let want = format!(
+            "{{\"path\":{},\"kind\":\"CompactHashIndex\",\"format\":\"{}\",\"bytes\":{},\
+             \"keys\":500,\"fingerprint_bits\":{},\"mph_bytes\":{},\"arena_bytes\":{},\
+             \"side_entries\":{}}}\n",
+            json_str(dest),
+            info.format,
+            info.bytes,
+            info.fingerprint_bits.unwrap(),
+            info.mph_bytes.unwrap(),
+            info.arena_bytes.unwrap(),
+            info.side_entries.unwrap(),
+        );
+        assert_eq!(out, want);
+        // Without the flag the text is what it was.
+        let (code, text, _) = go(&["inspect", dest], "");
+        assert_eq!(code, 0);
+        assert!(text.starts_with("kind: CompactHashIndex\n"), "{text}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn inspect_json_nests_an_overlays_base_and_carries_the_sections() {
+        let dir = tmpdir();
+        let dest = dir.join("overlay.bin");
+        let mut overlay = lexindex::Overlay::new(StringIndex::build(["a", "b"]).unwrap());
+        overlay.add("c");
+        assert!(overlay.remove("a"));
+        overlay.save(&dest).unwrap();
+        let (code, out, err) = go(&["inspect", dest.to_str().unwrap(), "--json"], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        let tag = <StringIndex as OverlayBase>::BASE_TAG;
+        let nested = format!(
+            "\"overlay\":{{\"base_tag\":{tag},\"additions\":1,\"retired\":1,\
+             \"base\":{{\"kind\":\"StringIndex\""
+        );
+        assert!(out.contains(&nested), "{out}");
+        assert_eq!(out.lines().count(), 1, "{out}");
+
+        let keys = keys_file(&dir, &corpus(2_000));
+        let blob = dir.join("sections.bin");
+        let dict = blob.to_str().unwrap();
+        assert_eq!(
+            go(&["build", keys.as_str(), dict, "--index", "dict"], "").0,
+            0
+        );
+        let (code, out, err) = go(&["inspect", dict, "--sections", "--json"], "");
+        assert_eq!((code, err.as_str()), (0, ""));
+        let size = std::fs::metadata(&blob).unwrap().len();
+        assert!(
+            out.contains(&format!(",\"total\":{size},\"restarts\":")),
+            "{out}"
+        );
+        assert!(
+            out.starts_with("{\"path\":") && out.ends_with("}}\n"),
+            "{out}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn json_strings_escape_what_json_requires_and_keep_the_rest() {
+        assert_eq!(json_str("BDX4"), "\"BDX4\"");
+        assert_eq!(
+            json_str("a\"b\\c\nd\te\u{1}f"),
+            "\"a\\\"b\\\\c\\nd\\te\\u0001f\""
+        );
+        assert_eq!(json_str("путь/北京.bin"), "\"путь/北京.bin\"");
+    }
+
+    #[test]
     fn inspect_sections_refuses_a_blob_that_is_not_a_dict_and_dump_refuses_the_flag() {
         let dir = tmpdir();
         let blob = dir.join("string.bin");
@@ -1840,6 +2022,12 @@ mod tests {
         assert_eq!(code, 1);
         // What the header said is still printed before the refusal names the kind.
         assert!(out.contains("kind: StringIndex\n"), "{out}");
+        assert!(
+            err.contains("--sections is a DictIndex's byte split"),
+            "{err}"
+        );
+        let (code, out, err) = go(&["inspect", dest, "--sections", "--json"], "");
+        assert_eq!((code, out.as_str()), (1, ""), "no half-written JSON: {out}");
         assert!(
             err.contains("--sections is a DictIndex's byte split"),
             "{err}"
