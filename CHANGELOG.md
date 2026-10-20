@@ -30,9 +30,6 @@ All notable changes to this project are documented here. The format follows
   rather than `<builtins.DictIndex object at 0x…>`: the kind, the key count, the parameter that
   sets its size, and `serialized_len()`. Nothing in it reads the index, so a `repr` of a
   ten-million-key blob in a notebook costs what `len` costs.
-- **CPython 3.15 and 3.15t.** One `cp315-abi3.abi3t` wheel (PEP 803) for free-threaded 3.15 and
-  later, which a GIL 3.15 also takes; the `cp311-abi3` wheel still serves 3.11–3.14 and `cp314t`
-  stays. CI runs the Python tests on 3.15, and on 3.15t with the GIL off. PyO3 0.29 → 0.30.
 - **Compatibility: upgrade readers first.** The magic stays `BMP8`; lexindex 4.0–4.5 refuse a
   merged arena as `arena: unknown offset encoding`, and a blob whose arena stays blocked loads on
   every 4.x. `build_to_file`, `build_to_file_with_fingerprints`, a streamed `lexindex build` and
@@ -52,6 +49,14 @@ All notable changes to this project are documented here. The format follows
   Over 10 000 random 256-key tails 9.05 % needed a second hash seed and 8.1 % of those a third —
   independent attempts, under which 64 failures are about 10⁻⁶⁷
   (`mphf::spike::tail_attempt_histogram`, behind `bench-mphf`).
+
+## [4.5.3] — 2026-10-20
+
+### Added
+
+- **CPython 3.15 and 3.15t.** One `cp315-abi3.abi3t` wheel (PEP 803) for free-threaded 3.15 and
+  later, which a GIL 3.15 also takes; the `cp311-abi3` wheel still serves 3.11–3.14 and `cp314t`
+  stays. CI runs the Python tests on 3.15, and on 3.15t with the GIL off. PyO3 0.29 → 0.30.
 
 ## [4.5.2] — 2026-09-25
 
