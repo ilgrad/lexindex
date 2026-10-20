@@ -20,6 +20,10 @@ df.with_columns(
 )
 ```
 
+[`examples/polars_ids.py`](https://github.com/ilgrad/lexindex/blob/main/examples/polars_ids.py)
+runs end to end: a million-row string column to ids and back, with the sizes of both and of the
+index file.
+
 The expressions are elementwise, so they run in the engine's own threads, inside a lazy plan and
 under the streaming engine, and hold no GIL. The blob is read once per process and shared by every
 chunk and thread.
