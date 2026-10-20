@@ -157,7 +157,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -188,14 +188,24 @@ jobs:
           uv run --python ${{ matrix.python-version }} --with mypy --with "$wheel" \
             python -m mypy.stubtest lexindex
 
-  # The free-threaded build needs its own wheel: the module declares `Py_MOD_GIL_NOT_USED`, and
-  # free-threaded CPython has no stable ABI before 3.15, so the abi3 wheel `python-build` produces
-  # will not load on `3.14t` at all. Without this job the threading guarantee in `docs/usage.md`
-  # rots the first time the bindings are touched -- the two concurrency tests cannot fail on a GIL
-  # build, because the GIL is what stops the interleaving they are about.
+  # The free-threaded build needs its own wheel: the module declares `Py_MOD_GIL_NOT_USED`, and the
+  # abi3 wheel `python-build` produces will not load on a free-threaded interpreter at all. 3.14t has
+  # no stable ABI, so its wheel is version-specific; from 3.15 PEP 803's `abi3t` gives one wheel,
+  # which a GIL 3.15 interpreter also takes in preference to the abi3 one -- hence both runs below.
+  # Without this job the threading guarantee in `docs/usage.md` rots the first time the bindings are
+  # touched -- the two concurrency tests cannot fail on a GIL build, because the GIL is what stops
+  # the interleaving they are about.
   python-freethreaded:
-    name: python (pytest · py3.14t, free-threaded)
+    name: python (pytest · py${{ matrix.python }}, free-threaded)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python: "3.14t" }
+          # The `python` feature alone builds abi3 for a GIL 3.15 and a version-specific wheel for
+          # 3.15t; the dependency feature is what turns `abi3t` on, and only for this wheel.
+          - { python: "3.15t", features: "--features python,pyo3/abi3t-py315" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
@@ -208,13 +218,12 @@ jobs:
           # post-step would fail on it; off is exactly the v5 behaviour this job was written for.
           enable-cache: false
       - name: install a free-threaded interpreter
-        run: uv python install 3.14t
-      # maturin sees the free-threaded interpreter, warns that abi3 does not support it yet, and
-      # builds version-specific off the same `python` feature -- no separate feature is needed.
-      - name: build for 3.14t
+        run: uv python install ${{ matrix.python }}
+      - name: build for ${{ matrix.python }}
         run: |
-          uv run --python 3.14t --with maturin --no-project \
-            maturin build --release --out dist-ft --interpreter python3.14t
+          uv run --python ${{ matrix.python }} --with maturin --no-project \
+            maturin build --release --out dist-ft --interpreter python${{ matrix.python }} \
+            ${{ matrix.features }}
       - name: pytest (GIL disabled)
         env:
           PYTHON_GIL: "0"
@@ -222,9 +231,23 @@ jobs:
         run: |
           wheels=(dist-ft/*.whl)
           wheel="${wheels[0]}"
-          uv run --python 3.14t --no-project --with pytest --with numpy --with pyarrow \
+          uv run --python ${{ matrix.python }} --no-project --with pytest --with numpy --with pyarrow \
             --with "$wheel" \
             pytest tests/test_python.py -q
+      - name: abi3t is abi3t, and a GIL 3.15 runs it
+        if: matrix.python == '3.15t'
+        env:
+          LEXINDEX_REQUIRE_NUMPY: "1"
+        run: |
+          wheels=(dist-ft/*.whl)
+          wheel="${wheels[0]}"
+          case "$wheel" in *-cp315-abi3.abi3t-*) ;; *) echo "::error::not an abi3t wheel: $wheel"; exit 1;; esac
+          uv python install 3.15
+          uv run --python 3.15 --no-project --with pytest --with numpy --with pyarrow \
+            --with "$wheel" \
+            pytest tests/test_python.py -q
+          uv run --python 3.15 --no-project --with mypy --with "$wheel" \
+            python -m mypy.stubtest lexindex
 
   # The whole library builds on 32-bit since 1.0, `mph` included, and the README says so. `check`,
   # not `test`: there is no 32-bit runner to execute on, and the property is a compilation one --
