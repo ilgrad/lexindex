@@ -1122,6 +1122,28 @@ def test_overlay_core():
     assert ov.add("apple") == 0, "re-adding revives the original id"
 
 
+def test_repr_says_what_and_how_big():
+    keys = ["apple", "banana", "cherry"]
+    di = lexindex.DictIndex(keys, block=16)
+    assert repr(di) == f"DictIndex(len=3, block=16, bytes={di.serialized_len()})"
+    ch = lexindex.CompactHashIndex(keys, 2)
+    assert repr(ch) == f"CompactHashIndex(len=3, fingerprint_bits=16, bytes={ch.serialized_len()})"
+    hd = lexindex.HashedDictIndex.from_dict(di, 8)
+    assert repr(hd) == f"HashedDictIndex(len=3, fingerprint_bits=8, bytes={hd.serialized_len()})"
+    for cls in (
+        lexindex.StringIndex,
+        lexindex.PerfectHashIndex,
+        lexindex.ClosedHashIndex,
+        lexindex.DoubleArrayIndex,
+    ):
+        idx = cls(keys)
+        assert repr(idx) == f"{cls.__name__}(len=3, bytes={idx.serialized_len()})"
+    ov = lexindex.Overlay(lexindex.StringIndex(keys))
+    ov.add("durian")
+    ov.remove("apple")
+    assert repr(ov) == "Overlay(base=StringIndex, len=3, id_space=4)"
+
+
 def test_overlay_retires_an_id_without_a_membership_test():
     base = lexindex.CompactHashIndex(["apple", "banana"], fingerprint_bits=32)
     ov = lexindex.Overlay(base)

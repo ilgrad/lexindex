@@ -23,6 +23,10 @@ All notable changes to this project are documented here. The format follows
   key, freed before the arena is laid out. A load checks every merged entry once — inside the data
   and on character boundaries — so `load_mmap` of a merged arena is `O(n)`, and a crafted entry is
   refused. Two golden blobs pin the encoding byte for byte and seed the `parse_perfect` fuzz target.
+- **Every Python index type has a `repr`.** `DictIndex(len=479823, block=256, bytes=1266114)`
+  rather than `<builtins.DictIndex object at 0x…>`: the kind, the key count, the parameter that
+  sets its size, and `serialized_len()`. Nothing in it reads the index, so a `repr` of a
+  ten-million-key blob in a notebook costs what `len` costs.
 - **CPython 3.15 and 3.15t.** One `cp315-abi3.abi3t` wheel (PEP 803) for free-threaded 3.15 and
   later, which a GIL 3.15 also takes; the `cp311-abi3` wheel still serves 3.11–3.14 and `cp314t`
   stays. CI runs the Python tests on 3.15, and on 3.15t with the GIL off. PyO3 0.29 → 0.30.

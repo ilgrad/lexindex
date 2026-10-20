@@ -229,6 +229,14 @@ impl PyStringIndex {
         self.inner.len()
     }
 
+    fn __repr__(&self) -> String {
+        format!(
+            "StringIndex(len={}, bytes={})",
+            self.inner.len(),
+            self.inner.serialized_len()
+        )
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -874,6 +882,14 @@ impl PyPerfectHashIndex {
         self.inner.len()
     }
 
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "PerfectHashIndex(len={}, bytes={})",
+            self.inner.len(),
+            self.inner.serialized_len().map_err(to_py)?
+        ))
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -1287,6 +1303,15 @@ impl PyCompactHashIndex {
         self.inner.len()
     }
 
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "CompactHashIndex(len={}, fingerprint_bits={}, bytes={})",
+            self.inner.len(),
+            self.inner.fingerprint_bits(),
+            self.inner.serialized_len().map_err(to_py)?
+        ))
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -1592,6 +1617,14 @@ impl PyClosedHashIndex {
         self.inner.len()
     }
 
+    fn __repr__(&self) -> String {
+        format!(
+            "ClosedHashIndex(len={}, bytes={})",
+            self.inner.len(),
+            self.inner.serialized_len()
+        )
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -1830,6 +1863,15 @@ impl PyDictIndex {
 
     fn __len__(&self) -> usize {
         self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DictIndex(len={}, block={}, bytes={})",
+            self.inner.len(),
+            self.inner.block(),
+            self.inner.serialized_len()
+        )
     }
 
     fn is_empty(&self) -> bool {
@@ -2280,6 +2322,15 @@ impl PyHashedDictIndex {
         self.inner.len()
     }
 
+    fn __repr__(&self) -> String {
+        format!(
+            "HashedDictIndex(len={}, fingerprint_bits={}, bytes={})",
+            self.inner.len(),
+            self.inner.fingerprint_bits(),
+            self.inner.serialized_len()
+        )
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -2536,6 +2587,14 @@ impl PyDoubleArrayIndex {
 
     fn __len__(&self) -> usize {
         self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DoubleArrayIndex(len={}, bytes={})",
+            self.inner.len(),
+            self.inner.serialized_len()
+        )
     }
 
     fn is_empty(&self) -> bool {
@@ -2798,6 +2857,15 @@ impl PyOverlay {
     /// How many keys are live: base keys plus additions, less what has been removed.
     fn __len__(&self, py: Python<'_>) -> usize {
         on_base!(self.lock(py), |ov| ov.len())
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> String {
+        let (base, len, id_space) = match &*self.lock(py) {
+            OverlayInner::String(ov) => ("StringIndex", ov.len(), ov.id_space()),
+            OverlayInner::Perfect(ov) => ("PerfectHashIndex", ov.len(), ov.id_space()),
+            OverlayInner::Compact(ov) => ("CompactHashIndex", ov.len(), ov.id_space()),
+        };
+        format!("Overlay(base={base}, len={len}, id_space={id_space})")
     }
 
     /// Whether every key has been removed (or there were none).
