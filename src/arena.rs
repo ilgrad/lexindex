@@ -2118,7 +2118,9 @@ mod tests {
         let one = merged_blob(MERGED, (1, 0, 0), &[0], b"a", &[]);
         assert_eq!(StringArena::from_bytes(&one).unwrap().get(0), Some("a"));
         let mut many = one;
-        many[..8].copy_from_slice(&((1u64 << 40) + 1).to_le_bytes());
+        // 2^31 keys, a count every target's `usize` holds, so the zero-width check is what refuses
+        // it on 32 bits too, not the header's conversion.
+        many[..8].copy_from_slice(&((1u64 << 31) + 1).to_le_bytes());
         let err = StringArena::from_bytes(&many).unwrap_err().to_string();
         assert!(err.contains("zero-width"), "{err}");
     }
