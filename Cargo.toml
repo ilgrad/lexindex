@@ -60,7 +60,7 @@ path = "src/bin/lexindex.rs"
 fst = { version = "0.4", features = ["levenshtein"] }
 # memmap2 backs the zero-copy `load_mmap` path (the `mmap` feature). Read-only maps only.
 memmap2 = { version = "0.9", optional = true }
-pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"], optional = true }
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py311"], optional = true }
 
 [features]
 default = ["mph", "mmap"]

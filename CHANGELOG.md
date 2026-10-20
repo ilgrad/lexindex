@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.3] — 2026-10-20
+
+### Added
+
+- **CPython 3.15 and 3.15t.** One `cp315-abi3.abi3t` wheel (PEP 803) for free-threaded 3.15 and
+  later, which a GIL 3.15 also takes; the `cp311-abi3` wheel still serves 3.11–3.14 and `cp314t`
+  stays. CI runs the Python tests on 3.15, and on 3.15t with the GIL off. PyO3 0.29 → 0.30.
+
 ## [4.5.2] — 2026-09-25
 
 ### Fixed

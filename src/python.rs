@@ -337,7 +337,7 @@ impl PyStringIndex {
         }
         let sink = id_sink::<u64>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
@@ -363,7 +363,7 @@ impl PyStringIndex {
                 .map(|k| self.inner.id(k).unwrap_or(u64::MAX))
                 .collect()
         });
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
@@ -1005,7 +1005,7 @@ impl PyPerfectHashIndex {
         }
         let sink = id_sink::<u32>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
@@ -1038,7 +1038,7 @@ impl PyPerfectHashIndex {
                 .map(|id| id.unwrap_or(u32::MAX))
                 .collect()
         });
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
@@ -1408,7 +1408,7 @@ impl PyCompactHashIndex {
         }
         let sink = id_sink::<u32>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns instead of a fresh `bytes` per call:
@@ -1441,7 +1441,7 @@ impl PyCompactHashIndex {
                 .map(|id| id.unwrap_or(u32::MAX))
                 .collect()
         });
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item, so a caller can read the
@@ -1654,7 +1654,7 @@ impl PyClosedHashIndex {
         }
         let sink = id_sink::<u32>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
@@ -1672,7 +1672,7 @@ impl PyClosedHashIndex {
         }
         let sink = id_sink::<u32>(out, keys.len())?;
         let ids = py.detach(|| self.inner.ids_of(&keys));
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
@@ -2038,7 +2038,7 @@ impl PyDictIndex {
         }
         let sink = id_sink::<u64>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
@@ -2062,7 +2062,7 @@ impl PyDictIndex {
                 .map(|id| id.unwrap_or(u64::MAX))
                 .collect()
         });
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
@@ -2374,7 +2374,7 @@ impl PyHashedDictIndex {
         }
         let sink = id_sink::<u64>(out, n)?;
         let ids = self.arrow_ids(py, &chunks)?;
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// `ids_of_bytes` written into memory the caller owns: `out` is any writable C-contiguous
@@ -2397,7 +2397,7 @@ impl PyHashedDictIndex {
                 .map(|id| id.unwrap_or(u64::MAX))
                 .collect()
         });
-        write_ids(py, &sink, &ids)
+        write_ids(&sink, &ids)
     }
 
     /// The `numpy` dtype of one [`ids_of_bytes`](Self::ids_of_bytes) item.
@@ -3369,17 +3369,17 @@ fn id_sink<T: pyo3::buffer::Element>(out: &Bound<'_, PyAny>, n: usize) -> PyResu
 }
 
 /// Writes `ids` over the head of a buffer `id_sink` accepted.
-fn write_ids<T: pyo3::buffer::Element>(
-    py: Python<'_>,
-    buf: &PyBuffer<T>,
-    ids: &[T],
-) -> PyResult<()> {
-    let cells = buf
-        .as_mut_slice(py)
-        .ok_or_else(|| PyBufferError::new_err("out is not writable"))?;
-    for (cell, &id) in cells.iter().zip(ids) {
-        cell.set(id);
+fn write_ids<T: pyo3::buffer::Element>(buf: &PyBuffer<T>, ids: &[T]) -> PyResult<()> {
+    let head = buf
+        .as_slice_ptr()
+        .ok_or_else(|| PyBufferError::new_err("out is not C-contiguous"))?;
+    if head.len() < ids.len() {
+        return Err(PyValueError::new_err("out is shorter than the ids"));
     }
+    // SAFETY: `id_sink` accepted the buffer as writable, `T`-typed and C-contiguous, and the
+    // `PyBuffer` keeps the export, so the memory stays valid for the call; the check above keeps
+    // the write inside it, and `ids` is this crate's own vector, so the two cannot overlap.
+    unsafe { std::ptr::copy_nonoverlapping(ids.as_ptr(), head.cast::<T>().as_ptr(), ids.len()) };
     Ok(())
 }
 

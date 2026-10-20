@@ -72,7 +72,7 @@ jobs:
           fi
           exit $fail
 
-  # The full CI matrix — fmt, clippy, tests on Linux/macOS/Windows, Python 3.11–3.14, MSRV,
+  # The full CI matrix — fmt, clippy, tests on Linux/macOS/Windows, Python 3.11–3.15, MSRV,
   # coverage — as a reusable workflow, so a tag cannot publish what a push to main would reject.
   ci:
     name: ci
@@ -177,21 +177,24 @@ jobs:
           name: wheels-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
           path: dist
 
-  # Free-threaded CPython has no stable ABI before 3.15 -- PEP 803 puts `abi3t` there -- so the abi3
-  # wheel above cannot load on a `3.14t` interpreter at all and `pip` falls back to the sdist.
-  # maturin sees the free-threaded interpreter, drops abi3 with a warning and builds version-specific
-  # off the same `python` feature, so no manifest changes. Its own job rather than extra cells above:
-  # the platform list differs (no cross-built macOS x86_64 -- a version-specific wheel needs the
-  # interpreter maturin is building against), and the abi3 leg that serves almost every install stays
-  # untouched.
+  # The abi3 wheel above cannot load on a free-threaded interpreter at all, and `pip` would fall back
+  # to the sdist. 3.14t has no stable ABI: maturin sees the interpreter, drops abi3 with a warning and
+  # builds version-specific off the same `python` feature. From 3.15, PEP 803's `abi3t` gives one
+  # wheel for 3.15t and later, tagged `cp315-abi3.abi3t`; a GIL 3.15 takes it too, ahead of the
+  # `cp311-abi3` one. The dependency feature turns `abi3t` on for this leg only: in the manifest it
+  # would make the abi3 leg above build `abi3t` whenever `setup-python` resolves to 3.15 or later.
+  # Its own job rather than extra cells above: the platform list differs (no cross-built macOS
+  # x86_64 -- these builds read the interpreter maturin is building against), and the abi3 leg that
+  # serves almost every install stays untouched.
   wheels-freethreaded:
-    name: wheels cp314t ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
+    name: wheels cp${{ matrix.python }} ${{ matrix.platform.runner }} ${{ matrix.platform.target }}
     runs-on: ${{ matrix.platform.runner }}
     needs: [preflight]
     if: ${{ !cancelled() && needs.preflight.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
+        python: ["3.14t", "3.15t"]
         platform:
           - { runner: ubuntu-latest, target: x86_64, smoke: true }
           - { runner: ubuntu-latest, target: aarch64 }
@@ -202,15 +205,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The manylinux/musllinux legs build inside a PyPA container that already ships
-      # /opt/python/cp314-cp314t; macOS and Windows run maturin natively and need the interpreter.
+      # /opt/python/cp31Xt-cp31Xt; macOS and Windows run maturin natively and need the interpreter.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14t"
+          python-version: ${{ matrix.python }}
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter python3.14t
+          args: >-
+            --release --out dist --interpreter python${{ matrix.python }}
+            ${{ matrix.python == '3.15t' && '--features python,pyo3/abi3t-py315' || '' }}
           manylinux: ${{ matrix.platform.manylinux || 'auto' }}
           sccache: "true"
       # The same exercise the abi3 smoke test runs, plus the one assertion only this wheel can make:
@@ -222,9 +227,9 @@ jobs:
         env:
           PYTHON_GIL: "0"
         run: |
-          python3.14t -m pip install --no-index --find-links dist lexindex
+          python${{ matrix.python }} -m pip install --no-index --find-links dist lexindex
           cd "$RUNNER_TEMP"
-          python3.14t - <<'EOF'
+          python${{ matrix.python }} - <<'EOF'
           import sys, lexindex
           assert not sys._is_gil_enabled(), "importing lexindex re-enabled the GIL"
           idx = lexindex.StringIndex(["banana", "apple"])
@@ -251,10 +256,10 @@ jobs:
           print("smoke ok:", lexindex.__version__)
           EOF
           # The command line the wheel carries, run the way a pip install runs it.
-          python3.14t -m lexindex --version
+          python${{ matrix.python }} -m lexindex --version
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: wheels-ft-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
+          name: wheels-ft-${{ matrix.python }}-${{ matrix.platform.runner }}-${{ matrix.platform.target }}-${{ matrix.platform.manylinux || 'auto' }}
           path: dist
 
   sdist:

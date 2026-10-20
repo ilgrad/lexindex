@@ -129,7 +129,7 @@ targets, `wasm32-unknown-unknown` included (leave `mmap` off there — nothing t
 ## Install
 
 ```bash
-pip install lexindex      # one abi3 wheel for CPython 3.11+, no runtime dependencies
+pip install lexindex      # wheels for CPython 3.11+, 3.14t and 3.15t+, no runtime dependencies
 ```
 
 ```toml
