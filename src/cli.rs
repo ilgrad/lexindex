@@ -1937,29 +1937,26 @@ mod tests {
         let blob = dir.join("json.bin");
         let dest = blob.to_str().unwrap();
         assert_eq!(
-            go(&["build", keys.as_str(), dest, "--index", "compact"], "").0,
+            go(&["build", keys.as_str(), dest, "--index", "dict"], "").0,
             0
         );
         let info = lexindex::inspect_file(&blob).unwrap();
         let (code, out, err) = go(&["inspect", dest, "--json"], "");
         assert_eq!((code, err.as_str()), (0, ""));
+        // A field the kind does not have -- a fingerprint, a perfect hash -- is left out.
         let want = format!(
-            "{{\"path\":{},\"kind\":\"CompactHashIndex\",\"format\":\"{}\",\"bytes\":{},\
-             \"keys\":500,\"fingerprint_bits\":{},\"mph_bytes\":{},\"arena_bytes\":{},\
-             \"side_entries\":{}}}\n",
+            "{{\"path\":{},\"kind\":\"DictIndex\",\"format\":\"{}\",\"bytes\":{},\
+             \"keys\":500,\"arena_bytes\":{}}}\n",
             json_str(dest),
             info.format,
             info.bytes,
-            info.fingerprint_bits.unwrap(),
-            info.mph_bytes.unwrap(),
             info.arena_bytes.unwrap(),
-            info.side_entries.unwrap(),
         );
         assert_eq!(out, want);
         // Without the flag the text is what it was.
         let (code, text, _) = go(&["inspect", dest], "");
         assert_eq!(code, 0);
-        assert!(text.starts_with("kind: CompactHashIndex\n"), "{text}");
+        assert!(text.starts_with("kind: DictIndex\n"), "{text}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
