@@ -49,6 +49,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Getting started: tutorial.md
   - Usage guide: usage.md
   - Polars plugin: polars.md
   - Upgrading to 4.0: migration-4.md

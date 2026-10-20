@@ -42,6 +42,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Documentation
 
+- **A getting-started page**, `docs/tutorial.md`, second in the site's nav: a keys file, `plan`,
+  `build`, `inspect`, then `load_mmap`, a lookup each way and a prefix query, every command with
+  the output it printed.
+- **`examples/polars_ids.py`**: a million-row string column through all four `lexindex-polars`
+  expressions and back, with the string column, the id column and the index file sized side by
+  side; linked from the plugin's README.
 - **The perfect hash's tail exhausts its 64 hash seeds only on duplicate hashes, now measured.**
   Over 10 000 random 256-key tails 9.05 % needed a second hash seed and 8.1 % of those a third —
   independent attempts, under which 64 failures are about 10⁻⁶⁷
