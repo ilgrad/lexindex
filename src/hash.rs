@@ -194,7 +194,9 @@ pub fn hash_key_bytes(b: &[u8]) -> u64 {
 ///
 /// Callers keep all 64 bits and truncate to the table width themselves; the collision side table
 /// stores the full value, so two distinct keys merge only when they collide in *both* 64-bit hashes
-/// at once (~`2^-128` per pair) — not at the `2^-(64+b)` a truncated side match would allow.
+/// at once — not at the `2^-(64+b)` a truncated side match would allow. For random keys that is
+/// ~`2^-128` a pair from 17 bytes up, but ~`2^-64` for two keys of one length up to 16 bytes,
+/// where both hashes are functions of one 64-bit product (see [`hash_pair`]).
 #[inline]
 pub(crate) fn fingerprint_full(s: &str) -> u64 {
     fingerprint_full_bytes(s.as_bytes())
@@ -211,7 +213,10 @@ pub(crate) fn fingerprint_full_bytes(b: &[u8]) -> u64 {
 /// them for the hash, and the fingerprint folds the same two with the length rotated and its
 /// own constants — so it costs a multiply and two XORs over the hash, not a second pass over
 /// the key, and the pair is a 128-bit function of the 128-bit state `(a, c)`: two keys that
-/// agree on both hashes agree on the state, at `2^-128` a pair. Every `CompactHashIndex` path
+/// agree on both hashes agree on the state, at `2^-128` a pair. Up to 16 bytes `c` is a constant,
+/// so the state is `a` and the length: `2^-64` a pair of one length, and a birthday search over
+/// `a` alone finds such a pair in ~2^32 steps (the test pair `DOUBLE_COLLIDING_PAIR`). Every
+/// `CompactHashIndex` path
 /// needs both hashes; `PerfectHashIndex::build` keeps using [`hash_key`] alone, and
 /// `build_to_file` takes both, the second for its replay digest.
 #[inline]
@@ -263,6 +268,13 @@ pub(crate) fn split_collisions(hashes: &[u64]) -> (Vec<u64>, Vec<(u64, u32)>) {
 #[cfg(test)]
 pub(crate) const COLLIDING_PAIR: (&str, &str) = ("2z4vqnm4rshfe", "6c6rjaoegwraa");
 
+/// Two distinct 16-byte strings equal in **both** hashes. To 16 bytes the lane product `c` is a
+/// constant, so both hashes are functions of the 64-bit `a` and the length, and a birthday search
+/// on `a` alone finds such a pair: Brent's cycle search over 16-character hex keys, 3.7·10⁹ steps
+/// on one core. No build can tell these keys from one key written twice.
+#[cfg(test)]
+pub(crate) const DOUBLE_COLLIDING_PAIR: (&str, &str) = ("33b6a90281824ded", "800df3e3dac02350");
+
 #[cfg(test)]
 mod golden {
     use super::{fingerprint_full, hash_key};
@@ -275,6 +287,17 @@ mod golden {
         assert_eq!(hash_key(a), 0xf2ed_3d38_004f_7110);
         // The pair collides in the slot hash only — the independent fingerprint tells them apart.
         assert_ne!(fingerprint_full(a), fingerprint_full(b));
+    }
+
+    #[test]
+    fn the_pinned_double_collision_still_collides_in_both_hashes() {
+        let (a, b) = super::DOUBLE_COLLIDING_PAIR;
+        assert_ne!(a, b);
+        assert_eq!(super::hash_pair(a), super::hash_pair(b));
+        assert_eq!(
+            super::hash_pair(a),
+            (0x7bc5_2b91_7a78_64cf, 0x3455_f15e_07c8_2605)
+        );
     }
 
     /// `f` over every input against its pinned value, all of them reported at once when any

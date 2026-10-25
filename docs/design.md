@@ -100,8 +100,15 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 `PerfectHashIndex` below) holding the **full 64-bit second hash** — not the table's truncated width —
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
-one silent case left is a pair colliding in *both* 64-bit hashes at once (`≈ 2^-128` per pair), which
-is indistinguishable from a duplicate key by construction and collapses into one entry. That rate
+one silent case left is a pair colliding in *both* 64-bit hashes at once, which is indistinguishable
+from a duplicate key by construction and collapses into one entry. For random keys of 17 bytes or
+more that is `≈ 2^-128` a pair. Up to 16 bytes the hash's second lane product is a constant, so both
+hashes are functions of one 64-bit product and the length: `≈ 2^-64` a pair of one length, or
+an expected 0.027 merges among 10⁹ such keys of one length. Chosen keys do it on purpose: a
+birthday search on that product found two 16-byte keys equal in both hashes in 3.7·10⁹ steps on one core, and from 97
+bytes a block that starts with the lane state zeroes a product, so the next eight bytes reach
+neither hash. `HashedDictIndex` knows its keys are distinct and refuses such a pair at build;
+`PerfectHashIndex` stores its keys and serves both. The `2^-128` rate also
 holds only if no *structured* difference collides in both, and the hash through 1.1 did not manage
 it: its per-word round, a 64-bit multiply and a rotate, kept a difference in the top bits of one
 word confined to the top bits of the product and dropped it into byte 3 of the next word, where

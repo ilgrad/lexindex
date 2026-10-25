@@ -58,7 +58,9 @@ pub struct ClosedHashIndex {
 
 impl ClosedHashIndex {
     /// Build from a collection of strings. Duplicates are removed; ids are arbitrary dense slots.
-    /// The build streams: it keeps 16 hashed bytes per key, never the strings.
+    /// The build streams: it keeps 16 hashed bytes per key, never the strings — so two distinct
+    /// keys equal in both 64-bit hashes are one key to it, at the rates and costs
+    /// [`CompactHashIndex::build_bits`](crate::CompactHashIndex::build_bits) states.
     pub fn build<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

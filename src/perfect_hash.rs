@@ -2098,6 +2098,21 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// Keys equal in both 64-bit hashes, which every keyless hash index must take for one key, are
+    /// two keys here: the stored keys decide.
+    #[test]
+    fn keys_sharing_both_hashes_keep_their_own_ids() {
+        let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
+        let mut keys: Vec<String> = (0..500).map(|i| format!("filler-{i:03}")).collect();
+        keys.extend([a.to_string(), b.to_string()]);
+        let idx = PerfectHashIndex::build(&keys).unwrap();
+        assert_eq!(idx.len(), 502);
+        let (ia, ib) = (idx.id(a).unwrap(), idx.id(b).unwrap());
+        assert_ne!(ia, ib);
+        assert_eq!((idx.key(ia), idx.key(ib)), (Some(a), Some(b)));
+        assert_eq!((idx.id_unchecked(a), idx.id_unchecked(b)), (ia, ib));
+    }
+
     /// A real 64-bit hash collision (the pinned pair from `crate::hash`) must build, keep ids a
     /// bijection, answer exactly for both keys on every query path, and survive serde — the whole
     /// point of the side table.

@@ -39,7 +39,8 @@ const MAX_FP_BITS: u32 = 32;
 ///
 /// - **`fingerprint_bits >= 1`**: [`id`](Self::id) answers a non-member with `Some` at a rate of
 ///   `2^-fingerprint_bits`, as [`CompactHashIndex::id`](crate::CompactHashIndex::id) does. A member
-///   always gets its own rank.
+///   always gets its own rank: a dictionary holding two keys equal in both 64-bit hashes is
+///   refused at build, at every width.
 /// - **`fingerprint_bits == 0`**: `id` is the dictionary's own search: exact, at the dictionary's
 ///   cost. The smallest sidecar, for a caller whose hot path is
 ///   [`id_unchecked`](Self::id_unchecked).
@@ -95,8 +96,10 @@ impl HashedDictIndex {
     /// while the perfect hash is built over the distinct hashes and the ranks are written at their
     /// slots. The same dictionary and width give the same blob, byte for byte, on any machine.
     /// Two keys that collide in the 64-bit key hash are served exactly, from a side table keyed by
-    /// the full second hash; keys colliding in both 64-bit hashes at once, `≈ 2^-128` a pair, are
-    /// told apart only at `fingerprint_bits == 0`.
+    /// the full second hash. Two keys colliding in both at once — `≈ 2^-64` a pair of one length
+    /// up to 16 bytes, `≈ 2^-128` longer, and cheap to make for whoever chooses the keys (see
+    /// [`CompactHashIndex::build_bits`](crate::CompactHashIndex::build_bits)) — would share a rank,
+    /// so the build refuses them with [`IndexError::Build`].
     pub fn from_dict(dict: DictIndex, fingerprint_bits: u32) -> Result<Self, IndexError> {
         Self::from_shared_dict(Arc::new(dict), fingerprint_bits)
     }
@@ -151,24 +154,36 @@ impl HashedDictIndex {
             .collect();
         collided.dedup();
         hashes.dedup();
-        let m = hashes.len();
-        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-        let mph = Mphf::build_with_threads(&hashes, threads)?;
-        drop(hashes);
 
-        // Every key of a shared hash but the lowest-ranked goes to the side table.
+        // Every key of a shared hash but the lowest-ranked goes to the side table, which tells
+        // them apart by the second hash. A dictionary's keys are distinct, so two of them that
+        // share the second hash too are a collision in both, which nothing here can serve.
         let mut side: Vec<(u64, u64, u64)> = Vec::new();
         if !collided.is_empty() {
             let mut owned = vec![false; collided.len()];
+            let mut members: Vec<(u64, u64)> = Vec::new();
             for (rank, &(h, full)) in pairs.iter().enumerate() {
                 if let Ok(g) = collided.binary_search(&h) {
                     if owned[g] {
                         side.push((h, full, rank as u64));
                     }
                     owned[g] = true;
+                    members.push((h, full));
                 }
             }
+            members.sort_unstable();
+            if members.windows(2).any(|w| w[0] == w[1]) {
+                return Err(IndexError::Build(
+                    "hashed-dict: two keys share both 64-bit hashes, so no width can tell them \
+                     apart; a PerfectHashIndex or the DictIndex alone serves them exactly",
+                ));
+            }
         }
+
+        let m = hashes.len();
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let mph = Mphf::build_with_threads(&hashes, threads)?;
+        drop(hashes);
         // Each hash becomes its slot, on every thread when there are enough keys to share out.
         let slots = |part: &mut [(u64, u64)]| part.iter_mut().for_each(|p| p.0 = mph.index(p.0));
         if threads <= 1 || n < threads * 4096 {
@@ -873,6 +888,24 @@ mod tests {
         let dict = DictIndex::build(["a", "b"]).unwrap();
         let err = HashedDictIndex::from_dict(dict, 33).unwrap_err();
         assert!(err.to_string().contains("0..=32"), "{err}");
+    }
+
+    /// Two keys equal in both 64-bit hashes cannot both keep their ranks — the side table
+    /// matches on the pair, and answered both with the second key's rank — so the build refuses
+    /// them, at every width: a dictionary's keys are distinct, so equal pairs are a collision.
+    #[test]
+    fn keys_sharing_both_hashes_are_refused_at_every_width() {
+        let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
+        let mut keys = words(500);
+        keys.extend([a.to_string(), b.to_string()]);
+        for bits in [0u32, 1, 8, 16] {
+            let dict = DictIndex::build(&keys).unwrap();
+            let err = HashedDictIndex::from_dict(dict, bits).unwrap_err();
+            assert!(
+                err.to_string().contains("both 64-bit hashes"),
+                "bits={bits}: {err}"
+            );
+        }
     }
 
     /// The pinned 64-bit key-hash collision: both keys keep their own ranks at every width,

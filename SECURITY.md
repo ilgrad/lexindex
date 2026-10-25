@@ -88,10 +88,15 @@ deliberately re-checksummed.
 
 **The hashes are unseeded and deterministic**, because that is what makes a serialised index
 reloadable. Someone who chooses the keys or the queries can therefore search offline for collisions
-and for `CompactHashIndex` false positives. Neither is a memory-safety problem — a hash collision
-costs a side-table probe, and construction cannot be made to fail by one — but lexindex is not a
-HashDoS defence and must not be used as one. If your keys come from an adversary and lookup latency
-is a resource you are protecting, put a keyed hash in front.
+and for `CompactHashIndex` false positives. Neither is a memory-safety problem, and a collision in
+one of the two 64-bit hashes costs a side-table probe — but a collision in **both** at once costs
+correctness, and it is cheap for whoever chooses the keys: a birthday search finds two 16-byte keys
+equal in both hashes in ~2^32 hash steps, minutes on one core, and keys of 97 bytes or more need a
+few dozen tries. `CompactHashIndex` and `ClosedHashIndex` give such keys one id; `HashedDictIndex`
+refuses to build over them; `PerfectHashIndex` and the ordered indexes are not affected. lexindex
+is not a HashDoS defence and must not be used as one. If a third party chooses your keys, build a
+`PerfectHashIndex` or an ordered index over them; if lookup latency is a resource you are
+protecting, put a keyed hash in front.
 
 **`unsafe` is mapping, page allocation, reads whose bound is an invariant rather than a check,
 and a call into code built for an instruction the CPU was checked for.** The library contains
@@ -160,7 +165,8 @@ fuzzes it for ten minutes across all of them, starting from the seeds.
   stranger's id there.** Removal is by id, and a false positive can supply one; both methods
   document it, and the base alone would have answered the same. `Overlay::retire_id` takes the id
   and no key, so a caller that keeps the ids it was issued has a removal nothing can mislead.
-- **Hash collisions found offline.** See above.
+- **Hash collisions found offline**, including keys equal in both hashes that a keyless hash index
+  takes for one key. See above: choose the index for keys you do not control accordingly.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set
   you hand in, not to a number a blob claims.
 

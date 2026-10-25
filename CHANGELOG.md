@@ -37,7 +37,25 @@ All notable changes to this project are documented here. The format follows
   not always the same bytes. `plan` prices the merged arena from a sample and reads high where the
   overlap grows with `n`: 9.67 bytes a key on the dictionary against 9.25 built.
 
+### Fixed
+
+- **`HashedDictIndex` refuses a dictionary holding two keys equal in both 64-bit hashes** with
+  `IndexError::Build`, at every width. Its side table matched on the pair, so both keys were
+  answered with one rank — by `id` from one fingerprint bit up and by `id_unchecked` at any
+  width. A dictionary's keys are distinct, so equal pairs there are a collision, never a
+  duplicate; the check reads only keys that already share the first hash, so no other build
+  changes, byte for byte.
+
 ### Documentation
+
+- **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes
+  both hashes are functions of one 64-bit product and the length, so two random keys of one
+  length share both at `≈ 2^-64` a pair, not the `≈ 2^-128` the docs gave — an expected 0.027
+  merges among 10⁹ such keys. Chosen keys do it on purpose: a birthday search found a 16-byte
+  pair in 3.7·10⁹ steps on one core, and from 97 bytes a block that repeats the lane state needs
+  a few dozen tries. `CompactHashIndex` and `ClosedHashIndex` give such keys one id, as they
+  always did; `SECURITY.md`, `docs/design.md` and the build docs now say so and name
+  `PerfectHashIndex` for keys a third party chooses.
 
 - **A getting-started page**, `docs/tutorial.md`, second in the site's nav: a keys file, `plan`,
   `build`, `inspect`, then `load_mmap`, a lookup each way and a prefix query, every command with
