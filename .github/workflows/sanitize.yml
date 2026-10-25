@@ -26,7 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # `--target` is required: without it the sanitizer flags also instrument build scripts and
       # proc-macros, which then run under an uninstrumented host and fail to link.
       # `--lib --tests` skips doctests: rustdoc does not link the sanitizer runtime into the
@@ -51,7 +51,7 @@ jobs:
         with:
           toolchain: nightly
           components: miri
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Deliberately narrow: the interpreter is orders of magnitude slower than the machine, so it
       # goes where lexindex does its own byte-range and pointer work — `blob` (the shared,
       # range-limited views every index borrows from) and `subsequence` (the automaton's index
@@ -153,7 +153,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # `--release`: the battery is tens of millions of hashes and a debug build turns tens of
       # seconds into tens of minutes. The runner has no `/usr/share/dict/words`, so the corpus
       # families are generated -- the battery says which it ran on in its first lines.
