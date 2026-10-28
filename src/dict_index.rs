@@ -162,7 +162,7 @@ pub struct DictIndex {
     /// The first eight bytes of each head as a big-endian word, so a search compares heads only
     /// inside the run of blocks that share the probe's.
     ///
-    /// The one section a mapping does not borrow. Two binary searches over it open every lookup,
+    /// The one section a mapping does not borrow. A binary search over it opens every lookup,
     /// and `<[u64]>::partition_point` is the only form of that search that keeps its steps out of
     /// the branch predictor: it selects with `hint::select_unpredictable`, which needs a `u64`
     /// slice and so an alignment a section of a blob does not have. Reading the words out of the
@@ -3268,7 +3268,7 @@ impl DictIndex {
         }
     }
 
-    /// [`sample_range`] and [`run_boundary`](Self::run_boundary) for one probe whose sample is
+    /// [`sample_range`] and the head compare after it, for one probe whose sample is
     /// `s`. A run of equal samples that has a trie is not measured: its root knows where it ends,
     /// and on paths the gallop to that end was two dozen steps of a lookup. Only a run of
     /// [`MIN_RUN`] or more can have one, and the sample `MIN_RUN - 1` past the first says whether
@@ -3345,19 +3345,6 @@ impl DictIndex {
             place_prefix(&raw.prefix, self.blocks_len(), query)?;
         }
         Ok(sample_at(query, raw.g))
-    }
-
-    /// [`head_boundary`](Self::head_boundary) over a run of equal samples `[lo, hi)`, placed by the
-    /// run's [`Ties`] where it has them: one head compare for the whole run rather than one a
-    /// halving of it. With the boundary, what [`Ties::boundary`] knows of the head below it.
-    #[inline]
-    fn run_boundary(&self, probe: &[u8], lo: usize, hi: usize) -> (usize, Option<(usize, usize)>) {
-        if hi - lo >= MIN_RUN {
-            if let Some(placed) = self.tie_boundary(probe, lo) {
-                return placed;
-            }
-        }
-        (self.head_boundary(probe, lo, hi), None)
     }
 
     /// [`Ties::boundary`] for the run of equal samples that starts at block `lo`, if it has a trie.
@@ -3811,7 +3798,6 @@ impl DictIndex {
         let rounds = usize::BITS as usize - nb.leading_zeros() as usize + 1;
         let mut s = [0u64; LANES];
         let (mut lo_at, mut lo_len) = ([0usize; LANES], [0usize; LANES]);
-        let (mut hi_at, mut hi_len) = ([0usize; LANES], [0usize; LANES]);
         let mut bound = [0usize; LANES];
         // The boundary of a lane the samples cannot place, and `usize::MAX` for one they can.
         let mut fixed = [0usize; LANES];
@@ -3822,16 +3808,18 @@ impl DictIndex {
                     Ok(sample) => {
                         s[j] = sample;
                         fixed[j] = usize::MAX;
-                        (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, nb, 0, nb);
+                        (lo_at[j], lo_len[j]) = (0, nb);
                     }
                     Err(l) => {
                         fixed[j] = l;
-                        (lo_at[j], lo_len[j], hi_at[j], hi_len[j]) = (0, 0, 0, 0);
+                        (lo_at[j], lo_len[j]) = (0, 0);
                     }
                 }
             }
-            // `lo` is the first sample not below the probe's, `hi` the first above it — the two
-            // `partition_point`s `locate` makes, run for every lane at once.
+            // `lo` is the first sample not below the probe's — the `partition_point` `locate`
+            // makes, run for every lane at once. The first sample above it is not searched for
+            // too: where no sample equals the probe's it is `lo`, so one compare says so, and a
+            // second search would only repeat the first's loads.
             for _ in 0..rounds {
                 for j in 0..m {
                     if lo_len[j] > 0 {
@@ -3843,25 +3831,24 @@ impl DictIndex {
                             lo_len[j] = half;
                         }
                     }
-                    if hi_len[j] > 0 {
-                        let half = hi_len[j] >> 1;
-                        if self.samples[hi_at[j] + half] <= s[j] {
-                            hi_at[j] += half + 1;
-                            hi_len[j] -= half + 1;
-                        } else {
-                            hi_len[j] = half;
-                        }
-                    }
                 }
             }
-            // As in `sample_range`: only a run of samples equal to the lane's has heads to compare.
+            // As in `sample_boundary`: only a run of samples equal to the lane's has heads to
+            // compare, and a run long enough to have a trie is placed by it, unmeasured.
             for j in 0..m {
                 bound[j] = if fixed[j] != usize::MAX {
                     fixed[j]
-                } else if hi_at[j] == lo_at[j] {
+                } else if self.samples.get(lo_at[j]) != Some(&s[j]) {
                     lo_at[j]
                 } else {
-                    self.run_boundary(key(base + j), lo_at[j], hi_at[j]).0
+                    let (lo, probe) = (lo_at[j], key(base + j));
+                    let placed = (self.samples.get(lo + MIN_RUN - 1) == Some(&s[j]))
+                        .then(|| self.tie_boundary(probe, lo))
+                        .flatten();
+                    match placed {
+                        Some((b, _)) => b,
+                        None => self.head_boundary(probe, lo, past_equal(&self.samples, lo, s[j])),
+                    }
                 };
             }
             // The block start is one load and the data it names another, so they are pulled in as
@@ -6100,6 +6087,37 @@ mod tests {
             vec![None; LANES + 1],
             "an empty index still answers once per key"
         );
+    }
+
+    /// Runs of blocks whose samples are all equal, of every length that changes the lanes' path —
+    /// one block, one short of a run with a trie, exactly one, one past, and a long run that ends
+    /// at the last block — answered by the batch as `id` answers them, routed or not, built or
+    /// loaded (a load derives the tries).
+    #[test]
+    fn a_batch_places_probes_in_runs_of_equal_samples_as_id_does() {
+        let block = 4;
+        let mut keys = Vec::new();
+        for (group, run) in [1, MIN_RUN - 1, MIN_RUN, MIN_RUN + 1, 3 * MIN_RUN]
+            .iter()
+            .enumerate()
+        {
+            // Eight shared bytes after the group's own two: every head of the group samples alike.
+            keys.extend((0..run * block).map(|i| format!("{group:02}same-run{i:05}")));
+        }
+        let mut queries = keys.clone();
+        for k in &keys {
+            queries.push(format!("{k}\u{7f}"));
+            queries.push(format!("{}~", &k[..k.len() - 1]));
+            queries.push(k[..10].to_string());
+        }
+        queries.extend(["", "00", "99", "02same-run", "04same-run99999~"].map(String::from));
+        let built = DictIndex::build_with_block(&keys, block).unwrap();
+        let loaded = DictIndex::from_bytes(&built.to_bytes()).unwrap();
+        assert!(loaded.ties.is_some(), "the long runs have tries");
+        batch_matches(&built, &queries, "built");
+        batch_matches(&loaded, &queries, "loaded");
+        loaded.route_microblocks();
+        batch_matches(&loaded, &queries, "loaded, routed");
     }
 
     /// [`DictIndex::ids_of`] answers `queries` as [`DictIndex::id`] does one at a time.

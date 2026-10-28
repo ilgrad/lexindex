@@ -53,6 +53,15 @@ All notable changes to this project are documented here. The format follows
   duplicate; the check reads only keys that already share the first hash, so no other build
   changes, byte for byte.
 
+### Changed
+
+- **`DictIndex::ids_of` places each probe with one binary search over the samples, not two.** A
+  lane searched for its first sample past the probe and again for its last one at or before it;
+  the second search is now one compare against the sample it already found, or one step into the
+  trie of a run of equal samples. The same answers, checked on six corpora by a checksum over
+  every id; 7.2–9.8 % fewer instructions a key on six corpus and block configurations, counted
+  with `perf stat -e instructions:u`. Time waits for a quiet machine and is not claimed here.
+
 ### Documentation
 
 - **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes
