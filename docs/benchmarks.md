@@ -2220,6 +2220,17 @@ million keys and 3.24 at ten million, where a rank takes 24 bits. And it builds 
 corpus, from 1.19× on `words` to 5.7× on `dna` at ten million, in 1.31–2.48× the time of the
 dictionary alone.
 
+**Its build needs no more memory than the dictionary's.** The sidecar holds a 16-byte hash pair a
+key and the table, and builds after the dictionary has freed its own buffers, so the dictionary's
+build is the high-water mark. Measured on the thirteen corpora at a million keys and six at ten
+million (`cargo run --release --example peak -- hashed 0 <bits>` with `LEXINDEX_PEAK_KEYS` naming
+the corpus file, one process a cell), the build adds 88–191 bytes a key over the key list at a
+million keys and 31–73 at ten million, and at ten million every width's peak is its dictionary
+phase's to the byte. At a million keys the sidecar raises the peak on nine corpora of thirteen, by
+0.1–5.1 bytes a key, the most on `titles-zh`; the same dictionary built in two processes reads up
+to 8 bytes a key apart, so the gap is the allocator's size, not the sidecar's
+([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/peak-hashed-2026-10-28-arz-8c92679.txt)).
+
 **What it does not do.** XCDAT answers a stranger exactly. `HashedDictIndex` does only through the
 dictionary's search — `id` at zero bits, the `Dict` 256 column, which `dict().route_microblocks()`
 routes like any other `DictIndex` — so for a stranger the exact searches earlier in this section are

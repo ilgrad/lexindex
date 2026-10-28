@@ -1,7 +1,8 @@
 //! Peak resident memory of a single index build, measured in-process on Linux.
 //!
-//! Run with `cargo run --release --example peak -- <string|string-sorted|perfect|compact> [n]
-//! [fp_bytes]` (`fp_bytes` ∈ {1, 2, 4} applies to `compact` only). Peak RSS is a high-water mark, so
+//! Run with `cargo run --release --example peak -- <string|string-sorted|perfect|compact|dict|hashed>
+//! [n] [fp]` (`fp` is `compact`'s fingerprint bytes, 1, 2 or 4, default 1, or `hashed`'s
+//! fingerprint bits, 0 to 32, default 8; the others ignore it). Peak RSS is a high-water mark, so
 //! one index per process: measuring two in one run would report only the larger one. The driver that
 //! fills the CHANGELOG table therefore invokes this example once per index.
 //!
@@ -22,9 +23,9 @@
 //! Keys are the same real dictionary-word bigrams `examples/bench.rs` uses; synthetic sequences
 //! would understate the arena and flatter every structure.
 
-use lexindex::StringIndex;
 #[cfg(feature = "mph")]
-use lexindex::{CompactHashIndex, PerfectHashIndex};
+use lexindex::{CompactHashIndex, HashedDictIndex, PerfectHashIndex};
+use lexindex::{DictIndex, StringIndex};
 
 /// The kernel's own high-water mark for this process, in bytes (`VmHWM` from `/proc/self/status`).
 /// Linux-only by design: this is a diagnostic example, not shipped library code.
@@ -185,10 +186,12 @@ fn main() {
         .next()
         .and_then(|a| a.parse().ok())
         .unwrap_or(2_000_000);
-    // `compact` only: the fingerprint width, in bytes. The build's peak is expected to move by
-    // exactly this much per key, which is how the documented formula gets checked.
+    // `compact`: the fingerprint width in bytes, whose build peak is expected to move by exactly
+    // this much per key, which is how the documented formula gets checked. `hashed`: in bits.
     #[cfg(feature = "mph")]
-    let fp_bytes: usize = args.next().and_then(|a| a.parse().ok()).unwrap_or(1);
+    let fp: Option<u32> = args.next().and_then(|a| a.parse().ok());
+    #[cfg(feature = "mph")]
+    let fp_bytes = fp.unwrap_or(1) as usize;
 
     // Two dispatches, split by the thing being measured: the streaming modes below never let a key
     // list exist, so their `keys` column is the process baseline and not the corpus. The
@@ -332,11 +335,20 @@ fn main() {
         return;
     }
 
-    let vocab = load_vocab();
-    let keys = make_keys(n, &vocab);
+    // `LEXINDEX_PEAK_KEYS` names a file of one key a line to build over instead of the bigrams,
+    // and `n` is then its line count: the bigrams are long and alike, and a corpus of short keys
+    // gives the same build a different peak.
+    let keys = match std::env::var_os("LEXINDEX_PEAK_KEYS") {
+        Some(path) => std::fs::read_to_string(&path)
+            .expect("LEXINDEX_PEAK_KEYS names a readable UTF-8 file")
+            .lines()
+            .map(str::to_owned)
+            .collect(),
+        None => make_keys(n, &load_vocab()),
+    };
+    let n = keys.len();
     // The vocabulary is dead once the keys exist, and the reset comes after both facts so that
     // `keys_rss` is the key list at rest rather than the largest the process ever happened to be.
-    drop(vocab);
     reset_peak_rss();
     let keys_rss = peak_rss();
 
@@ -347,6 +359,34 @@ fn main() {
             let build_ms = t0.elapsed().as_secs_f64() * 1e3;
             let blob = idx.serialized_len();
             report("StringIndex", n, keys_rss, blob, build_ms);
+            std::hint::black_box(idx);
+        }
+        "dict" => {
+            let t0 = std::time::Instant::now();
+            let idx = DictIndex::build(&keys).unwrap();
+            let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+            let blob = idx.serialized_len();
+            report("DictIndex", n, keys_rss, blob, build_ms);
+            std::hint::black_box(idx);
+        }
+        // The dictionary first, reported on its own: the high-water mark only rises, so the second
+        // line's peak is the larger of the two phases, and the first says which one it was.
+        #[cfg(feature = "mph")]
+        "hashed" => {
+            let t0 = std::time::Instant::now();
+            let dict = DictIndex::build(&keys).unwrap();
+            report(
+                "  dict phase",
+                n,
+                keys_rss,
+                dict.serialized_len(),
+                t0.elapsed().as_secs_f64() * 1e3,
+            );
+            let bits = fp.unwrap_or(8);
+            let idx = HashedDictIndex::from_dict(dict, bits).unwrap();
+            let build_ms = t0.elapsed().as_secs_f64() * 1e3;
+            let blob = idx.serialized_len();
+            report(&format!("HashedDict/{bits}"), n, keys_rss, blob, build_ms);
             std::hint::black_box(idx);
         }
         #[cfg(feature = "mph")]
@@ -376,7 +416,7 @@ fn main() {
         other => {
             eprintln!(
                 "unknown index {other:?}; expected string, string-sorted[-sparse][-gen], \
-                 perfect or compact"
+                 perfect, compact, dict or hashed"
             );
             std::process::exit(1);
         }

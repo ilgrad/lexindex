@@ -1,0 +1,156 @@
+# HashedDictIndex build peak vs DictIndex, examples/peak.rs (dict, hashed 0/8/16), LEXINDEX_PEAK_KEYS=<corpus file>
+# lexindex 8c92679 plus the peak.rs modes added with this file; one process a line; 'build adds' = VmHWM after the build minus VmHWM after the keys loaded (reset between).
+# The ms columns were taken on a busy machine (bench-ready.sh exit 1) and are not quoted anywhere.
+
+## words-full
+DictIndex    n    479823  build   343.2 ms  keys    30.0 MB ( 62.5 B/key)  peak    77.0 MB (160.5 B/key)  build adds    47.0 MB ( 98.0 B/key)  blob  2.64 B/key
+  dict phase n    479823  build   319.1 ms  keys    29.9 MB ( 62.4 B/key)  peak    76.6 MB (159.6 B/key)  build adds    46.7 MB ( 97.2 B/key)  blob  2.64 B/key
+HashedDict/0 n    479823  build   378.7 ms  keys    29.9 MB ( 62.4 B/key)  peak    77.2 MB (160.9 B/key)  build adds    47.3 MB ( 98.5 B/key)  blob  5.25 B/key
+  dict phase n    479823  build   319.7 ms  keys    29.8 MB ( 62.0 B/key)  peak    77.2 MB (160.8 B/key)  build adds    47.4 MB ( 98.8 B/key)  blob  2.64 B/key
+HashedDict/8 n    479823  build   384.5 ms  keys    29.8 MB ( 62.0 B/key)  peak    77.2 MB (160.8 B/key)  build adds    47.4 MB ( 98.8 B/key)  blob  6.25 B/key
+  dict phase n    479823  build   344.6 ms  keys    29.8 MB ( 62.2 B/key)  peak    77.0 MB (160.5 B/key)  build adds    47.2 MB ( 98.3 B/key)  blob  2.64 B/key
+HashedDict/16 n    479823  build   404.0 ms  keys    29.8 MB ( 62.2 B/key)  peak    79.2 MB (165.0 B/key)  build adds    49.3 MB (102.8 B/key)  blob  7.25 B/key
+## dna-1000000
+DictIndex    n   1000000  build   861.2 ms  keys    59.1 MB ( 59.1 B/key)  peak   181.0 MB (181.0 B/key)  build adds   121.9 MB (121.9 B/key)  blob  4.37 B/key
+  dict phase n   1000000  build   841.1 ms  keys    58.7 MB ( 58.7 B/key)  peak   181.5 MB (181.5 B/key)  build adds   122.8 MB (122.8 B/key)  blob  4.37 B/key
+HashedDict/0 n   1000000  build  1014.3 ms  keys    58.7 MB ( 58.7 B/key)  peak   181.8 MB (181.8 B/key)  build adds   123.1 MB (123.1 B/key)  blob  7.12 B/key
+  dict phase n   1000000  build  1392.1 ms  keys    59.2 MB ( 59.2 B/key)  peak   180.8 MB (180.8 B/key)  build adds   121.5 MB (121.5 B/key)  blob  4.37 B/key
+HashedDict/8 n   1000000  build  1528.8 ms  keys    59.2 MB ( 59.2 B/key)  peak   181.0 MB (181.0 B/key)  build adds   121.8 MB (121.8 B/key)  blob  8.12 B/key
+  dict phase n   1000000  build   814.9 ms  keys    59.0 MB ( 59.0 B/key)  peak   180.6 MB (180.6 B/key)  build adds   121.5 MB (121.5 B/key)  blob  4.37 B/key
+HashedDict/16 n   1000000  build   983.7 ms  keys    59.0 MB ( 59.0 B/key)  peak   180.8 MB (180.8 B/key)  build adds   121.8 MB (121.8 B/key)  blob  9.12 B/key
+## domains-1000000
+DictIndex    n   1000000  build   905.5 ms  keys    59.4 MB ( 59.4 B/key)  peak   208.4 MB (208.4 B/key)  build adds   149.0 MB (149.0 B/key)  blob  4.50 B/key
+  dict phase n   1000000  build   928.8 ms  keys    59.1 MB ( 59.1 B/key)  peak   207.7 MB (207.7 B/key)  build adds   148.6 MB (148.6 B/key)  blob  4.50 B/key
+HashedDict/0 n   1000000  build  1069.2 ms  keys    59.1 MB ( 59.1 B/key)  peak   209.2 MB (209.2 B/key)  build adds   150.1 MB (150.1 B/key)  blob  7.24 B/key
+  dict phase n   1000000  build   879.1 ms  keys    59.5 MB ( 59.5 B/key)  peak   208.2 MB (208.2 B/key)  build adds   148.7 MB (148.7 B/key)  blob  4.50 B/key
+HashedDict/8 n   1000000  build  1039.1 ms  keys    59.5 MB ( 59.5 B/key)  peak   209.3 MB (209.3 B/key)  build adds   149.8 MB (149.8 B/key)  blob  8.24 B/key
+  dict phase n   1000000  build  1617.1 ms  keys    59.1 MB ( 59.1 B/key)  peak   208.6 MB (208.6 B/key)  build adds   149.5 MB (149.5 B/key)  blob  4.50 B/key
+HashedDict/16 n   1000000  build  1851.3 ms  keys    59.1 MB ( 59.1 B/key)  peak   209.9 MB (209.9 B/key)  build adds   150.9 MB (150.9 B/key)  blob  9.24 B/key
+## idents-1000000
+DictIndex    n   1000000  build  1127.0 ms  keys    63.0 MB ( 63.0 B/key)  peak   216.1 MB (216.1 B/key)  build adds   153.1 MB (153.1 B/key)  blob  5.23 B/key
+  dict phase n   1000000  build  1110.8 ms  keys    63.2 MB ( 63.2 B/key)  peak   216.0 MB (216.0 B/key)  build adds   152.7 MB (152.7 B/key)  blob  5.23 B/key
+HashedDict/0 n   1000000  build  1259.7 ms  keys    63.2 MB ( 63.2 B/key)  peak   216.1 MB (216.1 B/key)  build adds   152.9 MB (152.9 B/key)  blob  7.97 B/key
+  dict phase n   1000000  build  1070.9 ms  keys    63.3 MB ( 63.3 B/key)  peak   216.7 MB (216.7 B/key)  build adds   153.4 MB (153.4 B/key)  blob  5.23 B/key
+HashedDict/8 n   1000000  build  1225.4 ms  keys    63.3 MB ( 63.3 B/key)  peak   216.8 MB (216.8 B/key)  build adds   153.6 MB (153.6 B/key)  blob  8.97 B/key
+  dict phase n   1000000  build  1062.6 ms  keys    63.1 MB ( 63.1 B/key)  peak   216.2 MB (216.2 B/key)  build adds   153.1 MB (153.1 B/key)  blob  5.23 B/key
+HashedDict/16 n   1000000  build  1227.2 ms  keys    63.1 MB ( 63.1 B/key)  peak   216.5 MB (216.5 B/key)  build adds   153.3 MB (153.3 B/key)  blob  9.97 B/key
+## numeric-1000000
+DictIndex    n   1000000  build  1407.3 ms  keys    59.2 MB ( 59.2 B/key)  peak   145.7 MB (145.7 B/key)  build adds    86.6 MB ( 86.6 B/key)  blob  1.01 B/key
+  dict phase n   1000000  build   807.5 ms  keys    59.0 MB ( 59.0 B/key)  peak   146.5 MB (146.5 B/key)  build adds    87.5 MB ( 87.5 B/key)  blob  1.01 B/key
+HashedDict/0 n   1000000  build   978.9 ms  keys    59.0 MB ( 59.0 B/key)  peak   147.7 MB (147.7 B/key)  build adds    88.7 MB ( 88.7 B/key)  blob  3.75 B/key
+  dict phase n   1000000  build   760.6 ms  keys    59.2 MB ( 59.2 B/key)  peak   146.4 MB (146.4 B/key)  build adds    87.3 MB ( 87.3 B/key)  blob  1.01 B/key
+HashedDict/8 n   1000000  build   911.9 ms  keys    59.2 MB ( 59.2 B/key)  peak   147.5 MB (147.5 B/key)  build adds    88.3 MB ( 88.3 B/key)  blob  4.75 B/key
+  dict phase n   1000000  build   754.4 ms  keys    59.2 MB ( 59.2 B/key)  peak   146.7 MB (146.7 B/key)  build adds    87.6 MB ( 87.6 B/key)  blob  1.01 B/key
+HashedDict/16 n   1000000  build   910.4 ms  keys    59.2 MB ( 59.2 B/key)  peak   147.9 MB (147.9 B/key)  build adds    88.7 MB ( 88.7 B/key)  blob  5.75 B/key
+## opaque-1000000
+DictIndex    n   1000000  build   883.7 ms  keys    59.2 MB ( 59.2 B/key)  peak   204.0 MB (204.0 B/key)  build adds   144.8 MB (144.8 B/key)  blob 10.40 B/key
+  dict phase n   1000000  build   996.6 ms  keys    58.8 MB ( 58.8 B/key)  peak   204.9 MB (204.9 B/key)  build adds   146.1 MB (146.1 B/key)  blob 10.40 B/key
+HashedDict/0 n   1000000  build  1154.2 ms  keys    58.8 MB ( 58.8 B/key)  peak   205.2 MB (205.2 B/key)  build adds   146.4 MB (146.4 B/key)  blob 13.14 B/key
+  dict phase n   1000000  build   624.8 ms  keys    59.2 MB ( 59.2 B/key)  peak   204.9 MB (204.9 B/key)  build adds   145.7 MB (145.7 B/key)  blob 10.40 B/key
+HashedDict/8 n   1000000  build   732.4 ms  keys    59.2 MB ( 59.2 B/key)  peak   205.1 MB (205.1 B/key)  build adds   145.9 MB (145.9 B/key)  blob 14.14 B/key
+  dict phase n   1000000  build   550.5 ms  keys    59.0 MB ( 59.0 B/key)  peak   205.8 MB (205.8 B/key)  build adds   146.8 MB (146.8 B/key)  blob 10.40 B/key
+HashedDict/16 n   1000000  build   661.0 ms  keys    59.0 MB ( 59.0 B/key)  peak   206.1 MB (206.1 B/key)  build adds   147.1 MB (147.1 B/key)  blob 15.14 B/key
+## paths-1000000
+DictIndex    n   1000000  build  1356.9 ms  keys   167.9 MB (167.9 B/key)  peak   318.6 MB (318.6 B/key)  build adds   150.7 MB (150.7 B/key)  blob  9.87 B/key
+  dict phase n   1000000  build  2109.8 ms  keys   167.7 MB (167.7 B/key)  peak   318.9 MB (318.9 B/key)  build adds   151.1 MB (151.1 B/key)  blob  9.87 B/key
+HashedDict/0 n   1000000  build  2397.7 ms  keys   167.7 MB (167.7 B/key)  peak   318.9 MB (318.9 B/key)  build adds   151.1 MB (151.1 B/key)  blob 12.61 B/key
+  dict phase n   1000000  build  1267.4 ms  keys   167.9 MB (167.9 B/key)  peak   319.9 MB (319.9 B/key)  build adds   152.0 MB (152.0 B/key)  blob  9.87 B/key
+HashedDict/8 n   1000000  build  1480.9 ms  keys   167.9 MB (167.9 B/key)  peak   319.9 MB (319.9 B/key)  build adds   152.0 MB (152.0 B/key)  blob 13.61 B/key
+  dict phase n   1000000  build  1550.2 ms  keys   167.9 MB (167.9 B/key)  peak   326.8 MB (326.8 B/key)  build adds   158.9 MB (158.9 B/key)  blob  9.87 B/key
+HashedDict/16 n   1000000  build  1785.6 ms  keys   167.9 MB (167.9 B/key)  peak   326.8 MB (326.8 B/key)  build adds   158.9 MB (158.9 B/key)  blob 14.61 B/key
+## pypi-full
+DictIndex    n    889864  build  1371.6 ms  keys    54.4 MB ( 61.1 B/key)  peak   178.1 MB (200.2 B/key)  build adds   123.7 MB (139.1 B/key)  blob  4.17 B/key
+  dict phase n    889864  build   707.5 ms  keys    54.1 MB ( 60.8 B/key)  peak   178.6 MB (200.7 B/key)  build adds   124.5 MB (139.9 B/key)  blob  4.17 B/key
+HashedDict/0 n    889864  build   855.7 ms  keys    54.1 MB ( 60.8 B/key)  peak   179.9 MB (202.1 B/key)  build adds   125.7 MB (141.3 B/key)  blob  6.91 B/key
+  dict phase n    889864  build   602.7 ms  keys    54.4 MB ( 61.2 B/key)  peak   178.3 MB (200.4 B/key)  build adds   123.8 MB (139.2 B/key)  blob  4.17 B/key
+HashedDict/8 n    889864  build   717.3 ms  keys    54.4 MB ( 61.2 B/key)  peak   179.8 MB (202.1 B/key)  build adds   125.4 MB (140.9 B/key)  blob  7.91 B/key
+  dict phase n    889864  build   675.0 ms  keys    54.3 MB ( 61.0 B/key)  peak   179.0 MB (201.2 B/key)  build adds   124.7 MB (140.2 B/key)  blob  4.17 B/key
+HashedDict/16 n    889864  build   790.8 ms  keys    54.3 MB ( 61.0 B/key)  peak   180.3 MB (202.6 B/key)  build adds   125.9 MB (141.5 B/key)  blob  8.91 B/key
+## titles-en-1000000
+DictIndex    n   1000000  build   989.9 ms  keys    64.8 MB ( 64.8 B/key)  peak   236.7 MB (236.7 B/key)  build adds   171.9 MB (171.9 B/key)  blob  7.37 B/key
+  dict phase n   1000000  build  1016.0 ms  keys    65.2 MB ( 65.2 B/key)  peak   237.1 MB (237.1 B/key)  build adds   171.9 MB (171.9 B/key)  blob  7.37 B/key
+HashedDict/0 n   1000000  build  1147.2 ms  keys    65.2 MB ( 65.2 B/key)  peak   237.3 MB (237.3 B/key)  build adds   172.1 MB (172.1 B/key)  blob 10.11 B/key
+  dict phase n   1000000  build  1040.9 ms  keys    65.2 MB ( 65.2 B/key)  peak   237.3 MB (237.3 B/key)  build adds   172.0 MB (172.0 B/key)  blob  7.37 B/key
+HashedDict/8 n   1000000  build  1570.6 ms  keys    65.2 MB ( 65.2 B/key)  peak   237.5 MB (237.5 B/key)  build adds   172.3 MB (172.3 B/key)  blob 11.11 B/key
+  dict phase n   1000000  build  1370.8 ms  keys    65.1 MB ( 65.1 B/key)  peak   237.4 MB (237.4 B/key)  build adds   172.3 MB (172.3 B/key)  blob  7.37 B/key
+HashedDict/16 n   1000000  build  1539.8 ms  keys    65.1 MB ( 65.1 B/key)  peak   237.5 MB (237.5 B/key)  build adds   172.4 MB (172.4 B/key)  blob 12.11 B/key
+## titles-ru-1000000
+DictIndex    n   1000000  build   979.0 ms  keys    78.9 MB ( 78.9 B/key)  peak   266.1 MB (266.1 B/key)  build adds   187.2 MB (187.2 B/key)  blob  6.86 B/key
+  dict phase n   1000000  build  1013.2 ms  keys    79.0 MB ( 79.0 B/key)  peak   267.3 MB (267.3 B/key)  build adds   188.3 MB (188.3 B/key)  blob  6.86 B/key
+HashedDict/0 n   1000000  build  1277.8 ms  keys    79.0 MB ( 79.0 B/key)  peak   267.3 MB (267.3 B/key)  build adds   188.3 MB (188.3 B/key)  blob  9.60 B/key
+  dict phase n   1000000  build  1034.6 ms  keys    78.8 MB ( 78.8 B/key)  peak   266.7 MB (266.7 B/key)  build adds   187.9 MB (187.9 B/key)  blob  6.86 B/key
+HashedDict/8 n   1000000  build  1241.7 ms  keys    78.8 MB ( 78.8 B/key)  peak   266.7 MB (266.7 B/key)  build adds   187.9 MB (187.9 B/key)  blob 10.60 B/key
+  dict phase n   1000000  build  1329.7 ms  keys    79.0 MB ( 79.0 B/key)  peak   267.3 MB (267.3 B/key)  build adds   188.3 MB (188.3 B/key)  blob  6.86 B/key
+HashedDict/16 n   1000000  build  1966.8 ms  keys    79.0 MB ( 79.0 B/key)  peak   267.3 MB (267.3 B/key)  build adds   188.3 MB (188.3 B/key)  blob 11.60 B/key
+## titles-zh-1000000
+DictIndex    n   1000000  build   902.9 ms  keys    62.1 MB ( 62.1 B/key)  peak   248.2 MB (248.2 B/key)  build adds   186.1 MB (186.1 B/key)  blob  5.85 B/key
+  dict phase n   1000000  build   849.8 ms  keys    62.0 MB ( 62.0 B/key)  peak   248.1 MB (248.1 B/key)  build adds   186.1 MB (186.1 B/key)  blob  5.85 B/key
+HashedDict/0 n   1000000  build  1021.3 ms  keys    62.0 MB ( 62.0 B/key)  peak   252.5 MB (252.5 B/key)  build adds   190.5 MB (190.5 B/key)  blob  8.59 B/key
+  dict phase n   1000000  build   752.1 ms  keys    62.4 MB ( 62.4 B/key)  peak   249.1 MB (249.1 B/key)  build adds   186.7 MB (186.7 B/key)  blob  5.85 B/key
+HashedDict/8 n   1000000  build   914.8 ms  keys    62.4 MB ( 62.4 B/key)  peak   253.8 MB (253.8 B/key)  build adds   191.4 MB (191.4 B/key)  blob  9.59 B/key
+  dict phase n   1000000  build   947.8 ms  keys    62.2 MB ( 62.2 B/key)  peak   247.9 MB (247.9 B/key)  build adds   185.7 MB (185.7 B/key)  blob  5.85 B/key
+HashedDict/16 n   1000000  build  1110.4 ms  keys    62.2 MB ( 62.2 B/key)  peak   253.0 MB (253.0 B/key)  build adds   190.8 MB (190.8 B/key)  blob 10.59 B/key
+## urls-1000000
+DictIndex    n   1000000  build  1385.7 ms  keys    95.4 MB ( 95.4 B/key)  peak   244.6 MB (244.6 B/key)  build adds   149.2 MB (149.2 B/key)  blob  7.51 B/key
+  dict phase n   1000000  build  1817.2 ms  keys    95.4 MB ( 95.4 B/key)  peak   239.6 MB (239.6 B/key)  build adds   144.2 MB (144.2 B/key)  blob  7.51 B/key
+HashedDict/0 n   1000000  build  2252.8 ms  keys    95.4 MB ( 95.4 B/key)  peak   239.6 MB (239.6 B/key)  build adds   144.2 MB (144.2 B/key)  blob 10.25 B/key
+  dict phase n   1000000  build  1437.6 ms  keys    95.2 MB ( 95.2 B/key)  peak   245.1 MB (245.1 B/key)  build adds   150.0 MB (150.0 B/key)  blob  7.51 B/key
+HashedDict/8 n   1000000  build  1594.7 ms  keys    95.2 MB ( 95.2 B/key)  peak   245.1 MB (245.1 B/key)  build adds   150.0 MB (150.0 B/key)  blob 11.25 B/key
+  dict phase n   1000000  build  1390.0 ms  keys    95.2 MB ( 95.2 B/key)  peak   246.4 MB (246.4 B/key)  build adds   151.2 MB (151.2 B/key)  blob  7.51 B/key
+HashedDict/16 n   1000000  build  1670.0 ms  keys    95.2 MB ( 95.2 B/key)  peak   246.4 MB (246.4 B/key)  build adds   151.2 MB (151.2 B/key)  blob 12.25 B/key
+## uuid-1000000
+DictIndex    n   1000000  build  1014.2 ms  keys    75.0 MB ( 75.0 B/key)  peak   227.5 MB (227.5 B/key)  build adds   152.5 MB (152.5 B/key)  blob 18.04 B/key
+  dict phase n   1000000  build   879.2 ms  keys    74.9 MB ( 74.9 B/key)  peak   224.4 MB (224.4 B/key)  build adds   149.5 MB (149.5 B/key)  blob 18.04 B/key
+HashedDict/0 n   1000000  build  1008.7 ms  keys    74.9 MB ( 74.9 B/key)  peak   224.4 MB (224.4 B/key)  build adds   149.5 MB (149.5 B/key)  blob 20.78 B/key
+  dict phase n   1000000  build   895.1 ms  keys    74.8 MB ( 74.8 B/key)  peak   228.2 MB (228.2 B/key)  build adds   153.4 MB (153.4 B/key)  blob 18.04 B/key
+HashedDict/8 n   1000000  build  1215.8 ms  keys    74.8 MB ( 74.8 B/key)  peak   228.2 MB (228.2 B/key)  build adds   153.4 MB (153.4 B/key)  blob 21.78 B/key
+  dict phase n   1000000  build   812.3 ms  keys    74.8 MB ( 74.8 B/key)  peak   225.3 MB (225.3 B/key)  build adds   150.5 MB (150.5 B/key)  blob 18.04 B/key
+HashedDict/16 n   1000000  build   956.0 ms  keys    74.8 MB ( 74.8 B/key)  peak   225.3 MB (225.3 B/key)  build adds   150.5 MB (150.5 B/key)  blob 22.78 B/key
+## dna-10000000
+DictIndex    n  10000000  build 11712.5 ms  keys   563.0 MB ( 56.3 B/key)  peak   908.4 MB ( 90.8 B/key)  build adds   345.4 MB ( 34.5 B/key)  blob  3.95 B/key
+  dict phase n  10000000  build 10941.5 ms  keys   562.8 MB ( 56.3 B/key)  peak   918.4 MB ( 91.8 B/key)  build adds   355.5 MB ( 35.6 B/key)  blob  3.95 B/key
+HashedDict/0 n  10000000  build 13248.5 ms  keys   562.8 MB ( 56.3 B/key)  peak   918.4 MB ( 91.8 B/key)  build adds   355.5 MB ( 35.6 B/key)  blob  7.19 B/key
+  dict phase n  10000000  build 11454.7 ms  keys   562.9 MB ( 56.3 B/key)  peak   915.5 MB ( 91.6 B/key)  build adds   352.6 MB ( 35.3 B/key)  blob  3.95 B/key
+HashedDict/8 n  10000000  build 13593.3 ms  keys   562.9 MB ( 56.3 B/key)  peak   915.5 MB ( 91.6 B/key)  build adds   352.6 MB ( 35.3 B/key)  blob  8.19 B/key
+  dict phase n  10000000  build 10020.8 ms  keys   563.0 MB ( 56.3 B/key)  peak   915.9 MB ( 91.6 B/key)  build adds   352.9 MB ( 35.3 B/key)  blob  3.95 B/key
+HashedDict/16 n  10000000  build 12029.9 ms  keys   563.0 MB ( 56.3 B/key)  peak   915.9 MB ( 91.6 B/key)  build adds   352.9 MB ( 35.3 B/key)  blob  9.19 B/key
+## numeric-10000000
+DictIndex    n  10000000  build 10680.7 ms  keys   563.0 MB ( 56.3 B/key)  peak   874.6 MB ( 87.5 B/key)  build adds   311.6 MB ( 31.2 B/key)  blob  1.02 B/key
+  dict phase n  10000000  build  9590.3 ms  keys   563.0 MB ( 56.3 B/key)  peak   874.7 MB ( 87.5 B/key)  build adds   311.7 MB ( 31.2 B/key)  blob  1.02 B/key
+HashedDict/0 n  10000000  build 11530.7 ms  keys   563.0 MB ( 56.3 B/key)  peak   874.7 MB ( 87.5 B/key)  build adds   311.7 MB ( 31.2 B/key)  blob  4.25 B/key
+  dict phase n  10000000  build  9406.6 ms  keys   562.7 MB ( 56.3 B/key)  peak   875.1 MB ( 87.5 B/key)  build adds   312.4 MB ( 31.2 B/key)  blob  1.02 B/key
+HashedDict/8 n  10000000  build 11366.1 ms  keys   562.7 MB ( 56.3 B/key)  peak   875.1 MB ( 87.5 B/key)  build adds   312.4 MB ( 31.2 B/key)  blob  5.25 B/key
+  dict phase n  10000000  build  8983.8 ms  keys   562.9 MB ( 56.3 B/key)  peak   874.5 MB ( 87.5 B/key)  build adds   311.6 MB ( 31.2 B/key)  blob  1.02 B/key
+HashedDict/16 n  10000000  build 10569.7 ms  keys   562.9 MB ( 56.3 B/key)  peak   874.5 MB ( 87.5 B/key)  build adds   311.6 MB ( 31.2 B/key)  blob  6.25 B/key
+## opaque-10000000
+DictIndex    n  10000000  build 10845.2 ms  keys   562.9 MB ( 56.3 B/key)  peak  1039.6 MB (104.0 B/key)  build adds   476.7 MB ( 47.7 B/key)  blob 10.05 B/key
+  dict phase n  10000000  build  9505.1 ms  keys   562.9 MB ( 56.3 B/key)  peak  1036.2 MB (103.6 B/key)  build adds   473.3 MB ( 47.3 B/key)  blob 10.05 B/key
+HashedDict/0 n  10000000  build 11387.3 ms  keys   562.9 MB ( 56.3 B/key)  peak  1036.2 MB (103.6 B/key)  build adds   473.3 MB ( 47.3 B/key)  blob 13.29 B/key
+  dict phase n  10000000  build 10178.6 ms  keys   562.8 MB ( 56.3 B/key)  peak  1044.6 MB (104.5 B/key)  build adds   481.8 MB ( 48.2 B/key)  blob 10.05 B/key
+HashedDict/8 n  10000000  build 11612.8 ms  keys   562.8 MB ( 56.3 B/key)  peak  1044.6 MB (104.5 B/key)  build adds   481.8 MB ( 48.2 B/key)  blob 14.29 B/key
+  dict phase n  10000000  build 10849.7 ms  keys   562.8 MB ( 56.3 B/key)  peak  1038.9 MB (103.9 B/key)  build adds   476.0 MB ( 47.6 B/key)  blob 10.05 B/key
+HashedDict/16 n  10000000  build 12770.0 ms  keys   562.8 MB ( 56.3 B/key)  peak  1038.9 MB (103.9 B/key)  build adds   476.0 MB ( 47.6 B/key)  blob 15.29 B/key
+## titles-en-10000000
+DictIndex    n  10000000  build 12455.0 ms  keys   623.1 MB ( 62.3 B/key)  peak  1206.9 MB (120.7 B/key)  build adds   583.8 MB ( 58.4 B/key)  blob  5.65 B/key
+  dict phase n  10000000  build 11601.2 ms  keys   623.2 MB ( 62.3 B/key)  peak  1203.3 MB (120.3 B/key)  build adds   580.2 MB ( 58.0 B/key)  blob  5.65 B/key
+HashedDict/0 n  10000000  build 13845.5 ms  keys   623.2 MB ( 62.3 B/key)  peak  1203.3 MB (120.3 B/key)  build adds   580.2 MB ( 58.0 B/key)  blob  8.89 B/key
+  dict phase n  10000000  build 11087.4 ms  keys   623.2 MB ( 62.3 B/key)  peak  1204.4 MB (120.4 B/key)  build adds   581.2 MB ( 58.1 B/key)  blob  5.65 B/key
+HashedDict/8 n  10000000  build 12865.6 ms  keys   623.2 MB ( 62.3 B/key)  peak  1204.4 MB (120.4 B/key)  build adds   581.2 MB ( 58.1 B/key)  blob  9.89 B/key
+  dict phase n  10000000  build 11510.1 ms  keys   623.2 MB ( 62.3 B/key)  peak  1203.5 MB (120.3 B/key)  build adds   580.3 MB ( 58.0 B/key)  blob  5.65 B/key
+HashedDict/16 n  10000000  build 13249.9 ms  keys   623.2 MB ( 62.3 B/key)  peak  1203.5 MB (120.3 B/key)  build adds   580.3 MB ( 58.0 B/key)  blob 10.89 B/key
+## urls-10000000
+DictIndex    n  10000000  build 11391.9 ms  keys   924.7 MB ( 92.5 B/key)  peak  1487.2 MB (148.7 B/key)  build adds   562.5 MB ( 56.2 B/key)  blob  5.78 B/key
+  dict phase n  10000000  build 10322.2 ms  keys   924.7 MB ( 92.5 B/key)  peak  1496.3 MB (149.6 B/key)  build adds   571.6 MB ( 57.2 B/key)  blob  5.78 B/key
+HashedDict/0 n  10000000  build 11911.5 ms  keys   924.7 MB ( 92.5 B/key)  peak  1496.3 MB (149.6 B/key)  build adds   571.6 MB ( 57.2 B/key)  blob  9.02 B/key
+  dict phase n  10000000  build  7822.6 ms  keys   924.7 MB ( 92.5 B/key)  peak  1495.0 MB (149.5 B/key)  build adds   570.3 MB ( 57.0 B/key)  blob  5.78 B/key
+HashedDict/8 n  10000000  build  9293.7 ms  keys   924.7 MB ( 92.5 B/key)  peak  1495.0 MB (149.5 B/key)  build adds   570.3 MB ( 57.0 B/key)  blob 10.02 B/key
+  dict phase n  10000000  build  7112.1 ms  keys   924.9 MB ( 92.5 B/key)  peak  1496.2 MB (149.6 B/key)  build adds   571.3 MB ( 57.1 B/key)  blob  5.78 B/key
+HashedDict/16 n  10000000  build  8620.0 ms  keys   924.9 MB ( 92.5 B/key)  peak  1496.2 MB (149.6 B/key)  build adds   571.3 MB ( 57.1 B/key)  blob 11.02 B/key
+## uuid-10000000
+DictIndex    n  10000000  build  5758.8 ms  keys   722.7 MB ( 72.3 B/key)  peak  1454.5 MB (145.4 B/key)  build adds   731.7 MB ( 73.2 B/key)  blob 17.56 B/key
+  dict phase n  10000000  build  9241.4 ms  keys   722.7 MB ( 72.3 B/key)  peak  1444.8 MB (144.5 B/key)  build adds   722.1 MB ( 72.2 B/key)  blob 17.56 B/key
+HashedDict/0 n  10000000  build 10936.8 ms  keys   722.7 MB ( 72.3 B/key)  peak  1444.8 MB (144.5 B/key)  build adds   722.1 MB ( 72.2 B/key)  blob 20.80 B/key
+  dict phase n  10000000  build  8933.7 ms  keys   722.8 MB ( 72.3 B/key)  peak  1453.5 MB (145.4 B/key)  build adds   730.7 MB ( 73.1 B/key)  blob 17.56 B/key
+HashedDict/8 n  10000000  build 11548.9 ms  keys   722.8 MB ( 72.3 B/key)  peak  1453.5 MB (145.4 B/key)  build adds   730.7 MB ( 73.1 B/key)  blob 21.80 B/key
+  dict phase n  10000000  build  9277.4 ms  keys   722.8 MB ( 72.3 B/key)  peak  1424.3 MB (142.4 B/key)  build adds   701.5 MB ( 70.2 B/key)  blob 17.56 B/key
+HashedDict/16 n  10000000  build 11281.4 ms  keys   722.8 MB ( 72.3 B/key)  peak  1424.3 MB (142.4 B/key)  build adds   701.5 MB ( 70.2 B/key)  blob 22.80 B/key

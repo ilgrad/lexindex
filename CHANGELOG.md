@@ -94,6 +94,10 @@ All notable changes to this project are documented here. The format follows
 - **`SECURITY.md` states what a `DoubleArrayIndex` build costs on chosen keys**, measured before
   and after the change under Changed. Every other build and load was counted from 2^16 to 2^24 keys
   on five corpora and stays within a constant a key.
+- **`HashedDictIndex`'s build peak is measured**: no higher than the `DictIndex` build it starts
+  with, to the byte at ten million keys and within 5.1 bytes a key at a million, on every suite
+  corpus (`bench/results/peak-hashed-2026-10-28-arz-8c92679.txt`). `examples/peak.rs` gains `dict`
+  and `hashed` modes and reads a corpus file named by `LEXINDEX_PEAK_KEYS`.
 - **`docs/benchmarks.md` has a "Where lexindex loses" section**: every measured loss in one list,
   each linked to the section that measured it.
 - **The README's and the usage guide's Rust examples show all their code.** They had hidden lines
