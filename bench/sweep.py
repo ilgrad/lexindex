@@ -120,7 +120,7 @@ def _one(path: Path, corpus: str, size: int, repeats: int) -> list[dict]:
     keys = path.read_text(encoding="utf-8").splitlines()
     raw = sum(len(k.encode()) for k in keys) / len(keys)
     print(f"\n{corpus} {len(keys):,} keys, raw {raw:.2f} B/key  ({path.name})")
-    probes, a_miss = _probes.probe_set(keys, PROBES)
+    probes, a_miss = _probes.mixed_probes(keys, PROBES)
     cells, lanes, alive = [], [], []
     for name, build, keeps in _structures():
         times = []

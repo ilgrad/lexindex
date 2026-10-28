@@ -119,7 +119,7 @@ def _serialised_size(obj) -> int | None:
 PROBES = 100_000
 
 
-LOOKUPS, A_MISS = _probes.probe_set(KEYS, PROBES)
+LOOKUPS, A_MISS = _probes.mixed_probes(KEYS, PROBES)
 
 
 def _lookup_fn(obj, exact: bool):

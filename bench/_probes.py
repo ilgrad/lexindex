@@ -7,6 +7,15 @@ swapped for another the corpus uses, and it stays inside every structure's alpha
 
 The order is shuffled with a fixed seed. A probe order that walks the keys at any fixed step is
 learned by the L2 stride prefetcher, and that has reversed a ranking in this repository before.
+
+`mixed_probes` is the set a lookup is timed on. It takes its members and its strangers from two
+draws, so that no member travels with the stranger spelled from it: an ordered index walks such a
+pair through one block and finds it cached the second time (over 1 000 000 titles `StringIndex`
+read 572-575 ns on pairs and 637-638 on two draws). And every probe is a new string, allocated in
+the order it is asked: a member drawn from `keys` is the corpus's own string, scattered through a
+heap as large as the corpus, and a pass paid for fetching it (`ClosedHashIndex` 82-84 ns on hits
+drawn from it and 63-64 on hits copied). Both measured for `bench/latency_model.py`, which draws
+its lanes the same way.
 """
 
 from __future__ import annotations
@@ -59,3 +68,24 @@ def probe_set(keys: list[str], count: int, seed: int = 0x5EED) -> tuple[list[str
         if strangers:
             return probes, strangers[0]
     raise ValueError("no stranger could be spelled in this corpus's alphabet")
+
+
+def fresh(xs: list[str]) -> list[str]:
+    """`xs` as new strings, allocated in the order a pass asks them."""
+    return [x.encode().decode() for x in xs]
+
+
+def mixed_probes(keys: list[str], count: int, seed: int = 0x5EED) -> tuple[list[str], str]:
+    """About `count` probes, half members from one draw and half strangers from another, shuffled,
+    each a new string; and one stranger to check a lookup against."""
+    member = set(keys)
+    half = count // 2
+
+    def draw(at: int, members: bool) -> list[str]:
+        probes, _ = probe_set(keys, 2 * count, at)
+        return [p for p in probes if (p in member) == members][:half]
+
+    members, strangers = draw(seed, True), draw(seed + 1, False)
+    probes = members + strangers
+    random.Random(seed).shuffle(probes)
+    return fresh(probes), strangers[0]
