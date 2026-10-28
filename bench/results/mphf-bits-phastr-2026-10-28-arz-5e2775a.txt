@@ -1,0 +1,30 @@
+MPH3 against sux 0.15.0 PHastR: bits/key only. bench/mphf_vs at 5e2775a (lexindex), sux 0.15.0 (Cargo.lock), one thread, one round, MPHF_VS_ROWS=lexindex,PHastR, Ryzen 7 5800HS, 2026-10-28.
+Bits are the serialised table and do not depend on the machine. The machine was NOT quiet (bench-ready.sh exit 1: 86 C, load 9): the build, lookup and peak columns below are NOT a measurement and are not quoted anywhere.
+
+== n=1000000 threads=1 2026-10-28T11:47+02:00 load 9.81 4.57 2.41
+n 1000000, 1 thread(s), builds min of 1 rounds, lookups over one shuffled probe order, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.925     49.8   +0.0%      2.0   +2.8%      2.4   +1.0%           5.9      0.0
+sux 0.15 PHastR (8-bit, 4.25)            1.960     71.1   +0.0%      3.6   +0.7%        -                   9.9      0.0
+sux 0.15 PHastR (8-bit, 4.5)             1.919     65.7   +0.0%      3.9   +2.7%        -                   8.3      0.0
+sux 0.15 PHastR (8-bit, 4.75)            1.915     58.9   +0.0%      4.3   +2.6%        -                   0.4      0.0
+sux 0.15 PHastR (10-bit, 5.75)           1.850    128.9   +0.0%      4.4   +2.4%        -                   0.3      0.0
+sux 0.15 PHastR (10-bit, 6)              1.852    118.4   +0.0%      5.1   +5.7%        -                   0.3      0.0
+== n=10000000 threads=1 2026-10-28T11:47+02:00 load 9.51 4.59 2.43
+n 10000000, 1 thread(s), builds min of 1 rounds, lookups over one shuffled probe order, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.915     41.0   +0.0%      2.7   +0.7%      2.8   +7.0%          30.2      2.0
+sux 0.15 PHastR (8-bit, 4.25)            1.943     75.2   +0.0%      5.0   +1.2%        -                  94.6      2.0
+sux 0.15 PHastR (8-bit, 4.5)             1.904     66.6   +0.0%      5.5   +1.0%        -                  79.0      2.0
+sux 0.15 PHastR (8-bit, 4.75)            1.899     62.9   +0.0%      6.3   +8.2%        -                  79.5      2.0
+sux 0.15 PHastR (10-bit, 5.75)           1.823    118.9   +0.0%      6.3   +7.0%        -                  77.2      2.0
+sux 0.15 PHastR (10-bit, 6)              1.823    110.1   +0.0%      7.0   +5.9%        -                  78.9      2.0
+== n=100000000 threads=1 2026-10-28T11:47+02:00 load 8.83 4.53 2.42
+n 100000000, 1 thread(s), builds min of 1 rounds, lookups over one shuffled probe order, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.911     42.6   +0.0%     14.7  +49.1%      6.1  +43.2%         261.4     20.0
+sux 0.15 PHastR (8-bit, 4.25)            1.942     74.7   +0.0%     25.4  +36.9%        -                 940.6     20.0
+sux 0.15 PHastR (8-bit, 4.5)             1.902     73.3   +0.0%     24.5  +44.8%        -                 921.8     20.0
+sux 0.15 PHastR (8-bit, 4.75)            1.897     72.1   +0.0%     27.8  +27.0%        -                 932.8     20.0
+sux 0.15 PHastR (10-bit, 5.75)           1.819    258.9   +0.0%     29.8  +14.2%        -                 899.4     20.0
+sux 0.15 PHastR (10-bit, 6)              1.819    272.0   +0.0%     31.5  +44.8%        -                 906.9     20.0

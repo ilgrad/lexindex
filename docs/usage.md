@@ -641,50 +641,53 @@ use lexindex::{
     PerfectHashIndex, StringIndex,
 };
 
-let idx = StringIndex::build(["apple", "apricot", "banana"])?;
-assert_eq!(idx.id("banana"), Some(2));
-assert_eq!(idx.key(0).as_deref(), Some("apple")); // rank-walk over the FST → owned String
-assert_eq!(idx.prefix("ap").len(), 2);
-let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
-assert_eq!(near, ["apple"]);
+fn main() -> Result<(), lexindex::IndexError> {
+    let idx = StringIndex::build(["apple", "apricot", "banana"])?;
+    assert_eq!(idx.id("banana"), Some(2));
+    assert_eq!(idx.key(0).as_deref(), Some("apple")); // rank-walk over the FST → owned String
+    assert_eq!(idx.prefix("ap").len(), 2);
+    let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
+    assert_eq!(near, ["apple"]);
 
-// `save`, `load`, `load_mmap` and their `_untrusted` / `_verified` forms take any `AsRef<Path>`.
-let path = std::env::temp_dir().join("lexindex-usage-catalog.bix");
-idx.save(&path)?;
-let info = lexindex::inspect_file(&path)?; // what the file is, from its header alone
-assert_eq!((info.kind, info.keys), (lexindex::BlobKind::StringIndex, Some(3)));
-// SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
-let idx = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into RAM
-assert_eq!(idx.id("banana"), Some(2)); // the same answers, off the mapped file
+    // `save`, `load`, `load_mmap` and their `_untrusted` / `_verified` forms take any `AsRef<Path>`.
+    let path = std::env::temp_dir().join("lexindex-usage-catalog.bix");
+    idx.save(&path)?;
+    let info = lexindex::inspect_file(&path)?; // what the file is, from its header alone
+    assert_eq!((info.kind, info.keys), (lexindex::BlobKind::StringIndex, Some(3)));
+    {
+        // SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
+        let mapped = unsafe { StringIndex::load_mmap(&path) }?; // zero-copy; no read into RAM
+        assert_eq!(mapped.id("banana"), Some(2)); // the same answers, off the mapped file
+    } // the mapping ends with its scope, before the file goes
+    std::fs::remove_file(&path)?;
 
-let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
-assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
+    let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
+    assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
 
-let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // 1.24 B/key, no reverse
-let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // 0.74 B/key, 6.25% FP rate
-assert!(small.contains("POST"));
+    let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // 1.24 B/key, no reverse
+    let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // 0.74 B/key, 6.25% FP rate
+    assert!(small.contains("POST"));
 
-let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key
-assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
+    let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key
+    assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
-let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.64 B/key
-assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
-assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
-assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
-words.route_microblocks(); // opt-in: ~0.5 B/key of memory, in no blob, for a faster search
+    let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.64 B/key
+    assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
+    assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
+    assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
+    words.route_microblocks(); // opt-in: ~0.5 B/key of memory, in no blob, for a faster search
 
-let hashed = HashedDictIndex::from_dict(words, 8)?; // the dictionary, and a hash sidecar beside it
-assert_eq!(hashed.id("banana"), Some(2)); // one hash and a read of each table, not a search
-assert_eq!(hashed.dict().key(2).as_deref(), Some("banana")); // ordered queries: the dictionary's
+    let hashed = HashedDictIndex::from_dict(words, 8)?; // the dictionary, and a hash sidecar beside it
+    assert_eq!(hashed.id("banana"), Some(2)); // one hash and a read of each table, not a search
+    assert_eq!(hashed.dict().key(2).as_deref(), Some("banana")); // ordered queries: the dictionary's
 
-let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?; // a character a step
-assert_eq!(lexicon.longest_prefix("大学生活"), Some(("大学生".to_string(), 3)));
-let mut words = Vec::new(); // every key in the text: (start, end) in bytes, and the key's rank
-lexicon.for_each_occurrence("北京大学生", |start, end, id| words.push((start, end, id)));
-assert_eq!(words, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]);
-# drop(idx);
-# std::fs::remove_file(&path).ok();
-# Ok::<(), lexindex::IndexError>(())
+    let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?; // a character a step
+    assert_eq!(lexicon.longest_prefix("大学生活"), Some(("大学生".to_string(), 3)));
+    let mut words = Vec::new(); // every key in the text: (start, end) in bytes, and the key's rank
+    lexicon.for_each_occurrence("北京大学生", |start, end, id| words.push((start, end, id)));
+    assert_eq!(words, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]);
+    Ok(())
+}
 ```
 
 ### Building a corpus that does not fit in memory
@@ -694,36 +697,39 @@ its structure allows:
 
 ```rust
 use lexindex::{CompactHashIndex, DictIndex, PerfectHashIndex, StringIndex};
-# let dir = std::env::temp_dir();
-# let (bix, bmp) = (dir.join("lexindex-usage-stream.bix"), dir.join("lexindex-usage-stream.bmp"));
-# let (bch, bdx) = (dir.join("lexindex-usage-stream.bch"), dir.join("lexindex-usage-stream.bdx"));
 
-// `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do...
-let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
-// ...and past memory the pairs are sorted in runs spilled beside the output, the perfect hash is
-// built from the merged runs a chunk at a time, and the file is what `build` + `save` would write.
-CompactHashIndex::build_to_file(["c", "a", "b"], &bch, 1)?;
+fn main() -> Result<(), lexindex::IndexError> {
+    let dir = std::env::temp_dir();
+    let (bix, bmp) = (dir.join("lexindex-usage-stream.bix"), dir.join("lexindex-usage-stream.bmp"));
+    let (bch, bdx) = (dir.join("lexindex-usage-stream.bch"), dir.join("lexindex-usage-stream.bdx"));
 
-// `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
-StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
-// ...or takes them in any order through an external sort: runs spilled beside the output, merged.
-StringIndex::build_to_file(["c", "a", "b"], &bix)?;
+    // `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do...
+    let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
+    // ...and past memory the pairs are sorted in runs spilled beside the output, the perfect hash is
+    // built from the merged runs a chunk at a time, and the file is what `build` + `save` would write.
+    CompactHashIndex::build_to_file(["c", "a", "b"], &bch, 1)?;
 
-// `DictIndex` sorts the same way, then walks the sorted keys three times: the block heads and the
-// count, the symbol table's training sample -- whose stride depends on that count -- then the
-// encoding, which goes into the file as it is produced.
-DictIndex::build_to_file(["c", "a", "b"], &bdx)?;
+    // `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
+    StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;
+    // ...or takes them in any order through an external sort: runs spilled beside the output, merged.
+    StringIndex::build_to_file(["c", "a", "b"], &bix)?;
 
-// `PerfectHashIndex` stores its keys in slot order, and slot order is only known once the perfect
-// hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
-PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
-# assert!(small.contains("a"));
-# assert_eq!(std::fs::read(&bch)?, small.to_bytes()?);
-# std::fs::remove_file(&bix).ok();
-# std::fs::remove_file(&bmp).ok();
-# std::fs::remove_file(&bch).ok();
-# std::fs::remove_file(&bdx).ok();
-# Ok::<(), lexindex::IndexError>(())
+    // `DictIndex` sorts the same way, then walks the sorted keys three times: the block heads and the
+    // count, the symbol table's training sample -- whose stride depends on that count -- then the
+    // encoding, which goes into the file as it is produced.
+    DictIndex::build_to_file(["c", "a", "b"], &bdx)?;
+
+    // `PerfectHashIndex` stores its keys in slot order, and slot order is only known once the perfect
+    // hash is built -- so it takes a *factory* and reads the source twice. Keys must be distinct.
+    PerfectHashIndex::build_to_file(&bmp, || ["c", "a", "b"])?;
+    assert!(small.contains("a"));
+    assert_eq!(std::fs::read(&bch)?, small.to_bytes()?);
+    std::fs::remove_file(&bix)?;
+    std::fs::remove_file(&bmp)?;
+    std::fs::remove_file(&bch)?;
+    std::fs::remove_file(&bdx)?;
+    Ok(())
+}
 ```
 
 At 10 M real-word pairs the streamed `PerfectHashIndex` build peaks at 471 MB against 1 272 MB for
@@ -785,20 +791,23 @@ from it, making `add` and `remove` O(1) while the base stays untouched:
 
 ```rust
 use lexindex::{Overlay, StringIndex};
-let mut ov = Overlay::new(StringIndex::build(["apple", "banana"])?);
-let cherry = ov.add("cherry");            // ids continue above base.len()
-assert!(ov.remove("apple"));              // the id is retired, nothing is renumbered
-assert_eq!(ov.id("apple"), None);
-assert_eq!(ov.key(cherry).as_deref(), Some("cherry"));
 
-let blob = ov.to_bytes()?;                // base + additions + tombstones in one file
-let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes)?;
-assert_eq!(back.len(), 2);
+fn main() -> Result<(), lexindex::IndexError> {
+    let mut ov = Overlay::new(StringIndex::build(["apple", "banana"])?);
+    let cherry = ov.add("cherry");            // ids continue above base.len()
+    assert!(ov.remove("apple"));              // the id is retired, nothing is renumbered
+    assert_eq!(ov.id("apple"), None);
+    assert_eq!(ov.key(cherry).as_deref(), Some("cherry"));
 
-let (folded, remap) = back.compact_with_remap()?;   // rebuild the base — this renumbers…
-assert_eq!(folded.len(), 2);
-assert_eq!(folded.key(remap[cherry as usize]).as_deref(), Some("cherry")); // …and says how
-# Ok::<(), lexindex::IndexError>(())
+    let blob = ov.to_bytes()?;                // base + additions + tombstones in one file
+    let back = Overlay::from_bytes_with(&blob, StringIndex::from_bytes)?;
+    assert_eq!(back.len(), 2);
+
+    let (folded, remap) = back.compact_with_remap()?;   // rebuild the base — this renumbers…
+    assert_eq!(folded.len(), 2);
+    assert_eq!(folded.key(remap[cherry as usize]).as_deref(), Some("cherry")); // …and says how
+    Ok(())
+}
 ```
 
 An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning for
@@ -1022,7 +1031,7 @@ $ lexindex plan words.txt
   DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
   DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
   StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-  PerfectHashIndex       4641399 bytes   9.67 B/key    131 ns  estimated
+  PerfectHashIndex       4448821 bytes   9.27 B/key    130 ns  estimated
 the nanoseconds are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is

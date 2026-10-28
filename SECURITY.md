@@ -169,6 +169,12 @@ fuzzes it for ten minutes across all of them, starting from the seeds.
   takes for one key. See above: choose the index for keys you do not control accordingly.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set
   you hand in, not to a number a blob claims.
+- **A `DoubleArrayIndex` build that grows faster than its keys.** Its placer gives every row the
+  lowest base that fits, and the search for it grows with the array. Counted in instructions a key
+  on one thread: 7 203 at 2^16 Chinese titles and 32 364 at 2^21; keys shaped so that every row has
+  eight children out of 20 000 characters take 2 366 at 2^16 and 20 834 at 2^20. Every other build
+  stayed within a constant a key up to 2^24 keys or the end of its corpus. Building from keys a
+  third party chooses, bound their count or pick another index.
 
 ## Where the details are
 

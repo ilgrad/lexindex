@@ -211,26 +211,30 @@ df.with_columns(pl.col("track").lexindex.id("tracks.bdx"))   # and .contains, .k
 ```rust
 use lexindex::StringIndex;
 
-let idx = StringIndex::build(["apple", "apricot", "banana", "cherry"])?;
-assert_eq!(idx.id("banana"), Some(2));                  // string → id (sorted rank)
-assert_eq!(idx.key(0).as_deref(), Some("apple"));       // id → string, a rank-walk over the FST
+fn main() -> Result<(), lexindex::IndexError> {
+    let idx = StringIndex::build(["apple", "apricot", "banana", "cherry"])?;
+    assert_eq!(idx.id("banana"), Some(2));                  // string → id (sorted rank)
+    assert_eq!(idx.key(0).as_deref(), Some("apple"));       // id → string, a rank-walk over the FST
 
-// prefix / range / fuzzy / subsequence, all lexicographically ordered
-let fruit: Vec<_> = idx.prefix("ap").into_iter().map(|(k, _)| k).collect();
-assert_eq!(fruit, ["apple", "apricot"]);
-let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
-assert_eq!(near, ["apple"]);                            // Levenshtein distance ≤ 1
-let sub: Vec<_> = idx.subsequence("ap").into_iter().map(|(k, _)| k).collect();
-assert_eq!(sub, ["apple", "apricot"]);
+    // prefix / range / fuzzy / subsequence, all lexicographically ordered
+    let fruit: Vec<_> = idx.prefix("ap").into_iter().map(|(k, _)| k).collect();
+    assert_eq!(fruit, ["apple", "apricot"]);
+    let near: Vec<_> = idx.fuzzy("aple", 1)?.into_iter().map(|(k, _)| k).collect();
+    assert_eq!(near, ["apple"]);                            // Levenshtein distance ≤ 1
+    let sub: Vec<_> = idx.subsequence("ap").into_iter().map(|(k, _)| k).collect();
+    assert_eq!(sub, ["apple", "apricot"]);
 
-// a flat blob: reload it, or borrow it zero-copy from the file
-idx.save("catalog.bix")?;
-// SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
-let idx = unsafe { StringIndex::load_mmap("catalog.bix") }?; // no read into RAM; pages shared
-assert_eq!(idx.id("cherry"), Some(3));                  // the same answers, off the mapped file
-# drop(idx);
-# std::fs::remove_file("catalog.bix").ok();
-# Ok::<(), lexindex::IndexError>(())
+    // a flat blob: reload it, or borrow it zero-copy from the file
+    let path = std::env::temp_dir().join("catalog.bix");
+    idx.save(&path)?;
+    {
+        // SAFETY: nothing may modify the file while a mapped index borrows it (see `load_mmap`).
+        let mapped = unsafe { StringIndex::load_mmap(&path) }?; // no read into RAM; pages shared
+        assert_eq!(mapped.id("cherry"), Some(3));               // the same answers, off the file
+    }                                                           // the mapping ends with its scope
+    std::fs::remove_file(&path)?;
+    Ok(())
+}
 ```
 
 ```rust
@@ -238,44 +242,47 @@ use lexindex::{
     ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex,
 };
 
-let verbs = ["GET", "POST", "PUT", "DELETE"];
+fn main() -> Result<(), lexindex::IndexError> {
+    let verbs = ["GET", "POST", "PUT", "DELETE"];
 
-// The smallest string → id map that rejects strangers: an 8-bit fingerprint per key, 1.24 B/key,
-// ~0.4 % false positives.
-let compact = CompactHashIndex::build(verbs, 1)?;
-let id = compact.id("POST").unwrap();                  // Some(slot); a stranger may rarely read as present
-assert_eq!(compact.id_unchecked("POST"), id);          // no fingerprint check, for a closed vocabulary
+    // The smallest string → id map that rejects strangers: an 8-bit fingerprint per key, 1.24 B/key,
+    // ~0.4 % false positives.
+    let compact = CompactHashIndex::build(verbs, 1)?;
+    let id = compact.id("POST").unwrap();                  // Some(slot); a stranger may rarely read as present
+    assert_eq!(compact.id_unchecked("POST"), id);          // no fingerprint check, for a closed vocabulary
 
-// The perfect hash alone, ~0.24 B/key: a member's id, and *some* id in [0, n) for anything else.
-let closed = ClosedHashIndex::build(verbs)?;
-assert!((closed.id("POST") as usize) < closed.len());
+    // The perfect hash alone, ~0.24 B/key: a member's id, and *some* id in [0, n) for anything else.
+    let closed = ClosedHashIndex::build(verbs)?;
+    assert!((closed.id("POST") as usize) < closed.len());
 
-// Verified membership and id → key, the keys stored; ids survive save / load on every index.
-let exact = PerfectHashIndex::build(verbs)?;
-let id = exact.id("POST").unwrap();
-assert_eq!(exact.key(id), Some("POST"));
-assert_eq!(exact.id("PATCH"), None);
-exact.save("verbs.bmp")?;
-assert_eq!(PerfectHashIndex::load("verbs.bmp")?.id("POST"), Some(id));
+    // Verified membership and id → key, the keys stored; ids survive save / load on every index.
+    let exact = PerfectHashIndex::build(verbs)?;
+    let id = exact.id("POST").unwrap();
+    assert_eq!(exact.key(id), Some("POST"));
+    assert_eq!(exact.id("PATCH"), None);
+    let path = std::env::temp_dir().join("verbs.bmp");
+    exact.save(&path)?;
+    assert_eq!(PerfectHashIndex::load(&path)?.id("POST"), Some(id));
+    std::fs::remove_file(&path)?;
 
-// Ordered, the key stored for every id, ~2.64 B/key; prefix and range, no fuzzy.
-let dict = DictIndex::build(verbs)?;
-assert_eq!(dict.id("POST"), Some(2));                  // the sorted rank
-assert_eq!(dict.key(2).as_deref(), Some("POST"));
-assert_eq!(dict.lower_bound("P"), 2);                  // the "P…" keys are ids 2..lower_bound("Q")
+    // Ordered, the key stored for every id, ~2.64 B/key; prefix and range, no fuzzy.
+    let dict = DictIndex::build(verbs)?;
+    assert_eq!(dict.id("POST"), Some(2));                  // the sorted rank
+    assert_eq!(dict.key(2).as_deref(), Some("POST"));
+    assert_eq!(dict.lower_bound("P"), 2);                  // the "P…" keys are ids 2..lower_bound("Q")
 
-// The same dictionary with a hash sidecar: its ranks from one hash and two reads, not a search.
-let hashed = HashedDictIndex::from_dict(dict, 8)?;
-assert_eq!(hashed.id("POST"), Some(2));
-assert_eq!(hashed.dict().key(2).as_deref(), Some("POST"));
+    // The same dictionary with a hash sidecar: its ranks from one hash and two reads, not a search.
+    let hashed = HashedDictIndex::from_dict(dict, 8)?;
+    assert_eq!(hashed.id("POST"), Some(2));
+    assert_eq!(hashed.dict().key(2).as_deref(), Some("POST"));
 
-// A character a step, for matching a lexicon against running text: every key at every position.
-let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?;
-let mut found = Vec::new();
-lexicon.for_each_occurrence("北京大学生", |start, end, id| found.push((start, end, id)));
-assert_eq!(found, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]); // byte offsets, and the ranks
-# std::fs::remove_file("verbs.bmp").ok();
-# Ok::<(), lexindex::IndexError>(())
+    // A character a step, for matching a lexicon against running text: every key at every position.
+    let lexicon = DoubleArrayIndex::build(["北京", "北京大学", "大学", "大学生"])?;
+    let mut found = Vec::new();
+    lexicon.for_each_occurrence("北京大学生", |start, end, id| found.push((start, end, id)));
+    assert_eq!(found, [(0, 6, 0), (0, 12, 1), (6, 12, 2), (6, 15, 3)]); // byte offsets, and the ranks
+    Ok(())
+}
 ```
 
 ## C
@@ -545,6 +552,10 @@ which is what makes the build one streaming pass over sorted hashes.
 - Ragnar Groot Koerkamp, *PtrHash: Minimal Perfect Hashing at RAM Throughput*, 2025 —
   [arXiv:2502.15539](https://arxiv.org/abs/2502.15539),
   [`ptr_hash`](https://github.com/RagnarGrootKoerkamp/PtrHash).
+- Sebastiano Vigna, *PHastR: Faster Minimal Perfect Hashing with Rotated Layouts*, 2026 —
+  [arXiv:2610.17833](https://arxiv.org/abs/2610.17833), in [`sux`](https://github.com/vigna/sux-rs).
+  Built on one thread it takes fewer bits than `MPH3`
+  ([measured](https://ilgrad.github.io/lexindex/benchmarks/#the-perfect-hash-against-ptrhash-and-phast)).
 
 Until 1.0 the perfect hash **was** `ptr_hash`. Its pilot table was serialised behind private fields,
 so a blob holding one could not be validated from outside the crate that owned it, and `from_bytes`

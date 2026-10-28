@@ -240,6 +240,30 @@ So, in decision order:
   amortises better), and it has to be rebuilt from the keys on every process start; every structure
   here loads from a file instead, and every one but `ClosedHashIndex` by mapping it.
 
+## Where lexindex loses
+
+Every loss measured so far, in one place; each line links to the section that measured it.
+
+- **Exact `id` against XCDAT 15.** At a million keys lexindex's fastest exact search is behind on
+  ten corpora of thirteen: by 4–11 % on `urls`, `uuid`, `paths` and `titles-ru`, by 1.2–1.6× on the
+  other six. At ten million keys `opaque` is 1.37× behind, 442 ns against 323
+  ([measured](#the-research-frontier-measured)). `HashedDictIndex` is 3.8–9.0× faster than XCDAT
+  through `id_unchecked`, which takes a key's membership on trust, so it is not an exact search
+  ([against XCDAT](#hasheddictindex-against-xcdat)).
+- **Size on `paths` against MARISA at its smallest.** 8.81 bytes a key at 23 tries under the tiny
+  cache, against `DictIndex` block 1024's 9.32: MARISA is 5.8 % smaller by file and 7.9 % once both
+  are mapped. At ten million keys and at 19.2 million, mapped MARISA is 0.4–1.8 % smaller on
+  `titles-en` and `urls`, where `DictIndex` is the smaller by file
+  ([MARISA at its smallest](#marisa-at-its-smallest)).
+- **Bits against PHastR built on one thread.** `MPH3` takes 1.925 / 1.915 / 1.911 bits a key at
+  1 M / 10 M / 100 M, PHastR 1.919 / 1.904 / 1.902 at bucket size 4.5 and 1.850 / 1.823 / 1.819
+  with 10-bit seeds ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
+- **The eight-thread batch at a billion keys.** `MPH3`'s batch is 21 % behind PtrHash compact on
+  the same memory: it fetches 0.97 lines a key from DRAM against compact's 0.83
+  ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
+- **The double array's build.** 0.159 s on the jieba dictionary, 2.9× darts-clone's time and 1.6×
+  cedar's ([on Chinese running text](#on-chinese-running-text-from-rust-and-from-python)).
+
 ## The corpus set
 
 Everything above is one corpus at one `n`, which is why the section before it exists. The set that
@@ -858,8 +882,18 @@ within 0.02 bits.
 | `ptr_hash` balanced | 2.378 | 105.9 | 24.3 | 886 | 17.5 | 6.2 |
 | `ptr_hash` fast | 2.990 | 247.5 | 234.0 | 1 477 | 10.7 | 5.0 |
 
-`MPH3` is the smallest function in every table — 1.929 / 1.918 / 1.914 bits against regular
-PHast's 1.933 / 1.921 / 1.920 — and its lookups lead at 10 M and 100 M, single and batch: 2.6 and
+`MPH3` is the smallest function in these tables — 1.929 / 1.918 / 1.914 bits against regular
+PHast's 1.933 / 1.921 / 1.920 — but not the smallest there is. `sux` 0.15's PHastR (Vigna,
+[arXiv:2610.17833](https://arxiv.org/abs/2610.17833)), built on one thread over the same keys in
+the same process, takes fewer bits at 1 M / 10 M / 100 M keys: 1.919 / 1.904 / 1.902 at expected
+bucket size 4.5 and 1.915 / 1.899 / 1.897 at 4.75, against `MPH3`'s 1.925 / 1.915 / 1.911 in that
+run, and 1.850 / 1.823 / 1.819 with 10-bit seeds. Only its default bucket size, 4.25, is the larger:
+1.960 / 1.943 / 1.942
+([`bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt)).
+Those are bits alone, which no machine moves; PHastR's build and lookup times wait for a quiet
+run. Built on eight threads, PHastR cuts its levels into more chunks than `MPH3` does, and each
+chunk costs bits, so there our estimate puts PHastR above `MPH3` at 1 M — an estimate, not yet a
+measurement. `MPH3`'s lookups lead at 10 M and 100 M, single and batch: 2.6 and
 10.0 ns against PtrHash's fast set's 2.9 and 10.7, and 2.5 and 3.5 in a batch against its 2.8 and
 5.0. At 1 M its batch leads too, 2.2 against 2.4, and its single lookup is level with fast's at
 1.9 ns, where the run before had fast a tenth of a nanosecond ahead, inside both rows' spreads:

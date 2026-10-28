@@ -73,6 +73,22 @@ All notable changes to this project are documented here. The format follows
   always did; `SECURITY.md`, `docs/design.md` and the build docs now say so and name
   `PerfectHashIndex` for keys a third party chooses.
 
+- **A false sentence corrected: `MPH3` is not the smallest minimal perfect hash.** Built on one
+  thread over the same keys, `sux` 0.15's PHastR takes fewer bits at bucket sizes 4.5 and 4.75 and
+  with 10-bit seeds — 1.919 / 1.904 / 1.902 bits a key at 1 M / 10 M / 100 M against `MPH3`'s
+  1.925 / 1.915 / 1.911 (`bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt`, bits only).
+  The benchmarks said `MPH3` was the smallest in every table, which held only of tables without
+  PHastR; the README's prior art now cites it.
+- **`SECURITY.md` states what a `DoubleArrayIndex` build costs as its keys grow.** Its placement
+  is super-linear: 4.5× the instructions a key from 2^16 to 2^21 Chinese titles, 8.8× from 2^16 to
+  2^20 on keys shaped against it. Every other build and load was counted from 2^16 to 2^24 keys on
+  five corpora and stays within a constant a key.
+- **`docs/benchmarks.md` has a "Where lexindex loses" section**: every measured loss in one list,
+  each linked to the section that measured it.
+- **The README's and the usage guide's Rust examples show all their code.** They had hidden lines
+  for the doctest (`# drop(idx);`, `# Ok::<…>`) that GitHub, PyPI and the site printed as code;
+  each example is now a `fn main() -> Result<…>`, writes its files under `std::env::temp_dir()`,
+  ends a mapping with its scope and removes the file after.
 - **A getting-started page**, `docs/tutorial.md`, second in the site's nav: a keys file, `plan`,
   `build`, `inspect`, then `load_mmap`, a lookup each way and a prefix query, every command with
   the output it printed.
