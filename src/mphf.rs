@@ -228,21 +228,22 @@ const PIECES: u64 = 8;
 fn chunk_starts(buckets: u64, deep: bool) -> Vec<u64> {
     let pieces = tun(17, PIECES as f64) as u64;
     let tail = tun(19, PIECES as f64) as u64;
+    let chunk = 1u64 << tun(15, CHUNK.trailing_zeros() as f64) as u32;
     let mut starts = vec![0];
     let mut at = 0;
-    if deep || buckets < 4 * CHUNK || tail == 0 {
-        let floor = if deep { MIN_CHUNK } else { CHUNK / 4 };
-        let size = (buckets / pieces).clamp(floor, CHUNK);
+    if deep || buckets < 4 * chunk || tail == 0 {
+        let floor = if deep { MIN_CHUNK } else { chunk / 4 };
+        let size = (buckets / pieces).clamp(floor, chunk);
         while buckets - at >= 2 * size {
             at += size;
             starts.push(at);
         }
     } else {
-        while buckets - at >= 3 * CHUNK {
-            at += CHUNK;
+        while buckets - at >= 3 * chunk {
+            at += chunk;
             starts.push(at);
         }
-        let small = 2 * CHUNK / tail;
+        let small = 2 * chunk / tail;
         while buckets - at >= 2 * small {
             at += small;
             starts.push(at);
@@ -5317,8 +5318,26 @@ mod spike {
         let hs = bigram_hashes(n);
         let spec = std::env::var("LEXINDEX_MPHF_SWEEP").unwrap_or_default();
         let names = [
-            "lambda", "slice", "modes", "prodc", "tlambda", "talpha", "window", "delta", "w1",
-            "w2", "w3", "w4", "w5", "w6", "w7", "unused15", "margin", "chunk", "phantom", "tail",
+            "lambda",
+            "slice",
+            "modes",
+            "prodc",
+            "tlambda",
+            "talpha",
+            "window",
+            "delta",
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w5",
+            "w6",
+            "w7",
+            "chunkbits",
+            "margin",
+            "chunk",
+            "phantom",
+            "tail",
         ];
         let threads = env("LEXINDEX_MPHF_THREADS", 1);
         for cfg in spec.split(';').filter(|c| !c.trim().is_empty()) {
