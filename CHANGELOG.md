@@ -34,11 +34,18 @@ All notable changes to this project are documented here. The format follows
   merged arena as `arena: unknown offset encoding`, and a blob whose arena stays blocked loads on
   every 4.x. `build_to_file`, `build_to_file_with_fingerprints`, a streamed `lexindex build` and
   `Overlay::compact_to_file` write the blocked layout as before: the same ids as `build` + `save`,
-  not always the same bytes. `plan` prices the merged arena from a sample and reads high where the
-  overlap grows with `n`: 9.67 bytes a key on the dictionary against 9.25 built.
+  not always the same bytes. `plan` prices the merged arena at `n` (below, under Fixed).
 
 ### Fixed
 
+- **`plan` prices a merged `PerfectHashIndex` arena within 2.9 % of the built blob**, on fourteen
+  corpora, where its estimate read a million identifiers 11.4 % high. The arena is now priced
+  apart from the rest of the index: the saving a key is read at the sample and at its bottom half
+  and quarter by hash, carried to `n` by a power law whose exponent falls where it fell between the
+  two halvings, and laid out as the build would lay the entries out; a blocked arena is priced from
+  its lengths in slot order. The sample's lexicographic first half, the second point before, keeps
+  the keys contained in their neighbours and read the saving as flat. The dictionary now reads 9.27
+  bytes a key against 9.25 built, where it read 9.67. Only `plan`'s numbers change.
 - **`HashedDictIndex` refuses a dictionary holding two keys equal in both 64-bit hashes** with
   `IndexError::Build`, at every width. Its side table matched on the pair, so both keys were
   answered with one rank — by `id` from one fingerprint bit up and by `id_unchecked` at any

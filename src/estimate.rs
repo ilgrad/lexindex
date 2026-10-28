@@ -1194,12 +1194,11 @@ struct Sample {
     /// The ranking survives — the number is still two orders under every other index's, so a plan
     /// picks the fst — but the byte count does not, and [`Plan::thin`] is what says so.
     fst_per_key: f64,
-    /// `(fixed, per key)` for each hash index, fitted over two sample sizes: their blobs are a
-    /// header, a perfect hash and a per-key table, and at a hundred thousand keys the header is
-    /// still 0.06 bytes a key -- scaling one measurement by `n` carries that constant with it and
-    /// reads 34 % high.
+    /// Each hash index fitted over two sample sizes: their blobs are a header, a perfect hash and
+    /// a per-key table, and at a hundred thousand keys the header is still 0.06 bytes a key --
+    /// scaling one measurement by `n` carries that constant with it and reads 34 % high.
     #[cfg(feature = "mph")]
-    hash_fit: [(f64, f64); 3],
+    hash_fit: HashFits,
 }
 
 impl Sample {
@@ -1411,31 +1410,149 @@ fn suffix_bytes(shape: &Shape, entries: f64, restarts: f64) -> f64 {
     (entries - restarts) * (l - shape.mean_lcp1()) + restarts * (l - shape.mean_lcp32())
 }
 
-/// `(fixed, per key)` for the three hash indexes, from a build at the sample size and another at
-/// half of it. Their size is a straight line in `n` -- a perfect hash and a per-key table over a
-/// header -- so two points fit it exactly, and neither depends on what the keys say beyond their
-/// length. The key arena is taken out of `PerfectHashIndex` here and put back at `n`, where the
-/// corpus's own byte count is known exactly. A merged arena breaks the line: what its overlap
-/// saves grows with `n`, so the fit reads high -- 9.67 bytes a key on the 479 823-word
-/// dictionary against 9.25 built.
+/// The three hash indexes, each from a build at the sample size and another at half of it.
 #[cfg(feature = "mph")]
-fn hash_fits(keys: &[&str]) -> Result<[(f64, f64); 3], IndexError> {
-    let bytes = |ks: &[&str]| -> Result<[f64; 3], IndexError> {
-        let arena: f64 = ks.iter().map(|k| k.len() as f64).sum();
+struct HashFits {
+    /// `(fixed, per key)`: a perfect hash and a per-key table over a header are a straight line in
+    /// `n`, so two points fit it exactly, and neither depends on what the keys say.
+    compact: (f64, f64),
+    closed: (f64, f64),
+    perfect: PerfectFit,
+}
+
+/// `PerfectHashIndex` is that line plus its key arena, and a merged arena breaks the line: what
+/// its overlap saves grows with `n`. So the arena is priced apart, at `n`.
+///
+/// The saving a key, σ, is read at the sample and at its bottom half and quarter *by hash* —
+/// uniform draws, nested in the sample as the sample is in the corpus. Each doubling multiplies σ
+/// by 2^β; β is the last doubling's exponent, clamped to [0, 1], and where it fell from the doubling
+/// before it falls by the same ratio at every doubling to `n`. Containment, the larger part of σ
+/// where it grows, follows a power law in the sample rate, and on dense keys its growth slows:
+/// a constant β read a million numeric ids 9.8 % low. The draws must be uniform: the sample's
+/// lexicographic first half keeps the keys contained in their neighbours and loses only the
+/// overlaps into the second half, so on a million identifiers it read the saving flat and the plan
+/// 11.4 % high. Against the built blob on 14 corpora the worst error is 2.9 %.
+#[cfg(feature = "mph")]
+struct PerfectFit {
+    /// `(fixed, per key)` for the blob without its arena.
+    rest: (f64, f64),
+    /// `(fixed, per key)` for a blocked arena's index, beyond the keys.
+    blocked: (f64, f64),
+    /// The sample's key lengths, the length histogram a merged arena's fields are sized from.
+    lens: Vec<u32>,
+    /// σ at the sample size `m`, the last doubling's exponent, and the ratio it falls by a
+    /// doubling, at most 1.
+    saving: f64,
+    beta: f64,
+    decay: f64,
+    m: usize,
+}
+
+#[cfg(feature = "mph")]
+impl PerfectFit {
+    fn bytes(&self, shape: &Shape) -> f64 {
+        let n = shape.n;
+        let doublings = (n as f64 / self.m.max(1) as f64).log2().max(0.0);
+        let r = self.decay;
+        let exponent = if r < 1.0 {
+            self.beta * r * (1.0 - r.powf(doublings)) / (1.0 - r)
+        } else {
+            self.beta * doublings
+        };
+        let saving = self.saving * exponent.exp2();
+        let data_len = shape.len as usize;
+        let merged_len = (shape.len as f64 - saving * n as f64).max(0.0) as usize;
+        let blocked_index = line(self.blocked, n).max(0.0) as usize;
+        line(self.rest, n)
+            + crate::arena::priced(&self.lens, n, data_len, merged_len, blocked_index) as f64
+    }
+}
+
+/// The keys of the sample whose hash is in its lower half, ascending: the uniform half of a
+/// uniform sample, and the second point of every hash fit.
+#[cfg(feature = "mph")]
+fn hash_half<'a>(keys: &[&'a str]) -> Vec<&'a str> {
+    let mut by_hash: Vec<(u64, &str)> = keys
+        .iter()
+        .map(|&k| (crate::blob::hash_bytes(k.as_bytes()), k))
+        .collect();
+    let half = keys.len() / 2;
+    if half > 0 {
+        by_hash.select_nth_unstable_by_key(half - 1, |&(h, _)| h);
+    }
+    let mut low: Vec<&str> = by_hash[..half].iter().map(|&(_, k)| k).collect();
+    low.sort_unstable();
+    low
+}
+
+/// The bytes a superstring of `keys` — sorted, distinct — saves on them, a key: `0` where they
+/// do not merge.
+#[cfg(feature = "mph")]
+fn saving_per_key(keys: &[&str]) -> f64 {
+    let raw: usize = keys.iter().map(|k| k.len()).sum();
+    let order: Vec<u32> = (0..keys.len() as u32).collect();
+    match crate::superstring::merge(keys, &order) {
+        Some(merged) => raw.saturating_sub(merged.data.len()) as f64 / keys.len().max(1) as f64,
+        None => 0.0,
+    }
+}
+
+#[cfg(feature = "mph")]
+fn hash_fits(keys: &[&str]) -> Result<HashFits, IndexError> {
+    let low = hash_half(keys);
+    let (m, half) = (keys.len(), low.len());
+    let fit = |big: f64, small: f64| {
+        let slope = (big - small) / (m - half).max(1) as f64;
+        (big - slope * m as f64, slope)
+    };
+    let lens = |ks: &[&str]| -> Vec<u32> {
+        ks.iter()
+            .map(|k| u32::try_from(k.len()).unwrap_or(u32::MAX))
+            .collect()
+    };
+    // A blocked arena overflows block by block, so its index depends on the order of the lengths:
+    // the build lays them out in slot order, which the hash scatters, not in key order.
+    let lens_by_hash = |ks: &[&str]| -> Vec<u32> {
+        let mut by_hash: Vec<(u64, &str)> = ks
+            .iter()
+            .map(|&k| (crate::blob::hash_bytes(k.as_bytes()), k))
+            .collect();
+        by_hash.sort_unstable_by_key(|&(h, _)| h);
+        let in_order: Vec<&str> = by_hash.into_iter().map(|(_, k)| k).collect();
+        lens(&in_order)
+    };
+    let parts = |ks: &[&str]| -> Result<[f64; 4], IndexError> {
+        let perfect = PerfectHashIndex::build(ks)?;
         Ok([
             CompactHashIndex::build(ks, 1)?.serialized_len()? as f64,
             ClosedHashIndex::build(ks)?.serialized_len() as f64,
-            PerfectHashIndex::build(ks)?.serialized_len()? as f64 - arena,
+            (perfect.serialized_len()? - perfect.arena_len()) as f64,
+            crate::arena::blocked_index_len(&lens_by_hash(ks)).unwrap_or(0) as f64,
         ])
     };
-    let half = keys.len() / 2;
-    let (small, big) = (bytes(&keys[..half])?, bytes(keys)?);
-    let mut fit = [(0.0, 0.0); 3];
-    for (i, f) in fit.iter_mut().enumerate() {
-        let slope = (big[i] - small[i]) / (keys.len() - half).max(1) as f64;
-        *f = (big[i] - slope * keys.len() as f64, slope);
-    }
-    Ok(fit)
+    let (small, big) = (parts(&low)?, parts(keys)?);
+    let s_quarter = saving_per_key(&hash_half(&low));
+    let (s_small, s_big) = (saving_per_key(&low), saving_per_key(keys));
+    let exponent = |big: f64, small: f64| (big > 0.0 && small > 0.0).then(|| (big / small).log2());
+    let last = exponent(s_big, s_small);
+    let beta = last.map_or(0.0, |b| b.clamp(0.0, 1.0));
+    let decay = match (exponent(s_small, s_quarter), last) {
+        (Some(before), Some(last)) if before > 0.0 && last > 0.0 => (last / before).min(1.0),
+        _ => 1.0,
+    };
+    Ok(HashFits {
+        compact: fit(big[0], small[0]),
+        closed: fit(big[1], small[1]),
+        perfect: PerfectFit {
+            rest: fit(big[2], small[2]),
+            blocked: fit(big[3], small[3]),
+            lens: lens(keys),
+            saving: s_big.max(0.0),
+            beta,
+            decay,
+            m,
+        },
+    })
 }
 
 /// Price every index the needs allow, from one sorted copy of the keys.
@@ -1772,11 +1889,11 @@ fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -
                     )
                 }
                 #[cfg(feature = "mph")]
-                Kind::Compact => (line(sample.hash_fit[0], shape.n), None),
+                Kind::Compact => (line(sample.hash_fit.compact, shape.n), None),
                 #[cfg(feature = "mph")]
-                Kind::Closed => (line(sample.hash_fit[1], shape.n), None),
+                Kind::Closed => (line(sample.hash_fit.closed, shape.n), None),
                 #[cfg(feature = "mph")]
-                Kind::Perfect => (line(sample.hash_fit[2], shape.n) + shape.len as f64, None),
+                Kind::Perfect => (sample.hash_fit.perfect.bytes(shape), None),
                 #[cfg(not(feature = "mph"))]
                 _ => unreachable!("the hash indexes are not candidates without their feature"),
             };
@@ -2216,6 +2333,28 @@ mod tests {
             fst.bytes,
             StringIndex::build(&keys).unwrap().serialized_len() as u64
         );
+    }
+
+    /// The second point of the hash fits is the sample's bottom half by hash — a uniform half — and
+    /// not its lexicographic first half, which keeps the keys contained in their neighbours.
+    #[cfg(feature = "mph")]
+    #[test]
+    fn the_fits_half_is_the_hash_half() {
+        let keys: Vec<String> = (0..1000).map(|i| format!("k{i:04}")).collect();
+        let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
+        sorted.sort_unstable();
+        let half = hash_half(&sorted);
+        assert_eq!(half.len(), 500);
+        assert!(half.windows(2).all(|w| w[0] < w[1]), "ascending");
+        let hash = |k: &str| crate::blob::hash_bytes(k.as_bytes());
+        let cut = half.iter().map(|k| hash(k)).max().unwrap();
+        for k in &sorted {
+            assert_eq!(half.binary_search(k).is_ok(), hash(k) <= cut, "{k}");
+        }
+        assert_ne!(half, sorted[..500], "not the lexicographic half");
+        // Nested: the quarter is the half's own bottom half.
+        let quarter = hash_half(&half);
+        assert!(quarter.iter().all(|k| half.binary_search(k).is_ok()));
     }
 
     #[test]

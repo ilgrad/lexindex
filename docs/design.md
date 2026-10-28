@@ -720,9 +720,12 @@ character boundary — in `O(n)`, and a `load_mmap` of a merged arena reads its 
 crafted entry is refused at load rather than answered. The magic stays
 `BMP8`: 4.0–4.5 refuse a merged arena as an unknown offset encoding, and a blob that keeps a
 blocked arena crosses the versions in both directions. `build_to_file` and an overlay's
-`compact_to_file` hold no key set to merge and write the blocked layout. `plan` fits the arena by
-the same two-point line as the rest of the index, and the overlap grows with `n`, so it reads
-high: 9.67 B/key on the dictionary against 9.25 built.
+`compact_to_file` hold no key set to merge and write the blocked layout. `plan` prices the arena
+apart from the rest of the index, whose size is a line in `n`: the overlap grows with `n`, so it
+reads the saving a key at the sample and at its bottom half and quarter by hash and carries it to
+`n`, and lays the entries out as `MergedShape` would. On fourteen corpora its worst error against
+the built blob is 2.9 %; the two-point line it replaced read a million identifiers 11.4 % high and
+the dictionary at 9.67 B/key against 9.25 built (9.27 now).
 
 `build_with_fingerprints` sets bit `0x80` of the tag and stores one byte per slot behind the offsets —
 a fingerprint from the second hash, the one `CompactHashIndex` keeps — so a probe whose fingerprint

@@ -1107,21 +1107,35 @@ struct MergedShape {
 
 impl MergedShape {
     fn of(spans: &[(u64, u32)], data_len: usize, fingerprints: bool) -> Option<Self> {
-        let n = spans.len();
         let min_len = spans.iter().map(|s| s.1).min()?;
         // One bit at least, so that no entry is empty: with every field zero bits wide, as one
         // key alone would have them, the eight-byte read would start where the padding ends.
         let start_bits = (64 - spans.iter().map(|s| s.0).max()?.leading_zeros()).max(1);
+        let need = need_bits(spans.iter().map(|s| s.1), min_len);
+        Self::from_need(
+            &need,
+            spans.len(),
+            min_len,
+            start_bits,
+            data_len,
+            fingerprints,
+        )
+    }
+
+    /// The shape over `n` entries whose length fields need what `need` counts, starting below
+    /// `2^start_bits`.
+    fn from_need(
+        need: &[usize; 34],
+        n: usize,
+        min_len: u32,
+        start_bits: u32,
+        data_len: usize,
+        fingerprints: bool,
+    ) -> Option<Self> {
         let fp_bits = if fingerprints { 8 } else { 0 };
-        // `need[b]`: entries whose length past `min_len` takes a field of `b` bits at least, all
-        // ones being the escape — the bit length of the excess plus one.
-        let mut need = [0usize; 34];
-        for &(_, len) in spans {
-            need[(64 - (u64::from(len - min_len) + 1).leading_zeros()) as usize] += 1;
-        }
         let widest = (1..need.len()).rev().find(|&b| need[b] > 0)?;
         let mut best: Option<Self> = None;
-        let mut escaped = n;
+        let mut escaped: usize = need.iter().sum();
         for len_bits in 0..=widest as u32 {
             // Zero bits hold one length and no escape: only for keys all of one length.
             escaped -= need[len_bits as usize];
@@ -1160,6 +1174,53 @@ impl MergedShape {
         }
         best
     }
+}
+
+/// `need[b]`: the lengths whose excess past `min_len` takes a field of `b` bits at least, all ones
+/// being the escape — the bit length of the excess plus one.
+fn need_bits(lens: impl Iterator<Item = u32>, min_len: u32) -> [usize; 34] {
+    let mut need = [0usize; 34];
+    for len in lens {
+        need[(64 - (u64::from(len - min_len) + 1).leading_zeros()) as usize] += 1;
+    }
+    need
+}
+
+/// What [`StringArena::build_cheapest`] would spend, without fingerprints, on `n` keys of
+/// `data_len` bytes whose lengths are distributed as `lens`, a uniform draw of them: the merged
+/// layout over a superstring of `merged_len` bytes if it is the smaller, else the blocked one,
+/// whose index costs `blocked_index` bytes beyond the keys. For an estimate: the draw stands for
+/// the corpus, so the counts it gives each length field are scaled to `n`.
+pub(crate) fn priced(
+    lens: &[u32],
+    n: usize,
+    data_len: usize,
+    merged_len: usize,
+    blocked_index: usize,
+) -> usize {
+    let blocked = blocked_index.saturating_add(data_len);
+    let Some(min_len) = lens.iter().copied().min() else {
+        return blocked;
+    };
+    let scale = n as f64 / lens.len() as f64;
+    let mut need = need_bits(lens.iter().copied(), min_len);
+    for count in &mut need {
+        *count = (*count as f64 * scale).round() as usize;
+    }
+    // The last key starts at most its own length before the end.
+    let last_start = merged_len.saturating_sub(min_len as usize);
+    let start_bits = (usize::BITS - last_start.leading_zeros()).max(1);
+    match MergedShape::from_need(&need, n, min_len, start_bits, merged_len, false) {
+        Some(shape) if shape.bytes < blocked => shape.bytes,
+        _ => blocked,
+    }
+}
+
+/// The bytes the blocked layout's index takes over `lens`, beyond the keys themselves; `None`
+/// past what a blocked arena can address.
+pub(crate) fn blocked_index_len(lens: &[u32]) -> Option<usize> {
+    let data_len = lens.iter().map(|&l| l as usize).sum();
+    blocked_len(lens, data_len, false, NARROW_LIMIT)?.checked_sub(data_len)
 }
 
 /// Write a merged arena: header, packed entries and their padding, the superstring, and the

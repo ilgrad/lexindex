@@ -766,6 +766,12 @@ impl PerfectHashIndex {
         Ok(HEADER_V5 + mph + self.arena.as_bytes().len() + self.side.len() * SIDE_ENTRY)
     }
 
+    /// The key arena's bytes in the blob, in whichever layout the build chose: what the estimator
+    /// takes out of a sample's blob to fit the rest.
+    pub(crate) fn arena_len(&self) -> usize {
+        self.arena.as_bytes().len()
+    }
+
     /// Reconstruct from [`PerfectHashIndex::to_bytes`] output.
     ///
     /// Safe on arbitrary bytes. Every array the index will read is bounded by a length this crate
