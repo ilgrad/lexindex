@@ -340,7 +340,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
 - **`DoubleArrayIndex` numbers characters by frequency.** A label is a character's rank in the
   lexicon, 1 for the most frequent, read from a table indexed by code point; bases are unique, so
   the label a slot holds settles a step. Every row sits at the lowest base where it fits, the widest
-  first: 74 % of the slots are used on jieba's lexicon, 98 % on English words.
+  first, a wide row inside a window under the top once single children are left to fill the holes
+  below, which keeps a build linear: 74 % of the slots are used on jieba's lexicon, 98 % on English
+  words.
 - **Keys are bytes.** No Unicode normalisation, case folding or collation: normalise (NFC/NFKC,
   casefold) before building *and* before querying if the application needs it.
 - **Every build is deterministic.** The same keys give the same blob, byte for byte, on any machine

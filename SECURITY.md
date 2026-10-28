@@ -169,12 +169,15 @@ fuzzes it for ten minutes across all of them, starting from the seeds.
   takes for one key. See above: choose the index for keys you do not control accordingly.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set
   you hand in, not to a number a blob claims.
-- **A `DoubleArrayIndex` build that grows faster than its keys.** Its placer gives every row the
-  lowest base that fits, and the search for it grows with the array. Counted in instructions a key
-  on one thread: 7 203 at 2^16 Chinese titles and 32 364 at 2^21; keys shaped so that every row has
-  eight children out of 20 000 characters take 2 366 at 2^16 and 20 834 at 2^20. Every other build
-  stayed within a constant a key up to 2^24 keys or the end of its corpus. Building from keys a
-  third party chooses, bound their count or pick another index.
+- **What a `DoubleArrayIndex` build costs on chosen keys.** Its placer searches for the lowest base
+  a row fits; a row of several children searches a window under the top while single children are
+  left to fill the holes below, and an exact search stops 2^20 slots past its start. Counted in
+  instructions a key on one thread, Chinese titles take 7 042 at 2^16 and 5 837 at 2^21 (32 364
+  before the window); keys shaped so that every row has eight children out of 20 000 characters
+  take 2 423 at 2^16 and 3 153 at 2^20 (20 834 before), and random strings over 3 000 characters peak
+  at 15 796 at 2^18. A row's search is bounded, not its constant: building from keys a third party
+  chooses, bound their count, as for any index. Every other build stayed within a constant a key up
+  to 2^24 keys or the end of its corpus.
 
 ## Where the details are
 

@@ -596,19 +596,33 @@ saves a load a match: the prototype that had end slots spent 10 % more cycles in
 17 % more shuffled. A leaf needs no row. Bases are unique — no two rows share one — so a slot whose
 label matches belongs to the row being walked, and the check is exact without storing the parent.
 
-**Placement is the exact lowest fit, the widest rows first.** The root sits at base 0; every other
-row goes to the lowest base that no row has and whose slots are all free, rows with more children
-before rows with fewer. The search keeps the used slots and the taken bases as bitmaps, with a
-summary bit a word, and tests 64 candidate bases a word at once against each child, 32 words
-together as vector code. Relaxing the fit — a start that only moves up, or darts-clone's window of
-open blocks — cost 9–10 % of the size on jieba's lexicon. What keeps the exact fit fast is a floor:
-a row fits at base `b` when `b` is untaken and every slot `b + c` is free, and slots and bases are
-only ever taken, so the lowest slot the first child of a given set of labels could take never moves
-down. Each search leaves that slot for its first label, its first two and all of them, and the next
-row sharing one starts there. A small alphabet needs it: the free slots left low in the array suit
-no label, and without floors every row rescanned them — a build over 480 k English words took 16.6 s,
-and 0.5 with them, every row placed where it was before. 74 % of the slots are used on jieba's
-lexicon, 98 % on English words.
+**Placement is the lowest fit, the widest rows first, inside a window once the holes are spoken
+for.** The root sits at base 0; every other row goes to the lowest base that no row has and whose
+slots are all free, rows with more children before rows with fewer. A row of several children
+searched the whole occupied array for that base, and on a large alphabet the holes there suit
+single children only: on 2^21 Chinese titles a row scanned 0.5–1 M slots before it fit, four times
+as far as at 2^19, and the build's instructions a key grew 4.5× from 2^16 to 2^21. Such a row now
+starts no lower than 2^16 slots — or four alphabets, if wider — under the highest slot taken, while
+the free slots below the top are fewer than half the single-child rows still to place: those come
+last and fill holes from the bottom, so a hole the window skips is filled anyway. Over 2^16 to 2^21
+Chinese titles the build now holds 5 500–7 000 instructions a key; on a million of them it takes 69 %
+fewer instructions, on package names 39 %, English words 11 %, and every other array measured
+is 0.05–0.25 % smaller. An exact search that runs 2^20 slots past its start jumps to the window too,
+which bounds what a row costs on chosen keys. jieba's lexicon, a small array over 12 045
+characters, has more holes than single children for most of its build and keeps its size to the
+byte, if not every base.
+
+The search keeps the used slots and the taken bases as bitmaps, with a summary bit a word, and tests
+64 candidate bases a word at once against each child, 32 words together as vector code. Relaxing the
+fit everywhere — a start that only moves up, darts-clone's window of open blocks, or the window
+above applied without the hole count — cost 9–70 % of the size on jieba's lexicon. What keeps the
+search fast is a floor: a row fits at base `b` when `b` is untaken and every slot `b + c` is free,
+and slots and bases are only ever taken, so the lowest slot the first child of a given set of labels
+could take never moves down. Each search leaves that slot for its first label, its first two and all
+of them, and the next row sharing one starts there. A small alphabet needs it: the free slots left
+low in the array suit no label, and without floors every row rescanned them — a build over 480 k
+English words took 16.6 s, and 0.5 with them, every row placed where it was before. 74 % of the
+slots are used on jieba's lexicon, 98 % on English words.
 
 **The walks.** `for_each_common_prefix` decodes a character, reads its label and reads a slot, and
 stops at the first mismatch or leaf. `for_each_occurrence` decodes the text once into labels — on the

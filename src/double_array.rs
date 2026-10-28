@@ -15,8 +15,9 @@
 //! [`DictIndex`](crate::DictIndex) assign to the same keys, so either of them spells an id back.
 //!
 //! Placement puts the root at base 0 and every other row at the lowest base where all its slots
-//! are free, the rows with the most children first: on jieba's lexicon three slots in four are
-//! used.
+//! are free, the rows with the most children first — a row of several children no lower than a
+//! window under the top once the holes below it are fewer than the single children left to fill
+//! them, so that a build stays linear in its keys: on jieba's lexicon three slots in four are used.
 //!
 //! The blob is the header, the slots, the code table and the characters past the Basic
 //! Multilingual Plane. Every load walks the slots once, so that no slot names a base whose row
@@ -303,7 +304,9 @@ impl Trie {
 /// bases are only ever taken, so for any set of labels the lowest slot its first child could take
 /// never moves down, and a search that started at or below that slot and found it leaves it for
 /// the next row with the same labels: the next search skips, exactly, what this one proved has no
-/// room. On a small alphabet the free slots left low in the array suit no label, and without the
+/// room. A pair's or a set's floor found inside the [`WINDOW`] is the lowest fit at or above the
+/// window's start; that start only rises too, so the floor still bounds every later search inside
+/// it, and one outside it at worst skips a hole. On a small alphabet the free slots left low in the array suit no label, and without the
 /// floors every row rescanned them: a build over 480 k English words took 16.6 s, and 0.5 with
 /// them, placing every row where it did before.
 struct Floors {
@@ -354,6 +357,28 @@ fn pair_key(a: u16, b: u16) -> u32 {
     u32::from(a) << 16 | u32::from(b)
 }
 
+/// A row of two or more children searches no lower than this many slots under the highest slot
+/// taken, or four times the alphabet if that is wider — while the free slots under the top are
+/// fewer than half the single-child rows still to place. Those rows come last and fill holes from
+/// the bottom, so a hole a wider row skips is filled anyway, and the array is no larger.
+///
+/// Without it every such row searched the whole occupied array, whose holes suit single children
+/// only: on 2^21 Chinese titles a row scanned 0.5–1 M slots before it fit, 4× as far as at 2^19, and
+/// the build was quadratic. With it the build there took 79 % fewer instructions, on English words
+/// 11 % fewer, and the array was 0.05–0.25 % smaller on every other corpus measured; a small array
+/// over a wide alphabet (the jieba dictionary, 670 k slots, 12 045 labels) has more holes than
+/// single children for most of its build and keeps its size, if not every base.
+const WINDOW: usize = 1 << 16;
+
+/// Words an exact search crosses before it starts again at the [`WINDOW`]'s start, whatever the
+/// holes: a bound on the work a row costs on keys chosen to make every row search the whole array.
+const SEARCH_CAP: usize = 1 << 14;
+
+// The rows of two or more children placed and their search rounds, `CHUNK` words each: what the
+// test that holds a build's work to its keys reads.
+#[cfg(test)]
+thread_local!(static WORK: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) });
+
 /// The slot of the lowest set bit of `fit`, whose word 0 is word `w0` of the array.
 #[inline(always)]
 fn lowest(fit: &[u64; CHUNK], w0: usize) -> Option<usize> {
@@ -362,9 +387,9 @@ fn lowest(fit: &[u64; CHUNK], w0: usize) -> Option<usize> {
 }
 
 /// Every row's base: the root's is 0, and every other row takes the lowest base no row has
-/// whose slots are all free, the rows with the most children first. Wide rows are the hard ones to
-/// fit, so they go while the array is sparse; the single-child rows, most of a lexicon's, then fill
-/// the holes from the bottom.
+/// whose slots are all free — at or above the [`WINDOW`]'s start while it applies — the rows with
+/// the most children first. Wide rows are the hard ones to fit, so they go while the array is
+/// sparse; the single-child rows, most of a lexicon's, then fill the holes from the bottom.
 ///
 /// A search starts at the highest of its [`Floors`], walks the free slots its first child could
 /// take, `CHUNK` words of 64 at a time, and tests the bases they imply against the other children's
@@ -415,6 +440,14 @@ fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
     let last_word = (MAX_SLOTS - max_label) / 64;
     // The other children's slots relative to the first child's: a word offset and a shift.
     let mut rel: Vec<(usize, u32)> = Vec::new();
+    // The highest slot taken, the slots taken, and the single-child rows still to place.
+    let mut top = 0usize;
+    let mut used = 1 + t.kids(0).len();
+    let mut singles = rows
+        .iter()
+        .filter(|&&v| t.kids(v as usize).len() == 1)
+        .count();
+    let span = WINDOW.max(4 * max_label);
     for v in rows {
         let labels = &t.label[t.kids(v as usize)];
         let c0 = usize::from(labels[0]);
@@ -431,9 +464,26 @@ fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
         let (f1, f2, fall) = floors.get(labels);
         let e1 = lo.max(f1);
         let e2 = e1.max(f2);
-        let mut e = e2.max(fall);
-        let (mut learn1, mut learn2) = (e == e1, e == e2 && labels.len() > 1);
+        let wide = labels.len() > 1;
+        let reach = if wide { top.saturating_sub(span) } else { 0 };
+        let free = (top + 1).saturating_sub(used);
+        let from = if 2 * free < singles { reach } else { 0 };
+        let mut e = e2.max(fall).max(from);
+        let (mut learn1, mut learn2) = (e == e1, e == e2.max(from) && wide);
+        let start = e;
+        #[cfg(test)]
+        if wide {
+            WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
+        }
         let s = 'search: loop {
+            #[cfg(test)]
+            if wide {
+                WORK.with(|w| w.set((w.get().0, w.get().1 + 1)));
+            }
+            if wide && e < reach && e - start > 64 * SEARCH_CAP {
+                e = reach;
+                (learn1, learn2) = (false, false);
+            }
             let w0 = o.open_from(e / 64);
             if w0 > last_word {
                 return Err(too_many());
@@ -528,6 +578,9 @@ fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
         for &c in labels {
             o.take(b + usize::from(c));
         }
+        top = top.max(b + usize::from(labels[labels.len() - 1]));
+        used += labels.len();
+        singles -= usize::from(!wide);
         base[v as usize] = b as u32;
     }
     Ok(base)
@@ -1456,6 +1509,41 @@ mod tests {
             place(&t, chars.len()).unwrap(),
             place_with(&t, chars.len()).unwrap()
         );
+    }
+
+    #[test]
+    fn a_wide_row_searches_no_further_than_the_window_once_it_applies() {
+        // 2^17 strings of 4 to 12 characters out of 3 000: the exact lowest fit searched 75 rounds
+        // a wide row here and 152 at twice the keys; inside the window a row's search crosses at
+        // most the window's words, and the fit above the top is the first base it tries.
+        let mut x = 0x5CA1_E5CA_1E5C_A1E5u64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let keys: Vec<String> = (0..1 << 17)
+            .map(|_| {
+                (0..4 + next() % 9)
+                    .map(|_| char::from_u32(0x4E00 + (next() % 3000) as u32).unwrap())
+                    .collect()
+            })
+            .collect();
+        WORK.with(|w| w.set((0, 0)));
+        let idx = DoubleArrayIndex::build(&keys).unwrap();
+        let (rows, rounds) = WORK.with(std::cell::Cell::get);
+        let bound = (WINDOW / 64 / CHUNK + 2) as f64;
+        assert!(
+            rounds as f64 / rows as f64 <= bound,
+            "{rounds} rounds over {rows} wide rows, more than {bound} a row"
+        );
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        for (i, k) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(k), Some(i as u64), "{k}");
+        }
     }
 
     #[test]

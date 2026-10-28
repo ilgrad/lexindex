@@ -55,6 +55,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **A `DoubleArrayIndex` build is linear in its keys; it was quadratic on large alphabets.** A row
+  of several children searched the whole occupied array for the lowest base it fits, and on 2^21
+  Chinese titles crossed 0.5–1 M slots a row — the build's instructions a key grew 4.5× from 2^16 to
+  2^21. Such a row now searches from 2^16 slots (or four alphabets) under the top while the free
+  slots below are fewer than half the single-child rows still to place, which fill those holes
+  anyway, and an exact search stops 2^20 slots past its start. Counted on one thread: Chinese
+  titles 5 500–7 000 instructions a key from 2^16 to 2^21 (7 203 → 32 364 before); at a million of
+  them 69 % fewer instructions, package names 39 %, identifiers 29 %, English words 11 %; every
+  other array measured is 0.05–0.25 % smaller. jieba's lexicon, a small array over 12 045 characters,
+  keeps its size to the byte, not every base; every blob the golden tests pin is unchanged. **The same keys
+  can give different bytes than 4.5 did**, with the same ids: the format is unchanged, and every
+  4.5 blob loads. Time waits for a quiet machine; instruction counts are not a time.
 - **`DictIndex::ids_of` places each probe with one binary search over the samples, not two.** A
   lane searched for its first sample past the probe and again for its last one at or before it;
   the second search is now one compare against the sample it already found, or one step into the
@@ -79,10 +91,9 @@ All notable changes to this project are documented here. The format follows
   1.925 / 1.915 / 1.911 (`bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt`, bits only).
   The benchmarks said `MPH3` was the smallest in every table, which held only of tables without
   PHastR; the README's prior art now cites it.
-- **`SECURITY.md` states what a `DoubleArrayIndex` build costs as its keys grow.** Its placement
-  is super-linear: 4.5× the instructions a key from 2^16 to 2^21 Chinese titles, 8.8× from 2^16 to
-  2^20 on keys shaped against it. Every other build and load was counted from 2^16 to 2^24 keys on
-  five corpora and stays within a constant a key.
+- **`SECURITY.md` states what a `DoubleArrayIndex` build costs on chosen keys**, measured before
+  and after the change under Changed. Every other build and load was counted from 2^16 to 2^24 keys
+  on five corpora and stays within a constant a key.
 - **`docs/benchmarks.md` has a "Where lexindex loses" section**: every measured loss in one list,
   each linked to the section that measured it.
 - **The README's and the usage guide's Rust examples show all their code.** They had hidden lines
