@@ -24,8 +24,9 @@ processes run one after another; a cell is the minimum over every round of every
 the samples kept beside it. jieba over its own dictionary is the control row: no lexindex change
 can move it. The run is only as good as the machine was quiet.
 
-Run against a released wheel, so that the numbers belong to it, on a GIL build of CPython:
-  uv run --no-project --python /usr/bin/python3.14 --with lexindex==4.2.0 --with jieba==0.42.1 \\
+Run against a released wheel, so that the numbers belong to it, on a GIL build of CPython
+(`DoubleArrayIndex` needs lexindex 4.5 or later):
+  uv run --no-project --python /usr/bin/python3.14 --with lexindex==4.5.3 --with jieba==0.42.1 \\
          --with marisa-trie --with dawg2 python bench/cjk_segment.py [--processes 3] [--rounds 5]
 """
 
@@ -71,6 +72,7 @@ LOADS = (
     "string-mmap",
     "dict256-mmap",
     "dict256-bytes",
+    "da-mmap",
     "marisa-mmap",
     "dawg-load",
 )
@@ -129,6 +131,7 @@ def write_files(work: Path, words: list[str], freq: dict[str, int]) -> None:
 
     lexindex.StringIndex(words).save(work / "string.bix")
     lexindex.DictIndex(words).save(work / "dict256.bdx")
+    lexindex.DoubleArrayIndex(words).save(work / "words.bda")
     marisa_trie.Trie(words).save(str(work / "words.marisa"))
     dawg.DAWG(words).save(str(work / "words.dawg"))
     logf = array.array("d", [math.log(freq[w]) for w in words])
@@ -205,6 +208,7 @@ def variants(work: Path, lexicon_path: Path, words: list[str], total: int) -> di
 
     s = lexindex.StringIndex.load_mmap(work / "string.bix")
     d = lexindex.DictIndex.load_mmap(work / "dict256.bdx")
+    a = lexindex.DoubleArrayIndex.load_mmap(work / "words.bda")
     m = marisa_trie.Trie()
     m.mmap(str(work / "words.marisa"))
     # marisa numbers its keys its own way, so it gets a frequency table in its own order.
@@ -218,6 +222,8 @@ def variants(work: Path, lexicon_path: Path, words: list[str], total: int) -> di
         "lexindex StringIndex occurrences": Whole(s.occurrences, logf_rank, Words(s.id)),
         "lexindex StringIndex common_prefix": Backed(s.common_prefix, logf_rank, Words(s.id)),
         "lexindex DictIndex 256 common_prefix": Backed(d.common_prefix, logf_rank, Words(d.id)),
+        "lexindex DoubleArrayIndex occurrences": Whole(a.occurrences, logf_rank, Words(a.id)),
+        "lexindex DoubleArrayIndex common_prefix": Backed(a.common_prefix, logf_rank, Words(a.id)),
         "marisa-trie": Backed(
             lambda q: list(m.iter_prefixes_with_ids(q)), logf_marisa, Words(m.get)
         ),
@@ -304,6 +310,8 @@ def load_child(work: Path, lexicon_path: Path, name: str) -> int:
         idx = lexindex.DictIndex.load_mmap(work / "dict256.bdx")
     elif name == "dict256-bytes":
         idx = lexindex.DictIndex.from_bytes((work / "dict256.bdx").read_bytes())
+    elif name == "da-mmap":
+        idx = lexindex.DoubleArrayIndex.load_mmap(work / "words.bda")
     elif name == "marisa-mmap":
         idx = marisa_trie.Trie()
         idx.mmap(str(work / "words.marisa"))

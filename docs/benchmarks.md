@@ -1625,8 +1625,10 @@ jieba's own DAG on every block and its cuts of every sentence. The control row, 
 dictionary, spread 0.2–1.8 % across the processes and reads within 1 % of the 4.4.2 campaign's
 ([`bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/cjk-prefix-py-2026-09-24-arz-b101076.txt)),
 the `StringIndex` rows, whose code did not change, within 1.3 %. CPython 3.14.7 with the GIL;
-`marisa-trie` 1.4.1, `dawg2` 0.13.3. The harness is not in the repository; the file records every
-version, hash and flag. No competitor here is a lexindex dependency.</sub>
+`marisa-trie` 1.4.1, `dawg2` 0.13.3. That run's harness is not in the repository;
+[`bench/cjk_segment.py`](https://github.com/ilgrad/lexindex/blob/main/bench/cjk_segment.py) times the
+same backends after the same check, and the file records every version, hash and flag. No
+competitor here is a lexindex dependency.</sub>
 
 ## Hash quality
 
