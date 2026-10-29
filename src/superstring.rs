@@ -27,7 +27,8 @@
 //! and two builds of one key set give the same bytes on any number of threads.
 //!
 //! **Cost.** `O(N log σ)` for the automaton, `N` the bytes of all keys and `σ ≤ 256` the children a
-//! node can have, searched by bisection; `O(N + n log n)` for the merge, the log from serving each
+//! node can have, searched by bisection — its failure links, the part that misses the cache, one
+//! level at a time on every thread; `O(N + n log n)` for the merge, the log from serving each
 //! depth's keys in slot order. Memory, all of it gone when this returns: one copy of the keys, nine
 //! bytes per trie node — there are at most `N` — and a few dozen bytes per key.
 
@@ -81,15 +82,25 @@ struct Trie {
     level: Vec<u32>,
 }
 
-impl Trie {
-    fn child(&self, v: u32, c: u8) -> Option<u32> {
+/// The levels of a [`Trie`] a failure link of the level being built may read: every node above
+/// it, with its children and links. Borrowed apart from that level's own links, which threads
+/// write.
+#[derive(Clone, Copy)]
+struct Above<'a> {
+    label: &'a [u8],
+    first: &'a [u32],
+    fail: &'a [u32],
+}
+
+impl Above<'_> {
+    fn child(self, v: u32, c: u8) -> Option<u32> {
         let (lo, hi) = (self.first[v as usize], self.first[v as usize + 1]);
         let run = &self.label[lo as usize..hi as usize];
         run.binary_search(&c).ok().map(|k| lo + k as u32)
     }
 
     /// The node reached from `v` on byte `c`, falling back along the failure links.
-    fn step(&self, mut v: u32, c: u8) -> u32 {
+    fn step(self, mut v: u32, c: u8) -> u32 {
         loop {
             if let Some(w) = self.child(v, c) {
                 return w;
@@ -100,7 +111,48 @@ impl Trie {
             v = self.fail[v as usize];
         }
     }
+}
 
+/// A level narrower than this links its nodes on the calling thread: spawning costs more than
+/// it saves.
+const PARALLEL_LEVEL: usize = if cfg!(test) { 4 } else { 1 << 14 };
+
+/// The failure links of the nodes `start ..` of one depth, the parent of each in `parents`. A
+/// link only reads the levels above — a node's link is shorter than the node, so it and every
+/// node its fallback visits sit higher up — and the levels above are complete, so the nodes are
+/// linked in any order, on as many threads as there are, to the same links. Most of the merge's
+/// time is here, in reads that miss the cache, so it is the part worth spreading.
+fn link_level(trie: &mut Trie, start: usize, parents: &[u32]) {
+    let (fail, here) = trie.fail.split_at_mut(start);
+    let here = &mut here[..parents.len()];
+    let above = Above {
+        label: &trie.label,
+        first: &trie.first,
+        fail,
+    };
+    let labels = &trie.label[start..start + parents.len()];
+    let link = |out: &mut [u32], parents: &[u32], labels: &[u8]| {
+        for ((f, &p), &c) in out.iter_mut().zip(parents).zip(labels) {
+            *f = above.step(above.fail[p as usize], c);
+        }
+    };
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    if parents.len() < PARALLEL_LEVEL || threads == 1 {
+        return link(here, parents, labels);
+    }
+    let chunk = parents.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        for ((out, parents), labels) in here
+            .chunks_mut(chunk)
+            .zip(parents.chunks(chunk))
+            .zip(labels.chunks(chunk))
+        {
+            scope.spawn(move || link(out, parents, labels));
+        }
+    });
+}
+
+impl Trie {
     fn depth(&self, v: u32) -> usize {
         self.level.partition_point(|&s| s <= v) - 1
     }
@@ -171,14 +223,19 @@ fn sweep(text: &Text) -> Option<Sweep> {
     let mut inside = vec![(NONE, 0u32); n];
     // The node of each active key's prefix one byte shorter than the depth being built.
     let mut at = vec![0u32; n];
+    // The parent of each node of the depth being built, and the key that made it.
+    let (mut parents, mut makers): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
     let mut active: Vec<u32> = (0..n as u32)
         .filter(|&i| text.len(i as usize) > 0)
         .collect();
     let mut next = 1u32;
     for d in 1..=longest {
+        let start = next as usize;
         let mut parent_seen = NONE;
         let mut node = NONE;
         let mut kept = 0;
+        parents.clear();
+        makers.clear();
         for a in 0..active.len() {
             let i = active[a] as usize;
             // A key sharing this depth with the key before it — which is then the previous
@@ -193,18 +250,8 @@ fn sweep(text: &Text) -> Option<Sweep> {
                     trie.first[p as usize] = u;
                     parent_seen = p;
                 }
-                let f = if d == 1 {
-                    0
-                } else {
-                    trie.step(trie.fail[p as usize], c)
-                };
-                trie.fail[u as usize] = f;
-                if (is_term[f as usize / 64] >> (f % 64)) & 1 == 1 {
-                    let k = terminals[terminals.partition_point(|t| t.0 < f)].1 as usize;
-                    if inside[k].0 == NONE {
-                        inside[k] = (i as u32, (d - text.len(k)) as u32);
-                    }
-                }
+                parents.push(p);
+                makers.push(i as u32);
                 if text.len(i) == d {
                     term[i] = u;
                     terminals.push((u, i as u32));
@@ -219,6 +266,20 @@ fn sweep(text: &Text) -> Option<Sweep> {
             }
         }
         active.truncate(kept);
+        // Every link at depth 1 is the root, which `fail` already holds.
+        if d > 1 {
+            link_level(&mut trie, start, &parents);
+        }
+        // In node order, so the first node whose link ends a key is where that key is placed.
+        for (u, &i) in (start..).zip(&makers) {
+            let f = trie.fail[u];
+            if (is_term[f as usize / 64] >> (f % 64)) & 1 == 1 {
+                let k = terminals[terminals.partition_point(|t| t.0 < f)].1 as usize;
+                if inside[k].0 == NONE {
+                    inside[k] = (i, (d - text.len(k)) as u32);
+                }
+            }
+        }
         // Depth `d - 1` has all its children now: a node without any gets the start of the next
         // one's, so every run ends where the next begins.
         let mut end = next;

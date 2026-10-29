@@ -19,10 +19,12 @@ All notable changes to this project are documented here. The format follows
   Russian titles, 9–10 % on hex keys and UUIDs and 0.1–5 % on other titles; URLs, domains and
   paths keep the blocked layout. `key(id)` is still a zero-copy `&str` and membership one
   comparison. The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
-  bytes, deterministically, ties to the lower slot; it holds 9 bytes a trie node and a few dozen a
-  key, freed before the arena is laid out. A load checks every merged entry once — inside the data
-  and on character boundaries — so `load_mmap` of a merged arena is `O(n)`, and a crafted entry is
-  refused. Two golden blobs pin the encoding byte for byte and seed the `parse_perfect` fuzz target.
+  bytes, deterministically, ties to the lower slot, each level's failure links on every thread; it
+  holds 9 bytes a trie node and a few dozen a key, freed before the arena is laid out. The header
+  names the data's length, so a load checks that and nothing per entry: `load_mmap` stays `O(1)`, a
+  truncated blob is refused, and a crafted entry is checked where it is read, as under the blocked
+  layouts — it answers no key. Two golden blobs pin the encoding byte for byte and seed the
+  `parse_perfect` fuzz target.
 - **`lexindex inspect --json`.** The header's fields as one JSON object on one line, an overlay's
   base nested under `overlay` and, with `--sections`, the `DictIndex` byte split under `sections`.
   The text without the flag is unchanged; a refusal under `--json` prints nothing on stdout.

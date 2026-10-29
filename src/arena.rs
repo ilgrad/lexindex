@@ -21,7 +21,7 @@
 //! | `0x32` | `[base u64][off u16 × 257]` | 256 | 2.04 |
 //! | `4` | — | — | 4 |
 //! | `8` | — | — | 8 |
-//! | `0x13` | `[min_len u32][len_bits u8][start_bits u8]`, then one entry per slot | — | `(start_bits + len_bits) / 8` |
+//! | `0x13` | `[min_len u32][len_bits u8][start_bits u8][data_len u64]`, then one entry per slot | — | `(start_bits + len_bits) / 8` |
 //!
 //! **Merged** (`0x13`, since 4.6). The four layouts above store every key whole, in slot order.
 //! This one stores a greedy shortest common superstring of the keys ([`crate::superstring`]): a key
@@ -34,8 +34,9 @@
 //! the blocked one, so no key set grows. A key is still a slice of the data, so `key(id)` stays a
 //! zero-copy `&str` and membership one comparison; every slice starts on a character boundary,
 //! because a byte-wise occurrence of one UTF-8 string in another can start nowhere else. The keys
-//! overlap, so the two ends of the data say nothing about the entries between them, and the load
-//! checks every entry once: `O(n)` where the blocked layouts check two.
+//! overlap, so the two ends of the data say nothing about the entries between them; the header
+//! names the data's length instead, which a load checks, and each entry is checked where it is
+//! read, as under every other layout: inside the data, and validated before it is a `&str`.
 //!
 //! Bit `0x80` of the tag marks the same four layouts with one fingerprint byte per slot behind
 //! the offsets — after a block's fencepost, or after a flat table — so `0x91` is
@@ -106,13 +107,16 @@ const TRAILER: usize = 8;
 const HEADER: usize = 9;
 /// The keys as one superstring ([`crate::superstring`]), each slot a packed entry — its
 /// fingerprint under [`FP`], then `length − min_len`, then where it starts — `width` bits, least
-/// significant first, behind `[min_len u32][len_bits u8][start_bits u8]`. A length past what the
+/// significant first, behind `[min_len u32][len_bits u8][start_bits u8][data_len u64]`. A length
+/// past what the
 /// field holds is all ones in it and sits in an overflow table of `[slot u32][len u32]` behind the
 /// data, sorted by slot, under [`OVERFLOW`]. Never with [`WIDE_BASE`]: the header names the start's
 /// width.
 const MERGED: u8 = 0x13;
-/// `[min_len u32][len_bits u8][start_bits u8]`, behind a merged arena's tag.
-const PARAMS: usize = 6;
+/// `[min_len u32][len_bits u8][start_bits u8][data_len u64]`, behind a merged arena's tag. The data's
+/// length is the one thing about it a load can check without reading every entry: it is what
+/// refuses a truncated blob.
+const PARAMS: usize = 14;
 /// Zero bytes behind the packed entries, so that the eight-byte read of the last one stays in them.
 const PAD: usize = 7;
 /// The widest entry one unaligned eight-byte read holds at any bit offset.
@@ -540,7 +544,8 @@ impl StringArena {
             p.min_len.checked_add(usize::try_from(field).ok()?)?
         };
         let lo = self.data_start.checked_add(usize::try_from(start).ok()?)?;
-        Some(((lo, lo.checked_add(len)?), fp))
+        let hi = lo.checked_add(len).filter(|&hi| hi <= self.data_end)?;
+        Some(((lo, hi), fp))
     }
 
     #[inline(always)]
@@ -583,9 +588,9 @@ impl StringArena {
     /// one this format defines, the offset structure must fit, an overflow table must fit behind
     /// the data, and the offsets' ends must span the data.
     /// Individual offsets are bounds-checked lazily in [`get`](StringArena::get), so a
-    /// memory-mapped load stays instant (no `O(n)` scan). A merged arena is the exception: its
-    /// keys overlap, so no two ends say anything about the rest, and every entry is checked here
-    /// once — `O(n)` — to start and end on a character boundary inside the data.
+    /// memory-mapped load stays instant (no `O(n)` scan). A merged arena's keys overlap, so its
+    /// two ends say nothing about the rest and are not checked either: an entry is held inside the
+    /// data where it is read, and a `&str` is only ever handed out validated.
     pub(crate) fn from_shared(blob: SharedBytes) -> Result<Self, IndexError> {
         let bytes = blob.as_ref();
         // Header-supplied, so converted checked: a count that does not fit this platform's `usize`
@@ -604,12 +609,13 @@ impl StringArena {
             _ => return Err(IndexError::Format("arena: unknown offset encoding")),
         };
         let merged = split(tag).layout == MERGED;
-        let (data_start, packed) = if merged {
-            Packed::read(bytes, tag, n)?
+        let (data_start, merged_len, packed) = if merged {
+            let (start, len, packed) = Packed::read(bytes, tag, n)?;
+            (start, Some(len), packed)
         } else {
             let start =
                 prefix_len(tag, n).ok_or(IndexError::Format("arena: offset table too large"))?;
-            (start, Packed::default())
+            (start, None, Packed::default())
         };
         if bytes.len() < data_start {
             return Err(IndexError::Format("arena: truncated offset table"));
@@ -629,14 +635,12 @@ impl StringArena {
             (bytes.len(), bytes.len())
         };
         let data_len = data_end - data_start;
-        if merged {
-            packed.validate(
-                bytes,
-                tag,
-                n,
-                data_start..data_end,
-                &bytes[data_end..overflow_end],
-            )?;
+        if let Some(len) = merged_len {
+            if len != data_len as u64 {
+                return Err(IndexError::Format(
+                    "arena: merged data is not the length its header names",
+                ));
+            }
             return Ok(Self {
                 blob,
                 n,
@@ -676,20 +680,22 @@ impl StringArena {
 }
 
 impl Packed {
-    /// The entry geometry a merged arena's header names, and where its data starts.
-    fn read(bytes: &[u8], tag: u8, n: usize) -> Result<(usize, Self), IndexError> {
+    /// The entry geometry a merged arena's header names, where its data starts, and how long it
+    /// says the data is.
+    fn read(bytes: &[u8], tag: u8, n: usize) -> Result<(usize, u64, Self), IndexError> {
         let p = bytes
             .get(HEADER..HEADER + PARAMS)
             .ok_or(IndexError::Format("arena: truncated merged header"))?;
         let min_len = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
         let (len_bits, start_bits) = (u32::from(p[4]), u32::from(p[5]));
+        let data_len = u64::from_le_bytes(p[6..14].try_into().unwrap());
         let width = start_bits + len_bits + 8 * u32::from(tag & FP != 0);
         if width > MAX_WIDTH {
             return Err(IndexError::Format("arena: merged entries too wide"));
         }
         // The table's size bounds `n` only through `n · width`: at zero width any count fits, and
-        // `validate` would walk all of them. Distinct keys never share a `(start, length)`, so a
-        // zero-width entry can describe one key and no more.
+        // the arena would claim it. Distinct keys never share a `(start, length)`, so a zero-width
+        // entry can describe one key and no more.
         if width == 0 && n > 1 {
             return Err(IndexError::Format(
                 "arena: zero-width merged entries for more than one key",
@@ -703,6 +709,7 @@ impl Packed {
             .ok_or(IndexError::Format("arena: offset table too large"))?;
         Ok((
             entries,
+            data_len,
             Self {
                 width,
                 len_bits,
@@ -732,56 +739,6 @@ impl Packed {
     #[inline(always)]
     fn escape(self) -> u64 {
         (1u64 << self.len_bits) - 1
-    }
-
-    /// Every entry, once: a start and an end inside `data`, each on a character boundary, and an
-    /// overflow entry for exactly the slots whose length field escapes, in slot order — which
-    /// the lookup's bisection then relies on.
-    fn validate(
-        self,
-        bytes: &[u8],
-        tag: u8,
-        n: usize,
-        data: std::ops::Range<usize>,
-        overflow: &[u8],
-    ) -> Result<(), IndexError> {
-        let data = &bytes[data];
-        let size = data.len() as u64;
-        // `str::is_char_boundary` on the bytes: the end, or anything but a continuation byte.
-        let boundary = |at: u64| at == size || (data[at as usize] as i8) >= -0x40;
-        let mut escaped = overflow.chunks_exact(SLOT_LEN);
-        for i in 0..n {
-            let word = self
-                .word(bytes, i)
-                .ok_or(IndexError::Format("arena: truncated offset table"))?;
-            let (start, field) = self.fields(word, tag);
-            let len = if self.len_bits > 0 && field == self.escape() {
-                let entry = escaped.next().ok_or(IndexError::Format(
-                    "arena: an escaped length has no overflow entry",
-                ))?;
-                if u32::from_le_bytes(entry[..4].try_into().unwrap()) as usize != i {
-                    return Err(IndexError::Format(
-                        "arena: overflow table out of slot order",
-                    ));
-                }
-                u64::from(u32::from_le_bytes(entry[4..].try_into().unwrap()))
-            } else {
-                self.min_len as u64 + field
-            };
-            let end = start
-                .checked_add(len)
-                .filter(|&end| end <= size)
-                .ok_or(IndexError::Format("arena: a merged key runs past the data"))?;
-            if !boundary(start) || !boundary(end) {
-                return Err(IndexError::Format("arena: a merged key splits a character"));
-            }
-        }
-        if escaped.next().is_some() {
-            return Err(IndexError::Format(
-                "arena: an overflow entry names a slot that does not escape",
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -1237,6 +1194,7 @@ fn lay_out_merged(
     blob.push(tag);
     blob.extend_from_slice(&shape.min_len.to_le_bytes());
     blob.extend_from_slice(&[shape.len_bits as u8, shape.start_bits as u8]);
+    blob.extend_from_slice(&(data.len() as u64).to_le_bytes());
     let fp_bits = if fps.is_some() { 8 } else { 0 };
     let escape = (1u64 << shape.len_bits) - 1;
     let mut overflow = Vec::with_capacity(shape.escaped * SLOT_LEN + TRAILER);
@@ -1959,7 +1917,7 @@ mod tests {
     /// ends in the `"ab"` that `"abd"` starts with, so the two share it: the data is `"cabd"`.
     /// Lengths 2, 3, 3 over a minimum of 2 take a two-bit field (all ones would escape), starts
     /// 1, 1, 0 one bit, so each entry is three bits: `field | start << 2` — 4, 5, 1 — packed
-    /// least significant first into `0x6C 0x00`, then seven bytes of padding. 28 bytes where the
+    /// least significant first into `0x6C 0x00`, then seven bytes of padding. 36 bytes where the
     /// blocked layout takes 38.
     #[test]
     fn a_merged_arena_is_laid_out_byte_for_byte() {
@@ -1970,6 +1928,7 @@ mod tests {
         want.push(MERGED);
         want.extend_from_slice(&2u32.to_le_bytes()); // min_len
         want.extend_from_slice(&[2, 1]); // len_bits, start_bits
+        want.extend_from_slice(&4u64.to_le_bytes()); // data_len
         want.extend_from_slice(&[0x6C, 0x00]); // 4 | 5 << 3 | 1 << 6
         want.extend_from_slice(&[0; PAD]);
         want.extend_from_slice(b"cabd");
@@ -1986,13 +1945,15 @@ mod tests {
 
     /// One key alone has every field zero bits wide but its start's, which is one bit so that the
     /// entry is never empty — the case the property tests found, an empty key whose eight-byte
-    /// read began where the padding ended. A hand-written blob with an empty entry is refused, not
-    /// read past its end.
+    /// read began where the padding ended. Laid out without the comparison to the blocked layout,
+    /// which one key may find smaller. A hand-written blob with an empty entry answers no key, and
+    /// is not read past its end.
     #[test]
     fn a_single_key_merges_into_a_readable_arena() {
         for key in ["", "é", "x"] {
             for fps in [None, Some(&[0x5A][..])] {
-                let arena = cheapest(&[key], fps);
+                let len = [key.len() as u32];
+                let arena = StringArena::merged(&[key], &[0], &len, fps, None).unwrap();
                 assert_eq!(arena.tag() & !FP, MERGED, "{key:?}");
                 let restored = StringArena::from_bytes(&arena.to_bytes()).unwrap();
                 assert_eq!((restored.get(0), restored.get(1)), (Some(key), None));
@@ -2000,7 +1961,7 @@ mod tests {
         }
         let empty = merged_blob(MERGED, (0, 0, 0), &[0], b"", &[]);
         assert_eq!(empty.len(), HEADER + PARAMS + PAD);
-        assert!(StringArena::from_bytes(&empty).is_err());
+        assert_eq!(StringArena::from_bytes(&empty).unwrap().get(0), None);
     }
 
     /// One long key among short overlapping ones: its length escapes to the overflow table rather
@@ -2089,6 +2050,7 @@ mod tests {
         blob.push(tag);
         blob.extend_from_slice(&min_len.to_le_bytes());
         blob.extend_from_slice(&[len_bits, start_bits]);
+        blob.extend_from_slice(&(data.len() as u64).to_le_bytes());
         let mut bits = vec![false; entries.len() * width as usize];
         for (i, &e) in entries.iter().enumerate() {
             for b in 0..width as usize {
@@ -2116,49 +2078,56 @@ mod tests {
     }
 
     /// `"aé"`, `"é"`, `"éa"` merge to `"aéa"`: the first and last overlap by `é`, which is a
-    /// prefix of the last. The builder's blob is the hand-written one, and a blob is checked entry
-    /// by entry at load — each refusal below is one check doing its job.
+    /// prefix of the last. The builder's blob is the hand-written one. A load checks the header
+    /// alone, as it does for every layout, so a crafted entry loads and is caught where it is
+    /// read: its slot answers `None`, and the other slots still answer.
     #[test]
-    fn a_crafted_merged_arena_is_refused() {
+    fn a_crafted_merged_entry_reads_as_no_key() {
         let data = "aéa".as_bytes(); // 61 C3 A9 61: é at 1..3
         // Lengths 3, 2, 3 over 2: a two-bit field; starts 0, 1, 1: one bit; `field | start << 2`.
         let shape = (2, 2, 1);
         let good = merged_blob(MERGED, shape, &[1, 4, 5], data, &[]);
         assert_eq!(cheapest(&["é", "éa", "aé"], None).to_bytes(), good);
-        let arena = StringArena::from_bytes(&good).unwrap();
-        let got: Vec<Option<&str>> = (0..4).map(|i| arena.get(i)).collect();
-        assert_eq!(got, [Some("aé"), Some("é"), Some("éa"), None]);
-        let err = |blob: Vec<u8>| StringArena::from_bytes(&blob).unwrap_err().to_string();
+        let read = |blob: &[u8]| -> Vec<Option<String>> {
+            let arena = StringArena::from_bytes(blob).unwrap();
+            (0..4).map(|i| arena.get(i).map(str::to_owned)).collect()
+        };
+        let keys = |k: [Option<&str>; 3]| -> Vec<Option<String>> {
+            k.iter()
+                .chain(&[None])
+                .map(|k| k.map(str::to_owned))
+                .collect()
+        };
+        assert_eq!(read(&good), keys([Some("aé"), Some("é"), Some("éa")]));
         // Wider starts, so they can point anywhere.
         let wide = (2, 2, 3);
         let at = |field: u64, start: u64| field | start << 2;
-        assert!(StringArena::from_bytes(&merged_blob(MERGED, wide, &[1, 4, 5], data, &[])).is_ok());
+        assert_eq!(
+            read(&merged_blob(MERGED, wide, &[1, 4, 5], data, &[])),
+            keys([Some("aé"), Some("é"), Some("éa")])
+        );
         // é from byte 2: its start inside its own encoding.
         let bad = merged_blob(MERGED, wide, &[1, at(0, 2), 5], data, &[]);
-        assert!(err(bad).contains("splits a character"));
+        assert_eq!(read(&bad), keys([Some("aé"), None, Some("éa")]));
         // "a" and é's lead byte: an end inside a character.
         let bad = merged_blob(MERGED, wide, &[at(0, 0), 4, 5], data, &[]);
-        assert!(err(bad).contains("splits a character"));
-        // Three bytes from byte 3 of four.
+        assert_eq!(read(&bad), keys([None, Some("é"), Some("éa")]));
+        // Three bytes from byte 3 of four: past the data, though not past the blob when an
+        // overflow table follows it.
         let bad = merged_blob(MERGED, wide, &[1, 4, at(1, 3)], data, &[]);
-        assert!(err(bad).contains("runs past the data"));
+        assert_eq!(read(&bad), keys([Some("aé"), Some("é"), None]));
+        let bad = merged_blob(MERGED | OVERFLOW, wide, &[1, 4, at(1, 3)], data, &[]);
+        assert_eq!(read(&bad), keys([Some("aé"), Some("é"), None]));
         // A field of all ones with no overflow table to send it to.
         let bad = merged_blob(MERGED, wide, &[1, at(3, 1), 5], data, &[]);
-        assert!(err(bad).contains("has no overflow entry"));
-        // The same escape with the table, which names the slot: it loads, and it reads.
+        assert_eq!(read(&bad), keys([Some("aé"), None, Some("éa")]));
+        // The same escape with the table, which names the slot: it reads.
         let escaped = merged_blob(MERGED | OVERFLOW, wide, &[1, at(3, 1), 5], data, &[(1, 2)]);
-        assert_eq!(StringArena::from_bytes(&escaped).unwrap().get(1), Some("é"));
-        // The table naming another slot, or one more slot than escapes.
+        assert_eq!(read(&escaped), keys([Some("aé"), Some("é"), Some("éa")]));
+        // The table naming another slot: the escaped one has no length.
         let bad = merged_blob(MERGED | OVERFLOW, wide, &[1, at(3, 1), 5], data, &[(2, 2)]);
-        assert!(err(bad).contains("out of slot order"));
-        let bad = merged_blob(
-            MERGED | OVERFLOW,
-            wide,
-            &[1, at(3, 1), 5],
-            data,
-            &[(1, 2), (2, 3)],
-        );
-        assert!(err(bad).contains("names a slot that does not escape"));
+        assert_eq!(read(&bad), keys([Some("aé"), None, Some("éa")]));
+        let err = |blob: Vec<u8>| StringArena::from_bytes(&blob).unwrap_err().to_string();
         // Entries past what one eight-byte read holds, a header cut short, entries cut short.
         let bad = merged_blob(MERGED, (2, 2, 56), &[1, 4, 5], data, &[]);
         assert!(err(bad).contains("too wide"));
@@ -2186,36 +2155,8 @@ mod tests {
         assert!(err.contains("zero-width"), "{err}");
     }
 
-    /// The overflow table of a merged arena is held to the entries that escape: one entry per
-    /// escaped slot, in slot order, and none for a slot that does not escape.
-    #[test]
-    fn a_merged_overflow_table_matches_the_escapes() {
-        let long = "q".repeat(300);
-        let mut keys: Vec<String> = (0..200).map(|i| format!("{i:03}")).collect();
-        keys.push(long);
-        keys.sort_unstable();
-        let order: Vec<u32> = (0..keys.len() as u32).collect();
-        let data_len = keys.iter().map(String::len).sum();
-        let good = StringArena::build_cheapest(&keys, &order, data_len, None).to_bytes();
-        assert_eq!(good[8], MERGED | OVERFLOW);
-        let err = |blob: &[u8]| StringArena::from_bytes(blob).unwrap_err().to_string();
-        let entry = good.len() - TRAILER - SLOT_LEN;
-        let mut bad = good.clone();
-        bad[entry] ^= 1; // the slot it names
-        assert!(err(&bad).contains("out of slot order"), "{}", err(&bad));
-        // Two entries where one slot escapes: the table grows by one and its trailer says so.
-        let mut bad = good[..good.len() - TRAILER].to_vec();
-        bad.extend_from_slice(&good[entry..entry + SLOT_LEN]);
-        bad.extend_from_slice(&(2 * SLOT_LEN as u64).to_le_bytes());
-        assert!(
-            err(&bad).contains("names a slot that does not escape"),
-            "{}",
-            err(&bad)
-        );
-    }
-
     /// Every single-byte change to a merged blob either fails to load or loads into an arena
-    /// whose every read stays inside it: a crafted blob answers wrong, never out of bounds.
+    /// whose every read stays inside its data: a crafted blob answers wrong, never out of bounds.
     #[test]
     fn a_mutated_merged_arena_never_reads_out_of_bounds() {
         let long = "q".repeat(300);
@@ -2235,6 +2176,9 @@ mod tests {
                     if let Ok(arena) = StringArena::from_bytes(&bad) {
                         for i in 0..=arena.len() {
                             let _ = (arena.get(i), arena.get_matching(i, 0xA5));
+                            if let Some((lo, hi)) = arena.span(i) {
+                                assert!(arena.data_start <= lo && hi <= arena.data_end, "{at}");
+                            }
                         }
                     }
                 }

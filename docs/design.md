@@ -717,7 +717,10 @@ node's children a sorted run: `O(N log σ)` for `N` key bytes. A key inside anot
 some failure link points to, or is a prefix of the next key in order. The rest are chained by decreasing overlap — Ukkonen's
 greedy, each depth's keys in slot order taking the smallest free key in byte order under their
 node — and the chains are written in their heads' slot order: `O(N + n log n)` in all, and
-deterministic, so the blob is reproducible like every other. The automaton is 9 bytes a node, at
+deterministic, so the blob is reproducible like every other. Most of the time is the failure
+links, reads that miss the cache once the automaton outgrows it; a link reads only the levels
+above its own, which are complete, so each level's links are computed on every thread, to the
+same links in any order. The automaton is 9 bytes a node, at
 most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key, all freed before the
 arena is laid out; past 2³² nodes the merge is not attempted.
 
@@ -727,11 +730,13 @@ minimum-weight cycle cover of the keys' overlap graph is never longer than the s
 within 0.12 % of that cover — at most 0.11 % on Russian titles and 0.07 % on Chinese words, under
 0.015 % on the rest — and equals it, so is the shortest, on eight.
 
-The overlap costs the loader its shortcut. A blocked arena's load checks that its first and last
-offsets span the data and leaves the rest to the access that reads them. Merged entries can point
-anywhere in the data, so the load checks each one — start and end inside the data, both on a
-character boundary — in `O(n)`, and a `load_mmap` of a merged arena reads its entry table. A
-crafted entry is refused at load rather than answered. The magic stays
+The overlap would cost the loader its shortcut, and does not. A blocked arena's load checks that
+its first and last offsets span the data and leaves the rest to the access that reads them. Merged
+entries can point anywhere in the data, so their ends say nothing; the header names the data's
+length instead, which the load checks against the section — what refuses a truncated file — and
+each entry is checked where it is read, as under the blocked layouts: inside the data, and
+validated as UTF-8 before it is handed out as a `&str`. So `load_mmap` stays `O(1)`, and a crafted
+entry answers no key rather than being refused at load. The magic stays
 `BMP8`: 4.0–4.5 refuse a merged arena as an unknown offset encoding, and a blob that keeps a
 blocked arena crosses the versions in both directions. `build_to_file` and an overlay's
 `compact_to_file` hold no key set to merge and write the blocked layout. `plan` prices the arena
