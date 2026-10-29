@@ -3700,17 +3700,18 @@ impl DictIndex {
     /// What that is worth is what is left stalled, so it grows with the index and shrinks with the
     /// block — a larger block leaves fewer samples to search and more bytes to scan, and only the
     /// search is fully hidden. Real word bigrams, half of the probes members, shuffled, a loop of
-    /// [`id`](Self::id) as the control in the same process:
+    /// [`id`](Self::id) as the control in the same process
+    /// (`bench/results/quiet-ab-2026-10-28-arz-c18a6b1.txt`):
     ///
     /// | keys | block | index | `id` in a loop | `ids_of` |
     /// |---:|---:|---:|---:|---:|
-    /// | 10 M | 32 | 39 MB | 861 ns | **535** |
-    /// | 10 M | 128 | 32 MB | 771 | 645 |
-    /// | 1 M | 32 | 3.2 MB | 377 | 306 |
-    /// | 200 k | 32 | 0.6 MB | 277 | 281 |
+    /// | 10 M | 32 | 29 MB | 598 ns | **430** |
+    /// | 10 M | 128 | 26 MB | 543 | **410** |
+    /// | 1 M | 32 | 2.2 MB | 330 | **292** |
+    /// | 200 k | 32 | 0.4 MB | 207 | 237 |
     ///
     /// The last row is the point: an index that fits in cache has nothing to hide, and the batch
-    /// is then the same work in a less obvious order.
+    /// is then the same work in a less obvious order, and slower for the lockstep's bookkeeping.
     #[cfg_attr(not(feature = "mph"), allow(dead_code))]
     pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(
         &self,

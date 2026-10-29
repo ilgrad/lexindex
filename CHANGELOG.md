@@ -66,13 +66,20 @@ All notable changes to this project are documented here. The format follows
   other array measured is 0.05–0.25 % smaller. jieba's lexicon, a small array over 12 045 characters,
   keeps its size to the byte, not every base; every blob the golden tests pin is unchanged. **The same keys
   can give different bytes than 4.5 did**, with the same ids: the format is unchanged, and every
-  4.5 blob loads. Time waits for a quiet machine; instruction counts are not a time.
+  4.5 blob loads. In a quiet A/B against 4.5.3, one process, the minimum of five rounds
+  (`bench/results/quiet-ab-2026-10-28-arz-c18a6b1.txt`): a million Chinese titles build in 561 ms
+  where they took 1 466 (−61.7 %), domains −29.4 %, package names −27.0 %, identifiers −21.5 %,
+  English words −8.9 % and jieba's lexicon −3.2 %.
 - **`DictIndex::ids_of` places each probe with one binary search over the samples, not two.** A
   lane searched for its first sample past the probe and again for its last one at or before it;
   the second search is now one compare against the sample it already found, or one step into the
   trie of a run of equal samples. The same answers, checked on six corpora by a checksum over
   every id; 7.2–9.8 % fewer instructions a key on six corpus and block configurations, counted
-  with `perf stat -e instructions:u`. Time waits for a quiet machine and is not claimed here.
+  with `perf stat -e instructions:u`. In a quiet A/B against 4.5.3, half of the probes strangers,
+  shuffled, the minimum of seven rounds (`bench/results/quiet-ab-2026-10-28-arz-c18a6b1.txt`):
+  `ids_of` 7.2–9.5 % faster on word bigrams from 200 k to 10 M keys at blocks 32 and 128, 2.7–4.4 %
+  on English words, URLs and paths at the default block, with a loop of `id` in the same process
+  within ±1.8 %.
 
 ### Documentation
 

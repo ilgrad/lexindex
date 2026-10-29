@@ -1,0 +1,131 @@
+# Quiet window 2026-10-28 22:05-22:19, after a reboot, Zed closed, run from a terminal: lexindex
+# 4.5.3 from crates.io ("old") against main at c18a6b1 ("new"), linked into one process. The
+# harness (local/ab46, not in the repository) builds both with fat LTO, one codegen unit, no
+# target-cpu; it checks every answer of both before timing, then alternates lanes A B B A, forward
+# and reversed by round, two instances of each variant. Each row: corpus, mode, lane, variant,
+# instance, the minimum, then every round. Before every process: under 0.5 busy CPUs over 1 s
+# (/proc/stat) and the hottest thermal zone under 70 C (each "##" line ends with its reading).
+#   da   DoubleArrayIndex::build over the corpus, sorted and deduplicated (placer window, 8c92679)
+#   ids  DictIndex at the block named: ids_of over the probes, then a loop of id over the same,
+#        half of them members, half strangers (each member with U+0001 appended), shuffled with a
+#        fixed seed (one search a lane, 802e5f6)
+# Corpora: string-index-benchmarks/corpora, jieba 0.42.1's dict.txt, and real word bigrams.
+# titles-en and titles-ru at 1 M are refused by the double array (23-bit slots), as in 4.5.
+# bench-ready before the first process:
+#   load                   0.39  ok
+#   swap in use            0 MiB  ok
+#   memory available       35.8 GiB  ok
+#   page cache             12.7 GiB (a previous run's corpora; reclaim mid-run reads as noise)
+#   uptime                 1.3 h
+#   governor               performance
+#   READY
+## ab46 da jieba/dict.txt 5 [22:05:32 48000mC]
+# dict da: 349045 keys, blob old 5451278 new 5451278 bytes, 5 rounds
+row dict da build old 1 160.48 ms [162.49 161.88 160.48 169.05 161.55]
+row dict da build new 1 155.06 ms [155.06 155.33 155.29 163.66 155.21]
+row dict da build new 2 155.00 ms [155.82 155.08 155.00 156.77 156.87]
+row dict da build old 2 160.20 ms [162.39 163.61 169.11 161.85 160.20]
+## ab46 da corpora/titles-zh-1000000.txt 5 [22:05:42 68000mC]
+# titles-zh-1000000 da: 1000000 keys, blob old 33231680 new 33148360 bytes, 5 rounds
+row titles-zh-1000000 da build old 1 1468.64 ms [1493.24 1468.64 1474.00 1469.92 1475.99]
+row titles-zh-1000000 da build new 1 563.12 ms [607.40 570.02 563.12 568.28 564.25]
+row titles-zh-1000000 da build new 2 561.28 ms [644.10 567.73 565.21 561.28 564.41]
+row titles-zh-1000000 da build old 2 1465.57 ms [1466.44 1465.57 1476.57 1477.89 1475.56]
+## ab46 da corpora/pypi-full.txt 5 [22:06:13 68000mC]
+# pypi-full da: 895600 keys, blob old 43603870 new 43583614 bytes, 5 rounds
+row pypi-full da build old 1 1009.47 ms [1009.47 1025.43 1025.78 1028.10 1024.65]
+row pypi-full da build new 1 736.87 ms [737.17 738.69 737.90 736.87 740.18]
+row pypi-full da build new 2 736.80 ms [742.63 736.80 738.16 744.67 740.50]
+row pypi-full da build old 2 1020.52 ms [1021.28 1020.52 1021.17 1044.69 1032.17]
+## ab46 da corpora/idents-1000000.txt 5 [22:06:39 68000mC]
+# idents-1000000 da: 1000000 keys, blob old 59859854 new 59804630 bytes, 5 rounds
+row idents-1000000 da build old 1 1340.45 ms [1340.45 1349.09 1344.55 1350.26 1347.94]
+row idents-1000000 da build new 1 1052.93 ms [1052.93 1054.63 1055.44 1053.52 1058.54]
+row idents-1000000 da build new 2 1052.88 ms [1052.88 1055.15 1056.98 1060.75 1053.49]
+row idents-1000000 da build old 2 1343.30 ms [1348.08 1343.30 1349.87 1346.07 1347.91]
+## ab46 da corpora/words-full.txt 5 [22:07:11 69000mC]
+# words-full da: 479823 keys, blob old 11718374 new 11711854 bytes, 5 rounds
+row words-full da build old 1 181.97 ms [227.16 217.99 190.46 181.97 182.04]
+row words-full da build new 1 165.19 ms [202.12 218.58 212.37 165.19 165.42]
+row words-full da build new 2 165.69 ms [170.78 171.54 207.14 166.44 165.69]
+row words-full da build old 2 181.39 ms [185.08 183.18 187.15 182.65 181.39]
+## ab46 da corpora/titles-en-1000000.txt 5 [22:07:20 68000mC]
+FAILED ab46 da corpora/titles-en-1000000.txt 5
+## ab46 da corpora/titles-ru-1000000.txt 5 [22:07:26 68000mC]
+FAILED ab46 da corpora/titles-ru-1000000.txt 5
+## ab46 da corpora/domains-1000000.txt 5 [22:07:32 68000mC]
+# domains-1000000 da: 1000000 keys, blob old 65203926 new 65162518 bytes, 5 rounds
+row domains-1000000 da build old 1 1347.64 ms [1347.67 1348.19 1349.15 1347.64 1351.11]
+row domains-1000000 da build new 1 954.31 ms [957.02 954.31 956.47 970.84 958.68]
+row domains-1000000 da build new 2 951.28 ms [951.28 967.96 960.54 955.41 959.61]
+row domains-1000000 da build old 2 1346.77 ms [1348.07 1348.18 1346.77 1349.21 1348.93]
+## ab46 ids data/bigrams-200k.txt 32 7 [22:08:05 67000mC]
+# bigrams-200k ids block 32: 200000 keys, 200000 probes (half strangers), 7 rounds
+row bigrams-200k ids32 ids_of old 1 263.42 ns [264.20 263.98 263.71 263.42 264.71 263.50 264.91]
+row bigrams-200k ids32 id old 1 208.27 ns [208.27 212.47 208.57 210.51 209.58 210.77 210.03]
+row bigrams-200k ids32 ids_of new 1 237.98 ns [238.86 238.74 239.24 237.98 239.15 238.59 239.27]
+row bigrams-200k ids32 id new 1 209.59 ns [209.59 214.32 209.99 212.01 210.75 211.21 210.09]
+row bigrams-200k ids32 ids_of new 2 237.23 ns [238.09 237.36 240.84 237.23 238.64 238.53 244.25]
+row bigrams-200k ids32 id new 2 207.38 ns [207.38 210.32 208.68 209.95 209.04 228.20 209.11]
+row bigrams-200k ids32 ids_of old 2 262.17 ns [265.48 262.17 263.65 262.26 264.18 282.65 264.08]
+row bigrams-200k ids32 id old 2 207.01 ns [208.45 207.01 208.57 207.32 210.83 207.57 209.00]
+## ab46 ids data/bigrams-1m.txt 32 7 [22:08:13 65000mC]
+# bigrams-1m ids block 32: 1000000 keys, 1000000 probes (half strangers), 7 rounds
+row bigrams-1m ids32 ids_of old 1 314.81 ns [316.85 315.86 314.81 315.01 315.26 315.60 315.87]
+row bigrams-1m ids32 id old 1 330.88 ns [330.94 340.24 330.88 341.89 330.97 344.13 332.28]
+row bigrams-1m ids32 ids_of new 1 292.35 ns [298.66 296.39 298.98 292.35 294.22 292.68 294.65]
+row bigrams-1m ids32 id new 1 329.68 ns [340.67 346.53 339.12 338.35 329.68 338.60 331.21]
+row bigrams-1m ids32 ids_of new 2 292.22 ns [298.47 296.29 297.26 292.22 293.70 292.68 294.25]
+row bigrams-1m ids32 id new 2 330.85 ns [342.79 340.92 336.81 344.47 330.85 335.46 331.29]
+row bigrams-1m ids32 ids_of old 2 318.14 ns [324.15 324.51 324.75 322.40 322.31 318.14 322.59]
+row bigrams-1m ids32 id old 2 331.72 ns [346.62 340.38 347.46 342.23 331.74 331.72 333.12]
+## ab46 ids data/bigrams-10m.txt 32 7 [22:08:38 67000mC]
+# bigrams-10m ids block 32: 10000000 keys, 1000000 probes (half strangers), 7 rounds
+row bigrams-10m ids32 ids_of old 1 467.41 ns [492.10 482.49 470.36 472.88 476.62 468.70 467.41]
+row bigrams-10m ids32 id old 1 600.09 ns [630.18 619.62 604.85 620.11 600.09 611.93 601.20]
+row bigrams-10m ids32 ids_of new 1 437.01 ns [447.61 445.20 447.01 442.92 459.96 437.01 445.49]
+row bigrams-10m ids32 id new 1 610.39 ns [610.39 612.95 610.51 611.84 610.67 616.68 610.99]
+row bigrams-10m ids32 ids_of new 2 429.75 ns [445.89 429.75 442.87 435.65 444.41 432.03 442.02]
+row bigrams-10m ids32 id new 2 597.61 ns [599.01 618.25 597.61 619.07 599.53 616.91 626.21]
+row bigrams-10m ids32 ids_of old 2 468.10 ns [510.31 468.10 491.17 489.30 499.04 469.07 491.45]
+row bigrams-10m ids32 id old 2 587.25 ns [591.63 587.64 588.16 587.60 594.95 587.25 588.21]
+## ab46 ids data/bigrams-10m.txt 128 7 [22:09:16 69000mC]
+# bigrams-10m ids block 128: 10000000 keys, 1000000 probes (half strangers), 7 rounds
+row bigrams-10m ids128 ids_of old 1 443.34 ns [448.94 451.45 454.18 453.44 451.12 443.34 445.09]
+row bigrams-10m ids128 id old 1 551.22 ns [563.62 567.12 561.68 564.21 557.61 558.83 551.22]
+row bigrams-10m ids128 ids_of new 1 410.26 ns [415.85 417.51 421.97 413.76 417.41 410.26 413.52]
+row bigrams-10m ids128 id new 1 554.86 ns [554.86 574.66 558.39 574.58 561.39 572.19 561.33]
+row bigrams-10m ids128 ids_of new 2 411.48 ns [413.55 417.10 421.53 412.81 418.14 411.48 415.27]
+row bigrams-10m ids128 id new 2 542.64 ns [544.25 563.75 564.94 570.80 550.85 563.88 542.64]
+row bigrams-10m ids128 ids_of old 2 442.17 ns [452.26 442.17 453.23 449.93 456.56 446.07 450.46]
+row bigrams-10m ids128 id old 2 553.38 ns [553.38 554.58 563.91 561.70 556.79 555.77 554.13]
+## ab46 ids corpora/words-full.txt 256 7 [22:09:51 69000mC]
+# words-full ids block 256: 479823 keys, 479823 probes (half strangers), 7 rounds
+row words-full ids256 ids_of old 1 290.58 ns [292.12 290.66 290.97 290.58 292.09 293.14 290.95]
+row words-full ids256 id old 1 277.80 ns [286.93 287.67 279.76 290.67 282.61 284.24 277.80]
+row words-full ids256 ids_of new 1 281.05 ns [283.39 281.14 283.18 281.62 283.15 281.05 281.84]
+row words-full ids256 id new 1 275.20 ns [302.87 288.71 277.71 286.72 283.45 284.78 275.20]
+row words-full ids256 ids_of new 2 281.39 ns [283.35 283.38 283.30 281.39 282.18 284.12 282.32]
+row words-full ids256 id new 2 275.10 ns [289.38 289.11 276.30 285.72 277.90 285.73 275.10]
+row words-full ids256 ids_of old 2 288.95 ns [294.79 289.16 290.31 288.95 290.30 290.46 290.23]
+row words-full ids256 id old 2 274.31 ns [282.93 278.73 275.24 274.31 301.77 282.98 290.01]
+## ab46 ids corpora/urls-1000000.txt 256 7 [22:10:05 68000mC]
+# urls-1000000 ids block 256: 1000000 keys, 1000000 probes (half strangers), 7 rounds
+row urls-1000000 ids256 ids_of old 1 400.12 ns [410.54 406.72 406.33 400.41 400.12 402.79 403.62]
+row urls-1000000 ids256 id old 1 425.73 ns [434.03 443.12 433.57 433.81 425.73 433.56 425.81]
+row urls-1000000 ids256 ids_of new 1 388.47 ns [401.51 395.86 403.62 388.72 391.60 388.47 391.44]
+row urls-1000000 ids256 id new 1 426.16 ns [434.82 445.65 434.15 433.84 432.94 433.69 426.16]
+row urls-1000000 ids256 ids_of new 2 388.31 ns [395.35 396.49 390.52 388.31 391.81 389.73 389.77]
+row urls-1000000 ids256 id new 2 425.88 ns [434.21 447.88 425.88 439.54 426.49 440.80 429.75]
+row urls-1000000 ids256 ids_of old 2 401.17 ns [406.84 401.17 406.00 403.67 406.09 402.96 401.68]
+row urls-1000000 ids256 id old 2 427.80 ns [430.14 435.93 440.67 431.47 430.04 431.33 427.80]
+## ab46 ids corpora/paths-1000000.txt 256 7 [22:10:36 68000mC]
+# paths-1000000 ids block 256: 1000000 keys, 1000000 probes (half strangers), 7 rounds
+row paths-1000000 ids256 ids_of old 1 535.32 ns [546.29 535.36 535.32 538.07 540.02 536.70 537.31]
+row paths-1000000 ids256 id old 1 533.18 ns [549.16 552.62 533.18 539.36 541.83 546.52 534.09]
+row paths-1000000 ids256 ids_of new 1 511.62 ns [521.00 519.79 511.62 512.40 513.80 511.86 513.61]
+row paths-1000000 ids256 id new 1 533.69 ns [547.23 556.79 533.69 539.49 535.59 540.19 540.90]
+row paths-1000000 ids256 ids_of new 2 516.72 ns [527.35 524.61 521.65 517.86 520.20 516.72 522.09]
+row paths-1000000 ids256 id new 2 534.91 ns [559.83 560.65 539.77 548.35 540.73 550.86 534.91]
+row paths-1000000 ids256 ids_of old 2 536.19 ns [551.21 546.61 547.01 546.78 539.74 536.19 538.29]
+row paths-1000000 ids256 id old 2 527.77 ns [542.35 541.18 553.53 547.47 528.12 527.77 527.99]
