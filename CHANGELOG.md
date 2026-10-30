@@ -68,6 +68,12 @@ All notable changes to this project are documented here. The format follows
   from a table. Counted on a million keys a lookup (`perf stat`, one CPU): instructions −6…−17 %,
   branches −12…−34 %, branch misses −36…−62 % (identifiers 11.6 → 6.0, package names 10.6 → 5.4,
   English words 10.4 → 3.9), loads −7…−29 %; the answers and the blob are unchanged. Not yet timed.
+- **A `DoubleArrayIndex` build peaks 5–7 % lower.** Numbering the trie kept the key range of every
+  node it had numbered; it keeps about the breadth-first frontier now. Peak resident memory of a
+  process that reads a million keys and builds over them: domain names 335 → 319 MB, identifiers
+  343 → 318, Chinese titles 267 → 250, package names 264 → 251, and 15–31 % lower on the key sets
+  that are refused for their size (UUIDs 910 → 632 MB before the refusal). The blobs are
+  byte-identical; instructions +0.2–0.7 %.
 - **A `DoubleArrayIndex` build is linear in its keys; it was quadratic on large alphabets.** A row
   of several children searched the whole occupied array for the lowest base it fits, and on 2^21
   Chinese titles crossed 0.5–1 M slots a row — the build's instructions a key grew 4.5× from 2^16 to

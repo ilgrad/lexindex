@@ -255,12 +255,20 @@ impl Trie {
             word: vec![NO_WORD],
             first: Vec::new(),
         };
-        // (lo, hi, depth): the keys under each node, a range of ids.
+        // (lo, hi, depth): the keys under node `off + i` at `span[i]`, a range of ids. The spans
+        // of numbered nodes are dropped once they are half the vector, so it holds about the
+        // breadth-first frontier rather than a triple a node: as a triple a node it was 96 MB of
+        // the 272 MB a build over a million domain names peaked at.
         let mut span: Vec<(u32, u32, u32)> = vec![(first_key as u32, n as u32, 0)];
+        let mut off = 0;
         let mut runs: Vec<(u16, u32, u32)> = Vec::new();
         let mut v = 0;
         while v < t.label.len() {
-            let (mut lo, hi, d) = span[v];
+            if 2 * (v - off) > span.len() {
+                span.drain(..v - off);
+                off = v;
+            }
+            let (mut lo, hi, d) = span[v - off];
             let d = d as usize;
             // The key the node spells sorts first among the keys under it.
             if lo < hi && starts[lo as usize + 1] - starts[lo as usize] == d {
