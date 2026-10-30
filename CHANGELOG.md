@@ -81,6 +81,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex::id` retires 3–10 % fewer instructions.** On a CPU with AVX2 a microblock's header
+  codes decode eight at a time (one 32-byte load, `vpermd`, variable shifts) instead of one load
+  and a shift each; the route to a microblock bisects its sorted route words instead of comparing
+  all of them; and a block's shard is a shift where the blob's shard is a power of two, as every
+  build writes it, instead of a 64-bit `div`. Counted on a million keys a lookup (`perf stat`,
+  routed, block 256 / 1024): English titles 1 932 → 1 825 / 2 484 → 2 239, domain names 1 665 →
+  1 588 / 2 187 → 1 962, English words 1 479 → 1 435 / 1 922 → 1 826, URLs 2 038 → 1 929 /
+  2 601 → 2 353, paths 3 076 → 2 934 / 4 004 → 3 670; unrouted block 256 −3.0…−3.7 % (words
+  level). The scalar walk stays the path for table-coded runs, other targets and CPUs without
+  AVX2, and a test holds the two walks to the same answer on every run. The blob is unchanged. Not
+  yet timed.
 - **`StringIndex::id` reads a node's inputs with one or two 16-byte compares.** A node of up to 32
   transitions was searched a byte and a branch at a time; SSE2 compares its inputs at once (eight
   bytes a word on targets without it, the loop where the blob ends too close to load), a point

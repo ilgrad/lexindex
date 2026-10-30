@@ -770,6 +770,87 @@ impl<'a> Reader<'a> {
     pub(crate) fn header_bytes(&self) -> usize {
         self.hdr_end
     }
+
+    /// Whether [`heads8`](Self::heads8) can decode this run: a frame whose bases leave room for
+    /// every pair in a 32-bit lane. A table's codes are indices and stay with
+    /// [`pair_as`](Self::pair_as).
+    #[cfg(target_arch = "x86_64")]
+    #[inline(always)]
+    pub(crate) fn lanes_fit(&self) -> bool {
+        const LANE_BASE: usize = 1 << 30;
+        self.is_frame && self.frame.bl <= LANE_BASE && self.frame.bn <= LANE_BASE
+    }
+
+    /// The next eight codes of a frame as their pairs, `lcp` lanes first and length lanes second,
+    /// with bit `t` of the mask set where code `t` is the escape (its two lanes are then
+    /// meaningless); the cursor moves past all eight. The same codes [`next_code`](Self::next_code) reads, the same
+    /// zero padding past the data — so lanes past the run's headers hold what eight more calls
+    /// would have returned, and a caller that counts its entries never looks at them.
+    ///
+    /// A frame code is at most thirty bits and starts within the first byte, so eight of them end
+    /// inside the 32 bytes at the first one's byte: each lane gathers the two 32-bit words its code
+    /// straddles (`vpermd`) and shifts them together (`vpsrlvd`, `vpsllvd`, which give zero for a
+    /// shift of 32 — the lane whose code starts on a word).
+    ///
+    /// # Safety
+    /// The CPU must have AVX2, and [`lanes_fit`](Self::lanes_fit) must hold.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    #[inline]
+    pub(crate) unsafe fn heads8(
+        &mut self,
+    ) -> (std::arch::x86_64::__m256i, std::arch::x86_64::__m256i, u32) {
+        use std::arch::x86_64::*;
+        let bit = self.bit;
+        self.bit = bit + 8 * self.width as usize;
+        let byte = bit / 8;
+        let mut pad = [0u8; 32];
+        let window: &[u8; 32] = match self.data.get(byte..).and_then(|d| d.first_chunk::<32>()) {
+            Some(w) => w,
+            None => {
+                let take = self.data.get(byte..).unwrap_or_default();
+                let n = take.len().min(32);
+                pad[..n].copy_from_slice(&take[..n]);
+                &pad
+            }
+        };
+        let w = self.width as i32;
+        // SAFETY (all intrinsics below): the caller guarantees AVX2, and the load reads the 32
+        // bytes of `window`.
+        unsafe {
+            let v = _mm256_loadu_si256(window.as_ptr().cast());
+            let lane = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+            let at = _mm256_add_epi32(
+                _mm256_set1_epi32((bit % 8) as i32),
+                _mm256_mullo_epi32(lane, _mm256_set1_epi32(w)),
+            );
+            let q = _mm256_srli_epi32::<5>(at);
+            let r = _mm256_and_si256(at, _mm256_set1_epi32(31));
+            let lo = _mm256_permutevar8x32_epi32(v, q);
+            let hi = _mm256_permutevar8x32_epi32(v, _mm256_add_epi32(q, _mm256_set1_epi32(1)));
+            let code = _mm256_and_si256(
+                _mm256_or_si256(
+                    _mm256_srlv_epi32(lo, r),
+                    _mm256_sllv_epi32(hi, _mm256_sub_epi32(_mm256_set1_epi32(32), r)),
+                ),
+                _mm256_set1_epi32(self.mask as i32),
+            );
+            let escapes = _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(
+                code,
+                _mm256_set1_epi32(self.mask as i32),
+            )));
+            let f = self.frame;
+            let ls = _mm256_add_epi32(
+                _mm256_set1_epi32(f.bl as i32),
+                _mm256_srl_epi32(code, _mm_cvtsi32_si128(f.wn as i32)),
+            );
+            let ns = _mm256_add_epi32(
+                _mm256_set1_epi32(f.bn as i32),
+                _mm256_and_si256(code, _mm256_set1_epi32(f.mask_n as i32)),
+            );
+            (ls, ns, escapes as u32)
+        }
+    }
 }
 
 /// The last bytes of a run as a word, zero-padded: the load a header takes when eight bytes do

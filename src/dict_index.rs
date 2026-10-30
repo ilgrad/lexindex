@@ -203,6 +203,11 @@ pub struct DictIndex {
     codes: Vec<(Code, Code)>,
     /// Blocks one symbol table covers. At least one, and at most what the header's `u16` holds.
     shard: usize,
+    /// `shard`'s log when it is a power of two, as every build writes it, and `u32::MAX` when a
+    /// blob says otherwise: the shard of a block is then a shift rather than a 64-bit `div`, which
+    /// sat on a lookup's dependent path twice — the block comes out of the search, and its codec
+    /// is needed before the scan can start.
+    shard_bits: u32,
     /// The phrases the blob's shards name, shared by all of them: empty on a corpus whose shards
     /// all settled on their tables alone, which is what [`phrase::mine`] returns when nothing
     /// repeats often enough to earn its dictionary bytes.
@@ -1107,6 +1112,15 @@ impl<'a> Piece<'a> {
     fn units(self, unit: u32) -> usize {
         let left = (self.stream.len() * 8).saturating_sub(self.start);
         self.units.min(left / unit as usize)
+    }
+}
+
+/// [`DictIndex::shard_bits`] for a shard of `shard` blocks.
+fn shard_bits_of(shard: usize) -> u32 {
+    if shard.is_power_of_two() {
+        shard.trailing_zeros()
+    } else {
+        u32::MAX
     }
 }
 
@@ -2828,6 +2842,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            shard_bits: shard_bits_of(shard),
             phrases,
             g,
             code: None,
@@ -2885,17 +2900,27 @@ impl DictIndex {
         self.samples.len()
     }
 
+    /// The shard block `b` is in.
+    #[inline(always)]
+    fn shard_of(&self, b: usize) -> usize {
+        if self.shard_bits < usize::BITS {
+            b >> self.shard_bits
+        } else {
+            b / self.shard
+        }
+    }
+
     /// The suffix codec block `b` was encoded under.
     #[inline(always)]
     fn codec_of(&self, b: usize) -> &Codec {
-        let s = b / self.shard;
+        let s = self.shard_of(b);
         &self.codecs[if s < self.codecs.len() { s } else { 0 }]
     }
 
     /// The header codes block `b`'s entries were written under, the microblocks' first.
     #[inline(always)]
     fn codes_of(&self, b: usize) -> &(Code, Code) {
-        let s = b / self.shard;
+        let s = self.shard_of(b);
         &self.codes[if s < self.codes.len() { s } else { 0 }]
     }
 
@@ -3183,10 +3208,97 @@ fn scan_as<C: SuffixCmp>(
     cmp: &C,
 ) -> (usize, usize, bool) {
     if frame {
+        #[cfg(target_arch = "x86_64")]
+        if entries.codes.lanes_fit() && std::is_x86_feature_detected!("avx2") {
+            // SAFETY: the CPU has AVX2 and the run's frame fits the lanes.
+            return unsafe { scan_lanes_avx2(entries, count, probe, matched, cmp) };
+        }
         scan_with::<true, C>(entries, count, probe, matched, cmp)
     } else {
         scan_with::<false, C>(entries, count, probe, matched, cmp)
     }
+}
+
+/// [`scan_with`] for a frame run, its headers decoded eight at a time
+/// ([`heads8`](paircode::Reader::heads8)) rather than one: the walk then reads each entry's pair
+/// off two arrays, and every check, escape and answer is the scalar loop's, entry for entry.
+///
+/// A header cost the walk an unaligned load, its bounds check, a shift, a mask and the frame's
+/// split — about a quarter of a scan's instructions on titles — and a lookup walks eight or nine
+/// of them; eight decoded together take a dozen.
+///
+/// # Safety
+/// The CPU must have AVX2, and the run's codes must satisfy
+/// [`lanes_fit`](paircode::Reader::lanes_fit).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline(never)]
+unsafe fn scan_lanes_avx2<C: SuffixCmp>(
+    entries: &Entries<'_>,
+    count: usize,
+    probe: &[u8],
+    mut matched: usize,
+    cmp: &C,
+) -> (usize, usize, bool) {
+    use std::arch::x86_64::*;
+    let mut codes = entries.codes;
+    let sfx = entries.sfx;
+    let mut reach = entries.reach;
+    let tail = tail_word(probe);
+    let (end_bits, max_units, unit) = (entries.end_bits, entries.max_units, cmp.unit());
+    let (mut ls, mut lens) = ([0u32; 8], [0u32; 8]);
+    let mut j = 1;
+    while j < count {
+        // SAFETY: the caller's contract; the stores are of two arrays of eight `u32`s.
+        let escapes = unsafe {
+            let (lv, nv, escapes) = codes.heads8();
+            _mm256_storeu_si256(ls.as_mut_ptr().cast(), lv);
+            _mm256_storeu_si256(lens.as_mut_ptr().cast(), nv);
+            escapes
+        };
+        for t in 0..(count - j).min(8) {
+            let j = j + t;
+            let (l, len) = if escapes & (1 << t) == 0 {
+                (ls[t] as usize, lens[t] as usize)
+            } else {
+                match escaped(sfx, reach.min(end_bits)) {
+                    Some((l, len, at)) => {
+                        reach = at;
+                        (l, len)
+                    }
+                    None => return (j - 1, matched, false),
+                }
+            };
+            if len > max_units || l < matched {
+                return (j - 1, matched, false);
+            }
+            let start = reach.min(end_bits);
+            reach = reach.wrapping_add(len.wrapping_mul(unit));
+            if l > matched {
+                continue;
+            }
+            let piece = Piece {
+                stream: sfx,
+                start,
+                units: len,
+            };
+            let (c, ord) = cmp.compare(
+                piece,
+                Rest {
+                    key: probe,
+                    at: matched,
+                    tail,
+                },
+            );
+            match ord {
+                Ordering::Equal => return (j, matched + c, true),
+                Ordering::Greater => return (j - 1, matched, false),
+                Ordering::Less => matched += c,
+            }
+        }
+        j += 8;
+    }
+    (count.saturating_sub(1), matched, false)
 }
 
 /// The walk itself, for one kind of header code and one codec: the run's cursor lives in locals,
@@ -3884,7 +3996,10 @@ impl DictIndex {
         }
         let s = sample_at(probe, o);
         let words = &group[1..];
-        let j: usize = words.iter().map(|&w| usize::from(w < s)).sum();
+        // The words ascend — a block whose restarts do not is never routed — so the count of words
+        // below the probe is a bisection's answer: four branchless steps over fifteen words where a
+        // compare of every word took fifteen, and five over thirty-one.
+        let j = words.partition_point(|&w| w < s);
         if words.get(j) == Some(&s) {
             return None;
         }
@@ -5066,6 +5181,7 @@ impl DictIndex {
             codecs,
             codes,
             shard,
+            shard_bits: shard_bits_of(shard),
             phrases,
             g,
             code,
@@ -6948,6 +7064,120 @@ mod tests {
         keys.sort();
         keys.dedup();
         keys
+    }
+
+    /// The AVX2 walk over a run's headers answers what the scalar walk does — rank, matched bytes
+    /// and hit — on every frame run of every block, plain, phrased and labelled, microblocks of
+    /// 16 to the whole block, for
+    /// members, strangers and prefixes, from the `matched` a lookup starts at and from others.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_lane_walk_answers_what_the_scalar_walk_does() {
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
+        fn agree<C: SuffixCmp>(
+            e: &Entries<'_>,
+            count: usize,
+            probe: &[u8],
+            matched: usize,
+            cmp: &C,
+        ) {
+            if e.count + 1 != count || !e.codes.lanes_fit() {
+                return;
+            }
+            let scalar = scan_with::<true, C>(e, count, probe, matched, cmp);
+            // SAFETY: AVX2 checked above, and the frame fits.
+            let lanes = unsafe { scan_lanes_avx2(e, count, probe, matched, cmp) };
+            assert_eq!(scalar, lanes, "probe {probe:?} from {matched}");
+        }
+        let mut sets = vec![corpus(), label_corpus(3, 3_000)];
+        // Keys whose shared prefixes and lengths spread past what a frame's fields hold, so that
+        // runs carry escapes.
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut wide: Vec<String> = (0..3_000)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let stem = "s".repeat((state >> 58) as usize * 9);
+                let tail: String = (0..(state >> 40) as usize % 70)
+                    .map(|k| char::from(b'a' + ((state >> (k % 37)) % 5) as u8))
+                    .collect();
+                format!("{stem}{tail}")
+            })
+            .collect();
+        wide.sort_unstable();
+        wide.dedup();
+        sets.push(wide);
+        for keys in &sets {
+            let mut probes: Vec<Vec<u8>> = keys.iter().map(|k| k.as_bytes().to_vec()).collect();
+            probes.extend(self::probes(keys).into_iter().map(String::into_bytes));
+            for block in [16usize, 64, 256, 1024] {
+                // Microblocks up to the block: runs of 127 and 1 023 headers, many windows each.
+                let built = [
+                    DictIndex::build_with_block(keys, block).unwrap(),
+                    DictIndex::build_with_labels(keys, block).unwrap(),
+                    DictIndex::build_with_layout(keys, block, 128.min(block)).unwrap(),
+                    DictIndex::build_with_layout(keys, block, block).unwrap(),
+                ];
+                for idx in &built {
+                    idx.route_microblocks();
+                    for b in 0..idx.blocks_len() {
+                        let codec = idx.codec_of(b);
+                        let r = idx.micros_in(b);
+                        let base = idx.blocks.at(b);
+                        let mut runs = vec![(&idx.codes_of(b).1, idx.restart_data_at(b, base), r)];
+                        for j in 0..r {
+                            runs.push((
+                                &idx.codes_of(b).0,
+                                idx.micro_data_at(b, j, base),
+                                idx.micro_count(b, j),
+                            ));
+                        }
+                        let head = idx.head(b);
+                        for (code, data, count) in runs {
+                            let e = Entries::of(code, codec, data, count);
+                            for probe in probes.iter().skip(b % 3).step_by(3) {
+                                let m = lcp(head, probe);
+                                for matched in [0, m, m / 2] {
+                                    match codec {
+                                        Codec::Symbols { table, split: None } => {
+                                            agree(&e, count, probe, matched, &SymbolsCmp(table))
+                                        }
+                                        Codec::Symbols {
+                                            table,
+                                            split: Some(split),
+                                        } if idx.phrases.has_labels() => {
+                                            let cmp = LabelledCmp {
+                                                table,
+                                                split: *split,
+                                                dict: &idx.phrases,
+                                            };
+                                            agree(&e, count, probe, matched, &cmp)
+                                        }
+                                        Codec::Symbols {
+                                            table,
+                                            split: Some(split),
+                                        } => {
+                                            let cmp = TieredCmp {
+                                                table,
+                                                split: *split,
+                                                dict: &idx.phrases,
+                                            };
+                                            agree(&e, count, probe, matched, &cmp)
+                                        }
+                                        Codec::Packed(a) => {
+                                            agree(&e, count, probe, matched, &PackedCmp(a))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// A labelled blob answers every question the plain one does, at every block, through a load
