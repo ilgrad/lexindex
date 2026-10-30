@@ -717,12 +717,15 @@ node's children a sorted run: `O(N log σ)` for `N` key bytes. A key inside anot
 some failure link points to, or is a prefix of the next key in order. The rest are chained by decreasing overlap — Ukkonen's
 greedy, each depth's keys in slot order taking the smallest free key in byte order under their
 node — and the chains are written in their heads' slot order: `O(N + n log n)` in all, and
-deterministic, so the blob is reproducible like every other. Most of the time is the failure
-links, reads that miss the cache once the automaton outgrows it; a link reads only the levels
-above its own, which are complete, so each level's links are computed on every thread, to the
-same links in any order. The automaton is 9 bytes a node, at
-most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key, all freed before the
-arena is laid out; past 2³² nodes the merge is not attempted.
+deterministic, so the blob is reproducible like every other. The nodes are laid down in one pass
+over the keys, cut into runs that each number their own range of every level; the failure links,
+reads that miss the cache once the automaton outgrows it, read only the levels above their own, so
+each level is linked on every thread; the keys inside others are found on every thread, the lowest
+node any thread sees for a key winning; and the chains are walked and written on every thread, cut
+by their bytes. Serving the overlaps, in the order the ties fix, runs on one thread, and so does
+building the lists it serves from — all to the same bytes on any number of threads. The automaton
+is 9 bytes a node, at most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key,
+all freed before the arena is laid out; past 2³² nodes the merge is not attempted.
 
 No worst-case ratio is claimed for greedy here, but on these keys it can be bracketed: a
 minimum-weight cycle cover of the keys' overlap graph is never longer than the shortest superstring

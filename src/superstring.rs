@@ -5,21 +5,22 @@
 //!
 //! # Construction
 //!
-//! The keys come sorted and distinct. Their trie is laid out level by level, so the children of a
-//! node are one contiguous run of the next level, sorted by their byte; one sweep per depth builds
-//! the nodes and their failure links at once, the link of a node only reading nodes above it.
+//! The keys come sorted and distinct. Their trie is numbered level by level, so the children of a
+//! node are one contiguous run of the next level, sorted by their byte, and its nodes are laid down
+//! in one pass over the keys; the failure links follow a level at a time, the link of a node only
+//! reading nodes above it.
 //!
 //! A key is **contained** when it is a proper prefix of the key after it in sorted order, or when
 //! its trie node is the failure link of some node — then it ends inside the key that node spells a
-//! prefix of. The first such node the sweep meets is where the key is placed.
+//! prefix of. The first such node in node order is where the key is placed.
 //!
 //! Every other key is **free**, and the free keys are chained greedily: overlaps of length `d` are
 //! taken before any of length `d − 1`, and a key ending in a suffix that is a node `v` of depth `d`
 //! may be followed by any free key under `v` that nothing precedes yet and that does not start its
 //! own chain. A key's candidate overlaps are its failure chain, longest first, so it walks down
 //! that chain one node at a time, and the free keys under a node are a list concatenated from its
-//! children's, one level at a time from the deepest up. The chains are then written one after
-//! another, each key once, minus its overlap with the one before.
+//! children's, one level at a time from the deepest any key waits at up. The chains are then
+//! written one after another, each key once, minus its overlap with the one before.
 //!
 //! **Ties.** Among the keys whose overlaps have the same length, the one in the lower slot is served
 //! first, and it takes the smallest key in byte order that it may. Chains are written in the slot
@@ -27,10 +28,11 @@
 //! and two builds of one key set give the same bytes on any number of threads.
 //!
 //! **Cost.** `O(N log σ)` for the automaton, `N` the bytes of all keys and `σ ≤ 256` the children a
-//! node can have, searched by bisection — its failure links, the part that misses the cache, one
-//! level at a time on every thread; `O(N + n log n)` for the merge, the log from serving each
-//! depth's keys in slot order. Memory, all of it gone when this returns: one copy of the keys, nine
-//! bytes per trie node — there are at most `N` — and a few dozen bytes per key.
+//! node can have, searched by bisection; `O(N + n log n)` for the merge, the log from serving each
+//! depth's keys in slot order. The nodes, the failure links, the contained keys and the writing of
+//! the chains run on every thread; serving the overlaps, in the order the ties fix, runs on one.
+//! Memory, all of it gone when this returns: one copy of the keys, nine bytes per trie node — there
+//! are at most `N` — and a few dozen bytes per key.
 
 /// "No key" and "no node": key indices and node ids are both below it.
 const NONE: u32 = u32::MAX;
@@ -48,14 +50,37 @@ struct Text {
 }
 
 impl Text {
+    /// Copied on every thread: keys sorted apart from the order they were allocated in are a read
+    /// that misses the cache each. `S` need not be `Sync`, so the threads read their bytes.
     fn new<S: AsRef<str>>(keys: &[S]) -> Self {
-        let total = keys.iter().map(|k| k.as_ref().len()).sum();
-        let mut bytes = Vec::with_capacity(total);
+        let keys: Vec<&[u8]> = keys.iter().map(|k| k.as_ref().as_bytes()).collect();
         let mut ends = Vec::with_capacity(keys.len() + 1);
         ends.push(0);
-        for k in keys {
-            bytes.extend_from_slice(k.as_ref().as_bytes());
-            ends.push(bytes.len());
+        for k in &keys {
+            ends.push(ends[ends.len() - 1] + k.len());
+        }
+        let mut bytes = vec![0u8; ends[keys.len()]];
+        let copy = |keys: &[&[u8]], out: &mut [u8]| {
+            let mut at = 0;
+            for k in keys {
+                out[at..at + k.len()].copy_from_slice(k);
+                at += k.len();
+            }
+        };
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        if keys.len() < PARALLEL_KEYS || threads == 1 {
+            copy(&keys, &mut bytes);
+        } else {
+            let per = keys.len().div_ceil(threads);
+            std::thread::scope(|scope| {
+                let mut rest = &mut bytes[..];
+                for (c, run) in keys.chunks(per).enumerate() {
+                    let width = ends[c * per + run.len()] - ends[c * per];
+                    let (out, tail) = std::mem::take(&mut rest).split_at_mut(width);
+                    rest = tail;
+                    scope.spawn(move || copy(run, out));
+                }
+            });
         }
         Self { bytes, ends }
     }
@@ -117,37 +142,43 @@ impl Above<'_> {
 /// it saves.
 const PARALLEL_LEVEL: usize = if cfg!(test) { 4 } else { 1 << 14 };
 
-/// The failure links of the nodes `start ..` of one depth, the parent of each in `parents`. A
-/// link only reads the levels above — a node's link is shorter than the node, so it and every
-/// node its fallback visits sit higher up — and the levels above are complete, so the nodes are
-/// linked in any order, on as many threads as there are, to the same links. Most of the merge's
-/// time is here, in reads that miss the cache, so it is the part worth spreading.
-fn link_level(trie: &mut Trie, start: usize, parents: &[u32]) {
+/// Fewer keys than this are written out on the calling thread.
+const PARALLEL_KEYS: usize = if cfg!(test) { 2 } else { 1 << 16 };
+
+/// Chains a thread takes at a time when it measures them.
+const CHAINS_TAKEN: usize = 16;
+
+/// A trie with fewer nodes than this is laid down on the calling thread.
+const PARALLEL_NODES: usize = if cfg!(test) { 8 } else { 1 << 18 };
+
+/// The failure links of the nodes `start .. end`, one depth, each of which holds its parent in
+/// `fail` until its link replaces it. A link only reads the levels above — a node's link is
+/// shorter than the node, so it and every node its fallback visits sit higher up — and those are
+/// linked already, so the nodes are linked in any order, on as many threads as there are, to the
+/// same links. These are reads that miss the cache once the automaton outgrows it, the part of the
+/// merge most worth spreading.
+fn link_level(trie: &mut Trie, start: usize, end: usize) {
     let (fail, here) = trie.fail.split_at_mut(start);
-    let here = &mut here[..parents.len()];
+    let here = &mut here[..end - start];
     let above = Above {
         label: &trie.label,
         first: &trie.first,
         fail,
     };
-    let labels = &trie.label[start..start + parents.len()];
-    let link = |out: &mut [u32], parents: &[u32], labels: &[u8]| {
-        for ((f, &p), &c) in out.iter_mut().zip(parents).zip(labels) {
-            *f = above.step(above.fail[p as usize], c);
+    let labels = &trie.label[start..end];
+    let link = |out: &mut [u32], labels: &[u8]| {
+        for (f, &c) in out.iter_mut().zip(labels) {
+            *f = above.step(above.fail[*f as usize], c);
         }
     };
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-    if parents.len() < PARALLEL_LEVEL || threads == 1 {
-        return link(here, parents, labels);
+    if here.len() < PARALLEL_LEVEL || threads == 1 {
+        return link(here, labels);
     }
-    let chunk = parents.len().div_ceil(threads);
+    let chunk = here.len().div_ceil(threads);
     std::thread::scope(|scope| {
-        for ((out, parents), labels) in here
-            .chunks_mut(chunk)
-            .zip(parents.chunks(chunk))
-            .zip(labels.chunks(chunk))
-        {
-            scope.spawn(move || link(out, parents, labels));
+        for (out, labels) in here.chunks_mut(chunk).zip(labels.chunks(chunk)) {
+            scope.spawn(move || link(out, labels));
         }
     });
 }
@@ -163,6 +194,8 @@ impl Trie {
 struct Sweep {
     trie: Trie,
     term: Vec<u32>,
+    /// Each key's shared prefix with the key before it.
+    lcp: Vec<u32>,
     /// `(container, offset)` for a contained key, `(NONE, 0)` for a free one.
     inside: Vec<(u32, u32)>,
 }
@@ -179,11 +212,7 @@ pub(crate) fn merge<S: AsRef<str>>(keys: &[S], order: &[u32]) -> Option<Superstr
     }
     let text = Text::new(keys);
     let sweep = sweep(&text)?;
-    let mut slot_of = vec![0u32; n];
-    for (slot, &k) in order.iter().enumerate() {
-        slot_of[k as usize] = slot as u32;
-    }
-    let chains = chain(&text, &sweep, &slot_of);
+    let chains = chain(&text, &sweep, order);
     Some(lay_out(&text, &sweep, &chains, order))
 }
 
@@ -191,127 +220,289 @@ fn common_prefix(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
-/// Build the trie level by level, its failure links with it, and find the contained keys.
+/// `f(at, chunk)` over `out` cut into one chunk a thread, `at` the chunk's offset; on the calling
+/// thread alone when `out` is shorter than `min`, where spawning costs more than it saves.
+fn on_threads<T: Send>(out: &mut [T], min: usize, f: impl Fn(usize, &mut [T]) + Sync) {
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    if out.len() < min || threads == 1 {
+        return f(0, out);
+    }
+    let chunk = out.len().div_ceil(threads);
+    let f = &f;
+    std::thread::scope(|scope| {
+        for (c, part) in out.chunks_mut(chunk).enumerate() {
+            scope.spawn(move || f(c * chunk, part));
+        }
+    });
+}
+
+/// One run of keys' range of every depth: the bytes of its nodes there, and their parents.
+#[derive(Default)]
+struct RunNodes<'a> {
+    labels: Vec<&'a mut [u8]>,
+    parents: Vec<&'a mut [u32]>,
+}
+
+/// Every node's byte and parent, the parent in `fail`, and each key's own node in `term`: key `i`
+/// makes the next node of every depth past `lcp[i]` it reaches, and the nodes of a depth are
+/// numbered in key order from `level`. The keys are cut into runs, one a thread; a run's nodes
+/// of each depth are one contiguous range, after the ranges of the runs before it, so the runs
+/// write apart, and the node of every depth a run's first key shares with the key before it is
+/// the last one numbered before the run.
+fn lay_nodes(
+    text: &Text,
+    lcp: &[u32],
+    level: &[u32],
+    label: &mut [u8],
+    fail: &mut [u32],
+    term: &mut [u32],
+) {
+    let n = lcp.len();
+    let depths = level.len() - 1;
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let runs = if label.len() < PARALLEL_NODES {
+        1
+    } else {
+        threads
+    };
+    let run_keys = n.div_ceil(runs).max(1);
+    // Nodes each run makes at each depth, then where its range of each depth starts.
+    let mut starts: Vec<Vec<u32>> = lcp
+        .chunks(run_keys)
+        .enumerate()
+        .map(|(r, run)| {
+            let mut opens = vec![0i64; depths + 1];
+            for (j, &shared) in run.iter().enumerate() {
+                opens[shared as usize + 1] += 1;
+                opens[text.len(r * run_keys + j) + 1] -= 1;
+            }
+            let mut width = 0i64;
+            let mut counts = vec![0u32; depths];
+            for (count, &open) in counts.iter_mut().zip(&opens).skip(1) {
+                width += open;
+                *count = width as u32;
+            }
+            counts
+        })
+        .collect();
+    let mut next: Vec<u32> = level[..depths].to_vec();
+    for counts in &mut starts {
+        for (count, at) in counts.iter_mut().zip(&mut next) {
+            let width = *count;
+            *count = *at;
+            *at += width;
+        }
+    }
+    let mut runs_nodes: Vec<RunNodes<'_>> = starts.iter().map(|_| RunNodes::default()).collect();
+    let (mut label, mut fail) = (&mut label[1..], &mut fail[1..]);
+    for d in 1..depths {
+        let mut at = level[d];
+        for (r, run) in runs_nodes.iter_mut().enumerate() {
+            let end = starts.get(r + 1).map_or(level[d + 1], |s| s[d]);
+            let width = (end - at) as usize;
+            let (l, rest) = std::mem::take(&mut label).split_at_mut(width);
+            let (f, rest_f) = std::mem::take(&mut fail).split_at_mut(width);
+            run.labels.push(l);
+            run.parents.push(f);
+            (label, fail) = (rest, rest_f);
+            at = end;
+        }
+    }
+    let lay = |r: usize, run: &mut RunNodes<'_>, term: &mut [u32]| {
+        let start = &starts[r];
+        let first = r * run_keys;
+        let mut path = vec![0u32; depths];
+        for d in 1..=lcp[first] as usize {
+            path[d] = start[d] - 1;
+        }
+        let mut fill = vec![0usize; depths];
+        for (j, own) in term.iter_mut().enumerate() {
+            let i = first + j;
+            let key = text.key(i);
+            for d in lcp[i] as usize + 1..=key.len() {
+                let k = fill[d];
+                fill[d] += 1;
+                run.labels[d - 1][k] = key[d - 1];
+                // The parent, until `link_level` puts the link in its place.
+                run.parents[d - 1][k] = path[d - 1];
+                path[d] = start[d] + k as u32;
+            }
+            *own = path[key.len()];
+        }
+    };
+    std::thread::scope(|scope| {
+        for (r, (run, term)) in runs_nodes
+            .iter_mut()
+            .zip(term.chunks_mut(run_keys))
+            .enumerate()
+        {
+            let lay = &lay;
+            if runs == 1 {
+                lay(r, run, term);
+            } else {
+                scope.spawn(move || lay(r, run, term));
+            }
+        }
+    });
+}
+
+/// Build the trie, its failure links, and find the contained keys.
+///
+/// The nodes are numbered level by level, but laid down in one pass over the keys in order: a
+/// key makes a node at every depth past the prefix it shares with the key before it, so the
+/// count of each level, and where it starts, is known from those shared prefixes first, and each
+/// key then takes the next number of every level it reaches, so the keys are read once, front to
+/// back. The links follow, a level at a time.
 fn sweep(text: &Text) -> Option<Sweep> {
     let n = text.ends.len() - 1;
     let mut lcp = vec![0u32; n];
-    let mut nodes = 1u64;
-    let mut longest = 0usize;
-    for (i, shared) in lcp.iter_mut().enumerate() {
-        if i > 0 {
-            *shared = common_prefix(text.key(i - 1), text.key(i)) as u32;
+    on_threads(&mut lcp, PARALLEL_KEYS, |at, out| {
+        for (i, shared) in (at..).zip(out) {
+            if i > 0 {
+                *shared = common_prefix(text.key(i - 1), text.key(i)) as u32;
+            }
         }
-        nodes += (text.len(i) - *shared as usize) as u64;
-        longest = longest.max(text.len(i));
+    });
+    let longest = (0..n).map(|i| text.len(i)).max().unwrap_or(0);
+    // Key `i` makes one node at each depth `lcp[i] + 1 ..= len(i)`: the width of a level is a
+    // running sum of where those ranges open and close.
+    let mut opens = vec![0i64; longest + 2];
+    for (i, &shared) in lcp.iter().enumerate() {
+        opens[shared as usize + 1] += 1;
+        opens[text.len(i) + 1] -= 1;
     }
-    if nodes >= u64::from(NONE) {
-        return None;
+    let mut level = Vec::with_capacity(longest + 2);
+    level.extend([0u32, 1]);
+    let (mut width, mut nodes) = (0i64, 1u64);
+    for &open in &opens[1..=longest] {
+        width += open;
+        nodes += width as u64;
+        if nodes >= u64::from(NONE) {
+            return None;
+        }
+        level.push(nodes as u32);
     }
     let nodes = nodes as usize;
-    let mut trie = Trie {
-        label: vec![0; nodes],
-        first: vec![NONE; nodes + 1],
-        fail: vec![0; nodes],
-        level: Vec::with_capacity(longest + 2),
-    };
-    trie.level.extend([0, 1]);
-    trie.first[0] = 1;
+    let mut label = vec![0u8; nodes];
+    let mut fail = vec![0u32; nodes];
     let mut term = vec![0u32; n];
-    // Terminal nodes in creation order, which is node order, so a lookup bisects.
-    let mut terminals: Vec<(u32, u32)> = Vec::new();
+    lay_nodes(text, &lcp, &level, &mut label, &mut fail, &mut term);
+    // The parents run in node order, so a node's children start at the first node whose parent
+    // is not before it — and a node without any gets the start of the next one's, so every run
+    // ends where the next begins.
+    let mut first = vec![0u32; nodes + 1];
+    first[nodes] = nodes as u32;
+    on_threads(&mut first[..nodes], 1 << 16, |at, out| {
+        let mut u = 1 + fail[1..].partition_point(|&p| (p as usize) < at);
+        for (v, f) in (at..).zip(out) {
+            while u < nodes && (fail[u] as usize) < v {
+                u += 1;
+            }
+            *f = u as u32;
+        }
+    });
     let mut is_term = vec![0u64; nodes.div_ceil(64)];
-    let mut inside = vec![(NONE, 0u32); n];
-    // The node of each active key's prefix one byte shorter than the depth being built.
-    let mut at = vec![0u32; n];
-    // The parent of each node of the depth being built, and the key that made it.
-    let (mut parents, mut makers): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
-    let mut active: Vec<u32> = (0..n as u32)
-        .filter(|&i| text.len(i as usize) > 0)
-        .collect();
-    let mut next = 1u32;
-    for d in 1..=longest {
-        let start = next as usize;
-        let mut parent_seen = NONE;
-        let mut node = NONE;
-        let mut kept = 0;
-        parents.clear();
-        makers.clear();
-        for a in 0..active.len() {
-            let i = active[a] as usize;
-            // A key sharing this depth with the key before it — which is then the previous
-            // active one — shares its node.
-            if d > lcp[i] as usize {
-                let u = next;
-                next += 1;
-                let c = text.key(i)[d - 1];
-                let p = at[i];
-                trie.label[u as usize] = c;
-                if p != parent_seen {
-                    trie.first[p as usize] = u;
-                    parent_seen = p;
-                }
-                parents.push(p);
-                makers.push(i as u32);
-                if text.len(i) == d {
-                    term[i] = u;
-                    terminals.push((u, i as u32));
-                    is_term[u as usize / 64] |= 1 << (u % 64);
-                }
-                node = u;
-            }
-            at[i] = node;
-            if text.len(i) > d {
-                active[kept] = i as u32;
-                kept += 1;
-            }
+    for (i, &u) in term.iter().enumerate() {
+        if text.len(i) > 0 {
+            is_term[u as usize / 64] |= 1 << (u % 64);
         }
-        active.truncate(kept);
-        // Every link at depth 1 is the root, which `fail` already holds.
-        if d > 1 {
-            link_level(&mut trie, start, &parents);
+    }
+    let mut trie = Trie {
+        label,
+        first,
+        fail,
+        level,
+    };
+    // Every link at depth 1 is the root, which is also the parent there.
+    for d in 2..trie.level.len() - 1 {
+        let (start, end) = (trie.level[d] as usize, trie.level[d + 1] as usize);
+        link_level(&mut trie, start, end);
+    }
+    // The key ending at each terminal node, by its rank among them: one read and a popcount, not
+    // a bisection over the terminals, which would miss the cache at every step.
+    let mut terms_before = Vec::with_capacity(is_term.len());
+    let mut count = 0u32;
+    for word in &is_term {
+        terms_before.push(count);
+        count += word.count_ones();
+    }
+    let rank = |u: u32| {
+        let (word, bit) = (u as usize / 64, u % 64);
+        terms_before[word] + (is_term[word] & ((1u64 << bit) - 1)).count_ones()
+    };
+    let is_term = |u: u32| (is_term[u as usize / 64] >> (u % 64)) & 1 == 1;
+    let mut key_at = vec![0u32; count as usize];
+    for (i, &u) in term.iter().enumerate() {
+        if text.len(i) > 0 {
+            key_at[rank(u) as usize] = i as u32;
         }
-        // In node order, so the first node whose link ends a key is where that key is placed.
-        for (u, &i) in (start..).zip(&makers) {
+    }
+    // The first node in node order whose link ends a key is where that key is placed: the nodes
+    // are read on every thread, and the lowest any thread finds for a key wins. The nodes of
+    // depth 1 all link to the root, which `is_term` leaves out.
+    use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+    let placed: Vec<AtomicU32> = (0..n).map(|_| AtomicU32::new(NONE)).collect();
+    let find = |from: usize, to: usize| {
+        for u in from..to {
             let f = trie.fail[u];
-            if (is_term[f as usize / 64] >> (f % 64)) & 1 == 1 {
-                let k = terminals[terminals.partition_point(|t| t.0 < f)].1 as usize;
-                if inside[k].0 == NONE {
-                    inside[k] = (i, (d - text.len(k)) as u32);
+            if is_term(f) {
+                let k = key_at[rank(f) as usize] as usize;
+                // A thread reads its nodes in order, so past its first, this load turns it away.
+                if placed[k].load(Relaxed) > u as u32 {
+                    placed[k].fetch_min(u as u32, Relaxed);
                 }
             }
         }
-        // Depth `d - 1` has all its children now: a node without any gets the start of the next
-        // one's, so every run ends where the next begins.
-        let mut end = next;
-        for v in (trie.level[d - 1]..trie.level[d]).rev() {
-            match trie.first[v as usize] {
-                NONE => trie.first[v as usize] = end,
-                s => end = s,
+    };
+    let below_root = trie.level.get(2).map_or(nodes, |&s| s as usize);
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    if nodes - below_root < PARALLEL_NODES || threads == 1 {
+        find(below_root, nodes);
+    } else {
+        let chunk = (nodes - below_root).div_ceil(threads);
+        std::thread::scope(|scope| {
+            for from in (below_root..nodes).step_by(chunk) {
+                scope.spawn(move || find(from, (from + chunk).min(nodes)));
             }
+        });
+    }
+    // Inside the smallest key under that node, which its leftmost path down reaches — a node that
+    // ends no key has children.
+    let mut inside = vec![(NONE, 0u32); n];
+    on_threads(&mut inside, PARALLEL_KEYS, |at, out| {
+        for (k, place) in (at..).zip(out) {
+            let u = placed[k].load(Relaxed);
+            if u == NONE {
+                continue;
+            }
+            let mut v = u;
+            while !is_term(v) {
+                v = trie.first[v as usize];
+            }
+            *place = (
+                key_at[rank(v) as usize],
+                (trie.depth(u) - text.len(k)) as u32,
+            );
         }
-        // The first node of depth `d` is where its children, at `d + 1`, will start, and it
-        // bounds the last run of depth `d - 1`, which the next sweep's links may read.
-        trie.first[trie.level[d] as usize] = next;
-        trie.level.push(next);
-    }
-    debug_assert_eq!(next as usize, nodes);
-    let last = trie.level[trie.level.len() - 2];
-    for v in last..next {
-        trie.first[v as usize] = next;
-    }
-    trie.first[nodes] = next;
+    });
+    drop(placed);
     // A key that is a proper prefix of another is a prefix of the key right after it.
     for i in 0..n.saturating_sub(1) {
         if lcp[i + 1] as usize == text.len(i) {
             inside[i] = (i as u32 + 1, 0);
         }
     }
-    Some(Sweep { trie, term, inside })
+    Some(Sweep {
+        trie,
+        term,
+        lcp,
+        inside,
+    })
 }
 
 /// The greedy chains over the free keys: `(next, overlap)` per key, `NONE` where a chain ends.
-fn chain(text: &Text, sweep: &Sweep, slot_of: &[u32]) -> Vec<(u32, u32)> {
-    let n = slot_of.len();
+fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
+    let n = order.len();
     let trie = &sweep.trie;
     let free = |k: usize| sweep.inside[k].0 == NONE;
     let mut link = vec![(NONE, 0u32); n];
@@ -319,22 +510,26 @@ fn chain(text: &Text, sweep: &Sweep, slot_of: &[u32]) -> Vec<(u32, u32)> {
     let mut other_end: Vec<u32> = (0..n as u32).collect();
     let mut preceded = vec![false; n];
     let depths = trie.level.len() - 1;
-    // Keys waiting at each depth for an overlap that long, as linked lists.
-    let mut waiting = vec![NONE; depths];
-    let mut waiting_next = vec![NONE; n];
-    let mut cur = vec![0u32; n];
-    for k in 0..n {
-        if !free(k) {
-            continue;
+    // Where each free key waits first, by slot, found on every thread: the link of its node, the
+    // longest overlap it could have, and that node's depth.
+    let mut first_wait = vec![(0u32, 0u32); n];
+    on_threads(&mut first_wait, PARALLEL_KEYS, |at, out| {
+        for (wait, &k) in out.iter_mut().zip(&order[at..]) {
+            if free(k as usize) {
+                let v = trie.fail[sweep.term[k as usize] as usize];
+                *wait = (v, trie.depth(v) as u32);
+            }
         }
-        let v = trie.fail[sweep.term[k] as usize];
+    });
+    // Keys waiting at each depth for an overlap that long, as `(slot, key, node)`, each depth's
+    // in slot order.
+    let mut waiting: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); depths];
+    for (slot, (&k, &(v, d))) in order.iter().zip(&first_wait).enumerate() {
         if v != 0 {
-            let d = trie.depth(v);
-            cur[k] = v;
-            waiting_next[k] = waiting[d];
-            waiting[d] = k as u32;
+            waiting[d as usize].push((slot as u32, k, v));
         }
     }
+    drop(first_wait);
     // The free keys under each node of the level at hand, and of the level below it: a list
     // threaded through `list_next`, in byte order.
     let mut list_next = vec![NONE; n];
@@ -346,52 +541,89 @@ fn chain(text: &Text, sweep: &Sweep, slot_of: &[u32]) -> Vec<(u32, u32)> {
         .unwrap_or(0) as usize;
     let mut here = vec![(NONE, NONE); widest];
     let mut below = vec![(NONE, NONE); widest];
-    // Free keys by their node, which is node order.
-    let mut ending: Vec<(u32, u32)> = (0..n)
-        .filter(|&k| free(k))
-        .map(|k| (sweep.term[k], k as u32))
-        .collect();
-    ending.sort_unstable();
+    // Free keys by their node, which is node order: a key's node is on the level of its length,
+    // and the nodes of a level are numbered in key order — a counting sort by length.
+    let mut at_len = vec![0usize; depths + 1];
+    for k in (0..n).filter(|&k| free(k)) {
+        at_len[text.len(k) + 1] += 1;
+    }
+    for d in 1..=depths {
+        at_len[d] += at_len[d - 1];
+    }
+    let mut ending = vec![(0u32, 0u32); at_len[depths]];
+    for k in (0..n).filter(|&k| free(k)) {
+        let at = &mut at_len[text.len(k)];
+        ending[*at] = (sweep.term[k], k as u32);
+        *at += 1;
+    }
+    drop(at_len);
+    debug_assert!(ending.windows(2).all(|w| w[0] < w[1]));
     let mut ending_at = ending.len();
-    let mut batch: Vec<u32> = Vec::new();
-    for d in (1..depths).rev() {
+    // No key waits below the deepest overlap any key starts at, so the lists there are never
+    // read. That level's lists come from the keys in order instead — a node's free keys are the
+    // keys under it, which are consecutive — and the levels below it are never visited.
+    let deepest = (1..depths)
+        .rev()
+        .find(|&d| !waiting[d].is_empty())
+        .unwrap_or(0);
+    for d in (1..=deepest).rev() {
         let (lo, hi) = (trie.level[d], trie.level[d + 1]);
         let child_lo = hi;
         let first_ending = ending.partition_point(|e| e.0 < lo);
         let mut e = first_ending;
-        for v in lo..hi {
-            let (mut head, mut tail) = (NONE, NONE);
-            if e < ending_at && ending[e].0 == v {
-                let k = ending[e].1;
-                list_next[k as usize] = NONE;
-                (head, tail) = (k, k);
-                e += 1;
-            }
-            let (c_lo, c_hi) = (trie.first[v as usize], trie.first[v as usize + 1]);
-            for c in c_lo..c_hi {
-                let (h, t) = below[(c - child_lo) as usize];
-                if h == NONE {
+        if d == deepest {
+            // Nodes of depth `d` made so far: each key past it either makes the next or shares
+            // the last.
+            let mut made = 0usize;
+            for (k, &shared) in sweep.lcp.iter().enumerate() {
+                if text.len(k) < d {
                     continue;
                 }
-                if head == NONE {
-                    head = h;
-                } else {
-                    list_next[tail as usize] = h;
+                made += usize::from((shared as usize) < d);
+                if !free(k) {
+                    continue;
                 }
-                tail = t;
+                list_next[k] = NONE;
+                let list = &mut here[made - 1];
+                if list.0 == NONE {
+                    list.0 = k as u32;
+                } else {
+                    list_next[list.1 as usize] = k as u32;
+                }
+                list.1 = k as u32;
             }
-            here[(v - lo) as usize] = (head, tail);
+        } else {
+            for v in lo..hi {
+                let (mut head, mut tail) = (NONE, NONE);
+                if e < ending_at && ending[e].0 == v {
+                    let k = ending[e].1;
+                    list_next[k as usize] = NONE;
+                    (head, tail) = (k, k);
+                    e += 1;
+                }
+                let (c_lo, c_hi) = (trie.first[v as usize], trie.first[v as usize + 1]);
+                for c in c_lo..c_hi {
+                    let (h, t) = below[(c - child_lo) as usize];
+                    if h == NONE {
+                        continue;
+                    }
+                    if head == NONE {
+                        head = h;
+                    } else {
+                        list_next[tail as usize] = h;
+                    }
+                    tail = t;
+                }
+                here[(v - lo) as usize] = (head, tail);
+            }
         }
         ending_at = first_ending;
-        batch.clear();
-        let mut k = waiting[d];
-        while k != NONE {
-            batch.push(k);
-            k = waiting_next[k as usize];
-        }
-        batch.sort_unstable_by_key(|&k| slot_of[k as usize]);
-        for &s in &batch {
-            let v = cur[s as usize];
+        // A few runs in slot order already — the keys that wait here first, then those each
+        // deeper level turned away, in the order it served them — which a merge sort finds and
+        // merges rather than sorting afresh.
+        let mut batch = std::mem::take(&mut waiting[d]);
+        batch.sort_by_key(|&(slot, _, _)| slot);
+        for &(slot, s, v) in &batch {
             let list = &mut here[(v - lo) as usize];
             match take(list, &mut list_next, &preceded, other_end[s as usize]) {
                 Some(t) => {
@@ -404,10 +636,7 @@ fn chain(text: &Text, sweep: &Sweep, slot_of: &[u32]) -> Vec<(u32, u32)> {
                 None => {
                     let f = trie.fail[v as usize];
                     if f != 0 {
-                        let fd = trie.depth(f);
-                        cur[s as usize] = f;
-                        waiting_next[s as usize] = waiting[fd];
-                        waiting[fd] = s;
+                        waiting[trie.depth(f)].push((slot, s, f));
                     }
                 }
             }
@@ -469,24 +698,102 @@ fn lay_out(text: &Text, sweep: &Sweep, link: &[(u32, u32)], order: &[u32]) -> Su
             total -= o as usize;
         }
     }
-    let mut data = Vec::with_capacity(total);
-    let mut starts = vec![u64::MAX; n];
-    for &head in order {
-        let mut k = head as usize;
-        if !free(k) || preceded[k] {
-            continue;
+    // A chain's bytes are known only by walking it, a dependent read a key, so the chains are
+    // walked on every thread twice: once for their lengths, which place them, then to write them.
+    // Chains run from one key to a third of all of them, so the lengths are handed out a few
+    // chains at a time, and the writing is cut by bytes.
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+    let heads: Vec<u32> = order
+        .iter()
+        .copied()
+        .filter(|&k| free(k as usize) && !preceded[k as usize])
+        .collect();
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let threads = if n < PARALLEL_KEYS { 1 } else { threads };
+    let lens: Vec<AtomicU64> = heads.iter().map(|_| AtomicU64::new(0)).collect();
+    let taken = AtomicUsize::new(0);
+    let measure = || {
+        loop {
+            let from = taken.fetch_add(CHAINS_TAKEN, Relaxed);
+            if from >= heads.len() {
+                break;
+            }
+            for j in from..(from + CHAINS_TAKEN).min(heads.len()) {
+                let mut k = heads[j] as usize;
+                let mut len = text.len(k);
+                loop {
+                    let (t, o) = link[k];
+                    if t == NONE {
+                        break;
+                    }
+                    k = t as usize;
+                    len += text.len(k) - o as usize;
+                }
+                lens[j].store(len as u64, Relaxed);
+            }
         }
-        starts[k] = data.len() as u64;
-        data.extend_from_slice(text.key(k));
-        while link[k].0 != NONE {
-            let (t, o) = link[k];
-            let t = t as usize;
-            starts[t] = (data.len() - o as usize) as u64;
-            data.extend_from_slice(&text.key(t)[o as usize..]);
-            k = t;
+    };
+    std::thread::scope(|scope| {
+        for _ in 1..threads {
+            scope.spawn(measure);
         }
+        measure();
+    });
+    let mut at = Vec::with_capacity(heads.len() + 1);
+    at.push(0usize);
+    for len in lens {
+        at.push(at[at.len() - 1] + len.into_inner() as usize);
     }
-    debug_assert_eq!(data.len(), total);
+    debug_assert_eq!(at[heads.len()], total);
+    let mut data = vec![0u8; total];
+    let starts: Vec<AtomicU64> = (0..n).map(|_| AtomicU64::new(u64::MAX)).collect();
+    let write = |heads: &[u32], at: &[usize], out: &mut [u8]| {
+        let base = at[0];
+        for (&head, &from) in heads.iter().zip(at) {
+            let mut k = head as usize;
+            let mut pos = from - base;
+            let key = text.key(k);
+            out[pos..pos + key.len()].copy_from_slice(key);
+            starts[k].store(from as u64, Relaxed);
+            pos += key.len();
+            loop {
+                let (t, o) = link[k];
+                if t == NONE {
+                    break;
+                }
+                k = t as usize;
+                let tail = &text.key(k)[o as usize..];
+                starts[k].store((base + pos - o as usize) as u64, Relaxed);
+                out[pos..pos + tail.len()].copy_from_slice(tail);
+                pos += tail.len();
+            }
+        }
+    };
+    // Group `g` takes the chains that start in its share of the bytes.
+    let cuts: Vec<usize> = (0..=threads)
+        .map(|g| {
+            at.partition_point(|&b| b < total * g / threads)
+                .min(heads.len())
+        })
+        .collect();
+    std::thread::scope(|scope| {
+        let mut rest = &mut data[..];
+        for g in 0..threads {
+            let (lo, hi) = (
+                cuts[g],
+                if g + 1 == threads {
+                    heads.len()
+                } else {
+                    cuts[g + 1]
+                },
+            );
+            let (out, tail) = std::mem::take(&mut rest).split_at_mut(at[hi] - at[lo]);
+            rest = tail;
+            let (group, at, write) = (&heads[lo..hi], &at[lo..=hi], &write);
+            scope.spawn(move || write(group, at, out));
+        }
+    });
+    let mut starts: Vec<u64> = starts.into_iter().map(AtomicU64::into_inner).collect();
     // A contained key sits where its container puts it; a container is strictly longer, so the
     // walk up ends at a free key.
     let mut path = Vec::new();
