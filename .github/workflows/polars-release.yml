@@ -73,8 +73,8 @@ jobs:
         platform:
           - { runner: ubuntu-latest, target: x86_64, smoke: true }
           - { runner: ubuntu-latest, target: aarch64 }
-          - { runner: macos-14, target: x86_64 }
-          - { runner: macos-14, target: aarch64, smoke: true }
+          - { runner: macos-15, target: x86_64 }
+          - { runner: macos-15, target: aarch64, smoke: true }
           - { runner: windows-latest, target: x64, smoke: true }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
