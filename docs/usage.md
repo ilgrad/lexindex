@@ -870,6 +870,49 @@ The blob records which base wrote it, so `from_bytes_with` refuses a mismatch be
 loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by
 mistake.
 
+### Compiler flags in your own build
+
+A crate from crates.io compiles under the profile of the program that depends on it: Cargo reads
+`[profile]` from the workspace root and ignores a dependency's, so nothing in lexindex's own
+`Cargo.toml` reaches your build. The wheels on PyPI are built with the profile below; put it in
+your workspace's `Cargo.toml` to compile lexindex the way they do. A `[profile.release]` in a cargo
+config such as `~/.cargo/config.toml` outranks the manifest's, so look there too.
+
+```toml
+[profile.release]
+opt-level = 3
+lto = true          # fat LTO
+codegen-units = 1
+```
+
+Below `opt-level = 3` the hash lookups lose the most. At `2`, evaluating the minimal perfect hash
+inside the four hash indexes takes 31 % more instructions and `HashedDictIndex::id_unchecked` 3 %
+more, and nothing else counted moves by more than 0.5 %; at `"s"`, 53 % and 10 % more, a
+`DictIndex` build 5 % and a lookup 2 % more, and a `StringIndex` lookup 2 % less.
+
+For a binary that runs only on the machine that built it, `RUSTFLAGS="-C target-cpu=native"` takes
+3.6–3.9 % of the instructions off a `DictIndex` lookup (block 256 with `route_microblocks`, on a
+million titles and on a million domains) and 1.7–1.8 % off a `DictIndex` build at block 32. The
+other lookups counted — `StringIndex`, `HashedDictIndex` and the perfect hash alone — move by
+1.3 % or less, either way. `-C target-cpu=x86-64-v3`, a level (AVX2, BMI2, FMA) rather than one
+CPU, takes 3.3–3.5 % off the same lookup. These are instruction counts, not times, taken with
+`znver3` — what `native` selects on the Zen 3 laptop that counted them
+([`bench/results/codegen-counts-2026-10-30-arz-9a3a772.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/codegen-counts-2026-10-30-arz-9a3a772.txt)).
+
+The x86-64 wheels stay on the baseline instruction set. A wheel's platform tag names an operating
+system and an architecture, such as `manylinux_2_17_x86_64` (PEP 425, PEP 600), and no CPU level,
+so pip would install a wheel built for x86-64-v3 on a CPU without AVX2, and the interpreter would
+die at the first such instruction. Where a wider instruction pays, the crate asks the CPU at run
+time and keeps a portable path beside it: AVX2 for the double array's placer and for its load
+check, `popcnt` for the perfect hash's remap of the keys its first level bumped. A build whose
+`target-cpu` has the feature compiles that check to a constant.
+
+Profile-guided optimisation is yours to run, with `cargo-pgo` and a workload of the operations your
+program serves. On lexindex's harness, a workload of twelve runs over five of the indexes took
+1.3–2.9 % of the instructions off the `DictIndex` lookups and added 1.9–2.6 % to the `StringIndex`
+and `HashedDictIndex` ones (same file). Those are counts as well: the branch layout PGO chooses
+shows in time, which was not measured.
+
 ## C
 
 The `capi` feature exports six of the seven indexes to C — all but `DoubleArrayIndex`: one opaque

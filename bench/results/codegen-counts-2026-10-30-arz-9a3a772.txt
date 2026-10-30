@@ -1,0 +1,120 @@
+Instructions a key under five codegen variants of one source: lexindex at 9a3a772 (the tree clean but for
+bench/mphf_vs/Cargo.lock, outside the crate), linked by a local harness (local/2026-10-30-isa, not in the
+repository; a path dependency with features bench-mphf and fuzzing, the shipped release profile: opt-level 3,
+fat LTO, one codegen unit). Variants: base = that profile, baseline x86-64; znver3 = -C target-cpu=znver3;
+v3 = -C target-cpu=x86-64-v3; o2 / os = CARGO_PROFILE_RELEASE_OPT_LEVEL=2 / s. Each cell is `perf stat -e
+instructions:u,branches:u,branch-misses:u,L1-dcache-load-misses:u,cycles:u` of a process that runs the
+operation over every key of a 1 M-key corpus three times, minus the same process doing nothing after loading
+the keys, divided by the operations; a build row is two builds against a process that only reads the keys.
+Kinds: routed256 = DictIndex block 256, route_microblocks on; hashed0 = HashedDictIndex::id_unchecked, no
+fingerprint; mphf = the MPH3 function alone; string = StringIndex; dict32 = DictIndex::build at block 32.
+Corpora: string-index-benchmarks titles-en-1000000.txt and domains-1000000.txt. 2026-10-30 21:18-21:22
++02:00, Ryzen 7 5800HS, Fedora 44, rustc 1.99.1, on a BUSY machine (four research agents): insn/key, br/key
+and brmiss/k are per-process counts and hold there; l1miss/k and cyc/key share caches and cores with the
+other work and are NOT to be read (some cyc/key are negative). The ISA lines count mnemonics in each
+variant's harness binary (objdump).
+
+    Finished `release` profile [optimized + debuginfo] target(s) in 42.39s
+    Finished `release` profile [optimized + debuginfo] target(s) in 41.26s
+    Finished `release` profile [optimized + debuginfo] target(s) in 38.30s
+    Finished `release` profile [optimized + debuginfo] target(s) in 29.25s
+== znver3 ISA
+popcnt=12 lzcnt=79 tzcnt=230 bsr=11 pdep= pext= shlx=487 shrx=874 bzhi=142 andn=311 vpcmpeqb=110 vmovdqu=2418  total=284933
+== v3 ISA
+popcnt=12 lzcnt=73 tzcnt=216 bsr=11 pdep= pext= shlx=476 shrx=809 bzhi=142 andn=277 vpcmpeqb=106 vmovdqu=2267  total=278198
+== o2 ISA
+popcnt=4 lzcnt= tzcnt=211 bsr=87 pdep= pext= shlx= shrx= bzhi= andn= vpcmpeqb= vmovdqu=84  total=259008
+== os ISA
+popcnt=3 lzcnt= tzcnt=26 bsr=81 pdep= pext= shlx= shrx= bzhi= andn= vpcmpeqb= vmovdqu=  total=212431
+variant  corpus     kind       op       insn/key   br/key brmiss/k l1miss/k  cyc/key
+base     titles-en  routed256  id         1927.3    273.0   12.545   34.990   1722.8
+base     titles-en  hashed0    id           91.9     13.1    0.627    3.638    160.9
+base     titles-en  mphf       id           22.7      3.2    0.019    1.031     12.5
+base     titles-en  string     id         1688.7    351.1   10.722   21.332   2263.4
+base     titles-en  dict32     build     11470.1   1923.5   74.390  249.504  11831.4
+znver3   titles-en  routed256  id         1858.1    283.0   12.457   31.621   1963.3
+znver3   titles-en  hashed0    id           91.6     13.1    0.623    2.972    273.7
+znver3   titles-en  mphf       id           22.5      3.2    0.035    1.125     16.7
+znver3   titles-en  string     id         1695.6    336.3   10.736   21.422   3082.4
+znver3   titles-en  dict32     build     11265.2   1925.1   74.768  251.728  11890.9
+v3       titles-en  routed256  id         1863.5    282.9   12.412   32.602   2080.4
+v3       titles-en  hashed0    id           91.6     13.1    0.614    3.564    154.2
+v3       titles-en  mphf       id           22.5      3.2    0.020    1.055     22.2
+v3       titles-en  string     id         1707.3    337.3   10.743   21.515   2076.1
+v3       titles-en  dict32     build     11385.9   1897.6   74.647  251.426  11437.0
+o2       titles-en  routed256  id         1926.6    274.6   12.483   34.926   1994.2
+o2       titles-en  hashed0    id           94.8     15.0    0.546    3.255    192.8
+o2       titles-en  mphf       id           29.7      6.2    0.025    1.112     23.1
+o2       titles-en  string     id         1688.8    351.2   10.715   21.533   2547.5
+o2       titles-en  dict32     build     11516.6   1960.5   74.420  249.227  11776.9
+os       titles-en  routed256  id         1972.9    270.3   12.147   36.461   2101.9
+os       titles-en  hashed0    id          101.2     17.1    0.591    3.575    286.3
+os       titles-en  mphf       id           34.8      8.2    0.026    1.081      5.0
+os       titles-en  string     id         1651.7    337.2   10.794   21.575   2681.2
+os       titles-en  dict32     build     12035.3   2111.6   73.946  249.701  12189.8
+base     domains    routed256  id         1660.9    227.7    9.771   27.771   1685.9
+base     domains    hashed0    id           92.9     13.2    0.289    3.783    176.6
+base     domains    mphf       id           22.8      3.2    0.024    1.152      6.2
+base     domains    string     id         1314.9    268.0    8.507   19.495   1747.3
+base     domains    dict32     build      7575.3   1271.2   44.425  134.698   6424.1
+znver3   domains    routed256  id         1596.5    234.7    9.732   27.867   1655.1
+znver3   domains    hashed0    id           92.8     13.1    0.313    4.174    212.7
+znver3   domains    mphf       id           22.5      3.2    0.019    1.106     -4.1
+znver3   domains    string     id         1320.3    255.7    8.535   19.488   2202.2
+znver3   domains    dict32     build      7450.2   1276.8   44.833  136.125   6775.9
+v3       domains    routed256  id         1602.3    234.9    9.743   26.077   1606.7
+v3       domains    hashed0    id           92.9     13.2    0.286    3.647    166.0
+v3       domains    mphf       id           22.6      3.2    0.036    0.962      9.5
+v3       domains    string     id         1330.8    256.7    8.506   19.516   1955.2
+v3       domains    dict32     build      7480.8   1257.7   44.866  136.641   6604.3
+o2       domains    routed256  id         1662.6    229.3    9.793   29.109   1705.1
+o2       domains    hashed0    id           96.2     15.2    0.271    3.602    201.3
+o2       domains    mphf       id           29.7      6.2    0.016    0.989     42.2
+o2       domains    string     id         1314.9    268.0    8.533   19.409   1867.9
+o2       domains    dict32     build      7597.3   1290.9   44.552  135.785   6703.4
+os       domains    routed256  id         1686.5    228.0    9.500   26.081   1649.1
+os       domains    hashed0    id          102.1     17.2    0.258    3.717    115.9
+os       domains    mphf       id           34.9      8.2    0.042    1.162      0.6
+os       domains    string     id         1283.9    256.6    8.532   19.423   1976.5
+os       domains    dict32     build      7992.9   1409.0   44.460  135.758   7061.1
+
+Profile-guided build of the same harness, 2026-10-30 21:22-21:25 +02:00, the source and the machine as above:
+cargo-pgo 0.3.0, `cargo pgo build` (-Cprofile-generate); twelve workload runs, on titles-en unless another
+corpus is named: routed256 id (titles-en, domains), dict256 id (words-full), hashed0 id, perfect id, compact
+id, mphf id and batch, string id, routed256 batch, dict32 build (titles-en, domains); `cargo pgo optimize
+build` (llvm-profdata merge, -Cprofile-use); then the cells above, counted for the base binary and the PGO
+one. Same columns and the same caveat: only insn/key, br/key and brmiss/k are to be read.
+
+[2026-10-30T19:22:13Z INFO  cargo_pgo::pgo::instrument] PGO profile directory will be cleared.
+[2026-10-30T19:22:13Z INFO  cargo_pgo::pgo::instrument] PGO profiles will be stored into /home/ilgrad/Documents/projects/betula/repos/lexindex/local/2026-10-30-isa/target-pgo/pgo-profiles.
+[2026-10-30T19:23:05Z INFO  cargo_pgo::pgo::instrument] PGO-instrumented binary isa built successfully.
+[2026-10-30T19:23:05Z INFO  cargo_pgo::pgo::instrument] PGO instrumentation build finished successfully.
+    Finished `release` profile [optimized + debuginfo] target(s) in 51.84s
+default_13026979308669952697_0.profraw
+[2026-10-30T19:23:37Z INFO  cargo_pgo::pgo::optimize] Found 1 PGO profile file with total size 481.95 KiB at /home/ilgrad/Documents/projects/betula/repos/lexindex/local/2026-10-30-isa/target-pgo/pgo-profiles.
+[2026-10-30T19:23:37Z INFO  cargo_pgo::pgo::optimize] Merged PGO profile(s) to /home/ilgrad/Documents/projects/betula/repos/lexindex/local/2026-10-30-isa/target-pgo/pgo-profiles/merged-3a1aec16449d5a5401bbfd2ef05ad9789f6978f44eb9bc97291e201f2f6cd12d.profdata.
+[2026-10-30T19:24:13Z INFO  cargo_pgo::pgo::optimize] PGO-optimized binary isa built successfully.
+PGO optimized build successfully finished.
+    Finished `release` profile [optimized + debuginfo] target(s) in 35.34s
+variant  corpus     kind       op       insn/key   br/key brmiss/k l1miss/k  cyc/key
+base     titles-en  routed256  id         1927.2    272.9   12.500   34.893   1908.8
+base     titles-en  hashed0    id           91.7     13.0    0.588    4.131    181.8
+base     titles-en  mphf       id           22.7      3.2    0.016    1.037     -8.5
+base     titles-en  string     id         1688.7    351.1   10.701   21.324   2102.5
+base     titles-en  dict32     build     11469.3   1923.4   74.534  250.234  11766.8
+pgo      titles-en  routed256  id         1902.0    268.6   12.607   34.689   2366.7
+pgo      titles-en  hashed0    id           94.1     12.6    0.637    3.483    105.4
+pgo      titles-en  mphf       id           22.6      3.2    0.021    1.079     30.8
+pgo      titles-en  string     id         1723.4    344.3   11.297   21.556   2981.6
+pgo      titles-en  dict32     build     11527.5   1828.1   74.206  248.224  12228.1
+base     domains    routed256  id         1661.0    227.7    9.778   25.709   1675.9
+base     domains    hashed0    id           93.2     13.2    0.250    3.826    199.0
+base     domains    mphf       id           22.8      3.2    0.013    1.124      8.4
+base     domains    string     id         1314.9    268.0    8.545   19.444   1883.5
+base     domains    dict32     build      7575.3   1271.2   44.428  135.483   6851.2
+pgo      domains    routed256  id         1612.9    223.7    9.735   25.946   1599.4
+pgo      domains    hashed0    id           95.0     12.4    0.320    4.072    260.1
+pgo      domains    mphf       id           22.6      3.2    0.021    1.041     14.4
+pgo      domains    string     id         1341.6    268.0    8.955   19.030   1984.6
+pgo      domains    dict32     build      7651.0   1240.5   44.286  134.815   6609.2
+done
