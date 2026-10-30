@@ -2106,11 +2106,24 @@ impl DictIndex {
         Self::from_sorted_labelled(&view, block, micro_for(block))
     }
 
-    /// [`build_with_block`](Self::build_with_block) with the microblock size chosen by the caller
-    /// instead of by `micro_for`: `1..=block`, dividing it. For the harnesses that measure the
-    /// (block, micro) grid; the shipped builders take the largest divisor at or below 32.
-    #[cfg(feature = "fuzzing")]
-    #[doc(hidden)]
+    /// [`build_with_block`](Self::build_with_block) with `micro` keys a microblock rather than the
+    /// 16 to 32 it chooses: `1..=block`, dividing `block`. A lookup scans one restart a microblock
+    /// and then one microblock, `block / micro + micro - 2` entries, so a larger `micro` stores
+    /// fewer restarts for a longer scan. At the default block of 256, microblocks of 128 rather
+    /// than 16 made fourteen corpora 0.12–0.34 bytes a key smaller — paths 6.85 → 6.51, the
+    /// 479 823-word dictionary 2.64 → 2.45, a million URLs 7.51 → 7.35, a million UUIDs
+    /// 18.04 → 17.89 — and 64 took 80–90 % of that. What the longer scan costs an `id` is not
+    /// measured yet, which is why no builder chooses it by itself. The blob is the same format:
+    /// lexindex 4.5.3 loads one built here and answers every key of those fourteen.
+    ///
+    /// ```
+    /// use lexindex::DictIndex;
+    /// let keys = ["apple", "apricot", "banana", "cherry"];
+    /// let index = DictIndex::build_with_layout(keys, 4, 2)?;
+    /// assert_eq!(index.id("banana"), Some(2));
+    /// assert!(DictIndex::build_with_layout(keys, 4, 3).is_err()); // 3 does not divide 4
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
     pub fn build_with_layout<I, S>(items: I, block: usize, micro: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

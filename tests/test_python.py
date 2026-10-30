@@ -378,6 +378,21 @@ def test_dict_index_ordered_queries():
     assert empty.successor("a") is None and empty.predecessor("a") is None
 
 
+def test_dict_index_micro_argument_trades_restarts_for_bytes():
+    words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
+    default = lexindex.DictIndex(words)
+    for micro in (1, 64, 128, 256):
+        di = lexindex.DictIndex(words, micro=micro)
+        assert di.block == 256 and len(di) == len(words)
+        assert di.ids_of(words) == list(range(len(words)))
+        assert di.keys_of(list(range(len(words)))) == words
+    assert lexindex.DictIndex(words, micro=128).serialized_len() < default.serialized_len()
+    assert lexindex.DictIndex(words, micro=16).to_bytes() == default.to_bytes()
+    for bad in (0, 3, 512):
+        with pytest.raises(ValueError, match="micro"):
+            lexindex.DictIndex(words, micro=bad)
+
+
 def test_dict_index_block_argument_and_persistence(tmp_path):
     words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
     for block in (1, 5, 32, 1024):

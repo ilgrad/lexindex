@@ -55,6 +55,13 @@ All notable changes to this project are documented here. The format follows
   `Overlay::compact_to_file` write the blocked layout as before: the same ids as `build` + `save`,
   not always the same bytes. `plan` prices the merged arena at `n` (below, under Fixed).
 
+- **`DictIndex::build_with_layout` and `DictIndex(…, micro=…)` choose the microblock size.** The
+  builders split a block into microblocks of 16 to 32; this takes any size dividing the block. At
+  the default block of 256, microblocks of 128 store 0.12–0.34 bytes a key less on fourteen
+  corpora — paths 6.85 → 6.51, the dictionary 2.64 → 2.45, URLs 7.51 → 7.35 — and 64 takes 80–90 %
+  of that; a lookup scans up to 128 entries of a microblock rather than 16, a cost not measured
+  yet, so no builder or `plan` chooses it by itself. Same format: lexindex 4.5.3 loads these blobs
+  and answers every key.
 ### Fixed
 
 - **`plan` prices a merged `PerfectHashIndex` arena within 2.9 % of the built blob**, on fourteen

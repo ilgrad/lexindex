@@ -399,6 +399,8 @@ list(words)                        # [("apple", 0), ...], lazily
 faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 268–270 ns against 291–298
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
+fewer = DictIndex(words_list, micro=128)    # 2.45 B/key against 2.64: microblocks of 128, not 16 --
+                                            # fewer restarts, a longer scan (its id cost unmeasured)
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.

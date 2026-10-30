@@ -1805,17 +1805,27 @@ impl PyDictIndex {
     /// 512 / 1024 gave 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51 bytes per key on the dictionary,
     /// every one under `marisa-trie`'s 2.955 floor. `block` also takes the name of a point on that
     /// curve instead of a number: `"fast"` (32), `"balanced"` (256, the default) or `"compact"`
-    /// (1024).
+    /// (1024). `micro` sets the microblock size instead, `1..=block` and dividing it: at the
+    /// default block, 128 stored 0.12–0.34 bytes a key less than the 16 chosen by default on
+    /// fourteen corpora, for a longer scan whose cost is not measured yet.
     #[new]
     #[pyo3(
-        signature = (items, block = BlockArg::Size(DictProfile::Balanced.block())),
-        text_signature = "(items, block=256)"
+        signature = (items, block = BlockArg::Size(DictProfile::Balanced.block()), micro = None),
+        text_signature = "(items, block=256, micro=None)"
     )]
-    fn new(py: Python<'_>, items: &Bound<'_, PyAny>, block: BlockArg) -> PyResult<Self> {
+    fn new(
+        py: Python<'_>,
+        items: &Bound<'_, PyAny>,
+        block: BlockArg,
+        micro: Option<usize>,
+    ) -> PyResult<Self> {
         let block = block.block()?;
         let keys = collect_strs(items)?;
         let inner = py
-            .detach(|| DictIndex::build_with_block(&keys, block))
+            .detach(|| match micro {
+                None => DictIndex::build_with_block(&keys, block),
+                Some(micro) => DictIndex::build_with_layout(&keys, block, micro),
+            })
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),
