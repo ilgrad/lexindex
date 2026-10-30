@@ -50,7 +50,7 @@ use std::sync::OnceLock;
 /// Everything but the keys themselves comes after the data, because none of it is known until the
 /// data is encoded: the starts' widths, the code a shard's entries were written under, and the
 /// codec its suffixes were. That is what lets a streamed build write every section once, in order.
-const MAGIC: &[u8; 4] = b"BDX3";
+pub(crate) const MAGIC: &[u8; 4] = b"BDX3";
 /// A `BDX3` blob whose keys are spelled in a [character code](charcode), which it stores last and
 /// whose length is the header's `chars`. A magic of its own rather than a flag in `BDX3`'s
 /// reserved bytes, which 4.2 did not read: it would have compared a query it never coded against
@@ -6956,6 +6956,59 @@ mod tests {
         );
         let full = firsts(&plain);
         assert!(crate::labels::Labels::of(plain, full).is_some());
+    }
+
+    /// A crafted blob can nest labelled dictionaries one in another as deep as its bytes allow,
+    /// each level the same sections around the next. The nested dictionary is written plain only,
+    /// so the reader refuses any other by its magic before parsing it and recurses once whatever
+    /// the depth; parsed first, fifty thousand levels overflow a test thread's stack.
+    #[test]
+    fn a_label_dictionary_nested_without_end_is_refused_at_the_first_level() {
+        let keys = label_corpus(1, 400);
+        let mut view = view_of(&keys, 1);
+        sort_distinct(&mut view, 1);
+        let template = DictIndex::from_sorted_labelled(&view, 16, micro_for(16))
+            .unwrap()
+            .expect("the corpus's labels pay")
+            .to_bytes();
+        let u32_at = |b: &[u8], i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        // The nested blob is the one plain magic past the header, behind its length.
+        let found: Vec<usize> = (HEADER..template.len() - 4)
+            .filter(|&i| &template[i..i + 4] == MAGIC)
+            .collect();
+        assert_eq!(found.len(), 1);
+        let at = found[0] - 4;
+        let nested = u32_at(&template, at) as usize;
+        let section = u32_at(&template, 58) as usize;
+        let (head, inner, tail) = (
+            &template[..at + 4],
+            &template[at + 4..at + 4 + nested],
+            &template[at + 4 + nested..],
+        );
+        const DEPTH: usize = 50_000;
+        let mut blob = Vec::with_capacity(DEPTH * (head.len() + tail.len()) + inner.len());
+        for k in 0..DEPTH {
+            // Level `k` wraps the `DEPTH - k - 1` levels below it and the template's plain blob.
+            let size = (DEPTH - k - 1) * (head.len() + tail.len()) + inner.len();
+            let start = blob.len();
+            blob.extend_from_slice(head);
+            let level = &mut blob[start..];
+            let section_len = section - nested + size;
+            level[58..62].copy_from_slice(&u32::try_from(section_len).unwrap().to_le_bytes());
+            level[at..at + 4].copy_from_slice(&u32::try_from(size).unwrap().to_le_bytes());
+            let check = crate::blob::hash_bytes(&level[..CHECKED]) as u32;
+            level[CHECKED..HEADER].copy_from_slice(&check.to_le_bytes());
+        }
+        blob.extend_from_slice(inner);
+        for _ in 0..DEPTH {
+            blob.extend_from_slice(tail);
+        }
+        let got = DictIndex::from_shared(SharedBytes::from_owned(blob), false);
+        assert!(
+            matches!(got, Err(IndexError::Format("dict: bad label dictionary"))),
+            "{:?}",
+            got.err()
+        );
     }
 
     #[test]

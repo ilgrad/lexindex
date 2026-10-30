@@ -17,7 +17,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::dict_index::{Bytes, DictIndex, micro_for};
+use crate::dict_index::{Bytes, DictIndex, MAGIC, micro_for};
 use crate::phrase::{self, LABEL_MAX, Map};
 use std::cell::Cell;
 
@@ -65,7 +65,13 @@ impl Labels {
             .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
             .ok_or_else(bad)?;
         let end = len.checked_add(4).ok_or_else(bad)?;
-        let index = DictIndex::from_shared(section.subslice(4, end).ok_or_else(bad)?, verify)?;
+        let nested = section.subslice(4, end).ok_or_else(bad)?;
+        // Only a plain dictionary is written here. Refused by its magic before it is parsed, a
+        // nested labelled one cannot recurse the reader as deep as a crafted blob's bytes allow.
+        if nested.get(..4) != Some(&MAGIC[..]) {
+            return Err(bad());
+        }
+        let index = DictIndex::from_shared(nested, verify)?;
         let firsts = section.subslice(end, section.len()).ok_or_else(bad)?;
         Self::of(index, firsts).ok_or_else(bad)
     }
