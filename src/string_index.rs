@@ -1974,6 +1974,25 @@ mod tests {
             .unwrap();
     }
 
+    /// Nodes of every transition count from 1 to 40 — one compare's window, two, and past the 32
+    /// that bring a transition index — at the root, where the blob ends a few bytes past the inputs,
+    /// and one level down: every input of each node found, and every byte that is none refused.
+    #[test]
+    fn nodes_of_every_width_answer_what_fsts_own_decoder_does() {
+        let alphabet: Vec<char> = (b'!'..=b'~').map(char::from).collect();
+        for width in 1..=40 {
+            let keys: Vec<String> = alphabet[..width]
+                .iter()
+                .flat_map(|&c| [c.to_string(), format!("q{c}")])
+                .collect();
+            let idx = StringIndex::build(&keys).unwrap();
+            let probes = (0u8..=127)
+                .map(char::from)
+                .flat_map(|c| [c.to_string(), format!("q{c}")]);
+            assert_walks_agree(&idx, keys.iter().cloned().chain(probes));
+        }
+    }
+
     /// A load holds no first-character table; the first walk derives it, with a state for each
     /// character of the plane that begins a key — one, two and three bytes long — and the walks
     /// answer as `fst`'s decoder does past it: the empty key's match, a character no key begins

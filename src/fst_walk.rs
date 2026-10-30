@@ -167,6 +167,18 @@ fn descend<D: AsRef<[u8]>>(
     Some(())
 }
 
+/// The low `min(n, 8)` bytes of a word, for every pack size a 4-bit field can name: one load in
+/// place of a compare, a move and three shifts.
+const LOW: [u64; 16] = {
+    let mut low = [u64::MAX; 16];
+    let mut n = 0;
+    while n < 8 {
+        low[n] = (1u64 << (8 * n)) - 1;
+        n += 1;
+    }
+    low
+};
+
 /// A little-endian integer of `n` bytes at `at`, as `fst` packs one; one unaligned load where the
 /// blob has eight bytes to give.
 #[inline(always)]
@@ -176,7 +188,7 @@ fn uint(bytes: &[u8], at: usize, n: usize) -> u64 {
     }
     match bytes.get(at..at.wrapping_add(8)) {
         Some(&[a, b, c, d, e, f, g, h]) => {
-            u64::from_le_bytes([a, b, c, d, e, f, g, h]) & (u64::MAX >> (64 - 8 * n.min(8)))
+            u64::from_le_bytes([a, b, c, d, e, f, g, h]) & LOW[n & 15]
         }
         _ => bytes[at..at + n]
             .iter()
@@ -204,11 +216,75 @@ fn one_input(bytes: &[u8], addr: usize, state: u8) -> (u8, usize) {
     }
 }
 
+/// Where `b` first occurs among the `n` bytes at `at` — `position` over `bytes[at..at + n]`, which
+/// a node of up to 32 transitions answers with one or two 16-byte compares instead of a compare and
+/// a branch an input, where the blob holds the bytes past the inputs that the loads read.
+#[inline(always)]
+fn position(bytes: &[u8], at: usize, n: usize, b: u8) -> Option<usize> {
+    let wide = if n <= 16 { 16 } else { 32 };
+    match bytes.get(at..at.wrapping_add(wide)) {
+        Some(window) if n <= 32 => first_equal(window, n, b),
+        _ => bytes[at..at + n].iter().position(|&x| x == b),
+    }
+}
+
+/// The first `i < n` with `window[i] == b`, for a window of 16 or 32 bytes and `n` no longer.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn first_equal(window: &[u8], n: usize, b: u8) -> Option<usize> {
+    use std::arch::x86_64::{
+        __m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
+    };
+    debug_assert!(matches!(window.len(), 16 | 32) && n <= window.len());
+    // SAFETY: SSE2 is part of the x86_64 baseline, and each unaligned load reads 16 of the bytes
+    // `window` holds, which are 16 or 32.
+    let hits = unsafe {
+        let probe = _mm_set1_epi8(b as i8);
+        let half = |i: usize| {
+            let v = _mm_loadu_si128(window.as_ptr().add(i).cast::<__m128i>());
+            _mm_movemask_epi8(_mm_cmpeq_epi8(v, probe)) as u32 & 0xFFFF
+        };
+        if window.len() > 16 {
+            half(0) | (half(16) << 16)
+        } else {
+            half(0)
+        }
+    } & ((1u64 << n) - 1) as u32;
+    (hits != 0).then(|| hits.trailing_zeros() as usize)
+}
+
+/// [`first_equal`] in eight-byte words, for a target without SSE2's compare. A byte of `x` is zero
+/// exactly where the input is `b`; the borrow trick can mark a byte above a zero falsely, never one
+/// below, so a word's lowest mark is a true one, and the words are read from the first.
+#[cfg(any(test, not(target_arch = "x86_64")))]
+#[inline(always)]
+fn first_equal_swar(window: &[u8], n: usize, b: u8) -> Option<usize> {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    for (w, word) in window.chunks_exact(8).take(n.div_ceil(8)).enumerate() {
+        let x = u64::from_le_bytes(word.try_into().expect("an eight-byte chunk"))
+            ^ (ONES * u64::from(b));
+        let zero = x.wrapping_sub(ONES) & !x & (ONES << 7);
+        if zero != 0 {
+            let i = 8 * w + zero.trailing_zeros() as usize / 8;
+            return (i < n).then_some(i);
+        }
+    }
+    None
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline(always)]
+fn first_equal(window: &[u8], n: usize, b: u8) -> Option<usize> {
+    first_equal_swar(window, n, b)
+}
+
 impl Layout {
-    /// The node at `addr`: its final output if it is final, and — for `input`, if it has one — the
-    /// transition's target and the output on the edge.
+    /// The node at `addr`: its final output if it is final and `FINAL` asks for it, and — for
+    /// `input`, if it has one — the transition's target and the output on the edge. A point lookup
+    /// asks for the final output at its last node only, and passes final nodes on the way: a final
+    /// output read there and dropped is reads and bounds checks the walk cannot elide.
     #[inline(always)]
-    fn step(
+    fn step<const FINAL: bool>(
         self,
         bytes: &[u8],
         addr: usize,
@@ -265,7 +341,7 @@ impl Layout {
                 let inputs = sizes - index - ntrans;
                 let outputs = inputs - ntrans * tsize;
                 let final_output =
-                    is_final.then(|| uint(bytes, outputs - (ntrans + 1) * osize, osize));
+                    (FINAL && is_final).then(|| uint(bytes, outputs - (ntrans + 1) * osize, osize));
                 let Some(b) = input else {
                     return (final_output, None);
                 };
@@ -276,7 +352,7 @@ impl Layout {
                     }
                 } else {
                     // Inputs are written in reverse, the first transition's nearest the sizes.
-                    match bytes[inputs..sizes].iter().position(|&x| x == b) {
+                    match position(bytes, inputs, ntrans, b) {
                         Some(p) => ntrans - p - 1,
                         None => return (final_output, None),
                     }
@@ -317,7 +393,7 @@ impl Layout {
             }
         }
         for i in from..=q.len() {
-            let (fin, next) = self.step(bytes, addr, q.get(i).copied());
+            let (fin, next) = self.step::<true>(bytes, addr, q.get(i).copied());
             // A final state inside a character cannot be a key this crate built, since keys come
             // from `&str` — but `from_bytes` loads any transducer, and slicing there would panic.
             if let Some(v) = fin.and_then(|out| acc.checked_add(out)) {
@@ -338,9 +414,49 @@ impl Layout {
     pub(crate) fn get(self, bytes: &[u8], key: &[u8]) -> Option<u64> {
         let (mut addr, mut acc) = (self.root, 0u64);
         for &b in key {
-            let (to, out) = self.step(bytes, addr, Some(b)).1?;
+            let (to, out) = self.step::<false>(bytes, addr, Some(b)).1?;
             (addr, acc) = (to, acc.checked_add(out)?);
         }
-        acc.checked_add(self.step(bytes, addr, None).0?)
+        acc.checked_add(self.step::<true>(bytes, addr, None).0?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The vector search, and the word-at-a-time one other targets compile, answer `position`'s
+    /// question on every input count up to 32 and every probe — inputs repeated, as a malformed
+    /// node may repeat them, the probe absent, and the inputs at every distance from the slice's
+    /// end, where the window does not fit and the loop answers.
+    #[test]
+    fn the_input_search_answers_what_position_does() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for round in 0..2_000 {
+            // A small alphabet makes repeats and hits common, a wide one makes misses common.
+            let alphabet = if round % 2 == 0 { 4 } else { 256 };
+            let len = 1 + (next() % 80) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| (next() % alphabet) as u8).collect();
+            for at in 0..len {
+                for n in 0..=(len - at).min(32) {
+                    for b in [bytes[at], (next() % alphabet) as u8, 0, 255] {
+                        let want = bytes[at..at + n].iter().position(|&x| x == b);
+                        assert_eq!(position(&bytes, at, n, b), want, "at {at} n {n} b {b}");
+                        for wide in [16, 32] {
+                            if let Some(window) = bytes.get(at..at + wide).filter(|_| n <= wide) {
+                                assert_eq!(first_equal_swar(window, n, b), want);
+                                assert_eq!(first_equal(window, n, b), want);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
