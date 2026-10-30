@@ -943,6 +943,93 @@ fn the_coded_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key(
     assert_eq!(walked, sorted);
 }
 
+/// The keys `golden-4.7.0-dict-labels.bdx` was built from: paths under a few directories whose
+/// names recur under many parents, from a fixed generator — the shape a dictionary of trie labels
+/// is for.
+fn labelled_keys() -> Vec<String> {
+    const DIRS: [&str; 5] = ["usr/share", "usr/lib", "home/me/src", "opt/tool", "var/log"];
+    const NAMES: [&str; 7] = [
+        "locale/translations",
+        "python3.14/site-packages",
+        "icons/hicolor/48x48",
+        "documentation/reference-manual",
+        "node_modules/.bin",
+        "release-notes/changelog-archive",
+        "include/subdir",
+    ];
+    const FILES: [&str; 4] = ["index.html", "README.md", "__init__.py", "Makefile"];
+    let mut x = 11u32;
+    let mut next = |m: usize| {
+        x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        (x >> 16) as usize % m
+    };
+    (0..6000)
+        .map(|i| {
+            format!(
+                "/{}/{}/{}-{}/{}",
+                DIRS[next(DIRS.len())],
+                NAMES[next(NAMES.len())],
+                NAMES[next(NAMES.len())],
+                i % 211,
+                FILES[next(FILES.len())]
+            )
+        })
+        .collect()
+}
+
+/// The first blob whose dictionary names trie labels, pinned like the others: `BDX5` is `BDX3`
+/// with the labels as a nested blob behind the phrases, and a build decides them deterministically.
+#[test]
+fn the_labelled_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
+    let keys = labelled_keys();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    sorted.dedup();
+    let fresh = lexindex::DictIndex::build_with_labels(&keys, 256)
+        .unwrap()
+        .to_bytes();
+    let path = data("golden-4.7.0-dict-labels.bdx");
+    let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&fresh[..4], b"BDX5");
+    assert!(
+        stored == fresh,
+        "golden-4.7.0-dict-labels.bdx changed; regenerate {}",
+        path.display()
+    );
+    #[cfg(feature = "fuzzing")]
+    assert!(lexindex::fuzzing::load_dict(&stored) && lexindex::fuzzing::inspect(&stored));
+    #[cfg_attr(
+        not(feature = "mmap"),
+        expect(unused_mut, reason = "the mapping is pushed with `mmap`")
+    )]
+    let mut loaded = vec![lexindex::DictIndex::load(&path).unwrap()];
+    // SAFETY: a fixture nothing writes while the test runs.
+    #[cfg(feature = "mmap")]
+    loaded.push(unsafe { lexindex::DictIndex::load_mmap(&path) }.unwrap());
+    for idx in loaded {
+        assert_eq!(idx.len(), sorted.len());
+        assert_eq!(idx.sections().total(), stored.len() as u64);
+        for (rank, key) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
+            assert_eq!(
+                idx.key(rank as u64).as_deref(),
+                Some(key.as_str()),
+                "{rank}"
+            );
+        }
+        for stranger in ["/usr/share/x", "/home/me/src/documentation", "/z", "", "/"] {
+            let rank = sorted.partition_point(|k| k.as_str() < stranger) as u64;
+            let member = sorted
+                .binary_search_by(|k| k.as_str().cmp(stranger))
+                .is_ok();
+            assert_eq!(idx.id(stranger), member.then_some(rank), "{stranger:?}");
+            assert_eq!(idx.lower_bound(stranger), rank, "{stranger:?}");
+        }
+        let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+        assert_eq!(walked, sorted);
+    }
+}
+
 /// The byte split of the pinned dictionary blob accounts for all of it, and says the same thing
 /// about the same bytes as it did when the blob was written. A section that starts drifting is a
 /// format change nobody declared.

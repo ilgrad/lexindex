@@ -229,15 +229,16 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             rest(bytes, [36, mph, side * 20])?;
             Ok(i)
         }
-        b"BDX1" | b"BDX2" | b"BDX3" | b"BDX4" => {
+        b"BDX1" | b"BDX2" | b"BDX3" | b"BDX4" | b"BDX5" => {
             // `[magic 4][n u64][block u32][heads u64][data u64][table u32][payload u64]…` in all
-            // four, then the offset widths and the microblock size `BDX2` added, and the header
+            // five, then the offset widths and the microblock size `BDX2` added, and the header
             // codes and the phrase dictionary `BDX3` did. `BDX4` is `BDX3` with its keys spelled
-            // in a character code, stored last. A blob this version refuses to load still says
-            // what it is here.
+            // in a character code, stored last; `BDX5` is `BDX3` whose dictionary section holds
+            // trie labels behind the phrases, the same length field covering both. A blob this
+            // version refuses to load still says what it is here.
             let one = &magic == b"BDX1";
             let coded = &magic == b"BDX4";
-            let three = &magic == b"BDX3" || coded;
+            let three = &magic == b"BDX3" || coded || &magic == b"BDX5";
             let header: u64 = if one {
                 48
             } else if three {

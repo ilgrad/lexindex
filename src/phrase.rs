@@ -15,13 +15,21 @@
 //! never earn their dictionary there.
 
 use crate::fsst::{self, ESCAPE, Table};
+use crate::labels::Labels;
 use crate::packed::Alphabet;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::Arc;
 
-/// The longest phrase, which is also how far a parse looks ahead at one position.
+/// The longest phrase.
 pub(crate) const MAX: usize = 32;
+/// The longest trie label a `BDX5` dictionary holds past its phrases, which is also how far a parse
+/// looks ahead at one position. A trie of phrases alone is no deeper than [`MAX`], so the walk that
+/// looks this far stops where it always stopped.
+pub(crate) const LABEL_MAX: usize = 255;
+/// Ids a dictionary may name, phrases and labels together: what a [`Pick`] has room for.
+pub(crate) const IDS_MAX: usize = 1 << 22;
 /// Adjacent tokens a mined window may span.
 ///
 /// Three, because the parse a round mines under is already near-optimal: a candidate that beats
@@ -300,6 +308,8 @@ pub(crate) struct Dict {
     /// owns `ends[257 * g ..]`.
     ends: Vec<u16>,
     count: usize,
+    /// The trie labels a `BDX5` blob names past its phrases: ids from `count` on are their ranks.
+    labels: Option<Arc<Labels>>,
 }
 
 /// Entries a group's slice of [`Dict::ends`] holds: one a phrase and the opening zero.
@@ -313,7 +323,40 @@ impl Dict {
             bases: Vec::new(),
             ends: Vec::new(),
             count: 0,
+            labels: None,
         }
+    }
+
+    /// The same phrases with `labels` named past them.
+    pub(crate) fn with_labels(mut self, labels: Labels) -> Self {
+        self.labels = Some(Arc::new(labels));
+        self
+    }
+
+    /// Whether ids past the phrases name trie labels, which is what makes a blob `BDX5`.
+    #[inline(always)]
+    pub(crate) fn has_labels(&self) -> bool {
+        self.labels.is_some()
+    }
+
+    /// Phrases proper, the ids [`chunk`](Self::chunk) answers; [`len`](Self::len) counts the
+    /// labels past them too.
+    #[inline(always)]
+    pub(crate) fn phrases(&self) -> usize {
+        self.count
+    }
+
+    /// Label `id` — an id past the phrases — handed to `f` as it reads; `None` past the labels or
+    /// on one this crate did not write.
+    #[inline]
+    pub(crate) fn label<R>(&self, id: usize, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        self.labels.as_deref()?.with(id.checked_sub(self.count)?, f)
+    }
+
+    /// The first byte of label `id`, an id past the phrases; `None` past the labels.
+    #[inline(always)]
+    pub(crate) fn label_first(&self, id: usize) -> Option<u8> {
+        self.labels.as_deref()?.first(id.checked_sub(self.count)?)
     }
 
     pub(crate) fn of(phrases: &[Vec<u8>]) -> Self {
@@ -339,9 +382,10 @@ impl Dict {
         dict
     }
 
+    /// Ids the dictionary names: its phrases, and its labels after them.
     #[inline(always)]
     pub(crate) fn len(&self) -> usize {
-        self.count
+        self.count + self.labels.as_deref().map_or(0, Labels::len)
     }
 
     /// The bytes of phrase `id`; `None` past the dictionary or on one this crate did not write.
@@ -379,12 +423,31 @@ impl Dict {
         Some((self.bytes.get(base + from..)?.first_chunk::<MAX>()?, len))
     }
 
-    /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count.
+    /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count; in a `BDX5` blob
+    /// behind its own `u32` length and followed by the labels' blob.
     pub(crate) fn serialized_len(&self) -> usize {
+        let flat = self.flat_len();
+        match self.labels.as_deref() {
+            None => flat,
+            Some(labels) => 4 + flat + labels.serialized_len(),
+        }
+    }
+
+    fn flat_len(&self) -> usize {
         4 + 4 * self.bases.len() + 2 * self.ends.len() + self.used
     }
 
     pub(crate) fn write_to(&self, out: &mut Vec<u8>) {
+        if let Some(labels) = self.labels.as_deref() {
+            out.extend_from_slice(&(self.flat_len() as u32).to_le_bytes());
+            self.write_flat(out);
+            labels.write_to(out);
+        } else {
+            self.write_flat(out);
+        }
+    }
+
+    fn write_flat(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&(self.count as u32).to_le_bytes());
         for &b in &self.bases {
             out.extend_from_slice(&b.to_le_bytes());
@@ -416,6 +479,7 @@ impl Dict {
                 .map(|c| u16::from_le_bytes(c.try_into().expect("2 bytes")))
                 .collect(),
             count,
+            labels: None,
         };
         // Every phrase has to name bytes that are there and to be a phrase a parse could have
         // written, or a lookup would read somebody else's.
@@ -682,20 +746,20 @@ const RAW: u8 = 1;
 const PHRASE: u8 = 2;
 
 /// A token of a parse in one word: kind in the low two bits, the input bytes it covers in the
-/// next six, then the symbol code or phrase id.
+/// next eight, then the symbol code or phrase id.
 ///
 /// Packed because a parse stores one of these for every byte of every piece the build prices, and
-/// the tuple it replaced was twelve bytes for the same twenty-six bits.
+/// the tuple it replaced was twelve bytes for the same thirty-two bits.
 #[derive(Clone, Copy)]
 struct Pick(u32);
 
-const _: () = assert!(MAX <= 63 && CAP <= 1 << 24);
+const _: () = assert!(LABEL_MAX <= 255 && CAP <= IDS_MAX && IDS_MAX <= 1 << 22);
 
 impl Pick {
     #[inline(always)]
     fn new(kind: u8, id: u32, len: u32) -> Pick {
-        debug_assert!(len <= 63 && id < 1 << 24);
-        Pick(u32::from(kind) | len << 2 | id << 8)
+        debug_assert!(len <= 255 && (id as usize) < IDS_MAX);
+        Pick(u32::from(kind) | len << 2 | id << 10)
     }
 
     #[inline(always)]
@@ -705,12 +769,12 @@ impl Pick {
 
     #[inline(always)]
     fn len(self) -> usize {
-        (self.0 >> 2) as usize & 63
+        (self.0 >> 2) as usize & 255
     }
 
     #[inline(always)]
     fn id(self) -> u32 {
-        self.0 >> 8
+        self.0 >> 10
     }
 }
 
@@ -775,7 +839,7 @@ fn parse(
             // One induction variable, and the tail read only where a phrase is in the running:
             // the walk is the parse's inner loop and the two pointers a zip advances were two
             // instructions of every step for a value most steps never look at.
-            let bytes = &s[i..n.min(i + MAX)];
+            let bytes = &s[i..n.min(i + LABEL_MAX)];
             for k in 0..bytes.len() {
                 let Some((c, nb, phrase)) = trie.step(node, base, bytes[k]) else {
                     break;
@@ -951,7 +1015,8 @@ pub(crate) fn settle(
 /// The ten splits of a family name five symbol prefixes between them and one trie, and a price
 /// reads only the cost array a parse leaves — so the walk that fills these runs once a piece
 /// rather than once a piece a split. The trie walk is the half that pays: it probes up to
-/// [`MAX`] nodes at every position where the encoder answers once.
+/// [`MAX`] nodes at every position where the encoder answers once ([`LABEL_MAX`] past a phrase in a
+/// labelled dictionary).
 #[derive(Default)]
 struct Memo {
     /// `(code, len)` at every position, one row an encoder, the rows end to end.
@@ -995,7 +1060,7 @@ impl Memo {
         let root = trie.root();
         for i in 0..n {
             let (mut node, mut base) = (0u32, root);
-            for (k, &b) in s[i..n.min(i + MAX)].iter().enumerate() {
+            for (k, &b) in s[i..n.min(i + LABEL_MAX)].iter().enumerate() {
                 let Some((c, nb, phrase)) = trie.step(node, base, b) else {
                     break;
                 };

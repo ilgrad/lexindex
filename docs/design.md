@@ -533,6 +533,38 @@ refuses. The code is validated whole on load — its mode, its page widths, asce
 nothing left over — and a stored key that does not decode ends a walk and fails `key`, as the
 corrupted blob it is.
 
+**Trie labels, where they pay (`BDX5`, read from 4.7).** What front coding leaves of a path is a run
+of patricia-trie edge labels — directory and file names that recur under different parents — and
+on a million paths the second and later occurrences of repeated labels are 49 % of every byte front
+coding stores. A phrase reaches 32 bytes and only the spans the sampled miner sees often enough; a
+label used two to nine times, or longer, is spelled by symbols at every occurrence. A labelled
+build counts the labels of every key's residual (the right-branching depths of a key are the
+suffix minima of the lcp array, so one stack pass over the sorted keys cuts them), keeps those
+that pay — `count · (0.58 len − 2.5) > 0.6 len + 3`, two to 255 bytes, none a phrase already — and
+names them past the phrases: an id from the phrase count on is a label, a shard names it with the
+two- or three-byte reference a phrase takes, and the dynamic-programming parse takes a label
+wherever it is cheapest, not only where the trie cuts. The labels are stored once, as a nested
+`BDX3` blob at 16 keys a block over each label reversed behind a tier byte: reversal makes labels
+that end alike share the prefix the nested front coding takes out, and the tier puts the 16 384
+most used first, so that they take the two-byte references (−0.099 B/key on paths against one
+tier). A byte a label keeps its first byte beside the nested blob: an entry's suffix starts where
+its key branches, so half the label compares a lookup makes on paths differ at the first byte, and
+those need no decode. The dictionary section is the phrases behind their own `u32` length, then
+`[nested bytes u32][nested blob][first bytes]`; the nested blob is read by the same loader as any
+other, borrowed from a mapping, and must itself be `BDX3` — no code, no labels of its own.
+
+A label is decoded through the nested index, so it costs what a nested `key` does. At block 1024 on
+a million paths, counted: a member `id` takes 8 114 instructions against `BDX3`'s 4 915 (+65 %;
++115 % without the first bytes) and `key_into` 8 551 against 4 500; on the suite's shorter paths
++46 % and +57 %. Nested blocks of 8 and 4 buy back a fifth and nearly half of the extra `id`
+instructions for 0.07 and 0.20 bytes a key (counted without the first bytes). So the labels are an opt-in of the build, and a choice of the blob: the build
+that tries them runs beside the plain one and keeps the smaller, byte for byte the plain blob
+where the labels lose. At block 1024: own paths 9.323 → 8.556 bytes a key (MARISA's floor is
+8.81), the suite's paths 6.511 → 6.149, URLs 7.271 → 7.053, English titles 7.212 → 6.987 (10 M:
+5.478 → 5.206), identifiers 4.860 → 4.727, domains 4.363 → 4.247, PyPI names 4.024 → 3.908;
+`words`, `dna`, `numeric`, `opaque` and `uuid` keep their blob, and a corpus spelled in a character
+code takes no labels.
+
 ## `HashedDictIndex`
 
 A `DictIndex` answers `id` by searching — the block samples, a walk of one block's restarts, a scan
@@ -1026,6 +1058,7 @@ or — never — read it wrong.
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
+| `BDX5` | 4.7 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no labels writes `BDX3` |
 | `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |

@@ -101,6 +101,7 @@ mod fsst;
 mod fst_bounds;
 mod fst_walk;
 mod inspect;
+mod labels;
 mod offsets;
 mod overlay;
 mod packed;

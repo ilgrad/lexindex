@@ -57,6 +57,11 @@ const MAGIC: &[u8; 4] = b"BDX3";
 /// coded keys and answered wrongly, where a new magic is refused by name. A blob without a code is
 /// still `BDX3`, byte for byte what 4.2 wrote, and 4.2 still reads it.
 const CODED_MAGIC: &[u8; 4] = b"BDX4";
+/// A `BDX3` blob whose dictionary names trie labels past its phrases (`crate::labels`): the
+/// dictionary section is the phrases behind their own length, then the labels as a nested `BDX3`
+/// blob. A magic of its own because a reader that did not know the labels would refuse the ids
+/// that name them only one lookup at a time; it refuses the blob by name instead. Never coded.
+const LABELLED_MAGIC: &[u8; 4] = b"BDX5";
 /// The formats this one replaces, with what a loader says about each. A refusal names what wrote
 /// the blob, because a bare "bad magic" sends someone hunting for disk corruption when the file is
 /// intact and merely old.
@@ -918,6 +923,10 @@ impl Codec {
             Codec::Symbols {
                 table,
                 split: Some(split),
+            } if dict.has_labels() => decode_labelled(table, *split, dict, piece.bytes(), out, cap),
+            Codec::Symbols {
+                table,
+                split: Some(split),
             } => decode_tiered(table, *split, dict, piece.bytes(), out, cap),
             Codec::Symbols { table, .. } => table.decode_into(piece.bytes(), out, cap),
             Codec::Packed(a) => a.decode_into(&piece.codes(a.width()), out, cap),
@@ -1505,6 +1514,19 @@ impl Phrases {
             dict: Dict::of(&phrases),
         }
     }
+
+    /// The phrases of `self` with the trie labels of `keys` named past them, where any pay.
+    fn labelled<K: AsKey>(self, keys: &[K]) -> Option<Self> {
+        let phrases: Vec<Vec<u8>> = (0..self.dict.phrases())
+            .map(|id| self.dict.at(id).map(<[u8]>::to_vec))
+            .collect::<Option<_>>()?;
+        let room = phrase::IDS_MAX - phrases.len();
+        let (labels, store) = crate::labels::select(keys, &phrases, room)?;
+        Some(Self {
+            trie: Trie::of(phrases.iter().chain(&labels).map(Vec::as_slice)),
+            dict: Dict::of(&phrases).with_labels(store),
+        })
+    }
 }
 
 /// Write one run: its headers under `code`, then its suffixes, each preceded by the two varints of
@@ -1947,6 +1969,54 @@ impl DictIndex {
             ));
         }
         Self::from_view(view, block, micro_for(block))
+    }
+
+    /// [`build_with_block`](Self::build_with_block), trying a dictionary of the corpus's trie
+    /// labels as well and keeping it only where the blob comes out smaller (`BDX5`); otherwise the
+    /// blob is `build_with_block`'s, byte for byte. A corpus spelled in a character code takes no
+    /// labels. Not yet a stable part of the API: the format is read by every release from 4.7, and
+    /// the builder stays hidden until the lookup cost is measured.
+    #[doc(hidden)]
+    pub fn build_with_labels<I, S>(items: I, block: usize) -> Result<Self, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if !(1..=MAX_BLOCK).contains(&block) {
+            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+        }
+        let keys: Vec<S> = items.into_iter().collect();
+        let threads = build_threads(keys.len(), block);
+        let mut view = view_of(&keys, threads);
+        sort_distinct(&mut view, threads);
+        let micro = micro_for(block);
+        if choose_code(&view, threads).is_some() {
+            return Self::from_view(view, block, micro);
+        }
+        let plain = Self::from_sorted(&view, block, micro)?;
+        Ok(match Self::from_sorted_labelled(&view, block, micro)? {
+            Some(labelled) if labelled.serialized_len() < plain.serialized_len() => labelled,
+            _ => plain,
+        })
+    }
+
+    /// The labelled half of [`build_with_labels`](Self::build_with_labels) alone, whether or not
+    /// it wins: `None` where no label pays. For the harnesses that size both halves.
+    #[cfg(feature = "fuzzing")]
+    #[doc(hidden)]
+    pub fn build_labelled<I, S>(items: I, block: usize) -> Result<Option<Self>, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if !(1..=MAX_BLOCK).contains(&block) {
+            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+        }
+        let keys: Vec<S> = items.into_iter().collect();
+        let threads = build_threads(keys.len(), block);
+        let mut view = view_of(&keys, threads);
+        sort_distinct(&mut view, threads);
+        Self::from_sorted_labelled(&view, block, micro_for(block))
     }
 
     /// [`build_with_block`](Self::build_with_block) with the microblock size chosen by the caller
@@ -2482,6 +2552,45 @@ impl DictIndex {
         Self::from_sorted_as(keys, block, micro, threads, keys.len())
     }
 
+    /// The build over sorted, distinct keys, with no trie labels whatever the corpus: what the
+    /// nested dictionary of a labelled one is built with.
+    pub(crate) fn from_sorted_plain<K: AsKey + Sync>(
+        keys: &[K],
+        block: usize,
+        micro: usize,
+    ) -> Result<Self, IndexError> {
+        Self::from_sorted(keys, block, micro)
+    }
+
+    /// [`from_sorted`](Self::from_sorted) with the blob's trie labels named in its dictionary
+    /// (`crate::labels`); `None` where none pays or no shard would name them.
+    fn from_sorted_labelled<K: AsKey + Sync>(
+        keys: &[K],
+        block: usize,
+        micro: usize,
+    ) -> Result<Option<Self>, IndexError> {
+        let threads = build_threads(keys.len(), block);
+        let pieces = build_pieces(keys, block, micro, 0);
+        let tables = train_shards(&pieces, train_threads(threads));
+        let phrases = mine_phrases(&pieces, &tables, keys.len(), train_threads(threads));
+        drop(pieces);
+        let Some(phrases) = phrases.labelled(keys) else {
+            return Ok(None);
+        };
+        let idx = Self::from_vocabulary(keys, block, micro, threads, &tables, &phrases)?;
+        Ok(idx.phrases.has_labels().then_some(idx))
+    }
+
+    /// Whether the dictionary names trie labels: a `BDX5` blob.
+    pub(crate) fn has_labels(&self) -> bool {
+        self.phrases.has_labels()
+    }
+
+    /// Whether the keys are spelled in a character code: a `BDX4` blob.
+    pub(crate) fn is_coded(&self) -> bool {
+        self.code.is_some()
+    }
+
     /// The build, with the phrase dictionary bought for a corpus of `corpus` keys. That is the
     /// index's own count for every build but the estimator's. A sample of a hundred thousand keys
     /// standing in for a million has to buy the vocabulary the million would: the miner admits a
@@ -2906,6 +3015,13 @@ struct TieredCmp<'a> {
     dict: &'a Dict,
 }
 
+/// [`TieredCmp`] over a dictionary that names trie labels past its phrases.
+struct LabelledCmp<'a> {
+    table: &'a Table,
+    split: Split,
+    dict: &'a Dict,
+}
+
 struct PackedCmp<'a>(&'a Alphabet);
 
 impl SuffixCmp for SymbolsCmp<'_> {
@@ -2929,6 +3045,18 @@ impl SuffixCmp for TieredCmp<'_> {
     #[inline(always)]
     fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
         compare_tiered(self.table, self.split, self.dict, piece.bytes(), rest)
+    }
+}
+
+impl SuffixCmp for LabelledCmp<'_> {
+    #[inline(always)]
+    fn unit(&self) -> usize {
+        8
+    }
+
+    #[inline(always)]
+    fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
+        compare_labelled(self.table, self.split, self.dict, piece.bytes(), rest)
     }
 }
 
@@ -3183,6 +3311,135 @@ fn decode_tiered(
     true
 }
 
+/// [`compare_tiered`] where ids past the phrases name trie labels: a label is decoded out of the
+/// nested dictionary and compared eight bytes at a time like a phrase. A loop of its own, so that a
+/// blob without labels runs the loop it always ran.
+#[inline(never)]
+fn compare_labelled(
+    table: &Table,
+    split: Split,
+    dict: &Dict,
+    packed: &[u8],
+    rest: Rest<'_>,
+) -> (usize, Ordering) {
+    let (words, lens) = table.parts();
+    let n = words.len().min(usize::from(split.symbols()));
+    let (words, lens) = (&words[..n], &lens[..n]);
+    let mut c = 0;
+    let mut i = 0;
+    while let Some(&code) = packed.get(i) {
+        let k = usize::from(code);
+        if k < words.len() {
+            i += 1;
+            if let Some(answer) = compare_word(words[k], usize::from(lens[k]), rest, &mut c) {
+                return answer;
+            }
+            continue;
+        }
+        if code == ESCAPE {
+            let Some(&b) = packed.get(i + 1) else {
+                break;
+            };
+            i += 2;
+            if let Some(answer) = compare_word(u64::from(b), 1, rest, &mut c) {
+                return answer;
+            }
+            continue;
+        }
+        let Some((id, took)) = split.read_at(packed, i) else {
+            break;
+        };
+        i += took;
+        let answer = if let Some((phrase, plen)) = dict.chunk(id) {
+            compare_bytes(&phrase[..plen], rest, &mut c)
+        } else {
+            let Some(first) = dict.label_first(id) else {
+                break;
+            };
+            // An entry's suffix starts where its key branches, so a label is told from the probe
+            // at its first byte about half the time, and that compare needs no decode.
+            if c == rest.len() {
+                return (c, Ordering::Greater);
+            }
+            let theirs = rest.word(c) as u8;
+            if first != theirs {
+                return (c, first.cmp(&theirs));
+            }
+            match dict.label(id, |label| compare_bytes(label, rest, &mut c)) {
+                Some(answer) => answer,
+                None => break,
+            }
+        };
+        if let Some(answer) = answer {
+            return answer;
+        }
+    }
+    ended(c, rest)
+}
+
+/// [`compare_word`] over a run of bytes of any length, eight at a time.
+#[inline(always)]
+fn compare_bytes(bytes: &[u8], rest: Rest<'_>, c: &mut usize) -> Option<(usize, Ordering)> {
+    let mut chunks = bytes.chunks_exact(8);
+    for word in &mut chunks {
+        let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+        if let Some(answer) = compare_word(word, 8, rest, c) {
+            return Some(answer);
+        }
+    }
+    let tail = chunks.remainder();
+    if tail.is_empty() {
+        return None;
+    }
+    let mut word = [0u8; 8];
+    word[..tail.len()].copy_from_slice(tail);
+    compare_word(u64::from_le_bytes(word), tail.len(), rest, c)
+}
+
+/// [`decode_tiered`] where ids past the phrases name trie labels. Appends rather than writing into
+/// reserved room, since a label is up to [`phrase::LABEL_MAX`] bytes for the two codes that name it.
+#[inline(never)]
+fn decode_labelled(
+    table: &Table,
+    split: Split,
+    dict: &Dict,
+    packed: &[u8],
+    out: &mut Vec<u8>,
+    cap: usize,
+) -> bool {
+    let start = out.len();
+    let mut i = 0;
+    while i < packed.len() && out.len() - start < cap {
+        if let Some((id, took)) = split.read_at(packed, i) {
+            if let Some((phrase, len)) = dict.chunk(id) {
+                out.extend_from_slice(&phrase[..len]);
+            } else if dict
+                .label(id, |label| out.extend_from_slice(label))
+                .is_none()
+            {
+                out.truncate(start);
+                return false;
+            }
+            i += took;
+        } else if packed[i] == ESCAPE {
+            let Some(&b) = packed.get(i + 1) else {
+                out.truncate(start);
+                return false;
+            };
+            out.push(b);
+            i += 2;
+        } else {
+            let Some((word, len)) = table.symbol(packed[i]) else {
+                out.truncate(start);
+                return false;
+            };
+            out.extend_from_slice(&word.to_le_bytes()[..len]);
+            i += 1;
+        }
+    }
+    true
+}
+
 impl DictIndex {
     /// `query` as the keys are spelled, handed to `f` with what the bytes stand for. A blob without
     /// a code hands the query over as it is. One with a code spells it into a buffer on the stack
@@ -3399,6 +3656,17 @@ impl DictIndex {
         match codec {
             Codec::Symbols { table, split: None } => {
                 scan_as(frame, entries, count, probe, matched, &SymbolsCmp(table))
+            }
+            Codec::Symbols {
+                table,
+                split: Some(split),
+            } if self.phrases.has_labels() => {
+                let cmp = LabelledCmp {
+                    table,
+                    split: *split,
+                    dict: &self.phrases,
+                };
+                scan_as(frame, entries, count, probe, matched, &cmp)
             }
             Codec::Symbols {
                 table,
@@ -4001,7 +4269,7 @@ impl DictIndex {
     /// Two climbs, not one: the block's restart run up to the microblock the rank falls in, then
     /// that microblock up to the rank. Together they read `block / micro + micro − 2` headers
     /// where one level read `block − 1`.
-    fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
+    pub(crate) fn key_bytes_into(&self, id: u64, out: &mut Vec<u8>) -> bool {
         out.clear();
         let Ok(id) = usize::try_from(id) else {
             return false;
@@ -4374,8 +4642,11 @@ impl DictIndex {
         })
         .expect("hashing the sections cannot fail");
         let mut h = [0u8; HEADER];
+        debug_assert!(!(self.code.is_some() && self.phrases.has_labels()));
         h[0..4].copy_from_slice(if self.code.is_some() {
             CODED_MAGIC
+        } else if self.phrases.has_labels() {
+            LABELLED_MAGIC
         } else {
             MAGIC
         });
@@ -4510,10 +4781,11 @@ impl DictIndex {
         if let Some((_, why)) = LEGACY_MAGIC.iter().find(|(m, _)| bytes.starts_with(*m)) {
             return Err(IndexError::Format(why));
         }
-        let coded = match bytes.get(..4) {
+        let (coded, labelled) = match bytes.get(..4) {
             _ if bytes.len() < HEADER => None,
-            Some(m) if m == MAGIC => Some(false),
-            Some(m) if m == CODED_MAGIC => Some(true),
+            Some(m) if m == MAGIC => Some((false, false)),
+            Some(m) if m == CODED_MAGIC => Some((true, false)),
+            Some(m) if m == LABELLED_MAGIC => Some((false, true)),
             _ => None,
         }
         .ok_or(IndexError::Format("bad magic or truncated header"))?;
@@ -4643,8 +4915,28 @@ impl DictIndex {
             }
             codes
         };
-        let phrases = Dict::read(&take(phrase_len))
-            .ok_or(IndexError::Format("dict: bad phrase dictionary"))?;
+        let phrases = {
+            let section = take(phrase_len);
+            let bad = || IndexError::Format("dict: bad phrase dictionary");
+            if labelled {
+                let flat = section
+                    .get(..4)
+                    .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
+                    .ok_or_else(bad)?;
+                let end = flat.checked_add(4).ok_or_else(bad)?;
+                let dict = Dict::read(section.get(4..end).ok_or_else(bad)?).ok_or_else(bad)?;
+                let labels = crate::labels::Labels::read(
+                    section.subslice(end, section.len()).ok_or_else(bad)?,
+                    verify,
+                )?;
+                if dict.phrases() + labels.len() > phrase::IDS_MAX {
+                    return Err(IndexError::Format("dict: bad label dictionary"));
+                }
+                dict.with_labels(labels)
+            } else {
+                Dict::read(&section).ok_or_else(bad)?
+            }
+        };
         let blocks = Offsets::new(
             take(offsets::bases_len(nb, shift)),
             take(offsets::deltas_len(nb, block_width)),
@@ -6494,6 +6786,176 @@ mod tests {
             loaded > 0 && refused > 0,
             "loaded {loaded}, refused {refused}"
         );
+    }
+
+    /// Paths under a few directories, each name reused under many parents: the shape whose
+    /// repeated trie labels a `BDX5` dictionary is for.
+    fn label_corpus(seed: u64, n: usize) -> Vec<String> {
+        const DIRS: [&str; 6] = [
+            "usr/share",
+            "usr/lib",
+            "home/me/src",
+            "opt/tool",
+            "var/log",
+            "etc",
+        ];
+        const NAMES: [&str; 8] = [
+            "locale/translations",
+            "python3.14/site-packages",
+            "icons/hicolor/48x48",
+            "documentation",
+            "node_modules/.bin",
+            "x",
+            "release-notes",
+            "include/subdir",
+        ];
+        const FILES: [&str; 5] = ["index.html", "README.md", "__init__.py", "Makefile", "a"];
+        let mut state = seed | 1;
+        let mut next = |m: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % m as u64) as usize
+        };
+        let mut keys: Vec<String> = (0..n)
+            .map(|i| {
+                format!(
+                    "/{}/{}/{}-{}/{}",
+                    DIRS[next(DIRS.len())],
+                    NAMES[next(NAMES.len())],
+                    NAMES[next(NAMES.len())],
+                    i % 97,
+                    FILES[next(FILES.len())]
+                )
+            })
+            .collect();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// A labelled blob answers every question the plain one does, at every block, through a load
+    /// and a mapping — and a build that tries labels and loses returns the plain blob.
+    #[test]
+    fn a_labelled_blob_answers_what_the_plain_one_does() {
+        for (seed, n) in [(1u64, 4_000usize), (7, 900)] {
+            let keys = label_corpus(seed, n);
+            for block in [1usize, 16, 64, 256, 1024] {
+                let plain = DictIndex::build_with_block(&keys, block).unwrap();
+                let built = DictIndex::build_with_labels(&keys, block).unwrap();
+                let blob = built.to_bytes();
+                if !built.has_labels() {
+                    assert_eq!(blob, plain.to_bytes(), "block {block}");
+                    continue;
+                }
+                assert_eq!(&blob[..4], LABELLED_MAGIC);
+                assert!(blob.len() < plain.to_bytes().len(), "block {block}");
+                check(&built, &keys);
+                let back = DictIndex::from_bytes(&blob).unwrap();
+                assert!(back.has_labels());
+                assert_eq!(back.to_bytes(), blob, "block {block}");
+                check(&back, &keys);
+                for p in [
+                    "/usr",
+                    "/usr/share/x",
+                    "/home/me/src/documentation/",
+                    "/z",
+                    "",
+                ] {
+                    assert_eq!(back.prefix_id_range(p), plain.prefix_id_range(p), "{p:?}");
+                }
+                let path = scratch("labelled").join(format!("idx-{seed}-{block}.bdx"));
+                built.save(&path).unwrap();
+                check(&DictIndex::load(&path).unwrap(), &keys);
+                #[cfg(feature = "mmap")]
+                {
+                    // SAFETY: the file is this test's own and nothing writes it while it is mapped.
+                    let mapped = unsafe { DictIndex::load_mmap(&path) }.unwrap();
+                    check(&mapped, &keys);
+                }
+            }
+        }
+        let labelled = DictIndex::build_with_labels(label_corpus(1, 4_000), 256).unwrap();
+        assert!(labelled.has_labels(), "the corpus is built to take labels");
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(24))]
+        /// Whatever the paths, a build that tries labels answers as the plain build does.
+        #[test]
+        fn a_build_with_labels_agrees_with_the_plain_build(
+            seed in 1u64..u64::MAX,
+            n in 50usize..1_500,
+            block in proptest::sample::select(vec![4usize, 32, 256]),
+        ) {
+            let keys = label_corpus(seed, n);
+            let idx = DictIndex::build_with_labels(&keys, block).unwrap();
+            check(&idx, &keys);
+            check(&DictIndex::from_bytes(&idx.to_bytes()).unwrap(), &keys);
+        }
+    }
+
+    /// The labels are a blob of their own inside the dictionary section, read by the loader every
+    /// blob goes through; a label that does not parse is refused at the load, and one that parses
+    /// still answers with somebody else's bytes, never past a section or outside the ids.
+    #[test]
+    fn a_corrupted_label_dictionary_never_panics() {
+        let keys = label_corpus(1, 4_000);
+        let idx = DictIndex::build_with_labels(&keys, 256).unwrap();
+        assert!(idx.has_labels());
+        let blob = idx.to_bytes();
+        let at = layout(&blob, 256).phrases;
+        let len = u32::from_le_bytes(blob[58..62].try_into().unwrap()) as usize;
+        let probes: Vec<String> = probes(&keys).into_iter().step_by(53).collect();
+        let (mut loaded, mut refused) = (0, 0);
+        for i in (0..len).step_by(len / 97 + 1) {
+            for xor in [0x01u8, 0x80, 0xFF] {
+                let mut b = blob.clone();
+                b[at + i] ^= xor;
+                reframe(&mut b);
+                if answers_or_is_refused(&b, &keys, &probes, false) {
+                    loaded += 1;
+                } else {
+                    refused += 1;
+                }
+            }
+        }
+        // A nested blob is checked by its own header and payload checksums, so most edits are
+        // refused; the stride also reaches the phrase half and the nested blob's sections.
+        assert!(refused > 0, "loaded {loaded}, refused {refused}");
+        // Ids past the labels: every reference byte of the block data set to the widest id.
+        let data_len = u64::from_le_bytes(blob[24..32].try_into().unwrap()) as usize;
+        let data_at = layout(&blob, 256).data;
+        for fill in [0xFEu8, 0xFF, 0x80] {
+            let mut b = blob.clone();
+            b[data_at..data_at + data_len].fill(fill);
+            reframe(&mut b);
+            assert!(answers_or_is_refused(&b, &keys, &probes, true));
+        }
+    }
+
+    /// A `BDX5` whose labels are themselves labelled or coded is no blob this crate writes.
+    #[test]
+    fn a_label_dictionary_that_names_labels_of_its_own_is_refused() {
+        let keys = label_corpus(1, 4_000);
+        let firsts = |idx: &DictIndex| SharedBytes::from_owned(vec![b'a'; idx.len()]);
+        let inner = DictIndex::build_with_labels(&keys, 256).unwrap();
+        assert!(inner.has_labels());
+        assert!(
+            crate::labels::Labels::of(
+                DictIndex::build_with_labels(&keys, 256).unwrap(),
+                firsts(&inner)
+            )
+            .is_none()
+        );
+        let plain = DictIndex::build_with_block(&keys, 16).unwrap();
+        let short = SharedBytes::from_owned(vec![b'a'; plain.len() - 1]);
+        assert!(
+            crate::labels::Labels::of(DictIndex::build_with_block(&keys, 16).unwrap(), short)
+                .is_none()
+        );
+        let full = firsts(&plain);
+        assert!(crate::labels::Labels::of(plain, full).is_some());
     }
 
     #[test]
