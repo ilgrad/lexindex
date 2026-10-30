@@ -113,6 +113,11 @@ All notable changes to this project are documented here. The format follows
   on English words, URLs and paths at the default block, with a loop of `id` in the same process
   within ±1.8 %.
 
+- **The symbol trainer walks only the code pairs a sample can form.** Each of its four rounds
+  ranked candidate pairs by walking the whole 511 × 511 count matrix; it now walks the rows and
+  columns of the codes the encoder emitted. The same tables, so the same blobs, byte for byte on
+  fourteen corpora; a `DictIndex` build runs 0.2–1.9 % fewer instructions (1.1 % on domains,
+  1.0 % on titles).
 ### Documentation
 
 - **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes

@@ -217,12 +217,19 @@ impl Table {
                     *gain.entry((word, len as u8)).or_default() += u64::from(c) * len as u64;
                 }
             }
-            for (&(wa, la), row) in piece.iter().zip(count2.chunks_exact(space)) {
+            // A pair is two codes the encoder emitted, and every emitted code was counted above:
+            // the walk takes only the rows and columns of those, a fraction of the 261 121 cells
+            // on a corpus of few distinct bytes, and the same cells with a count on every corpus.
+            let live: Vec<usize> = (0..space).filter(|&code| count1[code] > 0).collect();
+            for &a in &live {
+                let (wa, la) = piece[a];
                 // A row already at the length cap concatenates with nothing.
                 if la == MAX_LEN {
                     continue;
                 }
-                for (&c, &(wb, lb)) in row.iter().zip(&piece) {
+                let row = &count2[a * space..(a + 1) * space];
+                for &b in &live {
+                    let (c, (wb, lb)) = (row[b], piece[b]);
                     if c == 0 || la + lb > MAX_LEN {
                         continue;
                     }
