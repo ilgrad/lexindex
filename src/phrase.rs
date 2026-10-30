@@ -114,13 +114,16 @@ fn gain_cap() -> usize {
 /// constant, one to sixteen cores gave three blobs of a million urls and six of a million paths.
 /// Sixteen is the number that leaves every blob this crate has published unchanged.
 const POOLS: usize = 16;
-/// Suffixes the miner reads, spread over the shard samples. The vocabulary is the corpus's, not one
-/// shard's, but it converges long before every sample is in: this bounds the miner's map rather
-/// than its answer.
-const PIECES: usize = 400_000;
-/// Pieces the scout round reads before the miner commits to the real ones. A sixteenth of
-/// [`PIECES`], because a span worth a dictionary entry is one the corpus repeats often enough that
-/// a sixty-fourth of a sample still holds it many times over.
+/// Suffixes the miner reads, spread over the shard samples: every sample of a build up to ten million
+/// keys, half of them at twenty. Fewer is not cheaper in bytes: the vocabulary's room is a quarter
+/// of the pieces read, and at 400 000 a build of ten million titles or URLs carried 1.5–1.9 % more
+/// bytes (19.2 million: 2.4–2.5 %) for 6–7 % fewer instructions; at 100 000, 5 % more at ten
+/// million and 31 % at 19.2. The miner's map is bounded by [`GAIN_CAP`], not by this, so the peak
+/// stayed where it was. Twice as many again bought 0.2 % at 19.2 million for 3 % more instructions.
+const PIECES: usize = 1_600_000;
+/// Pieces the scout round reads before the miner commits to the real ones, because a span worth a
+/// dictionary entry is one the corpus repeats often enough that a small slice of a sample still
+/// holds it many times over.
 const SCOUT_PIECES: usize = 6_250;
 /// Phrases a dictionary group holds, which is what a two-byte end inside the group is enough for.
 const GROUP: usize = 256;

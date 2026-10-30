@@ -118,6 +118,14 @@ All notable changes to this project are documented here. The format follows
   columns of the codes the encoder emitted. The same tables, so the same blobs, byte for byte on
   fourteen corpora; a `DictIndex` build runs 0.2–1.9 % fewer instructions (1.1 % on domains,
   1.0 % on titles).
+- **A `DictIndex` of more than about 2.6 million keys mines its phrases from more of its sample,
+  and is 1.4–2.5 % smaller.** The miner read at most 400 000 sampled suffixes, so a build of ten
+  million keys mined from a quarter of its sample and gave the vocabulary a quarter of the room.
+  It now reads up to 1.6 million: ten million titles 5.651 → 5.544 bytes a key, ten million URLs
+  5.784 → 5.695, 19.2 million titles 5.190 → 5.058 and URLs 5.325 → 5.197, 5.0 million Russian
+  titles 5.555 → 5.479. It costs 6–10 % more build instructions on those, and the same peak
+  memory. Every blob of fewer keys, and every larger one without phrases (DNA, numbers, hex keys,
+  UUIDs at ten million), is the same byte for byte.
 ### Documentation
 
 - **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes
