@@ -55,6 +55,7 @@ LEXINDEX = {
     "hashed8": "lexindex HashedDict fp=8",
     "hashed16": "lexindex HashedDict fp=16",
     "da": "lexindex DoubleArray",
+    "perfect": "lexindex PerfectHash (ids in hash order)",
 }
 # `HashedDictIndex` against the structure that was the fastest on every corpus before it, and beside
 # the dictionary it is built over.
@@ -66,7 +67,8 @@ HASHED = {
     "lexindex HashedDict fp=16": "fp=16",
 }
 # lexindex's exact searches -- the ones that answer a stranger exactly, which the sidecar does
-# not -- against the fastest structure from elsewhere.
+# not -- against the fastest structure from elsewhere. The perfect hash answers a stranger exactly
+# too, but its ids are hash slots, not ranks, and its column says so.
 SEARCH = {
     "XCDAT 15": "XCDAT 15",
     "lexindex Dict 256": "`Dict` 256",
@@ -75,6 +77,7 @@ SEARCH = {
     "lexindex Dict 1024 routed": "1024 routed",
     "lexindex StringIndex": "`StringIndex`",
     "lexindex DoubleArray": "`DoubleArray`",
+    "lexindex PerfectHash (ids in hash order)": "`PerfectHash`, hash-order ids",
 }
 REFERENCE = {"ART", "C-ART"}
 # What GNU timeout exits with when it had to stop the process.

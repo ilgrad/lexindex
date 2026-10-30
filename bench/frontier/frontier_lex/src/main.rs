@@ -7,7 +7,7 @@
 use std::io::BufRead;
 use std::time::Instant;
 
-use lexindex::{DictIndex, DoubleArrayIndex, HashedDictIndex, StringIndex};
+use lexindex::{DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex, StringIndex};
 
 /// The longest key libstdc++'s `std::string` keeps inside the object rather than behind a pointer.
 const SSO: usize = 15;
@@ -131,6 +131,21 @@ impl Probe for Closed {
     }
 }
 
+/// The perfect hash over the stored keys, through `id`: the key at the slot is compared, so a
+/// stranger is answered exactly, but an id is a slot of the hash and not a rank. The row's label
+/// says so -- a caller who needs ranges of keys as ranges of ids cannot use it.
+impl Probe for PerfectHashIndex {
+    fn build(keys: &[String], _: usize) -> Self {
+        PerfectHashIndex::build(keys).expect("perfect hash build")
+    }
+    fn bytes(&self) -> usize {
+        self.serialized_len().expect("perfect hash size")
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.id(key).map_or(u64::MAX, u64::from)
+    }
+}
+
 fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
     let t0 = Instant::now();
     let index = T::build(keys, arg);
@@ -179,7 +194,8 @@ fn run<T: Probe>(keys: &[String], arg: usize, label: &str) {
     }
     let mean = passes.iter().sum::<f64>() / passes.len() as f64;
     let min = passes.iter().cloned().fold(f64::INFINITY, f64::min);
-    // Four passes over keys whose ids are the ranks 0..n: any other sum is a wrong answer.
+    // Four passes over keys whose ids are the ranks 0..n, or for the perfect hash the same ids in
+    // another order: any other sum is a wrong answer.
     let n = keys.len() as u64;
     assert_eq!(
         sink,
@@ -199,7 +215,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|string|hashed0|hashed8|hashed16|da>..."
+            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|string|hashed0|hashed8|hashed16|da|perfect>..."
         );
         std::process::exit(2);
     }
@@ -227,6 +243,9 @@ fn main() {
             "hashed8" => run::<Hashed>(&keys, 8, "lexindex HashedDictIndex fp=8"),
             "hashed16" => run::<Hashed>(&keys, 16, "lexindex HashedDictIndex fp=16"),
             "da" => run::<DoubleArrayIndex>(&keys, 0, "lexindex DoubleArrayIndex"),
+            "perfect" => {
+                run::<PerfectHashIndex>(&keys, 0, "lexindex PerfectHashIndex (ids in hash order)")
+            }
             other => {
                 eprintln!("unknown kind {other}");
                 std::process::exit(2);
