@@ -769,8 +769,95 @@ fn distinct_ascending(keys: &mut Vec<&str>, threads: usize) -> bool {
 /// `keys` sorted, unless they ascend already, and their duplicates dropped.
 fn sort_distinct(keys: &mut Vec<&str>, threads: usize) {
     if !distinct_ascending(keys, threads) {
-        keys.sort_unstable();
+        sort_on(keys, threads);
         assert!(dedup_ascending(keys), "sorted keys ascend");
+    }
+}
+
+/// `keys` sorted on `threads` threads: a range a thread sorted in place, then cut at splitters drawn
+/// from every range, so that each thread merges the keys between two splitters from every range
+/// into its own part of one buffer. Keys of equal bytes are interchangeable, so the order is the
+/// one-thread sort's, whatever the thread count. The sort was the one serial phase of a build from
+/// unsorted keys: 2.5 % of its instructions on a million domains, at one thread's pace.
+fn sort_on(keys: &mut Vec<&str>, threads: usize) {
+    let n = keys.len();
+    // Every range must give `threads` keys to the sample.
+    let threads = threads.min(n.isqrt()).max(1);
+    if threads == 1 {
+        keys.sort_unstable();
+        return;
+    }
+    let size = n.div_ceil(threads);
+    std::thread::scope(|scope| {
+        for range in keys.chunks_mut(size) {
+            scope.spawn(move || range.sort_unstable());
+        }
+    });
+    let mut out: Vec<&str> = vec![""; n];
+    {
+        let runs: Vec<&[&str]> = keys.chunks(size).collect();
+        let mut sample: Vec<&str> = runs
+            .iter()
+            .flat_map(|r| (0..threads).map(move |i| r[i * r.len() / threads]))
+            .collect();
+        sample.sort_unstable();
+        let splitters: Vec<&str> = (1..threads)
+            .map(|j| sample[j * sample.len() / threads])
+            .collect();
+        // Where each splitter falls in each run: part `j` of a run is its keys from splitter
+        // `j - 1` up to, not including, splitter `j`.
+        let cuts: Vec<Vec<usize>> = runs
+            .iter()
+            .map(|r| {
+                let mut c = Vec::with_capacity(threads + 1);
+                c.push(0);
+                c.extend(splitters.iter().map(|s| r.partition_point(|k| k < s)));
+                c.push(r.len());
+                c
+            })
+            .collect();
+        std::thread::scope(|scope| {
+            let mut rest = out.as_mut_slice();
+            for j in 0..threads {
+                let parts: Vec<&[&str]> = runs
+                    .iter()
+                    .zip(&cuts)
+                    .map(|(r, c)| &r[c[j]..c[j + 1]])
+                    .collect();
+                let len = parts.iter().map(|p| p.len()).sum();
+                let (part, tail) = std::mem::take(&mut rest).split_at_mut(len);
+                rest = tail;
+                scope.spawn(move || merge_into(&parts, part));
+            }
+        });
+    }
+    *keys = out;
+}
+
+/// The sorted `parts` merged into `out`, which has room for exactly all of them.
+fn merge_into<'k>(parts: &[&[&'k str]], out: &mut [&'k str]) {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    use std::collections::binary_heap::PeekMut;
+    let mut next = vec![1usize; parts.len()];
+    let mut heads: BinaryHeap<Reverse<(&str, usize)>> = parts
+        .iter()
+        .enumerate()
+        .filter_map(|(r, p)| p.first().map(|&k| Reverse((k, r))))
+        .collect();
+    for slot in out {
+        let mut top = heads.peek_mut().expect("as many keys as slots");
+        let Reverse((key, r)) = *top;
+        *slot = key;
+        match parts[r].get(next[r]) {
+            Some(&k) => {
+                next[r] += 1;
+                *top = Reverse((k, r));
+            }
+            None => {
+                PeekMut::pop(top);
+            }
+        }
     }
 }
 
@@ -5831,6 +5918,22 @@ mod tests {
             check(&DictIndex::load(&path).unwrap(), &keys);
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    proptest::proptest! {
+        /// The sort on threads orders keys as one thread's sort does, duplicates and all, for any
+        /// thread count — including more threads than the sample can take a key a range from.
+        #[test]
+        fn sort_on_threads_is_the_one_thread_sort(
+            keys in proptest::collection::vec("[ab\u{e9}]{0,6}", 0..3000),
+            threads in 1usize..17,
+        ) {
+            let mut want: Vec<&str> = keys.iter().map(String::as_str).collect();
+            want.sort_unstable();
+            let mut got: Vec<&str> = keys.iter().map(String::as_str).collect();
+            sort_on(&mut got, threads);
+            proptest::prop_assert_eq!(got, want);
+        }
     }
 
     proptest::proptest! {

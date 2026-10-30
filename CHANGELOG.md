@@ -126,6 +126,12 @@ All notable changes to this project are documented here. The format follows
   titles 5.555 → 5.479. It costs 6–10 % more build instructions on those, and the same peak
   memory. Every blob of fewer keys, and every larger one without phrases (DNA, numbers, hex keys,
   UUIDs at ten million), is the same byte for byte.
+- **A `DictIndex` built from unsorted keys sorts them on every thread.** The sort was the one
+  serial phase of such a build; it now sorts a range of keys a thread and merges them cut at
+  splitters drawn from every range, a part a thread. The order, and so every blob, is the
+  one-thread sort's, byte for byte on fourteen corpora and at ten million keys; the merge adds
+  1.2–6 % to the build's instructions, spread over the threads, and nothing to its peak. Keys that
+  come sorted skip it, as before.
 ### Documentation
 
 - **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes
