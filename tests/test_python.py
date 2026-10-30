@@ -2126,3 +2126,44 @@ def test_the_api_page_documents_every_public_name():
     public = {name for name in lexindex.__all__ if not name.startswith("_")}
     assert sorted(public - documented) == []
     assert sorted(documented - public) == []
+
+
+def _scalar(token):
+    """docs/usage.md's map from a token id to one character: past U+D800 the ids skip the gap."""
+    return chr(token + 0x800 if token >= 0xD800 else token)
+
+
+def test_token_ids_as_keys_are_injective_and_keep_the_order_of_the_sequences():
+    chars = [_scalar(t) for t in range(1_112_064)]  # every id the map has room for
+    assert all(a < b for a, b in itertools.pairwise(chars))  # increasing, hence injective
+    assert all(c < "\ud800" or c > "\udfff" for c in chars)  # no surrogate: all encode
+    "".join(chars).encode("utf-8")
+    with pytest.raises(ValueError):
+        _scalar(1_112_064)
+
+    rng = random.Random(11)
+    edges = [0, 1, 0x7F, 0x80, 0x7FF, 0x800, 0xD7FF, 0xD800, 0xDFFF, 0xE000, 50_256, 128_255]
+    seqs = {tuple(rng.choice(edges) for _ in range(rng.randrange(1, 6))) for _ in range(3000)}
+    by_key = {"".join(map(_scalar, s)): s for s in seqs}
+    d = lexindex.DictIndex(by_key)
+    for rank, seq in enumerate(sorted(seqs)):  # ids are the ranks of the id sequences
+        assert d.key(rank) == "".join(map(_scalar, seq)) and by_key[d.key(rank)] == seq
+    head = (0xD800, 0)
+    want = sorted(s for s in seqs if s[:2] == head)
+    got = [by_key[k] for k, _ in d.prefix("".join(map(_scalar, head)))]
+    assert got == want and want
+
+
+def test_the_ngram_hints_example_runs_on_a_synthetic_shard():
+    script = Path(__file__).resolve().parent.parent / "examples" / "ngram_hints.py"
+    run = subprocess.run(
+        [sys.executable, str(script), "--train-tokens", "60000", "--val-tokens", "6000"],
+        capture_output=True,
+        encoding="utf-8",
+        timeout=120,
+        check=True,
+    )
+    lines = run.stdout.splitlines()
+    assert [line.split(":")[0] for line in lines[:3]] == ["n= 6", "n=10", "n=20"]
+    hinted, right = (float(x) for x in re.findall(r"([\d.]+)%", lines[3]))
+    assert hinted > 50 and right > 80  # the synthetic documents repeat their sentences

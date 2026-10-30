@@ -633,6 +633,37 @@ free-threaded builds get wheels of their own, from the same source with the same
 `cp311-abi3` one. `3.14t` has no stable ABI and gets a version-specific `cp314-cp314t`. Older
 free-threaded builds have no wheel: PyO3 supports `3.14t` and not `3.13t`.
 
+### Token sequences as keys
+
+Keys are strings, and a sequence of token ids is one without any conversion of note: GPT-2's
+50 257 ids are all below U+D800, so every id *is* a Unicode scalar value, and an n-token context
+is a string of n characters. A vocabulary that reaches the surrogate range (Llama 3's 128 256)
+moves the ids from U+D800 up past it:
+
+```python
+def scalar(token: int) -> str:
+    # ids below 0xD800 map to themselves, the rest to 0xE000 and up: 1 112 064 ids in all
+    return chr(token + 0x800 if token >= 0xD800 else token)
+
+def key(tokens) -> str:
+    return "".join(map(scalar, tokens))
+
+contexts = CompactHashIndex(key(ids[j : j + 6]) for j in range(len(ids) - 6))
+```
+
+The map is injective and increasing, and a key holds one character a token, so a key's prefix is
+a prefix of its tokens and the ordered indexes rank keys in the lexicographic order of their id
+sequences: `DictIndex` ids are those ranks, and `prefix` finds every stored context that starts
+with given tokens. In UTF-8 an id below 128 takes one byte, below 2 048 two and the rest three,
+so most GPT-2 contexts are about three bytes a token.
+
+`examples/ngram_hints.py` builds the 6-, 10- and 20-token contexts of a modded-nanogpt token
+shard into `CompactHashIndex`es with the next token, a count bucket and a purity bucket in arrays
+beside them -- three bytes a context -- and asks a held-out slice for the longest context with a
+hint. Most held-out contexts were never seen unless the training slice is very large, so the
+false-positive rate is paid on most probes: at 8 fingerprint bits the false hits of three levels
+outnumber the true ones on a 2 M-token slice, and the example uses 16.
+
 ## Rust
 
 ```rust
