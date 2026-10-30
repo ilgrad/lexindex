@@ -21,7 +21,8 @@ three things cannot, and are declared here rather than inferred: the display lab
 wording of a membership cell that is neither yes nor no, and whether a library answers
 common-prefix queries -- a capability `bench/compare.py` does not measure. A `frontier` table is a
 research-frontier campaign's overview, with `view=hashed` its `HashedDictIndex` table, with
-`view=search` its exact searches, or with `corpus=` one corpus's table, rendered by
+`view=chained` that table at the chained latency, with `view=search` its exact searches, or with
+`corpus=` one corpus's table, rendered by
 `bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed. A
 `marisa-floor` table is MARISA at its smallest against lexindex's smallest, as files and as mapped
 loads.
@@ -149,10 +150,13 @@ def render_compare(artifact: dict, opts: dict[str, str]) -> str:
 
 def render_frontier(artifact: dict, opts: dict[str, str]) -> str:
     """A frontier campaign's overview, with `view=hashed` its `HashedDictIndex` table, with
-    `view=search` its exact searches, or with `corpus=` that corpus's table."""
+    `view=chained` that table at the chained latency, with `view=search` its exact searches, or
+    with `corpus=` that corpus's table."""
     corpora = FRONTIER.corpora_of(artifact)
     if opts.get("view") == "hashed":
         return FRONTIER.hashed(corpora)
+    if opts.get("view") == "chained":
+        return FRONTIER.chained(corpora)
     if opts.get("view") == "search":
         return FRONTIER.search(corpora)
     if "corpus" not in opts:
