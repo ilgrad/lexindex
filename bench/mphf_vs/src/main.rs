@@ -1,6 +1,6 @@
 //! One process, A-B-A-B: lexindex's `Mphf` (the `bench-mphf` export) against `ph` 0.11.0's PHast
 //! (`Function`, `SeedOnly`) and PHast+ (`Function2`, `ShiftOnlyWrapped`), both at 8-bit seeds and
-//! bucket size 4.5, `ptr_hash` 2.1.1's three parameter sets, and `sux` 0.15.0's PHastR at five:
+//! bucket size 4.5, `ptr_hash` 2.1.3's three parameter sets, and `sux` 0.15.3's PHastR at five:
 //! 8-bit seeds at expected bucket sizes 4.25 (its default), 4.5 and 4.75, and 10-bit seeds over
 //! slices of 2048 at 5.75 and 6, read unaligned as its documentation advises — over the same
 //! distinct splitmix64 keys and the same shuffled probe order. Builds: the minimum over the rounds, and
@@ -455,11 +455,11 @@ impl Counter {
     fn stop(&self) -> f64 {
         self.ioctl(0x2401); // PERF_EVENT_IOC_DISABLE
         unsafe extern "C" {
-            fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+            fn read(fd: i32, buf: *mut std::ffi::c_void, count: usize) -> isize;
         }
         let mut got = [0u8; 8];
         // SAFETY: the descriptor reads one `u64` into a buffer of exactly eight bytes.
-        let n = unsafe { read(self.0, got.as_mut_ptr(), 8) };
+        let n = unsafe { read(self.0, got.as_mut_ptr().cast(), 8) };
         if n == 8 {
             u64::from_le_bytes(got) as f64
         } else {
@@ -556,9 +556,9 @@ fn main() {
         "lexindex MPH3",
         "ph 0.11 PHast+ (ShiftOnlyWrapped)",
         "ph 0.11 PHast (SeedOnly)",
-        "ptr_hash 2.1.1 compact",
-        "ptr_hash 2.1.1 balanced",
-        "ptr_hash 2.1.1 fast",
+        "ptr_hash 2.1.3 compact",
+        "ptr_hash 2.1.3 balanced",
+        "ptr_hash 2.1.3 fast",
         "sux 0.15 PHastR (8-bit, 4.25)",
         "sux 0.15 PHastR (8-bit, 4.5)",
         "sux 0.15 PHastR (8-bit, 4.75)",

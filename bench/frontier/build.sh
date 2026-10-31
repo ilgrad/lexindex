@@ -88,11 +88,23 @@ for entry in "${ADAPTED[@]}"; do
   echo "$dest/$header"
 done
 
-step "MARISA 0.2.6"
-# The version C²'s own MARISA headers (baseline_marisa/include) are written against. C²'s
-# build_marisa.sh builds it with autotools; its sources compiled directly need a compiler alone, and
-# take the flags C² builds everything else with.
+step "MARISA 0.3.1"
+# C²'s MARISA wrapper includes baseline_marisa/include, C²'s copy of the public headers of 0.2.6 with
+# string_view overloads added. 0.3.0 changed the classes those headers declare, so the pinned
+# release's own headers replace the copy, and the wrapper -- C²'s code, unchanged -- compiles against
+# the library it links. C²'s build_marisa.sh builds that library with autotools; its sources compiled
+# directly need a compiler alone, and take the flags C² builds everything else with.
 marisa=$frontier/c2/baseline_marisa/marisa
+copy=$frontier/c2/baseline_marisa/include
+while read -r header; do
+  # Copied only when it differs: a fresh mtime would recompile everything that includes it.
+  cmp -s "$marisa/include/$header" "$copy/$header" || cp "$marisa/include/$header" "$copy/$header"
+done < <(cd "$marisa/include" && find . -name '*.h' | sort)
+# Headers the release no longer ships (exception.h, scoped-array.h, scoped-ptr.h) go, so that no
+# 0.2.6 declaration is left to include.
+while read -r header; do
+  [ -e "$marisa/include/$header" ] || rm "$copy/$header"
+done < <(cd "$copy" && find . -name '*.h' | sort)
 rm -rf "$marisa/obj"
 mkdir "$marisa/obj"
 while read -r source; do

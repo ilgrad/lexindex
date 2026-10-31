@@ -1,0 +1,7 @@
+# Sizes only, 2026-10-31, host arz, rustc 1.99.1: local/rustcmp-latest over the suite's words-full (479 823 keys),
+# each structure checked to answer every key first. Crates: yada 0.7.0, crawdad 0.4.1, fst 0.4.7 (crates.io).
+structure,bytes,bytes_per_key
+yada 0.7.0,7665664,15.98
+crawdad 0.4.1 Trie,12580876,26.22
+crawdad 0.4.1 MpTrie,9418972,19.63
+fst 0.4.7 Set,2328459,4.85

@@ -12,14 +12,14 @@ publish = false
 [dependencies]
 # PHastR's constructors take a progress logger, and its size is read through `mem_dbg`: both at the
 # versions `sux` itself requires.
-dsi-progress-logger = "0.8.7"
+dsi-progress-logger = "0.8.10"
 lexindex = { path = "../..", features = ["bench-mphf"] }
-mem_dbg = "0.4.1"
+mem_dbg = "0.4.4"
 ph = { version = "0.11.0", features = ["wyhash"] }
-ptr_hash = "2.1.1"
-rayon = "1"
+ptr_hash = "2.1.3"
+rayon = "1.12"
 # Without the default `flate2` and `zstd`: they read compressed key files, which nothing here does.
-sux = { version = "0.15.0", default-features = false, features = ["rayon"] }
+sux = { version = "0.15.3", default-features = false, features = ["rayon"] }
 
 [profile.release]
 opt-level = 3

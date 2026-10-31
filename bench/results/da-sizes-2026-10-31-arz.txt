@@ -1,0 +1,15 @@
+# Sizes only, 2026-10-31, host arz: local/cjk/z8-latest 'sizes' over jieba 0.42.1's dict.txt (349 045 words), after its 'check' passed
+# (every structure gives the same (length, id) set at all 178 338 positions of UD Chinese GSDSimp r2.18).
+# cedarwood's own count is the file save_to_writer writes, loaded back and checked on every word; 0.5.0 had no file form.
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex 4.5.3 (crates.io); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20260819 (Red Hat 16.2.1-2) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+lexindex StringIndex                  8.95 B/word own count (3124743 bytes)     15.26 B/word held by malloc
+cedarwood 0.6.1                      60.55 B/word own count (21135962 bytes)     60.57 B/word held by malloc
+darts-clone 0.32                     17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+yada 0.7.0                           17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+crawdad 0.4.1 Trie                   18.40 B/word own count (6422528 bytes)     24.80 B/word held by malloc
+crawdad 0.4.1 MpTrie                 22.17 B/word own count (7736696 bytes)     30.79 B/word held by malloc
+daachorse 5.1.0 charwise             47.95 B/word own count (16738312 bytes)     55.34 B/word held by malloc
+lexindex DoubleArrayIndex            15.62 B/word own count (5451278 bytes)     15.62 B/word held by malloc

@@ -32,6 +32,40 @@ whether your machine is comparable to the one in the tables at all.
 > refreshed column is worse than a dated one.
 
 
+## Every competitor, and the version measured
+
+Every library this page compares against, at its latest release on 2026-10-31, or at its latest
+commit where it has none. Bumping one moved no size on this page: each was rebuilt at the new
+version, and every size came out the same to the last digit published; the artifacts that show it
+are named in the last column. **The timed columns are the older versions' until a quiet machine re-runs them**;
+each table names the version it was timed at.
+
+| competitor | language | structure | latest | in the timed tables |
+|---|---|---|---|---|
+| MARISA, [`s-yata/marisa-trie`](https://github.com/s-yata/marisa-trie) | C++ | recursive LOUDS Patricia trie | 0.3.1, `3e87d53`, 2025-07-20 | 0.2.6, `e54f296`; the floor's sizes the same at 0.3.1 (2026-10-12), the C² driver's too |
+| `marisa-trie` (PyPI) | Python over C++ | the same trie | 1.4.1, 2026-04-08 | 1.4.1, which bundles C++ marisa 0.2.7, as its main branch does |
+| `rsmarisa` | Rust | a port of MARISA | 0.4.2, 2026-06-01 | 0.4.2 |
+| XCDAT, [`kampersanda/xcdat`](https://github.com/kampersanda/xcdat) | C++ | compressed double-array trie | 0.2.2, `2451441`, 2024-09-10 | the same |
+| C²-FST, C²-CoCo, C²-MARISA, [`alexztc/C2`](https://github.com/alexztc/C2) | C++ | succinct tries with cache-conscious bit vectors and unary-path compression | `92c1b86`, 2026-06-20 | the same |
+| FST, CoCo-trie, PDT, ART, C-ART, as C² carries them | C++ | LOUDS-Dense/Sparse trie (SuRF); collapsed-node succinct trie; path-decomposed trie; adaptive radix tree | C² `92c1b86`; CoCo-trie's adapted headers at `ee860d4`, 2026-04-09 | the same |
+| sdsl-lite, sux (C++), ds2i, FSST: C²'s libraries | C++ | succinct structures; string compression | `0b861c7` 2026-10-10, `568903f` 2024-10-07, `4f46606` 2021-01-21, `e638d4c` 2026-04-06 | sdsl-lite `4312ea9`, sux `5944f6b`; all 208 `space_cost`s the 1 M campaign's first round recorded the same at the new pins |
+| `fst` | Rust | minimal acyclic finite-state transducer | 0.4.7, 2021-06-06 | 0.4.7, also `StringIndex`'s own dependency |
+| `yada` | Rust | byte-wise double-array trie | 0.7.0, 2026-06-06 | 0.7.0; the word-list sizes were 0.5's, the same at 0.7.0 ([`rust-tries-sizes-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rust-tries-sizes-2026-10-31-arz.txt)) |
+| `crawdad` `Trie`, `MpTrie` | Rust | character-wise double-array trie; minimal-prefix trie | 0.4.1, 2026-08-12 | 0.4.1 |
+| `daachorse` | Rust | character-wise double-array Aho–Corasick automaton | 5.1.0, 2026-10-18 | 5.0.0; the size the same at 5.1.0 ([`da-sizes-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/da-sizes-2026-10-31-arz.txt)) |
+| `cedarwood` | Rust | cedar's reduced double-array trie | 0.6.1, 2026-09-07 | 0.5.0, the version jieba-rs 0.10.4 used; the size the same at 0.6.1 |
+| darts-clone, [`s-yata/darts-clone`](https://github.com/s-yata/darts-clone) | C++ | double-array trie | 0.32 at `87b71af`, 2025-05-11 | the same |
+| `dawg2`, `datrie` | Python over C++ / C | DAWG (dawgdic); double-array trie (libdatrie) | 0.13.3, 2025-10-08; 0.8.3, 2025-08-28 | the same |
+| jieba, `jieba-rs` | Python, Rust | the segmenter whose lexicon and DAG the Chinese runs use | 0.42.1, 2020-01-20; 0.11.0, 2026-09-16 | the same |
+| `ptr_hash` | Rust | PtrHash minimal perfect hash | 2.1.3, 2026-10-21 | 2.1.1; bits the same at 2.1.3 ([`mphf-bits-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-2026-10-31-arz.txt)) |
+| `ph` | Rust | PHast and PHast+ minimal perfect hashes | 0.11.0, 2026-02-12 | the same |
+| `sux` (Rust) | Rust | PHastR minimal perfect hash | 0.15.3, 2026-10-29 | 0.15.0; bits the same at 0.15.3 |
+
+Python's `dict` and Rust's `HashMap` are the interpreter's and the toolchain's, named beside each
+table. The research-frontier tables come from `bench/frontier/` here and from the
+[string-index-benchmarks](https://github.com/ilgrad/string-index-benchmarks) suite, whose
+`pins.sh` files hold the same C++ commits.
+
 ## Serialised size on real English words
 
 `python bench/compare.py` on `/usr/share/dict/words` (479 823 words, 9.3 B/key raw). **Keys are a real
@@ -168,8 +202,10 @@ words, one process:
 alphabet, shuffled with a fixed seed; five rounds with the six lanes alternating and reversing on
 odd rounds, the first discarded and the minimum of the other four kept. Three such processes, each
 started only once the machine passed a readiness check, the table quoting the minimum of the three,
-which agree within 3 %. The other rows are the older sweep with `crawdad` 0.4, `yada` 0.5, `fst`
-0.4; size is serialised bytes ÷ keys throughout, and `rsmarisa`'s `io_size()` is asserted equal to
+which agree within 3 %. The other rows are sizes from the older sweep with `crawdad` 0.4, `yada`
+0.5 and `fst` 0.4, the same to the hundredth at 0.4.1, 0.7.0 and 0.4.7
+([`rust-tries-sizes-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rust-tries-sizes-2026-10-31-arz.txt));
+size is serialised bytes ÷ keys throughout, and `rsmarisa`'s `io_size()` is asserted equal to
 the file it saves. `rsmarisa` is the control across sessions: its lanes read 1–3 % under the
 2026-09-19 run these rows replace, and `DictIndex`'s 3–5 %. In that earlier session a fourth
 process, run seconds after a `git commit`, read 8–20 % slower on **every** row including
@@ -846,7 +882,9 @@ beyond the keys — exact where the tables are large enough to be mapped whole (
 SipHash, which nobody benchmarks it with): `Function2` with `ShiftOnlyWrapped` is PHast+ with
 wrapping, the design this crate's `MPH3` grew out of; `Function` with `SeedOnly` is regular PHast.
 Both at 8-bit seeds and bucket size 4.5, as here. `ptr_hash` 2.1.1 is PtrHash's three parameter
-sets. Bits and lookups are the 1-thread process's; the 8-thread process builds the same functions to
+sets; 2.1.3 and `sux` 0.15.3 build the same bits at 1 M
+([`mphf-bits-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-2026-10-31-arz.txt)), and their times wait for a
+quiet run. Bits and lookups are the 1-thread process's; the 8-thread process builds the same functions to
 within 0.02 bits.
 
 **1 M keys** — 241 KB of table, inside L2:
@@ -1524,7 +1562,10 @@ position pays. Mapped from its file rather than held in the huge pages a build o
 in, the walk costs about a nanosecond more. And the index is the smallest double array here: 15.62
 bytes a word against 17.75 for darts-clone and yada, 18.40 for crawdad; cedar's figure is its
 resident heap — 0.5.0 has no file form, and its array grows by doubling, so a quarter of its slots
-sit idle.
+sit idle. At the latest releases (daachorse 5.1.0, cedarwood 0.6.1) every size in the table is the
+same to the hundredth, and cedarwood's new file form saves 60.55 bytes a word
+([`da-sizes-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/da-sizes-2026-10-31-arz.txt)); the times are 5.0.0's and
+0.5.0's until a quiet run.
 
 **`StringIndex` is the other end of the same trade.** Its walk takes 3.8–4.4× the double array's,
 at 59 % of its bytes: at 4.4.1 it ran 1 025 instructions a character against cedar's 150 and
@@ -1540,7 +1581,7 @@ prefix enumeration, ranges, fuzzy matching.
 |---|---:|---:|
 | **lexindex `DoubleArrayIndex`** | 0.159 s | **0.70** ms mapped · 2.03 read |
 | darts-clone 0.32 | **0.055** | 0.81 read |
-| cedarwood 0.5.0 | 0.099 | no file form |
+| cedarwood 0.5.0 | 0.099 | no file form; 0.6 has one, its load not yet timed |
 | yada 0.7.0 | 0.342 | 3.25 read |
 | crawdad 0.4.1 `Trie` | 1.448 | 1.64 read |
 | crawdad 0.4.1 `MpTrie` | 1.862 | 1.72 read |

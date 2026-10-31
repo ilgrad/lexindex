@@ -1,0 +1,15 @@
+# Bits only, 2026-10-31, host arz: bench/mphf_vs 1000000 1 1 at ptr_hash 2.1.3, sux 0.15.3, ph 0.11.0 (Cargo.lock).
+# The machine was busy (another session's jobs, load ~20): the time columns of that run are not kept.
+# The binary that ran carried 2.1.1 in its ptr_hash labels; the lock it was built from says 2.1.3.
+row,bits_per_key
+lexindex MPH3,1.925
+ph 0.11 PHast+ (ShiftOnlyWrapped),2.160
+ph 0.11 PHast (SeedOnly),1.933
+ptr_hash 2.1.3 compact,2.144
+ptr_hash 2.1.3 balanced,2.378
+ptr_hash 2.1.3 fast,2.990
+sux 0.15 PHastR (8-bit, 4.25),1.960
+sux 0.15 PHastR (8-bit, 4.5),1.919
+sux 0.15 PHastR (8-bit, 4.75),1.915
+sux 0.15 PHastR (10-bit, 5.75),1.850
+sux 0.15 PHastR (10-bit, 6),1.852
