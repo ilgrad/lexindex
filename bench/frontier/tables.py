@@ -94,7 +94,8 @@ CORPUS = re.compile(
 )
 PROCESS = re.compile(r"^--- (?P<label>.+?)   load ")
 SKIPPED = re.compile(r"^--- .+?   skipped: ")
-# What C²'s protocol has no column for: the three warm passes frontier_lex times after the cold one.
+# What C²'s protocol has no column for: the three warm passes frontier_lex times after the cold one
+# (after the chained ones, for the rows that time those).
 LEX_WARM = re.compile(r"^lexindex .+, then mean (?P<mean>[\d.]+) / min (?P<min>[\d.]+) ns")
 # The chained passes frontier_lex and xcdat_frontier time for the `HashedDict` table's structures.
 CHAINED = re.compile(r"^(?:lexindex .+: )?chained mean (?P<mean>[\d.]+) / min (?P<min>[\d.]+) ns$")

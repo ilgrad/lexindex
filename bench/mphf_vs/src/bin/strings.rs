@@ -314,10 +314,10 @@ fn main() {
     let names = [
         "lexindex ClosedHashIndex",
         "lexindex Mphf + hash_key_bytes",
-        "ptr_hash 2.1.1 fast, lexindex's hash",
-        "ptr_hash 2.1.1 compact, lexindex's hash",
-        "ptr_hash 2.1.1 fast, xxh3 over the bytes",
-        "ptr_hash 2.1.1 compact, xxh3 over the bytes",
+        "ptr_hash 2.1.3 fast, lexindex's hash",
+        "ptr_hash 2.1.3 compact, lexindex's hash",
+        "ptr_hash 2.1.3 fast, xxh3 over the bytes",
+        "ptr_hash 2.1.3 compact, xxh3 over the bytes",
         "lexindex CompactHashIndex fp=1",
     ];
     let mut rows = names.map(|name| Row::new(name, wanted(name), copies));

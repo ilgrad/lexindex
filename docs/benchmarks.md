@@ -57,7 +57,7 @@ each table names the version it was timed at.
 | darts-clone, [`s-yata/darts-clone`](https://github.com/s-yata/darts-clone) | C++ | double-array trie | 0.32 at `87b71af`, 2025-05-11 | the same |
 | `dawg2`, `datrie` | Python over C++ / C | DAWG (dawgdic); double-array trie (libdatrie) | 0.13.3, 2025-10-08; 0.8.3, 2025-08-28 | the same |
 | jieba, `jieba-rs` | Python, Rust | the segmenter whose lexicon and DAG the Chinese runs use | 0.42.1, 2020-01-20; 0.11.0, 2026-09-16 | the same |
-| `ptr_hash` | Rust | PtrHash minimal perfect hash | 2.1.3, 2026-10-21 | 2.1.1; bits the same at 2.1.3 ([`mphf-bits-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-2026-10-31-arz.txt)) |
+| `ptr_hash` | Rust | PtrHash minimal perfect hash, its Elias–Fano from `sucds` 0.8.3, the major version it requires (0.11.0 is the latest) | 2.1.3, 2026-10-21 | 2.1.1; bits the same at 2.1.3 ([`mphf-bits-2026-10-31-arz.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-2026-10-31-arz.txt)) |
 | `ph` | Rust | PHast and PHast+ minimal perfect hashes | 0.11.0, 2026-02-12 | the same |
 | `sux` (Rust) | Rust | PHastR minimal perfect hash | 0.15.3, 2026-10-29 | 0.15.0; bits the same at 0.15.3 |
 
@@ -923,10 +923,10 @@ within 0.02 bits.
 `MPH3` is the smallest function in these tables — 1.929 / 1.918 / 1.914 bits against regular
 PHast's 1.933 / 1.921 / 1.920 — but not the smallest there is. `sux` 0.15's PHastR (Vigna,
 [arXiv:2610.17833](https://arxiv.org/abs/2610.17833)), built on one thread over the same keys in
-the same process, takes fewer bits at 1 M / 10 M / 100 M keys: 1.919 / 1.904 / 1.902 at expected
-bucket size 4.5 and 1.915 / 1.899 / 1.897 at 4.75, against `MPH3`'s 1.925 / 1.915 / 1.911 in that
-run, and 1.850 / 1.823 / 1.819 with 10-bit seeds. Only its default bucket size, 4.25, is the larger:
-1.960 / 1.943 / 1.942
+the same process and hashing each with its own `ToSig` for `u64` (xxh3), takes fewer bits at
+1 M / 10 M / 100 M keys: 1.919 / 1.904 / 1.902 at expected bucket size 4.5 and 1.915 / 1.899 /
+1.897 at 4.75, against `MPH3`'s 1.925 / 1.915 / 1.911 in that run, and 1.850 / 1.823 / 1.819
+with 10-bit seeds. Only its default bucket size, 4.25, is the larger: 1.960 / 1.943 / 1.942
 ([`bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-bits-phastr-2026-10-28-arz-5e2775a.txt)).
 Those are bits alone, which no machine moves; PHastR's build and lookup times wait for a quiet
 run. Built on eight threads, PHastR cuts its levels into more chunks than `MPH3` does, and each
@@ -973,7 +973,15 @@ binary runs the path a user of string keys sees, end to end, on real corpora (`l
 in the repository: an English word list, URLs, UUIDs, English Wikipedia titles, file paths):
 `ClosedHashIndex::id` — the key hash, then `MPH3` — against PtrHash's fast set over the same key
 hash, which isolates the perfect hash, and over xxh3 of the bytes, PtrHash as one would build it
-over strings with a general-purpose string hash. One process a corpus, three rounds; a round builds
+over strings with a general-purpose string hash. The key hash is lexindex's own `hash_key_bytes`
+([the design notes](design.md#perfecthashindex)); xxh3 is the 64-bit XXH3 of `xxhash-rust`,
+PtrHash's `hash::Xxh3`, which its default features build. PtrHash's documentation recommends
+`StringHash` for strings instead, which is GxHash and needs its `gxhash` feature. No row here uses
+it, and GxHash's 128-bit form, the `StringHash128` PtrHash recommends past 10⁹ keys, has a
+collision that no seed removes: two 88-character strings that differ in five positions share their
+hash under each of a million seeds
+([Groot Koerkamp, 2026-07](https://curiouscoding.nl/posts/gxhash-collision/)), so a build over a
+set that holds the pair cannot tell them apart. One process a corpus, three rounds; a round builds
 every row first and then times the rows in turn within each pass, each turn preceded by an untimed
 sweep over the first 2^20 probe keys, so that a machine warming through a round slows every row
 alike and no row holds the caches to itself for a turn of its own. Every key is looked up once in a

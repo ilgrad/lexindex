@@ -903,8 +903,9 @@ The x86-64 wheels stay on the baseline instruction set. A wheel's platform tag n
 system and an architecture, such as `manylinux_2_17_x86_64` (PEP 425, PEP 600), and no CPU level,
 so pip would install a wheel built for x86-64-v3 on a CPU without AVX2, and the interpreter would
 die at the first such instruction. Where a wider instruction pays, the crate asks the CPU at run
-time and keeps a portable path beside it: AVX2 for the double array's placer and for its load
-check, `popcnt` for the perfect hash's remap of the keys its first level bumped. A build whose
+time and keeps a portable path beside it: AVX2 for a `DictIndex` lookup's walk over a run of
+microblock headers, for the double array's placer and for its load check, `popcnt` for the perfect
+hash's remap of the keys its first level bumped. A build whose
 `target-cpu` has the feature compiles that check to a constant.
 
 Profile-guided optimisation is yours to run, with `cargo-pgo` and a workload of the operations your
