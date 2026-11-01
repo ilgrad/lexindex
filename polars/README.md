@@ -76,6 +76,17 @@ lexindex's `from_untrusted_bytes` for that, one walk over its transducer each ti
 Paths are expanded and made absolute when the expression is built, not when it runs, so a query
 keeps reading one file even if a symlink is swapped under it.
 
+The threads of a first query wait for one read rather than each making their own. The cache holds
+one generation a path and has no limit of its own. To give it one, set
+`LEXINDEX_POLARS_CACHE_BYTES`: past that many bytes of blobs, counted by their files' sizes, the
+least recently used go, and the newest stays whatever its size. Eviction costs a later chunk a read
+and never an answer.
+
+```python
+lexindex_polars.cache_info()  # {"entries": 1, "bytes": 2636721, "hits": 12, "loads": 1}
+lexindex_polars.clear_cache()  # what no running chunk holds goes back
+```
+
 ## Versions
 
 The plugin is compiled against polars' own FFI: the wheel names the polars it was built and tested

@@ -5,7 +5,20 @@ moves on polars' cadence and not on the library's.
 
 ## [Unreleased]
 
+### Added
+
+- **The cache can be bounded, read and emptied.** `LEXINDEX_POLARS_CACHE_BYTES` names the bytes of
+  blobs the process may hold, past which the least recently used go; unset, there is no limit, as
+  before. `lexindex_polars.cache_info()` reports the entries, their bytes, the hits and the loads,
+  and `lexindex_polars.clear_cache()` empties it. An evicted blob costs a later chunk a read and
+  never an answer, since a chunk holds its own reference.
+
 ### Fixed
+
+- **A first query reads a blob once.** Every engine thread that arrived before the first read
+  finished read the file itself, so a first query could hold as many copies of the blob at one
+  moment as it had threads. A miss now waits for the read in progress. A load waits for a load of
+  another file; a hit waits for neither.
 
 - **A crafted `StringIndex` blob is refused by name.** The plugin loaded a `StringIndex` with
   `from_bytes`, which `SECURITY.md` keeps for blobs you wrote yourself and which can panic inside

@@ -14,6 +14,10 @@
 //! *during* a query is therefore visible to later chunks and not to earlier ones, which is why an
 //! index a query reads should not be rebuilt under it.
 //!
+//! The threads of a first query wait for one read rather than each making their own. The cache
+//! holds one generation a path, and any number of paths unless `LEXINDEX_POLARS_CACHE_BYTES` names
+//! a limit, past which the least recently used blobs go.
+//!
 //! # What a kind cannot answer
 //!
 //! The six index types do not all answer all four questions: a keyless hash has no `key`, a closed
@@ -24,7 +28,8 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::UNIX_EPOCH;
 
 use lexindex::{
@@ -171,8 +176,80 @@ struct CacheKey {
     generation: Generation,
 }
 
-static CACHE: LazyLock<RwLock<HashMap<CacheKey, Arc<Index>>>> =
+/// One cached blob, and when it was last asked for.
+struct Entry {
+    index: Arc<Index>,
+    bytes: u64,
+    used: AtomicU64,
+}
+
+static CACHE: LazyLock<RwLock<HashMap<CacheKey, Entry>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+/// Held across a read and a parse, so that the threads of a first query read a blob once rather
+/// than each hold a copy of it at the same moment. One lock for every path: a load waits for a load
+/// of another file and a cache hit waits for nothing, and a lock a path is more code for a rare case.
+static LOADING: Mutex<()> = Mutex::new(());
+/// Ticks handed to `Entry::used`, each to one entry: the smallest is the least recently used.
+static CLOCK: AtomicU64 = AtomicU64::new(0);
+static HITS: AtomicU64 = AtomicU64::new(0);
+static LOADS: AtomicU64 = AtomicU64::new(0);
+
+const BUDGET_VAR: &str = "LEXINDEX_POLARS_CACHE_BYTES";
+
+/// The bytes of blobs the cache may hold, if the environment names a limit. Read at every load
+/// rather than once, so a process can set it after the plugin is first used.
+fn budget() -> PolarsResult<Option<u64>> {
+    let Some(raw) = std::env::var_os(BUDGET_VAR) else {
+        return Ok(None);
+    };
+    raw.to_str()
+        .and_then(|text| text.trim().parse().ok())
+        .map(Some)
+        .ok_or_else(|| polars_err!(ComputeError: "lexindex: {BUDGET_VAR} must be a number of bytes, not {raw:?}"))
+}
+
+fn cached(key: &CacheKey) -> Option<Arc<Index>> {
+    let cache = read_cache();
+    let entry = cache.get(key)?;
+    entry
+        .used
+        .store(CLOCK.fetch_add(1, Ordering::Relaxed), Ordering::Relaxed);
+    HITS.fetch_add(1, Ordering::Relaxed);
+    Some(Arc::clone(&entry.index))
+}
+
+/// Takes a freshly read blob in, and lets the least recently used go until `budget` holds. The
+/// newest always stays, whatever its size: a chunk's own `Arc` keeps an evicted index alive to the
+/// end of that chunk, so eviction can cost a later chunk a read and never an answer.
+fn remember(key: CacheKey, index: Arc<Index>, bytes: u64, budget: Option<u64>) {
+    let mut cache = write_cache();
+    // A rebuilt blob at the same path replaces its entry rather than joining it, so the obvious
+    // loop -- build, query, rebuild, query -- does not hold every generation in memory.
+    cache.retain(|k, _| k.path != key.path);
+    let used = AtomicU64::new(CLOCK.fetch_add(1, Ordering::Relaxed));
+    cache.insert(key, Entry { index, bytes, used });
+    let Some(budget) = budget else {
+        return;
+    };
+    let mut held: u64 = cache.values().map(|entry| entry.bytes).sum();
+    // A scan an eviction: a process holds a handful of indexes, too few for a linked list to pay.
+    while held > budget && cache.len() > 1 {
+        let Some(oldest) = cache
+            .values()
+            .map(|entry| entry.used.load(Ordering::Relaxed))
+            .min()
+        else {
+            break;
+        };
+        cache.retain(|_, entry| {
+            let keep = entry.used.load(Ordering::Relaxed) != oldest;
+            if !keep {
+                held -= entry.bytes;
+            }
+            keep
+        });
+    }
+}
 
 fn parse(bytes: &[u8], path: &Path) -> PolarsResult<Index> {
     let fail = |e: lexindex::IndexError| polars_err!(ComputeError: "lexindex: {} is not a readable index: {e}", path.display());
@@ -225,31 +302,55 @@ fn index_for(args: &Args) -> PolarsResult<Arc<Index>> {
         generation: Generation::of(&meta),
     };
 
-    if let Some(hit) = read_cache().get(&key) {
-        return Ok(Arc::clone(hit));
+    if let Some(hit) = cached(&key) {
+        return Ok(hit);
     }
 
+    let _loading = LOADING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = cached(&key) {
+        return Ok(hit);
+    }
+    let budget = budget()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|e| polars_err!(ComputeError: "lexindex: cannot read {}: {e}", path.display()))?;
     let index = Arc::new(parse(&bytes, &path)?);
-
-    let mut cache = write_cache();
-    // A rebuilt blob at the same path replaces its entry rather than joining it, so the obvious
-    // loop -- build, query, rebuild, query -- does not hold every generation in memory.
-    cache.retain(|k, _| k.path != path);
-    cache.insert(key, Arc::clone(&index));
+    LOADS.fetch_add(1, Ordering::Relaxed);
+    remember(key, Arc::clone(&index), bytes.len() as u64, budget);
     Ok(index)
 }
 
 // Nothing here panics while the lock is held, so the poison can only come from elsewhere; taking
 // the map back is still better than propagating a panic into the engine's worker thread.
-fn read_cache() -> std::sync::RwLockReadGuard<'static, HashMap<CacheKey, Arc<Index>>> {
+fn read_cache() -> std::sync::RwLockReadGuard<'static, HashMap<CacheKey, Entry>> {
     CACHE.read().unwrap_or_else(|e| e.into_inner())
 }
 
-fn write_cache() -> std::sync::RwLockWriteGuard<'static, HashMap<CacheKey, Arc<Index>>> {
+fn write_cache() -> std::sync::RwLockWriteGuard<'static, HashMap<CacheKey, Entry>> {
     CACHE.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What `lexindex_polars.cache_info` reads, as one column in the order it names them: entries,
+/// bytes, hits, loads. An expression because the engine's dlopen is the only way into this library:
+/// it has no Python module, and a C entry point of its own would be this crate's first `unsafe`.
+#[polars_expr(output_type=UInt64)]
+fn lexindex_cache_info(_inputs: &[Series]) -> PolarsResult<Series> {
+    let cache = read_cache();
+    let bytes = cache.values().map(|entry| entry.bytes).sum();
+    let info = [
+        cache.len() as u64,
+        bytes,
+        HITS.load(Ordering::Relaxed),
+        LOADS.load(Ordering::Relaxed),
+    ];
+    Ok(UInt64Chunked::from_slice("info".into(), &info).into_series())
+}
+
+/// Drops every cached blob for `lexindex_polars.clear_cache`. A chunk running now keeps its `Arc`.
+#[polars_expr(output_type=Boolean)]
+fn lexindex_clear_cache(_inputs: &[Series]) -> PolarsResult<Series> {
+    write_cache().clear();
+    Ok(BooleanChunked::from_slice("cleared".into(), &[true]).into_series())
 }
 
 /// The keys of a string column, or an error naming the type it got instead.

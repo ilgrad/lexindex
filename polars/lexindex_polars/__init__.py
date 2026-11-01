@@ -20,7 +20,7 @@ from pathlib import Path
 import polars as pl
 from polars.plugins import register_plugin_function
 
-__all__ = ["LexindexExpr", "__version__"]
+__all__ = ["LexindexExpr", "__version__", "cache_info", "clear_cache"]
 
 __version__ = "0.1.1"
 
@@ -34,6 +34,42 @@ def _path(index: str | Path) -> str:
     symlink is swapped or the process changes directory while it runs.
     """
     return str(Path(index).expanduser().resolve())
+
+
+def _call(function_name: str) -> pl.Series:
+    """One call of a plugin function that concerns the process and no column.
+
+    An expression because the engine is the only thing that loads the plugin, which has no Python
+    module of its own.
+    """
+    return pl.select(
+        register_plugin_function(
+            plugin_path=_LIB,
+            function_name=function_name,
+            args=[pl.lit(0)],
+            changes_length=True,
+        )
+    ).to_series()
+
+
+def cache_info() -> dict[str, int]:
+    """What this process's cache holds, and what it has done since the process began.
+
+    ``entries`` and ``bytes`` are the blobs held now, the bytes being their files'. ``hits`` counts
+    the chunks answered from the cache and ``loads`` the blobs read from a file, however many
+    threads were waiting for it. ``clear_cache`` resets the first two and not the counters.
+    """
+    entries, nbytes, hits, loads = _call("lexindex_cache_info").to_list()
+    return {"entries": entries, "bytes": nbytes, "hits": hits, "loads": loads}
+
+
+def clear_cache() -> None:
+    """Forget every blob this process has read, so that the next chunk of any query reads its file.
+
+    A chunk that is running keeps the index it holds until it ends. This returns memory only for
+    what no running chunk holds.
+    """
+    _call("lexindex_clear_cache")
 
 
 @pl.api.register_expr_namespace("lexindex")

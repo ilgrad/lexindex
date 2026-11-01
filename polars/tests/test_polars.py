@@ -13,7 +13,7 @@ import lexindex as lx
 import polars as pl
 import pytest
 
-import lexindex_polars  # noqa: F401  -- the import registers the namespace
+import lexindex_polars  # the import registers the namespace
 
 KEYS = ["alpha", "beta", "delta", "epsilon", "gamma", "omega", "zeta"]
 STRANGERS = ["absent", "nothing", "zzz"]
@@ -165,6 +165,99 @@ def test_a_blob_renamed_over_the_path_is_seen_at_the_same_length_and_timestamp(t
     now = path.stat()
     assert (now.st_size, now.st_mtime_ns) == (was.st_size, was.st_mtime_ns)
     assert _ids(path, lambda c, p: c.lexindex.id(p), ["bb"]) == [0]
+
+
+def _read(path):
+    _ids(path, lambda c, p: c.lexindex.id(p), ["alpha"])
+
+
+@pytest.fixture
+def three(tmp_path):
+    """Three blobs of one size, in a cache that starts empty."""
+    paths = [tmp_path / f"{name}.bdx" for name in "abc"]
+    for path in paths:
+        lx.DictIndex(KEYS).save(path)
+    lexindex_polars.clear_cache()
+    return paths
+
+
+def test_a_first_query_on_many_threads_reads_the_blob_once(tmp_path):
+    # Far more expressions than threads, over a blob too large to read before the next one starts:
+    # every thread misses at once. Each expression's own column keeps them from being merged.
+    path = tmp_path / "large.bdx"
+    lx.DictIndex(f"key-{i:07d}" for i in range(400_000)).save(path)
+    columns = [f"k{i}" for i in range(4 * pl.thread_pool_size())]
+    frame = pl.DataFrame({c: ["key-0000001"] for c in columns})
+    before = lexindex_polars.cache_info()["loads"]
+    out = frame.select(pl.col(c).lexindex.id(path) for c in columns)
+    assert out.row(0) == (1,) * len(columns)
+    assert lexindex_polars.cache_info()["loads"] == before + 1
+
+
+def test_cache_info_counts_what_the_cache_did(three):
+    a = three[0]
+    was = lexindex_polars.cache_info()
+    assert (was["entries"], was["bytes"]) == (0, 0)
+    _read(a)
+    _read(a)
+    now = lexindex_polars.cache_info()
+    assert (now["entries"], now["bytes"]) == (1, a.stat().st_size)
+    assert now["loads"] == was["loads"] + 1
+    assert now["hits"] == was["hits"] + 1
+
+
+def test_clear_cache_forgets_the_blobs_and_keeps_the_counters(three):
+    a = three[0]
+    _read(a)
+    loads = lexindex_polars.cache_info()["loads"]
+    lexindex_polars.clear_cache()
+    now = lexindex_polars.cache_info()
+    assert (now["entries"], now["bytes"], now["loads"]) == (0, 0, loads)
+    _read(a)
+    assert lexindex_polars.cache_info()["loads"] == loads + 1
+
+
+def test_without_a_budget_every_path_stays(three, monkeypatch):
+    monkeypatch.delenv("LEXINDEX_POLARS_CACHE_BYTES", raising=False)
+    for path in three:
+        _read(path)
+    assert lexindex_polars.cache_info()["entries"] == 3
+
+
+def test_the_budget_lets_the_least_recently_used_go(three, monkeypatch):
+    a, b, c = three
+    monkeypatch.setenv("LEXINDEX_POLARS_CACHE_BYTES", str(2 * a.stat().st_size))
+    _read(a)
+    _read(b)
+    _read(a)  # now b is the older of the two
+    _read(c)
+    now = lexindex_polars.cache_info()
+    assert (now["entries"], now["bytes"]) == (2, 2 * a.stat().st_size)
+    _read(a)
+    _read(c)
+    assert lexindex_polars.cache_info()["loads"] == now["loads"]
+    _read(b)
+    assert lexindex_polars.cache_info()["loads"] == now["loads"] + 1
+
+
+def test_a_blob_over_the_budget_stays_until_another_takes_its_place(three, monkeypatch):
+    a, b, _ = three
+    monkeypatch.setenv("LEXINDEX_POLARS_CACHE_BYTES", "1")
+    _read(a)
+    now = lexindex_polars.cache_info()
+    assert (now["entries"], now["bytes"]) == (1, a.stat().st_size)
+    _read(a)
+    assert lexindex_polars.cache_info()["loads"] == now["loads"]
+    _read(b)
+    assert lexindex_polars.cache_info()["entries"] == 1
+    _read(a)
+    assert lexindex_polars.cache_info()["loads"] == now["loads"] + 2
+
+
+def test_a_budget_that_is_not_a_number_is_refused_by_name(three, monkeypatch):
+    monkeypatch.setenv("LEXINDEX_POLARS_CACHE_BYTES", "lots")
+    with pytest.raises(pl.exceptions.ComputeError, match="LEXINDEX_POLARS_CACHE_BYTES"):
+        _read(three[0])
 
 
 def test_a_missing_file_names_itself(tmp_path):
