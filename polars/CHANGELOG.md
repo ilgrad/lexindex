@@ -13,6 +13,17 @@ moves on polars' cadence and not on the library's.
   and `lexindex_polars.clear_cache()` empties it. An evicted blob costs a later chunk a read and
   never an answer, since a chunk holds its own reference.
 
+### Changed
+
+- **An expression is pinned to the file it saw when it was built.** A rebuild during a query used to
+  reach its later chunks and not its earlier ones, and nothing said so: two columns of one result
+  could hold ids from two generations of an index, which are not comparable. A chunk now gets the
+  generation its expression saw: from the cache without touching the file, or from the file while
+  it still is that generation, or a `ComputeError` that says the index was rebuilt. **An expression
+  object kept across a rebuild now raises where it used to read the new file**; build it again, or
+  pass `pin=False` to any of the four for the old behaviour. An expression built anew after each
+  rebuild, the usual loop, sees no difference.
+
 ### Fixed
 
 - **A first query reads a blob once.** Every engine thread that arrived before the first read

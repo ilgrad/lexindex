@@ -7,12 +7,22 @@
 //! # The blob is read once
 //!
 //! A path is opened on first use and the whole blob read into memory, then kept in a process-wide
-//! cache keyed by path, size, modification time and, on unix, device and inode. Every later chunk —
-//! and every thread — shares that one `Arc`, because an index is immutable once loaded. Rewriting
-//! or replacing the file changes the key,
-//! so the next chunk loads the new blob and the old entry for that path is dropped; a rewrite
-//! *during* a query is therefore visible to later chunks and not to earlier ones, which is why an
-//! index a query reads should not be rebuilt under it.
+//! cache keyed by path and generation: size, modification time and, on unix, device and inode. Every
+//! later chunk — and every thread — shares that one `Arc`, because an index is immutable once
+//! loaded. No file stays mapped: a mapping's contract is that nothing writes the file, which a
+//! plugin cannot promise about a file any process may rebuild.
+//!
+//! # One query, one generation
+//!
+//! An expression carries the generation it saw when it was built, and a chunk gets exactly that one:
+//! from the cache without touching the file, or from the file while it still is that generation, or
+//! a `ComputeError`. Ids from two generations of an index are not comparable, so a rebuild during a
+//! query must not reach only its later chunks. Loading a new generation drops the old one for that
+//! path, so the obvious loop does not hold every generation in memory, and a query still running on
+//! the old one then fails rather than mixes. `pin=False` asks for whatever the file holds when a
+//! chunk runs, and a file absent when the expression was built is read the same way.
+//!
+//! # The cache
 //!
 //! The threads of a first query wait for one read rather than each making their own. The cache
 //! holds one generation a path, and any number of paths unless `LEXINDEX_POLARS_CACHE_BYTES` names
@@ -129,20 +139,26 @@ impl Index {
     }
 }
 
-/// What every one of the four expressions takes: the blob to answer from.
+/// What every one of the four expressions takes: the blob to answer from, and the generation of it
+/// the expression saw when it was built. `None` where the file was absent then or `pin=False`.
 #[derive(Deserialize)]
 struct Args {
     path: String,
+    pin: Option<Generation>,
 }
 
 /// Which file a path held. A rename brings a new inode even where the length and the timestamp
 /// are the same, and rename is how a blob is replaced atomically.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// `dev` and `ino` are the bit patterns as signed, because an expression's kwargs arrive pickled and
+/// the decoder refuses an integer past `i64::MAX`, where an inode can lie (overlayfs keeps a layer's
+/// number in its top bits). They are only ever compared.
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 struct Generation {
     len: u64,
     mtime_ns: i64,
-    dev: u64,
-    ino: u64,
+    dev: i64,
+    ino: i64,
 }
 
 impl Generation {
@@ -156,7 +172,7 @@ impl Generation {
         #[cfg(unix)]
         let (dev, ino) = {
             use std::os::unix::fs::MetadataExt;
-            (meta.dev(), meta.ino())
+            (meta.dev() as i64, meta.ino() as i64)
         };
         // std has no stable file identity elsewhere; length and timestamp are what is left there.
         #[cfg(not(unix))]
@@ -290,6 +306,17 @@ fn parse(bytes: &[u8], path: &Path) -> PolarsResult<Index> {
 /// The index for this path, from the cache or read into it.
 fn index_for(args: &Args) -> PolarsResult<Arc<Index>> {
     let path = PathBuf::from(&args.path);
+    // A pinned chunk asks for a generation and not for whatever the file holds now, so a hit touches
+    // no file: a rebuild during the query changes nothing the query reads.
+    if let Some(generation) = args.pin
+        && let Some(hit) = cached(&CacheKey {
+            path: path.clone(),
+            generation,
+        })
+    {
+        return Ok(hit);
+    }
+
     // One open file answers both questions below. A stat and a separate read by path could file a
     // new blob under the old one's key if the path were replaced between the two.
     let mut file = File::open(&path)
@@ -297,9 +324,16 @@ fn index_for(args: &Args) -> PolarsResult<Arc<Index>> {
     let meta = file
         .metadata()
         .map_err(|e| polars_err!(ComputeError: "lexindex: cannot open {}: {e}", path.display()))?;
+    let generation = Generation::of(&meta);
+    if args.pin.is_some_and(|pin| pin != generation) {
+        polars_bail!(
+            ComputeError: "lexindex: {} was rebuilt since this expression was built, and the blob it saw is not cached any more -- build the expression again, or pass pin=False to read whatever the file holds when a chunk runs",
+            path.display(),
+        );
+    }
     let key = CacheKey {
         path: path.clone(),
-        generation: Generation::of(&meta),
+        generation,
     };
 
     if let Some(hit) = cached(&key) {

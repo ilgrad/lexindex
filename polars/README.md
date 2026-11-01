@@ -37,7 +37,7 @@ chunk and thread.
 | `.lexindex.contains(path)` | a string column | `Boolean` | `false` |
 | `.lexindex.key(path)` | an integer column | `String` | `null` |
 
-`null` in, `null` out, for all four.
+`null` in, `null` out, for all four. Each also takes `pin=`; see [Reading the blob](#reading-the-blob).
 
 ## What each index kind answers
 
@@ -64,11 +64,19 @@ order and size matters, `HashedDictIndex` when they must be the key order and `i
 
 ## Reading the blob
 
-The file named by an expression is read whole on first use and cached for the process, keyed by
-path, size, modification time and, on unix, device and inode. Rewriting the file or renaming
-another over it replaces that entry, so a later chunk sees the
-new index and an earlier one does not: **do not rebuild an index a running query is reading.**
-Nothing stays mapped, and this crate writes no `unsafe`.
+The file named by an expression is read whole on first use and cached for the process. Nothing
+stays mapped, because a mapping's contract is that nothing writes the file, and a plugin cannot
+promise that about a file any process may rebuild; this crate writes no `unsafe`.
+
+**An expression is pinned to the file it saw when it was built**: its size, modification time and,
+on unix, device and inode. A chunk gets that generation from the cache without touching the file,
+or reads the file while it still is that generation, or raises a `ComputeError` saying the index was
+rebuilt. Ids from two generations are not comparable, so one query never sees both. After a rebuild,
+build the expression again. That reads the new file and drops the old generation from the cache, so
+a query still running on it raises rather than mixes. `pin=False` on any expression reads whatever
+the file holds when a chunk runs, so a rebuild reaches a running query's later chunks. A file absent
+when the expression is built is read that way too, and a plan serialized and run elsewhere carries
+its pin, so it needs `pin=False` if the copy there is another file.
 
 A file may be anyone's: a crafted one is a `ComputeError` naming it. A `StringIndex` goes through
 lexindex's `from_untrusted_bytes` for that, one walk over its transducer each time a file is read.
@@ -77,7 +85,7 @@ Paths are expanded and made absolute when the expression is built, not when it r
 keeps reading one file even if a symlink is swapped under it.
 
 The threads of a first query wait for one read rather than each making their own. The cache holds
-one generation a path and has no limit of its own. To give it one, set
+one generation a path, keyed by the same fields, and has no limit of its own. To give it one, set
 `LEXINDEX_POLARS_CACHE_BYTES`: past that many bytes of blobs, counted by their files' sizes, the
 least recently used go, and the newest stays whatever its size. Eviction costs a later chunk a read
 and never an answer.

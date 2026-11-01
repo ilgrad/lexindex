@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import lexindex as lx
 import polars as pl
@@ -153,18 +154,143 @@ def test_a_rebuilt_blob_at_the_same_path_is_picked_up(blobs, tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="only unix has a stable file identity in std")
-def test_a_blob_renamed_over_the_path_is_seen_at_the_same_length_and_timestamp(tmp_path):
+@pytest.mark.parametrize("pin", [True, False])
+def test_a_blob_renamed_over_the_path_is_seen_at_the_same_length_and_timestamp(tmp_path, pin):
     path, replacement = tmp_path / "live.bdx", tmp_path / "next.bdx"
     lx.DictIndex(["aa", "bb"]).save(path)
     lx.DictIndex(["bb", "cc"]).save(replacement)
-    assert _ids(path, lambda c, p: c.lexindex.id(p), ["bb"]) == [1]
+    assert _ids(path, lambda c, p: c.lexindex.id(p, pin=pin), ["bb"]) == [1]
 
     was = path.stat()
     os.utime(replacement, ns=(was.st_atime_ns, was.st_mtime_ns))
     os.replace(replacement, path)
     now = path.stat()
     assert (now.st_size, now.st_mtime_ns) == (was.st_size, was.st_mtime_ns)
-    assert _ids(path, lambda c, p: c.lexindex.id(p), ["bb"]) == [0]
+    assert _ids(path, lambda c, p: c.lexindex.id(p, pin=pin), ["bb"]) == [0]
+
+
+@pytest.fixture
+def live(tmp_path):
+    """A blob in which "alpha" is id 0, and what rebuilds it so that "alpha" is id 1."""
+    path = tmp_path / "live.bdx"
+    lx.DictIndex(KEYS).save(path)
+    return path, lambda: lx.DictIndex(["aardvark", *KEYS]).save(path)
+
+
+ALPHA = pl.DataFrame({"k": ["alpha"]})
+
+
+def test_one_query_never_mixes_two_generations(live):
+    path, rebuild = live
+    expr = pl.col("k").lexindex.id(path)
+
+    def rebuilt_under_the_query(frame):
+        rebuild()
+        return frame
+
+    out = (
+        ALPHA.lazy()
+        .with_columns(expr.alias("before"))
+        .map_batches(rebuilt_under_the_query)
+        .with_columns(expr.alias("after"))
+        .collect()
+    )
+    assert out.row(0) == ("alpha", 0, 0)
+
+
+def test_a_pinned_hit_touches_no_file(live):
+    path, _ = live
+    expr = pl.col("k").lexindex.id(path)
+    assert ALPHA.select(expr).item() == 0
+    path.unlink()
+    assert ALPHA.select(expr).item() == 0
+
+
+def test_an_expression_refuses_a_generation_it_can_no_longer_get(live):
+    path, rebuild = live
+    expr = pl.col("k").lexindex.id(path)
+    rebuild()
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since this expression was built"):
+        ALPHA.select(expr)
+
+
+def test_a_new_expression_takes_the_new_generation_and_the_old_one_then_refuses(live):
+    path, rebuild = live
+    old = pl.col("k").lexindex.id(path)
+    assert ALPHA.select(old).item() == 0
+    rebuild()
+    assert ALPHA.select(pl.col("k").lexindex.id(path)).item() == 1
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since this expression was built"):
+        ALPHA.select(old)
+
+
+def test_a_pinned_expression_reads_its_generation_again_after_an_eviction(live):
+    path, _ = live
+    expr = pl.col("k").lexindex.id(path)
+    assert ALPHA.select(expr).item() == 0
+    lexindex_polars.clear_cache()
+    loads = lexindex_polars.cache_info()["loads"]
+    assert ALPHA.select(expr).item() == 0
+    assert lexindex_polars.cache_info()["loads"] == loads + 1
+
+
+def test_a_pin_past_the_signed_range_reaches_the_plugin(live, monkeypatch):
+    # overlayfs keeps a layer's number in an inode's top bits. Pickled as it is, such a number stops
+    # the plugin's decoder ("could not parse kwargs"); here it must arrive and simply not match.
+    path, _ = live
+    real = path.stat()
+    stat = SimpleNamespace(
+        st_size=real.st_size, st_mtime_ns=real.st_mtime_ns, st_dev=2**64 - 1, st_ino=2**63 + 5
+    )
+    monkeypatch.setattr(lexindex_polars, "os", SimpleNamespace(stat=lambda _: stat, name="posix"))
+    expr = pl.col("k").lexindex.id(path)
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since"):
+        ALPHA.select(expr)
+
+
+def test_pin_false_reads_what_the_file_holds_when_a_chunk_runs(live):
+    path, rebuild = live
+    expr = pl.col("k").lexindex.id(path, pin=False)
+    assert ALPHA.select(expr).item() == 0
+    rebuild()
+    assert ALPHA.select(expr).item() == 1
+
+
+def test_a_file_absent_when_the_expression_is_built_is_read_when_it_appears(tmp_path):
+    path = tmp_path / "later.bdx"
+    expr = pl.col("k").lexindex.id(path)
+    lx.DictIndex(KEYS).save(path)
+    assert ALPHA.select(expr).item() == 0
+
+
+@pytest.mark.parametrize("name", ["id", "contains"])
+def test_the_forward_expressions_all_take_pin(live, name):
+    path, rebuild = live
+    expr = getattr(pl.col("k").lexindex, name)(path)
+    rebuild()
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since"):
+        ALPHA.select(expr)
+    assert ALPHA.select(getattr(pl.col("k").lexindex, name)(path, pin=False)).height == 1
+
+
+def test_id_unchecked_takes_pin(tmp_path):
+    path = tmp_path / "live.bhd"
+    lx.HashedDictIndex.from_dict(lx.DictIndex(KEYS), 0).save(path)
+    expr = pl.col("k").lexindex.id_unchecked(path)
+    lx.HashedDictIndex.from_dict(lx.DictIndex(["aardvark", *KEYS]), 0).save(path)
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since"):
+        ALPHA.select(expr)
+    assert ALPHA.select(pl.col("k").lexindex.id_unchecked(path, pin=False)).item() == 1
+
+
+def test_key_takes_pin(live):
+    path, rebuild = live
+    expr = pl.col("id").lexindex.key(path)
+    rebuild()
+    zero = pl.DataFrame({"id": [0]})
+    with pytest.raises(pl.exceptions.ComputeError, match="rebuilt since"):
+        zero.select(expr)
+    assert zero.select(pl.col("id").lexindex.key(path, pin=False)).item() == "aardvark"
 
 
 def _read(path):
