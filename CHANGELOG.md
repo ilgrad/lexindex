@@ -47,7 +47,10 @@ All notable changes to this project are documented here. The format follows
   2.1–2.3× fewer instructions and 2.0–3.6× less peak memory; the fourteen other corpora past the
   floor take 3.5–5.4 % more instructions and the same peak, and the dictionary, below the floor,
   nothing (`bench/results/preflight-counts-2026-11-01-arz-fb09edc.txt`, counted on a busy machine:
-  the times want a quiet one). A key set whose saving hangs on what the draws miss can keep the
+  the times want a quiet one). A table over the automaton's top levels and a skip for keys of one
+  length then pay most of that back, to 0.80–1.06× of a build without a preflight
+  (`bench/results/step-table-counts-2026-11-01-arz-1db56f2.txt`), to the same bytes. A key set whose
+  saving hangs on what the draws miss can keep the
   blocked layout where merging would have been smaller, which is the
   size 4.5 gave it, so still none grows. The header
   names the data's length, so a load checks that and nothing per entry: `load_mmap` stays `O(1)`, a

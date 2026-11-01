@@ -772,7 +772,12 @@ node any thread sees for a key winning; and the chains are walked and written on
 by their bytes. Serving the overlaps, in the order the ties fix, runs on one thread, and so does
 building the lists it serves from — all to the same bytes on any number of threads. The automaton
 is 9 bytes a node, at most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key,
-all freed before the arena is laid out; past 2³² nodes the merge is not attempted.
+all freed before the arena is laid out; past 2³² nodes the merge is not attempted. Walking a failure
+link is a bisection at every node on the way down, and most walks end near the root, so the top levels
+hold one row of 256 steps a node, at most 4 MiB and a byte a node, gone once the links are. Keys all of
+one length have none inside another to look for. Together that took 3–16 % of a build's instructions on
+fourteen of eighteen corpora and 23 % on UUIDs, and moved the three of short keys under 2 %
+(`bench/results/step-table-counts-2026-11-01-arz-1db56f2.txt`), counted and not yet timed.
 
 The merge is 55–89 % of a build's instructions and its peak memory, and on URLs, domains and paths
 it is then thrown away. So from 2¹⁹ keys it has to earn its place first. The saving comes in two

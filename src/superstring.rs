@@ -115,6 +115,9 @@ struct Above<'a> {
     label: &'a [u8],
     first: &'a [u32],
     fail: &'a [u32],
+    /// `steps[v * 256 + c]` is `step(v, c)`, for `v` below `shallow`.
+    steps: &'a [u32],
+    shallow: u32,
 }
 
 impl Above<'_> {
@@ -126,14 +129,41 @@ impl Above<'_> {
 
     /// The node reached from `v` on byte `c`, falling back along the failure links.
     fn step(self, mut v: u32, c: u8) -> u32 {
-        loop {
+        while v >= self.shallow {
             if let Some(w) = self.child(v, c) {
                 return w;
             }
-            if v == 0 {
-                return 0;
-            }
             v = self.fail[v as usize];
+        }
+        self.steps[v as usize * 256 + c as usize]
+    }
+}
+
+/// One in this many nodes may have a row of [`Above::steps`], and no more than [`STEPS_MOST`]: a
+/// byte a node at most, against the nine the automaton holds.
+const STEPS_SHARE: usize = if cfg!(test) { 4 } else { 1 << 10 };
+
+/// Rows of [`Above::steps`] at most, 4 MiB: within the L3 that a walk's shallow nodes would be in.
+const STEPS_MOST: usize = 1 << 12;
+
+/// The nodes with a row of [`Above::steps`]: whole levels from the root down, as many as fit. Most
+/// walks end here, after a bisection at every node on the way: `step` in the top levels is the one
+/// read, however far the fallback would have gone.
+fn shallow_nodes(level: &[u32], nodes: usize) -> usize {
+    let most = (nodes / STEPS_SHARE).clamp(1, STEPS_MOST);
+    level[level.partition_point(|&start| start as usize <= most) - 1] as usize
+}
+
+/// The rows of the nodes `from .. to` that have one, which are one level, all of whose links are
+/// known. A row is its link's, shorter so already there, under the node's own children.
+fn fill_steps(steps: &mut [u32], trie: &Trie, from: usize, to: usize) {
+    for v in from..to.min(steps.len() / 256) {
+        if v > 0 {
+            let f = trie.fail[v] as usize;
+            steps.copy_within(f * 256..(f + 1) * 256, v * 256);
+        }
+        for w in trie.first[v]..trie.first[v + 1] {
+            steps[v * 256 + trie.label[w as usize] as usize] = w;
         }
     }
 }
@@ -157,13 +187,15 @@ const PARALLEL_NODES: usize = if cfg!(test) { 8 } else { 1 << 18 };
 /// linked already, so the nodes are linked in any order, on as many threads as there are, to the
 /// same links. These are reads that miss the cache once the automaton outgrows it, the part of the
 /// merge most worth spreading.
-fn link_level(trie: &mut Trie, start: usize, end: usize) {
+fn link_level(trie: &mut Trie, steps: &[u32], start: usize, end: usize) {
     let (fail, here) = trie.fail.split_at_mut(start);
     let here = &mut here[..end - start];
     let above = Above {
         label: &trie.label,
         first: &trie.first,
         fail,
+        steps,
+        shallow: (steps.len() / 256) as u32,
     };
     let labels = &trie.label[start..end];
     let link = |out: &mut [u32], labels: &[u8]| {
@@ -413,11 +445,17 @@ fn sweep(text: &Text) -> Option<Sweep> {
         fail,
         level,
     };
-    // Every link at depth 1 is the root, which is also the parent there.
-    for d in 2..trie.level.len() - 1 {
+    let mut steps = vec![0u32; shallow_nodes(&trie.level, nodes) * 256];
+    fill_steps(&mut steps, &trie, 0, 1);
+    for d in 1..trie.level.len() - 1 {
         let (start, end) = (trie.level[d] as usize, trie.level[d + 1] as usize);
-        link_level(&mut trie, start, end);
+        // Every link at depth 1 is the root, which is also the parent there.
+        if d > 1 {
+            link_level(&mut trie, &steps, start, end);
+        }
+        fill_steps(&mut steps, &trie, start, end);
     }
+    drop(steps);
     // The key ending at each terminal node, by its rank among them: one read and a popcount, not
     // a bisection over the terminals, which would miss the cache at every step.
     let mut terms_before = Vec::with_capacity(is_term.len());
@@ -454,7 +492,12 @@ fn sweep(text: &Text) -> Option<Sweep> {
             }
         }
     };
-    let below_root = trie.level.get(2).map_or(nodes, |&s| s as usize);
+    // A key inside another of its own length would be that key, and there is nothing to find.
+    let below_root = if (0..n).all(|i| text.len(i) == longest) {
+        nodes
+    } else {
+        trie.level.get(2).map_or(nodes, |&s| s as usize)
+    };
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     if nodes - below_root < PARALLEL_NODES || threads == 1 {
         find(below_root, nodes);
@@ -947,9 +990,11 @@ mod tests {
         };
         for _ in 0..2000 {
             let n = (next() % 30) as usize;
+            // One set in four of one length, which has no key inside another to look for.
+            let one_length = (next() % 4 == 0).then(|| (next() % 6) as usize);
             let mut keys: Vec<String> = (0..n)
                 .map(|_| {
-                    let len = (next() % 6) as usize;
+                    let len = one_length.unwrap_or_else(|| (next() % 6) as usize);
                     (0..len)
                         .map(|_| ['a', 'b', 'é', '中'][(next() % 4) as usize])
                         .collect()
