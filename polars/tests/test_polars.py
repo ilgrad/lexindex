@@ -6,6 +6,8 @@ from `lexindex` itself, so a disagreement is the plugin's and not a hand-written
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import lexindex as lx
 import polars as pl
 import pytest
@@ -14,6 +16,7 @@ import lexindex_polars  # noqa: F401  -- the import registers the namespace
 
 KEYS = ["alpha", "beta", "delta", "epsilon", "gamma", "omega", "zeta"]
 STRANGERS = ["absent", "nothing", "zzz"]
+SPECIMENS = Path(__file__).resolve().parents[2] / "tests" / "data"
 
 
 def _save(index, tmp_path, name):
@@ -158,6 +161,16 @@ def test_a_file_that_is_not_an_index_is_refused(tmp_path):
     path.write_bytes(b"not an index at all")
     with pytest.raises(pl.exceptions.ComputeError, match="not a readable index"):
         _ids(path, lambda c, p: c.lexindex.id(p))
+
+
+@pytest.mark.parametrize("name", ["panicking-1.0.0-string.bix", "unfitting-4.0.0-string.bix"])
+def test_a_crafted_string_index_is_refused_by_name(name):
+    # `from_bytes` panics on the first of these inside fst's decoder. The engine catches a plugin's
+    # panic too, but then all it can say is "the plugin panicked", about no file in particular.
+    with pytest.raises(pl.exceptions.ComputeError, match="not a readable index") as refused:
+        _ids(SPECIMENS / name, lambda c, p: c.lexindex.id(p))
+    assert name in str(refused.value)
+    assert "panicked" not in str(refused.value)
 
 
 def test_a_non_string_column_names_its_type(blobs):

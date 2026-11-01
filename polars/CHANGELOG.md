@@ -3,6 +3,17 @@
 `lexindex-polars` is versioned separately from `lexindex`: it tracks polars' plugin ABI, which
 moves on polars' cadence and not on the library's.
 
+## [Unreleased]
+
+### Fixed
+
+- **A crafted `StringIndex` blob is refused by name.** The plugin loaded a `StringIndex` with
+  `from_bytes`, which `SECURITY.md` keeps for blobs you wrote yourself and which can panic inside
+  `fst`'s decoder. The engine caught the panic, so the process lived and the query failed, but with
+  "the plugin panicked" and no file named; the panic hook ran first. It now loads with
+  `from_untrusted_bytes`, and such a file is the same `ComputeError` as any other unreadable one.
+  The walk this adds to a `StringIndex`'s load is paid once a generation.
+
 ## [0.1.1] — 2026-09-24
 
 ### Changed

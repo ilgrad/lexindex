@@ -142,7 +142,11 @@ fn parse(bytes: &[u8], path: &Path) -> PolarsResult<Index> {
     let fail = |e: lexindex::IndexError| polars_err!(ComputeError: "lexindex: {} is not a readable index: {e}", path.display());
     let kind = lexindex::inspect(bytes).map_err(fail)?.kind;
     Ok(match kind {
-        BlobKind::StringIndex => Index::String(StringIndex::from_bytes(bytes).map_err(fail)?),
+        // A file named by a query may be anyone's, and `from_bytes` can panic on a crafted transducer.
+        // The walk this adds is paid once a generation.
+        BlobKind::StringIndex => {
+            Index::String(StringIndex::from_untrusted_bytes(bytes).map_err(fail)?)
+        }
         BlobKind::DictIndex => Index::Dict(DictIndex::from_bytes(bytes).map_err(fail)?),
         BlobKind::CompactHashIndex => {
             Index::Compact(CompactHashIndex::from_bytes(bytes).map_err(fail)?)

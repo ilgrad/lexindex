@@ -69,6 +69,9 @@ path, size and modification time. Rewriting the file replaces that entry, so a l
 new index and an earlier one does not: **do not rebuild an index a running query is reading.**
 Nothing stays mapped, and this crate writes no `unsafe`.
 
+A file may be anyone's: a crafted one is a `ComputeError` naming it. A `StringIndex` goes through
+lexindex's `from_untrusted_bytes` for that, one walk over its transducer each time a file is read.
+
 Paths are expanded and made absolute when the expression is built, not when it runs, so a query
 keeps reading one file even if a symlink is swapped under it.
 
