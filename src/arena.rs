@@ -238,8 +238,9 @@ impl StringArena {
     /// every reader since 2.0 knows. `data_len` is the keys' total length, as for `build_exact`.
     ///
     /// The superstring is computed to be priced, so a build that keeps the blocked layout has
-    /// still paid for it — see [`crate::superstring`] for what that costs. It is gone before the
-    /// blocked arena is laid out.
+    /// still paid for it — see [`crate::superstring`] for what that costs — unless
+    /// [`merge_cannot_win`] says so from a sample first. It is gone before the blocked arena is
+    /// laid out.
     pub(crate) fn build_cheapest<S: AsRef<str>>(
         keys: &[S],
         order: &[u32],
@@ -250,8 +251,13 @@ impl StringArena {
         let lens: Option<Vec<u32>> = in_order().map(|k| u32::try_from(k.len()).ok()).collect();
         if let Some(lens) = lens {
             let blocked = blocked_len(&lens, data_len, fps.is_some(), NARROW_LIMIT);
-            if let Some(merged) = Self::merged(keys, order, &lens, fps, blocked) {
-                return merged;
+            let hopeless = blocked.is_some_and(|blocked| {
+                merge_cannot_win(keys, order, &lens, data_len, fps.is_some(), blocked)
+            });
+            if !hopeless {
+                if let Some(merged) = Self::merged(keys, order, &lens, fps, blocked) {
+                    return merged;
+                }
             }
         }
         Self::build_exact(in_order(), order.len(), data_len, fps)
@@ -1131,6 +1137,102 @@ impl MergedShape {
         }
         best
     }
+}
+
+/// Whether a merge of `keys` is sure enough to lose to a blocked arena of `blocked` bytes to be
+/// left out: on the key sets it loses on, it is most of a build's instructions and its peak memory.
+///
+/// A key that is a proper prefix of the next costs the merge nothing, and those are counted exactly.
+/// The rest of the saving, keys inside others and overlaps, is read from merges of every 32nd, 16th
+/// and 8th slot, which the perfect hash makes uniform draws. Per key that rest grows with the rate
+/// `r` of the draw: a saving between one pair of keys shows only when both are drawn, so linearly
+/// in `r`, and one that any of many keys can give shows at any `r`. So the draws at `1/8` and
+/// `1/16` are carried to `r = 1` along a line, `A + B r`, which reads high where the saving
+/// saturates and on the mark where it does not, and an eighth goes on top for a draw's noise. If
+/// that much still does not beat the blocked arena, the merge is left out. If a draw alone reaches
+/// `5/9` of the way, it runs at once, for the price of that draw.
+///
+/// `false` costs the build the draws and changes no byte. `true` on a key set the merge would have
+/// won keeps the blocked arena, not one that grew. That takes a saving the draws do not hold: few
+/// pairs of long keys, one key holding every other. Those are held out by
+/// [`long_keys_hold_too_much`].
+fn merge_cannot_win<S: AsRef<str>>(
+    keys: &[S],
+    order: &[u32],
+    lens: &[u32],
+    data_len: usize,
+    fingerprints: bool,
+    blocked: usize,
+) -> bool {
+    let n = keys.len();
+    if n < PREFLIGHT_KEYS || long_keys_hold_too_much(lens, data_len) {
+        return false;
+    }
+    let (Some(&shortest), Some(&longest)) = (lens.iter().min(), lens.iter().max()) else {
+        return false;
+    };
+    let contained = prefix_contained_bytes(keys.iter().map(AsRef::as_ref));
+    let need = need_bits(lens.iter().copied(), shortest);
+    let wins_with = |rest: u64| {
+        let data = (data_len as u64).saturating_sub(contained + rest);
+        let start_bits = (64 - data.saturating_sub(u64::from(longest)).leading_zeros()).max(1);
+        MergedShape::from_need(&need, n, shortest, start_bits, data as usize, fingerprints)
+            .is_none_or(|shape| shape.bytes < blocked)
+    };
+    let unpromising =
+        |every| rest_of_draw(keys, order, every).filter(|&rest| !wins_with(rest * 9 / 5));
+    let estimate = || {
+        unpromising(32)?;
+        let sixteenth = unpromising(16)?;
+        let eighth = unpromising(8)?;
+        let line = eighth + 14 * eighth.saturating_sub(sixteenth);
+        Some(line + line / 8)
+    };
+    estimate().is_some_and(|rest| !wins_with(rest))
+}
+
+/// Below this many keys [`merge_cannot_win`] does not ask: the merge is cheap in absolute terms and
+/// the draws are thin.
+const PREFLIGHT_KEYS: usize = if cfg!(test) { 1 << 12 } else { 1 << 19 };
+
+/// Whether the keys over 16 times the mean length hold more than one byte in 16: then a handful
+/// of them, drawn or not, decide what a draw reads.
+fn long_keys_hold_too_much(lens: &[u32], data_len: usize) -> bool {
+    let long = 16 * (data_len / lens.len()) as u64;
+    let held: u64 = lens
+        .iter()
+        .map(|&len| u64::from(len))
+        .filter(|&len| len > long)
+        .sum();
+    held > data_len as u64 / 16
+}
+
+/// The bytes of the keys, sorted and distinct, that are a proper prefix of the key after them.
+fn prefix_contained_bytes<'a>(mut keys: impl Iterator<Item = &'a str>) -> u64 {
+    let Some(mut before) = keys.next() else {
+        return 0;
+    };
+    let mut bytes = 0;
+    for key in keys {
+        if key.as_bytes().starts_with(before.as_bytes()) {
+            bytes += before.len() as u64;
+        }
+        before = key;
+    }
+    bytes
+}
+
+/// What a merge saves on every `every`-th slot's key beyond its prefix-contained keys, scaled to
+/// the whole set. `None` when the draw cannot be merged.
+fn rest_of_draw<S: AsRef<str>>(keys: &[S], order: &[u32], every: usize) -> Option<u64> {
+    let mut picked: Vec<u32> = order.iter().step_by(every).copied().collect();
+    picked.sort_unstable();
+    let draw: Vec<&str> = picked.iter().map(|&k| keys[k as usize].as_ref()).collect();
+    let slots: Vec<u32> = (0..draw.len() as u32).collect();
+    let merged = crate::superstring::merge(&draw, &slots)?;
+    let bytes: u64 = draw.iter().map(|key| key.len() as u64).sum();
+    let free = bytes - prefix_contained_bytes(draw.iter().copied());
+    Some((free - merged.data.len() as u64) * every as u64)
 }
 
 /// `need[b]`: the lengths whose excess past `min_len` takes a field of `b` bits at least, all ones
@@ -2033,6 +2135,130 @@ mod tests {
         let arena = StringArena::build_cheapest(&keys, &order, data_len, None);
         let blocked = StringArena::build_exact(&keys, keys.len(), data_len, None);
         assert_eq!(arena.to_bytes(), blocked.to_bytes());
+    }
+
+    /// What `build_cheapest` takes from a build: keys sorted and distinct, with slots by hash, as
+    /// the perfect hash hands them over, and their lengths in slot order.
+    fn slotted(mut keys: Vec<String>) -> (Vec<String>, Vec<u32>, Vec<u32>, usize) {
+        keys.sort_unstable();
+        keys.dedup();
+        let mut order: Vec<u32> = (0..keys.len() as u32).collect();
+        order.sort_by_key(|&k| crate::blob::hash_bytes(keys[k as usize].as_bytes()));
+        let lens = order
+            .iter()
+            .map(|&k| keys[k as usize].len() as u32)
+            .collect();
+        let data_len = keys.iter().map(String::len).sum();
+        (keys, order, lens, data_len)
+    }
+
+    /// Whether `merge_cannot_win` leaves the merge out, against the real price of the blocked
+    /// layout, and whether the merge would in fact have come out smaller.
+    fn preflight(keys: Vec<String>, fingerprints: bool) -> (bool, bool) {
+        let (keys, order, lens, data_len) = slotted(keys);
+        let blocked = blocked_len(&lens, data_len, fingerprints, NARROW_LIMIT).unwrap();
+        let fps = fingerprints.then(|| vec![7u8; keys.len()]);
+        let left_out = merge_cannot_win(&keys, &order, &lens, data_len, fingerprints, blocked);
+        let wins =
+            StringArena::merged(&keys, &order, &lens, fps.as_deref(), Some(blocked)).is_some();
+        (left_out, wins)
+    }
+
+    fn bracketed(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("<{i}>")).collect()
+    }
+
+    /// Keys that hold nothing and overlap nowhere lose the merge; the draws say so, with
+    /// fingerprints or without, and the blob is the blocked one the merge would have left.
+    #[test]
+    fn a_merge_that_cannot_win_is_left_out_and_the_bytes_stay() {
+        for fingerprints in [false, true] {
+            assert_eq!(preflight(bracketed(1 << 14), fingerprints), (true, false));
+        }
+        let (keys, order, _, data_len) = slotted(bracketed(1 << 14));
+        let arena = StringArena::build_cheapest(&keys, &order, data_len, None);
+        let in_slots = order.iter().map(|&k| keys[k as usize].as_str());
+        let blocked = StringArena::build_exact(in_slots, keys.len(), data_len, None);
+        assert_eq!(arena.to_bytes(), blocked.to_bytes());
+    }
+
+    /// Windows of one text overlap in all but a byte: the first draw is already enough.
+    #[test]
+    fn a_merge_that_wins_is_run() {
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        let text: Vec<u8> = (0..1 << 15)
+            .map(|_| {
+                x = x.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(23);
+                b"acgt"[(x >> 62) as usize]
+            })
+            .collect();
+        let keys: Vec<String> = text
+            .windows(24)
+            .map(|w| String::from_utf8(w.to_vec()).unwrap())
+            .collect();
+        assert_eq!(preflight(keys.clone(), false), (false, true));
+        let (keys, order, _, data_len) = slotted(keys);
+        let arena = StringArena::build_cheapest(&keys, &order, data_len, None);
+        assert_eq!(arena.tag(), MERGED);
+    }
+
+    /// A saving between one pair of keys shows in a draw only where both are drawn, one pair in
+    /// 64 at the eighth: the line through the draws has to carry that back to the whole set. Here
+    /// every draw alone falls short of the merge's price, and the merge wins by half of it.
+    #[test]
+    fn a_saving_between_pairs_is_carried_to_the_whole_set() {
+        let inner = |i: usize| format!("<{i:020}>");
+        let mut keys: Vec<String> = (0..1 << 15).map(inner).collect();
+        keys.extend((0..1 << 12).map(|i| format!("<x{}y>", inner(i))));
+        assert_eq!(preflight(keys, false), (false, true));
+    }
+
+    /// Half the keys a proper prefix of another: a draw has none of that saving to read, and the
+    /// exact count is what wins it.
+    #[test]
+    fn prefix_contained_keys_are_counted_on_the_whole_set() {
+        let mut keys = bracketed(1 << 14);
+        keys.extend((0..1 << 14).map(|i| format!("<{i}")));
+        assert_eq!(preflight(keys, false), (false, true));
+    }
+
+    /// One key holding every other is drawn or not, and a draw that misses it reads nothing:
+    /// a set whose long keys hold this much is not asked about.
+    #[test]
+    fn keys_too_long_for_a_draw_to_stand_for_run_the_merge() {
+        let mut keys = bracketed(1 << 14);
+        keys.push(keys.concat());
+        let (_, _, lens, data_len) = slotted(keys.clone());
+        assert!(long_keys_hold_too_much(&lens, data_len));
+        assert_eq!(preflight(keys, false), (false, true));
+        let (_, _, lens, data_len) = slotted(bracketed(1 << 14));
+        assert!(!long_keys_hold_too_much(&lens, data_len));
+    }
+
+    #[test]
+    fn a_small_set_is_not_asked_about() {
+        let n = PREFLIGHT_KEYS - 1;
+        let (left_out, _) = preflight(bracketed(n), false);
+        assert!(!left_out);
+        let (left_out, _) = preflight(bracketed(n + 1), false);
+        assert!(left_out);
+    }
+
+    /// Scaled to the whole set, and without what the exact count already has.
+    #[test]
+    fn the_rest_of_a_draw_leaves_out_the_prefix_contained_keys() {
+        let keys = ["ab", "abcd", "bc", "cdx", "y"];
+        assert_eq!(rest_of_draw(&keys, &[0, 1, 2, 3, 4], 1), Some(4));
+        assert_eq!(rest_of_draw(&keys, &[1, 4, 3, 0, 2], 2), Some(8));
+    }
+
+    #[test]
+    fn prefix_contained_bytes_are_those_of_a_proper_prefix_of_the_next_key() {
+        let of = |keys: &[&str]| prefix_contained_bytes(keys.iter().copied());
+        assert_eq!(of(&[]), 0);
+        assert_eq!(of(&["a"]), 0);
+        assert_eq!(of(&["", "a", "ab", "abc", "b", "c"]), 3);
+        assert_eq!(of(&["ab", "ac"]), 0);
     }
 
     /// A merged blob written by hand, so the reader is pinned independently of the writer:

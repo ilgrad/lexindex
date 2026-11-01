@@ -36,10 +36,20 @@ All notable changes to this project are documented here. The format follows
   comparison. The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
   bytes, deterministically, ties to the lower slot, on every thread but for serving the overlaps; it
   holds 9 bytes a trie node and a few dozen a key, freed before the arena is laid out. It costs
-  build time, paid also where the blocked layout wins: against 4.5.3 on fourteen corpora of up to
-  a million keys, 1.6–3.1× on eight threads (the dictionary 65 → 137 ms, DNA 175 → 411, domains
-  151 → 442, identifiers 165 → 506) and 2.9–6.0× on one CPU; `load_mmap` and `id` stay within
-  0.92–1.04× (`bench/results/quiet-ab-2026-10-29-arz-1a885ac-merge.txt`). The header
+  build time: against 4.5.3 on fourteen corpora of up to a million keys, 1.6–3.1× on eight threads
+  (the dictionary 65 → 137 ms, DNA 175 → 411, domains 151 → 442, identifiers 165 → 506) and 2.9–6.0×
+  on one CPU; `load_mmap` and `id` stay within 0.92–1.04×
+  (`bench/results/quiet-ab-2026-10-29-arz-1a885ac-merge.txt`). Those times predate a preflight: from
+  2¹⁹ keys, a build counts the keys that are a prefix of the next exactly, merges every 32nd, 16th
+  and 8th slot, and leaves the merge out when the saving those draws carry to the whole set still
+  does not reach the blocked arena. On eighteen corpora of up to a million keys, plain and with
+  fingerprints, every blob is the same to the byte as without it. URLs, domains and paths take
+  2.1–2.3× fewer instructions and 2.0–3.6× less peak memory; the fourteen other corpora past the
+  floor take 3.5–5.4 % more instructions and the same peak, and the dictionary, below the floor,
+  nothing (`bench/results/preflight-counts-2026-11-01-arz-fb09edc.txt`, counted on a busy machine:
+  the times want a quiet one). A key set whose saving hangs on what the draws miss can keep the
+  blocked layout where merging would have been smaller, which is the
+  size 4.5 gave it, so still none grows. The header
   names the data's length, so a load checks that and nothing per entry: `load_mmap` stays `O(1)`, a
   truncated blob is refused, and a crafted entry is checked where it is read, as under the blocked
   layouts — it answers no key. Two golden blobs pin the encoding byte for byte and seed the

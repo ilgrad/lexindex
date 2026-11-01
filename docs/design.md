@@ -774,6 +774,33 @@ building the lists it serves from — all to the same bytes on any number of thr
 is 9 bytes a node, at most one node a key byte (0.26–0.55 measured), plus a few dozen bytes a key,
 all freed before the arena is laid out; past 2³² nodes the merge is not attempted.
 
+The merge is 55–89 % of a build's instructions and its peak memory, and on URLs, domains and paths
+it is then thrown away. So from 2¹⁹ keys it has to earn its place first. The saving comes in two
+parts. Keys that are a proper prefix of the next are counted exactly, in one sorted pass. The rest,
+keys inside others and overlaps, is read from merges of every 32nd, 16th and 8th slot, which the
+perfect hash makes uniform draws, each a fraction of the merge's cost. That rest grows per key with
+the draw, and the shape of the growth is the whole estimate: a saving between one pair of keys is
+seen only when both are drawn, so linearly in the rate `r`, and one any of many keys can give — the
+`.com` a thousand domains share — is there at any `r`. A line `A + B r` through the draws at 1/8 and
+1/16 is on the mark for a mix of the two, and a saving that saturates with `r` keeps the true curve
+below it. The estimate at `r = 1` is `R₈ + 14 (R₈ − R₁₆)`, with an eighth on top for a draw's noise.
+If a merged arena that much smaller still does not beat the blocked one, the merge is left out. If a
+draw alone reaches `5/9` of what the merge needs, it runs at once, so a corpus that wins usually pays
+only for the 1/32 draw.
+
+The wrong answers are not symmetric. A needless merge costs time and changes no byte. A merge left
+out keeps the blocked arena where the merged one would be smaller: the arena 4.5 wrote, so nothing
+grows, but the blob is larger than it had to be. On the eighteen corpora and their hash-uniform
+subsets at 1/2 and 1/3, the estimate over what the merge needs reads at most 0.91 where the merge
+loses and at least 2.12 where it wins, against a truth of 0.62 and 1.04 on the same runs. No blob
+changes on any of them, plain or with fingerprints, nor on 90 key sets planted around the tie
+(`bench/results/preflight-counts-2026-11-01-arz-fb09edc.txt`). What can fool it is a saving the draws
+do not hold: of those planted sets, one would have left out a merge worth 0.5 %, its saving in a few
+pairs of 2 KB keys that hold over a sixteenth of the bytes. So a set whose keys over 16 times the mean
+length hold more than a sixteenth of its bytes is not asked about, nor is one under 2¹⁹ keys, where
+the merge costs little and the draws read thin. That is a measured margin and not a bound: a key set
+built knowing the slots can still hide a saving from the draws, and pay for it in its own blob.
+
 No worst-case ratio is claimed for greedy here, but on these keys it can be bracketed: a
 minimum-weight cycle cover of the keys' overlap graph is never longer than the shortest superstring
 (Blum, Jiang, Li, Tromp and Yannakakis, 1994), and on the same sixteen corpora the merge comes

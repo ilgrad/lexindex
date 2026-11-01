@@ -1,0 +1,100 @@
+# Preflight against no preflight: PerfectHashIndex::build and build_with_fingerprints. Counts only:
+# the machine was busy (other sessions, editor), so user-mode instructions on every thread
+# (perf_event_open, inherit, exclude_kernel), VmHWM over the build, and bytes; no time is quoted.
+# base = fb09edc. new = fb09edc plus merge_cannot_win in src/arena.rs. Harness outside the repository
+# (local/bld7h/ab): fat LTO, one codegen unit, no target-cpu, each build in its own process.
+## sha256 8f19880fd13a4d9e3dc862c66beba06dd6c0d3dc1fc2ba07bc67bb385c81b9a4  src/arena.rs
+# Corpora: string-index-benchmarks/corpora, real word bigrams, and four held out (e. coli k-mers,
+# geonames, npm), up to 1 M keys. Row: corpus mode keys base_instr new_instr new/base base_peak_kb
+# new_peak_kb blob_bytes same? sha256 of the new blob, first 12 digits.
+row bigrams-1m plain 1000000 2023441315 2120445940 1.048 121004 123892 9124044 same 3017ed0c6890
+row bigrams-1m fp 1000000 2072585988 2170288668 1.047 122296 122480 10124044 same 7063719a3458
+row words-full plain 479823 1227310313 1224910035 0.998 64508 64456 4438796 same f6d79c40c058
+row words-full fp 479823 1250804689 1248897367 0.998 64264 65108 4918619 same 68cd09a84750
+row dna-1000000 plain 1000000 4625993604 4808849892 1.040 260632 260520 17754793 same f28e98f648f5
+row dna-1000000 fp 1000000 4678012609 4859979357 1.039 262328 261976 18754793 same 4a2cca51a4b6
+row domains-1000000 plain 1000000 3891779103 1689968801 0.434 211972 57864 15453880 same 206b22abc2c8
+row domains-1000000 fp 1000000 3943259383 1741299832 0.442 213312 60440 16453880 same 3004ac0a8265
+row idents-1000000 plain 1000000 3690730338 3859202334 1.046 174232 181524 15918156 same 0c1bac92435d
+row idents-1000000 fp 1000000 3740574034 3909003213 1.045 183884 183244 16918156 same 298bcb6a8e6a
+row numeric-1000000 plain 1000000 1796526296 1893952502 1.054 115708 115800 4115873 same 4120ab186963
+row numeric-1000000 fp 1000000 1845542075 1944106473 1.053 116348 116756 5115873 same 69f57f0bbde9
+row opaque-1000000 plain 1000000 4621605595 4811512420 1.041 239496 239612 16492262 same f02ad0eaad3a
+row opaque-1000000 fp 1000000 4673715941 4862593424 1.040 240700 240740 17492262 same bc411fda0f89
+row paths-1000000 plain 1000000 4011838939 1928996295 0.481 304912 145592 60622083 same 5475b5707a05
+row paths-1000000 fp 1000000 4063079446 1980084806 0.487 305916 148764 61622275 same 58527edf0bd4
+row pypi-full plain 895600 2989297259 3113007673 1.041 150856 152300 11683364 same eacfe89dfeb1
+row pypi-full fp 895600 3033112979 3157793988 1.041 148144 150952 12578964 same 5577fd645882
+row titles-en-1000000 plain 1000000 4535337099 4713701668 1.039 231276 230984 22849895 same 4c0081ed0db8
+row titles-en-1000000 fp 1000000 4584031271 4763859352 1.039 231860 231840 23849895 same 727a4de012d9
+row titles-ru-1000000 plain 1000000 6262835186 6516213546 1.040 316536 316844 33807886 same 6a2f70381436
+row titles-ru-1000000 fp 1000000 6311911966 6566338433 1.040 317548 318012 34807886 same 861d8a42dad0
+row titles-zh-1000000 plain 1000000 3776690948 3932538939 1.041 205836 205436 18236459 same 0fff8238cb20
+row titles-zh-1000000 fp 1000000 3825796278 3982649093 1.041 206344 206432 19236459 same cde40d4198ff
+row urls-1000000 plain 1000000 3499749782 1639322755 0.468 307424 133896 54625465 same 57b064e33b17
+row urls-1000000 fp 1000000 3550920909 1690413650 0.476 308772 136972 55625657 same 58728d927e76
+row uuid-1000000 plain 1000000 8142214996 8434028279 1.036 427444 424332 34971641 same c74c2dbdc1e3
+row uuid-1000000 fp 1000000 8194304503 8485141811 1.035 428080 425100 35971641 same 1f6b9c46defb
+row ecoli-k16 plain 1000000 2843581508 2992473690 1.052 184008 184520 6749426 same 9352a714cbd1
+row ecoli-k16 fp 1000000 2895738752 3043516356 1.051 179076 185328 7749426 same 5560659072d1
+row ecoli-k31 plain 1000000 5217756184 5464244376 1.047 326884 326796 7683438 same de362bff4543
+row ecoli-k31 fp 1000000 5269843259 5515302928 1.047 327688 328056 8683438 same 3629b2f0be17
+row geonames plain 1000000 3343305403 3485048038 1.042 166784 166720 14345574 same e2991fe0ba81
+row geonames fp 1000000 3392385433 3535481912 1.042 167792 167672 15345574 same 0c4e0b48041c
+row npm plain 1000000 4543572296 4722335940 1.039 236152 230480 20972100 same 9a18562a0e5e
+row npm fp 1000000 4591578008 4772403608 1.039 231568 231468 21972100 same b6822d8b3bf9
+# same blob on 36 of 36
+#
+# Larger corpora, plain: the same, past what the rule was chosen on.
+big base paths-full plain n=1655602 instr=6269654990 peak_kb=485176 blob=100357971
+big new  paths-full plain n=1655602 instr=3100925899 peak_kb=240608 blob=100357971
+big same paths-full
+big base idents-full plain n=1183525 instr=14858656382 peak_kb=395956 blob=18970695
+big new  idents-full plain n=1183525 instr=15003879492 peak_kb=387724 blob=18970695
+big same idents-full
+big base titles-zh-full plain n=2997733 instr=10713712389 peak_kb=575596 blob=52963197
+big new  titles-zh-full plain n=2997733 instr=11166115607 peak_kb=575508 blob=52963197
+big same titles-zh-full
+big base titles-en-10000000 plain n=10000000 instr=39531127121 peak_kb=1976908 blob=215916612
+big new  titles-en-10000000 plain n=10000000 instr=41165098746 peak_kb=1989548 blob=215916612
+big same titles-en-10000000
+big base urls-10000000 plain n=10000000 instr=31289327053 peak_kb=2677448 blob=528904099
+big new  urls-10000000 plain n=10000000 instr=32635719682 peak_kb=2686456 blob=528904099
+big same urls-10000000
+#
+# What the rule reads, per corpus, over eight runs (the whole set plain and with fingerprints, and
+# hash-uniform subsets of 1/2 and 1/3 under three salts each; the floor of 2^19 keys ignored so that
+# the small subsets are read too). true/b is the merge's saving past the prefix-contained keys
+# over what it needs to beat the blocked arena; est/b is the rule's estimate of the same. The merge
+# is left out where est/b < 1 and no draw reaches 5/9. Column W/L: the merge wins or loses.
+rule bigrams-1m W runs=8 true/b=4.24..7.67 est/b=6.68..10.35 merged-vs-blocked=-27.85..-25.43%
+rule words-full W runs=8 true/b=1.82..5.26 est/b=3.55..11.28 merged-vs-blocked=-15.30..-9.60%
+rule dna-1000000 W runs=8 true/b=8.61..10.22 est/b=15.17..18.77 merged-vs-blocked=-32.70..-30.11%
+rule domains-1000000 L runs=8 true/b=0.59..0.62 est/b=0.79..0.91 merged-vs-blocked=+4.96..+5.84%
+rule idents-1000000 W runs=8 true/b=3.42..71.27 est/b=6.76..138.01 merged-vs-blocked=-15.68..-9.80%
+rule numeric-1000000 W runs=8 true/b=3.32..3.52 est/b=4.89..6.39 merged-vs-blocked=-46.19..-40.56%
+rule opaque-1000000 W runs=8 true/b=2.81..3.05 est/b=5.26..5.60 merged-vs-blocked=-9.83..-9.11%
+rule paths-1000000 L runs=8 true/b=0.09..0.39 est/b=0.07..0.61 merged-vs-blocked=+1.20..+2.54%
+rule pypi-full W runs=8 true/b=2.39..3.39 est/b=4.40..6.07 merged-vs-blocked=-14.90..-11.15%
+rule titles-en-1000000 W runs=8 true/b=1.11..1.24 est/b=2.48..2.90 merged-vs-blocked=-1.73..-0.75%
+rule titles-ru-1000000 W runs=8 true/b=3.27..5.63 est/b=8.30..14.12 merged-vs-blocked=-11.30..-7.78%
+rule titles-zh-1000000 W runs=8 true/b=1.34..1.81 est/b=2.79..3.63 merged-vs-blocked=-4.76..-2.33%
+rule urls-1000000 L runs=8 true/b=0.01..0.02 est/b=0.02..0.03 merged-vs-blocked=+1.89..+2.72%
+rule uuid-1000000 W runs=8 true/b=3.58..4.09 est/b=6.54..7.86 merged-vs-blocked=-8.66..-7.93%
+rule ecoli-k16 W runs=8 true/b=11.97..12.78 est/b=21.65..23.12 merged-vs-blocked=-63.89..-53.17%
+rule ecoli-k31 W runs=8 true/b=20.13..24.01 est/b=35.00..55.36 merged-vs-blocked=-77.46..-57.30%
+rule geonames W runs=8 true/b=1.04..1.46 est/b=2.12..3.29 merged-vs-blocked=-3.62..-0.37%
+rule npm W runs=8 true/b=1.76..1.96 est/b=3.07..3.61 merged-vs-blocked=-6.09..-4.89%
+#
+# Ninety sets planted around the tie, 600 000 keys and up, plain: s7 a share of the keys inside a
+# partner; s8 overlapping a partner by 24 bytes; s9 and s10 few long pairs, 256 and 2048 bytes; s3 domains
+# with s7's pairs on top; s4 paths with proper prefixes added. Row: family, sets, sets where the merge
+# wins, sets where the preflight left it out, sets whose blob changed, new/base instructions where it ran.
+planted s10 sets=24 merge-wins=15 left-out=5 changed=0 new/base=1.000..1.268
+planted s3 sets=8 merge-wins=4 left-out=1 changed=0 new/base=1.038..1.209
+planted s4 sets=10 merge-wins=8 left-out=2 changed=0 new/base=1.046..1.252
+planted s7 sets=12 merge-wins=8 left-out=4 changed=0 new/base=1.200..1.201
+planted s8 sets=12 merge-wins=2 left-out=8 changed=0 new/base=1.203..1.203
+planted s9 sets=24 merge-wins=15 left-out=8 changed=0 new/base=1.209..1.212
+# Without the floor and the guard on long keys, the rule would have left out one merge that wins, 0.48 %
+# on s10-heavy2k-006-s2, where keys of 2 KB hold 11 % of the bytes; the guard turns that set away.
