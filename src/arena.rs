@@ -2241,6 +2241,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn a_small_set_is_not_asked_about() {
         let n = PREFLIGHT_KEYS - 1;
         let (left_out, _) = preflight(bracketed(n), false);
