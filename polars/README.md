@@ -65,7 +65,8 @@ order and size matters, `HashedDictIndex` when they must be the key order and `i
 ## Reading the blob
 
 The file named by an expression is read whole on first use and cached for the process, keyed by
-path, size and modification time. Rewriting the file replaces that entry, so a later chunk sees the
+path, size, modification time and, on unix, device and inode. Rewriting the file or renaming
+another over it replaces that entry, so a later chunk sees the
 new index and an earlier one does not: **do not rebuild an index a running query is reading.**
 Nothing stays mapped, and this crate writes no `unsafe`.
 

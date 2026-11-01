@@ -6,6 +6,7 @@ from `lexindex` itself, so a disagreement is the plugin's and not a hand-written
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import lexindex as lx
@@ -149,6 +150,21 @@ def test_a_rebuilt_blob_at_the_same_path_is_picked_up(blobs, tmp_path):
     assert _ids(path, lambda c, p: c.lexindex.id(p), ["alpha"]) == [0]
     lx.DictIndex(["aardvark", *KEYS]).save(path)
     assert _ids(path, lambda c, p: c.lexindex.id(p), ["alpha"]) == [1]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="only unix has a stable file identity in std")
+def test_a_blob_renamed_over_the_path_is_seen_at_the_same_length_and_timestamp(tmp_path):
+    path, replacement = tmp_path / "live.bdx", tmp_path / "next.bdx"
+    lx.DictIndex(["aa", "bb"]).save(path)
+    lx.DictIndex(["bb", "cc"]).save(replacement)
+    assert _ids(path, lambda c, p: c.lexindex.id(p), ["bb"]) == [1]
+
+    was = path.stat()
+    os.utime(replacement, ns=(was.st_atime_ns, was.st_mtime_ns))
+    os.replace(replacement, path)
+    now = path.stat()
+    assert (now.st_size, now.st_mtime_ns) == (was.st_size, was.st_mtime_ns)
+    assert _ids(path, lambda c, p: c.lexindex.id(p), ["bb"]) == [0]
 
 
 def test_a_missing_file_names_itself(tmp_path):

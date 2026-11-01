@@ -13,6 +13,11 @@ moves on polars' cadence and not on the library's.
   "the plugin panicked" and no file named; the panic hook ran first. It now loads with
   `from_untrusted_bytes`, and such a file is the same `ComputeError` as any other unreadable one.
   The walk this adds to a `StringIndex`'s load is paid once a generation.
+- **A blob renamed over the path is seen even at the same length and timestamp.** The cache key was
+  path, size and modification time, so such a replacement went on answering from the old blob for
+  the life of the process. The key now holds the device and inode as well, on unix. And the size,
+  the timestamp and the bytes now come from one open file, where a replacement between a stat and a
+  read by path could file the new blob under the old one's key.
 
 ## [0.1.1] — 2026-09-24
 

@@ -7,8 +7,9 @@
 //! # The blob is read once
 //!
 //! A path is opened on first use and the whole blob read into memory, then kept in a process-wide
-//! cache keyed by path, size and modification time. Every later chunk — and every thread — shares
-//! that one `Arc`, because an index is immutable once loaded. Rewriting the file changes the key,
+//! cache keyed by path, size, modification time and, on unix, device and inode. Every later chunk —
+//! and every thread — shares that one `Arc`, because an index is immutable once loaded. Rewriting
+//! or replacing the file changes the key,
 //! so the next chunk loads the new blob and the old entry for that path is dropped; a rewrite
 //! *during* a query is therefore visible to later chunks and not to earlier ones, which is why an
 //! index a query reads should not be rebuilt under it.
@@ -20,10 +21,11 @@
 //! are `ComputeError`s naming the kind and the blob, raised when the expression runs.
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock};
-use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use lexindex::{
     BlobKind, ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex,
@@ -128,11 +130,45 @@ struct Args {
     path: String,
 }
 
+/// Which file a path held. A rename brings a new inode even where the length and the timestamp
+/// are the same, and rename is how a blob is replaced atomically.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct Generation {
+    len: u64,
+    mtime_ns: i64,
+    dev: u64,
+    ino: u64,
+}
+
+impl Generation {
+    fn of(meta: &fs::Metadata) -> Self {
+        let mtime_ns = meta
+            .modified()
+            .map_or(0, |at| match at.duration_since(UNIX_EPOCH) {
+                Ok(after) => after.as_nanos() as i64,
+                Err(before) => -(before.duration().as_nanos() as i64),
+            });
+        #[cfg(unix)]
+        let (dev, ino) = {
+            use std::os::unix::fs::MetadataExt;
+            (meta.dev(), meta.ino())
+        };
+        // std has no stable file identity elsewhere; length and timestamp are what is left there.
+        #[cfg(not(unix))]
+        let (dev, ino) = (0, 0);
+        Self {
+            len: meta.len(),
+            mtime_ns,
+            dev,
+            ino,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Hash)]
 struct CacheKey {
     path: PathBuf,
-    len: u64,
-    modified: Option<SystemTime>,
+    generation: Generation,
 }
 
 static CACHE: LazyLock<RwLock<HashMap<CacheKey, Arc<Index>>>> =
@@ -177,19 +213,24 @@ fn parse(bytes: &[u8], path: &Path) -> PolarsResult<Index> {
 /// The index for this path, from the cache or read into it.
 fn index_for(args: &Args) -> PolarsResult<Arc<Index>> {
     let path = PathBuf::from(&args.path);
-    let meta = fs::metadata(&path)
+    // One open file answers both questions below. A stat and a separate read by path could file a
+    // new blob under the old one's key if the path were replaced between the two.
+    let mut file = File::open(&path)
+        .map_err(|e| polars_err!(ComputeError: "lexindex: cannot open {}: {e}", path.display()))?;
+    let meta = file
+        .metadata()
         .map_err(|e| polars_err!(ComputeError: "lexindex: cannot open {}: {e}", path.display()))?;
     let key = CacheKey {
         path: path.clone(),
-        len: meta.len(),
-        modified: meta.modified().ok(),
+        generation: Generation::of(&meta),
     };
 
     if let Some(hit) = read_cache().get(&key) {
         return Ok(Arc::clone(hit));
     }
 
-    let bytes = fs::read(&path)
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
         .map_err(|e| polars_err!(ComputeError: "lexindex: cannot read {}: {e}", path.display()))?;
     let index = Arc::new(parse(&bytes, &path)?);
 
