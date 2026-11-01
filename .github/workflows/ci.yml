@@ -356,6 +356,19 @@ jobs:
             fi
           done < <(git ls-files '*Cargo.lock')
           exit "$stale"
+      # The manifests name the last release until a release commit moves them, whichever branch it
+      # was cut from: 4.5.3 came from `release-4.5.x`, and main went on saying 4.5.2, older than what
+      # PyPI served, with 4.5.3's heading already in its own changelog.
+      - name: the manifests name the last release in the changelog
+        run: |
+          set -euo pipefail
+          read -r last date < <(sed -nE 's/^## \[([0-9][^]]*)\] — ([0-9-]+).*/\1 \2/p' CHANGELOG.md | head -1)
+          cargo_version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          py_version="$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)"
+          cff_version="$(sed -n 's/^version: //p' CITATION.cff)"
+          cff_date="$(sed -nE 's/^date-released: "?([0-9-]+)"?/\1/p' CITATION.cff)"
+          echo "changelog $last $date; Cargo.toml $cargo_version; pyproject.toml $py_version; CITATION.cff $cff_version $cff_date"
+          [ "$cargo_version" = "$last" ] && [ "$py_version" = "$last" ] && [ "$cff_version" = "$last" ] && [ "$cff_date" = "$date" ]
       - name: cargo publish --dry-run
         run: cargo publish --dry-run --locked
 

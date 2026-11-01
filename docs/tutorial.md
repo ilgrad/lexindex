@@ -8,7 +8,7 @@ below was run as shown, and its output is pasted unedited.
 ```console
 $ pip install lexindex
 $ lexindex --version
-lexindex 4.5.2
+lexindex 4.5.3
 ```
 
 The wheel carries the `lexindex` command line as well as the Python module, and has no runtime
