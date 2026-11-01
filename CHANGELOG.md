@@ -64,6 +64,14 @@ All notable changes to this project are documented here. The format follows
   and answers every key.
 ### Fixed
 
+- **A crafted `StringIndex` blob no longer aborts a C caller's process.** `lexindex_index_open` and
+  `lexindex_index_from_bytes` loaded it with `from_bytes`, whose known panic on such a blob reaches
+  `extern "C"` as an abort: 111 bytes did it, `tests/data/panicking-1.0.0-string.bix`, against the
+  module's claim that no path has a panic on any input. They now return
+  `LEXINDEX_STATUS_FORMAT`, through `from_untrusted_bytes`, at the cost of one pass over the
+  transducer at load. `lexindex dump` had the same path, as a panic with exit code 101, for a
+  `StringIndex` and for an overlay over one; it now fails with exit code 1. A new fuzz target,
+  `parse_capi`, loads and queries through the exported functions.
 - **`plan` prices a merged `PerfectHashIndex` arena within 2.9 % of the built blob**, on fourteen
   corpora, where its estimate read a million identifiers 11.4 % high. The arena is now priced
   apart from the rest of the index: the saving a key is read at the sample and at its bottom half
@@ -151,6 +159,14 @@ All notable changes to this project are documented here. The format follows
   1.2–6 % to the build's instructions, spread over the threads, and nothing to its peak. Keys that
   come sorted skip it, as before.
 ### Documentation
+
+- **"What each index promises"** in the usage guide: for each of the seven, what two different keys
+  get, what a key it does not hold gets, and which loader a stranger's blob needs. `plan`'s closed
+  default is now said where `plan` is introduced, and the guide shows a table indexed by id following
+  its keys through `compact_with_remap`.
+- The design notes and the usage guide said six and five indexes; there are seven.
+- **"How old each section is"** in the benchmarks page, rendered from the artifacts each section
+  cites and the changelog's releases, and checked in CI.
 
 - **What two keys equal in both hashes cost, stated where it was understated.** Up to 16 bytes
   both hashes are functions of one 64-bit product and the length, so two random keys of one

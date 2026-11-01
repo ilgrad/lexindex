@@ -25,7 +25,9 @@ research-frontier campaign's overview, with `view=hashed` its `HashedDictIndex` 
 `corpus=` one corpus's table, rendered by
 `bench/frontier/tables.py` itself, so the docs cannot drift from what the campaign printed. A
 `marisa-floor` table is MARISA at its smallest against lexindex's smallest, as files and as mapped
-loads.
+loads. A `freshness` table names no artifact of its own: it is read off the page it sits on, one row
+a section, from the dates in the artifact names the section cites and the releases in the changelog,
+so that how old a section is cannot be claimed and then forgotten.
 """
 
 import argparse
@@ -43,6 +45,9 @@ CLOSE = "<!-- /table -->"
 # How far past a block the caption is looked for; a citation further away than this is prose.
 CAPTION_LINES = 20
 ARTIFACT_LINK = re.compile(r"bench/results/((?:compare|frontier|marisa-floor)-[\w.-]+\.json)")
+DATED_ARTIFACT = re.compile(r"bench/results/([\w.-]+?-(\d{4}-\d{2}-\d{2})[\w.-]*\.[a-z]+)")
+RELEASE = re.compile(r"^## \[(\d[^\]]*)\] — (\d{4}-\d{2}-\d{2})", re.M)
+FRESHNESS_TITLE = "How old each section is"
 
 # Loaded by path: its module name, `tables`, is this file's own.
 _spec = importlib.util.spec_from_file_location("frontier_tables", ROOT / "bench/frontier/tables.py")
@@ -205,6 +210,36 @@ def render_floor(artifact: dict, opts: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _as_of(day: str, releases: list[tuple[str, str]]) -> str:
+    """The release out on `day`, or main past the last one; `releases` is newest first."""
+    if day > releases[0][1]:
+        return f"main after {releases[0][0]}"
+    return next((version for version, date in releases if date <= day), "before the changelog")
+
+
+def render_freshness(page: str) -> str:
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    releases = RELEASE.findall(changelog)
+    lines = [
+        "| section | artifacts cited | oldest | newest |",
+        "|---|---:|---|---|",
+    ]
+    for section in re.split(r"^## ", page, flags=re.M)[1:]:
+        title, _, body = section.partition("\n")
+        if title == FRESHNESS_TITLE:
+            continue
+        days = {name: day for name, day in DATED_ARTIFACT.findall(body)}
+        if not days:
+            lines.append(f"| {title} | 0 | — | — |")
+            continue
+        old, new = min(days.values()), max(days.values())
+        lines.append(
+            f"| {title} | {len(days)} | {old} ({_as_of(old, releases)}) "
+            f"| {new} ({_as_of(new, releases)}) |"
+        )
+    return "\n".join(lines)
+
+
 RENDERERS = {"compare": render_compare, "frontier": render_frontier, "marisa-floor": render_floor}
 
 
@@ -243,6 +278,20 @@ def process(write: bool) -> int:
         out, moved = text, 0
         for m, body_at, end, opts in blocks(text):
             kind, artifact = m.group("kind"), m.group("artifact")
+            if kind == "freshness":
+                want = render_freshness(text) + "\n"
+                have = text[body_at:end]
+                if have != want:
+                    bad += 1
+                    if write:
+                        out = out[: body_at + moved] + want + out[end + moved :]
+                        moved += len(want) - len(have)
+                        print(f"{name}: rewrote the freshness table")
+                    else:
+                        print(f"{name}: the freshness table does not match the page")
+                        for line in _diff(have, want):
+                            print(f"  {line}")
+                continue
             if kind not in RENDERERS:
                 raise SystemExit(f"{name}: no renderer for a `{kind}` table")
             data = json.loads((ROOT / artifact).read_text(encoding="utf-8"))

@@ -10,6 +10,10 @@ A key is the context's token ids as characters: GPT-2's 50 257 ids are all below
 *is* a Unicode scalar value; ``scalar`` below also moves ids past the surrogate gap for larger
 vocabularies. See "Token sequences as keys" in docs/usage.md.
 
+This shows the lookup and the bytes, not a build at scale: ``Level`` holds a ``Counter`` a context in
+Python until the index exists, far more than the index it builds. Contexts also run across document
+boundaries, as the token stream a model reads does; a real table would decide that on purpose.
+
 The input is a modded-nanogpt token shard, as in the Hugging Face dataset kjj0/fineweb100B-gpt2: a
 1024-byte header of 256 little-endian int32 -- [0] = 20240520, [1] = 1, [2] = the token count --
 then the tokens as little-endian uint16. Without a path, a small synthetic shard is written first::
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import math
 import random
 import tempfile
 from collections import Counter
@@ -30,7 +35,9 @@ from lexindex import CompactHashIndex
 
 LEVELS = (6, 10, 20)
 COUNT_EDGES = (1, 2, 4, 8, 16, 64)  # 7 buckets: 1, 2, 3-4, 5-8, 9-16, 17-64, more
-PURITY_EDGES = (0.2, 0.4, 0.6, 0.8, 1.0)  # 6 buckets: below each edge, then exactly 1
+# 6 buckets: up to each edge, then exactly 1. The last edge is the float just below 1, since a
+# certain context is the one worth telling apart and `bucket` takes the first edge at or above.
+PURITY_EDGES = (0.2, 0.4, 0.6, 0.8, math.nextafter(1.0, 0.0))
 
 
 def scalar(token: int) -> str:

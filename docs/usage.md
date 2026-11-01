@@ -4,7 +4,7 @@ Runnable snippets for every interface, in Python and Rust.
 
 ## `plan` — which index, before you build one
 
-Five indexes with five size curves is a choice nobody should have to make from a README table: the
+Seven indexes with their own size curves is a choice nobody should have to make from a README table: the
 sizes are corpus-specific, and the spread between them on one corpus is larger than the spread of
 any one of them across corpora. `plan` sorts the keys once, measures what the formats are actually
 paid in, and prices every index that answers the questions you say you need answered.
@@ -26,7 +26,11 @@ Which index wins is a property of your keys and not of this library — six frui
 corpus, and neither is a range of numbers, which an fst folds into almost nothing. Run it on the
 keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key)`), `ordered`,
 `prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes, which is where
-their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five.
+their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five it
+can name: `HashedDictIndex` and `DoubleArrayIndex` are not ranked yet. **The default is a closed
+vocabulary:** a bare `plan(keys)` can recommend an index that answers a key it never held with some
+member's id, while the `lexindex` command assumes an open one and implies `exact`. Pass `exact=True`
+unless every key you will ask about is in `keys`.
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
 bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
@@ -503,6 +507,34 @@ pairs of English take 2.2 M. Every load walks all the slots to check them, `load
 so a crafted file answers wrong ids and never reads out of bounds; `load_mmap` skips only the
 checksum over the payload.
 
+## What each index promises
+
+Two questions decide whether an index fits keys you do not control, and they have different answers
+across the seven:
+
+| | two different keys | a key it does not hold | a blob from a stranger | C ABI | Polars plugin |
+|---|---|---|---|---|---|
+| `StringIndex` | two ids | `None`, exact | `from_untrusted_bytes`; `from_bytes` can panic | yes | yes |
+| `DictIndex` | two ids | `None`, exact | any loader | yes | yes |
+| `PerfectHashIndex` | two ids, from the stored keys if their hashes tie | `None`, exact | any loader | yes | yes |
+| `DoubleArrayIndex` | two ids | `None`, exact | any loader | no | no |
+| `HashedDictIndex` | two ids: the build refuses a pair equal in both hashes | `None`, or a rank at `2^-bits`; exact in `id` at zero bits | any loader | yes | yes |
+| `CompactHashIndex` | two ids, **one** if equal in both hashes | `None`, or an id at `2^-bits` | any loader | yes | yes |
+| `ClosedHashIndex` | two ids, **one** if equal in both hashes | some member's id | any loader | yes | yes |
+
+"Any loader" means `from_bytes` and `load` return an error on any input; a crafted blob can still
+answer wrong ids, never ids out of range ([`SECURITY.md`](https://github.com/ilgrad/lexindex/blob/main/SECURITY.md)).
+The C ABI, the plugin and the `lexindex` command open files that may be anyone's, so they load a
+`StringIndex` the untrusted way themselves.
+
+**Equal in both hashes is why the last two rows differ.** `CompactHashIndex` and `ClosedHashIndex`
+keep no keys, so at build a pair equal in both 64-bit hashes looks like one key given twice, and
+they share an id. For random keys that is `≈ 2^-128` a pair from 17 bytes up, and `≈ 2^-64` a pair
+of one length up to 16 bytes. **Chosen keys reach it on purpose**: a birthday search found a 16-byte
+pair in 3.7·10⁹ steps on one core ([the design notes](design.md#compacthashindex)). If a stranger
+chooses the keys you build over, use an index from the first five rows. `plan(keys, exact=True)` and
+the `lexindex` command leave the last two out; a bare `plan(keys)` does not.
+
 ## `Overlay` — edits without a rebuild
 
 Every index is built once from the whole key set, so adding a single key has always meant
@@ -523,6 +555,23 @@ folded = back.compact()                              # rebuild the base; this re
 folded, remap = back.compact_with_remap()            # ...with old id -> new id, uint64 bytes
 n = back.compact_to_file("vocab2.bmp")               # the same rebuilt base, streamed to a file
 ```
+
+A table indexed by id has to move with the keys. `compact_with_remap` is what makes that one step
+rather than a re-derivation from the keys:
+
+```python
+import numpy as np
+
+folded, remap = ov.compact_with_remap()
+remap = np.frombuffer(remap, dtype="uint64")
+kept = remap != np.uint64(2**64 - 1)                 # a retired id maps to the all-ones value
+rows = np.empty((len(folded), payload.shape[1]), dtype=payload.dtype)
+rows[remap[kept].astype("int64")] = payload[kept]    # each row to its key's new id
+```
+
+Publish the two together. Readers that pair a new index with an old table get wrong rows and no
+error, so write both into a new directory and swap one symlink to it (`os.replace` on a new link is
+atomic); a reader opens the two through that link, once.
 
 An id is never reissued and removal never renumbers, so an id held elsewhere keeps its meaning until
 `compact()` — which is explicit for exactly that reason. `load` and `from_bytes` take the base class
@@ -981,7 +1030,7 @@ Not in the ABI, each additive when someone asks: `Overlay`, the mmap loaders, th
 
 ## Command line
 
-The crate ships a binary of the same name, so the choice between five indexes can be made without
+The crate ships a binary of the same name, so the choice of an index can be made without
 writing any code: `cargo install lexindex`, or `cargo run --bin lexindex --` from a checkout. The
 Python wheel carries the same program, so `pip install lexindex` installs the same `lexindex`
 command with no Rust toolchain, and `python -m lexindex` runs it where the environment's scripts
@@ -1202,7 +1251,7 @@ built from lossy bytes would hold keys the file does not.
 
 The exit code is `0`, `2` for a command line that does not parse (the usage text follows the
 message), and `1` for work that fails -- a missing file, a blob that is not one, a build the library
-refuses, a key with a line break in it that `dump` cannot write as a line. `lexindex --help` prints the whole surface; three of the five indexes need the `mph`
+refuses, a key with a line break in it that `dump` cannot write as a line. `lexindex --help` prints the whole surface; `compact`, `closed` and `perfect` need the `mph`
 feature, and a build without it says so rather than pretending.
 
 ## Benchmark

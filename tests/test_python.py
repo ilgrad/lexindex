@@ -3,6 +3,7 @@
 import array
 import ast
 import importlib.metadata
+import importlib.util
 import inspect
 import itertools
 import multiprocessing
@@ -1269,6 +1270,32 @@ def test_overlay_compact_to_file_writes_the_compacted_base(ctor, tmp_path):
     assert sorted(back.keys()) == ["apple", "cherry", "durian"]
 
 
+def test_a_payload_follows_its_keys_through_compact_with_remap():
+    """docs/usage.md's snippet: rows indexed by id, renumbered with the index they belong to."""
+    np = _numpy_or_skip()
+    keys = ["apple", "banana", "cherry", "date"]
+    base = lexindex.PerfectHashIndex(keys)
+    ov = lexindex.Overlay(base)
+    ov.add("elderberry")
+    ov.remove("banana")
+    payload = np.zeros((len(keys) + 1, 2))
+    live = [*keys, "elderberry"]
+    live.remove("banana")
+    for key in live:
+        payload[ov.id(key)] = [len(key), ord(key[0])]
+
+    folded, remap = ov.compact_with_remap()
+    remap = np.frombuffer(remap, dtype="uint64")
+    kept = remap != np.uint64(2**64 - 1)
+    rows = np.empty((len(folded), payload.shape[1]), dtype=payload.dtype)
+    rows[remap[kept].astype("int64")] = payload[kept]
+
+    assert int(kept.sum()) == len(folded) == len(live)
+    for key in live:
+        assert rows[folded.id(key)].tolist() == [len(key), ord(key[0])]
+    assert folded.id("banana") is None
+
+
 @pytest.mark.parametrize(
     "ctor", [lexindex.StringIndex, lexindex.PerfectHashIndex], ids=["string", "perfect"]
 )
@@ -2167,6 +2194,18 @@ def test_token_ids_as_keys_are_injective_and_keep_the_order_of_the_sequences():
     want = sorted(s for s in seqs if s[:2] == head)
     got = [by_key[k] for k, _ in d.prefix("".join(map(_scalar, head)))]
     assert got == want and want
+
+
+def test_the_ngram_hints_example_tells_a_certain_context_from_a_likely_one():
+    script = Path(__file__).resolve().parent.parent / "examples" / "ngram_hints.py"
+    spec = importlib.util.spec_from_file_location("ngram_hints", script)
+    example = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(example)
+    bucket, purity, count = example.bucket, example.PURITY_EDGES, example.COUNT_EDGES
+    purities = (0.1, 0.2, 0.21, 0.8, 0.81, 0.999, 1.0)
+    assert [bucket(p, purity) for p in purities] == [0, 0, 1, 3, 4, 4, 5]
+    counts = (1, 2, 3, 4, 5, 16, 17, 64, 65)
+    assert [bucket(c, count) for c in counts] == [0, 1, 2, 2, 3, 4, 5, 5, 6]
 
 
 def test_the_ngram_hints_example_runs_on_a_synthetic_shard():

@@ -1,6 +1,6 @@
 # Design
 
-lexindex is six build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
+lexindex is seven build-once / query-many indexes over a set of strings, each a flat, relocatable blob.
 
 ## Keys are bytes
 
@@ -922,7 +922,7 @@ checking but a different MPH.
 
 ## Choosing an index: `plan`
 
-Five structures with five corpus-specific size curves is a table nobody can read an answer out of.
+Seven structures with corpus-specific size curves is a table nobody can read an answer out of.
 The spread between them on one corpus is larger than the spread of any one of them across corpora,
 so the only honest recommendation is one computed on the keys in hand. `plan` does that, and the
 question it had to answer first was how much of the answer can be *derived* rather than built.
