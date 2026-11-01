@@ -751,11 +751,14 @@ one ends as the other begins share the overlap. Each slot is then one packed ent
 `[fingerprint][length − min][start]`, least significant first, at most 57 bits so one unaligned
 `u64` read holds it — and a length too long for its field escapes to an overflow table of
 `(slot, length)` pairs behind the data (bit `0x40` again). `build` keeps whichever layout is
-smaller, a tie going to the blocked one, so no key set grows. On the dictionary the index goes
+smaller, a tie going to the blocked one, so no key set grows; from 2¹⁹ keys it first asks whether
+the merge can win at all, below. On the dictionary the index goes
 10.88 → **9.25 B/key** (the arena 10.64 → 9.01). Over sixteen benchmark corpora the arena shrinks
 by 46 % on numbers, 33 % on DNA, 13–15 % on words, Chinese words, identifiers and package names,
-11 % on Russian titles, 9–10 % on hex keys and UUIDs, and 0.1–5 % on other titles; it would grow
-on URLs, domains and paths, which keep the blocked layout. An entry is 23–32 bits where a blocked
+11 % on Russian titles, 9–10 % on hex keys and UUIDs, and 0.1–5 % on other titles; at a million keys
+it would grow on URLs, domains and paths, which keep the blocked layout. That is a statement about
+the scale: URLs at ten million merge, the arena 3.2 % smaller, since the keys that are a prefix of
+another alone pay for it there. An entry is 23–32 bits where a blocked
 layout spends 10.5 (`0x11`) or 16.2 (`0x12`), so it pays only where the keys overlap. A key is
 still one slice of the data, so `key(id)` stays a zero-copy `&str` and membership one comparison.
 
@@ -777,7 +780,7 @@ link is a bisection at every node on the way down, and most walks end near the r
 hold one row of 256 steps a node, at most 4 MiB and a byte a node, gone once the links are. Keys all of
 one length have none inside another to look for. Together that took 3–16 % of a build's instructions on
 fourteen of eighteen corpora and 23 % on UUIDs, and moved the three of short keys under 2 %
-(`bench/results/step-table-counts-2026-11-01-arz-1db56f2.txt`), counted and not yet timed.
+(`bench/results/step-table-counts-2026-11-01-arz-64e5419.txt`), counted and not yet timed.
 
 The merge is 55–89 % of a build's instructions and its peak memory, and on URLs, domains and paths
 it is then thrown away. So from 2¹⁹ keys it has to earn its place first. The saving comes in two

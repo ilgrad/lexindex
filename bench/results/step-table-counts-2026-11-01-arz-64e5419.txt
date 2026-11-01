@@ -2,6 +2,7 @@
 # every thread, VmHWM over the build, bytes; the machine was busy, so no time is quoted, and fewer
 # instructions here trade bisections on small arrays for reads of a larger one. Harness as in
 # preflight-counts-2026-11-01-arz-fb09edc.txt, whose base blobs these are compared with.
+# Run on this table's commit before a rebase (1db56f2): src/arena.rs and src/superstring.rs are the same.
 ## sha256 d2089860db94c0eaad520f85aac7cf6e462247735e6299a9af412679a853093c  src/superstring.rs
 # Row: corpus mode keys base_instr table_instr table/base preflight_instr preflight+table_instr
 # preflight+table/base base_peak_kb preflight+table_peak_kb same-blob-as-fb09edc? table_instr, table/base:

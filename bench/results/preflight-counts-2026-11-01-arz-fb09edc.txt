@@ -98,3 +98,6 @@ planted s8 sets=12 merge-wins=2 left-out=8 changed=0 new/base=1.203..1.203
 planted s9 sets=24 merge-wins=15 left-out=8 changed=0 new/base=1.209..1.212
 # Without the floor and the guard on long keys, the rule would have left out one merge that wins, 0.48 %
 # on s10-heavy2k-006-s2, where keys of 2 KB hold 11 % of the bytes; the guard turns that set away.
+# Scale: urls-10000000 plain, arena bytes: blocked 543912612, merged 526509613 (-3.20 %), so URLs keep the
+# blocked layout only at a million keys; the rule asked no draw past the first, prefix bytes 4.18 a key
+# against the 2.46 the merge needs.

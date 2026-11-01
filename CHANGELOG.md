@@ -31,9 +31,10 @@ All notable changes to this project are documented here. The format follows
   `build_with_fingerprints` price it beside the blocked layout and keep the smaller, a tie to the
   blocked one, so no key set grows. Over sixteen benchmark corpora the arena shrinks by 46 % on
   numbers, 33 % on DNA, 13–15 % on words, Chinese words, identifiers and package names, 11 % on
-  Russian titles, 9–10 % on hex keys and UUIDs and 0.1–5 % on other titles; URLs, domains and
-  paths keep the blocked layout. `key(id)` is still a zero-copy `&str` and membership one
-  comparison. The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
+  Russian titles, 9–10 % on hex keys and UUIDs and 0.1–5 % on other titles; at a million keys URLs,
+  domains and paths keep the blocked layout, and URLs at ten million merge, 3.2 % smaller. `key(id)`
+  is still a zero-copy `&str` and membership one comparison.
+  The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
   bytes, deterministically, ties to the lower slot, on every thread but for serving the overlaps; it
   holds 9 bytes a trie node and a few dozen a key, freed before the arena is laid out. It costs
   build time: against 4.5.3 on fourteen corpora of up to a million keys, 1.6–3.1× on eight threads
@@ -49,10 +50,9 @@ All notable changes to this project are documented here. The format follows
   nothing (`bench/results/preflight-counts-2026-11-01-arz-fb09edc.txt`, counted on a busy machine:
   the times want a quiet one). A table over the automaton's top levels and a skip for keys of one
   length then pay most of that back, to 0.80–1.06× of a build without a preflight
-  (`bench/results/step-table-counts-2026-11-01-arz-1db56f2.txt`), to the same bytes. A key set whose
-  saving hangs on what the draws miss can keep the
-  blocked layout where merging would have been smaller, which is the
-  size 4.5 gave it, so still none grows. The header
+  (`bench/results/step-table-counts-2026-11-01-arz-64e5419.txt`), to the same bytes. A key set whose
+  saving hangs on what the draws miss can keep the blocked layout where merging would have been
+  smaller, which is the size 4.5 gave it, so still none grows. The header
   names the data's length, so a load checks that and nothing per entry: `load_mmap` stays `O(1)`, a
   truncated blob is refused, and a crafted entry is checked where it is read, as under the blocked
   layouts — it answers no key. Two golden blobs pin the encoding byte for byte and seed the
