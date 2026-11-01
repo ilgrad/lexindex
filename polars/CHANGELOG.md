@@ -11,7 +11,7 @@ moves on polars' cadence and not on the library's.
   blobs the process may hold, past which the least recently used go; unset, there is no limit, as
   before. `lexindex_polars.cache_info()` reports the entries, their bytes, the hits and the loads,
   and `lexindex_polars.clear_cache()` empties it. An evicted blob costs a later chunk a read and
-  never an answer, since a chunk holds its own reference.
+  never a wrong answer, since a chunk holds its own reference.
 
 ### Changed
 

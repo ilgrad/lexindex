@@ -87,8 +87,8 @@ keeps reading one file even if a symlink is swapped under it.
 The threads of a first query wait for one read rather than each making their own. The cache holds
 one generation a path, keyed by the same fields, and has no limit of its own. To give it one, set
 `LEXINDEX_POLARS_CACHE_BYTES`: past that many bytes of blobs, counted by their files' sizes, the
-least recently used go, and the newest stays whatever its size. Eviction costs a later chunk a read
-and never an answer.
+least recently used go, and the newest stays whatever its size. Eviction costs a later chunk a read,
+and never a wrong answer.
 
 ```python
 lexindex_polars.cache_info()  # {"entries": 1, "bytes": 2636721, "hits": 12, "loads": 1}

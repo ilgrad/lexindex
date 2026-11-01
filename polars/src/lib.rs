@@ -236,7 +236,7 @@ fn cached(key: &CacheKey) -> Option<Arc<Index>> {
 
 /// Takes a freshly read blob in, and lets the least recently used go until `budget` holds. The
 /// newest always stays, whatever its size: a chunk's own `Arc` keeps an evicted index alive to the
-/// end of that chunk, so eviction can cost a later chunk a read and never an answer.
+/// end of that chunk, so eviction can cost a later chunk a read and never a wrong answer.
 fn remember(key: CacheKey, index: Arc<Index>, bytes: u64, budget: Option<u64>) {
     let mut cache = write_cache();
     // A rebuilt blob at the same path replaces its entry rather than joining it, so the obvious
