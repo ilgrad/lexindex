@@ -42,7 +42,10 @@ bytes handed to `CompactHashIndex` or `PerfectHashIndex` come back as an `IndexE
 contain, and so does an `Overlay`'s own framing — but an overlay hands its embedded base region to
 the base's loader, so an overlay over a `StringIndex` inherits the exception below unless it is
 loaded through `from_untrusted_bytes` (in Python) or `from_bytes_with(..,
-StringIndex::from_untrusted_bytes)` (in Rust). `StringIndex` is backed by
+StringIndex::from_untrusted_bytes)` (in Rust). The C ABI and the `lexindex` command do that for you:
+they open files that may be anyone's, and through 4.5.3 they did not, so 111 crafted bytes handed to
+`lexindex_index_open` or `lexindex_index_from_bytes` aborted the calling process, and `lexindex dump`
+panicked. The Polars plugin takes the same loader from its next release. `StringIndex` is backed by
 [`fst`](https://docs.rs/fst), whose node decoder is safe Rust but not total, and the checksum in
 front of it is public and recomputable — so a blob crafted to carry a matching one reaches that
 decoder with an invalid body and can **panic** instead of returning. That is measured rather than
@@ -149,7 +152,8 @@ of those formats and is the one entry point that is not a parser for a single on
 fuzzed through `from_untrusted_bytes`, which holds it to a return value too — twice: on its own,
 and as the base region of an overlay, which is the composition a caller loading a stranger's
 overlay runs; a target over `from_bytes` would only re-find the panic above
-every week and teach us to ignore a red job. A pull request that touches the code meets the same
+every week and teach us to ignore a red job. The C ABI has a target of its own, `parse_capi`, since a
+panic there aborts the caller: it loads any bytes through the exported function and asks what loads. A pull request that touches the code meets the same
 targets before it is merged: ClusterFuzzLite, OSS-Fuzz's tooling on this repository's runners,
 fuzzes it for ten minutes across all of them, starting from the seeds.
 

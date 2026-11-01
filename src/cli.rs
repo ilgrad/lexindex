@@ -742,7 +742,8 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     };
     match info.kind {
         BlobKind::StringIndex => {
-            for (key, id) in StringIndex::load(path)?.iter() {
+            // A file named on a command line may be anyone's, and `dump` exists for old ones.
+            for (key, id) in StringIndex::load_untrusted(path)?.iter() {
                 write_key(&mut sink, &key, id)?;
             }
         }
@@ -802,7 +803,7 @@ fn dump_overlay(path: &str, info: &BlobInfo, out: &mut dyn Write) -> Result<(), 
         .map(|o| o.base_tag)
         .ok_or_else(|| Fail::Failed(format!("{path}: an overlay without a base tag")))?;
     let keys = if tag == <StringIndex as OverlayBase>::BASE_TAG {
-        Overlay::<StringIndex>::load_with(path, StringIndex::from_bytes)?.keys()
+        Overlay::<StringIndex>::load_with(path, StringIndex::from_untrusted_bytes)?.keys()
     } else {
         #[cfg(feature = "mph")]
         if tag == <PerfectHashIndex as OverlayBase>::BASE_TAG {
@@ -1807,6 +1808,16 @@ mod tests {
         assert!(out.contains("kind: HashedDictIndex\n"), "{out}");
         assert!(out.contains("keys: 3\n"), "{out}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn dump_refuses_a_crafted_transducer_instead_of_panicking() {
+        for name in ["panicking-1.0.0-string.bix", "panicking-1.0.0-overlay.ovl"] {
+            let path = format!("{}/tests/data/{name}", env!("CARGO_MANIFEST_DIR"));
+            let (code, out, err) = go(&["dump", path.as_str()], "");
+            assert_eq!((code, out.as_str()), (1, ""), "{name}: {err}");
+            assert!(err.contains("fst node"), "{name}: {err}");
+        }
     }
 
     #[test]

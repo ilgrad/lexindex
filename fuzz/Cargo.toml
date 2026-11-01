@@ -24,7 +24,7 @@ libfuzzer-sys = "0.4"
 # the rejection the old one kept disproving.
 [dependencies.lexindex]
 path = ".."
-features = ["fuzzing"]
+features = ["fuzzing", "capi"]
 
 [[bin]]
 name = "parse_compact"
@@ -78,6 +78,13 @@ bench = false
 [[bin]]
 name = "parse_overlay_untrusted"
 path = "fuzz_targets/parse_overlay_untrusted.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_capi"
+path = "fuzz_targets/parse_capi.rs"
 test = false
 doc = false
 bench = false

@@ -120,8 +120,9 @@ const char *lexindex_last_error(void);
 
 /**
  * Reads the blob at `path` (NUL-terminated) into a handle of whatever kind it holds, with the
- * validation `load` does in Rust: framing and checksums. Overlay and standalone perfect-hash blobs
- * are `LEXINDEX_STATUS_UNSUPPORTED`.
+ * validation `load_untrusted` does in Rust: framing, checksums and, for a `StringIndex`, every
+ * node of the transducer, so a file someone else wrote is a status and never an abort. Overlay and
+ * standalone perfect-hash blobs are `LEXINDEX_STATUS_UNSUPPORTED`.
  *
  * # Safety
  *

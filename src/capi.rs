@@ -265,7 +265,12 @@ unsafe fn emit(
 
 fn load(bytes: &[u8]) -> Result<Any, LexindexStatus> {
     let any = match crate::inspect(bytes).map_err(failed)?.kind {
-        BlobKind::StringIndex => Any::String(StringIndex::from_bytes(bytes).map_err(failed)?),
+        // A path or a buffer says nothing about who wrote it, and a panic here aborts the caller.
+        // `from_bytes` is the one loader a crafted blob can panic; the walk costs a pass over the
+        // transducer once, at load.
+        BlobKind::StringIndex => {
+            Any::String(StringIndex::from_untrusted_bytes(bytes).map_err(failed)?)
+        }
         BlobKind::DictIndex => Any::Dict(DictIndex::from_bytes(bytes).map_err(failed)?),
         BlobKind::CompactHashIndex => {
             Any::Compact(CompactHashIndex::from_bytes(bytes).map_err(failed)?)
@@ -321,8 +326,9 @@ pub extern "C" fn lexindex_last_error() -> *const c_char {
 }
 
 /// Reads the blob at `path` (NUL-terminated) into a handle of whatever kind it holds, with the
-/// validation `load` does in Rust: framing and checksums. Overlay and standalone perfect-hash blobs
-/// are `LEXINDEX_STATUS_UNSUPPORTED`.
+/// validation `load_untrusted` does in Rust: framing, checksums and, for a `StringIndex`, every
+/// node of the transducer, so a file someone else wrote is a status and never an abort. Overlay and
+/// standalone perfect-hash blobs are `LEXINDEX_STATUS_UNSUPPORTED`.
 ///
 /// # Safety
 ///

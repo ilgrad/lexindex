@@ -439,6 +439,27 @@ fn garbage_is_a_format_error() {
     }
 }
 
+/// A blob crafted to reach `fst`'s decoder with an invalid body panics `StringIndex::from_bytes`,
+/// and a panic here aborts the caller's process: no test binary survives to report a failure.
+#[test]
+fn a_crafted_transducer_is_a_format_error_and_not_an_abort() {
+    for name in ["panicking-1.0.0-string.bix", "unfitting-4.0.0-string.bix"] {
+        let path = format!("{}/tests/data/{name}", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).expect("the specimen");
+
+        let mut out = ptr::null_mut();
+        let status = unsafe { lexindex_index_from_bytes(bytes.as_ptr(), bytes.len(), &mut out) };
+        assert_eq!(status, LexindexStatus::Format, "{name}: from_bytes");
+        assert!(out.is_null(), "{name}: from_bytes left a handle");
+        assert!(message().contains("fst node"), "{name}: {}", message());
+
+        let c_path = CString::new(path).expect("no NUL in the path");
+        let status = unsafe { lexindex_index_open(c_path.as_ptr(), &mut out) };
+        assert_eq!(status, LexindexStatus::Format, "{name}: open");
+        assert!(out.is_null(), "{name}: open left a handle");
+    }
+}
+
 #[test]
 fn a_missing_file_is_io() {
     let path = c"/nonexistent/lexindex-capi/none.blob";

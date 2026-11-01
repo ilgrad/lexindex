@@ -42,6 +42,8 @@ jobs:
           - parse_overlay_untrusted
           - parse_mphf
           - parse_string
+          # Not a blob parser either: the C ABI, where a panic aborts the caller, over all of them.
+          - parse_capi
           # Not a blob parser: `inspect` reads a header of any of the formats above and was found
           # non-total on a crafted overlay, so the target holds it to a return value on any bytes.
           - parse_inspect
