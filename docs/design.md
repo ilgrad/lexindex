@@ -539,11 +539,14 @@ on a million paths the second and later occurrences of repeated labels are 49 % 
 coding stores. A phrase reaches 32 bytes and only the spans the sampled miner sees often enough; a
 label used two to nine times, or longer, is spelled by symbols at every occurrence. A labelled
 build counts the labels of every key's residual (the right-branching depths of a key are the
-suffix minima of the lcp array, so one stack pass over the sorted keys cuts them), keeps those
+suffix minima of the lcp array, so one stack pass over the sorted keys cuts them), admits those
 that pay — `count · (0.58 len − 2.5) > 0.6 len + 3`, two to 255 bytes, none a phrase already — and
 names them past the phrases: an id from the phrase count on is a label, a shard names it with the
 two- or three-byte reference a phrase takes, and the dynamic-programming parse takes a label
-wherever it is cheapest, not only where the trie cuts. The labels are stored once, as a nested
+wherever it is cheapest, not only where the trie cuts. Since it does not cut where the trie does,
+the count only admits a label: one parse of every entry counts what the coding really takes, and a
+label is kept on the same inequality over that count. On a million paths a quarter of the admitted
+labels fail it and 18 % are never taken, and dropping them takes 0.066 bytes a key off the file. The labels are stored once, as a nested
 `BDX3` blob at 16 keys a block over each label reversed behind a tier byte: reversal makes labels
 that end alike share the prefix the nested front coding takes out, and the tier puts the 16 384
 most used first, so that they take the two-byte references (−0.099 B/key on paths against one
@@ -553,17 +556,29 @@ those need no decode. The dictionary section is the phrases behind their own `u3
 `[nested bytes u32][nested blob][first bytes]`; the nested blob is read by the same loader as any
 other, borrowed from a mapping, and must itself be `BDX3` — no code, no labels of its own.
 
-A label is decoded through the nested index, so it costs what a nested `key` does. At block 1024 on
-a million paths, counted: a member `id` takes 8 114 instructions against `BDX3`'s 4 915 (+65 %;
-+115 % without the first bytes) and `key_into` 8 551 against 4 500; on the suite's shorter paths
-+46 % and +57 %. Nested blocks of 8 and 4 buy back a fifth and nearly half of the extra `id`
-instructions for 0.07 and 0.20 bytes a key (counted without the first bytes). So the labels are an opt-in of the build, and a choice of the blob: the build
-that tries them runs beside the plain one and keeps the smaller, byte for byte the plain blob
-where the labels lose. At block 1024: own paths 9.323 → 8.556 bytes a key (MARISA's floor is
-8.81), the suite's paths 6.511 → 6.149, URLs 7.271 → 7.053, English titles 7.212 → 6.987 (10 M:
-5.478 → 5.206), identifiers 4.860 → 4.727, domains 4.363 → 4.247, PyPI names 4.024 → 3.908;
-`words`, `dna`, `numeric`, `opaque` and `uuid` keep their blob, and a corpus spelled in a character
-code takes no labels.
+A label is decoded through the nested index, so it costs what a nested `key` does, about a thousand
+instructions. The labels a lookup reads most therefore do not stay there: they become phrases, flat
+bytes and a direct offset, with no change to the format. What a label costs
+to read is not what it is used. A token at depth `a` of an entry is read by the keys of the entry's
+scope that share more than `a` bytes with it (a microblock's entry by that microblock, a restart by
+its block), so a directory high in a block is read by every key below it: in a million lookups on a
+million paths `/mutants.out/`, used 71 times, is read about 35 000 times, and `tests/`, used 5 627
+times, about 1 900. The same parse sums those reads, and a label of up to 32 bytes goes flat where
+they reach 16 for each byte it adds, `len + 2` against `0.6 len + 3`. That is 2 851 of the 39 703
+labels on those paths; the 2 851 most read take 59 % of the reads, the 2 851 most used 19 %.
+
+At block 1024 on a million paths, counted: a member `id` takes 5 847 instructions against `BDX3`'s
+4 728 (+24 %) and `key_into` 6 628 against 4 699 (+41 %); on the suite's shorter paths +10 % and
++19 %, and on URLs, titles, identifiers, domains and package names +6–10 % and +9–16 %. Nested blocks
+of 8 and 4, or labels stored unreversed, buy the same instructions for more bytes than a flat label
+does; a table of decoded labels derived at load holds labels past 32 bytes too and reads about 6 %
+cheaper, for four to five times the load instructions. So the labels are an opt-in of the build, and
+a choice of the blob: the build that tries them runs beside the plain one and keeps the smaller,
+byte for byte the plain blob where the labels lose. At block 1024: own paths 9.323 → 8.530 bytes a
+key (MARISA's floor is 8.81), the suite's paths 6.511 → 6.111, URLs 7.271 → 6.998, English titles
+7.212 → 6.939 (10 M: 5.375 → 5.159), identifiers 4.860 → 4.693, domains 4.363 → 4.244, PyPI names
+4.024 → 3.898; `words`, `dna`, `numeric`, `opaque` and `uuid` keep their blob, and a corpus spelled
+in a character code takes no labels.
 
 ## `HashedDictIndex`
 
@@ -1058,7 +1073,7 @@ or — never — read it wrong.
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
-| `BDX5` | 4.7 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no labels writes `BDX3` |
+| `BDX5` | 4.7 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
 | `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |

@@ -464,7 +464,7 @@ fn train_threads(threads: usize) -> usize {
 
 /// Threads a build of `n` keys encodes on: one per [`PARALLEL_BLOCKS`] blocks, at most the
 /// machine's.
-fn build_threads(n: usize, block: usize) -> usize {
+pub(crate) fn build_threads(n: usize, block: usize) -> usize {
     (n.div_ceil(block) / PARALLEL_BLOCKS)
         .min(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
         .max(1)
@@ -1616,16 +1616,32 @@ impl Phrases {
         }
     }
 
-    /// The phrases of `self` with the trie labels of `keys` named past them, where any pay.
-    fn labelled<K: AsKey>(self, keys: &[K]) -> Option<Self> {
+    /// The phrases of `self` with the trie labels of `keys` named past them, where any pay: those a
+    /// lookup reads most as phrases of their own, the others nested.
+    fn labelled<K: AsKey + Sync>(
+        self,
+        keys: &[K],
+        block: usize,
+        micro: usize,
+        tables: &[Table],
+    ) -> Option<Self> {
         let phrases: Vec<Vec<u8>> = (0..self.dict.phrases())
             .map(|id| self.dict.at(id).map(<[u8]>::to_vec))
             .collect::<Option<_>>()?;
         let room = phrase::IDS_MAX - phrases.len();
-        let (labels, store) = crate::labels::select(keys, &phrases, room)?;
-        Some(Self {
-            trie: Trie::of(phrases.iter().chain(&labels).map(Vec::as_slice)),
-            dict: Dict::of(&phrases).with_labels(store),
+        let got = crate::labels::select(keys, &phrases, room, block, micro, tables)?;
+        let mut phrases = phrases;
+        phrases.extend(got.flat);
+        let dict = Dict::of(&phrases);
+        Some(match got.nested {
+            Some((labels, store)) => Self {
+                trie: Trie::of(phrases.iter().chain(&labels).map(Vec::as_slice)),
+                dict: dict.with_labels(store),
+            },
+            None => Self {
+                trie: Trie::of(phrases.iter().map(Vec::as_slice)),
+                dict,
+            },
         })
     }
 }
@@ -2073,10 +2089,11 @@ impl DictIndex {
     }
 
     /// [`build_with_block`](Self::build_with_block), trying a dictionary of the corpus's trie
-    /// labels as well and keeping it only where the blob comes out smaller (`BDX5`); otherwise the
-    /// blob is `build_with_block`'s, byte for byte. A corpus spelled in a character code takes no
-    /// labels. Not yet a stable part of the API: the format is read by every release from 4.7, and
-    /// the builder stays hidden until the lookup cost is measured.
+    /// labels as well and keeping it only where the blob comes out smaller (`BDX5`, or `BDX3` with
+    /// more phrases where a lookup reads every label often); otherwise the blob is
+    /// `build_with_block`'s, byte for byte. A corpus spelled in a character code takes no labels.
+    /// Not yet a stable part of the API: the format is read by every release from 4.7, and the
+    /// builder stays hidden until the lookup cost is measured.
     #[doc(hidden)]
     pub fn build_with_labels<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
@@ -2688,11 +2705,14 @@ impl DictIndex {
         let tables = train_shards(&pieces, train_threads(threads));
         let phrases = mine_phrases(&pieces, &tables, keys.len(), train_threads(threads));
         drop(pieces);
-        let Some(phrases) = phrases.labelled(keys) else {
+        let mined = phrases.dict.phrases();
+        let Some(phrases) = phrases.labelled(keys, block, micro, &tables) else {
             return Ok(None);
         };
         let idx = Self::from_vocabulary(keys, block, micro, threads, &tables, &phrases)?;
-        Ok(idx.phrases.has_labels().then_some(idx))
+        // A shard that settles for no phrases names no label either, flat or nested.
+        let named = idx.phrases.has_labels() || idx.phrases.phrases() > mined;
+        Ok(named.then_some(idx))
     }
 
     /// Whether the dictionary names trie labels: a `BDX5` blob.
@@ -7321,6 +7341,32 @@ mod tests {
             reframe(&mut b);
             assert!(answers_or_is_refused(&b, &keys, &probes, true));
         }
+    }
+
+    /// Where a lookup reads every label a corpus takes often enough, they are all phrases: `BDX3`,
+    /// which answers like any other.
+    #[test]
+    fn a_dictionary_whose_labels_all_went_flat_is_no_labelled_blob() {
+        let mut keys: Vec<String> = Vec::new();
+        for dir in 0..20 {
+            for name in ["first-of-the-names", "second-of-the-names", "third-of-them"] {
+                keys.extend((0..100).map(|file| format!("d{dir:02}/{name}/{file:02}")));
+            }
+        }
+        keys.sort();
+        // No symbols to spell a byte in, so that the parse takes every label it can.
+        let tables = [Table::train(&[])];
+        let (block, micro) = (256, micro_for(256));
+        let phrases = Phrases::none()
+            .labelled(&keys, block, micro, &tables)
+            .expect("the shared directories pay");
+        assert!(!phrases.dict.has_labels());
+        assert!(phrases.dict.phrases() > 0);
+        let built = DictIndex::from_vocabulary(&keys, block, micro, 1, &tables, &phrases).unwrap();
+        let blob = built.to_bytes();
+        assert_eq!(&blob[..4], MAGIC);
+        check(&built, &keys);
+        check(&DictIndex::from_bytes(&blob).unwrap(), &keys);
     }
 
     /// A `BDX5` whose labels are themselves labelled or coded is no blob this crate writes.

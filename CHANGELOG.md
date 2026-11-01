@@ -13,10 +13,12 @@ All notable changes to this project are documented here. The format follows
   are half of what front coding stores — and phrases reach only 32 bytes and the spans the sampled
   miner sees ten times. A labelled build stores every edge label that pays once, in a nested
   `BDX3` blob of reversed labels at 16 keys a block, and names it with a phrase reference; the
-  parse takes a label wherever it is cheapest. At block 1024 own paths go 9.323 → 8.556 bytes a key
-  (under MARISA's 8.81 floor), the suite's paths 6.511 → 6.149, URLs, English titles, identifiers,
-  domains and PyPI names 2.6–3.1 % smaller, ten million titles 5.0 %. A member `id` costs +46–65 %
-  instructions and `key_into` +57–90 % on paths (counted, not yet timed), so the build is opt-in
+  parse takes a label wherever it is cheapest, and what it takes decides which labels stay and
+  which a lookup reads often enough to be stored flat among the phrases. At block 1024 own paths go
+  9.323 → 8.530 bytes a key (under MARISA's 8.81 floor), the suite's paths 6.511 → 6.111, URLs,
+  English titles, identifiers, domains and PyPI names 2.7–3.8 % smaller, ten million titles 4.0 %.
+  A member `id` costs +10–26 % instructions and `key_into` +19–51 % on paths, +6–11 % and +9–21 %
+  elsewhere (counted at blocks 256 and 1024, not yet timed), so the build is opt-in
   and hidden (`DictIndex::build_with_labels`) until a quiet machine prices it, and keeps the labels
   only where the blob comes out smaller — otherwise its blob is `build_with_block`'s byte for byte.
   This release reads the format so that a later one can write it; a pinned golden blob

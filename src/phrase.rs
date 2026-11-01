@@ -876,6 +876,33 @@ fn tokens(w: &mut Scratch, n: usize) {
     }
 }
 
+/// The phrases the cheapest coding of `s` names, as `(start, id)`, at a price typical of a
+/// dictionary's first split.
+pub(crate) fn picks(
+    s: &[u8],
+    enc: &fsst::Encoder,
+    trie: &Trie,
+    w: &mut Scratch,
+    mut f: impl FnMut(usize, usize),
+) {
+    parse(
+        s,
+        enc,
+        trie,
+        Some(Prices {
+            two: 1 << 15,
+            limit: usize::MAX,
+        }),
+        w,
+    );
+    tokens(w, s.len());
+    for &(start, _, kind, id) in &w.tokens {
+        if kind == PHRASE {
+            f(start, id as usize);
+        }
+    }
+}
+
 /// Codes `s` under a shard's table and split, appending to `out`; returns the bytes written.
 pub(crate) fn encode_into(
     s: &[u8],

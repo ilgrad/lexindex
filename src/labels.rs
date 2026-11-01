@@ -13,13 +13,23 @@
 //! front coding takes out, and the tier puts the most used labels first, so that they take the
 //! two-byte references. A label's id is its rank there, past the blob's phrases.
 //!
+//! Decoding a label costs what a nested `key` does, so the labels a lookup reads most are not
+//! stored there at all: they become phrases, flat bytes and a direct offset. Those are few and
+//! their reads are many, since an entry near the top of a block is read by every key below it
+//! that shares its prefix; which they are takes a parse of the blob to know, as the count of an
+//! edge says little about the reads of the label the parse really takes.
+//!
 //! Chosen per blob: the build that tries labels keeps them only where the blob comes out smaller.
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
-use crate::dict_index::{Bytes, DictIndex, MAGIC, micro_for};
-use crate::phrase::{self, LABEL_MAX, Map};
+use crate::dict_index::{
+    AsKey, Bytes, DictIndex, MAGIC, build_threads, micro_for, shard_blocks_for,
+};
+use crate::fsst::Table;
+use crate::phrase::{self, LABEL_MAX, Map, Trie};
 use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Keys a block of the nested dictionary holds: a label is at most this many entries' decode
 /// away from a stored head.
@@ -149,19 +159,129 @@ impl Labels {
 /// Whether a label of `len` bytes used `count` times pays for its place in the dictionary: inline
 /// the symbols spend about 0.58 bytes a byte, a reference 2.5 bytes, and the nested dictionary
 /// about 0.6 bytes a byte plus 3 for the entry (`plans/research/2026-10-30-paths-size.md` §2).
-fn pays(len: usize, count: u32) -> bool {
-    let (l, c) = (len as f64, f64::from(count));
+fn pays(len: usize, count: u64) -> bool {
+    let (l, c) = (len as f64, count as f64);
     c * (0.58 * l - 2.5) > 0.6 * l + 3.0
 }
 
-/// The labels worth a dictionary over `keys`, sorted and distinct, in id order, with the nested
-/// index that stores them; `None` where none pays. `phrases` are the blob's own, which a label
-/// does not repeat, and `room` the ids left past them.
-pub(crate) fn select(
-    keys: &[impl crate::dict_index::AsKey],
+/// The reads a label has to see for each byte a flat entry costs over a nested one, in one lookup
+/// of every key: the same on every corpus and at every size, since bytes and reads both go by the
+/// key. At 16 the blob is at most 0.04 bytes a key larger than one with nothing flat, and at block
+/// 1024 smaller on six corpora of eight. At 8 domain names grow past the blob with nothing flat by
+/// more than the labels' reads repay.
+const READS_A_BYTE: f64 = 16.0;
+
+/// Whether a label of `len` bytes read `reads` times earns a phrase's flat entry, `len + 2` bytes
+/// against a nested label's `0.6 len + 3`.
+fn earns_flat(len: usize, reads: u64) -> bool {
+    len <= phrase::MAX && reads as f64 >= READS_A_BYTE * (0.4 * len as f64 - 1.0).max(1.0)
+}
+
+/// What a blob's parse does with a label: how many times it names the label, and how many entries'
+/// worth of lookups then read it, in one lookup of every key.
+#[derive(Default)]
+struct Usage {
+    picks: AtomicU64,
+    reads: AtomicU64,
+}
+
+/// The [`Usage`] of each of `kept`, from the cheapest coding of every entry of the blob, in the
+/// entries' own runs. A token at depth `a` of entry `i` is read by the keys of the entry's scope
+/// from `i` on that share more than `a` bytes with it: a microblock's entry by that microblock, a
+/// restart by its whole block. A key that shares exactly `a` is told apart by the label's first
+/// byte, which costs no decode.
+fn usage<K: AsKey + Sync>(
+    keys: &[K],
+    lcps: &[usize],
+    block: usize,
+    micro: usize,
+    tables: &[Table],
+    phrases: &[Vec<u8>],
+    kept: &[(&[u8], u32)],
+) -> Vec<Usage> {
+    let n = keys.len();
+    let trie = Trie::of(
+        phrases
+            .iter()
+            .map(Vec::as_slice)
+            .chain(kept.iter().map(|&(l, _)| l)),
+    );
+    let uses: Vec<Usage> = kept.iter().map(|_| Usage::default()).collect();
+    let shard = shard_blocks_for(block);
+    let blocks = n.div_ceil(block);
+    let parse = |range: std::ops::Range<usize>| {
+        let mut w = phrase::Scratch::default();
+        let mut encoder = None;
+        for b in range {
+            let table = (b / shard).min(tables.len() - 1);
+            if encoder.as_ref().is_none_or(|&(at, _)| at != table) {
+                encoder = Some((table, tables[table].encoder()));
+            }
+            let Some((_, encoder)) = &encoder else {
+                unreachable!("set above");
+            };
+            let start = b * block;
+            let end = (start + block).min(n);
+            for i in start + 1..end {
+                let off = i - start;
+                let (shared, scope) = if off % micro == 0 {
+                    let shared = lcps[i + 1 - micro..=i].iter().copied().min();
+                    (shared.unwrap_or(0), end)
+                } else {
+                    (lcps[i], (start + (off / micro + 1) * micro).min(end))
+                };
+                let suffix = &keys[i].key_bytes()[shared..];
+                phrase::picks(suffix, encoder, &trie, &mut w, |at, id| {
+                    let Some(used) = id.checked_sub(phrases.len()).map(|rank| &uses[rank]) else {
+                        return;
+                    };
+                    let depth = shared + at;
+                    let reach = lcps[i + 1..scope].iter().take_while(|&&l| l > depth);
+                    used.picks.fetch_add(1, Ordering::Relaxed);
+                    used.reads
+                        .fetch_add(1 + reach.count() as u64, Ordering::Relaxed);
+                });
+            }
+        }
+    };
+    let threads = build_threads(n, block);
+    if threads == 1 {
+        parse(0..blocks);
+    } else {
+        std::thread::scope(|scope| {
+            for t in 0..threads {
+                let parse = &parse;
+                scope.spawn(move || parse(blocks * t / threads..blocks * (t + 1) / threads));
+            }
+        });
+    }
+    uses
+}
+
+/// What a dictionary names past its phrases.
+pub(crate) struct Selected {
+    /// The labels read often enough to be phrases themselves, most used first.
+    pub(crate) flat: Vec<Vec<u8>>,
+    /// The others in id order, past the flat ones, with the nested index that stores them; `None`
+    /// when every label went flat.
+    pub(crate) nested: Option<(Vec<Vec<u8>>, Labels)>,
+}
+
+/// The labels worth a dictionary over `keys`, sorted and distinct; `None` where none pays.
+/// `phrases` are the blob's own, which a label does not repeat, `room` the ids left past them, and
+/// `block`, `micro` and `tables` the blob's layout and its shards' symbols.
+///
+/// An edge's count only admits a label. What keeps it is the parse's own picks: on a million paths
+/// a quarter of the admitted labels do not pay for themselves once the parse has chosen, and 18 %
+/// are never taken at all, since a phrase or a run of symbols is as cheap.
+pub(crate) fn select<K: AsKey + Sync>(
+    keys: &[K],
     phrases: &[Vec<u8>],
     room: usize,
-) -> Option<(Vec<Vec<u8>>, Labels)> {
+    block: usize,
+    micro: usize,
+    tables: &[Table],
+) -> Option<Selected> {
     let n = keys.len();
     if n < 2 || room == 0 {
         return None;
@@ -208,7 +328,7 @@ pub(crate) fn select(
     let known: std::collections::HashSet<&[u8]> = phrases.iter().map(Vec::as_slice).collect();
     let mut kept: Vec<(&[u8], u32)> = counts
         .into_iter()
-        .filter(|&(l, c)| pays(l.len(), c) && !known.contains(l))
+        .filter(|&(l, c)| pays(l.len(), u64::from(c)) && !known.contains(l))
         .collect();
     if kept.is_empty() {
         return None;
@@ -216,10 +336,31 @@ pub(crate) fn select(
     // The most used first, ties in byte order, so that the cut is a function of the keys.
     kept.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     kept.truncate(room.min(phrase::IDS_MAX));
-    let mut stored: Vec<Vec<u8>> = kept
+    let uses = usage(keys, &lcps, block, micro, tables, phrases, &kept);
+    let mut used: Vec<(&[u8], u64, u64)> = kept
+        .iter()
+        .zip(&uses)
+        .map(|(&(l, _), u)| {
+            let picks = u.picks.load(Ordering::Relaxed);
+            (l, picks, u.reads.load(Ordering::Relaxed))
+        })
+        .filter(|&(l, picks, _)| pays(l.len(), picks))
+        .collect();
+    if used.is_empty() {
+        return None;
+    }
+    used.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    let (flat, rest): (Vec<_>, Vec<_>) = used
+        .into_iter()
+        .partition(|&(l, _, reads)| earns_flat(l.len(), reads));
+    let flat = flat.into_iter().map(|(l, ..)| l.to_vec()).collect();
+    if rest.is_empty() {
+        return Some(Selected { flat, nested: None });
+    }
+    let mut stored: Vec<Vec<u8>> = rest
         .iter()
         .enumerate()
-        .map(|(rank, &(l, _))| {
+        .map(|(rank, &(l, ..))| {
             let mut s = Vec::with_capacity(l.len() + 1);
             s.push(if rank < HOT { TIER_HOT } else { TIER_COLD });
             s.extend(l.iter().rev());
@@ -236,7 +377,11 @@ pub(crate) fn select(
         .map(|s| s[1..].iter().rev().copied().collect())
         .collect();
     let firsts = SharedBytes::from_owned(labels.iter().map(|l| l[0]).collect());
-    Some((labels, Labels::of(index, firsts)?))
+    let store = Labels::of(index, firsts)?;
+    Some(Selected {
+        flat,
+        nested: Some((labels, store)),
+    })
 }
 
 #[cfg(test)]
@@ -250,6 +395,43 @@ mod tests {
             out.extend_from_slice(&word.to_le_bytes()[..kept]);
         }
         out
+    }
+
+    /// With no symbols to spell a byte in, so that the parse takes every label it can.
+    fn chosen(keys: &[String], phrases: &[Vec<u8>]) -> Option<Selected> {
+        select(
+            keys,
+            phrases,
+            1 << 20,
+            256,
+            micro_for(256),
+            &[Table::train(&[])],
+        )
+    }
+
+    fn every_label(got: &Selected) -> Vec<Vec<u8>> {
+        let mut all = got.flat.clone();
+        if let Some((labels, _)) = &got.nested {
+            all.extend_from_slice(labels);
+        }
+        all
+    }
+
+    /// Six directories holding the same files and the same subdirectory. A file's name is read by
+    /// the one key that ends in it; the subdirectory's by every key under it.
+    fn path_list() -> Vec<String> {
+        let mut keys: Vec<String> = Vec::new();
+        for dir in 0..6 {
+            for file in 0..60u64 {
+                let name = file.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                keys.push(format!("/{dir}/{name:024x}"));
+            }
+            for file in 0..40 {
+                keys.push(format!("/{dir}/shared-dir/{file:02}"));
+            }
+        }
+        keys.sort();
+        keys
     }
 
     #[test]
@@ -268,22 +450,13 @@ mod tests {
 
     #[test]
     fn the_edges_of_a_path_list_become_labels_in_id_order() {
-        let mut keys: Vec<String> = Vec::new();
-        for dir in ["alpha", "beta", "gamma", "delta"] {
-            for f in 0..40 {
-                keys.push(format!("/usr/share/{dir}/component-{f:02}/index.html"));
-            }
-        }
-        keys.sort();
-        let (labels, store) = select(&keys, &[], 1 << 20).expect("repeated labels pay");
+        let keys = path_list();
+        let got = chosen(&keys, &[]).expect("repeated labels pay");
+        let (labels, store) = got.nested.as_ref().expect("a file's name is read once");
         assert_eq!(labels.len(), store.len());
         for (rank, label) in labels.iter().enumerate() {
             assert_eq!(store.with(rank, spelled).as_deref(), Some(&label[..]));
         }
-        assert!(
-            labels.iter().any(|l| l.ends_with(b"/index.html")),
-            "{labels:?}"
-        );
         assert!(store.with(labels.len(), |_| ()).is_none());
     }
 
@@ -293,14 +466,89 @@ mod tests {
             .map(|i| format!("k{i:03}/tail-shared-by-all"))
             .collect();
         keys.sort();
-        let (with, _) = select(&keys, &[], 1 << 20).expect("the tail pays");
+        let with = every_label(&chosen(&keys, &[]).expect("the tail pays"));
         let tail = with
             .iter()
             .find(|l| l.ends_with(b"tail-shared-by-all"))
             .cloned();
         let tail = tail.expect("the shared tail is a label");
         let without =
-            select(&keys, std::slice::from_ref(&tail), 1 << 20).map_or_else(Vec::new, |(l, _)| l);
+            chosen(&keys, std::slice::from_ref(&tail)).map_or_else(Vec::new, |s| every_label(&s));
         assert!(!without.contains(&tail));
+    }
+
+    /// An edge whose bytes the symbol table spells in one code is counted and admitted, but a
+    /// reference to it, at two bytes, is never the cheapest coding.
+    #[test]
+    fn a_label_the_parse_never_takes_is_not_stored() {
+        let mut keys: Vec<String> = Vec::new();
+        for c in (b'A'..=b'Z').map(char::from) {
+            keys.push(format!("{c}z"));
+            keys.extend((0..10).map(|d| format!("{c}abcdefgh{d}")));
+        }
+        keys.sort();
+        let edge = b"abcdefgh".to_vec();
+        assert!(pays(edge.len(), 26));
+        let raw = chosen(&keys, &[]).expect("with no symbols the edge is worth naming");
+        assert!(every_label(&raw).contains(&edge));
+        let pieces: Vec<&[u8]> = keys.iter().map(String::as_bytes).collect();
+        let tables = [Table::train(&pieces)];
+        let got = select(&keys, &[], 1 << 20, 256, micro_for(256), &tables);
+        assert!(got.is_none_or(|s| !every_label(&s).contains(&edge)));
+    }
+
+    /// Microblocks of two: `b-label-name-1` opens one, a restart its block reads, and the key below
+    /// it shares the label; `b0` shares only the byte before it, which the first byte settles. The
+    /// other two occurrences are read by their own keys alone.
+    #[test]
+    fn a_label_is_read_by_the_keys_of_its_scope_that_share_it() {
+        let keys = [
+            "a",
+            "b-label-name-0",
+            "b-label-name-1",
+            "b-label-name-2",
+            "b0",
+            "c-label-name-0",
+            "d",
+        ]
+        .map(String::from);
+        let mut lcps = vec![0; keys.len() + 1];
+        for i in 1..keys.len() {
+            lcps[i] = crate::dict_index::lcp(keys[i - 1].as_bytes(), keys[i].as_bytes());
+        }
+        let kept: [(&[u8], u32); 2] = [(b"-label-name-", 0), (b"never-in-the-keys", 0)];
+        let uses = usage(&keys, &lcps, 8, 2, &[Table::train(&[])], &[], &kept);
+        let got = |u: &Usage| {
+            (
+                u.picks.load(Ordering::Relaxed),
+                u.reads.load(Ordering::Relaxed),
+            )
+        };
+        assert_eq!(got(&uses[0]), (3, 4));
+        assert_eq!(got(&uses[1]), (0, 0));
+    }
+
+    #[test]
+    fn a_label_goes_flat_on_its_reads_and_only_up_to_a_phrase_long() {
+        assert!(earns_flat(2, 16));
+        assert!(!earns_flat(2, 15));
+        assert!(earns_flat(8, 36));
+        assert!(!earns_flat(8, 35));
+        assert!(earns_flat(phrase::MAX, 1 << 20));
+        assert!(!earns_flat(phrase::MAX + 1, 1 << 40));
+    }
+
+    #[test]
+    fn the_labels_a_lookup_reads_most_go_flat_and_no_others() {
+        let keys = path_list();
+        let got = chosen(&keys, &[]).expect("repeated labels pay");
+        assert!(
+            got.flat.iter().any(|l| l.ends_with(b"shared-dir/")),
+            "{:?}",
+            got.flat
+        );
+        let (labels, _) = got.nested.as_ref().expect("a file's name is read once");
+        assert!(labels.iter().all(|l| !l.ends_with(b"shared-dir/")));
+        assert!(got.flat.iter().all(|l| !labels.contains(l)));
     }
 }
