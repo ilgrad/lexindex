@@ -2171,6 +2171,7 @@ mod tests {
     /// Keys that hold nothing and overlap nowhere lose the merge; the draws say so, with
     /// fingerprints or without, and the blob is the blocked one the merge would have left.
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn a_merge_that_cannot_win_is_left_out_and_the_bytes_stay() {
         for fingerprints in [false, true] {
             assert_eq!(preflight(bracketed(1 << 14), fingerprints), (true, false));
@@ -2184,6 +2185,7 @@ mod tests {
 
     /// Windows of one text overlap in all but a byte: the first draw is already enough.
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn a_merge_that_wins_is_run() {
         let mut x = 0x2545_F491_4F6C_DD1Du64;
         let text: Vec<u8> = (0..1 << 15)
@@ -2206,6 +2208,7 @@ mod tests {
     /// 64 at the eighth: the line through the draws has to carry that back to the whole set. Here
     /// every draw alone falls short of the merge's price, and the merge wins by half of it.
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn a_saving_between_pairs_is_carried_to_the_whole_set() {
         let inner = |i: usize| format!("<{i:020}>");
         let mut keys: Vec<String> = (0..1 << 15).map(inner).collect();
@@ -2216,6 +2219,7 @@ mod tests {
     /// Half the keys a proper prefix of another: a draw has none of that saving to read, and the
     /// exact count is what wins it.
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn prefix_contained_keys_are_counted_on_the_whole_set() {
         let mut keys = bracketed(1 << 14);
         keys.extend((0..1 << 14).map(|i| format!("<{i}")));
@@ -2225,6 +2229,7 @@ mod tests {
     /// One key holding every other is drawn or not, and a draw that misses it reads nothing:
     /// a set whose long keys hold this much is not asked about.
     #[test]
+    #[cfg_attr(miri, ignore = "merges thousands of keys")]
     fn keys_too_long_for_a_draw_to_stand_for_run_the_merge() {
         let mut keys = bracketed(1 << 14);
         keys.push(keys.concat());
