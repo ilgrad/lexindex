@@ -41,6 +41,35 @@ pub(crate) struct Labels {
     firsts: SharedBytes,
 }
 
+/// A label as the nested dictionary spells it: reversed, with eight bytes of padding behind it.
+///
+/// Read a word at a time from its far end, so that no byte is moved before it is needed: a compare
+/// that stops inside the first word has reversed nothing.
+#[derive(Clone, Copy)]
+pub(crate) struct Label<'a> {
+    stored: &'a [u8],
+    len: usize,
+}
+
+impl Label<'_> {
+    pub(crate) fn len(self) -> usize {
+        self.len
+    }
+
+    /// The label's bytes from `at`, which is below its length, up to eight of them, as a
+    /// little-endian word, and how many there are: what [`crate::dict_index`]'s compare and store
+    /// take.
+    #[inline(always)]
+    pub(crate) fn word(self, at: usize) -> (u64, usize) {
+        let left = self.len - at;
+        let (start, kept) = if left >= 8 { (left - 8, 8) } else { (0, left) };
+        let chunk = self.stored[start..]
+            .first_chunk::<8>()
+            .expect("the padding is eight bytes");
+        (u64::from_be_bytes(*chunk) >> (8 * (8 - kept)), kept)
+    }
+}
+
 thread_local! {
     /// What a label decodes into before it is read: a lookup that meets one allocates nothing.
     static SCRATCH: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
@@ -86,17 +115,20 @@ impl Labels {
         self.index.len()
     }
 
-    /// Label `rank` handed to `f` as it reads forward; `None` past the labels or on one this crate
-    /// did not write.
+    /// Label `rank` handed to `f`; `None` past the labels or on one this crate did not write.
     #[inline]
-    pub(crate) fn with<R>(&self, rank: usize, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+    pub(crate) fn with<R>(&self, rank: usize, f: impl FnOnce(Label<'_>) -> R) -> Option<R> {
         SCRATCH.with(|cell| {
             let mut buf = cell.take();
             let got = self.index.key_bytes_into(rank as u64, &mut buf)
                 && (2..=LABEL_MAX + 1).contains(&buf.len());
             let out = got.then(|| {
-                buf[1..].reverse();
-                f(&buf[1..])
+                let len = buf.len() - 1;
+                buf.extend_from_slice(&[0; 8]);
+                f(Label {
+                    stored: &buf[1..],
+                    len,
+                })
             });
             cell.set(buf);
             out
@@ -211,6 +243,29 @@ pub(crate) fn select(
 mod tests {
     use super::*;
 
+    fn spelled(label: Label<'_>) -> Vec<u8> {
+        let mut out = Vec::new();
+        while out.len() < label.len() {
+            let (word, kept) = label.word(out.len());
+            out.extend_from_slice(&word.to_le_bytes()[..kept]);
+        }
+        out
+    }
+
+    #[test]
+    fn a_label_is_spelled_whatever_its_length() {
+        for len in 1..=40usize {
+            let label: Vec<u8> = (0..len as u8).map(|b| b + 1).collect();
+            let mut stored: Vec<u8> = label.iter().rev().copied().collect();
+            stored.extend_from_slice(&[0; 8]);
+            let got = spelled(Label {
+                stored: &stored,
+                len,
+            });
+            assert_eq!(got, label);
+        }
+    }
+
     #[test]
     fn the_edges_of_a_path_list_become_labels_in_id_order() {
         let mut keys: Vec<String> = Vec::new();
@@ -223,10 +278,7 @@ mod tests {
         let (labels, store) = select(&keys, &[], 1 << 20).expect("repeated labels pay");
         assert_eq!(labels.len(), store.len());
         for (rank, label) in labels.iter().enumerate() {
-            assert_eq!(
-                store.with(rank, <[u8]>::to_vec).as_deref(),
-                Some(&label[..])
-            );
+            assert_eq!(store.with(rank, spelled).as_deref(), Some(&label[..]));
         }
         assert!(
             labels.iter().any(|l| l.ends_with(b"/index.html")),

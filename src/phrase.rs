@@ -15,7 +15,7 @@
 //! never earn their dictionary there.
 
 use crate::fsst::{self, ESCAPE, Table};
-use crate::labels::Labels;
+use crate::labels::{Label, Labels};
 use crate::packed::Alphabet;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -352,7 +352,7 @@ impl Dict {
     /// Label `id` — an id past the phrases — handed to `f` as it reads; `None` past the labels or
     /// on one this crate did not write.
     #[inline]
-    pub(crate) fn label<R>(&self, id: usize, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+    pub(crate) fn label<R>(&self, id: usize, f: impl FnOnce(Label<'_>) -> R) -> Option<R> {
         self.labels.as_deref()?.with(id.checked_sub(self.count)?, f)
     }
 

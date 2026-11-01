@@ -3526,7 +3526,7 @@ fn decode_tiered(
 /// [`compare_tiered`] where ids past the phrases name trie labels: a label is decoded out of the
 /// nested dictionary and compared eight bytes at a time like a phrase. A loop of its own, so that a
 /// blob without labels runs the loop it always ran.
-#[inline(never)]
+#[inline(always)]
 fn compare_labelled(
     table: &Table,
     split: Split,
@@ -3562,54 +3562,68 @@ fn compare_labelled(
             break;
         };
         i += took;
-        let answer = if let Some((phrase, plen)) = dict.chunk(id) {
-            compare_bytes(&phrase[..plen], rest, &mut c)
-        } else {
-            let Some(first) = dict.label_first(id) else {
-                break;
-            };
-            // An entry's suffix starts where its key branches, so a label is told from the probe
-            // at its first byte about half the time, and that compare needs no decode.
-            if c == rest.len() {
-                return (c, Ordering::Greater);
+        if let Some((phrase, plen)) = dict.chunk(id) {
+            // As in `compare_tiered`: whole loads off the padding.
+            let mut k = 0;
+            for word in phrase.chunks_exact(8) {
+                if k >= plen {
+                    break;
+                }
+                let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+                if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
+                    return answer;
+                }
+                k += 8;
             }
-            let theirs = rest.word(c) as u8;
-            if first != theirs {
-                return (c, first.cmp(&theirs));
-            }
-            match dict.label(id, |label| compare_bytes(label, rest, &mut c)) {
-                Some(answer) => answer,
-                None => break,
-            }
+            continue;
+        }
+        let Some(first) = dict.label_first(id) else {
+            break;
         };
-        if let Some(answer) = answer {
-            return answer;
+        // An entry's suffix starts where its key branches, so a label is told from the probe
+        // at its first byte about half the time, and that compare needs no decode.
+        if c == rest.len() {
+            return (c, Ordering::Greater);
+        }
+        let theirs = rest.word(c) as u8;
+        if first != theirs {
+            return (c, first.cmp(&theirs));
+        }
+        match compare_label(dict, id, rest, &mut c) {
+            Some(None) => {}
+            Some(Some(answer)) => return answer,
+            None => break,
         }
     }
     ended(c, rest)
 }
 
-/// [`compare_word`] over a run of bytes of any length, eight at a time.
-#[inline(always)]
-fn compare_bytes(bytes: &[u8], rest: Rest<'_>, c: &mut usize) -> Option<(usize, Ordering)> {
-    let mut chunks = bytes.chunks_exact(8);
-    for word in &mut chunks {
-        let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
-        if let Some(answer) = compare_word(word, 8, rest, c) {
-            return Some(answer);
+/// Label `id` against `rest` from `c`, out of line: the decode is what a labelled compare spends
+/// most on, and the walk around it is the one every entry takes. `None` on a label this crate did
+/// not write.
+#[inline(never)]
+fn compare_label(
+    dict: &Dict,
+    id: usize,
+    rest: Rest<'_>,
+    c: &mut usize,
+) -> Option<Option<(usize, Ordering)>> {
+    dict.label(id, |label| {
+        let mut at = 0;
+        while at < label.len() {
+            let (word, kept) = label.word(at);
+            if let Some(answer) = compare_word(word, kept, rest, c) {
+                return Some(answer);
+            }
+            at += kept;
         }
-    }
-    let tail = chunks.remainder();
-    if tail.is_empty() {
-        return None;
-    }
-    let mut word = [0u8; 8];
-    word[..tail.len()].copy_from_slice(tail);
-    compare_word(u64::from_le_bytes(word), tail.len(), rest, c)
+        None
+    })
 }
 
-/// [`decode_tiered`] where ids past the phrases name trie labels. Appends rather than writing into
-/// reserved room, since a label is up to [`phrase::LABEL_MAX`] bytes for the two codes that name it.
+/// [`decode_tiered`] where ids past the phrases name trie labels. The same fixed-width stores between
+/// labels, with the room asked for again after each one: a label is up to [`phrase::LABEL_MAX`]
+/// bytes for the two codes that name it, too wide to size the room by the stream.
 #[inline(never)]
 fn decode_labelled(
     table: &Table,
@@ -3621,35 +3635,64 @@ fn decode_labelled(
 ) -> bool {
     let start = out.len();
     let mut i = 0;
-    while i < packed.len() && out.len() - start < cap {
-        if let Some((id, took)) = split.read_at(packed, i) {
-            if let Some((phrase, len)) = dict.chunk(id) {
-                out.extend_from_slice(&phrase[..len]);
-            } else if dict
-                .label(id, |label| out.extend_from_slice(label))
-                .is_none()
-            {
-                out.truncate(start);
-                return false;
+    loop {
+        let wanted = cap.saturating_sub(out.len() - start);
+        let Some(room) = (packed.len() - i).checked_mul(phrase::MAX / 2) else {
+            out.truncate(start);
+            return false;
+        };
+        let mut room = Room::of(out, room.min(wanted.saturating_add(phrase::MAX)));
+        let mut o = 0;
+        let mut label = None;
+        while i < packed.len() && o < wanted {
+            if let Some((id, took)) = split.read_at(packed, i) {
+                let Some((phrase, len)) = dict.chunk(id) else {
+                    label = Some(id);
+                    i += took;
+                    break;
+                };
+                room.put(o, phrase);
+                o += len;
+                i += took;
+            } else if packed[i] == ESCAPE {
+                let Some(&b) = packed.get(i + 1) else {
+                    out.truncate(start);
+                    return false;
+                };
+                room.byte(o, b);
+                o += 1;
+                i += 2;
+            } else {
+                let Some((word, len)) = table.symbol(packed[i]) else {
+                    out.truncate(start);
+                    return false;
+                };
+                room.put(o, &word.to_le_bytes());
+                o += len;
+                i += 1;
             }
-            i += took;
-        } else if packed[i] == ESCAPE {
-            let Some(&b) = packed.get(i + 1) else {
-                out.truncate(start);
-                return false;
-            };
-            out.push(b);
-            i += 2;
-        } else {
-            let Some((word, len)) = table.symbol(packed[i]) else {
-                out.truncate(start);
-                return false;
-            };
-            out.extend_from_slice(&word.to_le_bytes()[..len]);
-            i += 1;
+        }
+        // SAFETY: the loop wrote every byte below `o`.
+        unsafe { commit(out, o) };
+        let Some(id) = label else {
+            return true;
+        };
+        let read = dict.label(id, |label| {
+            let mut room = Room::of(out, label.len() + 8);
+            let mut at = 0;
+            while at < label.len() {
+                let (word, kept) = label.word(at);
+                room.put(at, &word.to_le_bytes());
+                at += kept;
+            }
+            // SAFETY: the loop wrote every byte below `at`, which is the label's length.
+            unsafe { commit(out, at) };
+        });
+        if read.is_none() {
+            out.truncate(start);
+            return false;
         }
     }
-    true
 }
 
 impl DictIndex {
