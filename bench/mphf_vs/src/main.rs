@@ -846,6 +846,10 @@ fn main() {
                     rounds
                         .iter()
                         .map(|(was, now)| {
+                            // Small enough that the allocator's tracking never saw it.
+                            if was.seq.is_nan() {
+                                return "no tracked page".to_string();
+                            }
                             format!(
                                 "{:.0} MB {:.2} -> {:.2} GB/s {:.2} -> {:.2} ns",
                                 was.mb, was.seq, now.seq, was.rnd, now.rnd
