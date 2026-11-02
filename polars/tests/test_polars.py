@@ -38,6 +38,7 @@ def built(tmp_path):
         "compact": _save(lx.CompactHashIndex(KEYS, 2), tmp_path, "keys.bch"),
         "closed": _save(lx.ClosedHashIndex(KEYS), tmp_path, "keys.bcl"),
         "perfect": _save(lx.PerfectHashIndex(KEYS), tmp_path, "keys.bmp"),
+        "double_array": _save(lx.DoubleArrayIndex(KEYS), tmp_path, "keys.bda"),
     }
 
 
@@ -52,7 +53,8 @@ def _ids(path, expr, keys=KEYS):
 
 
 KEY_STORING = ["string", "dict", "hashed", "perfect"]
-EXACT = [*KEY_STORING, "compact"]  # compact's fingerprint is 16 bits here, so no stranger passes
+# compact's fingerprint is 16 bits here, so no stranger passes
+EXACT = [*KEY_STORING, "double_array", "compact"]
 
 
 @pytest.mark.parametrize("kind", EXACT)
@@ -79,7 +81,7 @@ def test_id_unchecked_agrees_with_id_on_members(blobs, kind):
     )
 
 
-@pytest.mark.parametrize("kind", ["string", "dict"])
+@pytest.mark.parametrize("kind", ["string", "dict", "double_array"])
 def test_id_unchecked_refuses_a_searching_index(blobs, kind):
     with pytest.raises(pl.exceptions.ComputeError, match="no unchecked lookup"):
         _ids(blobs[kind], lambda c, p: c.lexindex.id_unchecked(p))
@@ -115,9 +117,9 @@ def test_key_is_null_past_the_end(blobs, kind):
     assert out["id"].to_list() == [None]
 
 
-@pytest.mark.parametrize("kind", ["compact", "closed"])
+@pytest.mark.parametrize("kind", ["compact", "closed", "double_array"])
 def test_key_refuses_an_index_without_keys(blobs, kind):
-    with pytest.raises(pl.exceptions.ComputeError, match="stores no keys"):
+    with pytest.raises(pl.exceptions.ComputeError, match="no reverse lookup"):
         pl.DataFrame({"id": [0]}).select(pl.col("id").lexindex.key(blobs[kind]))
 
 
@@ -406,6 +408,16 @@ def test_a_crafted_string_index_is_refused_by_name(name):
         _ids(SPECIMENS / name, lambda c, p: c.lexindex.id(p))
     assert name in str(refused.value)
     assert "panicked" not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "name", ["golden-4.6.0-perfect-merged.bmp", "golden-4.6.0-perfect-merged-fp.bmp"]
+)
+def test_a_merged_arena_answers_every_key(name):
+    path = SPECIMENS / name
+    reference = lx.PerfectHashIndex.load(path)
+    keys = [reference.key(i) for i in range(len(reference))]
+    assert _ids(path, lambda c, p: c.lexindex.id(p), keys) == list(range(len(keys)))
 
 
 def test_a_non_string_column_names_its_type(blobs):

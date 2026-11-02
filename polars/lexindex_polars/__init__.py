@@ -123,10 +123,10 @@ class LexindexExpr:
     def id(self, index: str | Path, *, pin: bool = True) -> pl.Expr:
         """Map a string column to the index's ids, null where a key is not in it.
 
-        Exact on ``StringIndex``, ``DictIndex``, ``PerfectHashIndex`` and a ``HashedDictIndex``
-        built at zero fingerprint bits; on the fingerprint kinds a stranger passes at about
-        ``2^-fingerprint_bits``. A ``ClosedHashIndex`` has no membership to check and answers every
-        key with an id.
+        Exact on ``StringIndex``, ``DictIndex``, ``DoubleArrayIndex``, ``PerfectHashIndex`` and a
+        ``HashedDictIndex`` built at zero fingerprint bits; on the fingerprint kinds a stranger
+        passes at about ``2^-fingerprint_bits``. A ``ClosedHashIndex`` has no membership to check
+        and answers every key with an id.
         """
         return register_plugin_function(
             plugin_path=_LIB,
@@ -142,7 +142,7 @@ class LexindexExpr:
         A key the index does not hold gets some id below the key count rather than null, which is
         the price of skipping the compare. Available on the hash-backed kinds only
         (``CompactHashIndex``, ``ClosedHashIndex``, ``PerfectHashIndex``, ``HashedDictIndex``); on
-        the two that answer by searching, ``id`` is already exact and this raises.
+        the three that answer by searching, ``id`` is already exact and this raises.
         """
         return register_plugin_function(
             plugin_path=_LIB,
@@ -170,8 +170,8 @@ class LexindexExpr:
     def key(self, index: str | Path, *, pin: bool = True) -> pl.Expr:
         """Map an id column back to its keys, null where the index has no such id.
 
-        The two fingerprint kinds store no keys and raise; the rest answer from the same blob the
-        forward direction uses.
+        The two fingerprint kinds store no keys and a ``DoubleArrayIndex`` walks one way only, so
+        those three raise; the rest answer from the same blob the forward direction uses.
         """
         return register_plugin_function(
             plugin_path=_LIB,

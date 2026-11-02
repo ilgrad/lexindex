@@ -30,9 +30,10 @@
 //!
 //! # What a kind cannot answer
 //!
-//! The six index types do not all answer all four questions: a keyless hash has no `key`, a closed
-//! hash cannot tell membership, and only the three hash-backed kinds have an unchecked `id`. Those
-//! are `ComputeError`s naming the kind and the blob, raised when the expression runs.
+//! The seven index types do not all answer all four questions: a keyless hash and a double array
+//! have no `key`, a closed hash cannot tell membership, and only the four hash-backed kinds have an
+//! unchecked `id`. Those are `ComputeError`s naming the kind and the blob, raised when the expression
+//! runs.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -43,8 +44,8 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::UNIX_EPOCH;
 
 use lexindex::{
-    BlobKind, ClosedHashIndex, CompactHashIndex, DictIndex, HashedDictIndex, PerfectHashIndex,
-    StringIndex,
+    BlobKind, ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, HashedDictIndex,
+    PerfectHashIndex, StringIndex,
 };
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
@@ -58,6 +59,7 @@ enum Index {
     Closed(ClosedHashIndex),
     Perfect(PerfectHashIndex),
     HashedDict(HashedDictIndex),
+    DoubleArray(DoubleArrayIndex),
 }
 
 impl Index {
@@ -70,6 +72,7 @@ impl Index {
             Index::Closed(_) => "ClosedHashIndex",
             Index::Perfect(_) => "PerfectHashIndex",
             Index::HashedDict(_) => "HashedDictIndex",
+            Index::DoubleArray(_) => "DoubleArrayIndex",
         }
     }
 
@@ -81,10 +84,11 @@ impl Index {
             Index::Closed(i) => Some(u64::from(i.id(key))),
             Index::Perfect(i) => i.id(key).map(u64::from),
             Index::HashedDict(i) => i.id(key),
+            Index::DoubleArray(i) => i.id(key),
         }
     }
 
-    /// The three hash-backed kinds skip the membership check; a search cannot.
+    /// The four hash-backed kinds skip the membership check; a search cannot.
     fn has_unchecked(&self) -> bool {
         matches!(
             self,
@@ -100,7 +104,7 @@ impl Index {
             Index::HashedDict(i) => i.id_unchecked(key),
             // Unreachable: `has_unchecked` gates every call. `u64::MAX` rather than a plausible
             // id, so a future caller that skips the gate gets an answer it cannot mistake for one.
-            Index::String(_) | Index::Dict(_) => u64::MAX,
+            Index::String(_) | Index::Dict(_) | Index::DoubleArray(_) => u64::MAX,
         }
     }
 
@@ -116,13 +120,18 @@ impl Index {
             Index::Compact(i) => i.contains(key),
             Index::Perfect(i) => i.contains(key),
             Index::HashedDict(i) => i.contains(key),
+            Index::DoubleArray(i) => i.contains(key),
             Index::Closed(_) => false,
         }
     }
 
-    /// The two fingerprint kinds keep no keys, so they have no reverse lookup.
-    fn stores_keys(&self) -> bool {
-        !matches!(self, Index::Compact(_) | Index::Closed(_))
+    /// The two fingerprint kinds keep no keys, and a double array walks one way only, so none of
+    /// the three has a reverse lookup.
+    fn has_reverse_lookup(&self) -> bool {
+        !matches!(
+            self,
+            Index::Compact(_) | Index::Closed(_) | Index::DoubleArray(_)
+        )
     }
 
     fn key(&self, id: u64) -> Option<String> {
@@ -134,7 +143,7 @@ impl Index {
                 .ok()
                 .and_then(|id| i.key(id))
                 .map(str::to_owned),
-            Index::Compact(_) | Index::Closed(_) => None,
+            Index::Compact(_) | Index::Closed(_) | Index::DoubleArray(_) => None,
         }
     }
 }
@@ -288,6 +297,9 @@ fn parse(bytes: &[u8], path: &Path) -> PolarsResult<Index> {
         }
         BlobKind::HashedDictIndex => {
             Index::HashedDict(HashedDictIndex::from_bytes(bytes).map_err(fail)?)
+        }
+        BlobKind::DoubleArrayIndex => {
+            Index::DoubleArray(DoubleArrayIndex::from_bytes(bytes).map_err(fail)?)
         }
         BlobKind::Mphf => {
             polars_bail!(ComputeError: "lexindex: {} is a standalone perfect hash, not an index", path.display())
@@ -443,9 +455,9 @@ fn lexindex_contains(inputs: &[Series], kwargs: Args) -> PolarsResult<Series> {
 #[polars_expr(output_type=String)]
 fn lexindex_key(inputs: &[Series], kwargs: Args) -> PolarsResult<Series> {
     let index = index_for(&kwargs)?;
-    if !index.stores_keys() {
+    if !index.has_reverse_lookup() {
         polars_bail!(
-            ComputeError: "lexindex: a {} stores no keys, so it has no reverse lookup ({})",
+            ComputeError: "lexindex: a {} has no reverse lookup ({})",
             index.kind(), kwargs.path,
         );
     }

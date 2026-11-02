@@ -41,13 +41,14 @@ chunk and thread.
 
 ## What each index kind answers
 
-An index blob names its own kind, so one expression serves all six and refuses what a kind cannot
+An index blob names its own kind, so one expression serves all seven and refuses what a kind cannot
 do — with a `ComputeError` naming the kind and the file, not a wrong answer.
 
 | kind | `id` | `id_unchecked` | `contains` | `key` |
 |---|---|---|---|---|
 | `DictIndex` | exact | — | exact | ✅ |
 | `StringIndex` | exact | — | exact | ✅ |
+| `DoubleArrayIndex` | exact | — | exact | — |
 | `HashedDictIndex` | exact at 0 bits, else `2^-bits` | ✅ | same | ✅ |
 | `PerfectHashIndex` | exact | ✅ | exact | ✅ |
 | `CompactHashIndex` | `2^-bits` | ✅ | `2^-bits` | — |
