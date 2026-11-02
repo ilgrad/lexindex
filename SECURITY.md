@@ -114,9 +114,9 @@ array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; 
 for an instruction the x86-64 baseline lacks, whose one obligation is that the CPU has it — the
 perfect hash's `Remap::get_popcnt`, its remap lookup with `popcnt`, and the double array's
 `place_avx2` and `slots_malformed_avx2`, its build's placement and its load's slot check with AVX2.
-There are sixty-nine `unsafe` blocks:
+There are seventy-two `unsafe` blocks:
 thirteen memory maps, counting the writable one `build_to_file` uses on
-a temporary file it created itself; seven in the huge-page allocator; six that write into a `Vec`'s
+a temporary file it created itself; seven in the huge-page allocator; eight that write into a `Vec`'s
 spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
 class that chose the load; four in `SharedBytes`, two of them cache prefetches; eleven
 `get_unchecked` or `assume_init` reads across the perfect hash, the dictionary's stair and the
@@ -130,7 +130,9 @@ code of a `BDX4` blob decodes, which is whole characters out of a table built fr
 whatever the blob holds — a debug build checks it, and so the fuzz targets do; three calls into
 those builds, on x86-64 only and each only once `is_x86_feature_detected!` has found its
 instruction — every other target and Miri run the portable build, and tests hold each pair to
-the same answers; and twelve in the double array's walks, which read a slot, the code table
+the same answers; one SSE2 compare over a transducer state's transitions, part of the x86-64
+baseline, whose loads read sixteen bytes each of a window that holds sixteen or thirty-two; and
+twelve in the double array's walks, which read a slot, the code table
 and a character of the text unchecked, and
 decode a text into buffers on the stack. A slot's bound is what the load's walk over every slot
 settles — no row runs past the array, no id past the keys — and a debug build checks every slot
@@ -138,8 +140,9 @@ read against the array's length, so the fuzz targets do that too. Four `unsafe i
 `SharedBytes` and `Pages` `Send` and `Sync` — the first reads, through its pointer, bytes that an immutable buffer or a read-only map
 owns; the second owns its table outright, as a `Vec` does — and `pages::Zeroed` is an
 `unsafe trait`, implemented for the four unsigned integers, whose all-zero bit pattern is a value.
-The `python` feature adds twelve more blocks, each a one-line call from a `load_mmap*` binding
-into the `unsafe fn` of the same name, forwarding the same obligation to the Python caller. The
+The `python` feature adds thirteen more blocks: twelve one-line calls from a `load_mmap*` binding
+into the `unsafe fn` of the same name, forwarding the same obligation to the Python caller, and
+one write of ids over a writable buffer the caller passed, past a check that they fit. The
 `capi` feature adds the eleven `unsafe extern "C"` functions that take a pointer, five internal
 `unsafe fn`s that read those pointers, and twenty-two `unsafe` blocks under them, each reading or
 writing memory the C caller vouched for in the function's `# Safety` line — the header carries it
