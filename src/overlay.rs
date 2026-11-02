@@ -668,9 +668,9 @@ impl OverlayBase for crate::PerfectHashIndex {
 }
 
 #[cfg(feature = "mph")]
-#[cfg(feature = "mph")]
 impl OverlayExact for crate::PerfectHashIndex {}
 
+#[cfg(feature = "mph")]
 impl OverlayKeys for crate::PerfectHashIndex {
     fn base_key(&self, id: u64) -> Option<String> {
         self.key(u32::try_from(id).ok()?).map(str::to_owned)
