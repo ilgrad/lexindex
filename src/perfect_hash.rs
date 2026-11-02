@@ -2121,10 +2121,10 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    /// Keys equal in both 64-bit hashes, which every keyless hash index must take for one key, are
-    /// two keys here: the stored keys decide.
+    /// The pair every keyless hash index took for one key under 4.x, two keys here under any hash:
+    /// the stored keys decide.
     #[test]
-    fn keys_sharing_both_hashes_keep_their_own_ids() {
+    fn the_pair_equal_in_both_4x_hashes_keeps_its_own_ids() {
         let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
         let mut keys: Vec<String> = (0..500).map(|i| format!("filler-{i:03}")).collect();
         keys.extend([a.to_string(), b.to_string()]);

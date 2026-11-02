@@ -936,12 +936,11 @@ impl CompactHashIndex {
     /// 16 bits, 29.9 at 32 (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
     /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
     /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys
-    /// colliding in **both** 64-bit hashes at once: they get one id. For random keys that is
-    /// `≈ 2^-128` a pair from 17 bytes up, but `≈ 2^-64` for two keys of one length up to 16
-    /// bytes — an expected 2.7·10⁻⁶ merges among 10⁷ such keys of one length, 2.7 % among 10⁹.
-    /// Someone who chooses the keys makes such a pair with a birthday search of ~2^32 hash steps,
-    /// minutes on one core, and in a few dozen tries with keys of 97 bytes or more; over keys a
-    /// third party submits, use [`PerfectHashIndex`](crate::PerfectHashIndex), which stores them.
+    /// colliding in **both** 64-bit hashes at once: they get one id. For random keys of any length
+    /// that is `≈ 2^-127` a pair — an expected 2.9·10⁻²¹ merges among 10⁹ keys. No search for such a
+    /// pair is known below the ~2^64 steps of a birthday; that is no proof, since the hash is not
+    /// cryptographic, so over keys a third party submits use
+    /// [`PerfectHashIndex`](crate::PerfectHashIndex), which stores them.
     /// Keys colliding in the slot hash alone are served exactly, from a side table keyed by the
     /// full second hash.
     pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
@@ -2164,14 +2163,24 @@ mod tests {
         assert_eq!(pulled, 0, "the iterator must not be consumed");
     }
 
-    /// The limit the build documents: keys equal in both 64-bit hashes are one key to it, as a key
-    /// written twice is.
+    /// One key to every 4.x build, which could not tell them from a key written twice; two now. The
+    /// limit stands for whatever pair is equal in both hashes, and none is known: no test can
+    /// reach it through keys.
     #[test]
-    fn keys_sharing_both_hashes_are_one_key() {
+    fn the_pair_equal_in_both_4x_hashes_is_two_keys() {
         let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
         let idx = CompactHashIndex::build([a, b, "filler"], 1).unwrap();
+        assert_eq!(idx.len(), 3);
+        assert_ne!(idx.id(a), idx.id(b));
+    }
+
+    /// The limit the build documents: a pair of hashes given twice is one key, as a key written
+    /// twice is, because the build holds nothing else to tell them apart by.
+    #[test]
+    fn equal_hash_pairs_are_one_key() {
+        let idx =
+            CompactHashIndex::build_from_pairs(vec![(11, 22), (11, 22), (33, 44)], 1).unwrap();
         assert_eq!(idx.len(), 2);
-        assert_eq!(idx.id(a), idx.id(b));
     }
 
     /// Side ids are handed out verbatim by `id()`, so the loader must pin them to the tail range

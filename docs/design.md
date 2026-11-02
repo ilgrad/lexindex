@@ -61,7 +61,7 @@ fingerprint per key and no stored keys at all**:
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
 - **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
-  computed from a **second** 64-bit hash of the key — the same two lane products folded under other
+  computed from a **second** 64-bit hash of the key — the same 128-bit state merged under other
   constants, one multiply over the slot hash. `id(key)` accepts the slot only if the query's
   fingerprint matches the stored one. The two hashes are uncorrelated for well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
   fingerprint about `2^-fingerprint_bits` — the tunable false-positive rate — ≈`2^-8k` by design:
@@ -101,14 +101,17 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
 one silent case left is a pair colliding in *both* 64-bit hashes at once, which is indistinguishable
-from a duplicate key by construction and collapses into one entry. For random keys of 17 bytes or
-more that is `≈ 2^-128` a pair. Up to 16 bytes the hash's second lane product is a constant, so both
-hashes are functions of one 64-bit product and the length: `≈ 2^-64` a pair of one length, or
-an expected 0.027 merges among 10⁹ such keys of one length. Chosen keys do it on purpose: a
-birthday search on that product found two 16-byte keys equal in both hashes in 3.7·10⁹ steps on one core, and from 97
-bytes a block that starts with the lane state zeroes a product, so the next eight bytes reach
-neither hash. `HashedDictIndex` knows its keys are distinct and refuses such a pair at build;
-`PerfectHashIndex` stores its keys and serves both. The `2^-128` rate also
+from a duplicate key by construction and collapses into one entry. For random keys of any length
+that is `≈ 2^-127` a pair: an expected 2.9·10⁻²¹ merges among 10⁹ keys (`n(n-1)/2 · 2^-127`, Maxima and
+PARI/GP agreeing). Both hashes merge one 128-bit state, two products unfolded up to 16 bytes and three
+per 32-byte block above. No search for such a pair is known below the 2^64 steps of a birthday.
+That is the end of a known attack, not a proof: the hash is not cryptographic, and its rounds keep
+some algebra. Through 4.x it was cheaper: up to 16 bytes both hashes were functions of one 64-bit
+product and the length, `≈ 2^-64` a pair of one length, and a birthday search found two 16-byte
+keys equal in both in 3.7·10⁹ steps on one core; from 97 bytes a block that started with the lane
+state zeroed a product, so the next eight bytes reached neither hash.
+`HashedDictIndex` knows its keys are distinct and refuses such a pair at build;
+`PerfectHashIndex` stores its keys and serves both. The `2^-127` rate also
 holds only if no *structured* difference collides in both, and the hash through 1.1 did not manage
 it: its per-word round, a 64-bit multiply and a rotate, kept a difference in the top bits of one
 word confined to the top bits of the product and dropped it into byte 3 of the next word, where
@@ -703,10 +706,10 @@ at 5.0 — `Overlay` does not take it, its ids being ranks, and the C ABI leaves
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
 gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/mphf.rs`), keyed on
 a **version-stable** 64-bit hash of each string (branch-free over three length
-classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, two
-multiply lanes over 32-byte blocks beyond — mixed by 64×64→128 multiplies folded to 64 bits with
-the length; 3.9 ns a dictionary word against 7.3 for the hash 2.0–3.x shipped, whose word loop and
-tail switch mispredicted on every length change — not
+classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, 32-byte
+blocks beyond — read into a 128-bit state by 64×64→128 multiplies left unfolded, and merged with the
+length; 3.9 ns a dictionary word in 4.0, not yet re-timed for 5.0's state, against 7.3 for the hash
+2.0–3.x shipped, whose word loop and tail switch mispredicted on every length change — not
 `std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is

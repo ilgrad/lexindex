@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The key hash carries 128 bits of state on every path.** Through 4.x both hashes of a key up to
+  16 bytes were functions of one folded 64-bit product and the length, so a birthday search found two
+  keys equal in both in 3.7·10⁹ steps, and from 97 bytes a block spelling the lane state erased the
+  next eight bytes from both. `CompactHashIndex` and `ClosedHashIndex` gave such keys one id. Now two
+  products to 16 bytes and three per 32-byte block stay unfolded until the merge, every word reaches
+  two of them, and the one product a text key can zero keeps its factors. A random pair shares both
+  hashes at `≈ 2^-127` at any length, an expected 2.9·10⁻²¹ merges among 10⁹ keys, and no chosen pair
+  is known below a birthday's 2^64 steps. That is no proof. Retired operations a `PerfectHashIndex::id`
+  hit, counted and **not yet timed**: urls 180 → 243, paths 233 → 339, uuid 175 → 234, domains
+  170 → 186, numeric 170 → 181. Every hash index's blob changes with it.
+
 ### Added
 
 - **`lexindex build --index hashed` and `--index double-array`.** The command line could inspect both

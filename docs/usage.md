@@ -529,9 +529,9 @@ The C ABI, the plugin and the `lexindex` command open files that may be anyone's
 
 **Equal in both hashes is why the last two rows differ.** `CompactHashIndex` and `ClosedHashIndex`
 keep no keys, so at build a pair equal in both 64-bit hashes looks like one key given twice, and
-they share an id. For random keys that is `≈ 2^-128` a pair from 17 bytes up, and `≈ 2^-64` a pair
-of one length up to 16 bytes. **Chosen keys reach it on purpose**: a birthday search found a 16-byte
-pair in 3.7·10⁹ steps on one core ([the design notes](design.md#compacthashindex)). If a stranger
+they share an id. For random keys of any length that is `≈ 2^-127` a pair. No chosen pair is known
+since 5.0, where 4.x gave one to a birthday search in 3.7·10⁹ steps; the hash is not cryptographic
+and carries no proof ([the design notes](design.md#compacthashindex)), so if a stranger
 chooses the keys you build over, use an index from the first five rows. `plan(keys, exact=True)` and
 the `lexindex` command leave the last two out; a bare `plan(keys)` does not.
 
