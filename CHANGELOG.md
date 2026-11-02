@@ -80,6 +80,10 @@ All notable changes to this project are documented here. The format follows
   and answers every key.
 ### Fixed
 
+- **A standalone `Mphf` blob whose level sits at the top of `u64` is refused at load.** Its keys and
+  slice did not fit in 64 bits together, so a debug build, which the fuzz targets are, panicked on
+  the add in a lookup under a header that checksums; a release build wrapped and stayed below `n`.
+  The indexes were not affected, since each holds the perfect hash to its own key count.
 - **A crafted `StringIndex` blob no longer aborts a C caller's process.** `lexindex_index_open` and
   `lexindex_index_from_bytes` loaded it with `from_bytes`, whose known panic on such a blob reaches
   `extern "C"` as an abort: 111 bytes did it, `tests/data/panicking-1.0.0-string.bix`, against the

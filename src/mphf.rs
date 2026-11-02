@@ -777,13 +777,14 @@ impl Level {
 
     /// A level of this geometry, before its seeds are found.
     fn of(n: u64, buckets: u64, slice: u64, mode_bits: u32) -> Self {
+        let shift = stride_for(slice, mode_bits).trailing_zeros();
         Self {
             n,
             buckets,
             slice,
-            shift: stride_for(slice, mode_bits).trailing_zeros(),
+            shift,
             mode_bits,
-            shipped: mode_bits == MODE_BITS && slice == SLICE,
+            shipped: mode_bits == MODE_BITS && slice == SLICE && shift == Self::SHIPPED.shift,
             seeds: Pages::default(),
         }
     }
@@ -2778,8 +2779,14 @@ impl V2 {
         let mut entries = 0usize;
         for i in 0..level_count {
             let (ln, buckets, slice) = (at(7 + i * 3), at(8 + i * 3), at(9 + i * 3));
-            // `value` wraps once, so it is below `ln` only while a slice fits inside the range.
-            if ln == 0 || buckets == 0 || !slice.is_power_of_two() || slice > ln {
+            // `value` wraps once, so it is below `ln` only while a slice fits inside the range,
+            // and it adds an offset in the slice to a value below `ln` before it does.
+            if ln == 0
+                || buckets == 0
+                || !slice.is_power_of_two()
+                || slice > ln
+                || slice > u64::MAX - ln
+            {
                 return Err(IndexError::Format("mphf: a level's shape is inconsistent"));
             }
             // A level's stride is its slice shifted down by the mode bits, so a slice narrower
@@ -4708,6 +4715,35 @@ mod tests {
     /// Field `j` of level row `i`: keys, buckets, slice.
     fn with_row(blob: &[u8], i: usize, j: usize, value: u64) -> Vec<u8> {
         with_scalar(blob, 7 + i * 3 + j, value)
+    }
+
+    /// A value is a slice's offset added to a scaled hash below the level's keys, so a level whose
+    /// keys and slice do not fit in 64 bits together has no sum to wrap: a debug build panicked on
+    /// the add, under a header that checksums.
+    #[test]
+    fn a_level_at_the_top_of_the_range_is_refused() {
+        let frame = |keys: u64| {
+            let mut b = vec![0u8; header_len(1)];
+            b[..4].copy_from_slice(MAGIC);
+            b[4..6].copy_from_slice(&FORMAT.to_le_bytes());
+            b[6] = 2;
+            for (i, v) in [keys, 1, 0, 0, 0, 0, 0, keys, 3, SLICE]
+                .into_iter()
+                .enumerate()
+            {
+                b[8 + i * 8..16 + i * 8].copy_from_slice(&v.to_le_bytes());
+            }
+            let hl = b.len();
+            let check = crate::blob::hash_bytes(&b[..hl - 4]) as u32;
+            b[hl - 4..].copy_from_slice(&check.to_le_bytes());
+            b.extend_from_slice(&[0xFF; 3]);
+            b
+        };
+        let fits = u64::MAX - SLICE;
+        let m = Mphf::from_bytes(&frame(fits)).unwrap();
+        assert!(m.index(u64::MAX) < fits);
+        assert!(Mphf::from_bytes(&frame(fits + 1)).is_err());
+        assert!(Mphf::from_bytes(&frame(u64::MAX)).is_err());
     }
 
     /// A block's sample is a `u16` above its super-block's, which is sound because the low bits
