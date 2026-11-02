@@ -44,6 +44,7 @@ needs — what the index must be able to do. They narrow what `plan` ranks and w
   --reverse    key(id) as well as id(key)
   --ordered    ids in lexicographic order, and in-order iteration
   --prefix     prefix and range queries (an ordered index)
+  --common-prefix  every key that is a prefix of a query, and the longest
   --fuzzy      Levenshtein and subsequence queries
   --exact      a non-member must be answered as one, barring the probabilistic indexes
 
@@ -63,8 +64,8 @@ options (`--name value` or `--name=value`):
                  for. The nanoseconds are a model of this crate's own machine, never a
                  measurement of yours
   --index NAME   auto (default), dict, string, compact, closed, perfect, hashed,
-                 double-array. The last two are never what auto picks: hashed is
-                 HashedDictIndex with no fingerprint, so exact, and both hold the corpus
+                 double-array. hashed is HashedDictIndex with no fingerprint, so exact;
+                 it and double-array hold the corpus to build
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
   --stream MODE  when to build straight to the blob instead of holding the corpus:
@@ -124,10 +125,6 @@ enum Accepts {
 enum Choice {
     Auto,
     One(Kind),
-    /// `Kind` cannot name this one before 5.0, so the planner does not rank it.
-    Hashed,
-    /// As [`Hashed`](Self::Hashed).
-    DoubleArray,
 }
 
 /// One subcommand's arguments, parsed.
@@ -195,8 +192,8 @@ fn choice(name: &str) -> Result<Choice, Fail> {
         "compact" => Choice::One(Kind::Compact),
         "closed" => Choice::One(Kind::Closed),
         "perfect" => Choice::One(Kind::Perfect),
-        "hashed" => Choice::Hashed,
-        "double-array" => Choice::DoubleArray,
+        "hashed" => Choice::One(Kind::Hashed),
+        "double-array" => Choice::One(Kind::DoubleArray),
         other => return Err(Fail::Usage(format!("--index: no such index `{other}`"))),
     })
 }
@@ -346,13 +343,14 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             "--closed-vocabulary" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
                 closed_vocabulary = true;
             }
-            "--reverse" | "--ordered" | "--prefix" | "--fuzzy" | "--exact"
+            "--reverse" | "--ordered" | "--prefix" | "--common-prefix" | "--fuzzy" | "--exact"
                 if !matches!(accepts, Accepts::Nothing | Accepts::Sections) =>
             {
                 let flag = match name {
                     "--reverse" => &mut cmd.needs.reverse,
                     "--ordered" => &mut cmd.needs.ordered,
                     "--prefix" => &mut cmd.needs.prefix,
+                    "--common-prefix" => &mut cmd.needs.common_prefix,
                     "--fuzzy" => &mut cmd.needs.fuzzy,
                     _ => &mut cmd.needs.exact,
                 };
@@ -480,26 +478,6 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
     let big = stream_above(cmd.stream, path);
-    let unranked = match cmd.index {
-        Choice::Hashed => Some("HashedDictIndex"),
-        Choice::DoubleArray => Some("DoubleArrayIndex"),
-        Choice::Auto | Choice::One(_) => None,
-    };
-    if let Some(name) = unranked {
-        if big.is_some() {
-            note_no_stream(path, name, err)?;
-        }
-        let (keys, blank) = read_keys(path, stdin)?;
-        note_blank(path, blank, err)?;
-        let n = if cmd.index == Choice::Hashed {
-            build_hashed(&keys, dest)?
-        } else {
-            let index = DoubleArrayIndex::build(&keys)?;
-            index.save(dest)?;
-            index.len()
-        };
-        return note_written(name, n, dest, err);
-    }
     // What to build, decided before the keys are read wherever it can be. `--index auto` over a
     // file prices it with `plan_file`, which does not hold it either, so a ranked build streams as
     // readily as a named one; standard input is the exception, since it cannot be priced and then
@@ -515,7 +493,6 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             Some((best.kind, best.block))
         }
         Choice::Auto => None,
-        Choice::Hashed | Choice::DoubleArray => unreachable!("built above"),
     };
     if let Some((kind, block)) = decided {
         if big.is_some() && can_stream(kind) {
@@ -553,20 +530,6 @@ fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fai
     .map_err(io_fail)
 }
 
-#[cfg(feature = "mph")]
-fn build_hashed(keys: &[String], dest: &Path) -> Result<usize, Fail> {
-    let index = HashedDictIndex::from_dict(DictIndex::build(keys)?, 0)?;
-    index.save(dest)?;
-    Ok(index.len())
-}
-
-#[cfg(not(feature = "mph"))]
-fn build_hashed(_: &[String], _: &Path) -> Result<usize, Fail> {
-    Err(Fail::Failed(
-        "HashedDictIndex needs the `mph` feature, which this build does not have".to_string(),
-    ))
-}
-
 /// What was written, and what it cost a key.
 fn note_written(name: &str, n: usize, dest: &Path, err: &mut dyn Write) -> Result<(), Fail> {
     let bytes = std::fs::metadata(dest)
@@ -589,6 +552,7 @@ fn can_stream(kind: Kind) -> bool {
         Kind::Compact | Kind::Closed => cfg!(feature = "mph"),
         // Its file build fills the arena through a mapping.
         Kind::Perfect => cfg!(all(feature = "mph", feature = "mmap")),
+        _ => false,
     }
 }
 
@@ -698,10 +662,9 @@ fn build_streamed(
         Kind::Closed => ClosedHashIndex::build_to_file(src.keys(), dest)?,
         #[cfg(all(feature = "mph", feature = "mmap"))]
         Kind::Perfect => PerfectHashIndex::build_to_file(dest, || src.keys())?,
-        #[cfg(not(all(feature = "mph", feature = "mmap")))]
         other => {
             return Err(Fail::Failed(format!(
-                "{} has no streaming build without the `mph` and `mmap` features",
+                "{} has no streaming build in this configuration",
                 other.name()
             )));
         }
@@ -716,6 +679,12 @@ fn build_and_save(
     dest: &Path,
     block: Option<usize>,
 ) -> Result<usize, Fail> {
+    let dict = || -> Result<DictIndex, IndexError> {
+        match block {
+            Some(b) => DictIndex::build_with_block(keys, b),
+            None => DictIndex::build(keys),
+        }
+    };
     let n = match kind {
         Kind::String => {
             let index = StringIndex::build(keys)?;
@@ -723,10 +692,19 @@ fn build_and_save(
             index.len()
         }
         Kind::Dict => {
-            let index = match block {
-                Some(b) => DictIndex::build_with_block(keys, b)?,
-                None => DictIndex::build(keys)?,
-            };
+            let index = dict()?;
+            index.save(dest)?;
+            index.len()
+        }
+        Kind::DoubleArray => {
+            let index = DoubleArrayIndex::build(keys)?;
+            index.save(dest)?;
+            index.len()
+        }
+        #[cfg(feature = "mph")]
+        Kind::Hashed => {
+            // No fingerprint, which is what `plan` prices `HashedDictIndex` at.
+            let index = HashedDictIndex::from_dict(dict()?, 0)?;
             index.save(dest)?;
             index.len()
         }
@@ -749,7 +727,9 @@ fn build_and_save(
             index.save(dest)?;
             index.len()
         }
-        #[cfg(not(feature = "mph"))]
+        // `Kind` is `#[non_exhaustive]`, which binds only outside the crate that defines it, as
+        // `cmd_dump` says of `BlobKind`.
+        #[allow(unreachable_patterns)]
         other => {
             return Err(Fail::Failed(format!(
                 "{} needs the `mph` feature, which this build does not have",
@@ -1441,7 +1421,9 @@ mod tests {
         let marked: Vec<&str> = err.lines().filter(|l| l.starts_with('*')).collect();
         assert_eq!(marked.len(), 1, "one winner: {err}");
         assert_eq!(
-            err.lines().filter(|l| l.contains("at block ")).count(),
+            err.lines()
+                .filter(|l| l.contains(" DictIndex") && l.contains("at block "))
+                .count(),
             3,
             "one row a priced block: {err}"
         );
@@ -1456,6 +1438,47 @@ mod tests {
             quoted,
             "the blob is the line that was marked: {err}"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `--index auto` may pick either kind that has no streaming build, and the blob is the kind the
+    /// ladder marked.
+    #[test]
+    fn auto_can_pick_a_hashed_dictionary_and_a_double_array() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(2_000));
+        let asked: [(&str, &[&str]); 2] = [
+            (
+                "DoubleArrayIndex",
+                &["--common-prefix", "--objective", "latency"],
+            ),
+            (
+                "HashedDictIndex",
+                &[
+                    "--closed-vocabulary",
+                    "--reverse",
+                    "--prefix",
+                    "--objective",
+                    "latency",
+                ],
+            ),
+        ];
+        for (name, needs) in asked {
+            if name == "HashedDictIndex" && !cfg!(feature = "mph") {
+                continue;
+            }
+            let blob = dir.join(format!("{name}.bin"));
+            let mut args = vec!["build", keys.as_str(), blob.to_str().unwrap()];
+            args.extend_from_slice(needs);
+            let (code, _, err) = go(&args, "");
+            assert_eq!(code, 0, "{err}");
+            let won = err.lines().find(|l| l.starts_with('*')).unwrap();
+            assert!(won.contains(name), "{err}");
+            assert!(err.contains(&format!(": {name} over ")), "{err}");
+            let (code, out, err) = go(&["inspect", blob.to_str().unwrap()], "");
+            assert_eq!(code, 0, "{err}");
+            assert!(out.contains(name), "{out}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

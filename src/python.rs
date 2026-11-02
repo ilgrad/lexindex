@@ -3542,7 +3542,7 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
-#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false, objective=crate::Objective::Memory))]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, common_prefix=false, fuzzy=false, exact=false, objective=crate::Objective::Memory))]
 // The arguments are the keyword arguments; pyo3 binds them one by one, so a parameter object here
 // would be a dict the caller has to build rather than a call they can read.
 #[allow(clippy::too_many_arguments)]
@@ -3552,6 +3552,7 @@ fn py_plan<'py>(
     reverse: bool,
     ordered: bool,
     prefix: bool,
+    common_prefix: bool,
     fuzzy: bool,
     exact: bool,
     #[pyo3(from_py_with = objective_of)] objective: crate::Objective,
@@ -3561,6 +3562,7 @@ fn py_plan<'py>(
         reverse,
         ordered,
         prefix,
+        common_prefix,
         fuzzy,
         exact,
     };

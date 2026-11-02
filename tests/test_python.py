@@ -1782,6 +1782,8 @@ def test_plan_prices_every_index_that_answers_the_question():
         "ClosedHashIndex",
         "CompactHashIndex",
         "DictIndex",
+        "DoubleArrayIndex",
+        "HashedDictIndex",
         "PerfectHashIndex",
         "StringIndex",
     }
@@ -1790,12 +1792,15 @@ def test_plan_prices_every_index_that_answers_the_question():
     by_kind = {e["kind"]: e for e in p["estimates"]}
     assert by_kind["StringIndex"]["bytes"] == len(lexindex.StringIndex(keys).to_bytes())
     # The block is a candidate of its own, so the dictionary is three rows, each the build at its
-    # own block -- and every other kind carries no block at all.
+    # own block -- the hashed one rides on the default, and every other kind carries no block.
     dicts = {e["block"]: e for e in p["estimates"] if e["kind"] == "DictIndex"}
     assert sorted(dicts) == [32, 256, 1024]
     for block, e in dicts.items():
         assert e["bytes"] == len(lexindex.DictIndex(keys, block).to_bytes())
-    assert [e["block"] for e in p["estimates"] if e["kind"] != "DictIndex"] == [None] * 4
+    assert by_kind["HashedDictIndex"]["block"] == 256
+    assert by_kind["DoubleArrayIndex"]["bytes"] == len(lexindex.DoubleArrayIndex(keys).to_bytes())
+    others = [e for e in p["estimates"] if e["kind"] not in ("DictIndex", "HashedDictIndex")]
+    assert [e["block"] for e in others] == [None] * 5
     assert dicts[256]["bytes_per_key"] == dicts[256]["bytes"] / 200
     assert p["mean_length"] == 7.0
     assert not p["close"] and not p["thin"]
@@ -1807,16 +1812,25 @@ def test_plan_leaves_out_what_cannot_answer():
     assert [e["kind"] for e in lexindex.plan(keys, fuzzy=True)["estimates"]] == ["StringIndex"]
     assert {e["kind"] for e in lexindex.plan(keys, prefix=True)["estimates"]} == {
         "DictIndex",
+        "HashedDictIndex",
         "StringIndex",
     }
     assert {e["kind"] for e in lexindex.plan(keys, ordered=True)["estimates"]} == {
         "DictIndex",
+        "HashedDictIndex",
+        "StringIndex",
+    }
+    assert {e["kind"] for e in lexindex.plan(keys, common_prefix=True)["estimates"]} == {
+        "DictIndex",
+        "DoubleArrayIndex",
+        "HashedDictIndex",
         "StringIndex",
     }
     # Exact membership rules out the two probabilistic indexes, and that is where their size comes
     # from; a reverse lookup rules out nothing further that survived it.
     assert {e["kind"] for e in lexindex.plan(keys, exact=True, reverse=True)["estimates"]} == {
         "DictIndex",
+        "HashedDictIndex",
         "PerfectHashIndex",
         "StringIndex",
     }
@@ -1843,12 +1857,13 @@ def test_plan_ranks_a_workload_by_what_it_asks():
     def best(objective):
         return lexindex.plan(keys, objective=objective)["best"]["kind"]
 
-    # A prefix query asks for an ordered index, and which one depends on the query.
-    assert best({"common_prefix": 9, "hits": 1}) == "StringIndex"
-    assert best({"prefix": 9, "hits": 1}) == "DictIndex"
+    # A walk of the query is a double array's question, and a prefix count an ordered index's: a
+    # closed vocabulary's hits there cost a hash.
+    assert best({"common_prefix": 9, "hits": 1}) == "DoubleArrayIndex"
+    assert best({"prefix": 9, "hits": 1}) == "HashedDictIndex"
     # So does a reverse lookup: it rules out the two indexes that store no keys.
     kinds = {e["kind"] for e in lexindex.plan(keys, objective={"reverse": 1})["estimates"]}
-    assert kinds == {"DictIndex", "PerfectHashIndex", "StringIndex"}
+    assert kinds == {"DictIndex", "HashedDictIndex", "PerfectHashIndex", "StringIndex"}
     p = lexindex.plan(keys, objective={"hits": 3, "misses": 1, "batch": 64})
     nanos = [e["nanos"] for e in p["estimates"]]
     assert nanos == sorted(nanos)

@@ -52,8 +52,8 @@ const BASE_MASK: u64 = (1 << BASE_BITS) - 1;
 const ID_SHIFT: u32 = BASE_SHIFT + BASE_BITS;
 
 /// Ids and bases are 23 bits.
-const MAX_KEYS: usize = 1 << (64 - ID_SHIFT);
-const MAX_SLOTS: usize = 1 << BASE_BITS;
+pub(crate) const MAX_KEYS: usize = 1 << (64 - ID_SHIFT);
+pub(crate) const MAX_SLOTS: usize = 1 << BASE_BITS;
 /// Label 0 is "not in the lexicon".
 const MAX_ALPHABET: usize = LABEL_MASK as usize;
 /// The code table covers the Basic Multilingual Plane; the characters past it are looked up.
@@ -1126,6 +1126,11 @@ impl DoubleArrayIndex {
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.
     pub fn serialized_len(&self) -> usize {
         self.blob.len()
+    }
+
+    /// The blob's bytes of slots, which is what [`plan`](crate::plan) scales with the corpus.
+    pub(crate) fn slot_bytes(&self) -> usize {
+        self.slots.len()
     }
 
     /// Reconstruct from [`DoubleArrayIndex::to_bytes`] output.

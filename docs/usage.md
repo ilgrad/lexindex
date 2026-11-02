@@ -25,9 +25,11 @@ assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "StringIndex"}
 Which index wins is a property of your keys and not of this library — six fruit names are not a
 corpus, and neither is a range of numbers, which an fst folds into almost nothing. Run it on the
 keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key)`), `ordered`,
-`prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes, which is where
-their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five it
-can name: `HashedDictIndex` and `DoubleArrayIndex` are not ranked yet. **The default is a closed
+`prefix`, `common_prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes,
+which is where their size comes from. Nothing is required by default, so a bare `plan(keys)` prices
+all seven. `HashedDictIndex` is priced at zero fingerprint bits: exact at its dictionary's search,
+and under a closed vocabulary at `id_unchecked`. `DoubleArrayIndex` leaves the ranking on a corpus
+past what its 23-bit slots hold. **The default is a closed
 vocabulary:** a bare `plan(keys)` can recommend an index that answers a key it never held with some
 member's id, while the `lexindex` command assumes an open one and implies `exact`. Pass `exact=True`
 unless every key you will ask about is in `keys`.
@@ -471,8 +473,7 @@ nineteen corpora of half a million to ten million keys, against 245 to 716 for t
 ([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
-dictionary answers. `plan` does not price it yet, and `Overlay` does not take it: its ids are
-ranks, as `DictIndex`'s are.
+dictionary answers. `Overlay` does not take it: its ids are ranks, as `DictIndex`'s are.
 
 ## `DoubleArrayIndex` — a lexicon against running text
 
@@ -1131,7 +1132,7 @@ format a later version stops reading, and it round-trips — rebuilding from a d
 blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
 an error that says so rather than an empty file.
 
-`plan` and `build` take the same five **needs**, which say what the index must be able to do and so
+`plan` and `build` take the same six **needs**, which say what the index must be able to do and so
 narrow what may be picked — with none of them the only question asked is `id(key)`, and the two
 probabilistic indexes are allowed:
 
@@ -1174,8 +1175,8 @@ needs narrow a *choice*, and naming one is not a choice to narrow. The library i
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect | hashed | double-array` names one instead and
-skips the plan entirely. The last two are never what `auto` picks, and they hold the corpus: `hashed`
-is a `HashedDictIndex` with no fingerprint, so exact.
+skips the plan entirely. The last two have no streaming build, so they hold the corpus: `hashed` is
+a `HashedDictIndex` with no fingerprint, so exact.
 On the 479 823-word dictionary that is 468-490 ms against 127-135 over nine alternating runs --
 `--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes

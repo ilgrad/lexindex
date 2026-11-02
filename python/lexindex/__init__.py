@@ -91,6 +91,8 @@ class Estimate(TypedDict):
         "PerfectHashIndex",
         "StringIndex",
         "DictIndex",
+        "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     bytes: int
     bytes_per_key: float

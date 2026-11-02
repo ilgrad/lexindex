@@ -70,6 +70,12 @@ fn rank_bits(n: usize) -> u32 {
     u64::BITS - (n.max(2) as u64 - 1).leading_zeros()
 }
 
+/// Bits the rank table of `n` keys takes at zero fingerprint bits, which is what
+/// [`plan`](crate::plan) adds to a dictionary and a perfect hash.
+pub(crate) fn table_bits(n: usize) -> u64 {
+    n as u64 * u64::from(rank_bits(n))
+}
+
 fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
     if bits <= MAX_FP_BITS {
         Ok(())

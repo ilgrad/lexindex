@@ -1002,8 +1002,8 @@ class Estimate(TypedDict):
     """What one index would weigh on the keys ``plan`` was given.
 
     ``bytes`` is the size of its serialised blob and ``bytes_per_key`` that over the number of
-    distinct keys. ``block`` is the ``DictIndex`` block the estimate was priced at and ``None``
-    for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
+    distinct keys. ``block`` is the block a ``DictIndex`` or a ``HashedDictIndex`` was priced at
+    and ``None`` for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
 
     ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a ``Workload``, of
@@ -1019,6 +1019,8 @@ class Estimate(TypedDict):
         "PerfectHashIndex",
         "StringIndex",
         "DictIndex",
+        "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     bytes: int
     bytes_per_key: float
@@ -1060,8 +1062,9 @@ class Workload(TypedDict, total=False):
     hits and the misses.
 
     Every operation is a question the index has to answer, so it adds to the keyword arguments: a
-    share of ``reverse`` rules out the two indexes that store no keys, and any prefix query asks
-    for an ordered one. A workload that asks nothing is ``"latency"``.
+    share of ``reverse`` rules out the two indexes that store no keys, ``prefix`` asks for an
+    ordered one, and ``common_prefix`` and ``longest_prefix`` for one that can walk a query. A
+    workload that asks nothing is ``"latency"``.
     """
 
     hits: int
@@ -1078,13 +1081,14 @@ def plan(
     reverse: bool = False,
     ordered: bool = False,
     prefix: bool = False,
+    common_prefix: bool = False,
     fuzzy: bool = False,
     exact: bool = False,
     objective: Literal["memory", "latency", "balanced"] | Workload = ...,
 ) -> Plan:
     """What each index would cost on these keys, and which of them answer your questions.
 
-    Five indexes with five corpus-specific size curves is a choice nobody should have to make from
+    Seven indexes with seven corpus-specific size curves is a choice nobody should have to make from
     a README table: the spread between them on one corpus is larger than the spread of any one of
     them across corpora. The keys are sorted once and priced from the statistics the formats are
     actually paid in -- the count, the mean length, the shared prefixes.
@@ -1109,8 +1113,8 @@ def plan(
     block as well as a kind.
 
     The keyword arguments say what the index has to be able to do -- ``key(id)`` as well as
-    ``id(key)``; ids in lexicographic order; prefix and range queries; fuzzy search; and exact
-    membership, without which a probabilistic index is allowed, which is how the two smallest get
+    ``id(key)``; ids in lexicographic order; prefix and range queries; the keys that are prefixes
+    of a query; fuzzy search; and exact membership, without which a probabilistic index is allowed, which is how the two smallest get
     their size. An index that cannot answer one of them is left out of the ranking rather than
     ranked last.
 
