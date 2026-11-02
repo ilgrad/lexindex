@@ -82,7 +82,7 @@ impl ClosedHashIndex {
         pairs.dedup();
         let n = pairs.len();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "closed-hash: more than u32::MAX keys; ids are u32",
             ));
         }
@@ -119,7 +119,7 @@ impl ClosedHashIndex {
             }
             let slot = slot as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "closed-hash: construction was not minimal/perfect",
                 ));
             }
@@ -203,7 +203,7 @@ impl ClosedHashIndex {
         let pairs = crate::compact_hash::stream_pairs(pairs, &mut scratch, &mut check, budget)?;
         let (n, side_len) = pairs.counts();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "closed-hash: more than u32::MAX keys; ids are u32",
             ));
         }
@@ -234,7 +234,7 @@ impl ClosedHashIndex {
             last = Some(h);
             let slot = mph.as_ref().expect("m > 0 means a table").index(h) as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "closed-hash: construction was not minimal/perfect",
                 ));
             }

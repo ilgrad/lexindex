@@ -77,7 +77,7 @@ pub enum LexindexStatus {
     Format = 4,
     /// The file could not be read or written.
     Io = 5,
-    /// The perfect hash could not be built from these keys.
+    /// An index could not be built from these keys.
     Build = 6,
     /// The caller's buffer is too small; the size it needs was written to `len`.
     BufferTooSmall = 7,

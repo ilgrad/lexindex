@@ -1945,7 +1945,7 @@ fn plan_file_with(
     read_lines(path, &mut |key| {
         if !run.fits(key) {
             if run.is_empty() {
-                return Err(IndexError::Format("plan: a key longer than the run budget"));
+                return Err(IndexError::Build("plan: a key longer than the run budget"));
             }
             runs.spill(run.sorted())?;
             run.clear();

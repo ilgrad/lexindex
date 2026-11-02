@@ -183,7 +183,7 @@ impl PyStringIndex {
             &path,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "string-index: the input iterable raised before it ended",
                     ))
                 } else {
@@ -211,7 +211,7 @@ impl PyStringIndex {
             &path,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "string-index: the input iterable raised before it ended",
                     ))
                 } else {
@@ -863,7 +863,7 @@ impl PyPerfectHashIndex {
             replay,
             || {
                 if seen.borrow().is_some() {
-                    Err(IndexError::Format(
+                    Err(IndexError::Build(
                         "perfect-hash: the source raised before it ended",
                     ))
                 } else {
@@ -1184,7 +1184,7 @@ fn fingerprint_width(fingerprint_bytes: usize, fingerprint_bits: Option<u32>) ->
         }
         None => {
             if !matches!(fingerprint_bytes, 1 | 2 | 4) {
-                return Err(to_py(IndexError::Format(
+                return Err(to_py(IndexError::Build(
                     "compact-hash: fingerprint_bytes must be 1, 2, or 4",
                 )));
             }
@@ -1192,7 +1192,7 @@ fn fingerprint_width(fingerprint_bytes: usize, fingerprint_bits: Option<u32>) ->
         }
     };
     if !(1..=64).contains(&bits) {
-        return Err(to_py(IndexError::Format(
+        return Err(to_py(IndexError::Build(
             "compact-hash: fingerprint_bits must be in 1..=64",
         )));
     }
@@ -1279,7 +1279,7 @@ impl PyCompactHashIndex {
             bits,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "compact-hash: the input iterable raised before it ended",
                     ))
                 } else {
@@ -1857,7 +1857,7 @@ impl PyDictIndex {
             block,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "dict: the input iterable raised before it ended",
                     ))
                 } else {

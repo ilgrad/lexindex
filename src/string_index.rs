@@ -215,7 +215,7 @@ impl StringIndex {
             let key = key.as_ref();
             if !run.fits(key) {
                 if run.is_empty() {
-                    return Err(IndexError::Format(
+                    return Err(IndexError::Build(
                         "string-index: a key longer than the run budget",
                     ));
                 }

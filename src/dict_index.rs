@@ -924,7 +924,7 @@ fn spell<'a>(
     };
     buf.clear();
     if !code.encode_key(key, buf) {
-        return Err(IndexError::Format(
+        return Err(IndexError::Build(
             "dict: the key stream changed between passes",
         ));
     }
@@ -2041,7 +2041,7 @@ impl DictIndex {
         S: AsRef<str>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         // Sorted and deduplicated as a view of the keys rather than as owned `String`s: every key
         // is copied into a block below in either case, so the intermediate copy only doubled the
@@ -2095,13 +2095,13 @@ impl DictIndex {
         S: AsRef<str>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
         let mut view = view_of(&keys, threads);
         if !distinct_ascending(&mut view, threads) {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "dict: build_sorted got a key below its predecessor",
             ));
         }
@@ -2121,7 +2121,7 @@ impl DictIndex {
         S: AsRef<str>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
@@ -2148,7 +2148,7 @@ impl DictIndex {
         S: AsRef<str>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
@@ -2181,10 +2181,10 @@ impl DictIndex {
         S: AsRef<str>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         if micro == 0 || block % micro != 0 {
-            return Err(IndexError::Format("dict: micro must divide block"));
+            return Err(IndexError::Build("dict: micro must divide block"));
         }
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
@@ -2277,7 +2277,7 @@ impl DictIndex {
         C: FnMut() -> Result<(), IndexError>,
     {
         if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         let mut run = Run::with_budget(run_bytes);
         let mut runs = Runs::beside(path);
@@ -2285,7 +2285,7 @@ impl DictIndex {
             let key = key.as_ref();
             if !run.fits(key) {
                 if run.is_empty() {
-                    return Err(IndexError::Format("dict: a key longer than the run budget"));
+                    return Err(IndexError::Build("dict: a key longer than the run budget"));
                 }
                 runs.spill(run.sorted())?;
                 run.clear();
@@ -2529,7 +2529,7 @@ impl DictIndex {
             kept.write_to(&mut dictionary);
             w.write_all(&dictionary)?;
             if i != n {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "dict: the key stream changed between passes",
                 ));
             }

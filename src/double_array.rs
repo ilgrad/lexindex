@@ -425,7 +425,7 @@ unsafe fn place_avx2(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError>
 #[inline(always)]
 fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
     let too_many = || {
-        IndexError::Format(
+        IndexError::Build(
             "double-array: the trie needs more than 8 388 608 slots; bases are 23 bits",
         )
     };
@@ -721,7 +721,7 @@ impl DoubleArrayIndex {
     fn build_ranked<S: AsRef<str>>(keys: &[S]) -> Result<Self, IndexError> {
         let n = keys.len();
         if n > MAX_KEYS {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: more than 8 388 608 keys; ids are 23 bits",
             ));
         }
@@ -753,7 +753,7 @@ impl DoubleArrayIndex {
             .collect();
         drop(freq);
         if chars.len() > MAX_ALPHABET {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: more than 65 535 distinct characters; labels are 16 bits",
             ));
         }
@@ -800,7 +800,7 @@ impl DoubleArrayIndex {
             top + max_label + 1
         };
         if n_slots > MAX_SLOTS {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: the trie needs more than 8 388 608 slots; bases are 23 bits",
             ));
         }
