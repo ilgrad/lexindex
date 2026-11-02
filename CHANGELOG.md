@@ -26,8 +26,9 @@ All notable changes to this project are documented here. The format follows
 - **`PerfectHashIndex` stores its keys overlapped where that is smaller: 10.88 → 9.25 bytes a key
   on the 479 823-word dictionary.** A new arena encoding, tag `0x13`, holds a greedy shortest
   common superstring of the keys — a key inside another costs no bytes, and an overlap between two
-  is stored once — with one packed `(start, length − min)` entry a slot, the fingerprint in the
-  same entry, and an overflow table for lengths past the entry's field. `build` and
+  is stored once — with one packed `(start, length − min)` entry a slot, fingerprints in a row of
+  their own ahead of the entries, so an absent key reads a table of one byte a key, and an overflow
+  table for lengths past the entry's field. `build` and
   `build_with_fingerprints` price it beside the blocked layout and keep the smaller, a tie to the
   blocked one, so no key set grows. Over sixteen benchmark corpora the arena shrinks by 46 % on
   numbers, 33 % on DNA, 13–15 % on words, Chinese words, identifiers and package names, 11 % on

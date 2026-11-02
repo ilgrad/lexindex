@@ -43,7 +43,8 @@
 //! `[base u32][off u8 × 17][fp u8 × 16]`, 37 bytes a block. `PerfectHashIndex` asks for it when
 //! built with fingerprints: a probe whose fingerprint does not match the slot's stops at the block
 //! and never reads the key — the second cache miss of a lookup, which a workload of mostly-absent
-//! keys otherwise pays for nothing. Behind the offsets rather than beside them so a member's
+//! keys otherwise pays for nothing. (A merged arena holds them in a row of their own, ahead of its
+//! entries.) Behind the offsets rather than beside them so a member's
 //! address path — the base and two offsets — is the plain layout's, byte for byte: interleaving
 //! pushed the offset pair up to 36 bytes from the base instead of 20, one more line split in
 //! four, and cost a member probe 6 ns against 3 for this layout.
@@ -105,9 +106,11 @@ const OVERFLOW: u8 = 0x40;
 const TRAILER: usize = 8;
 /// `[n_off: u64][tag: u8]`.
 const HEADER: usize = 9;
-/// The keys as one superstring ([`crate::superstring`]), each slot a packed entry — its
-/// fingerprint under [`FP`], then `length − min_len`, then where it starts — `width` bits, least
-/// significant first, behind `[min_len u32][len_bits u8][start_bits u8][data_len u64]`. A length
+/// The keys as one superstring ([`crate::superstring`]), each slot a packed entry —
+/// `length − min_len`, then where it starts — `width` bits, least significant first, behind
+/// `[min_len u32][len_bits u8][start_bits u8][data_len u64]` and, under [`FP`], a row of one
+/// fingerprint a slot: apart from the entries, so that the table an absent key reads is one byte a
+/// key, not the entries' three to four. A length
 /// past what the
 /// field holds is all ones in it and sits in an overflow table of `[slot u32][len u32]` behind the
 /// data, sorted by slot, under [`OVERFLOW`]. Never with [`WIDE_BASE`]: the header names the start's
@@ -537,7 +540,11 @@ impl StringArena {
         let bytes = self.blob.as_ref();
         if split(self.tag).layout == MERGED {
             let bit = i as u64 * u64::from(self.packed.width);
-            crate::blob::prefetch_byte(bytes, HEADER + PARAMS + (bit / 8) as usize);
+            let g = split(self.tag);
+            if g.fp == 1 {
+                crate::blob::prefetch_byte(bytes, HEADER + PARAMS + i);
+            }
+            crate::blob::prefetch_byte(bytes, HEADER + PARAMS + g.fp * self.n + (bit / 8) as usize);
             return;
         }
         let at = offsets_start(self.tag, i);
@@ -610,8 +617,8 @@ impl StringArena {
         Some(((self.data_start + lo, self.data_start + hi), fp))
     }
 
-    /// [`entry`](Self::entry) under the merged layout: the fingerprint, when the tag stores them,
-    /// decides before the length and the start are taken out of the same word.
+    /// [`entry`](Self::entry) under the merged layout: the fingerprint, from its row when `F` says
+    /// there is one, decides before the entry is read.
     ///
     /// # Safety
     ///
@@ -623,15 +630,25 @@ impl StringArena {
         i: usize,
         want: Option<u8>,
     ) -> Option<((usize, usize), u8)> {
+        // SAFETY: `i < n`, and the load counted `n` bytes of fingerprints under `F` in the prefix.
+        let fp = if F == 1 {
+            unsafe { *bytes.get_unchecked(HEADER + PARAMS + i) }
+        } else {
+            0
+        };
+        if F == 1 && want.is_some_and(|w| w != fp) {
+            return None;
+        }
         let p = self.packed;
         // `i < n`, and the load held `n * width` to what fits this platform. `width` is at most
         // `MAX_WIDTH`, so nothing below reaches 2^64 either, and the one bound takes them all.
         let bit = i as u64 * u64::from(p.width);
-        let at = HEADER + PARAMS + (bit / 8) as usize;
+        let table = HEADER + PARAMS + F * self.n;
+        let at = table + (bit / 8) as usize;
         debug_assert!(i < self.n && at + 8 <= self.data_start && self.data_start <= bytes.len());
-        // SAFETY: the load refused a blob shorter than `HEADER + PARAMS + PAD + ⌈n·width / 8⌉` and
-        // an entry of no bits, so with `i < n` the entry's first byte is at least one below the
-        // table's end, and `PAD` holds the other seven. The compare this leaves out is on every
+        // SAFETY: the load refused a blob shorter than `table + ⌈n·width / 8⌉ + PAD` and an entry of
+        // no bits, so with `i < n` the entry's first byte is at least one below the table's end,
+        // and `PAD` holds the other seven. The compare this leaves out is on every
         // lookup, and a lookup of a long key is only fast under the reorder buffer's width.
         let raw = u64::from_le_bytes(
             unsafe { bytes.get_unchecked(at..at + 8) }
@@ -639,12 +656,7 @@ impl StringArena {
                 .unwrap(),
         );
         let word = (raw >> (bit % 8)) & p.mask;
-        let fp = if F == 1 { word as u8 } else { 0 };
-        if F == 1 && want.is_some_and(|w| w != fp) {
-            return None;
-        }
-        let rest = if F == 1 { word >> 8 } else { word };
-        let (start, field) = (rest >> p.len_bits, rest & p.field_mask);
+        let (start, field) = (word >> p.len_bits, word & p.field_mask);
         let len = if field == p.escape {
             escaped_len(&bytes[self.data_end..self.overflow_end], i)? as u64
         } else {
@@ -802,7 +814,7 @@ impl Packed {
         let min_len = u32::from_le_bytes(p[..4].try_into().unwrap());
         let (len_bits, start_bits) = (u32::from(p[4]), u32::from(p[5]));
         let data_len = u64::from_le_bytes(p[6..14].try_into().unwrap());
-        let width = start_bits + len_bits + 8 * u32::from(tag & FP != 0);
+        let width = start_bits + len_bits;
         if width > MAX_WIDTH {
             return Err(IndexError::Format("arena: merged entries too wide"));
         }
@@ -817,6 +829,7 @@ impl Packed {
             .map(|bits| bits.div_ceil(8))
             .and_then(|b| usize::try_from(b).ok())
             .and_then(|b| b.checked_add(HEADER + PARAMS + PAD))
+            .and_then(|b| b.checked_add(if tag & FP != 0 { n } else { 0 }))
             .ok_or(IndexError::Format("arena: offset table too large"))?;
         Ok((
             entries,
@@ -1206,7 +1219,6 @@ impl MergedShape {
         data_len: usize,
         fingerprints: bool,
     ) -> Option<Self> {
-        let fp_bits = if fingerprints { 8 } else { 0 };
         let widest = (1..need.len()).rev().find(|&b| need[b] > 0)?;
         let mut best: Option<Self> = None;
         let mut escaped: usize = need.iter().sum();
@@ -1221,7 +1233,7 @@ impl MergedShape {
             } else {
                 escaped
             };
-            let width = start_bits + len_bits + fp_bits;
+            let width = start_bits + len_bits;
             if width > MAX_WIDTH {
                 continue;
             }
@@ -1232,6 +1244,7 @@ impl MergedShape {
                 0
             };
             let bytes = (HEADER + PARAMS + PAD)
+                .checked_add(if fingerprints { n } else { 0 })?
                 .checked_add(entries)?
                 .checked_add(data_len)?
                 .checked_add(tail)?;
@@ -1408,7 +1421,9 @@ fn lay_out_merged(
     blob.extend_from_slice(&shape.min_len.to_le_bytes());
     blob.extend_from_slice(&[shape.len_bits as u8, shape.start_bits as u8]);
     blob.extend_from_slice(&(data.len() as u64).to_le_bytes());
-    let fp_bits = if fps.is_some() { 8 } else { 0 };
+    if let Some(fps) = fps {
+        blob.extend_from_slice(fps);
+    }
     let escape = (1u64 << shape.len_bits) - 1;
     let mut overflow = Vec::with_capacity(shape.escaped * SLOT_LEN + TRAILER);
     let (mut acc, mut filled) = (0u128, 0u32);
@@ -1421,8 +1436,7 @@ fn lay_out_merged(
         } else {
             excess
         };
-        let fp = fps.map_or(0, |f| u64::from(f[slot]));
-        let entry = fp | field << fp_bits | start << (fp_bits + shape.len_bits);
+        let entry = field | start << shape.len_bits;
         acc |= u128::from(entry) << filled;
         filled += shape.width;
         while filled >= 8 {
@@ -2174,8 +2188,8 @@ mod tests {
     }
 
     /// One long key among short overlapping ones: its length escapes to the overflow table rather
-    /// than widening every entry, with and without fingerprints — whose filter decides from the
-    /// entry before the length is read.
+    /// than widening every entry, with and without fingerprints — whose filter decides from their
+    /// row before the entry is read.
     #[test]
     fn a_long_key_escapes_to_the_overflow_table() {
         let long = "q".repeat(300);
@@ -2383,7 +2397,7 @@ mod tests {
         data: &[u8],
         overflow: &[(u32, u32)],
     ) -> Vec<u8> {
-        let width = u32::from(start_bits + len_bits) + if tag & FP != 0 { 8 } else { 0 };
+        let width = u32::from(start_bits + len_bits);
         let mut blob = Vec::new();
         blob.extend_from_slice(&(entries.len() as u64 + 1).to_le_bytes());
         blob.push(tag);
