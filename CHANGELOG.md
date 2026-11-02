@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`lexindex build --index hashed` and `--index double-array`.** The command line could inspect both
+  blobs and build neither. `hashed` has no fingerprint, so it is exact. `auto` never picks either one:
+  the planner does not price them until 5.0.
 - **`DictIndex` reads `BDX5`: a dictionary that names trie labels past its phrases.** Path lists
   repeat whole directory and file names under different parents — on a million paths the repeats
   are half of what front coding stores — and phrases reach only 32 bytes and the spans the sampled

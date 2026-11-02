@@ -1173,7 +1173,9 @@ needs narrow a *choice*, and naming one is not a choice to narrow. The library i
 
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
-`--index dict | string | compact | closed | perfect` names one instead and skips the plan entirely.
+`--index dict | string | compact | closed | perfect | hashed | double-array` names one instead and
+skips the plan entirely. The last two are never what `auto` picks, and they hold the corpus: `hashed`
+is a `HashedDictIndex` with no fingerprint, so exact.
 On the 479 823-word dictionary that is 468-490 ms against 127-135 over nine alternating runs --
 `--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes

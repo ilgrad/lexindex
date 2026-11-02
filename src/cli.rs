@@ -10,8 +10,8 @@
 //! — one program, whichever way it was installed.
 
 use lexindex::{
-    BlobInfo, BlobKind, DictIndex, DictProfile, IndexError, Kind, Needs, Objective, Overlay,
-    OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
+    BlobInfo, BlobKind, DictIndex, DictProfile, DoubleArrayIndex, IndexError, Kind, Needs,
+    Objective, Overlay, OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -62,7 +62,9 @@ options (`--name value` or `--name=value`):
                  batch=N for the keys an ids_of call holds. An op adds the need it asks
                  for. The nanoseconds are a model of this crate's own machine, never a
                  measurement of yours
-  --index NAME   auto (default), dict, string, compact, closed, perfect
+  --index NAME   auto (default), dict, string, compact, closed, perfect, hashed,
+                 double-array. The last two are never what auto picks: hashed is
+                 HashedDictIndex with no fingerprint, so exact, and both hold the corpus
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
   --stream MODE  when to build straight to the blob instead of holding the corpus:
@@ -122,6 +124,10 @@ enum Accepts {
 enum Choice {
     Auto,
     One(Kind),
+    /// `Kind` cannot name this one before 5.0, so the planner does not rank it.
+    Hashed,
+    /// As [`Hashed`](Self::Hashed).
+    DoubleArray,
 }
 
 /// One subcommand's arguments, parsed.
@@ -189,6 +195,8 @@ fn choice(name: &str) -> Result<Choice, Fail> {
         "compact" => Choice::One(Kind::Compact),
         "closed" => Choice::One(Kind::Closed),
         "perfect" => Choice::One(Kind::Perfect),
+        "hashed" => Choice::Hashed,
+        "double-array" => Choice::DoubleArray,
         other => return Err(Fail::Usage(format!("--index: no such index `{other}`"))),
     })
 }
@@ -472,6 +480,26 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
     let big = stream_above(cmd.stream, path);
+    let unranked = match cmd.index {
+        Choice::Hashed => Some("HashedDictIndex"),
+        Choice::DoubleArray => Some("DoubleArrayIndex"),
+        Choice::Auto | Choice::One(_) => None,
+    };
+    if let Some(name) = unranked {
+        if big.is_some() {
+            note_no_stream(path, name, err)?;
+        }
+        let (keys, blank) = read_keys(path, stdin)?;
+        note_blank(path, blank, err)?;
+        let n = if cmd.index == Choice::Hashed {
+            build_hashed(&keys, dest)?
+        } else {
+            let index = DoubleArrayIndex::build(&keys)?;
+            index.save(dest)?;
+            index.len()
+        };
+        return note_written(name, n, dest, err);
+    }
     // What to build, decided before the keys are read wherever it can be. `--index auto` over a
     // file prices it with `plan_file`, which does not hold it either, so a ranked build streams as
     // readily as a named one; standard input is the exception, since it cannot be priced and then
@@ -487,22 +515,17 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             Some((best.kind, best.block))
         }
         Choice::Auto => None,
+        Choice::Hashed | Choice::DoubleArray => unreachable!("built above"),
     };
     if let Some((kind, block)) = decided {
         if big.is_some() && can_stream(kind) {
             let src = Source::new(path);
             let n = stream_to_file(kind, &src, dest, block)?;
             note_blank(path, src.blank.get(), err)?;
-            return note_written(kind, n, dest, err);
+            return note_written(kind.name(), n, dest, err);
         }
         if big.is_some() {
-            writeln!(
-                err,
-                "reading {path}: this file is large enough to build without holding it, but \
-                 {} has no streaming build in this configuration.",
-                kind.name()
-            )
-            .map_err(io_fail)?;
+            note_no_stream(path, kind.name(), err)?;
         }
     }
     let (keys, blank) = read_keys(path, stdin)?;
@@ -518,20 +541,42 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         }
     };
     let n = build_and_save(kind, &keys, dest, block)?;
-    note_written(kind, n, dest, err)
+    note_written(kind.name(), n, dest, err)
+}
+
+fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fail> {
+    writeln!(
+        err,
+        "reading {path}: this file is large enough to build without holding it, but {name} has \
+         no streaming build in this configuration."
+    )
+    .map_err(io_fail)
+}
+
+#[cfg(feature = "mph")]
+fn build_hashed(keys: &[String], dest: &Path) -> Result<usize, Fail> {
+    let index = HashedDictIndex::from_dict(DictIndex::build(keys)?, 0)?;
+    index.save(dest)?;
+    Ok(index.len())
+}
+
+#[cfg(not(feature = "mph"))]
+fn build_hashed(_: &[String], _: &Path) -> Result<usize, Fail> {
+    Err(Fail::Failed(
+        "HashedDictIndex needs the `mph` feature, which this build does not have".to_string(),
+    ))
 }
 
 /// What was written, and what it cost a key.
-fn note_written(kind: Kind, n: usize, dest: &Path, err: &mut dyn Write) -> Result<(), Fail> {
+fn note_written(name: &str, n: usize, dest: &Path, err: &mut dyn Write) -> Result<(), Fail> {
     let bytes = std::fs::metadata(dest)
         .map_err(|e| Fail::Failed(format!("{}: {e}", dest.display())))?
         .len();
     let per_key = bytes as f64 / n.max(1) as f64;
     writeln!(
         err,
-        "wrote {}: {} over {n} keys, {bytes} bytes ({per_key:.2} B/key)",
-        dest.display(),
-        kind.name()
+        "wrote {}: {name} over {n} keys, {bytes} bytes ({per_key:.2} B/key)",
+        dest.display()
     )
     .map_err(io_fail)
 }
@@ -1655,9 +1700,11 @@ mod tests {
             ("dict", "DictIndex", vec!["--block", "compact"]),
             ("dict", "DictIndex", vec!["--block", "64"]),
             ("string", "StringIndex", vec![]),
+            ("double-array", "DoubleArrayIndex", vec![]),
         ];
         if cfg!(feature = "mph") {
             all.extend([
+                ("hashed", "HashedDictIndex", vec![]),
                 ("compact", "CompactHashIndex", vec![]),
                 ("closed", "ClosedHashIndex", vec![]),
                 ("perfect", "PerfectHashIndex", vec![]),
@@ -1672,12 +1719,14 @@ mod tests {
         let dir = tmpdir();
         let keys = keys_file(&dir, &corpus(50));
         let dest = dir.join("out.bin");
-        let (code, _, err) = go(
-            &["build", &keys, dest.to_str().unwrap(), "--index", "compact"],
-            "",
-        );
-        assert_eq!(code, 1);
-        assert!(err.contains("needs the `mph` feature"), "{err}");
+        for index in ["compact", "hashed"] {
+            let (code, _, err) = go(
+                &["build", &keys, dest.to_str().unwrap(), "--index", index],
+                "",
+            );
+            assert_eq!(code, 1);
+            assert!(err.contains("needs the `mph` feature"), "{err}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1745,6 +1794,11 @@ mod tests {
             if matches!(index, "compact" | "closed") {
                 assert_eq!((code, out.as_str()), (1, ""), "{index}");
                 assert!(err.contains("stores no keys"), "{index}: {err}");
+                continue;
+            }
+            if index == "double-array" {
+                assert_eq!((code, out.as_str()), (1, ""), "{index}");
+                assert!(err.contains("cannot be dumped"), "{index}: {err}");
                 continue;
             }
             assert_eq!((code, err.as_str()), (0, ""), "{index}");
