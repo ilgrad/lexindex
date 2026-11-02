@@ -45,6 +45,9 @@ jobs:
             || { echo "::error::README.md install snippet does not say lexindex = \"$minor\""; fail=1; }
           grep -q "version = \"$minor\", default-features = false" README.md \
             || { echo "::error::README.md fst-only snippet does not say version = \"$minor\""; fail=1; }
+          # By hand this row lagged: 4.5.0 shipped naming 4.3.x as the supported line, until f5a486e.
+          grep -qF "| $minor.x | yes |" SECURITY.md \
+            || { echo "::error::SECURITY.md does not list $minor.x as the supported line"; fail=1; }
           grep -q "^## \[$ver\]" CHANGELOG.md \
             || { echo "::error::CHANGELOG.md has no '## [$ver]' section"; fail=1; }
           # An undated heading means the release notes were never finished.
