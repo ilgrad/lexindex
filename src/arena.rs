@@ -136,7 +136,7 @@ pub(crate) struct StringArena {
     data_end: usize,   // where the data stops: the overflow table's start, or the blob's end
     data_len: usize,   // data_end - data_start: every span is held to it where it is read
     overflow_end: usize, // where the overflow table stops: before its trailer, or the blob's end
-    plain: u8, // the tag without `OVERFLOW`, which only a block's own marker makes anyone read
+    plain: u8, // the tag without `OVERFLOW`, which only a block's marker or a merged escape reads
     tag: u8, // NARROW, WIDE, BLOCK_U8 or BLOCK_U16 (those two also `| WIDE_BASE`, `| OVERFLOW`), any `| FP`
     packed: Packed, // a merged arena's entry geometry; unused by every other layout
 }
@@ -484,14 +484,17 @@ impl StringArena {
         let tag = self.plain;
         let entry = if tag == BLOCK_U16 | fp {
             let at = offsets_start_in(BLOCK_U16, NARROW, F, i);
-            let block = self.table_at(bytes, at, block_bytes(B_U16, 2, NARROW, F));
+            // SAFETY: `i < n`, just checked, and the tag names this layout.
+            let block = unsafe { self.table_at(bytes, at, block_bytes(B_U16, 2, NARROW, F)) };
             in_block_u16::<F, NARROW>(block, overflow, i, want)
         } else if tag == BLOCK_U8 | fp {
             let at = offsets_start_in(BLOCK_U8, NARROW, F, i);
-            let block = self.table_at(bytes, at, block_bytes(B_U8, 1, NARROW, F));
+            // SAFETY: `i < n`, just checked, and the tag names this layout.
+            let block = unsafe { self.table_at(bytes, at, block_bytes(B_U8, 1, NARROW, F)) };
             in_block_u8::<F, NARROW>(block, overflow, i, want)
         } else if tag == MERGED | fp {
-            // SAFETY: `i < n`, just checked.
+            // SAFETY: `i < n`, just checked, the tag says merged with `FP` as `F` says, and `bytes`
+            // is the arena's blob.
             let Some(((lo, hi), _)) = (unsafe { self.merged_entry::<F>(bytes, i, want) }) else {
                 return false;
             };
@@ -515,13 +518,17 @@ impl StringArena {
         unsafe { bytes.get_unchecked(self.data_start + lo..self.data_start + hi) == key }
     }
 
-    /// The `len` bytes at `at` of the offset table of a blocked layout, for a block of a slot below
-    /// `n`: among the `n.div_ceil(slots)` blocks `prefix_len` counts, in a prefix no shorter blob
-    /// loads with.
+    /// The `len` bytes at `at` of the offset table of a blocked layout.
+    ///
+    /// # Safety
+    ///
+    /// `bytes` is the arena's blob, and `at` and `len` name the block of a slot below `n` under the
+    /// layout the tag says: among the `n.div_ceil(slots)` blocks `prefix_len` counts, in a prefix
+    /// no shorter blob loads with.
     #[inline(always)]
-    fn table_at<'a>(&self, bytes: &'a [u8], at: usize, len: usize) -> &'a [u8] {
+    unsafe fn table_at<'a>(&self, bytes: &'a [u8], at: usize, len: usize) -> &'a [u8] {
         debug_assert!(at + len <= self.data_start && self.data_start <= bytes.len());
-        // SAFETY: the two callers name a block of `i < n`, as above.
+        // SAFETY: what the caller promised, above.
         unsafe { bytes.get_unchecked(at..at + len) }
     }
 
@@ -589,7 +596,8 @@ impl StringArena {
         }
         let bytes = self.blob.as_ref();
         if split(self.tag).layout == MERGED {
-            // SAFETY: `i < n`, just checked.
+            // SAFETY: `i < n`, just checked, the layout is merged, `F` follows the tag's `FP` bit,
+            // and `bytes` is the arena's blob.
             return unsafe {
                 if self.tag & FP != 0 {
                     self.merged_entry::<1>(bytes, i, want)
@@ -622,7 +630,9 @@ impl StringArena {
     ///
     /// # Safety
     ///
-    /// `i < n`, which puts the eight bytes its entry is read from inside the table.
+    /// `i < n`, the layout is merged, `F` is 1 exactly when the tag has `FP`, and `bytes` is the
+    /// arena's blob: together these put the fingerprint in its row and the eight bytes the entry is
+    /// read from inside the table.
     #[inline(always)]
     unsafe fn merged_entry<const F: usize>(
         &self,
@@ -1068,8 +1078,10 @@ fn overflow_span<const B: usize>(
     span_from(base, lo, hi)
 }
 
-/// The length of merged slot `i`, whose field escaped, from the overflow table: its entries are
-/// in slot order, which the load checked. Cold, as [`overflow_span`] is, for the same reason.
+/// The length of merged slot `i`, whose field escaped, from the overflow table: a build writes its
+/// entries in slot order, and the load does not check that, so a crafted table's search finds a
+/// wrong length or none, each held to the data like any other. Cold, as [`overflow_span`] is, for
+/// the same reason.
 #[cold]
 #[inline(never)]
 fn escaped_len(table: &[u8], i: usize) -> Option<usize> {
