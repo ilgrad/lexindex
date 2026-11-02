@@ -6,11 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+Breaking, and for 5.0; `docs/migration-5.md` has every one with before and after.
+
+- **`plan` assumes an open vocabulary on every front end.** `Needs::default()` is exact, as the command
+  line was; `closed_vocabulary` asks for the other. `Needs::exact()`, `exact=` and `--exact` are gone.
+- **`plan` prices and ranks `HashedDictIndex` and `DoubleArrayIndex`.** `Kind` and `Needs` are
+  `#[non_exhaustive]`, `Needs::common_prefix` is new, and `--index auto` may pick either.
+- **`Estimate` is `#[non_exhaustive]` and carries `micro`, `resident_bytes` and `build_secs`.**
+  `Plan::pareto()` is the rows no other beats on size and speed, beside the one winner.
+- **`Overlay::remove` needs `OverlayExact`.** Over `CompactHashIndex` it does not compile, and raises
+  `TypeError` in Python; `retire_id` stays on every base.
+- **A refused build answers `IndexError::Build`, not `Format`,** and `Build` is no longer behind `mph`.
+  The C ABI answers `LEXINDEX_STATUS_BUILD`.
+
 ### Added
 
 - **`lexindex build --index hashed` and `--index double-array`.** The command line could inspect both
-  blobs and build neither. `hashed` has no fingerprint, so it is exact. `auto` never picks either one:
-  the planner does not price them until 5.0.
+  blobs and build neither. `hashed` has no fingerprint, so it is exact.
 - **`DictIndex` reads `BDX5`: a dictionary that names trie labels past its phrases.** Path lists
   repeat whole directory and file names under different parents — on a million paths the repeats
   are half of what front coding stores — and phrases reach only 32 bytes and the spans the sampled

@@ -746,8 +746,8 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     let mut sink = std::io::BufWriter::new(out);
     let keyless = |what: &str| {
         Fail::Failed(format!(
-            "{path}: a {what} stores no keys, so there is nothing to dump — the key list it was \
-             built from is the only way back"
+            "{path}: a {what} stores no keys, so there is nothing to dump — keep the key list it \
+             was built from, which is the only way across a format change"
         ))
     };
     match info.kind {
@@ -785,7 +785,7 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
         BlobKind::DoubleArrayIndex => {
             return Err(Fail::Failed(format!(
                 "{path}: a DoubleArrayIndex answers no id -> key, so it cannot be dumped; keep the \
-                 key list it was built from"
+                 key list it was built from, which is the only way across a format change"
             )));
         }
         #[cfg(not(feature = "mph"))]
@@ -1799,6 +1799,7 @@ mod tests {
             if matches!(index, "compact" | "closed") {
                 assert_eq!((code, out.as_str()), (1, ""), "{index}");
                 assert!(err.contains("stores no keys"), "{index}: {err}");
+                assert!(err.contains("keep the key list"), "{index}: {err}");
                 continue;
             }
             if index == "double-array" {

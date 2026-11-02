@@ -1133,7 +1133,10 @@ indexes, construction order for `PerfectHashIndex`, and live keys only for an `O
 for one reason: **`lexindex dump old.blob | lexindex build - new.blob` is the migration path** off a
 format a later version stops reading, and it round-trips — rebuilding from a dump reproduces the
 blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
-an error that says so rather than an empty file.
+an error that says so rather than an empty file, and **the key list they were built from is the only
+way across a format change: keep it.** `DoubleArrayIndex` answers no `id -> key`, and the same goes
+for it. For the rest, dump with the version that wrote the blob, before upgrading; see
+[Upgrading to 5.0](migration-5.md).
 
 `plan` and `build` take the same six **needs**, which say what the index must be able to do and so
 narrow what may be picked — with none of them the only question asked is an exact `id(key)`:
