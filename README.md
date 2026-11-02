@@ -358,7 +358,9 @@ One line each; the sections are in [the design notes](https://ilgrad.github.io/l
   `BCH6`, `BCH7`, `BCL1`) is refused by name and rebuilt from the keys, as is every dictionary
   blob before `BDX3` (`BDX1`, `BDX2`), which 4.0 rewrote a third smaller; `BIX4` crosses the
   versions unchanged, and an `OVL2` does when its base is one — an overlay embeds its base,
-  so one over an older hash blob is refused with it.
+  so one over an older hash blob is refused with it. 5.0 replaced the hash once more (128 bits of
+  state on every path), so 4.x's `BMP8`, `BHD1` go through 4.x's `lexindex dump` into this version's
+  `lexindex build`, and `BCH8`, `BCL2`, which store no keys, are rebuilt from their corpus.
 - **`--no-default-features` is `fst` only** (`StringIndex`, `DictIndex`, `DoubleArrayIndex`,
   `Overlay`); `mph` adds no dependency, so the whole tree is `fst` plus `memmap2`, and `cargo audit`
   reports nothing on either.

@@ -18,9 +18,11 @@ use crate::mphf::Mphf;
 
 /// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`
 /// `BCL1` was 2.0's, keyed on the hash 4.0 replaced: every id would answer wrong, so it is refused
-/// by name. `BCL2` is the same layout over the new hash.
+/// by name. `BCL2` was 4.0's, the same layout, keyed on the hash 5.0 replaced, and `BCL3` is the
+/// same layout again.
 const LEGACY_MAGICS: [&[u8; 4]; 1] = [b"BCL1"];
-const MAGIC: &[u8; 4] = b"BCL2";
+const MAGIC_V2: &[u8; 4] = b"BCL2";
+const MAGIC: &[u8; 4] = b"BCL3";
 const HEADER: usize = 36;
 const CHECKED: usize = 32; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + second hash u64 + id u32
@@ -386,7 +388,7 @@ impl ClosedHashIndex {
         (header, mph_buf, side_buf)
     }
 
-    /// Serialise to `[magic "BCL2"][n u64][mph_len u64][side_len u32][payload u64][check u32]
+    /// Serialise to `[magic "BCL3"][n u64][mph_len u64][side_len u32][payload u64][check u32]
     /// [MPH blob][side entries]`. `check` is a hash of the preceding header bytes and `payload` a
     /// streaming hash of everything after it, verified on load; the MPH region carries its own
     /// header and validates its own lengths, which is what makes [`from_bytes`](Self::from_bytes)
@@ -457,6 +459,9 @@ impl ClosedHashIndex {
                  longer computes; the keys are not stored, so it cannot be converted - rebuild the \
                  index from its keys",
             ));
+        }
+        if bytes.len() >= 4 && &bytes[0..4] == MAGIC_V2 {
+            return Err(IndexError::Format(crate::blob::REFUSED_BCL2));
         }
         if bytes.len() < HEADER || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
@@ -663,7 +668,19 @@ mod tests {
     fn round_trips_and_rejects_corrupt() {
         let idx = ClosedHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
         let good = idx.to_bytes();
-        assert_eq!(&good[0..4], b"BCL2");
+        assert_eq!(&good[0..4], b"BCL3");
+        let mut old = good.clone();
+        old[0..4].copy_from_slice(MAGIC_V2);
+        let err = ClosedHashIndex::from_bytes(&old)
+            .err()
+            .expect("refused")
+            .to_string();
+        assert!(
+            err.contains("lexindex 4.x")
+                && err.contains("stores no keys")
+                && err.contains("corpus"),
+            "{err}"
+        );
         let back = ClosedHashIndex::from_bytes(&good).unwrap();
         assert_eq!(back.len(), 3);
         for w in ["alpha", "beta", "gamma"] {

@@ -597,7 +597,8 @@ mod golden {
     /// into a loud CI failure instead. **Do not "fix" them to match new output: changing the hash
     /// is a breaking blob-format change and must bump the format magic, not this table.** 2.0 did
     /// exactly that — `BMP7` and `BCH7` — when the round was replaced, and 4.0 again — `BMP8`,
-    /// `BCH8`, `BCL2` — when the shape did, and 5.0 again when the state went to 128 bits.
+    /// `BCH8`, `BCL2` — when the shape did, and 5.0 again — `BMP9`, `BCH9`, `BCL3`, `BHD2` — when the
+    /// state went to 128 bits.
     #[test]
     fn hash_key_is_stable() {
         pinned(

@@ -23,7 +23,9 @@ use crate::{DictIndex, IndexError};
 
 /// `[magic 4][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32][payload u64][check u32]`,
 /// then the embedded `BDX3` or `BDX4` blob, the MPH blob, the bit-packed rank table and the side table.
-const MAGIC: &[u8; 4] = b"BHD1";
+const MAGIC: &[u8; 4] = b"BHD2";
+/// 4.x's, the same layout, keyed on the hash 5.0 replaced. The dictionary inside it holds the keys.
+const MAGIC_V1: &[u8; 4] = b"BHD1";
 const HEADER: usize = 48;
 const CHECKED: usize = 44; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 24; // hash u64 + full second hash u64 + rank u64
@@ -477,7 +479,7 @@ impl HashedDictIndex {
         (h, mph_buf, side_buf)
     }
 
-    /// Serialise to `[magic "BHD1"][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32]
+    /// Serialise to `[magic "BHD2"][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32]
     /// [payload u64][check u32][dictionary][MPH blob][bit-packed ranks][side entries]`, where the
     /// dictionary is its own `DictIndex` blob byte for byte, with its own checksums. `check` is a
     /// hash of the preceding header bytes and `payload` one of the three sections after the
@@ -551,6 +553,9 @@ impl HashedDictIndex {
     /// the MPH region located, not parsed.
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
+        if bytes.len() >= 4 && &bytes[0..4] == MAGIC_V1 {
+            return Err(IndexError::Format(crate::blob::REFUSED_BHD1));
+        }
         if bytes.len() < HEADER || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -886,6 +891,22 @@ mod tests {
             let restored = HashedDictIndex::from_bytes(&one.to_bytes()).unwrap();
             assert_eq!(restored.id("only"), Some(0));
         }
+    }
+
+    #[test]
+    fn a_4x_blob_is_refused_with_the_way_off() {
+        let dict = DictIndex::build(["a", "b"]).unwrap();
+        let mut old = HashedDictIndex::from_dict(dict, 8).unwrap().to_bytes();
+        old[0..4].copy_from_slice(MAGIC_V1);
+        let err = HashedDictIndex::from_bytes(&old)
+            .expect_err("refused")
+            .to_string();
+        assert!(
+            err.contains("lexindex 4.x")
+                && err.contains("lexindex dump")
+                && err.contains("lexindex build"),
+            "{err}"
+        );
     }
 
     #[test]

@@ -1129,7 +1129,9 @@ indexes, construction order for `PerfectHashIndex`, and live keys only for an `O
 for one reason: **`lexindex dump old.blob | lexindex build - new.blob` is the migration path** off a
 format a later version stops reading, and it round-trips — rebuilding from a dump reproduces the
 blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
-an error that says so rather than an empty file.
+an error that says so rather than an empty file. Off 4.x, whose hash blobs 5.0 refuses, the `dump` is
+4.x's and the `build` 5.0's, with `--index perfect` or `--index hashed` to keep the kind. A 4.x
+`CompactHashIndex` or `ClosedHashIndex` converts to nothing: rebuild it from the corpus it came from.
 
 `plan` and `build` take the same five **needs**, which say what the index must be able to do and so
 narrow what may be picked — with none of them the only question asked is `id(key)`, and the two

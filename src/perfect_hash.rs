@@ -27,9 +27,11 @@ use crate::mphf::Mphf;
 /// rather than half-supported.
 const LEGACY_MAGICS: [&[u8; 4]; 6] = [b"BMP2", b"BMP3", b"BMP4", b"BMP5", b"BMP6", b"BMP7"];
 /// `[magic 4][n u64][mph_len u64][side_len u32][payload u64][check u32]`, the framing `BMP5`
-/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marked 2.0's key hash and `BMP8` marks
-/// 4.0's, under which every slot of an older blob would answer wrong, so `BMP5` to `BMP7` are
-/// refused by name too.
+/// introduced. `BMP6` marked 1.1's blocked arena; `BMP7` marked 2.0's key hash, `BMP8` 4.0's, and
+/// `BMP9` marks 5.0's, under which every slot of an older blob would answer wrong, so `BMP5` to
+/// `BMP8` are refused by name too.
+const MAGIC_V9: &[u8; 4] = b"BMP9";
+/// 4.x's. Its keys are still in it, and its own `lexindex dump` reads them.
 const MAGIC_V8: &[u8; 4] = b"BMP8";
 const HEADER_V5: usize = 36;
 const CHECKED_V5: usize = 32;
@@ -43,7 +45,7 @@ const NO_KEY: u32 = u32::MAX;
 /// without ever holding the index — one writer of this layout, so the two cannot drift.
 fn header_bytes(n: usize, mph_len: usize, side_len: usize, payload: u64) -> [u8; HEADER_V5] {
     let mut header = [0u8; HEADER_V5];
-    header[0..4].copy_from_slice(MAGIC_V8);
+    header[0..4].copy_from_slice(MAGIC_V9);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..20].copy_from_slice(&(mph_len as u64).to_le_bytes());
     header[20..24].copy_from_slice(&(side_len as u32).to_le_bytes());
@@ -825,7 +827,10 @@ impl PerfectHashIndex {
             ));
         }
         let magic = &bytes[0..4];
-        if magic != MAGIC_V8 || bytes.len() < HEADER_V5 {
+        if magic == MAGIC_V8 {
+            return Err(IndexError::Format(crate::blob::REFUSED_BMP8));
+        }
+        if magic != MAGIC_V9 || bytes.len() < HEADER_V5 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V5..HEADER_V5].try_into().unwrap());
@@ -2024,6 +2029,21 @@ mod tests {
             assert!(err.contains("lexindex < 4.0"), "{err}");
             assert!(err.contains("rebuild"), "{err}");
         }
+    }
+
+    /// 4.x's own format stays a blob with a way off, and the refusal names it.
+    #[test]
+    fn a_4x_blob_is_refused_with_the_way_off() {
+        let idx = PerfectHashIndex::build(["alpha", "beta", "gamma"]).unwrap();
+        let mut old = idx.to_bytes().unwrap();
+        old[0..4].copy_from_slice(MAGIC_V8);
+        let err = from_bytes(&old).err().expect("refused").to_string();
+        assert!(
+            err.contains("lexindex 4.x")
+                && err.contains("lexindex dump")
+                && err.contains("lexindex build"),
+            "{err}"
+        );
     }
 
     /// A header that lost bytes in transit must be refused rather than used to frame sections,

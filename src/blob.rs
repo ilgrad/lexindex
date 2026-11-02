@@ -260,6 +260,22 @@ pub(crate) fn write_atomically_with(
     Ok(())
 }
 
+/// What a hash blob of 4.0 to 4.x is told at load: its ids are keyed on the hash 5.0 replaced, so every
+/// one would answer wrong. Two stored their keys and can be converted under 4.x, where `dump` still
+/// reads them; two never did, and only the corpus can rebuild them.
+pub(crate) const REFUSED_BMP8: &str = "perfect-hash: blob written by lexindex 4.x, keyed on a hash \
+     this version no longer computes; convert it with 4.x's `lexindex dump old.blob` piped into this \
+     version's `lexindex build - new.blob --index perfect`, and expect new ids";
+pub(crate) const REFUSED_BHD1: &str = "hashed-dict: blob written by lexindex 4.x, keyed on a hash \
+     this version no longer computes; convert it with 4.x's `lexindex dump old.blob` piped into this \
+     version's `lexindex build - new.blob --index hashed`; the ranks stay";
+pub(crate) const REFUSED_BCH8: &str = "compact-hash: blob written by lexindex 4.x, keyed on a hash \
+     this version no longer computes; it stores no keys, so `lexindex dump` cannot convert it - \
+     rebuild the index from the corpus it was built from, and expect new ids";
+pub(crate) const REFUSED_BCL2: &str = "closed-hash: blob written by lexindex 4.x, keyed on a hash \
+     this version no longer computes; it stores no keys, so `lexindex dump` cannot convert it - \
+     rebuild the index from the corpus it was built from, and expect new ids";
+
 /// FNV-1a over the bytes, then a splitmix64 finalizer for avalanche. Used as the 32-bit integrity
 /// check (its low half) of every lexindex-owned blob header, so an accidentally corrupted length or
 /// count fails cleanly at load instead of steering a query with a bogus bound. Keys are hashed by

@@ -17,7 +17,14 @@ All notable changes to this project are documented here. The format follows
   hashes at `≈ 2^-127` at any length, an expected 2.9·10⁻²¹ merges among 10⁹ keys, and no chosen pair
   is known below a birthday's 2^64 steps. That is no proof. Retired operations a `PerfectHashIndex::id`
   hit, counted and **not yet timed**: urls 180 → 243, paths 233 → 339, uuid 175 → 234, domains
-  170 → 186, numeric 170 → 181. Every hash index's blob changes with it.
+  170 → 186, numeric 170 → 181.
+- **Every hash blob takes a new number: `BMP9`, `BCH9`, `BCL3`, `BHD2`.** Under the new hash a 4.x blob
+  would answer wrong ids, so `BMP8`, `BCH8`, `BCL2` and `BHD1` are refused by name, and so is an
+  `OVL2` over one, with the base's message. **A `PerfectHashIndex` or `HashedDictIndex` converts**:
+  4.x's `lexindex dump old.blob` piped into this version's `lexindex build - new.blob --index perfect`
+  (`--index hashed`). The perfect hash's ids change; the dictionary's ranks do not. **A
+  `CompactHashIndex` or `ClosedHashIndex` does not**: they store no keys, nothing can dump them, and
+  their users rebuild from the corpus or stay on 4.x. `MPH3` and `OVL2` keep their numbers.
 
 - **The MPHF cuts its first level into chunks of 2¹⁹ buckets, not 2¹⁶.** A boundary between two chunks
   bumps about two hundred keys, so fewer of them save 0.015 bits a key at 10⁶ keys (1.923 → 1.908),

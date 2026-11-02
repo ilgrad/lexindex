@@ -79,7 +79,7 @@ Because the keys themselves are never stored, size is just the MPH (0.24 B/key �
 10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.3 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.74 B/key at 4 bits
 (6.25% false positives), 1.24 at the 8-bit default (0.39%), 2.24 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH8"][n][fp_bits][mph length][side_len]
+`id → key`. The serialised blob is `[magic "BCH9"][n][fp_bits][mph length][side_len]
 [payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — it frames every section, so it is
@@ -227,7 +227,7 @@ rather than `fingerprint_bits = 0` because a membership check that always says y
 signature that lies, and because the hot path is then one call with no compare behind it — the
 `id_unchecked` of the other two hash indexes as the only method. Size is the perfect hash and a
 36-byte header: **0.24 B/key** on real words, a fifth of the smallest fingerprinted index and a
-tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL2"][n][mph length][side_len]
+tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL3"][n][mph length][side_len]
 [payload][check][MPH blob][side]`, the `CompactHashIndex` layout without its fingerprint section,
 under the same 64-bit hash collision rule: keys sharing a hash resolve through the side table on
 their full second hash, exact for members. There is no `load_mmap`: the blob is the perfect hash,
@@ -612,7 +612,7 @@ it builds the perfect hash over the distinct hashes and writes each rank at its 
 side table matched on the full second hash before the rank table is read, exact for members at any
 width. The same dictionary and width give the same blob, byte for byte.
 
-The serialised blob is a 48-byte header — `[magic "BHD1"][n][fingerprint_bits][dictionary bytes]
+The serialised blob is a 48-byte header — `[magic "BHD2"][n][fingerprint_bits][dictionary bytes]
 [mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` or `BDX4` blob unchanged, the MPH blob,
 the rank table and the side table. Embedding the dictionary verbatim keeps one loader for it: the
 region goes to `DictIndex`'s own, which checks it as it checks a standalone blob, and the pair is
@@ -726,7 +726,7 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP8"][n][mph length]
+where membership is already guaranteed. The serialised blob is `[magic "BMP9"][n][mph length]
 [side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
 names one of five encodings.
@@ -824,9 +824,8 @@ entries can point anywhere in the data, so their ends say nothing; the header na
 length instead, which the load checks against the section — what refuses a truncated file — and
 each entry is checked where it is read, as under the blocked layouts: inside the data, and
 validated as UTF-8 before it is handed out as a `&str`. So `load_mmap` stays `O(1)`, and a crafted
-entry answers no key rather than being refused at load. The magic stays
-`BMP8`: 4.0–4.5 refuse a merged arena as an unknown offset encoding, and a blob that keeps a
-blocked arena crosses the versions in both directions. `build_to_file` and an overlay's
+entry answers no key rather than being refused at load. The magic did not change for it: a reader
+that knows no merged arena refuses one as an unknown offset encoding. `build_to_file` and an overlay's
 `compact_to_file` hold no key set to merge and write the blocked layout. `plan` prices the arena
 apart from the rest of the index, whose size is a line in `n`: the overlap grows with `n`, so it
 reads the saving a key at the sample and at its bottom half and quarter by hash and carries it to
@@ -840,8 +839,8 @@ does not match stops at the block and never reads the key. A lookup of an absent
 miss instead of two: on the dictionary 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 B/key,
 the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
-extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 2.0's
-`BMP8`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
+extra line splits cost a member probe 6 ns against 3 for this layout. The tag alone would
+already stop a reader from before 2.0, as an unknown arena encoding.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -1080,6 +1079,18 @@ a perfect hash's id is a slot, and both the hash and the seed geometry changed. 
 change is a heavier break than a format change for exactly that reason, which is why it waits for a
 major rather than riding one.
 
+**The key hash moved again in 5.0, for the same reason a major is the only place it could.** `BMP8`,
+`BCH8`, `BCL2` and `BHD1` are keyed on a hash up to 16 bytes one 64-bit product wide, and `5.0`
+refuses all four by name; a blob read under the new hash would answer wrong ids. The rule holds
+for the two with keys in them: **4.x's** `lexindex dump old.blob`, piped into 5.0's
+`lexindex build - new.blob --index perfect` (or `--index hashed`, whose ranks stay; a perfect hash's
+ids are slots, and move). 5.0's own `dump` refuses them with that sentence, since it would have to
+read a format it refuses. `CompactHashIndex` and `ClosedHashIndex` store no keys in any version, so
+**nothing converts them**: their users need the corpus they built from. Without it, the
+only option left is to keep that blob on 4.x, with the double collisions 4.x allows. `MPH3` keeps
+its number, as a table is keyed on the hashes it was handed, and `OVL2` keeps its own, as an overlay
+over a 4.x base is refused with the base.
+
 The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
 release, not a patch.
@@ -1106,16 +1117,16 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP8` | 4.0 | `PerfectHashIndex` | `BMP1`–`BMP7` **refused by name** |
-| `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
-| `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
+| `BMP9` | 5.0 | `PerfectHashIndex` | `BMP1`–`BMP8` **refused by name**; `BMP8` (4.x) names `lexindex dump \| lexindex build` |
+| `BCH9` | 5.0 | `CompactHashIndex` | `BCH1`–`BCH8` **refused by name**; `BCH8` (4.x) stores no keys, so it names its corpus |
+| `BCL3` | 5.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) and `BCL2` (4.x) **refused by name**; `BCL2` stores no keys, so it names its corpus |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
 | `BDX5` | 4.7 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
-| `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
+| `BHD2` | 5.0 | `HashedDictIndex` | `BHD1` (4.1–4.x) **refused by name**, naming `lexindex dump \| lexindex build`; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8`, `BCL2` and `BHD1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP9`, `BCH9`, `BCL3` and `BHD2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so all three
