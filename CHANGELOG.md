@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 Breaking, and for 5.0; `docs/migration-5.md` has every one with before and after.
 
+- **`IndexError` is `#[non_exhaustive]`.** A `match` on it needs a wildcard arm, and a new error no
+  longer costs a major version.
 - **`plan` assumes an open vocabulary on every front end.** `Needs::default()` is exact, as the command
   line was; `closed_vocabulary` asks for the other. `Needs::exact()`, `exact=` and `--exact` are gone.
 - **`plan` prices and ranks `HashedDictIndex` and `DoubleArrayIndex`.** `Kind` and `Needs` are

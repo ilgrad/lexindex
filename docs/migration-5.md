@@ -17,6 +17,7 @@ different question, and code that matched a refused build as `IndexError::Format
 | `--index auto` | never a `HashedDictIndex` or a `DoubleArrayIndex` | may pick either |
 | `Overlay::remove` over `CompactHashIndex` | compiled, and could retire a real key's id | does not compile; `TypeError` in Python |
 | A refused build | `IndexError::Format` | `IndexError::Build` |
+| `IndexError` | exhaustive | `#[non_exhaustive]` |
 
 ## `plan` assumes an open vocabulary
 
@@ -199,7 +200,8 @@ match DictIndex::build_with_block(&keys, block) {
 }
 ```
 
-An exhaustive `match` on `IndexError` built without `mph` needs the arm. The message starts
+`IndexError` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm, and a new error is no
+longer a major version. The message starts
 `build error:` rather than `format error:`. The C ABI answers `LEXINDEX_STATUS_BUILD` for these,
 where it answered `LEXINDEX_STATUS_FORMAT`. Python raises `ValueError` for both, as it did.
 

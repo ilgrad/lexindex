@@ -379,6 +379,7 @@ use std::fmt;
 
 /// Errors from building, querying, or (de)serialising an index.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IndexError {
     /// An error from the underlying finite-state transducer.
     Fst(fst::Error),
