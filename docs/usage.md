@@ -590,17 +590,17 @@ does not carry; saving it again writes the current one and it gains them.
 
 `key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
-a compile error, since the methods live on a trait the keyless index cannot implement. Removal over
-that base also inherits its false-positive rate: a `contains` that was never true of a real key can
-retire an id, so remove by a key you know is present — or by the id itself:
+a compile error, since the methods live on a trait the keyless index cannot implement. `remove` by
+key goes the same way, a `TypeError` naming the base and a compile error in Rust, since a key that
+index never held can match a live id and take a real key with it. Remove by the id itself:
 
 ```python
 ids = {key: ov.add(key) for key in ("neologism", "typo")}   # whatever the caller already stores
 ov.retire_id(ids.pop("typo"))                               # the tombstone, with no key to be wrong
 ```
 
-`retire_id` sets exactly the tombstone `remove` sets and asks the base nothing, so it is the one
-removal a false positive cannot mislead. An id at or above `id_space()`, or one already retired, is
+`retire_id` sets exactly the tombstone `remove` sets and asks the base nothing, so a false positive
+cannot mislead it. An id at or above `id_space()`, or one already retired, is
 `False` and changes nothing.
 
 ### Batched lookups into a buffer
@@ -912,8 +912,8 @@ and the wrong loader is already refused by the base tag rather than by the type.
 
 `key`, `keys` and `compact` need the base to store its keys, which `CompactHashIndex` does not — an
 overlay over it answers membership and nothing else, and the absence is a compile error rather than a
-runtime one. Removal over that base also inherits its false-positive rate: a `contains` that was
-never true of a real key can retire an id, so remove by a key you know is present.
+runtime one. `remove` needs exact membership (`OverlayExact`), which that base does not have either:
+a key it never held can match a live id. Over it, `retire_id` removes by the id `add` handed back.
 
 The blob records which base wrote it, so `from_bytes_with` refuses a mismatch before calling the
 loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by

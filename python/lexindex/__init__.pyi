@@ -848,19 +848,18 @@ class Overlay:
     def remove(self, key: str) -> bool:
         """Remove ``key``, returning whether it was there.
 
-        Over a ``CompactHashIndex`` base this inherits that index's false-positive rate: a
-        ``contains`` that was never true of a real key can retire an id. Remove by a key you know
-        is present, or by the id itself with ``retire_id``.
+        Raises ``TypeError`` on a ``CompactHashIndex`` base, whose membership is probabilistic: a
+        key it never held could retire a real key's id. Retire the id itself with ``retire_id``.
         """
 
     def retire_id(self, id: int) -> bool:
         """Retire ``id`` itself, returning whether it was live.
 
         The same tombstone ``remove`` sets, without the key lookup in front of it -- which over
-        a ``CompactHashIndex`` base is the part a false positive corrupts. An application that
-        stored the id it was given when the key was added has the exact id to retire and needs no
-        membership test. An id at or above ``id_space``, or one already retired, is ``False``
-        and changes nothing.
+        a ``CompactHashIndex`` base is what a false positive would corrupt, so there this is the
+        only removal. An application that stored the id it was given when the key was added has the
+        exact id to retire and needs no membership test. An id at or above ``id_space``, or one
+        already retired, is ``False`` and changes nothing.
         """
 
     def key(self, id: int) -> str | None:

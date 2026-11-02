@@ -1175,6 +1175,13 @@ def test_overlay_retires_an_id_without_a_membership_test():
     assert ov.retire_id(ov.id("apple")) and "apple" not in ov
 
 
+def test_overlay_refuses_a_removal_by_key_over_a_probabilistic_base():
+    ov = lexindex.Overlay(lexindex.CompactHashIndex(["apple", "banana"], fingerprint_bits=32))
+    with pytest.raises(TypeError, match=r"CompactHashIndex.*retire_id"):
+        ov.remove("apple")
+    assert "apple" in ov and len(ov) == 2, "a refused removal retires nothing"
+
+
 def test_overlay_shares_the_base_rather_than_taking_it():
     si = lexindex.StringIndex(["apple", "banana"])
     ov = lexindex.Overlay(si)
@@ -1370,7 +1377,7 @@ def test_overlay_save_replaces_an_existing_file_whole(tmp_path):
 def test_overlay_over_a_compact_hash_has_membership_and_nothing_else():
     ov = lexindex.Overlay(lexindex.CompactHashIndex(["alpha", "beta"], 4))
     assert ov.add("gamma") == 2
-    assert ov.remove("alpha") and ov.id("alpha") is None and len(ov) == 2
+    assert ov.retire_id(ov.id("alpha")) and ov.id("alpha") is None and len(ov) == 2
     assert "beta" in ov and "gamma" in ov
     for call in (lambda: ov.key(0), ov.keys, ov.compact):
         with pytest.raises(TypeError, match="stores no keys"):

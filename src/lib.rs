@@ -116,7 +116,7 @@ pub use dict_index::{DictIndex, DictProfile, DictSections};
 pub use double_array::DoubleArrayIndex;
 pub use estimate::{Estimate, Kind, Needs, Objective, Plan, Workload, plan, plan_file, plan_for};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
-pub use overlay::{Overlay, OverlayBase, OverlayKeys};
+pub use overlay::{Overlay, OverlayBase, OverlayExact, OverlayKeys};
 pub use string_index::StringIndex;
 
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash

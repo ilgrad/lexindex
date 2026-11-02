@@ -19,11 +19,11 @@
 //! [`CompactHashIndex`](crate::CompactHashIndex) a false positive that lands on a tombstoned id
 //! reads as absent — which is the contract that index already has, rather than a new one.
 //!
-//! The same probabilistic base makes [`remove`](Overlay::remove) the one operation to be careful
-//! with: a key the base has never seen can match a live id, and removing it retires that id along
-//! with the real key behind it. [`retire_id`](Overlay::retire_id) is the way out for a caller that
-//! kept the id — it retires exactly that id and asks the base nothing. See both methods for the
-//! whole of it.
+//! The same probabilistic base is why [`remove`](Overlay::remove) is not there at all: a key the
+//! base has never seen can match a live id, and removing it would retire that id along with the
+//! real key behind it. The method lives on [`OverlayExact`], which `CompactHashIndex` does not
+//! implement. [`retire_id`](Overlay::retire_id) is on every base: it retires exactly the id a
+//! caller kept and asks the base nothing.
 
 use crate::IndexError;
 
@@ -81,6 +81,18 @@ pub trait OverlayBase {
     /// Defaults to `false`, the conservative answer: an outside implementation opts in.
     const EXACT_MEMBERSHIP: bool = false;
 }
+
+/// A base whose [`base_id`](OverlayBase::base_id) never answers for a key it does not hold, and so
+/// can be asked which id a key to remove has: this is what puts [`Overlay::remove`] on the type.
+///
+/// [`CompactHashIndex`](crate::CompactHashIndex) does not implement it, so over that base a removal
+/// by key does not compile, and a caller keeps the ids it is issued for
+/// [`retire_id`](Overlay::retire_id). Distinct from [`OverlayKeys`], which only happens to hold for
+/// the same bases: exact membership does not need stored keys.
+///
+/// An implementation must set [`EXACT_MEMBERSHIP`](OverlayBase::EXACT_MEMBERSHIP), or `remove` fails
+/// to compile: the two cannot disagree.
+pub trait OverlayExact: OverlayBase {}
 
 /// A base that stores its keys, and so can answer `id → key` and be rebuilt from its own contents.
 ///
@@ -397,34 +409,33 @@ impl<I: OverlayBase> Overlay<I> {
         id
     }
 
-    /// Remove `key`. Returns whether it was live.
-    ///
-    /// The id is retired, not recycled: `key(id)` stops answering and no later addition receives
-    /// it, so ids handed out earlier stay valid for whoever holds them.
-    ///
-    /// **Over a probabilistic base this is the one operation whose false positive costs
-    /// something.** [`CompactHashIndex`](crate::CompactHashIndex) stores no keys, so a string it
-    /// has never seen can still match a live id — and removing it retires *that* id, taking a real
-    /// key with it. Reads already had this contract; a write does not get to be safer than the
-    /// index it writes to. A caller that kept the id it was given when the key was added can retire
-    /// it directly with [`retire_id`](Self::retire_id) and never ask the question; otherwise put
-    /// the overlay over [`PerfectHashIndex`](crate::PerfectHashIndex), whose membership is verified
-    /// against the stored key.
-    pub fn remove(&mut self, key: &str) -> bool {
-        match self.id(key) {
-            Some(id) => self.retire_id(id),
-            None => false,
-        }
-    }
-
     /// Retire `id` itself. Returns whether it was live.
     ///
-    /// The same tombstone [`remove`](Self::remove) sets, without the key lookup in front of it —
+    /// The same tombstone [`remove`](Overlay::remove) sets, without the key lookup in front of it —
     /// which is the whole point over a probabilistic base, where that lookup is what a false
-    /// positive corrupts. An application that stores the id it was handed when the key was added
-    /// has the exact id to retire and needs no membership test at all; over
-    /// [`CompactHashIndex`](crate::CompactHashIndex) this is the only removal that cannot take a
-    /// stranger's key with it.
+    /// positive would corrupt. An application that stores the id it was handed when the key was
+    /// added has the exact id to retire and needs no membership test at all; over
+    /// [`CompactHashIndex`](crate::CompactHashIndex) this is the only removal there is.
+    ///
+    /// ```
+    /// # #[cfg(feature = "mph")] {
+    /// use lexindex::{CompactHashIndex, Overlay};
+    ///
+    /// let mut ov = Overlay::new(CompactHashIndex::build(["apple", "banana"], 4).unwrap());
+    /// let cherry = ov.add("cherry");
+    /// assert!(ov.retire_id(cherry));
+    /// assert_eq!(ov.id("cherry"), None);
+    /// # }
+    /// ```
+    ///
+    /// Removal by key is not there to reach for: it does not compile over this base.
+    ///
+    /// ```compile_fail
+    /// use lexindex::{CompactHashIndex, Overlay};
+    ///
+    /// let mut ov = Overlay::new(CompactHashIndex::build(["apple", "banana"], 4).unwrap());
+    /// ov.remove("apple");
+    /// ```
     ///
     /// An id at or above [`id_space`](Self::id_space), or one already retired, is `false` and
     /// changes nothing.
@@ -435,6 +446,30 @@ impl<I: OverlayBase> Overlay<I> {
         self.set_dead(id, true);
         self.live -= 1;
         true
+    }
+}
+
+impl<I: OverlayExact> Overlay<I> {
+    /// Remove `key`. Returns whether it was live.
+    ///
+    /// The id is retired, not recycled: [`id`](Self::id) stops answering and no later addition of
+    /// another key receives it, so ids handed out earlier stay valid for whoever holds them.
+    ///
+    /// Only on a base with exact membership: over
+    /// [`CompactHashIndex`](crate::CompactHashIndex) a string it has never seen can match a live id,
+    /// and removing it would retire that id, taking a real key with it. That base has
+    /// [`retire_id`](Self::retire_id).
+    pub fn remove(&mut self, key: &str) -> bool {
+        const {
+            assert!(
+                I::EXACT_MEMBERSHIP,
+                "an OverlayExact base must set OverlayBase::EXACT_MEMBERSHIP"
+            );
+        }
+        match self.id(key) {
+            Some(id) => self.retire_id(id),
+            None => false,
+        }
     }
 }
 
@@ -539,6 +574,8 @@ impl<T: OverlayBase> OverlayBase for std::sync::Arc<T> {
     }
 }
 
+impl<T: OverlayExact> OverlayExact for std::sync::Arc<T> {}
+
 impl<T: OverlayKeys> OverlayKeys for std::sync::Arc<T> {
     fn base_key(&self, id: u64) -> Option<String> {
         (**self).base_key(id)
@@ -577,6 +614,8 @@ impl OverlayBase for crate::StringIndex {
         Ok(self.serialized_len())
     }
 }
+
+impl OverlayExact for crate::StringIndex {}
 
 impl OverlayKeys for crate::StringIndex {
     fn base_key(&self, id: u64) -> Option<String> {
@@ -629,6 +668,9 @@ impl OverlayBase for crate::PerfectHashIndex {
 }
 
 #[cfg(feature = "mph")]
+#[cfg(feature = "mph")]
+impl OverlayExact for crate::PerfectHashIndex {}
+
 impl OverlayKeys for crate::PerfectHashIndex {
     fn base_key(&self, id: u64) -> Option<String> {
         self.key(u32::try_from(id).ok()?).map(str::to_owned)
@@ -1343,9 +1385,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("overlay.bin");
         fn check<I: OverlayBase>(mut ov: Overlay<I>, path: &std::path::Path) {
-            ov.add("added-one");
+            let one = ov.add("added-one");
             ov.add("added-two");
-            ov.remove("added-one");
+            ov.retire_id(one);
             ov.save(path).unwrap();
             assert_eq!(std::fs::read(path).unwrap(), ov.to_bytes().unwrap());
         }
@@ -1395,6 +1437,8 @@ mod tests {
         }
     }
 
+    impl OverlayExact for VecBase {}
+
     impl OverlayKeys for VecBase {
         fn base_key(&self, id: u64) -> Option<String> {
             self.0.get(id as usize).cloned()
@@ -1407,7 +1451,7 @@ mod tests {
         }
     }
 
-    fn fruit<I: OverlayKeys>(base: I) -> Overlay<I> {
+    fn fruit<I: OverlayKeys + OverlayExact>(base: I) -> Overlay<I> {
         let mut ov = Overlay::new(base);
         ov.add("kiwi");
         ov.add("fig");
@@ -1804,7 +1848,7 @@ mod tests {
         use crate::CompactHashIndex;
         let mut ov = Overlay::new(CompactHashIndex::build(["alpha", "beta"], 4).unwrap());
         ov.add("gamma");
-        assert!(ov.remove("alpha"));
+        assert!(ov.retire_id(ov.id("alpha").unwrap()));
         let blob = ov.to_bytes().unwrap();
         // SAFETY: the blob was produced by `to_bytes` in this process and has not left it.
         let back = Overlay::from_bytes_with(&blob, CompactHashIndex::from_bytes).unwrap();
@@ -1990,7 +2034,7 @@ mod tests {
         assert_eq!(ov.len(), 3);
         let delta = ov.add("delta");
         assert!(ov.contains("delta") && ov.id("delta") == Some(delta));
-        assert!(ov.remove("beta"));
+        assert!(ov.retire_id(ov.id("beta").unwrap()));
         assert_eq!(ov.id("beta"), None);
         assert_eq!(ov.len(), 3);
         // No false negatives: whatever the fingerprint does on strings never inserted, a key that
