@@ -1094,7 +1094,7 @@ def plan(
     100 000-key draws, one uniform over the corpus and one of runs of consecutive keys, so past that
     size every entry is a model and ``measured`` is ``False``. Scored against the built blob on 23
     corpora of half a million to ten million keys, at each of the three priced ``DictIndex``
-    blocks, that estimate lands within 1.0 % median, 4.2 % at the 90th percentile and 7.2 % at
+    blocks, that estimate lands within 1.6 % median, 5.3 % at the 90th percentile and 8.3 % at
     worst; ``StringIndex`` within 1.1 / 6.7 / 11.7 over 19 corpora, because an fst merges equal
     right-languages and how much it merges is a property of the *density* of the whole key set
     rather than of any statistic of it. A dense id space is where that still breaks: ten million

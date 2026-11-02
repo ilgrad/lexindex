@@ -196,6 +196,10 @@ All notable changes to this project are documented here. The format follows
   come sorted skip it, as before.
 ### Documentation
 
+- **`plan()`'s accuracy, re-scored against today's blobs.** `DictIndex` shrank and the estimate did
+  not move, so the 1.0 / 4.2 / 7.2 % in the docs had gone stale: on the same 69 cells it is
+  1.6 / 5.3 / 8.3 %. The ranking is still right on 19 of 19. The usage guide's account of the error
+  on a deep path list named the wrong cause, a suffix length; it is the vocabulary's size.
 - **"What each index promises"** in the usage guide: for each of the seven, what two different keys
   get, what a key it does not hold gets, and which loader a stranger's blob needs. `plan`'s closed
   default is now said where `plan` is introduced, and the guide shows a table indexed by id following

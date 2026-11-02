@@ -12,7 +12,7 @@
 //! *corpus* would buy, along with the bytes an fst spends a key and the bits the perfect hash
 //! spends per key. Scored against the built blob on 23 corpora of half a million to ten
 //! million keys, at each of the three priced blocks, the [`DictIndex`] estimate lands within
-//! **1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**.
+//! **1.6 % median, 5.3 % at the 90th percentile and 8.3 % at worst**.
 //! [`StringIndex`] is looser — **1.1 % median, 6.7 % at the 90th percentile and 11.7 % at worst**
 //! over 19 corpora of a quarter million to nineteen million keys — because an fst merges equal
 //! right-languages, and how much it merges is a property of the *density* of the whole key set

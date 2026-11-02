@@ -36,7 +36,7 @@ Past 100 000 keys the three numbers no statistic gives — what the codec squeez
 bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
 that size, and each estimate says so in `measured`. Scored against the built blob on 23 corpora of
 half a million to ten million keys, at each of the three priced blocks, `DictIndex` lands within
-**1.0 % median, 4.2 % at the 90th percentile and 7.2 % at worst**; `StringIndex` within
+**1.6 % median, 5.3 % at the 90th percentile and 8.3 % at worst**; `StringIndex` within
 **1.1 / 6.7 / 11.7** over 19 corpora, because an fst merges equal right-languages and how much it
 merges is a property of the *density* of the whole key set rather than of any statistic of it. A
 dense id space is where that still breaks: ten million decimal ids merge to 356 bytes whole, which
@@ -45,13 +45,13 @@ the ranking survives, the byte count does not, and `thin` says so. Below the sam
 and reported at what they weigh.
 
 That error is not random in `n`. Holding a corpus's content fixed and moving only its size — stride
-samples of one file, so the difference is scale and nothing else — the estimate reads about 2.8 %
-low at a million keys and converges to within 0.2 % by ten million on urls and article titles. It
-does not converge on a **deep directory tree**, where shared prefixes keep lengthening with the key
-count: a path list reads level at a million and 7.2 % high at seven. The suffix rate is measured on
-a uniform draw of 100 000 keys, whose neighbours are `n / 100 000` apart, so what it reads is a
-longer suffix than the blob's — plan a large path index expecting the blob to come in under the
-number, and re-plan on a sample of the real keys if the margin matters.
+samples of one file, so the difference is scale and nothing else — the estimate reads about 3 %
+low at a million keys and about 2 % high at ten million on urls and article titles. On a **deep
+directory tree** it climbs further: a path list reads level at a million and 8.2 % high at seven.
+Most of that is the suffix rate. The plan reads it under a vocabulary mined from a draw of 100 000
+keys, which stops near 300 KB; seven million paths buy 600 KB and code their suffixes 8 % tighter
+(0.357 against 0.388). Plan a large path index expecting the blob to come in under the number; a
+sample of the real keys cannot narrow it, since a sample buys the smaller vocabulary too.
 
 **What a sample cannot see by itself is how good the vocabulary gets.** A shard's symbol table and
 the blob-wide phrase dictionary are trained on the keys the blob holds, and the miner buys a phrase
