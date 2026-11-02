@@ -322,7 +322,7 @@ fn main() {
     ];
     let mut rows = names.map(|name| Row::new(name, wanted(name), copies));
     let closed = || ClosedHashIndex::build(keys.iter().copied()).expect("build");
-    let compact_index = || CompactHashIndex::build(keys.iter().copied(), 1).expect("build");
+    let compact_index = || CompactHashIndex::build_bits(keys.iter().copied(), 8).expect("build");
     // `CompactPtrHash` is not `Clone` (its `EliasFano` remap is not), so its copies are built
     // again, and `ptr_hash` does not promise the same table twice.
     let compact_int = || {

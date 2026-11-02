@@ -153,7 +153,7 @@ mod mph {
     #[test]
     fn a_compact_hash_blob_round_trips_exactly() {
         let keys = keys();
-        let idx = lexindex::CompactHashIndex::build(&keys, 1).unwrap();
+        let idx = lexindex::CompactHashIndex::build_bits(&keys, 8).unwrap();
         let blob = idx.to_bytes().unwrap();
         assert_eq!(&blob[0..4], b"BCH8");
         let back = lexindex::CompactHashIndex::from_bytes(&blob).expect("its own blob loads");
@@ -193,7 +193,7 @@ mod mph {
     #[test]
     fn the_current_hash_blobs_are_byte_identical_to_a_fresh_build() {
         let keys = keys();
-        let compact = lexindex::CompactHashIndex::build(&keys, 1)
+        let compact = lexindex::CompactHashIndex::build_bits(&keys, 8)
             .unwrap()
             .to_bytes()
             .unwrap();

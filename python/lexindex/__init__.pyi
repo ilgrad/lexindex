@@ -324,7 +324,7 @@ class CompactHashIndex:
     def __new__(
         cls,
         items: Iterable[str],
-        fingerprint_bytes: int = 1,
+        fingerprint_bytes: int | None = None,
         *,
         fingerprint_bits: int | None = None,
     ) -> CompactHashIndex: ...
@@ -332,7 +332,7 @@ class CompactHashIndex:
     def build_to_file(
         items: Iterable[str],
         path: str | os.PathLike[str],
-        fingerprint_bytes: int = 1,
+        fingerprint_bytes: int | None = None,
         *,
         fingerprint_bits: int | None = None,
     ) -> int:

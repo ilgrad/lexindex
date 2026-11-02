@@ -903,8 +903,8 @@ pub struct CompactHashIndex {
 }
 
 impl CompactHashIndex {
-    /// Build from a collection of strings, storing `fingerprint_bytes` (1, 2, or 4) per key —
-    /// byte-granular sugar for [`build_bits`](Self::build_bits) with `8 × fingerprint_bytes`.
+    /// [`build_bits`](Self::build_bits) with the width in whole bytes: 1, 2 or 4, for
+    /// `8 × fingerprint_bytes` bits.
     pub fn build<I, S>(items: I, fingerprint_bytes: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -1040,26 +1040,8 @@ impl CompactHashIndex {
         })
     }
 
-    /// Build straight to a file, from a source that need not fit in memory: the file
-    /// [`build`](Self::build) and [`save`](Self::save) would have written, byte for byte, without
-    /// ever holding the keys, their hashes or the fingerprint table whole. Returns the number of
-    /// distinct keys written. `fingerprint_bytes` is [`build`](Self::build)'s;
-    /// [`build_bits_to_file`](Self::build_bits_to_file) takes a width in bits.
-    ///
-    /// One pass over `items` hashes each key to its 16-byte pair and drops the string; every
-    /// 256 MiB of pairs is sorted, deduplicated and spilled as a run beside the output, and the
-    /// runs are merged into one sorted file. The perfect hash is built from that file one
-    /// first-level chunk at a time — the table `build` gives the same keys, since both feed the
-    /// same placement — and a second read writes every fingerprint at its slot: into memory while
-    /// the table is under 256 MiB (268 M keys at the default width), past that through range
-    /// files of 16 M slots each, so that no byte of the output is ever written at a random
-    /// offset. Peak memory is one run plus the perfect hash's own construction, whatever the key
-    /// count; the transient disk beside the output is the distinct pairs twice, 32 bytes per key,
-    /// and twelve more past the table budget, all removed on every exit path.
-    ///
-    /// The source is read once, so any iterator will do; unlike
-    /// [`PerfectHashIndex::build_to_file`](crate::PerfectHashIndex::build_to_file) nothing is
-    /// replayed, because nothing here depends on the slot order before the keys are hashed.
+    /// [`build_bits_to_file`](Self::build_bits_to_file) with the width in whole bytes: 1, 2 or 4,
+    /// for `8 × fingerprint_bytes` bits.
     pub fn build_to_file<I, S>(
         items: I,
         path: impl AsRef<std::path::Path>,
@@ -1077,8 +1059,25 @@ impl CompactHashIndex {
         Self::build_bits_to_file(items, path, fingerprint_bytes as u32 * 8)
     }
 
-    /// [`build_to_file`](Self::build_to_file) at exactly `fingerprint_bits` (1..=64) per key —
-    /// [`build_bits`](Self::build_bits) written straight to `path`.
+    /// Build straight to a file, from a source that need not fit in memory: the file
+    /// [`build_bits`](Self::build_bits) and [`save`](Self::save) would have written, byte for byte, without
+    /// ever holding the keys, their hashes or the fingerprint table whole. Returns the number of
+    /// distinct keys written. `fingerprint_bits` is [`build_bits`](Self::build_bits)'s.
+    ///
+    /// One pass over `items` hashes each key to its 16-byte pair and drops the string; every
+    /// 256 MiB of pairs is sorted, deduplicated and spilled as a run beside the output, and the
+    /// runs are merged into one sorted file. The perfect hash is built from that file one
+    /// first-level chunk at a time — the table `build_bits` gives the same keys, since both feed the
+    /// same placement — and a second read writes every fingerprint at its slot: into memory while
+    /// the table is under 256 MiB (268 M keys at the default width), past that through range
+    /// files of 16 M slots each, so that no byte of the output is ever written at a random
+    /// offset. Peak memory is one run plus the perfect hash's own construction, whatever the key
+    /// count; the transient disk beside the output is the distinct pairs twice, 32 bytes per key,
+    /// and twelve more past the table budget, all removed on every exit path.
+    ///
+    /// The source is read once, so any iterator will do; unlike
+    /// [`PerfectHashIndex::build_to_file`](crate::PerfectHashIndex::build_to_file) nothing is
+    /// replayed, because nothing here depends on the slot order before the keys are hashed.
     pub fn build_bits_to_file<I, S>(
         items: I,
         path: impl AsRef<std::path::Path>,
@@ -1934,7 +1933,7 @@ mod tests {
     /// payload checksum — so the MPH region is never reached on a short read.
     #[test]
     fn parse_frame_rejects_every_truncation() {
-        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits(["alpha", "beta", "gamma"], 8).unwrap();
         let blob = idx.to_bytes().unwrap();
         for verify in [true, false] {
             for k in 0..blob.len() {
@@ -1954,14 +1953,15 @@ mod tests {
     #[test]
     fn serialized_len_matches_to_bytes() {
         for keys in [vec![], vec!["alpha"], vec!["alpha", "beta", "gamma"]] {
-            let idx = CompactHashIndex::build(&keys, 1).unwrap();
+            let idx = CompactHashIndex::build_bits(&keys, 8).unwrap();
             assert_eq!(idx.serialized_len().unwrap(), idx.to_bytes().unwrap().len());
         }
     }
 
     #[test]
     fn build_lookup_and_membership() {
-        let idx = CompactHashIndex::build(["alpha", "beta", "gamma", "delta", "alpha"], 2).unwrap();
+        let idx =
+            CompactHashIndex::build_bits(["alpha", "beta", "gamma", "delta", "alpha"], 16).unwrap();
         assert_eq!(idx.len(), 4);
         assert!(!idx.is_empty());
         let mut ids = Vec::new();
@@ -1981,7 +1981,7 @@ mod tests {
     #[test]
     fn false_positive_rate_is_bounded() {
         let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
-        let idx = CompactHashIndex::build(&members, 2).unwrap();
+        let idx = CompactHashIndex::build_bits(&members, 16).unwrap();
         for m in &members {
             assert!(idx.contains(m)); // no false negatives, ever
         }
@@ -2000,7 +2000,7 @@ mod tests {
     #[test]
     fn batch_matches_singular_including_misses() {
         let keys: Vec<String> = (0..3_000).map(|i| format!("k{i}")).collect();
-        let idx = CompactHashIndex::build(&keys, 2).unwrap();
+        let idx = CompactHashIndex::build_bits(&keys, 16).unwrap();
         let probes: Vec<String> = keys
             .iter()
             .cloned()
@@ -2015,7 +2015,7 @@ mod tests {
     #[test]
     fn much_smaller_than_perfect_hash_index() {
         let words: Vec<String> = (0..5_000).map(|i| format!("token-{i:05}")).collect();
-        let compact = CompactHashIndex::build(&words, 1)
+        let compact = CompactHashIndex::build_bits(&words, 8)
             .unwrap()
             .to_bytes()
             .unwrap()
@@ -2030,19 +2030,18 @@ mod tests {
 
     #[test]
     fn round_trips_and_rejects_corrupt() {
-        let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
+        let idx = CompactHashIndex::build_bits(["GET", "POST", "PUT", "DELETE"], 16).unwrap();
         let restored = from_bytes(&idx.to_bytes().unwrap()).unwrap();
         for w in ["GET", "POST", "PUT", "DELETE"] {
             assert_eq!(restored.id(w), idx.id(w));
         }
         assert_eq!(restored.id("PATCH"), None);
         assert!(from_bytes(b"nope").is_err());
-        assert!(CompactHashIndex::build(["a"], 3).is_err()); // bad fingerprint width
     }
 
     #[test]
     fn from_bytes_rejects_bad_width_and_length() {
-        let good = CompactHashIndex::build(["a", "bb", "ccc"], 2)
+        let good = CompactHashIndex::build_bits(["a", "bb", "ccc"], 16)
             .unwrap()
             .to_bytes()
             .unwrap();
@@ -2065,7 +2064,7 @@ mod tests {
     /// file.
     #[test]
     fn a_blob_from_before_1_2_is_refused_by_name() {
-        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits(["alpha", "beta", "gamma"], 8).unwrap();
         let good = idx.to_bytes().unwrap();
         assert_eq!(&good[0..4], b"BCH8");
         for magic in LEGACY_MAGICS {
@@ -2085,7 +2084,7 @@ mod tests {
     /// owned loads.
     #[test]
     fn corrupt_headers_and_payloads_are_refused() {
-        let idx = CompactHashIndex::build(["alpha", "beta", "gamma"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits(["alpha", "beta", "gamma"], 8).unwrap();
         let good = idx.to_bytes().unwrap();
         assert!(from_bytes(&good).is_ok());
         for pos in [4, 12, 15, 16, 23, 24, 27, 28, 35, 36, 39] {
@@ -2169,7 +2168,7 @@ mod tests {
     #[test]
     fn keys_sharing_both_hashes_are_one_key() {
         let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
-        let idx = CompactHashIndex::build([a, b, "filler"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits([a, b, "filler"], 8).unwrap();
         assert_eq!(idx.len(), 2);
         assert_eq!(idx.id(a), idx.id(b));
     }
@@ -2180,7 +2179,7 @@ mod tests {
     #[test]
     fn tampered_side_ids_are_refused_even_with_valid_checksums() {
         let (a, b) = crate::hash::COLLIDING_PAIR;
-        let idx = CompactHashIndex::build([a, b, "filler"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits([a, b, "filler"], 8).unwrap();
         assert_eq!(idx.side.len(), 1);
         let good = idx.to_bytes().unwrap();
         // The lone side entry's id lives in the blob's last 4 bytes.
@@ -2205,7 +2204,7 @@ mod tests {
     #[test]
     fn save_streams_the_same_bytes_as_to_bytes() {
         let words: Vec<String> = (0..500).map(|i| format!("w{i}")).collect();
-        let idx = CompactHashIndex::build(&words, 2).unwrap();
+        let idx = CompactHashIndex::build_bits(&words, 16).unwrap();
         let path =
             std::env::temp_dir().join(format!("lexindex_chstream_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
@@ -2218,7 +2217,7 @@ mod tests {
     fn id_unchecked_is_bounded_for_strangers() {
         let members: Vec<String> = (0..2_000).map(|i| format!("member-{i:05}")).collect();
         for round in 0..60 {
-            let idx = CompactHashIndex::build(&members, 1).unwrap();
+            let idx = CompactHashIndex::build_bits(&members, 8).unwrap();
             for probe in 0..2_000 {
                 let s = format!("stranger-{round}-{probe}");
                 assert!((idx.id_unchecked(&s) as usize) < idx.len());
@@ -2352,7 +2351,7 @@ mod tests {
     fn from_bytes_rejects_overflowing_n_without_panicking() {
         // A fabricated huge `n` in the header (with the MPH region left intact) must fail cleanly, not
         // overflow `n * fp_bytes` — which would panic in a debug build.
-        let mut blob = CompactHashIndex::build(["a", "bb", "ccc"], 4)
+        let mut blob = CompactHashIndex::build_bits(["a", "bb", "ccc"], 32)
             .unwrap()
             .to_bytes()
             .unwrap();
@@ -2368,7 +2367,7 @@ mod tests {
         let empty = CompactHashIndex::build_bits(Vec::<String>::new(), 4).unwrap();
         assert_eq!(empty.fingerprint_bits(), 4);
         assert!(empty.is_empty() && empty.id("x").is_none());
-        let empty = CompactHashIndex::build(Vec::<String>::new(), 1).unwrap();
+        let empty = CompactHashIndex::build_bits(Vec::<String>::new(), 8).unwrap();
         assert!(empty.is_empty() && empty.id("x").is_none() && empty.id_unchecked("x") == 0);
         assert_eq!(empty.ids_of(&["x", "y"]), vec![None, None]);
         let restored = from_bytes(&empty.to_bytes().unwrap()).unwrap();
@@ -2378,7 +2377,7 @@ mod tests {
 
     #[test]
     fn save_and_load_roundtrip() {
-        let idx = CompactHashIndex::build(["a", "b", "c"], 1).unwrap();
+        let idx = CompactHashIndex::build_bits(["a", "b", "c"], 8).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_ch_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
         assert_eq!(CompactHashIndex::load(&path).unwrap().id("b"), idx.id("b"));
@@ -2457,7 +2456,7 @@ mod tests {
     #[test]
     fn build_to_file_streams_the_perfect_hash_from_the_merged_file() {
         let keys: Vec<String> = (0..200_000).map(|i| format!("k{i}")).collect();
-        let expected = CompactHashIndex::build(&keys, 1)
+        let expected = CompactHashIndex::build_bits(&keys, 8)
             .unwrap()
             .to_bytes()
             .unwrap();
@@ -2562,13 +2561,40 @@ mod tests {
     }
 
     #[test]
+    fn the_byte_sized_forms_are_the_bit_sized_ones_at_eight_times_the_width() {
+        let keys = ["alpha", "beta", "gamma", "beta"];
+        let path = tmp("bytes.bch");
+        for bytes in [1, 2, 4] {
+            let bits = CompactHashIndex::build_bits(keys, bytes as u32 * 8)
+                .unwrap()
+                .to_bytes()
+                .unwrap();
+            let sugar = CompactHashIndex::build(keys, bytes).unwrap();
+            assert!(sugar.to_bytes().unwrap() == bits);
+            assert_eq!(
+                CompactHashIndex::build_to_file(keys, &path, bytes).unwrap(),
+                3
+            );
+            assert!(std::fs::read(&path).unwrap() == bits);
+            std::fs::remove_file(&path).ok();
+        }
+        assert!(CompactHashIndex::build(keys, 3).is_err());
+        let never = std::iter::from_fn(|| -> Option<&str> { panic!("the source was read") });
+        assert!(CompactHashIndex::build_to_file(never, &path, 3).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn build_to_file_public_forms_match_build() {
         let keys = ["alpha", "beta", "gamma", "beta"];
         let path = tmp("public.bch");
-        assert_eq!(CompactHashIndex::build_to_file(keys, &path, 2).unwrap(), 3);
+        assert_eq!(
+            CompactHashIndex::build_bits_to_file(keys, &path, 16).unwrap(),
+            3
+        );
         assert!(
             std::fs::read(&path).unwrap()
-                == CompactHashIndex::build(keys, 2)
+                == CompactHashIndex::build_bits(keys, 16)
                     .unwrap()
                     .to_bytes()
                     .unwrap()
@@ -2586,18 +2612,16 @@ mod tests {
         );
         std::fs::remove_file(&path).ok();
         let never = std::iter::from_fn(|| -> Option<&str> { panic!("the source was read") });
-        assert!(CompactHashIndex::build_to_file(never, &path, 3).is_err());
-        let never = std::iter::from_fn(|| -> Option<&str> { panic!("the source was read") });
         assert!(CompactHashIndex::build_bits_to_file(never, &path, 0).is_err());
         assert!(!path.exists());
         let empty = tmp("empty.bch");
         assert_eq!(
-            CompactHashIndex::build_to_file(Vec::<String>::new(), &empty, 1).unwrap(),
+            CompactHashIndex::build_bits_to_file(Vec::<String>::new(), &empty, 8).unwrap(),
             0
         );
         assert!(
             std::fs::read(&empty).unwrap()
-                == CompactHashIndex::build(Vec::<String>::new(), 1)
+                == CompactHashIndex::build_bits(Vec::<String>::new(), 8)
                     .unwrap()
                     .to_bytes()
                     .unwrap()
@@ -2658,7 +2682,7 @@ mod tests {
     #[cfg(feature = "mmap")]
     #[test]
     fn load_mmap_verified_refuses_a_flipped_payload_byte_the_plain_mapping_takes() {
-        let idx = CompactHashIndex::build(["GET", "POST", "PUT", "DELETE"], 2).unwrap();
+        let idx = CompactHashIndex::build_bits(["GET", "POST", "PUT", "DELETE"], 16).unwrap();
         let path = std::env::temp_dir().join(format!("lexindex_mmapv_{}.bch", std::process::id()));
         idx.save(&path).unwrap();
         // SAFETY: this test owns the file and nothing writes to it while a map is alive.
@@ -2679,7 +2703,7 @@ mod tests {
     #[test]
     fn load_mmap_matches_owned() {
         let words: Vec<String> = (0..128).map(|i| format!("k{i:03}")).collect();
-        let idx = CompactHashIndex::build(&words, 2).unwrap();
+        let idx = CompactHashIndex::build_bits(&words, 16).unwrap();
         let path =
             std::env::temp_dir().join(format!("lexindex_ch_mmap_{}.bch", std::process::id()));
         idx.save(&path).unwrap();

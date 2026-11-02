@@ -1524,7 +1524,7 @@ fn hash_fits(keys: &[&str]) -> Result<HashFits, IndexError> {
     let parts = |ks: &[&str]| -> Result<[f64; 4], IndexError> {
         let perfect = PerfectHashIndex::build(ks)?;
         Ok([
-            CompactHashIndex::build(ks, 1)?.serialized_len()? as f64,
+            CompactHashIndex::build_bits(ks, 8)?.serialized_len()? as f64,
             ClosedHashIndex::build(ks)?.serialized_len() as f64,
             (perfect.serialized_len()? - perfect.arena_len()) as f64,
             crate::arena::blocked_index_len(&lens_by_hash(ks)).unwrap_or(0) as f64,
@@ -1850,7 +1850,7 @@ fn weigh(keys: &[&str], candidates: &[(Kind, Option<usize>)]) -> Result<Vec<Esti
             }
             #[cfg(feature = "mph")]
             Kind::Compact => (
-                CompactHashIndex::build(keys, 1)?.serialized_len()? as u64,
+                CompactHashIndex::build_bits(keys, 8)?.serialized_len()? as u64,
                 None,
             ),
             #[cfg(feature = "mph")]
@@ -2369,7 +2369,7 @@ mod tests {
                     .unwrap()
                     .serialized_len() as u64,
                 #[cfg(feature = "mph")]
-                Kind::Compact => CompactHashIndex::build(&keys, 1)
+                Kind::Compact => CompactHashIndex::build_bits(&keys, 8)
                     .unwrap()
                     .serialized_len()
                     .unwrap() as u64,

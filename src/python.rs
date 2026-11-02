@@ -37,7 +37,9 @@
 
 use crate::{DictIndex, DictProfile, DoubleArrayIndex, IndexError, Overlay, StringIndex};
 use pyo3::buffer::PyBuffer;
-use pyo3::exceptions::{PyBufferError, PyIOError, PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{
+    PyBufferError, PyDeprecationWarning, PyIOError, PyKeyError, PyTypeError, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::sync::MutexExt;
@@ -1169,10 +1171,24 @@ impl PyPerfectHashIndex {
     }
 }
 
-/// The fingerprint width a `CompactHashIndex` constructor was asked for: `fingerprint_bytes`
-/// (1, 2 or 4) or, keyword-only and instead of it, `fingerprint_bits` (1..=64).
+/// The fingerprint width a `CompactHashIndex` constructor was asked for: `fingerprint_bits`
+/// (1..=64) or, deprecated and instead of it, `fingerprint_bytes` (1, 2 or 4).
 #[cfg(feature = "mph")]
-fn fingerprint_width(fingerprint_bytes: usize, fingerprint_bits: Option<u32>) -> PyResult<u32> {
+fn fingerprint_width(
+    py: Python<'_>,
+    fingerprint_bytes: Option<usize>,
+    fingerprint_bits: Option<u32>,
+) -> PyResult<u32> {
+    if fingerprint_bytes.is_some() {
+        let category = py.get_type::<PyDeprecationWarning>();
+        PyErr::warn(
+            py,
+            &category,
+            c"fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width",
+            1,
+        )?;
+    }
+    let fingerprint_bytes = fingerprint_bytes.unwrap_or(1);
     let bits = match fingerprint_bits {
         Some(bits) => {
             if fingerprint_bytes != 1 {
@@ -1229,19 +1245,20 @@ pub struct PyCompactHashIndex {
 #[cfg(feature = "mph")]
 #[pymethods]
 impl PyCompactHashIndex {
-    /// Build from an iterable of strings, storing `fingerprint_bytes` (1, 2, or 4) per key, or —
-    /// keyword-only — exactly `fingerprint_bits` (1..=64) per key. Fewer bits is smaller but raises
-    /// the membership false-positive rate to `2 ** -fingerprint_bits` (6.25% at 4 bits, ≈ 0.4% at 8,
-    /// ≈ 0.0015% at 16). Duplicates removed; ids are arbitrary dense slots.
+    /// Build from an iterable of strings, storing exactly `fingerprint_bits` (1..=64, default 8) per
+    /// key. Fewer bits is smaller but raises the membership false-positive rate to
+    /// `2 ** -fingerprint_bits` (6.25% at 4 bits, ≈ 0.4% at 8, ≈ 0.0015% at 16). Duplicates removed;
+    /// ids are arbitrary dense slots. `fingerprint_bytes` (1, 2, or 4) is the deprecated spelling
+    /// of 8, 16 or 32 bits, and warns.
     #[new]
-    #[pyo3(signature = (items, fingerprint_bytes=1, *, fingerprint_bits=None))]
+    #[pyo3(signature = (items, fingerprint_bytes=None, *, fingerprint_bits=None))]
     fn new(
         py: Python<'_>,
         items: &Bound<'_, PyAny>,
-        fingerprint_bytes: usize,
+        fingerprint_bytes: Option<usize>,
         fingerprint_bits: Option<u32>,
     ) -> PyResult<Self> {
-        let bits = fingerprint_width(fingerprint_bytes, fingerprint_bits)?;
+        let bits = fingerprint_width(py, fingerprint_bytes, fingerprint_bits)?;
         // Unlike the key-storing indexes, this one needs only 16 hashed bytes per key — so the
         // items are hashed as they come off the iterator (under the GIL) and the strings dropped,
         // keeping a generator-fed build streaming on the Python side too.
@@ -1261,14 +1278,14 @@ impl PyCompactHashIndex {
     /// finished table is ever held whole. The file is byte for byte what the constructor and
     /// `save` write. Returns the number of distinct keys written. Widths as in the constructor.
     #[staticmethod]
-    #[pyo3(signature = (items, path, fingerprint_bytes=1, *, fingerprint_bits=None))]
+    #[pyo3(signature = (items, path, fingerprint_bytes=None, *, fingerprint_bits=None))]
     fn build_to_file(
         items: &Bound<'_, PyAny>,
         path: PathBuf,
-        fingerprint_bytes: usize,
+        fingerprint_bytes: Option<usize>,
         fingerprint_bits: Option<u32>,
     ) -> PyResult<usize> {
-        let bits = fingerprint_width(fingerprint_bytes, fingerprint_bits)?;
+        let bits = fingerprint_width(items.py(), fingerprint_bytes, fingerprint_bits)?;
         let err = Rc::new(RefCell::new(None));
         let seen = Rc::clone(&err);
         // The check runs once the input has ended and again inside the atomic write, so an

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`fingerprint_bytes`, for `fingerprint_bits`.** The byte width was sugar for three of the 64
+  widths, and it was the one the signature led with. In Rust `CompactHashIndex::build` and
+  `build_to_file` are deprecated for `build_bits(items, 8)` and `build_bits_to_file`; in Python
+  passing `fingerprint_bytes` raises a `DeprecationWarning`, and `fingerprint_bits=` takes its place.
+  Both spellings write the same blob, byte for byte. They go in 5.0.
+
 ### Added
 
 - **`lexindex build --index hashed` and `--index double-array`.** The command line could inspect both

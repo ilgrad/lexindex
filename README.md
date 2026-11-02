@@ -247,7 +247,7 @@ fn main() -> Result<(), lexindex::IndexError> {
 
     // The smallest string → id map that rejects strangers: an 8-bit fingerprint per key, 1.24 B/key,
     // ~0.4 % false positives.
-    let compact = CompactHashIndex::build(verbs, 1)?;
+    let compact = CompactHashIndex::build_bits(verbs, 8)?;
     let id = compact.id("POST").unwrap();                  // Some(slot); a stranger may rarely read as present
     assert_eq!(compact.id_unchecked("POST"), id);          // no fingerprint check, for a closed vocabulary
 

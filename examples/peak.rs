@@ -250,10 +250,10 @@ fn main() {
             .unwrap_or_else(|_| std::env::temp_dir());
         let path = dir.join(format!("lexindex_peak_{}.bch", std::process::id()));
         let t0 = std::time::Instant::now();
-        let written = CompactHashIndex::build_to_file(
+        let written = CompactHashIndex::build_bits_to_file(
             iter_sparse_sorted_keys(n, &vocab).take(n),
             &path,
-            fp_bytes,
+            fp_bytes as u32 * 8,
         )
         .unwrap();
         let build_ms = t0.elapsed().as_secs_f64() * 1e3;
@@ -272,7 +272,7 @@ fn main() {
         reset_peak_rss();
         let keys_rss = peak_rss();
         let t0 = std::time::Instant::now();
-        let idx = CompactHashIndex::build(&keys, fp_bytes).unwrap();
+        let idx = CompactHashIndex::build_bits(&keys, fp_bytes as u32 * 8).unwrap();
         let build_ms = t0.elapsed().as_secs_f64() * 1e3;
         let blob = idx.serialized_len().unwrap();
         // Distinct keys, as the streamed mode reports them, so the two rows are comparable.
@@ -401,7 +401,7 @@ fn main() {
         #[cfg(feature = "mph")]
         "compact" => {
             let t0 = std::time::Instant::now();
-            let idx = CompactHashIndex::build(&keys, fp_bytes).unwrap();
+            let idx = CompactHashIndex::build_bits(&keys, fp_bytes as u32 * 8).unwrap();
             let build_ms = t0.elapsed().as_secs_f64() * 1e3;
             let blob = idx.serialized_len().unwrap();
             report(

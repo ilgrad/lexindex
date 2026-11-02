@@ -1357,7 +1357,7 @@ mod tests {
                 &path,
             );
             check(
-                Overlay::new(crate::CompactHashIndex::build(["a", "b"], 2).unwrap()),
+                Overlay::new(crate::CompactHashIndex::build_bits(["a", "b"], 16).unwrap()),
                 &path,
             );
         }
@@ -1494,7 +1494,7 @@ mod tests {
         #[cfg(feature = "mph")]
         {
             check(&crate::PerfectHashIndex::build(["a", "b"]).unwrap());
-            check(&crate::CompactHashIndex::build(["a", "b"], 2).unwrap());
+            check(&crate::CompactHashIndex::build_bits(["a", "b"], 16).unwrap());
         }
         check(&Stub);
         check(&std::sync::Arc::new(Stub));
@@ -1802,7 +1802,7 @@ mod tests {
     #[test]
     fn a_compact_hash_overlay_round_trips_its_membership() {
         use crate::CompactHashIndex;
-        let mut ov = Overlay::new(CompactHashIndex::build(["alpha", "beta"], 4).unwrap());
+        let mut ov = Overlay::new(CompactHashIndex::build_bits(["alpha", "beta"], 32).unwrap());
         ov.add("gamma");
         assert!(ov.remove("alpha"));
         let blob = ov.to_bytes().unwrap();
@@ -1970,7 +1970,7 @@ mod tests {
             ),
         }
 
-        let compact = CompactHashIndex::build(["one", "two"], 4).unwrap();
+        let compact = CompactHashIndex::build_bits(["one", "two"], 32).unwrap();
         let blob = craft_over::<CompactHashIndex>(&compact.to_bytes().unwrap(), b"one");
         // SAFETY: as above.
         let back = Overlay::from_bytes_with(&blob, CompactHashIndex::from_bytes)
@@ -1986,7 +1986,7 @@ mod tests {
     fn overlay_over_a_compact_hash_tracks_membership() {
         use crate::CompactHashIndex;
         let keys = ["alpha", "beta", "gamma"];
-        let mut ov = Overlay::new(CompactHashIndex::build(keys, 4).unwrap());
+        let mut ov = Overlay::new(CompactHashIndex::build_bits(keys, 32).unwrap());
         assert_eq!(ov.len(), 3);
         let delta = ov.add("delta");
         assert!(ov.contains("delta") && ov.id("delta") == Some(delta));

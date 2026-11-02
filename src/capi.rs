@@ -395,7 +395,7 @@ pub unsafe extern "C" fn lexindex_index_build(
                 LexindexKind::String => Any::String(StringIndex::build(keys).map_err(failed)?),
                 LexindexKind::Dict => Any::Dict(DictIndex::build(keys).map_err(failed)?),
                 LexindexKind::Compact => {
-                    Any::Compact(CompactHashIndex::build(keys, 1).map_err(failed)?)
+                    Any::Compact(CompactHashIndex::build_bits(keys, 8).map_err(failed)?)
                 }
                 LexindexKind::Closed => Any::Closed(ClosedHashIndex::build(keys).map_err(failed)?),
                 LexindexKind::Perfect => {

@@ -693,7 +693,7 @@ fn build_streamed(
             None => DictIndex::build_to_file(src.keys(), dest)?,
         },
         #[cfg(feature = "mph")]
-        Kind::Compact => CompactHashIndex::build_to_file(src.keys(), dest, 1)?,
+        Kind::Compact => CompactHashIndex::build_bits_to_file(src.keys(), dest, 8)?,
         #[cfg(feature = "mph")]
         Kind::Closed => ClosedHashIndex::build_to_file(src.keys(), dest)?,
         #[cfg(all(feature = "mph", feature = "mmap"))]
@@ -733,7 +733,7 @@ fn build_and_save(
         #[cfg(feature = "mph")]
         Kind::Compact => {
             // One fingerprint byte, which is what `plan` prices `CompactHashIndex` at.
-            let index = CompactHashIndex::build(keys, 1)?;
+            let index = CompactHashIndex::build_bits(keys, 8)?;
             index.save(dest)?;
             index.len()
         }

@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import types
+import warnings
 from pathlib import Path
 
 import lexindex
@@ -141,13 +142,28 @@ def test_compact_hash_index():
 
 
 def test_compact_hash_default_fingerprint():
-    ch = lexindex.CompactHashIndex(["x", "y", "z"])  # fingerprint_bytes defaults to 1
+    ch = lexindex.CompactHashIndex(["x", "y", "z"])  # fingerprint_bits defaults to 8
     assert all(ch.contains(w) for w in ["x", "y", "z"])
 
 
 def test_compact_hash_invalid_fingerprint_bytes():
-    with pytest.raises(ValueError):
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError):
         lexindex.CompactHashIndex(["a", "b"], 3)  # only 1, 2, 4 allowed
+
+
+def test_compact_hash_fingerprint_bytes_is_deprecated(tmp_path):
+    keys = ["a", "b", "c"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert lexindex.CompactHashIndex(keys).fingerprint_bits == 8
+        bits = lexindex.CompactHashIndex(keys, fingerprint_bits=16)
+        lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "bits.bch", fingerprint_bits=16)
+    with pytest.warns(DeprecationWarning, match="fingerprint_bits"):
+        positional = lexindex.CompactHashIndex(keys, 2)
+    with pytest.warns(DeprecationWarning, match="fingerprint_bits"):
+        lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "bytes.bch", fingerprint_bytes=2)
+    assert positional.to_bytes() == bits.to_bytes()
+    assert (tmp_path / "bytes.bch").read_bytes() == (tmp_path / "bits.bch").read_bytes()
 
 
 def test_compact_hash_fingerprint_bits():
@@ -205,14 +221,14 @@ def test_serialized_len_matches_to_bytes():
 
 def test_compact_hash_build_to_file_writes_what_the_constructor_would(tmp_path):
     keys = [f"tok-{i % 700}" for i in range(1000)]  # duplicates fold
-    for kwargs in ({}, {"fingerprint_bytes": 2}, {"fingerprint_bits": 4}):
+    for kwargs in ({}, {"fingerprint_bits": 16}, {"fingerprint_bits": 4}):
         p = tmp_path / "dict.bch"  # a pathlib.Path, not a str
         written = lexindex.CompactHashIndex.build_to_file((k for k in keys), p, **kwargs)
         assert written == 700
         assert p.read_bytes() == lexindex.CompactHashIndex(keys, **kwargs).to_bytes()
         assert lexindex.CompactHashIndex.load(p).id("tok-5") is not None
     assert [e.name for e in tmp_path.iterdir()] == ["dict.bch"]  # no scratch left beside it
-    with pytest.raises(ValueError):
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError):
         lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "x.bch", 3)
     with pytest.raises(ValueError):
         lexindex.CompactHashIndex.build_to_file(keys, tmp_path / "x.bch", 2, fingerprint_bits=8)

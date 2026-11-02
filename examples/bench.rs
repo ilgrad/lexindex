@@ -177,7 +177,7 @@ fn main() {
     bench(
         "lexindex CompactHash (fp=1)",
         n,
-        || CompactHashIndex::build(&keys, 1).unwrap(),
+        || CompactHashIndex::build_bits(&keys, 8).unwrap(),
         |idx| {
             probe
                 .iter()
@@ -241,7 +241,7 @@ fn main() {
     let di = DictIndex::build(&keys).unwrap();
     let ph = PerfectHashIndex::build(&keys).unwrap();
     let hd = HashedDictIndex::from_dict(DictIndex::build(&keys).unwrap(), 8).unwrap();
-    let ch = CompactHashIndex::build(&keys, 1).unwrap();
+    let ch = CompactHashIndex::build_bits(&keys, 8).unwrap();
     let da = DoubleArrayIndex::build(&keys).unwrap();
     let raw = keys.iter().map(String::len).sum::<usize>();
     println!("\nserialised size (bytes/key):");

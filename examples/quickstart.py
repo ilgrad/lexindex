@@ -68,7 +68,7 @@ def string_index_demo() -> None:
 
 def compact_hash_demo() -> None:
     """Smallest string -> id, when a rare false positive is fine and you never need id -> key."""
-    tokens = CompactHashIndex(VOCAB, fingerprint_bytes=2)  # ~0.0015% false-positive rate
+    tokens = CompactHashIndex(VOCAB, fingerprint_bits=16)  # ~0.0015% false-positive rate
 
     # dense id in [0, n); use it as an embedding-row / feature index
     ids = {w: tokens.id(w) for w in VOCAB}

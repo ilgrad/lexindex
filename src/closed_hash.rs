@@ -764,7 +764,7 @@ mod tests {
     fn the_blob_is_the_perfect_hash_alone() {
         let words: Vec<String> = (0..100_000).map(|i| format!("word-{i:06}")).collect();
         let closed = ClosedHashIndex::build(&words).unwrap();
-        let compact = crate::CompactHashIndex::build(&words, 1).unwrap();
+        let compact = crate::CompactHashIndex::build_bits(&words, 8).unwrap();
         let per_key = closed.serialized_len() as f64 / words.len() as f64;
         assert!(per_key < 0.30, "{per_key} B/key");
         assert!(closed.serialized_len() * 4 < compact.serialized_len().unwrap());

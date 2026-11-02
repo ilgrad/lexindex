@@ -69,7 +69,7 @@ fn mph_dictionaries_serve_many_readers() {
 
     let keys: Vec<String> = (0..2_000).map(|i| format!("tok-{i:05}")).collect();
     let exact = Arc::new(PerfectHashIndex::build(&keys).unwrap());
-    let compact = Arc::new(CompactHashIndex::build(&keys, 2).unwrap());
+    let compact = Arc::new(CompactHashIndex::build_bits(&keys, 16).unwrap());
     let dict = lexindex::DictIndex::build(&keys).unwrap();
     let hashed = Arc::new(lexindex::HashedDictIndex::from_dict(dict, 8).unwrap());
 

@@ -415,7 +415,7 @@ fn parse(w: &mut Window, nested: bool) -> Result<BlobInfo, IndexError> {
             Err(IndexError::Format(
                 "a CompactHashIndex blob from lexindex < 4.0, keyed on a hash this version no longer \
              computes, and which stores no keys; rebuild it from its keys with \
-             CompactHashIndex::build",
+             CompactHashIndex::build_bits",
             ))
         }
         b"BCL1" => Err(IndexError::Format(
@@ -582,7 +582,7 @@ mod tests {
             "the arena holds every key"
         );
 
-        let blob = crate::CompactHashIndex::build(keys(), 2)
+        let blob = crate::CompactHashIndex::build_bits(keys(), 16)
             .unwrap()
             .to_bytes()
             .unwrap();
@@ -861,7 +861,7 @@ mod tests {
     fn what_is_refused_says_why() {
         let msg = |b: &[u8]| inspect(b).unwrap_err().to_string();
         assert!(msg(b"BMP3 and whatever followed").contains("PerfectHashIndex::build"));
-        assert!(msg(b"BCH5 and whatever followed").contains("CompactHashIndex::build"));
+        assert!(msg(b"BCH5 and whatever followed").contains("CompactHashIndex::build_bits"));
         assert!(msg(b"nope").contains("unknown magic"));
         assert!(msg(b"BI").contains("shorter than a magic"));
         assert!(msg(b"").contains("shorter than a magic"));

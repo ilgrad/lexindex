@@ -303,10 +303,10 @@ it returns an arbitrary (but valid) slot for an unknown key. Use `id` everywhere
 ```python
 from lexindex import CompactHashIndex
 
-# fingerprint_bytes ∈ {1, 2, 4}; or a keyword-only fingerprint_bits ∈ 1..=64 for finer control.
-# 8 bits (the default) is 1.24 B/key with a ~0.4% membership false-positive
-# rate; 2 → ~0.0015%; 4 → effectively exact. No keys are stored, so there is no id → key.
-dict_ = CompactHashIndex(["GET", "POST", "PUT", "DELETE"], fingerprint_bytes=1)
+# fingerprint_bits ∈ 1..=64. 8 bits (the default) is 1.24 B/key with a ~0.4% membership
+# false-positive rate; 16 → ~0.0015%; 32 → effectively exact. No keys are stored, so there is no
+# id → key.
+dict_ = CompactHashIndex(["GET", "POST", "PUT", "DELETE"], fingerprint_bits=8)
 i = dict_.id("POST")           # dense id in [0, n); a non-member may rarely read as present
 dict_.contains("GET")          # True
 dict_.id_unchecked("GET")      # fastest lookup; no fingerprint check (closed-vocabulary hot path)
@@ -333,10 +333,10 @@ same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
 |---:|---:|---:|---:|
 | 4 | **0.74** | 6.25% | 62 500 |
 | 6 | 0.99 | 1.56% | 15 625 |
-| 8 (= `fingerprint_bytes=1`, default) | 1.24 | 0.39% | 3 906 |
+| 8 (default) | 1.24 | 0.39% | 3 906 |
 | 12 | 1.74 | 0.024% | 244 |
-| 16 (= `fingerprint_bytes=2`) | 2.24 | 0.0015% | 15 |
-| 32 (= `fingerprint_bytes=4`) | 4.24 | 2.3×10⁻⁸% | ~0 |
+| 16 | 2.24 | 0.0015% | 15 |
+| 32 | 4.24 | 2.3×10⁻⁸% | ~0 |
 
 Pick by the probe mix, not the key count: the rate is per *non-member* lookup, so a workload that
 only ever queries members never sees a false positive at any width, while a filter in front of a
@@ -746,7 +746,7 @@ fn main() -> Result<(), lexindex::IndexError> {
     let dict = PerfectHashIndex::build(["GET", "POST", "PUT"])?; // requires the default `mph` feature
     assert_eq!(dict.key(dict.id("POST").unwrap()), Some("POST")); // exact reverse lookup
 
-    let small = CompactHashIndex::build(["GET", "POST", "PUT"], 1)?; // 1.24 B/key, no reverse
+    let small = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 8)?; // 1.24 B/key, no reverse
     let tiny = CompactHashIndex::build_bits(["GET", "POST", "PUT"], 4)?; // 0.74 B/key, 6.25% FP rate
     assert!(small.contains("POST"));
 
@@ -786,10 +786,10 @@ fn main() -> Result<(), lexindex::IndexError> {
     let (bch, bdx) = (dir.join("lexindex-usage-stream.bch"), dir.join("lexindex-usage-stream.bdx"));
 
     // `CompactHashIndex` keeps a 16-byte pair per key and drops the string: any iterator will do...
-    let small = CompactHashIndex::build(["a", "b", "c"].iter(), 1)?;
+    let small = CompactHashIndex::build_bits(["a", "b", "c"].iter(), 8)?;
     // ...and past memory the pairs are sorted in runs spilled beside the output, the perfect hash is
     // built from the merged runs a chunk at a time, and the file is what `build` + `save` would write.
-    CompactHashIndex::build_to_file(["c", "a", "b"], &bch, 1)?;
+    CompactHashIndex::build_bits_to_file(["c", "a", "b"], &bch, 8)?;
 
     // `StringIndex` needs the keys in ascending byte order and streams them into the transducer.
     StringIndex::build_sorted_to_file(["a", "b", "c"], &bix)?;

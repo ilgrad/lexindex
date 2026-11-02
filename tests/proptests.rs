@@ -606,8 +606,8 @@ mod mph {
         }
     }
 
-    fn check_compact_no_false_negative(keys: &[String], fp: usize) {
-        let idx = CompactHashIndex::build(keys, fp).unwrap();
+    fn check_compact_no_false_negative(keys: &[String], fp: u32) {
+        let idx = CompactHashIndex::build_bits(keys, fp).unwrap();
         let expected = distinct_sorted(keys.to_vec());
         assert_eq!(idx.len(), expected.len());
         for key in &expected {
@@ -640,7 +640,7 @@ mod mph {
         #[test]
         fn compact_hash_no_false_negative(
             keys in multibyte_keys(),
-            fp in prop::sample::select(vec![1usize, 2, 4]),
+            fp in prop::sample::select(vec![8u32, 16, 32]),
         ) {
             check_compact_no_false_negative(&keys, fp);
         }
@@ -656,11 +656,11 @@ mod mph {
         #[test]
         fn compact_hash_corrupt_blob_is_rejected(
             keys in multibyte_keys().prop_filter("non-empty", |k| !k.is_empty()),
-            fp in prop::sample::select(vec![1usize, 2, 4]),
+            fp in prop::sample::select(vec![8u32, 16, 32]),
             at in any::<prop::sample::Index>(),
             xor in 1u8..=255,
         ) {
-            let idx = CompactHashIndex::build(&keys, fp).unwrap();
+            let idx = CompactHashIndex::build_bits(&keys, fp).unwrap();
             let mut blob = idx.to_bytes().unwrap();
             assert_eq!(&blob[0..4], b"BCH8");
             let pos = 4 + at.index(blob.len() - 4);
