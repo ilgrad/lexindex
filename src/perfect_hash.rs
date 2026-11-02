@@ -541,7 +541,8 @@ impl PerfectHashIndex {
         self.side[start..]
             .iter()
             .take_while(|e| e.0 == h)
-            .find_map(|e| (self.arena.bytes(e.1 as usize) == Some(key)).then_some(e.1))
+            .find(|e| self.arena.holds(e.1 as usize, key))
+            .map(|e| e.1)
     }
 
     /// Slot for a key hash; `None` only for an empty index. The MPH's remap covers every slot it
@@ -577,33 +578,34 @@ impl PerfectHashIndex {
     /// [`id`](Self::id) over the key's bytes.
     #[inline(always)]
     pub(crate) fn id_bytes(&self, key: &[u8]) -> Option<u32> {
-        if self.side.is_empty() {
-            // The overwhelming case (no hash collision anywhere in the index): one predicted
-            // branch, then exactly the side-free lookup — the hash dies at slot resolution,
-            // nothing stays live for a probe that cannot happen.
-            if self.arena.has_fingerprints() {
-                let (h, fp) = hash_pair_bytes(key);
-                let slot = self.slot_for(h)?;
-                return (self.arena.bytes_matching(slot, fp as u8) == Some(key))
-                    .then_some(slot as u32);
-            }
-            let slot = self.slot_for(hash_key_bytes(key))?;
-            return (self.arena.bytes(slot) == Some(key)).then_some(slot as u32);
+        if self.arena.has_fingerprints() {
+            return self.id_fingerprinted(key);
         }
-        self.id_with_side(key)
+        let slot = self.slot_for(hash_key_bytes(key))?;
+        if self.arena.holds(slot, key) {
+            return Some(slot as u32);
+        }
+        self.absent_or_collided(key)
     }
 
-    /// [`id`](Self::id) for an index that contains at least one hash collision: the side probe
-    /// runs only after the arena comparison has missed.
-    #[cold]
-    fn id_with_side(&self, key: &[u8]) -> Option<u32> {
+    #[inline(always)]
+    fn id_fingerprinted(&self, key: &[u8]) -> Option<u32> {
         let (h, fp) = hash_pair_bytes(key);
-        if let Some(slot) = self.slot_for(h) {
-            if self.arena.bytes_matching(slot, fp as u8) == Some(key) {
-                return Some(slot as u32);
-            }
+        let slot = self.slot_for(h)?;
+        if self.arena.holds_matching(slot, key, fp as u8) {
+            return Some(slot as u32);
         }
-        self.side_lookup(h, key)
+        self.absent_or_collided(key)
+    }
+
+    /// Only after the compare, so that a hit does not ask and the hash need not stay live for a
+    /// probe that next to no index can make.
+    #[inline(always)]
+    fn absent_or_collided(&self, key: &[u8]) -> Option<u32> {
+        if self.side.is_empty() {
+            return None;
+        }
+        self.side_lookup(hash_key_bytes(key), key)
     }
 
     /// Batched [`id`](Self::id): one call for many keys, aligned with the input (`None` where
@@ -793,7 +795,22 @@ impl PerfectHashIndex {
     /// type). See the `lexindex::fuzzing` module.
     #[cfg(feature = "fuzzing")]
     pub(crate) fn fuzz_parse_frame(bytes: &[u8], verify: bool) -> bool {
-        Self::parse_frame(&SharedBytes::copy_of(bytes), verify).is_ok()
+        let Ok(frame) = Self::parse_frame(&SharedBytes::copy_of(bytes), verify) else {
+            return false;
+        };
+        // `holds` reads without the checks the load has proved: a crafted arena must prove them
+        // too. It says what the checked read says, whatever that is.
+        let arena = &frame.arena;
+        for i in [0, frame.n / 2, frame.n.saturating_sub(1), frame.n] {
+            let stored = arena.span(i).and_then(|span| arena.bytes_at(span));
+            let key = stored.unwrap_or(b"");
+            assert_eq!(arena.holds(i, key), stored.is_some());
+            let matching = arena
+                .span_matching(i, 0)
+                .and_then(|span| arena.bytes_at(span));
+            assert_eq!(arena.holds_matching(i, key, 0), matching == Some(key));
+        }
+        true
     }
 
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {

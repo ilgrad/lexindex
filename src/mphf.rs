@@ -731,6 +731,10 @@ struct Level {
     shift: u32,
     /// Mode bits of the level's seeds: [`Geometry::mode_bits`].
     mode_bits: u32,
+    /// Whether [`form`](Self::form) is [`SHIPPED`](Self::SHIPPED): one load and one branch on the
+    /// single lookup, where comparing the three fields is nine instructions, and a lookup of a
+    /// long key keeps its speed only under the width of the reorder buffer.
+    shipped: bool,
     /// One per bucket; 0 is bumped.
     seeds: Pages<u8>,
 }
@@ -767,14 +771,19 @@ impl Level {
     /// The shape of a level over `n` keys, before its seeds are found. `n` must be at least the
     /// slice, which every level above [`TAIL_KEYS`] is.
     fn shape(n: u64, geometry: Geometry) -> Self {
-        let slice = slice_for(n);
-        let mode_bits = geometry.mode_bits();
+        let buckets = ceil_div_ratio(n, ratio(0, LAMBDA)).max(1);
+        Self::of(n, buckets, slice_for(n), geometry.mode_bits())
+    }
+
+    /// A level of this geometry, before its seeds are found.
+    fn of(n: u64, buckets: u64, slice: u64, mode_bits: u32) -> Self {
         Self {
             n,
-            buckets: ceil_div_ratio(n, ratio(0, LAMBDA)).max(1),
+            buckets,
             slice,
             shift: stride_for(slice, mode_bits).trailing_zeros(),
             mode_bits,
+            shipped: mode_bits == MODE_BITS && slice == SLICE,
             seeds: Pages::default(),
         }
     }
@@ -1977,17 +1986,23 @@ impl V2 {
 
     #[inline(always)]
     fn index(&self, h: u64) -> u64 {
-        if let Some(l) = &self.first {
-            let seed = l.seed_of(h);
-            if seed != 0 {
-                // The shipped geometry as immediates: three registers and three moves fewer in
-                // the placed path, and a loop over many keys is unswitched on the invariant.
-                return if l.form() == Level::SHIPPED {
-                    l.shipped_value(h, seed)
-                } else {
-                    l.value(h, seed)
-                };
+        match &self.first {
+            // The shipped geometry as immediates: three registers and three moves fewer in the
+            // placed path, and a loop over many keys is unswitched on the invariant. Asked first,
+            // since no level is shipped and one byte answers both.
+            Some(l) if l.shipped => {
+                let seed = l.seed_of(h);
+                if seed != 0 {
+                    return l.shipped_value(h, seed);
+                }
             }
+            Some(l) => {
+                let seed = l.seed_of(h);
+                if seed != 0 {
+                    return l.value(h, seed);
+                }
+            }
+            None => {}
         }
         self.index_bumped(h)
     }
@@ -2048,7 +2063,7 @@ impl V2 {
             // it where the shipped path landed followed unrelated edits — a jump more a key in
             // one build, none in the next. Out here it is one path, and no check a key.
             return match &self.first {
-                Some(l) if l.form() == Level::SHIPPED => hashes
+                Some(l) if l.shipped => hashes
                     .iter()
                     .map(|&h| match l.seed_of(h) {
                         0 => self.index_bumped(h),
@@ -2058,7 +2073,7 @@ impl V2 {
                 _ => hashes.iter().map(|&h| self.index(h)).collect(),
             };
         };
-        match (l.form() == Level::SHIPPED, l.seeds.len() >= retry_seeds) {
+        match (l.shipped, l.seeds.len() >= retry_seeds) {
             (true, false) => self.batch::<true, false>(l, hashes),
             (true, true) => self.batch::<true, true>(l, hashes),
             (false, false) => self.batch::<false, false>(l, hashes),
@@ -2787,14 +2802,7 @@ impl V2 {
                     .checked_add(usize::try_from(ln).map_err(|_| SIZE)?)
                     .ok_or(SIZE)?;
             }
-            levels.push(Level {
-                n: ln,
-                buckets,
-                slice,
-                shift: stride_for(slice, mode_bits).trailing_zeros(),
-                mode_bits,
-                seeds: Pages::default(),
-            });
+            levels.push(Level::of(ln, buckets, slice, mode_bits));
         }
         // An empty tail answers 0, which is inside the image; a non-empty one needs both tables.
         if (tail.buckets == 0) != (tail.range == 0) || (tail.buckets == 0) != (tail.keys == 0) {
@@ -4290,6 +4298,7 @@ mod tests {
         let m = Mphf::build(&hs).expect("build");
         let l = v2(&m).first.as_ref().expect("a first level");
         assert_eq!(l.form(), Level::SHIPPED);
+        assert!(l.shipped);
         let stride = SLICE >> (8 - MODE_BITS);
         for seed in 1..=u8::MAX {
             let mode = u64::from(seed) >> (8 - MODE_BITS);
@@ -4311,14 +4320,7 @@ mod tests {
         let hs: Vec<u64> = hashes(1 << 12).into_iter().chain([0, u64::MAX]).collect();
         for slice in (6..=20).map(|b| 1u64 << b) {
             for n in [slice, 3 * slice + 7] {
-                let level = |mode_bits| Level {
-                    n,
-                    buckets: 1,
-                    slice,
-                    shift: stride_for(slice, mode_bits).trailing_zeros(),
-                    mode_bits,
-                    seeds: Pages::default(),
-                };
+                let level = |mode_bits| Level::of(n, 1, slice, mode_bits);
                 let (l, old) = (level(MODE_BITS), level(0));
                 let stride = slice >> (8 - MODE_BITS);
                 for seed in 1..=u8::MAX {

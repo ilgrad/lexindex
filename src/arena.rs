@@ -131,7 +131,9 @@ pub(crate) struct StringArena {
     n: usize,          // number of strings == n_off - 1
     data_start: usize, // HEADER + the offset structure's length
     data_end: usize,   // where the data stops: the overflow table's start, or the blob's end
+    data_len: usize,   // data_end - data_start: every span is held to it where it is read
     overflow_end: usize, // where the overflow table stops: before its trailer, or the blob's end
+    plain: u8, // the tag without `OVERFLOW`, which only a block's own marker makes anyone read
     tag: u8, // NARROW, WIDE, BLOCK_U8 or BLOCK_U16 (those two also `| WIDE_BASE`, `| OVERFLOW`), any `| FP`
     packed: Packed, // a merged arena's entry geometry; unused by every other layout
 }
@@ -141,7 +143,15 @@ pub(crate) struct StringArena {
 struct Packed {
     width: u32,
     len_bits: u32,
-    min_len: usize,
+    min_len: u32,
+    /// The entry's `width` low bits, and its length field's: worked out once at the load, since a
+    /// `1 << width` on every read is instructions a lookup at the reorder buffer's width cannot
+    /// spare (see [`entry_of`]).
+    mask: u64,
+    field_mask: u64,
+    /// The field value that sends a length to the overflow table; `u64::MAX`, which no field
+    /// holds, when the field has no bits and every key is `min_len` long.
+    escape: u64,
 }
 
 impl StringArena {
@@ -441,18 +451,75 @@ impl StringArena {
         self.str_at(self.span_matching(i, fp)?)
     }
 
-    /// [`get`](Self::get)'s bytes, for a caller that only compares them against a key it
-    /// already holds: equal bytes are the same UTF-8, so the validation a `&str` costs — one
-    /// pass over the stored key — is skipped.
+    /// Whether slot `i` holds `key`: equal bytes are the same UTF-8, so the validation a `&str`
+    /// costs — one pass over the stored key — is skipped.
     #[inline(always)]
-    pub(crate) fn bytes(&self, i: usize) -> Option<&[u8]> {
-        self.bytes_at(self.span(i)?)
+    pub(crate) fn holds(&self, i: usize, key: &[u8]) -> bool {
+        self.holds_in::<0>(i, key, None)
     }
 
-    /// [`get_matching`](Self::get_matching)'s bytes — see [`bytes`](Self::bytes).
+    /// [`holds`](Self::holds) for a caller that knows the key's fingerprint, on an arena that
+    /// stores them: a slot whose fingerprint is not `fp` answers from the offset line alone,
+    /// without the read of the key that is a lookup's second cache miss.
     #[inline(always)]
-    pub(crate) fn bytes_matching(&self, i: usize, fp: u8) -> Option<&[u8]> {
-        self.bytes_at(self.span_matching(i, fp)?)
+    pub(crate) fn holds_matching(&self, i: usize, key: &[u8], fp: u8) -> bool {
+        self.holds_in::<1>(i, key, Some(fp))
+    }
+
+    /// The layouts of narrow bases, with fingerprints as `F` says, read here without a second check
+    /// of what the load has proved. A lookup of a long key is only fast under the width of the
+    /// reorder buffer, its miss overlapping the next lookup's, and every operation on the path
+    /// counts against it. Any other layout takes the general read, which `F` need not match.
+    #[inline(always)]
+    fn holds_in<const F: usize>(&self, i: usize, key: &[u8], want: Option<u8>) -> bool {
+        if i >= self.n {
+            return false;
+        }
+        let bytes = self.blob.as_ref();
+        let overflow = || &bytes[self.data_end..self.overflow_end];
+        let fp = if F == 1 { FP } else { 0 };
+        let tag = self.plain;
+        let entry = if tag == BLOCK_U16 | fp {
+            let at = offsets_start_in(BLOCK_U16, NARROW, F, i);
+            let block = self.table_at(bytes, at, block_bytes(B_U16, 2, NARROW, F));
+            in_block_u16::<F, NARROW>(block, overflow, i, want)
+        } else if tag == BLOCK_U8 | fp {
+            let at = offsets_start_in(BLOCK_U8, NARROW, F, i);
+            let block = self.table_at(bytes, at, block_bytes(B_U8, 1, NARROW, F));
+            in_block_u8::<F, NARROW>(block, overflow, i, want)
+        } else if tag == MERGED | fp {
+            // SAFETY: `i < n`, just checked.
+            let Some(((lo, hi), _)) = (unsafe { self.merged_entry::<F>(bytes, i, want) }) else {
+                return false;
+            };
+            debug_assert!(lo <= hi && hi <= self.data_end && self.data_end <= bytes.len());
+            // SAFETY: `merged_entry` holds a span to the data, and the data is in the blob.
+            return hi - lo == key.len() && unsafe { bytes.get_unchecked(lo..hi) } == key;
+        } else {
+            let span = self.entry(i, want).map(|e| e.0);
+            return span.and_then(|span| self.bytes_at(span)) == Some(key);
+        };
+        let Some(((lo, hi), _)) = entry else {
+            return false;
+        };
+        if hi > self.data_len || hi - lo != key.len() {
+            return false;
+        }
+        debug_assert!(lo <= hi && hi <= self.data_len);
+        debug_assert!(self.data_start + self.data_len <= bytes.len());
+        // SAFETY: `lo <= hi <= data_len`, and the load made `data_start + data_len` a position in
+        // the blob.
+        unsafe { bytes.get_unchecked(self.data_start + lo..self.data_start + hi) == key }
+    }
+
+    /// The `len` bytes at `at` of the offset table of a blocked layout, for a block of a slot below
+    /// `n`: among the `n.div_ceil(slots)` blocks `prefix_len` counts, in a prefix no shorter blob
+    /// loads with.
+    #[inline(always)]
+    fn table_at<'a>(&self, bytes: &'a [u8], at: usize, len: usize) -> &'a [u8] {
+        debug_assert!(at + len <= self.data_start && self.data_start <= bytes.len());
+        // SAFETY: the two callers name a block of `i < n`, as above.
+        unsafe { bytes.get_unchecked(at..at + len) }
     }
 
     /// Prefetch the lines slot `i`'s offsets are read from (pipelined batch lookups).
@@ -515,43 +582,79 @@ impl StringArena {
         }
         let bytes = self.blob.as_ref();
         if split(self.tag).layout == MERGED {
-            return self.merged_entry(bytes, i, want);
+            // SAFETY: `i < n`, just checked.
+            return unsafe {
+                if self.tag & FP != 0 {
+                    self.merged_entry::<1>(bytes, i, want)
+                } else {
+                    self.merged_entry::<0>(bytes, i, want)
+                }
+            };
         }
+        self.blocked_entry(bytes, i, want)
+    }
+
+    /// [`entry`](Self::entry) under every layout but the merged one.
+    #[inline(always)]
+    fn blocked_entry(
+        &self,
+        bytes: &[u8],
+        i: usize,
+        want: Option<u8>,
+    ) -> Option<((usize, usize), u8)> {
         let overflow = || &bytes[self.data_end..self.overflow_end];
         let ((lo, hi), fp) = entry_of(bytes, overflow, self.tag, self.n, i, want)?;
-        Some((
-            (
-                self.data_start.checked_add(lo)?,
-                self.data_start.checked_add(hi)?,
-            ),
-            fp,
-        ))
+        if hi > self.data_len {
+            return None;
+        }
+        Some(((self.data_start + lo, self.data_start + hi), fp))
     }
 
     /// [`entry`](Self::entry) under the merged layout: the fingerprint, when the tag stores them,
     /// decides before the length and the start are taken out of the same word.
+    ///
+    /// # Safety
+    ///
+    /// `i < n`, which puts the eight bytes its entry is read from inside the table.
     #[inline(always)]
-    fn merged_entry(
+    unsafe fn merged_entry<const F: usize>(
         &self,
         bytes: &[u8],
         i: usize,
         want: Option<u8>,
     ) -> Option<((usize, usize), u8)> {
         let p = self.packed;
-        let word = p.word(bytes, i)?;
-        let fp = if self.tag & FP != 0 { word as u8 } else { 0 };
-        if self.tag & FP != 0 && want.is_some_and(|w| w != fp) {
+        // `i < n`, and the load held `n * width` to what fits this platform. `width` is at most
+        // `MAX_WIDTH`, so nothing below reaches 2^64 either, and the one bound takes them all.
+        let bit = i as u64 * u64::from(p.width);
+        let at = HEADER + PARAMS + (bit / 8) as usize;
+        debug_assert!(i < self.n && at + 8 <= self.data_start && self.data_start <= bytes.len());
+        // SAFETY: the load refused a blob shorter than `HEADER + PARAMS + PAD + ⌈n·width / 8⌉` and
+        // an entry of no bits, so with `i < n` the entry's first byte is at least one below the
+        // table's end, and `PAD` holds the other seven. The compare this leaves out is on every
+        // lookup, and a lookup of a long key is only fast under the reorder buffer's width.
+        let raw = u64::from_le_bytes(
+            unsafe { bytes.get_unchecked(at..at + 8) }
+                .try_into()
+                .unwrap(),
+        );
+        let word = (raw >> (bit % 8)) & p.mask;
+        let fp = if F == 1 { word as u8 } else { 0 };
+        if F == 1 && want.is_some_and(|w| w != fp) {
             return None;
         }
-        let (start, field) = p.fields(word, self.tag);
-        let len = if p.len_bits > 0 && field == p.escape() {
-            escaped_len(&bytes[self.data_end..self.overflow_end], i)?
+        let rest = if F == 1 { word >> 8 } else { word };
+        let (start, field) = (rest >> p.len_bits, rest & p.field_mask);
+        let len = if field == p.escape {
+            escaped_len(&bytes[self.data_end..self.overflow_end], i)? as u64
         } else {
-            p.min_len.checked_add(usize::try_from(field).ok()?)?
+            u64::from(p.min_len) + field
         };
-        let lo = self.data_start.checked_add(usize::try_from(start).ok()?)?;
-        let hi = lo.checked_add(len).filter(|&hi| hi <= self.data_end)?;
-        Some(((lo, hi), fp))
+        if start + len > self.data_len as u64 {
+            return None;
+        }
+        let lo = self.data_start + start as usize;
+        Some(((lo, lo + len as usize), fp))
     }
 
     #[inline(always)]
@@ -652,7 +755,9 @@ impl StringArena {
                 n,
                 data_start,
                 data_end,
+                data_len,
                 overflow_end,
+                plain: tag & !OVERFLOW,
                 tag,
                 packed,
             });
@@ -678,7 +783,9 @@ impl StringArena {
             n,
             data_start,
             data_end,
+            data_len,
             overflow_end,
+            plain: tag & !OVERFLOW,
             tag,
             packed,
         })
@@ -692,7 +799,7 @@ impl Packed {
         let p = bytes
             .get(HEADER..HEADER + PARAMS)
             .ok_or(IndexError::Format("arena: truncated merged header"))?;
-        let min_len = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
+        let min_len = u32::from_le_bytes(p[..4].try_into().unwrap());
         let (len_bits, start_bits) = (u32::from(p[4]), u32::from(p[5]));
         let data_len = u64::from_le_bytes(p[6..14].try_into().unwrap());
         let width = start_bits + len_bits + 8 * u32::from(tag & FP != 0);
@@ -700,12 +807,10 @@ impl Packed {
             return Err(IndexError::Format("arena: merged entries too wide"));
         }
         // The table's size bounds `n` only through `n · width`: at zero width any count fits, and
-        // the arena would claim it. Distinct keys never share a `(start, length)`, so a zero-width
-        // entry can describe one key and no more.
-        if width == 0 && n > 1 {
-            return Err(IndexError::Format(
-                "arena: zero-width merged entries for more than one key",
-            ));
+        // the arena would claim it. And the eight-byte read of an entry stays in the table only
+        // if the entry has a bit: no build writes one without.
+        if width == 0 && n > 0 {
+            return Err(IndexError::Format("arena: zero-width merged entries"));
         }
         let entries = (n as u64)
             .checked_mul(u64::from(width))
@@ -720,31 +825,15 @@ impl Packed {
                 width,
                 len_bits,
                 min_len,
+                mask: (1u64 << width) - 1,
+                field_mask: (1u64 << len_bits) - 1,
+                escape: if len_bits > 0 {
+                    (1u64 << len_bits) - 1
+                } else {
+                    u64::MAX
+                },
             },
         ))
-    }
-
-    /// Slot `i`'s entry, `width` bits read least significant first.
-    #[inline(always)]
-    fn word(self, bytes: &[u8], i: usize) -> Option<u64> {
-        let bit = (i as u64).checked_mul(u64::from(self.width))?;
-        let at = HEADER + PARAMS + usize::try_from(bit / 8).ok()?;
-        let raw = u64::from_le_bytes(bytes.get(at..at.checked_add(8)?)?.try_into().unwrap());
-        Some((raw >> (bit % 8)) & ((1u64 << self.width) - 1))
-    }
-
-    /// `(start, length field)` of an entry, past its fingerprint.
-    #[inline(always)]
-    fn fields(self, word: u64, tag: u8) -> (u64, u64) {
-        let rest = word >> (8 * u32::from(tag & FP != 0));
-        (rest >> self.len_bits, rest & self.escape())
-    }
-
-    /// The all-ones length field, which sends a length to the overflow table; `0` when the field
-    /// has no bits and every key is `min_len` long.
-    #[inline(always)]
-    fn escape(self) -> u64 {
-        (1u64 << self.len_bits) - 1
     }
 }
 
@@ -869,40 +958,11 @@ fn entry_in<'a, const F: usize, const B: usize>(
     match layout {
         BLOCK_U8 => {
             let block = bytes.get(at..at.checked_add(block_bytes(B_U8, 1, B, F))?)?;
-            let k = i % B_U8;
-            let fp = if F == 1 { block[B + B_U8 + 1 + k] } else { 0 };
-            if F == 1 && want.is_some_and(|w| w != fp) {
-                return None;
-            }
-            let base = read_word::<B>(block)?;
-            let span = if block[B] == 0 {
-                span_from(base, block[B + k] as usize, block[B + k + 1] as usize)?
-            } else {
-                overflow_span::<B>(overflow(), &block[B + 1..], B_U8, k, base)?
-            };
-            Some((span, fp))
+            in_block_u8::<F, B>(block, overflow, i, want)
         }
         BLOCK_U16 => {
             let block = bytes.get(at..at.checked_add(block_bytes(B_U16, 2, B, F))?)?;
-            let k = i % B_U16;
-            let fp = if F == 1 {
-                block[B + (B_U16 + 1) * 2 + k]
-            } else {
-                0
-            };
-            if F == 1 && want.is_some_and(|w| w != fp) {
-                return None;
-            }
-            let base = read_word::<B>(block)?;
-            let span = if (block[B] | block[B + 1]) == 0 {
-                let p = B + k * 2;
-                let lo = u16::from_le_bytes(block[p..p + 2].try_into().unwrap()) as usize;
-                let hi = u16::from_le_bytes(block[p + 2..p + 4].try_into().unwrap()) as usize;
-                span_from(base, lo, hi)?
-            } else {
-                overflow_span::<B>(overflow(), &block[B + 2..], B_U16, k, base)?
-            };
-            Some((span, fp))
+            in_block_u16::<F, B>(block, overflow, i, want)
         }
         w => {
             let width = w as usize;
@@ -919,6 +979,57 @@ fn entry_in<'a, const F: usize, const B: usize>(
             Some((span_from(0, lo, hi)?, fp))
         }
     }
+}
+
+/// [`entry_in`] over slot `i`'s block of one-byte offsets.
+#[inline(always)]
+fn in_block_u8<'a, const F: usize, const B: usize>(
+    block: &[u8],
+    overflow: impl FnOnce() -> &'a [u8],
+    i: usize,
+    want: Option<u8>,
+) -> Option<((usize, usize), u8)> {
+    let k = i % B_U8;
+    let fp = if F == 1 { block[B + B_U8 + 1 + k] } else { 0 };
+    if F == 1 && want.is_some_and(|w| w != fp) {
+        return None;
+    }
+    let base = read_word::<B>(block)?;
+    let span = if block[B] == 0 {
+        span_from(base, block[B + k] as usize, block[B + k + 1] as usize)?
+    } else {
+        overflow_span::<B>(overflow(), &block[B + 1..], B_U8, k, base)?
+    };
+    Some((span, fp))
+}
+
+/// [`entry_in`] over slot `i`'s block of two-byte offsets.
+#[inline(always)]
+fn in_block_u16<'a, const F: usize, const B: usize>(
+    block: &[u8],
+    overflow: impl FnOnce() -> &'a [u8],
+    i: usize,
+    want: Option<u8>,
+) -> Option<((usize, usize), u8)> {
+    let k = i % B_U16;
+    let fp = if F == 1 {
+        block[B + (B_U16 + 1) * 2 + k]
+    } else {
+        0
+    };
+    if F == 1 && want.is_some_and(|w| w != fp) {
+        return None;
+    }
+    let base = read_word::<B>(block)?;
+    let span = if (block[B] | block[B + 1]) == 0 {
+        let p = B + k * 2;
+        let lo = u16::from_le_bytes(block[p..p + 2].try_into().unwrap()) as usize;
+        let hi = u16::from_le_bytes(block[p + 2..p + 4].try_into().unwrap()) as usize;
+        span_from(base, lo, hi)?
+    } else {
+        overflow_span::<B>(overflow(), &block[B + 2..], B_U16, k, base)?
+    };
+    Some((span, fp))
 }
 
 /// The span of slot `k` in a block whose offsets live in the overflow table: `row` is the block's
@@ -2048,8 +2159,7 @@ mod tests {
     /// One key alone has every field zero bits wide but its start's, which is one bit so that the
     /// entry is never empty — the case the property tests found, an empty key whose eight-byte
     /// read began where the padding ended. Laid out without the comparison to the blocked layout,
-    /// which one key may find smaller. A hand-written blob with an empty entry answers no key, and
-    /// is not read past its end.
+    /// which one key may find smaller.
     #[test]
     fn a_single_key_merges_into_a_readable_arena() {
         for key in ["", "é", "x"] {
@@ -2061,9 +2171,6 @@ mod tests {
                 assert_eq!((restored.get(0), restored.get(1)), (Some(key), None));
             }
         }
-        let empty = merged_blob(MERGED, (0, 0, 0), &[0], b"", &[]);
-        assert_eq!(empty.len(), HEADER + PARAMS + PAD);
-        assert_eq!(StringArena::from_bytes(&empty).unwrap().get(0), None);
     }
 
     /// One long key among short overlapping ones: its length escapes to the overflow table rather
@@ -2373,18 +2480,23 @@ mod tests {
 
     /// An entry of no bits leaves the slot count unbounded by the table, which is then empty for any
     /// count: a fuzzed header claimed some 10¹⁸ slots in 695 bytes, and the load checked them one
-    /// by one.
-    /// Distinct keys never share a `(start, length)`, so only a single key has a zero-width entry.
+    /// by one. And for one key over no data, its eight-byte read would end past the blob.
     #[test]
-    fn zero_width_entries_hold_one_key_at_most() {
+    fn a_merged_entry_has_a_bit() {
+        let refused = |blob: &[u8]| {
+            let err = StringArena::from_bytes(blob).unwrap_err().to_string();
+            assert!(err.contains("zero-width"), "{err}");
+        };
         let one = merged_blob(MERGED, (1, 0, 0), &[0], b"a", &[]);
-        assert_eq!(StringArena::from_bytes(&one).unwrap().get(0), Some("a"));
+        refused(&one);
+        let empty = merged_blob(MERGED, (0, 0, 0), &[0], b"", &[]);
+        assert_eq!(empty.len(), HEADER + PARAMS + PAD);
+        refused(&empty);
         let mut many = one;
         // 2^31 keys, a count every target's `usize` holds, so the zero-width check is what refuses
         // it on 32 bits too, not the header's conversion.
         many[..8].copy_from_slice(&((1u64 << 31) + 1).to_le_bytes());
-        let err = StringArena::from_bytes(&many).unwrap_err().to_string();
-        assert!(err.contains("zero-width"), "{err}");
+        refused(&many);
     }
 
     /// Every single-byte change to a merged blob either fails to load or loads into an arena
@@ -2411,6 +2523,97 @@ mod tests {
                             if let Some((lo, hi)) = arena.span(i) {
                                 assert!(arena.data_start <= lo && hi <= arena.data_end, "{at}");
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// `holds` leaves out checks the load has proved, so it has to say what the checked read says:
+    /// on every layout, with and without fingerprints, as built and under single-byte changes to a
+    /// blob, where a crafted offset answers wrong and never out of bounds.
+    #[test]
+    fn holds_says_what_the_checked_read_says() {
+        let checked = |a: &StringArena, i: usize, key: &str| {
+            a.span(i).and_then(|span| a.bytes_at(span)) == Some(key.as_bytes())
+        };
+        let checked_fp = |a: &StringArena, i: usize, key: &str, fp: u8| {
+            a.span_matching(i, fp).and_then(|span| a.bytes_at(span)) == Some(key.as_bytes())
+        };
+        let agree = |a: &StringArena, keys: &[String], at: &str| {
+            let slots = (0..=a.len()).step_by(if cfg!(miri) { 17 } else { 1 });
+            for i in slots.chain([a.len()]) {
+                for key in [keys[i % keys.len()].as_str(), keys[0].as_str(), ""] {
+                    let b = key.as_bytes();
+                    assert_eq!(a.holds(i, b), checked(a, i, key), "{at} slot {i}");
+                    for fp in [0xA5, 0x5A] {
+                        let got = a.holds_matching(i, b, fp);
+                        assert_eq!(got, checked_fp(a, i, key, fp), "{at} slot {i} fp {fp}");
+                    }
+                }
+            }
+        };
+        let short: Vec<String> = (0..64).map(|i| format!("k{i}")).collect();
+        let long: Vec<String> = (0..200).map(|i| format!("{i:020}")).collect();
+        let flat: Vec<String> = long[..40].to_vec();
+        let mut escaping = short.clone();
+        escaping[30] = "x".repeat(300);
+        let mut merging: Vec<String> = (0..60).map(|i| format!("{i:02}é")).collect();
+        merging.push("q".repeat(300));
+        merging.sort_unstable();
+        let order = |keys: &[String]| (0..keys.len() as u32).collect::<Vec<u32>>();
+        let total = |keys: &[String]| keys.iter().map(String::len).sum::<usize>();
+        // A sample under Miri: every byte and every slot took it past 25 minutes.
+        let step = if cfg!(miri) { 97 } else { 1 };
+        for fingerprints in [false, true] {
+            let fps = [0xA5u8; 200];
+            let fp = |keys: &[String]| fingerprints.then(|| fps[..keys.len()].to_vec());
+            let plain = |keys: &[String], limit: usize| {
+                let fps = fp(keys);
+                StringArena::build_exact_limited(
+                    keys,
+                    keys.len(),
+                    total(keys),
+                    fps.as_deref(),
+                    limit,
+                )
+            };
+            let merged = {
+                let fps = fp(&merging);
+                StringArena::build_cheapest(
+                    &merging,
+                    &order(&merging),
+                    total(&merging),
+                    fps.as_deref(),
+                )
+            };
+            let bit = if fingerprints { FP } else { 0 };
+            let layouts = [
+                (&short, plain(&short, NARROW_LIMIT), BLOCK_U8 | bit),
+                (&long, plain(&long, NARROW_LIMIT), BLOCK_U16 | bit),
+                (&flat, plain(&flat, NARROW_LIMIT), NARROW as u8 | bit),
+                (
+                    &escaping,
+                    plain(&escaping, NARROW_LIMIT),
+                    BLOCK_U8 | OVERFLOW | bit,
+                ),
+                (&short, plain(&short, 16), BLOCK_U8 | WIDE_BASE | bit),
+                (&merging, merged, MERGED | OVERFLOW | bit),
+            ];
+            for (keys, arena, tag) in layouts {
+                assert_eq!(arena.tag(), tag);
+                for (i, key) in keys.iter().enumerate() {
+                    assert!(arena.holds(i, key.as_bytes()), "tag {tag:#x} slot {i}");
+                }
+                agree(&arena, keys, "built");
+                let good = arena.to_bytes();
+                for at in (0..arena.data_start + 8).step_by(step) {
+                    for xor in [0x01, 0x80, 0xFF] {
+                        let mut bad = good.clone();
+                        bad[at] ^= xor;
+                        if let Ok(arena) = StringArena::from_bytes(&bad) {
+                            agree(&arena, keys, &format!("tag {tag:#x} byte {at} ^ {xor:#x}"));
                         }
                     }
                 }

@@ -108,6 +108,18 @@ All notable changes to this project are documented here. The format follows
   bisects its sorted route words instead of comparing all of them, and a block's shard is a shift
   where the blob's shard is a power of two, as every build writes it, instead of a 64-bit `div`.
   The time does not move. The blob is unchanged.
+- **A `PerfectHashIndex` lookup runs 6–7 % fewer operations.** A lookup is fast only while its
+  cache misses overlap the next lookup's, which holds while the path from a key's stored bytes to
+  the next probe key's fits the reorder buffer: four `nop`s added to a lookup at that edge took away
+  all it had gained, with no counter moving but cycles. So a level of the perfect hash decides at
+  load whether its geometry is the shipped one, the arena reads a block and a key's bytes without
+  checking again what the load proved, the layout is chosen after the hash rather than before it,
+  and a hit no longer asks for the collision table. Retired operations a hit on a million keys,
+  against the same lookup before the merged layout: URLs 192 → 180, paths 197 → 185, UUIDs
+  188 → 175, English titles 180 → 168, Russian titles 185 → 172. Counted, not yet timed on a quiet
+  machine.
+  A merged arena whose entries have no bits is now refused at load: no build writes one, and for one
+  empty key its read would end past the blob. The blobs are unchanged.
 - **`StringIndex::id` reads a node's inputs with one or two 16-byte compares.** A node of up to 32
   transitions was searched a byte and a branch at a time; SSE2 compares its inputs at once (eight
   bytes a word on targets without it, the loop where the blob ends too close to load), a point

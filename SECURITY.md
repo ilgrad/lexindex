@@ -103,24 +103,28 @@ protecting, put a keyed hash in front.
 
 **`unsafe` is mapping, page allocation, reads whose bound is an invariant rather than a check,
 and a call into code built for an instruction the CPU was checked for.** The library contains
-twenty-one `unsafe fn`s. Twelve carry an obligation a caller outside the crate has to meet:
+twenty-two `unsafe fn`s. Twelve carry an obligation a caller outside the crate has to meet:
 `load_mmap` and `load_mmap_verified` on the five indexes that have anything
 to map (`ClosedHashIndex` is the perfect hash and nothing else), `load_mmap_untrusted` on
-`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other nine are internal and their caller
+`StringIndex` and `load_mmap` on `DoubleArrayIndex`. The other ten are internal and their caller
 is this crate — `hash::r4` and `hash::r8`, the key hash's unchecked loads; `room::commit`, which
 extends a `Vec` over bytes just written into its spare capacity; `Pages::assume_init`; the double
-array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; and three builds
+array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; the string arena's
+`merged_entry`, an entry read unchecked for a slot below the count; and three builds
 for an instruction the x86-64 baseline lacks, whose one obligation is that the CPU has it — the
 perfect hash's `Remap::get_popcnt`, its remap lookup with `popcnt`, and the double array's
 `place_avx2` and `slots_malformed_avx2`, its build's placement and its load's slot check with AVX2.
-There are sixty-two `unsafe` blocks:
+There are sixty-eight `unsafe` blocks:
 thirteen memory maps, counting the writable one `build_to_file` uses on
 a temporary file it created itself; seven in the huge-page allocator; six that write into a `Vec`'s
 spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
 class that chose the load; four in `SharedBytes`, two of them cache prefetches; eleven
 `get_unchecked` or `assume_init` reads across the perfect hash, the dictionary's stair and the
 phrase trie a `BDX3` build walks — four of them in the perfect hash's remap, past a check that the
-entry is below its length, on tables whose lengths and samples the loader has checked; one
+entry is below its length, on tables whose lengths and samples the loader has checked; six in
+the string arena a perfect-hash lookup compares against, for a slot below the count, whose block
+or entry lies in a prefix the load measured against the blob and whose key's bytes are held to the
+data's length first; one
 `String::from_utf8_unchecked` over what the character
 code of a `BDX4` blob decodes, which is whole characters out of a table built from `char`s
 whatever the blob holds — a debug build checks it, and so the fuzz targets do; three calls into
