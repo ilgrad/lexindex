@@ -729,7 +729,7 @@ key across the language boundary and this one does not.</sub>
 
 ## Lookup speed from Python, against `dict` and `marisa-trie`
 
-`local/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
+`bench/latency_py.py` — one process per corpus, every structure built up front, the seven lookup
 forms rotated inside each round so none keeps the position that pays to warm the probe list.
 **Measured on 1.1**, from the minimum over two agreeing 15-round passes per corpus. Ratios are
 **quotients of the minima against `dict` on the same probe set**, and the gate is on *those*: worst
