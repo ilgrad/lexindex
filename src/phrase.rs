@@ -428,6 +428,11 @@ impl Dict {
 
     /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count; in a `BDX5` blob
     /// behind its own `u32` length and followed by the labels' blob.
+    /// Bytes this dictionary holds on the heap. A dictionary is decoded at load, the padding too.
+    pub(crate) fn held(&self) -> usize {
+        self.bytes.len() + self.bases.len() * 4 + self.ends.len() * 2
+    }
+
     pub(crate) fn serialized_len(&self) -> usize {
         let flat = self.flat_len();
         match self.labels.as_deref() {

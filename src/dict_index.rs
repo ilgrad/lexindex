@@ -242,6 +242,26 @@ pub struct DictIndex {
     mroute: OnceLock<Box<[u64]>>,
 }
 
+/// What a [`DictIndex`] holds on the heap beside the sections a mapped load borrows, in the parts
+/// [`plan`](crate::plan) scales apart.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Held {
+    /// The samples and the tries over them, which grow with the blocks.
+    pub(crate) blocks: usize,
+    /// The shards' tables and codes, which grow with the shards.
+    pub(crate) shards: usize,
+    /// The phrase dictionary, one for the blob, grown with what the corpus can afford.
+    pub(crate) phrases: usize,
+    /// The character code, one for the blob, and bounded by the alphabet.
+    pub(crate) code: usize,
+}
+
+impl Held {
+    pub(crate) fn total(self) -> usize {
+        self.blocks + self.shards + self.phrases + self.code
+    }
+}
+
 /// The first word of a block's [`DictIndex::mroute`] group that leaves the block to its restart
 /// run.
 const NO_ROUTE: u64 = u64::MAX;
@@ -4906,6 +4926,29 @@ impl DictIndex {
     /// assert!(s.entry_codes > 0 && s.heads > 0);
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
+    pub(crate) fn held(&self) -> Held {
+        let codec = |c: &Codec| match c {
+            Codec::Symbols { table, .. } => table.held(),
+            Codec::Packed(alphabet) => alphabet.held(),
+        };
+        let raw = self.raw.as_ref().map_or(0, |r| {
+            size_of::<RawRoute>() + r.prefix.len() + r.samples.len() * 8
+        });
+        Held {
+            blocks: self.samples.len() * 8 + self.ties.as_ref().map_or(0, |t| t.held()) + raw,
+            shards: self.codecs.len() * size_of::<Codec>()
+                + self.codecs.iter().map(codec).sum::<usize>()
+                + self.codes.len() * size_of::<(Code, Code)>()
+                + self
+                    .codes
+                    .iter()
+                    .map(|(a, b)| a.held() + b.held())
+                    .sum::<usize>(),
+            phrases: self.phrases.held(),
+            code: self.code.as_ref().map_or(0, |c| c.held()),
+        }
+    }
+
     pub fn sections(&self) -> DictSections {
         let mut s = DictSections {
             header: HEADER as u64,

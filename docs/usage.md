@@ -19,7 +19,7 @@ print(p["best"]["kind"])               # the cheapest index that answers them
 print(p["text"])                       # the whole ladder, and why the winner won
 
 # An index that cannot answer what was asked is left out of the ranking rather than ranked last.
-assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "StringIndex"}
+assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "HashedDictIndex", "StringIndex"}
 ```
 
 Which index wins is a property of your keys and not of this library — six fruit names are not a
@@ -1040,19 +1040,23 @@ own key iterators, and computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 wrote words.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
 
 $ lexindex inspect words.bin
@@ -1152,12 +1156,15 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-  PerfectHashIndex       4448821 bytes   9.27 B/key    130 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
++ PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns   9.51 B/key resident     93.6 ms build  estimated
+  DoubleArrayIndex      11708630 bytes  24.40 B/key    173 ns  24.40 B/key resident    236.8 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
 in this file, and they are ranked with the rest.
@@ -1195,11 +1202,19 @@ operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stran
 read off a log serve as they are. An op is also a question the index has to answer: `reverse` rules
 out the two indexes that store no keys and a prefix query asks for an ordered one, whatever the
 flags said. The ordered pair is where this decides something. On the same word list
-`--objective common_prefix=9,hits=1` answers `StringIndex` at 397 ns against 1853 for the fastest
-dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 276 ns against 806 -- and
-`hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 56 ns a key.
+`--objective common_prefix=9,hits=1` answers `DoubleArrayIndex` at 343 ns against `StringIndex`'s 397
+and 1853 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 276 ns
+against 806 -- and `hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 55 ns a key.
 
-**The nanoseconds are modelled, and of one machine.** `a + b·s + c·len + d·s·len` per structure,
+**Beside the winner, the front.** `pareto()` in Rust, `p["pareto"]` in Python and the `+` on the
+ladder are the rows no other row beats on both size and speed, smallest first: the whole trade this
+corpus offers under this objective, where `best` is one point on it. Each row also carries `micro`,
+the keys a microblock holds at its block; `resident_bytes` (`B/key resident`), what a mapped load
+holds once every page has been read, the blob and the tables a load derives; and `build_secs`.
+On a modelled row the heap beside the blob reads up to 30 % high on Latin keys and 25 % low on
+Chinese ones: a few per cent of `resident_bytes`, since that heap is a small share of it.
+
+**The nanoseconds are modelled, and of one machine, as are the build times.** `a + b·s + c·len + d·s·len` per structure,
 operation and `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the blob
 over 64 KiB -- what a lookup waits on is how far its bytes are from the CPU, which the key count
 alone does not say. The constants are fitted to 240 cells timed on this crate's own hardware -- a

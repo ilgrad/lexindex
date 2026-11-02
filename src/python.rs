@@ -3539,7 +3539,8 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// The keyword arguments say what the index has to be able to do, and the vocabulary is open unless
 /// `closed_vocabulary` says otherwise. One that cannot is left out of the ranking rather than ranked
 /// last, so `estimates` holds only usable answers and `best` is
-/// always one of them. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
+/// always one of them. `pareto` is the candidates no other beats on both `bytes` and `nanos`,
+/// smallest first. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
@@ -3582,6 +3583,11 @@ fn py_plan<'py>(
         estimates.append(estimate_dict(py, e, &plan)?)?;
     }
     d.set_item("estimates", estimates)?;
+    let front = PyList::empty(py);
+    for e in plan.pareto() {
+        front.append(estimate_dict(py, &e, &plan)?)?;
+    }
+    d.set_item("pareto", front)?;
     d.set_item("close", plan.close())?;
     d.set_item("thin", plan.thin())?;
     d.set_item("text", plan.to_string())?;
@@ -3650,6 +3656,9 @@ fn estimate_dict<'py>(
     d.set_item("bytes", e.bytes)?;
     d.set_item("bytes_per_key", e.bytes_per_key(plan.keys()))?;
     d.set_item("block", e.block)?;
+    d.set_item("micro", e.micro)?;
+    d.set_item("resident_bytes", e.resident_bytes)?;
+    d.set_item("build_secs", e.build_secs)?;
     d.set_item("measured", e.measured)?;
     d.set_item("nanos", plan.nanos(e))?;
     Ok(d)

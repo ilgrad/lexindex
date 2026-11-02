@@ -42,6 +42,16 @@ pub(crate) enum Code {
     Table { w: u32, pairs: Vec<u16> },
 }
 
+impl Code {
+    /// Bytes this code holds on the heap.
+    pub(crate) fn held(&self) -> usize {
+        match self {
+            Code::Frame(_) => 0,
+            Code::Table { pairs, .. } => pairs.len() * 2,
+        }
+    }
+}
+
 /// How every run of a frame group writes its prologue.
 ///
 /// A run's frame is its own — two bases and two field widths fitted to its fifteen or thirty-one

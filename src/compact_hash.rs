@@ -903,6 +903,11 @@ pub struct CompactHashIndex {
 }
 
 impl CompactHashIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// Build from a collection of strings, storing `fingerprint_bytes` (1, 2, or 4) per key —
     /// byte-granular sugar for [`build_bits`](Self::build_bits) with `8 × fingerprint_bytes`.
     pub fn build<I, S>(items: I, fingerprint_bytes: usize) -> Result<Self, IndexError>

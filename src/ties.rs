@@ -92,6 +92,16 @@ pub(crate) struct Ties {
 }
 
 impl Ties {
+    /// Bytes these tries hold on the heap.
+    pub(crate) fn held(&self) -> usize {
+        size_of::<Self>()
+            + self.roots.len() * 4
+            + self.nodes.len() * size_of::<Node>()
+            + self.words.len() * 8
+            + self.starts.len() * 4
+            + self.kids.len() * 4
+    }
+
     /// The tries over the heads `head(b)` whose samples are `samples`: `None` where no run of
     /// [`MIN_RUN`] or more equal samples splits, and past what a `u32` numbers.
     pub(crate) fn derive<'h>(

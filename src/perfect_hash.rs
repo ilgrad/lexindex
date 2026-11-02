@@ -335,6 +335,11 @@ pub struct PerfectHashIndex {
 }
 
 impl PerfectHashIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// Build from a collection of strings. Duplicates are removed; ids are arbitrary slots in `[0, n)`
     /// (no defined order — use [`crate::StringIndex`] when order matters).
     ///

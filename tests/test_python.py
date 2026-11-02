@@ -1807,6 +1807,19 @@ def test_plan_prices_every_index_that_answers_the_question():
     assert p["text"].startswith("200 keys, mean length 7.0")
 
 
+def test_plan_carries_the_costs_and_the_front():
+    keys = [f"key{i:04}" for i in range(200)]
+    p = lexindex.plan(keys, closed_vocabulary=True)
+    for e in p["estimates"]:
+        assert e["resident_bytes"] >= e["bytes"] and e["build_secs"] > 0
+        assert (e["micro"] is None) == (e["block"] is None)
+    by_size = [e["bytes"] for e in p["pareto"]]
+    assert by_size == sorted(by_size) and p["best"] in p["pareto"]
+    nanos = [e["nanos"] for e in p["pareto"]]
+    assert nanos == sorted(nanos, reverse=True)
+    assert all(e in p["estimates"] for e in p["pareto"])
+
+
 def test_plan_leaves_out_what_cannot_answer():
     keys = [f"key{i:04}" for i in range(200)]
     assert [e["kind"] for e in lexindex.plan(keys, fuzzy=True)["estimates"]] == ["StringIndex"]

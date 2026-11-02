@@ -95,6 +95,11 @@ fn table_len(count: usize, width: u32) -> Result<usize, IndexError> {
 }
 
 impl HashedDictIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// Build the sidecar over `dict`, storing `fingerprint_bits` (`0..=32`) of a second hash
     /// beside each key's rank. See [`HashedDictIndex`] for what the width decides.
     ///

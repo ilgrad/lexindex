@@ -1003,7 +1003,11 @@ class Estimate(TypedDict):
 
     ``bytes`` is the size of its serialised blob and ``bytes_per_key`` that over the number of
     distinct keys. ``block`` is the block a ``DictIndex`` or a ``HashedDictIndex`` was priced at
-    and ``None`` for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
+    and ``None`` for every other index, and ``micro`` the keys a microblock holds at that block.
+    ``resident_bytes`` is what a mapped load holds once every page has been read: the blob, and the
+    heap of the tables a load derives. ``build_secs`` is a modelled build time on this crate's own
+    machine, an ordering like ``nanos`` and never a prediction of yours. ``measured`` is ``True``
+    when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
 
     ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a ``Workload``, of
@@ -1025,6 +1029,9 @@ class Estimate(TypedDict):
     bytes: int
     bytes_per_key: float
     block: int | None
+    micro: int | None
+    resident_bytes: int
+    build_secs: float
     measured: bool
     nanos: float
 
@@ -1034,7 +1041,9 @@ class Plan(TypedDict):
     ``estimates`` is every index that answers what was asked, in the objective's order, and
     ``best`` is its first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean
     length in bytes and ``mean_lcp`` the mean prefix an adjacent pair shares -- the difference
-    between the two is the suffix a front-coded format actually stores.
+    between the two is the suffix a front-coded format actually stores. ``pareto`` is the candidates
+    no other beats on both ``bytes`` and ``nanos``, smallest first: the whole trade the corpus
+    offers, with ``best`` always on it.
 
     ``close`` says the two cheapest are within 1.3x of each other, which is inside what an estimate
     can separate; ``thin`` says the mean suffix is under two bytes, where a compression ratio read
@@ -1047,6 +1056,7 @@ class Plan(TypedDict):
     mean_lcp: float
     best: Estimate
     estimates: list[Estimate]
+    pareto: list[Estimate]
     close: bool
     thin: bool
     text: str

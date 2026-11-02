@@ -1128,6 +1128,11 @@ impl DoubleArrayIndex {
         self.blob.len()
     }
 
+    /// What a mapped load holds on the heap: the characters past the Basic Multilingual Plane.
+    pub(crate) fn held(&self) -> usize {
+        self.supp.len() * size_of::<(u32, u16)>()
+    }
+
     /// The blob's bytes of slots, which is what [`plan`](crate::plan) scales with the corpus.
     pub(crate) fn slot_bytes(&self) -> usize {
         self.slots.len()

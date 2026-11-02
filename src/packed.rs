@@ -48,6 +48,11 @@ const fn raw_codes(width: u32) -> usize {
 }
 
 impl Alphabet {
+    /// Bytes this alphabet holds on the heap.
+    pub(crate) fn held(&self) -> usize {
+        self.one.len() + self.two.len() + size_of::<[u16; 256]>()
+    }
+
     /// The cheapest alphabet over `freq`, the byte frequencies of a shard's suffixes, and the bits
     /// its codes would take. `None` when the shard stores no suffix bytes at all.
     pub(crate) fn of(freq: &[u64; 256]) -> Option<(Self, u64)> {
