@@ -40,17 +40,16 @@ usage:
            migration path off a format a later version stops reading
 
 needs — what the index must be able to do. They narrow what `plan` ranks and what
-`--index auto` may pick; with none of them the only question asked is `id(key)`:
+`--index auto` may pick; with none of them the only question asked is an exact `id(key)`:
   --reverse    key(id) as well as id(key)
   --ordered    ids in lexicographic order, and in-order iteration
   --prefix     prefix and range queries (an ordered index)
   --common-prefix  every key that is a prefix of a query, and the longest
   --fuzzy      Levenshtein and subsequence queries
-  --exact      a non-member must be answered as one, barring the probabilistic indexes
 
-`plan` and `--index auto` assume an **open** vocabulary and so imply `--exact`: left to itself
-the ranking is won by the index that answers a stranger with some member's id, and nothing in
-the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
+`plan` and `--index auto` assume an **open** vocabulary, as `Needs::default()` does: left to
+itself the ranking is won by the index that answers a stranger with some member's id, and nothing
+in the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
 the file, and the two probabilistic indexes are ranked with the rest — `ClosedHashIndex` at
 0.24 bytes a key, `CompactHashIndex` at 1.24. Naming an index with `--index` builds it whatever
 the needs say.
@@ -138,9 +137,9 @@ struct Cmd {
     json: bool,
     stream: Stream,
     objective: Objective,
-    /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
-    /// the ladder worth a line about what it left out.
-    implied_exact: bool,
+    /// Whether the vocabulary is open because nothing said it was closed, which is every run but
+    /// one with `--closed-vocabulary`: the ladder is worth a line about what that left out.
+    open_by_default: bool,
 }
 
 fn objective(name: &str) -> Result<Objective, Fail> {
@@ -326,9 +325,8 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         json: false,
         stream: Stream::Auto,
         objective: Objective::Memory,
-        implied_exact: false,
+        open_by_default: true,
     };
-    let mut closed_vocabulary = false;
     let mut at = 0;
     while at < args.len() {
         let arg = &args[at];
@@ -341,9 +339,10 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             "--sections" if accepts == Accepts::Sections => cmd.sections = true,
             "--json" if accepts == Accepts::Sections => cmd.json = true,
             "--closed-vocabulary" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
-                closed_vocabulary = true;
+                cmd.needs = cmd.needs.closed_vocabulary();
+                cmd.open_by_default = false;
             }
-            "--reverse" | "--ordered" | "--prefix" | "--common-prefix" | "--fuzzy" | "--exact"
+            "--reverse" | "--ordered" | "--prefix" | "--common-prefix" | "--fuzzy"
                 if !matches!(accepts, Accepts::Nothing | Accepts::Sections) =>
             {
                 let flag = match name {
@@ -351,8 +350,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
                     "--ordered" => &mut cmd.needs.ordered,
                     "--prefix" => &mut cmd.needs.prefix,
                     "--common-prefix" => &mut cmd.needs.common_prefix,
-                    "--fuzzy" => &mut cmd.needs.fuzzy,
-                    _ => &mut cmd.needs.exact,
+                    _ => &mut cmd.needs.fuzzy,
                 };
                 *flag = true;
             }
@@ -377,18 +375,6 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
     }
     if cmd.positional.len() != want {
         return Err(Fail::Usage(format!("expected `lexindex {form}`")));
-    }
-    // With no needs at all the cheapest index that answers `id(key)` is the one that answers a
-    // stranger with some other key's id, and nothing in the output would say so. A tool asked
-    // "which index" should not answer with the one whose failure is silent unless the caller has
-    // said the vocabulary is closed. The library's `Needs::default()` is unchanged: this is the
-    // command line choosing a default for a person, not the API choosing one for a program.
-    if !matches!(accepts, Accepts::Nothing | Accepts::Sections)
-        && !closed_vocabulary
-        && !cmd.needs.exact
-    {
-        cmd.needs.exact = true;
-        cmd.implied_exact = true;
     }
     Ok(cmd)
 }
@@ -443,19 +429,18 @@ fn cmd_plan(
         plan_file(path, cmd.needs, cmd.objective)?
     };
     write!(out, "{ranked}").map_err(io_fail)?;
-    note_implied_exact(cmd, &ranked, err)
+    note_open_vocabulary(cmd, &ranked, err)
 }
 
-/// What the ladder left out and how to ask for it back. Printed only when `--exact` was the
-/// command line's idea rather than the caller's, since otherwise it says nothing new.
-fn note_implied_exact(cmd: &Cmd, ranked: &Plan, err: &mut dyn Write) -> Result<(), Fail> {
+/// What the ladder left out and how to ask for it back.
+fn note_open_vocabulary(cmd: &Cmd, ranked: &Plan, err: &mut dyn Write) -> Result<(), Fail> {
     // The plan's needs rather than the command line's: a workload's operations add to them.
     let mut without = ranked.needs();
     without.exact = false;
     // And only when the default is what excluded them: an index that answers nothing but `id(key)`
     // is already ruled out by any other need, and a build without `mph` does not have one at all —
     // in either case the line would name something that was never a candidate.
-    if !cmd.implied_exact || !cfg!(feature = "mph") || !Kind::Closed.answers(without) {
+    if !cmd.open_by_default || !cfg!(feature = "mph") || !Kind::Closed.answers(without) {
         return Ok(());
     }
     writeln!(
@@ -488,7 +473,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto if path != "-" => {
             let ranked = plan_file(path, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, &ranked, err)?;
+            note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
             Some((best.kind, best.block))
         }
@@ -512,7 +497,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         None => {
             let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, &ranked, err)?;
+            note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
             (best.kind, best.block)
         }
@@ -1241,7 +1226,7 @@ mod tests {
         assert_eq!(out.lines().count(), 3, "{out}");
         assert!(out.contains("StringIndex"), "{out}");
         // The remaining needs parse and narrow nothing that is not already covered.
-        let (code, _, _) = go(&["plan", &keys, "--ordered", "--exact"], "");
+        let (code, _, _) = go(&["plan", &keys, "--ordered"], "");
         assert_eq!(code, 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1759,11 +1744,8 @@ mod tests {
         let keys = keys_file(&dir, &corpus(300));
         let dest = dir.join("auto.bin");
         let out_path = dest.to_str().unwrap();
-        // `--reverse --prefix --exact` leaves the two ordered indexes, and the ladder names both.
-        let (code, out, err) = go(
-            &["build", &keys, out_path, "--reverse", "--prefix", "--exact"],
-            "",
-        );
+        // `--reverse --prefix` leaves the ordered indexes, and the ladder names them.
+        let (code, out, err) = go(&["build", &keys, out_path, "--reverse", "--prefix"], "");
         assert_eq!((code, out.as_str()), (0, ""), "{err}");
         assert!(err.contains("300 keys, mean length"), "{err}");
         assert!(err.contains("StringIndex"), "{err}");
@@ -1958,9 +1940,10 @@ mod tests {
         // No ladder was printed, so there is nothing to explain.
         assert!(!err.contains("excluded"), "{err}");
 
-        // An explicit `--exact` is the caller's own, so the line stays out of the way.
-        let (_, _, err) = go(&["plan", keys.as_str(), "--exact"], "");
-        assert!(!err.contains("excluded"), "{err}");
+        // The default has no spelling of its own, so a flag cannot disagree with `--closed-vocabulary`.
+        let (code, _, err) = go(&["plan", keys.as_str(), "--exact"], "");
+        assert_eq!(code, 2);
+        assert!(err.contains("no such option `--exact`"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

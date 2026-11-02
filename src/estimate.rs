@@ -86,15 +86,20 @@ const CLOSE: f64 = 1.3;
 /// byte.
 const THIN_SUFFIX: f64 = 2.0;
 
-/// What the caller has to be able to do with the index. Nothing is required by default, so a
-/// `Needs::default()` asks only for `id(key)`.
+/// What the caller has to be able to do with the index.
+///
+/// `Needs::default()` asks for `id(key)` over an **open vocabulary**: a key the index never held
+/// must be answered as one, so [`exact`](Self::exact) is on and the two probabilistic indexes are
+/// not offered. [`closed_vocabulary`](Self::closed_vocabulary) is the promise that takes it off,
+/// which is the same ranking `--closed-vocabulary` and `closed_vocabulary=True` ask for.
 ///
 /// ```
 /// # use lexindex::Needs;
 /// let needs = Needs::default().reverse().prefix();
-/// assert!(needs.reverse && needs.prefix && !needs.fuzzy);
+/// assert!(needs.reverse && needs.prefix && !needs.fuzzy && needs.exact);
+/// assert!(!Needs::default().closed_vocabulary().exact);
 /// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Needs {
     /// `key(id)` as well as `id(key)`.
@@ -111,6 +116,19 @@ pub struct Needs {
     /// A non-member must be answered as one. Without it a probabilistic index is allowed, which is
     /// how the two smallest ones get their size.
     pub exact: bool,
+}
+
+impl Default for Needs {
+    fn default() -> Self {
+        Self {
+            reverse: false,
+            ordered: false,
+            prefix: false,
+            common_prefix: false,
+            fuzzy: false,
+            exact: true,
+        }
+    }
 }
 
 impl Needs {
@@ -144,9 +162,12 @@ impl Needs {
         self
     }
 
-    /// Require [`exact`](Self::exact) membership.
-    pub fn exact(mut self) -> Self {
-        self.exact = true;
+    /// Every key this index will be asked about is one it holds, so it need not recognise a
+    /// stranger: [`exact`](Self::exact) goes off and the two probabilistic indexes are ranked with
+    /// the rest. Promise it only of a vocabulary you control: `ClosedHashIndex` answers a stranger
+    /// with some member's id, and nothing in the blob would later say so.
+    pub fn closed_vocabulary(mut self) -> Self {
+        self.exact = false;
         self
     }
 }
@@ -182,10 +203,10 @@ impl Kind {
     ///
     /// ```
     /// use lexindex::{Kind, Needs};
-    /// // The two hash indexes answer `id(key)` and nothing else.
-    /// assert!(Kind::Closed.answers(Needs::default()));
-    /// assert!(!Kind::Closed.answers(Needs::default().exact()));
-    /// assert!(Kind::Dict.answers(Needs::default().prefix().exact()));
+    /// // The two hash indexes answer `id(key)` and nothing else, over a closed vocabulary.
+    /// assert!(Kind::Closed.answers(Needs::default().closed_vocabulary()));
+    /// assert!(!Kind::Closed.answers(Needs::default()));
+    /// assert!(Kind::Dict.answers(Needs::default().prefix()));
     /// assert!(!Kind::Dict.answers(Needs::default().fuzzy()));
     /// ```
     pub fn answers(self, needs: Needs) -> bool {
@@ -232,8 +253,8 @@ impl Kind {
 /// ```
 /// # use lexindex::{plan_for, Needs, Objective, Kind};
 /// let keys = ["apple", "apricot", "banana", "blueberry"];
-/// let small = plan_for(&keys, Needs::default().exact(), Objective::Memory)?;
-/// let quick = plan_for(&keys, Needs::default().exact(), Objective::Latency)?;
+/// let small = plan_for(&keys, Needs::default(), Objective::Memory)?;
+/// let quick = plan_for(&keys, Needs::default(), Objective::Latency)?;
 /// assert!(small.best().bytes <= quick.best().bytes);
 /// assert!(quick.nanos(&quick.best()) <= small.nanos(&small.best()));
 /// # Ok::<(), lexindex::IndexError>(())
@@ -2204,7 +2225,7 @@ mod tests {
     #[test]
     fn latency_and_memory_pick_different_indexes() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact().reverse();
+        let needs = Needs::default().reverse();
         let small = plan_for(&keys, needs, Objective::Memory).unwrap();
         let quick = plan_for(&keys, needs, Objective::Latency).unwrap();
         assert_eq!(small.best().kind, Kind::Dict);
@@ -2232,7 +2253,7 @@ mod tests {
     #[test]
     fn balanced_gives_up_less_than_either_extreme() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact().reverse();
+        let needs = Needs::default().reverse();
         let plans: Vec<Plan> = [Objective::Memory, Objective::Latency, Objective::Balanced]
             .into_iter()
             .map(|o| plan_for(&keys, needs, o).unwrap())
@@ -2384,20 +2405,28 @@ mod tests {
     #[test]
     fn a_workload_ranks_by_what_it_asks() {
         let keys = corpus(2_000);
-        let best = |asked: Workload| {
-            plan_for(&keys, Needs::default(), Objective::Workload(asked))
+        let best = |needs: Needs, asked: Workload| {
+            plan_for(&keys, needs, Objective::Workload(asked))
                 .unwrap()
                 .best()
                 .kind
         };
+        let (open, closed) = (Needs::default(), Needs::default().closed_vocabulary());
         assert_eq!(
-            best(Workload::default().hits(1).common_prefix(9)),
+            best(open, Workload::default().hits(1).common_prefix(9)),
             Kind::String
+        );
+        assert_eq!(
+            best(open, Workload::default().hits(1).prefix(9)),
+            Kind::Dict
         );
         if cfg!(feature = "mph") {
             // A closed vocabulary's hits cost a hash, and the prefix counts are its dictionary's.
-            assert_eq!(best(Workload::default().hits(1).prefix(9)), Kind::Hashed);
-            let kind = best(Workload::default().hits(1).batch(1_024));
+            assert_eq!(
+                best(closed, Workload::default().hits(1).prefix(9)),
+                Kind::Hashed
+            );
+            let kind = best(closed, Workload::default().hits(1).batch(1_024));
             assert!(matches!(kind, Kind::Closed | Kind::Compact), "{kind:?}");
         }
     }
@@ -2438,7 +2467,7 @@ mod tests {
     #[test]
     fn a_workload_that_asks_nothing_is_latency() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact();
+        let needs = Needs::default();
         let latency = plan_for(&keys, needs, Objective::Latency).unwrap();
         let empty = plan_for(&keys, needs, Objective::Workload(Workload::default())).unwrap();
         assert_eq!(latency.estimates(), empty.estimates());
@@ -2554,14 +2583,15 @@ mod tests {
     #[test]
     fn hashed_is_priced_by_the_vocabulary() {
         let keys = corpus(2_000);
-        let needs = Needs::default().reverse().prefix();
+        let open = Needs::default().reverse().prefix();
         let row = |p: &Plan| {
             *p.estimates()
                 .iter()
                 .find(|e| e.kind == Kind::Hashed)
                 .unwrap()
         };
-        let open = plan_for(&keys, needs.exact(), Objective::Latency).unwrap();
+        let closed = open.closed_vocabulary();
+        let open = plan_for(&keys, open, Objective::Latency).unwrap();
         assert_ne!(open.best().kind, Kind::Hashed);
         let dict = open
             .estimates()
@@ -2569,7 +2599,7 @@ mod tests {
             .find(|e| e.kind == Kind::Dict && e.block == Some(256))
             .unwrap();
         assert!(open.nanos(&row(&open)) >= open.nanos(dict));
-        let closed = plan_for(&keys, needs, Objective::Latency).unwrap();
+        let closed = plan_for(&keys, closed, Objective::Latency).unwrap();
         assert_eq!(closed.best().kind, Kind::Hashed, "{closed}");
         assert!(closed.nanos(&row(&closed)) < open.nanos(&row(&open)));
     }
@@ -2600,6 +2630,37 @@ mod tests {
             objective: Objective::Memory,
         };
         assert!(!p.close());
+    }
+
+    /// The default is the vocabulary a stranger's key can reach: exact, and so without the two
+    /// indexes that answer one with a member's id. Saying it is closed puts them back, wherever
+    /// in the chain it is said.
+    #[test]
+    fn the_default_is_an_open_vocabulary() {
+        assert!(Needs::default().exact);
+        let keys = corpus(500);
+        let kinds = |needs| {
+            plan(&keys, needs)
+                .unwrap()
+                .estimates()
+                .iter()
+                .map(|e| e.kind)
+                .collect::<Vec<_>>()
+        };
+        for probabilistic in [Kind::Compact, Kind::Closed] {
+            assert!(!probabilistic.answers(Needs::default()));
+            assert!(!kinds(Needs::default()).contains(&probabilistic));
+            let closed = Needs::default().closed_vocabulary();
+            assert!(probabilistic.answers(closed));
+            assert_eq!(
+                kinds(closed).contains(&probabilistic),
+                cfg!(feature = "mph")
+            );
+        }
+        assert_eq!(
+            Needs::default().closed_vocabulary().reverse(),
+            Needs::default().reverse().closed_vocabulary()
+        );
     }
 
     #[test]
@@ -2666,7 +2727,8 @@ mod tests {
     #[test]
     fn the_model_lands_near_the_truth() {
         let keys = corpus(20_000);
-        let plan = with_sample(2_000, || plan(&keys, Needs::default()).unwrap());
+        let every = Needs::default().closed_vocabulary();
+        let plan = with_sample(2_000, || plan(&keys, every).unwrap());
         assert!(plan.estimates().iter().all(|e| !e.measured));
         for e in plan.estimates() {
             let truth = match e.kind {

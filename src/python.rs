@@ -3536,13 +3536,14 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// number reads about a hundredfold high. It is still far under every other index, so the ranking
 /// picks the fst -- but `thin` is set, and a byte count under that flag is not one to quote.
 ///
-/// The keyword arguments say what the index has to be able to do. One that cannot is left out of
-/// the ranking rather than ranked last, so `estimates` holds only usable answers and `best` is
+/// The keyword arguments say what the index has to be able to do, and the vocabulary is open unless
+/// `closed_vocabulary` says otherwise. One that cannot is left out of the ranking rather than ranked
+/// last, so `estimates` holds only usable answers and `best` is
 /// always one of them. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
-#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, common_prefix=false, fuzzy=false, exact=false, objective=crate::Objective::Memory))]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, common_prefix=false, fuzzy=false, closed_vocabulary=false, objective=crate::Objective::Memory))]
 // The arguments are the keyword arguments; pyo3 binds them one by one, so a parameter object here
 // would be a dict the caller has to build rather than a call they can read.
 #[allow(clippy::too_many_arguments)]
@@ -3554,7 +3555,7 @@ fn py_plan<'py>(
     prefix: bool,
     common_prefix: bool,
     fuzzy: bool,
-    exact: bool,
+    closed_vocabulary: bool,
     #[pyo3(from_py_with = objective_of)] objective: crate::Objective,
 ) -> PyResult<Bound<'py, PyDict>> {
     let keys = collect_strs(keys)?;
@@ -3564,7 +3565,7 @@ fn py_plan<'py>(
         prefix,
         common_prefix,
         fuzzy,
-        exact,
+        exact: !closed_vocabulary,
     };
     let plan = py
         .detach(|| crate::plan_for(&keys, needs, objective))

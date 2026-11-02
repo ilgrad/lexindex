@@ -25,14 +25,13 @@ assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "StringIndex"}
 Which index wins is a property of your keys and not of this library — six fruit names are not a
 corpus, and neither is a range of numbers, which an fst folds into almost nothing. Run it on the
 keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key)`), `ordered`,
-`prefix`, `common_prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes,
-which is where their size comes from. Nothing is required by default, so a bare `plan(keys)` prices
-all seven. `HashedDictIndex` is priced at zero fingerprint bits: exact at its dictionary's search,
+`prefix`, `common_prefix`, `fuzzy` and `closed_vocabulary`. `HashedDictIndex` is priced at zero fingerprint bits: exact at its dictionary's search,
 and under a closed vocabulary at `id_unchecked`. `DoubleArrayIndex` leaves the ranking on a corpus
-past what its 23-bit slots hold. **The default is a closed
-vocabulary:** a bare `plan(keys)` can recommend an index that answers a key it never held with some
-member's id, while the `lexindex` command assumes an open one and implies `exact`. Pass `exact=True`
-unless every key you will ask about is in `keys`.
+past what its 23-bit slots hold. **The default is an open vocabulary**, in Python, in Rust's
+`Needs::default()` and on the command line alike: a key the index never held has to be answered as
+one, so a bare `plan(keys)` prices the five exact indexes. `closed_vocabulary=True` puts the two
+probabilistic indexes back, which is where their size comes from, and is the promise that every key
+you will ask about is in `keys`: one of them answers a stranger with some member's id.
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
 bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
@@ -533,8 +532,8 @@ keep no keys, so at build a pair equal in both 64-bit hashes looks like one key 
 they share an id. For random keys that is `≈ 2^-128` a pair from 17 bytes up, and `≈ 2^-64` a pair
 of one length up to 16 bytes. **Chosen keys reach it on purpose**: a birthday search found a 16-byte
 pair in 3.7·10⁹ steps on one core ([the design notes](design.md#compacthashindex)). If a stranger
-chooses the keys you build over, use an index from the first five rows. `plan(keys, exact=True)` and
-the `lexindex` command leave the last two out; a bare `plan(keys)` does not.
+chooses the keys you build over, use an index from the first five rows. `plan` and the `lexindex` command
+leave the last two out unless told the vocabulary is closed.
 
 ## `Overlay` — edits without a rebuild
 
@@ -1133,19 +1132,18 @@ blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at al
 an error that says so rather than an empty file.
 
 `plan` and `build` take the same six **needs**, which say what the index must be able to do and so
-narrow what may be picked — with none of them the only question asked is `id(key)`, and the two
-probabilistic indexes are allowed:
+narrow what may be picked — with none of them the only question asked is an exact `id(key)`:
 
 ```text
 --reverse    key(id) as well as id(key)
 --ordered    ids in lexicographic order, and in-order iteration
 --prefix     prefix and range queries (an ordered index)
+--common-prefix  every key that is a prefix of a query, and the longest
 --fuzzy      Levenshtein and subsequence queries      -- only StringIndex answers this
---exact      a non-member must be answered as one     -- bars CompactHashIndex and ClosedHashIndex
 ```
 
-**The command line assumes an open vocabulary, and so implies `--exact`.** Asked to rank with no
-needs at all, the honest answer on size is `ClosedHashIndex` at 0.24 bytes a key — and it answers a
+**The command line assumes an open vocabulary, as the library does.** Asked to rank with no needs at
+all, the honest answer on size is `ClosedHashIndex` at 0.24 bytes a key — and it answers a
 key it has never seen with some member's id, because it stores nothing to check against. That is the
 right index for a fixed vocabulary and a trap for anything else, and a ranking is read by someone
 who has not yet decided. So `plan` and `--index auto` leave the two probabilistic indexes out and
@@ -1168,9 +1166,8 @@ in this file, and they are ranked with the rest.
 `--closed-vocabulary` is that promise, and puts both back in the ranking. The line is printed only
 when the default is what excluded them: ask for `--prefix` and they were never candidates, so
 nothing is explained. Naming an index with `--index closed` builds it whatever the needs say — the
-needs narrow a *choice*, and naming one is not a choice to narrow. The library is unchanged:
-`Needs::default()` in Rust and Python still asks only for `id(key)`, because a program that calls
-`plan` has a caller who decided, and a command line has a person who is still deciding.
+needs narrow a *choice*, and naming one is not a choice to narrow. The same promise is
+`Needs::default().closed_vocabulary()` in Rust and `closed_vocabulary=True` in Python.
 
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;

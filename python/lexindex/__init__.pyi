@@ -1083,7 +1083,7 @@ def plan(
     prefix: bool = False,
     common_prefix: bool = False,
     fuzzy: bool = False,
-    exact: bool = False,
+    closed_vocabulary: bool = False,
     objective: Literal["memory", "latency", "balanced"] | Workload = ...,
 ) -> Plan:
     """What each index would cost on these keys, and which of them answer your questions.
@@ -1114,9 +1114,11 @@ def plan(
 
     The keyword arguments say what the index has to be able to do -- ``key(id)`` as well as
     ``id(key)``; ids in lexicographic order; prefix and range queries; the keys that are prefixes
-    of a query; fuzzy search; and exact membership, without which a probabilistic index is allowed, which is how the two smallest get
-    their size. An index that cannot answer one of them is left out of the ranking rather than
-    ranked last.
+    of a query; fuzzy search. An index that cannot answer one of them is left out of the ranking
+    rather than ranked last. The vocabulary is **open** by default: a key the index never held has
+    to be answered as one, as with Rust's ``Needs::default()`` and on the command line.
+    ``closed_vocabulary=True`` is the promise that every key you will ask about is in ``keys``, and
+    puts the two probabilistic indexes back, which is where their size comes from.
 
     ``objective`` is what the ranking is *for*: ``memory`` (the default, the smallest blob),
     ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``), ``balanced``
