@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
   hit, counted and **not yet timed**: urls 180 → 243, paths 233 → 339, uuid 175 → 234, domains
   170 → 186, numeric 170 → 181. Every hash index's blob changes with it.
 
+- **The MPHF cuts its first level into chunks of 2¹⁹ buckets, not 2¹⁶.** A boundary between two chunks
+  bumps about two hundred keys, so fewer of them save 0.015 bits a key at 10⁶ keys (1.923 → 1.908),
+  0.007 at 10⁷ and 0.006 at 10⁸. A larger chunk in flight costs memory: `CompactHashIndex` over 10⁷
+  listed keys adds 253.8 MB to the keys against 216.7, on 8 threads, and 2·10⁶ keys and
+  `PerfectHashIndex` do not move. Provisional: fewer chunks spread over fewer threads, and what that
+  costs a build is **not yet timed**.
+
 ### Added
 
 - **`lexindex build --index hashed` and `--index double-array`.** The command line could inspect both

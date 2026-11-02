@@ -207,8 +207,10 @@ const TAIL_TRIES: u32 = 64;
 const MAX_LEVELS: usize = 16;
 
 /// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary
-/// between two costs about two hundred keys bumped, so they are few and large.
-const CHUNK: u64 = 1 << 16;
+/// between two costs about two hundred keys bumped, so they are few and large. 2¹⁹ against 2¹⁶ takes
+/// 0.015 bits a key off 10⁶ keys, 0.007 off 10⁷ and 0.006 off 10⁸. Provisional: fewer chunks spread
+/// over fewer threads, and what that costs a build has not been measured.
+const CHUNK: u64 = 1 << 19;
 
 /// Fewest buckets per chunk on a level after the first: about the window, so that a chunk's
 /// placement order is the level's. A first level is cut no finer than a quarter chunk: a boundary
