@@ -309,11 +309,12 @@ fn on_threads<T: Send>(out: &mut [T], min: usize, f: impl Fn(usize, &mut [T]) + 
     });
 }
 
-/// One run of keys' range of every depth: the bytes of its nodes there, and their parents.
-#[derive(Default)]
-struct RunNodes<'a> {
-    labels: Vec<&'a mut [u8]>,
-    parents: Vec<&'a mut [u32]>,
+/// One run of keys' range of one depth: what the run writes there next, and the last node it
+/// numbered, the one the next key under it shares.
+struct Cursor<'a> {
+    labels: std::slice::IterMut<'a, u8>,
+    parents: std::slice::IterMut<'a, u32>,
+    last: u32,
 }
 
 /// Every node's byte and parent, the parent in `fail`, and each key's own node in `term`: key `i`
@@ -366,7 +367,7 @@ fn lay_nodes(
             *at += width;
         }
     }
-    let mut runs_nodes: Vec<RunNodes<'_>> = starts.iter().map(|_| RunNodes::default()).collect();
+    let mut runs_nodes: Vec<Vec<Cursor<'_>>> = starts.iter().map(|_| Vec::new()).collect();
     let (mut label, mut fail) = (&mut label[1..], &mut fail[1..]);
     for d in 1..depths {
         let mut at = level[d];
@@ -375,32 +376,33 @@ fn lay_nodes(
             let width = (end - at) as usize;
             let (l, rest) = std::mem::take(&mut label).split_at_mut(width);
             let (f, rest_f) = std::mem::take(&mut fail).split_at_mut(width);
-            run.labels.push(l);
-            run.parents.push(f);
+            run.push(Cursor {
+                labels: l.iter_mut(),
+                parents: f.iter_mut(),
+                last: at - 1,
+            });
             (label, fail) = (rest, rest_f);
             at = end;
         }
     }
-    let lay = |r: usize, run: &mut RunNodes<'_>, term: &mut [u32]| {
-        let start = &starts[r];
+    let lay = |r: usize, run: &mut [Cursor<'_>], term: &mut [u32]| {
         let first = r * run_keys;
-        let mut path = vec![0u32; depths];
-        for d in 1..=lcp[first] as usize {
-            path[d] = start[d] - 1;
-        }
-        let mut fill = vec![0usize; depths];
         for (j, own) in term.iter_mut().enumerate() {
             let i = first + j;
             let key = text.key(i);
-            for d in lcp[i] as usize + 1..=key.len() {
-                let k = fill[d];
-                fill[d] += 1;
-                run.labels[d - 1][k] = key[d - 1];
+            let shared = lcp[i] as usize;
+            let mut node = match shared.checked_sub(1) {
+                Some(d) => run[d].last,
+                None => 0,
+            };
+            for (at, &byte) in run[shared..key.len()].iter_mut().zip(&key[shared..]) {
+                at.last += 1;
+                *at.labels.next().expect("counted by `starts`") = byte;
                 // The parent, until `link_level` puts the link in its place.
-                run.parents[d - 1][k] = path[d - 1];
-                path[d] = start[d] + k as u32;
+                *at.parents.next().expect("counted by `starts`") = node;
+                node = at.last;
             }
-            *own = path[key.len()];
+            *own = node;
         }
     };
     std::thread::scope(|scope| {
