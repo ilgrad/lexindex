@@ -18,6 +18,7 @@ different question, and code that matched a refused build as `IndexError::Format
 | `Overlay::remove` over `CompactHashIndex` | compiled, and could retire a real key's id | does not compile; `TypeError` in Python |
 | A refused build | `IndexError::Format` | `IndexError::Build` |
 | `IndexError` | exhaustive | `#[non_exhaustive]` |
+| A 4.x blob of a hash index | read | refused by name: [dump and build, or build from your keys](#which-4x-blobs-50-reads) |
 
 ## `plan` assumes an open vocabulary
 
@@ -213,5 +214,45 @@ from the key list these were built from**, so keep it wherever one of these is i
 other index can give its keys back: run `lexindex dump old.blob > keys.txt` with the version that
 wrote the blob, before upgrading, since a later version may refuse that blob by name.
 
-Which blobs 5.0 itself refuses, and which ids survive the rebuild, follows the release's hash and
-format changes, and is on this page when those land.
+## Which 4.x blobs 5.0 reads
+
+The key hash changed, so a hash blob from 4.x would answer wrong ids. 5.0 refuses those blobs by
+name, and the message gives the way across. The ordered indexes do not hash a key, so 5.0 reads
+their 4.x blobs as they are.
+
+| A blob 4.x wrote | 5.0 | The way across | Ids |
+|---|---|---|---|
+| `DictIndex` (`BDX3`, `BDX4`), `StringIndex` (`BIX4`), `DoubleArrayIndex` (`BDA1`) | reads it | none | the same |
+| `Overlay` (`OVL2`) over one of those | reads it | none | the same |
+| `HashedDictIndex` (`BHD1`) | refuses it | dump, then build | the same: they are ranks |
+| `PerfectHashIndex` (`BMP8`) | refuses it | dump, then build | **new** |
+| `CompactHashIndex` (`BCH8`), `ClosedHashIndex` (`BCL2`) | refuses it | build from your key list | **new** |
+| `Overlay` (`OVL2`) over a hash index | refuses it, with its base's message | as its base | as its base |
+
+Run the dump with the version that wrote the blob, since 5.0 refuses to read it:
+
+```console
+$ uvx --from 'lexindex<5' lexindex dump old.blob > keys.txt
+$ lexindex build keys.txt new.blob --index perfect     # or --index hashed
+```
+
+The dump of an overlay holds the keys it added, so the new index holds them too.
+
+`--index hashed` builds at block 256 with no fingerprint. A `HashedDictIndex` with another block or
+width goes through `HashedDictIndex.from_dict(dictionary, bits)`, over a `DictIndex` built from the
+same `keys.txt`.
+
+A `PerfectHashIndex` gives every key a new id. The dump is in old-id order, so a line's number is
+the key's old id, and a program that stored ids can build its map from that:
+
+```python
+new = lexindex.PerfectHashIndex.load("new.blob")
+new_id = [new.id(line.rstrip("\n")) for line in open("keys.txt", encoding="utf-8", newline="\n")]
+# new_id[old] is what `old` is now
+```
+
+`CompactHashIndex` and `ClosedHashIndex` hold no keys, so nothing can dump them. To keep stored ids
+across, ask both versions about your key list: 4.x answers each key's old id, 5.0 its new one.
+
+A `DictIndex` built by 5.0 can be smaller than the same keys' 4.x blob, and its ids are the same, so
+a rebuild is optional.
