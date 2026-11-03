@@ -10,8 +10,8 @@
 //! — one program, whichever way it was installed.
 
 use lexindex::{
-    BlobInfo, BlobKind, DictIndex, DictProfile, DoubleArrayIndex, IndexError, Kind, Needs,
-    Objective, Overlay, OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
+    BlobInfo, BlobKind, DictIndex, DictLayout, DictProfile, DoubleArrayIndex, IndexError, Kind,
+    Needs, Objective, Overlay, OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -26,8 +26,8 @@ const USAGE: &str = concat!(
 
 usage:
   lexindex plan    <keys-file> [--objective NAME] [needs]
-  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--stream MODE]
-                   [--objective NAME] [needs]
+  lexindex build   <keys-file> <out-blob> [--index NAME] [--block SPEC] [--labels]
+                   [--stream MODE] [--objective NAME] [needs]
   lexindex inspect <blob> [--sections] [--json]
   lexindex dump    <blob>
 
@@ -67,6 +67,9 @@ options (`--name value` or `--name=value`):
                  HashedDictIndex with no fingerprint, so exact, and both hold the corpus
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
+  --labels       with `--index dict`: also try a dictionary of the corpus's trie labels
+                 and keep it where the blob comes out smaller -- paths, URLs, titles --
+                 for a lookup that reads more. Holds the corpus, whatever `--stream` says
   --stream MODE  when to build straight to the blob instead of holding the corpus:
                  auto (default), always, never, or the keys-file size past which to do
                  it (1000, 512M, 4G). `auto` is a quarter of the memory the machine
@@ -137,6 +140,7 @@ struct Cmd {
     needs: Needs,
     index: Choice,
     block: Option<usize>,
+    labels: bool,
     sections: bool,
     json: bool,
     stream: Stream,
@@ -325,6 +329,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         needs: Needs::default(),
         index: Choice::Auto,
         block: None,
+        labels: false,
         sections: false,
         json: false,
         stream: Stream::Auto,
@@ -367,6 +372,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             "--block" if accepts == Accepts::NeedsAndIndex => {
                 cmd.block = Some(block_size(&value(args, &mut at, name, inline)?)?);
             }
+            "--labels" if accepts == Accepts::NeedsAndIndex => cmd.labels = true,
             "--stream" if accepts == Accepts::NeedsAndIndex => {
                 cmd.stream = stream_mode(&value(args, &mut at, name, inline)?)?;
             }
@@ -478,6 +484,11 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             "--block is the DictIndex block size and needs `--index dict`".to_string(),
         ));
     }
+    if cmd.labels && cmd.index != Choice::One(Kind::Dict) {
+        return Err(Fail::Usage(
+            "--labels is a DictIndex layout and needs `--index dict`".to_string(),
+        ));
+    }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
     let big = stream_above(cmd.stream, path);
     let unranked = match cmd.index {
@@ -517,14 +528,18 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto => None,
         Choice::Hashed | Choice::DoubleArray => unreachable!("built above"),
     };
+    // The label dictionary is chosen over the whole corpus -- which labels pay is a count across
+    // every key -- so a labelled build holds the keys, and a large file is held too, with a note.
     if let Some((kind, block)) = decided {
-        if big.is_some() && can_stream(kind) {
+        if big.is_some() && can_stream(kind) && !cmd.labels {
             let src = Source::new(path);
             let n = stream_to_file(kind, &src, dest, block)?;
             note_blank(path, src.blank.get(), err)?;
             return note_written(kind.name(), n, dest, err);
         }
-        if big.is_some() {
+        if big.is_some() && cmd.labels {
+            note_labels_hold(path, err)?;
+        } else if big.is_some() {
             note_no_stream(path, kind.name(), err)?;
         }
     }
@@ -540,7 +555,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             (best.kind, best.block)
         }
     };
-    let n = build_and_save(kind, &keys, dest, block)?;
+    let n = build_and_save(kind, &keys, dest, block, cmd.labels)?;
     note_written(kind.name(), n, dest, err)
 }
 
@@ -549,6 +564,15 @@ fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fai
         err,
         "reading {path}: this file is large enough to build without holding it, but {name} has \
          no streaming build in this configuration."
+    )
+    .map_err(io_fail)
+}
+
+fn note_labels_hold(path: &str, err: &mut dyn Write) -> Result<(), Fail> {
+    writeln!(
+        err,
+        "reading {path}: this file is large enough to build without holding it, but --labels \
+         chooses its label dictionary over the whole corpus, so it is held."
     )
     .map_err(io_fail)
 }
@@ -715,6 +739,7 @@ fn build_and_save(
     keys: &[String],
     dest: &Path,
     block: Option<usize>,
+    labels: bool,
 ) -> Result<usize, Fail> {
     let n = match kind {
         Kind::String => {
@@ -723,10 +748,8 @@ fn build_and_save(
             index.len()
         }
         Kind::Dict => {
-            let index = match block {
-                Some(b) => DictIndex::build_with_block(keys, b)?,
-                None => DictIndex::build(keys)?,
-            };
+            let layout = block.map_or_else(DictLayout::default, DictLayout::new);
+            let index = DictIndex::build_with(keys, layout.with_labels(labels))?;
             index.save(dest)?;
             index.len()
         }
@@ -1238,6 +1261,15 @@ mod tests {
                 vec!["build", "k", "o", "--index=string", "--block=64"],
                 "--block is the DictIndex block size",
             ),
+            (
+                vec!["build", "k", "o", "--labels"],
+                "--labels is a DictIndex layout",
+            ),
+            (
+                vec!["build", "k", "o", "--index=string", "--labels"],
+                "--labels is a DictIndex layout",
+            ),
+            (vec!["plan", "k", "--labels"], "no such option `--labels`"),
         ] {
             let (code, out, err) = go(&args, "");
             assert_eq!((code, out.as_str()), (2, ""), "{args:?}");
@@ -1479,6 +1511,12 @@ mod tests {
                     err.contains(&format!("wrote {dest}: {kind} over 2000 keys")),
                     "{index} {mode}: {err}"
                 );
+                // A labelled build holds the corpus whatever `--stream` says, and says so.
+                assert_eq!(
+                    err.contains("--labels chooses its label dictionary over the whole corpus"),
+                    mode == "always" && block.contains(&"--labels"),
+                    "{index} {mode}: {err}"
+                );
                 written.push(std::fs::read(&blob).unwrap());
             }
             assert!(written[0] == written[1], "{index}: the blobs differ");
@@ -1699,6 +1737,7 @@ mod tests {
             ("dict", "DictIndex", vec!["--block=balanced"]),
             ("dict", "DictIndex", vec!["--block", "compact"]),
             ("dict", "DictIndex", vec!["--block", "64"]),
+            ("dict", "DictIndex", vec!["--block=compact", "--labels"]),
             ("string", "StringIndex", vec![]),
             ("double-array", "DoubleArrayIndex", vec![]),
         ];

@@ -410,6 +410,53 @@ def test_dict_index_micro_argument_trades_restarts_for_bytes():
             lexindex.DictIndex(words, micro=bad)
 
 
+def _label_corpus(seed, n):
+    """Path lists whose directory and file names recur under different parents -- the shape the
+    label dictionary pays on. The same generator as the Rust test's `label_corpus`."""
+    dirs = ["usr/share", "usr/lib", "home/me/src", "opt/tool", "var/log", "etc"]
+    names = [
+        "locale/translations",
+        "python3.14/site-packages",
+        "icons/hicolor/48x48",
+        "documentation",
+        "node_modules/.bin",
+        "x",
+        "release-notes",
+        "include/subdir",
+    ]
+    files = ["index.html", "README.md", "__init__.py", "Makefile", "a"]
+    state = seed | 1
+
+    def pick(items):
+        nonlocal state
+        state ^= (state << 13) & 0xFFFFFFFFFFFFFFFF
+        state ^= state >> 7
+        state ^= (state << 17) & 0xFFFFFFFFFFFFFFFF
+        return items[state % len(items)]
+
+    return sorted(
+        {f"/{pick(dirs)}/{pick(names)}/{pick(names)}-{i % 97}/{pick(files)}" for i in range(n)}
+    )
+
+
+def test_dict_index_labels_keeps_the_smaller_blob_and_answers_every_key():
+    paths = _label_corpus(1, 4_000)
+    plain = lexindex.DictIndex(paths, block=256)
+    labelled = lexindex.DictIndex(paths, block=256, labels=True)
+    blob = labelled.to_bytes()
+    assert blob[:4] == b"BDX5" and len(blob) < plain.serialized_len()
+    assert labelled.block == 256 and len(labelled) == len(paths)
+    assert labelled.ids_of(paths) == list(range(len(paths)))
+    assert labelled.keys_of(list(range(len(paths)))) == paths
+    assert labelled.id("/usr/share/x/x-3/nope") is None
+    assert labelled.prefix_id_range("/usr/") == plain.prefix_id_range("/usr/")
+    back = lexindex.DictIndex.from_bytes(blob)
+    assert back.to_bytes() == blob and back.ids_of(paths[:100]) == list(range(100))
+    # Where no label pays, the blob is the plain build's, byte for byte.
+    words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
+    assert lexindex.DictIndex(words, labels=True).to_bytes() == lexindex.DictIndex(words).to_bytes()
+
+
 def test_dict_index_block_argument_and_persistence(tmp_path):
     words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
     for block in (1, 5, 32, 1024):

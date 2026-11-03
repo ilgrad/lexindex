@@ -1995,6 +1995,52 @@ impl DictProfile {
     }
 }
 
+/// How a [`DictIndex`] lays its keys out: the block, the microblock and whether to try a label
+/// dictionary. [`DictIndex::build_with`] takes one; [`DictIndex::build`] uses the default, which
+/// is [`DictProfile::Balanced`]'s block with the microblocks the block chooses and no labels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DictLayout {
+    /// Keys a block holds, `1..=1024`: what a stored head and its arrays are shared over.
+    pub block: usize,
+    /// Keys a microblock holds, `1..=block` and dividing it; `None` is the 16 to 32 the block
+    /// chooses by itself. See [`DictIndex::build_with_layout`].
+    pub micro: Option<usize>,
+    /// Try a dictionary of the corpus's trie labels and keep it where the blob comes out smaller.
+    /// See [`DictIndex::build_with`].
+    pub labels: bool,
+}
+
+impl Default for DictLayout {
+    fn default() -> Self {
+        Self::new(DEFAULT_BLOCK)
+    }
+}
+
+impl DictLayout {
+    /// `block` keys a block, the microblocks the block chooses, no labels.
+    pub const fn new(block: usize) -> Self {
+        Self {
+            block,
+            micro: None,
+            labels: false,
+        }
+    }
+
+    /// The same layout with `micro` keys a microblock.
+    pub const fn with_micro(self, micro: usize) -> Self {
+        Self {
+            micro: Some(micro),
+            ..self
+        }
+    }
+
+    /// The same layout, trying a label dictionary or not.
+    pub const fn with_labels(self, labels: bool) -> Self {
+        Self { labels, ..self }
+    }
+}
+
 impl DictIndex {
     /// Build from a collection of strings, in any order; duplicates are removed and the ids are
     /// the ranks of the distinct keys in byte order. Blocks of 256 keys.
@@ -2088,27 +2134,53 @@ impl DictIndex {
         Self::from_view(view, block, micro_for(block))
     }
 
-    /// [`build_with_block`](Self::build_with_block), trying a dictionary of the corpus's trie
-    /// labels as well and keeping it only where the blob comes out smaller (`BDX5`, or `BDX3` with
-    /// more phrases where a lookup reads every label often); otherwise the blob is
-    /// `build_with_block`'s, byte for byte. A corpus spelled in a character code takes no labels.
-    /// Not yet a stable part of the API: the format is read by every release from 4.7, and the
-    /// builder stays hidden until the lookup cost is measured.
-    #[doc(hidden)]
-    pub fn build_with_labels<I, S>(items: I, block: usize) -> Result<Self, IndexError>
+    /// [`build`](Self::build) with the block, the microblock and the labels of `layout`. With
+    /// `labels`, a dictionary of the corpus's trie labels is tried as well and kept only where the
+    /// blob comes out smaller (`BDX5`, or `BDX3` with more phrases where a lookup reads every
+    /// label often); otherwise the blob is the plain layout's, byte for byte, and a corpus spelled
+    /// in a character code takes no labels. Path lists repeat whole directory and file names under
+    /// different parents, which is what a label names once: at block 1024 a million paths go
+    /// 9.323 → 8.530 bytes a key, under `marisa-trie`'s 8.81 at its smallest, and URLs, English
+    /// titles, identifiers, domains and PyPI names come out 2.7–3.8 % smaller. A member `id` reads
+    /// 1.5 labels on average through the nested dictionary: +24 % instructions on those paths and
+    /// +6–10 % elsewhere, counted and not yet timed — which is why no default builds labels.
+    ///
+    /// ```
+    /// use lexindex::{DictIndex, DictLayout};
+    /// let keys = ["/usr/share/doc", "/usr/share/man", "/usr/lib", "/home/me/doc"];
+    /// let index = DictIndex::build_with(keys, DictLayout::new(256).with_labels(true))?;
+    /// assert_eq!(index.id("/usr/lib"), Some(1));
+    /// assert_eq!(
+    ///     DictIndex::build_with(keys, DictLayout::new(256))?.to_bytes(),
+    ///     DictIndex::build_with_block(keys, 256)?.to_bytes()
+    /// );
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn build_with<I, S>(items: I, layout: DictLayout) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
+        let DictLayout {
+            block,
+            micro,
+            labels,
+        } = layout;
         if !(1..=MAX_BLOCK).contains(&block) {
             return Err(IndexError::Format("dict: block must be in 1..=1024"));
         }
+        let micro = match micro {
+            Some(micro) if micro == 0 || block % micro != 0 => {
+                return Err(IndexError::Format("dict: micro must divide block"));
+            }
+            Some(micro) => micro,
+            None => micro_for(block),
+        };
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
         let mut view = view_of(&keys, threads);
         sort_distinct(&mut view, threads);
-        let micro = micro_for(block);
-        if choose_code(&view, threads).is_some() {
+        if !labels || choose_code(&view, threads).is_some() {
             return Self::from_view(view, block, micro);
         }
         let plain = Self::from_sorted(&view, block, micro)?;
@@ -2118,8 +2190,8 @@ impl DictIndex {
         })
     }
 
-    /// The labelled half of [`build_with_labels`](Self::build_with_labels) alone, whether or not
-    /// it wins: `None` where no label pays. For the harnesses that size both halves.
+    /// The labelled half of [`build_with`](Self::build_with) alone, whether or not it wins:
+    /// `None` where no label pays. For the harnesses that size both halves.
     #[cfg(feature = "fuzzing")]
     #[doc(hidden)]
     pub fn build_labelled<I, S>(items: I, block: usize) -> Result<Option<Self>, IndexError>
@@ -7050,7 +7122,8 @@ mod tests {
             let keys = label_corpus(seed, n);
             for block in [1usize, 16, 64, 256, 1024] {
                 let plain = DictIndex::build_with_block(&keys, block).unwrap();
-                let built = DictIndex::build_with_labels(&keys, block).unwrap();
+                let built =
+                    DictIndex::build_with(&keys, DictLayout::new(block).with_labels(true)).unwrap();
                 let blob = built.to_bytes();
                 if !built.has_labels() {
                     assert_eq!(blob, plain.to_bytes(), "block {block}");
@@ -7083,7 +7156,11 @@ mod tests {
                 }
             }
         }
-        let labelled = DictIndex::build_with_labels(label_corpus(1, 4_000), 256).unwrap();
+        let labelled = DictIndex::build_with(
+            label_corpus(1, 4_000),
+            DictLayout::new(256).with_labels(true),
+        )
+        .unwrap();
         assert!(labelled.has_labels(), "the corpus is built to take labels");
     }
 
@@ -7097,7 +7174,7 @@ mod tests {
             block in proptest::sample::select(vec![4usize, 32, 256]),
         ) {
             let keys = label_corpus(seed, n);
-            let idx = DictIndex::build_with_labels(&keys, block).unwrap();
+            let idx = DictIndex::build_with(&keys, DictLayout::new(block).with_labels(true)).unwrap();
             check(&idx, &keys);
             check(&DictIndex::from_bytes(&idx.to_bytes()).unwrap(), &keys);
         }
@@ -7109,7 +7186,7 @@ mod tests {
     #[test]
     fn a_corrupted_label_dictionary_never_panics() {
         let keys = label_corpus(1, 4_000);
-        let idx = DictIndex::build_with_labels(&keys, 256).unwrap();
+        let idx = DictIndex::build_with(&keys, DictLayout::new(256).with_labels(true)).unwrap();
         assert!(idx.has_labels());
         let blob = idx.to_bytes();
         let at = layout(&blob, 256).phrases;
@@ -7173,11 +7250,11 @@ mod tests {
     fn a_label_dictionary_that_names_labels_of_its_own_is_refused() {
         let keys = label_corpus(1, 4_000);
         let firsts = |idx: &DictIndex| SharedBytes::from_owned(vec![b'a'; idx.len()]);
-        let inner = DictIndex::build_with_labels(&keys, 256).unwrap();
+        let inner = DictIndex::build_with(&keys, DictLayout::new(256).with_labels(true)).unwrap();
         assert!(inner.has_labels());
         assert!(
             crate::labels::Labels::of(
-                DictIndex::build_with_labels(&keys, 256).unwrap(),
+                DictIndex::build_with(&keys, DictLayout::new(256).with_labels(true)).unwrap(),
                 firsts(&inner)
             )
             .is_none()

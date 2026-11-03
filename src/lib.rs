@@ -113,7 +113,7 @@ mod string_index;
 mod subsequence;
 mod ties;
 
-pub use dict_index::{DictIndex, DictProfile, DictSections};
+pub use dict_index::{DictIndex, DictLayout, DictProfile, DictSections};
 pub use double_array::DoubleArrayIndex;
 pub use estimate::{Estimate, Kind, Needs, Objective, Plan, Workload, plan, plan_file, plan_for};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};

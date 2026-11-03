@@ -9,7 +9,9 @@
 use std::io::BufRead;
 use std::time::Instant;
 
-use lexindex::{DictIndex, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex, StringIndex};
+use lexindex::{
+    DictIndex, DictLayout, DoubleArrayIndex, HashedDictIndex, PerfectHashIndex, StringIndex,
+};
 
 /// The longest key libstdc++'s `std::string` keeps inside the object rather than behind a pointer.
 const SSO: usize = 15;
@@ -78,6 +80,23 @@ impl Probe for DoubleArrayIndex {
     }
     fn probe(&self, key: &str) -> u64 {
         self.id(key).unwrap_or(u64::MAX)
+    }
+}
+
+/// `DictIndex` built with a label dictionary, which it keeps where the blob comes out smaller
+/// (`BDX5`); elsewhere the blob is the plain build's, byte for byte, and so is the row.
+struct Labelled(DictIndex);
+
+impl Probe for Labelled {
+    fn build(keys: &[String], block: usize) -> Self {
+        let layout = DictLayout::new(block).with_labels(true);
+        Labelled(DictIndex::build_with(keys, layout).expect("dict build"))
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len()
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.probe(key)
     }
 }
 
@@ -273,6 +292,15 @@ fn main() {
             "routed1024" => {
                 run::<Routed>(&keys, 1024, "lexindex DictIndex block 1024 routed", chained)
             }
+            "labels256" => {
+                run::<Labelled>(&keys, 256, "lexindex DictIndex block 256 labelled", chained)
+            }
+            "labels1024" => run::<Labelled>(
+                &keys,
+                1024,
+                "lexindex DictIndex block 1024 labelled",
+                chained,
+            ),
             "string" => run::<StringIndex>(&keys, 0, "lexindex StringIndex", chained),
             "hashed0" => run::<Closed>(&keys, 0, "lexindex HashedDictIndex closed", chained),
             "hashed8" => run::<Hashed>(&keys, 8, "lexindex HashedDictIndex fp=8", chained),

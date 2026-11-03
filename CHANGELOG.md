@@ -29,11 +29,12 @@ All notable changes to this project are documented here. The format follows
   9.323 → 8.530 bytes a key (under MARISA's 8.81 floor), the suite's paths 6.511 → 6.111, URLs,
   English titles, identifiers, domains and PyPI names 2.7–3.8 % smaller, ten million titles 4.0 %.
   A member `id` costs +10–26 % instructions and `key_into` +19–51 % on paths, +6–11 % and +9–21 %
-  elsewhere (counted at blocks 256 and 1024, not yet timed), so the build is opt-in
-  and hidden (`DictIndex::build_with_labels`) until a quiet machine prices it, and keeps the labels
-  only where the blob comes out smaller — otherwise its blob is `build_with_block`'s byte for byte.
-  This release reads the format so that a later one can write it; a pinned golden blob
-  (`golden-4.7.0-dict-labels.bdx`) seeds the dictionary fuzz target.
+  elsewhere (counted at blocks 256 and 1024, not yet timed), so the build is opt-in:
+  `DictIndex::build_with(keys, DictLayout::new(1024).with_labels(true))` in Rust, `labels=True` on
+  the Python constructor, `--labels` on `lexindex build --index dict`; it keeps the labels only
+  where the blob comes out smaller — otherwise its blob is the plain layout's byte for byte — and
+  no default builds them. `DictLayout` is the one argument the block, the microblock and the labels
+  go in. A pinned golden blob (`golden-4.7.0-dict-labels.bdx`) seeds the dictionary fuzz target.
 - **`PerfectHashIndex` stores its keys overlapped where that is smaller: 10.88 → 9.25 bytes a key
   on the 479 823-word dictionary.** A new arena encoding, tag `0x13`, holds a greedy shortest
   common superstring of the keys — a key inside another costs no bytes, and an overlap between two

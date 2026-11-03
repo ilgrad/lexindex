@@ -52,6 +52,8 @@ LEXINDEX = {
     "routed32": "lexindex Dict 32 routed",
     "routed256": "lexindex Dict 256 routed",
     "routed1024": "lexindex Dict 1024 routed",
+    "labels256": "lexindex Dict 256 labelled",
+    "labels1024": "lexindex Dict 1024 labelled",
     "string": "lexindex StringIndex",
     "hashed0": "lexindex HashedDict closed",
     "hashed8": "lexindex HashedDict fp=8",

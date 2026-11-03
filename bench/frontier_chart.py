@@ -25,7 +25,10 @@ Three choices the figure makes, each of which could be made dishonestly:
   alone, and choosing after seeing the answer would be the mirage this repository exists to refuse.
   Scored against the built blob on all 19 corpora of this set, its ranking of the two candidates a
   memory objective picks between is right on every one -- so the bar is what a caller gets without
-  reading this figure.
+  reading this figure. The one exception is spelled out on the bar: a `labelled` build
+  (`DictIndex(..., labels=True)`, `--labels`) is an opt-in the planner does not price, kept only
+  where its blob is smaller than the plain one; where a campaign timed it and it is the smallest,
+  the label says `labelled`, and the plain build's bar is what the planner gives.
 * **A linear axis.** The corpora span a fraction of a byte to 21 bytes a key and a log axis would
   flatter the ratios; the numbers are printed on the bars instead.
 

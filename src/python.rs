@@ -35,7 +35,9 @@
 //! [`Python::detach`] like the rest; the `Vec` is only borrowed there, so the Python references are
 //! released with the GIL held.
 
-use crate::{DictIndex, DictProfile, DoubleArrayIndex, IndexError, Overlay, StringIndex};
+use crate::{
+    DictIndex, DictLayout, DictProfile, DoubleArrayIndex, IndexError, Overlay, StringIndex,
+};
 use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{
     PyBufferError, PyDeprecationWarning, PyIOError, PyKeyError, PyTypeError, PyValueError,
@@ -1824,25 +1826,37 @@ impl PyDictIndex {
     /// curve instead of a number: `"fast"` (32), `"balanced"` (256, the default) or `"compact"`
     /// (1024). `micro` sets the microblock size instead, `1..=block` and dividing it: at the
     /// default block, 128 stored 0.12–0.34 bytes a key less than the 16 chosen by default on
-    /// fourteen corpora, for a longer scan whose cost is not measured yet.
+    /// fourteen corpora, for a longer scan whose cost is not measured yet. `labels=True` tries a
+    /// dictionary of the corpus's trie labels as well and keeps it where the blob comes out
+    /// smaller -- path lists repeat whole directory and file names under different parents, and
+    /// at block 1024 a million paths go 9.323 -> 8.530 bytes a key, under `marisa-trie`'s 8.81 at
+    /// its smallest; URLs, titles, identifiers and domains 2.7-3.8 % -- otherwise the bytes are
+    /// the plain build's. A member lookup then reads 1.5 labels on average: +24 % instructions on
+    /// those paths, +6-10 % elsewhere, counted and not yet timed, which is why it is off by default.
     #[new]
     #[pyo3(
-        signature = (items, block = BlockArg::Size(DictProfile::Balanced.block()), micro = None),
-        text_signature = "(items, block=256, micro=None)"
+        signature = (
+            items,
+            block = BlockArg::Size(DictProfile::Balanced.block()),
+            micro = None,
+            labels = false
+        ),
+        text_signature = "(items, block=256, micro=None, labels=False)"
     )]
     fn new(
         py: Python<'_>,
         items: &Bound<'_, PyAny>,
         block: BlockArg,
         micro: Option<usize>,
+        labels: bool,
     ) -> PyResult<Self> {
-        let block = block.block()?;
+        let mut layout = DictLayout::new(block.block()?).with_labels(labels);
+        if let Some(micro) = micro {
+            layout = layout.with_micro(micro);
+        }
         let keys = collect_strs(items)?;
         let inner = py
-            .detach(|| match micro {
-                None => DictIndex::build_with_block(&keys, block),
-                Some(micro) => DictIndex::build_with_layout(&keys, block, micro),
-            })
+            .detach(|| DictIndex::build_with(&keys, layout))
             .map_err(to_py)?;
         Ok(Self {
             inner: Arc::new(inner),

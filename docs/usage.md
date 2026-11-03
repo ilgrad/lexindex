@@ -406,6 +406,11 @@ smaller = DictIndex(words_list, block="compact")  # a name for a point on that c
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
 fewer = DictIndex(words_list, micro=128)    # 2.45 B/key against 2.64: microblocks of 128, not 16 --
                                             # fewer restarts, a longer scan (its id cost unmeasured)
+paths = DictIndex(path_list, block=1024, labels=True)  # also tries a dictionary of the trie labels
+                                            # and keeps it where the blob is smaller: a million paths
+                                            # 9.32 -> 8.53 B/key, URLs and titles 3-4 %; a lookup
+                                            # then reads 1.5 labels (+24 % instructions on paths,
+                                            # not yet timed). Elsewhere the plain blob, byte for byte
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
@@ -1231,6 +1236,14 @@ every candidate, so it moves the numbers and not the ranking -- but do not quote
 three named blocks as candidates of their own and ranks them with the rest, so a block named beside
 `auto` would ask the planner to choose one and then overrule its answer. `--index auto` builds the
 block on the line it marked; to choose one yourself, read it off the ladder and name both.
+
+`--labels`, with `--index dict` too, also tries a dictionary of the corpus's trie labels and keeps
+it where the blob comes out smaller -- path lists, URLs, titles, whose directory and file names recur
+under different parents -- and writes the plain blob, byte for byte, where it does not. A lookup
+then reads 1.5 labels on average, +24 % instructions on paths and +6-10 % elsewhere, counted and
+not yet timed, which is why no default builds them. Which labels pay is a count over every key, so
+a labelled build holds the corpus whatever `--stream` says, and says so on a file large enough to
+have streamed.
 
 `--stream` decides whether the build holds the corpus. With a named `--index` and a keys file --
 never standard input, which cannot be rewound -- `build` feeds the file straight into the streaming

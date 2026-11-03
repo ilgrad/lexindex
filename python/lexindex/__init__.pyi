@@ -496,6 +496,7 @@ class DictIndex:
         items: Iterable[str],
         block: int | Literal["fast", "balanced", "compact"] = 256,
         micro: int | None = None,
+        labels: bool = False,
     ) -> DictIndex:
         """``block`` keys per block, ``1..=1024``. The block is what a stored head and its arrays
         are shared over; it is split into microblocks of 16 to 32 -- the smallest divisor of the
@@ -506,7 +507,13 @@ class DictIndex:
         a point on that curve: ``"fast"`` is 32, ``"balanced"`` 256 and ``"compact"`` 1024.
         ``micro`` sets the microblock size instead, ``1..=block`` and dividing it: at the default
         block, 128 stored 0.12--0.34 bytes per key less than the default 16 on fourteen corpora
-        (2.64 -> 2.45 on the dictionary), for a longer scan whose cost is not measured yet."""
+        (2.64 -> 2.45 on the dictionary), for a longer scan whose cost is not measured yet.
+        ``labels=True`` tries a dictionary of the corpus's trie labels as well and keeps it where
+        the blob comes out smaller -- at block 1024 a million paths go 9.323 -> 8.530 bytes per
+        key, under ``marisa-trie``'s 8.81 at its smallest; URLs, titles, identifiers and domains
+        2.7--3.8 % -- otherwise the bytes are the plain build's. A member lookup then reads 1.5
+        labels on average, +24 % instructions on those paths and +6--10 % elsewhere, counted and
+        not yet timed, which is why it is off by default."""
 
     @staticmethod
     def build_to_file(

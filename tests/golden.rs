@@ -985,9 +985,10 @@ fn the_labelled_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_k
     let mut sorted = keys.clone();
     sorted.sort();
     sorted.dedup();
-    let fresh = lexindex::DictIndex::build_with_labels(&keys, 256)
-        .unwrap()
-        .to_bytes();
+    let fresh =
+        lexindex::DictIndex::build_with(&keys, lexindex::DictLayout::new(256).with_labels(true))
+            .unwrap()
+            .to_bytes();
     let path = data("golden-4.7.0-dict-labels.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert_eq!(&fresh[..4], b"BDX5");
