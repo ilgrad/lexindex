@@ -686,7 +686,12 @@ impl StringArena {
 
     #[inline(always)]
     pub(crate) fn str_at(&self, span: (usize, usize)) -> Option<&str> {
-        std::str::from_utf8(self.bytes_at(span)?).ok()
+        let bytes = self.bytes_at(span)?;
+        if bytes.is_ascii() {
+            // SAFETY: every byte is below 0x80, and such a sequence is UTF-8.
+            return Some(unsafe { std::str::from_utf8_unchecked(bytes) });
+        }
+        std::str::from_utf8(bytes).ok()
     }
 
     /// The bytes of `span`, unvalidated — see [`bytes`](Self::bytes).
@@ -1907,6 +1912,44 @@ mod tests {
         assert_eq!(arena.get(0), Some("apple"));
         assert_eq!(arena.get(1), Some("banana"));
         assert_eq!(arena.get(2), None);
+    }
+
+    /// `str_at` takes a key of plain ASCII without the validator, and that way out must be no wider
+    /// than the key: one byte above 0x7F, wherever the key lies and however long it is, goes to the
+    /// validator, which refuses what is not UTF-8 and keeps what is.
+    #[test]
+    fn a_stored_key_is_validated_at_every_position_length_and_alignment() {
+        let second_key = |lead: usize, key: &[u8]| {
+            let mut blob = Vec::new();
+            blob.extend_from_slice(&3u64.to_le_bytes());
+            blob.push(NARROW as u8);
+            for o in [0, lead, lead + key.len()] {
+                blob.extend_from_slice(&(o as u32).to_le_bytes());
+            }
+            blob.resize(blob.len() + lead, b'-');
+            blob.extend_from_slice(key);
+            StringArena::from_bytes(&blob).unwrap()
+        };
+        for lead in 0..8 {
+            for len in 0..=70 {
+                let plain = vec![b'a'; len];
+                let want = std::str::from_utf8(&plain).unwrap();
+                assert_eq!(second_key(lead, &plain).get(1), Some(want));
+                for at in 0..len {
+                    for byte in [0x80, 0xC3, 0xFF] {
+                        let mut bad = plain.clone();
+                        bad[at] = byte;
+                        assert_eq!(second_key(lead, &bad).get(1), None, "{lead} {len} {at}");
+                    }
+                    if at + 1 < len {
+                        let mut good = plain.clone();
+                        good[at..at + 2].copy_from_slice("é".as_bytes());
+                        let want = std::str::from_utf8(&good).unwrap();
+                        assert_eq!(second_key(lead, &good).get(1), Some(want));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

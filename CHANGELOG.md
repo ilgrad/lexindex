@@ -145,6 +145,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`PerfectHashIndex::key` takes an ASCII key without the UTF-8 validator.** The validator walks
+  a short key a byte at a time until a word is aligned, and that walk's exit is a branch no
+  predictor learns. An `is_ascii` check, which is the standard library's and reads by words, decides
+  first; a key with any byte above 0x7F goes to the validator as before, so what is refused has not
+  changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
+  99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
+  → 0.02.
 - **A `DictIndex` lookup pulls its microblock in ahead of the scan.** Once the block is known, its
   microblock offsets and its route words are prefetched beside the head compare, and once the run
   is known, its next three lines: each of these is read behind a miss whose address the next one
