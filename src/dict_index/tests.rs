@@ -1479,6 +1479,19 @@ fn a_corpus_of_repeated_spans_buys_phrases() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A loaded index reads its phrases where its blob holds them: a copy of the section was most of
+/// what a mapped index kept on the heap.
+#[test]
+fn a_loaded_index_reads_its_phrases_in_place() {
+    let keys = phrase_corpus();
+    let blob = DictIndex::build(&keys).unwrap().to_bytes();
+    let back = DictIndex::from_bytes(&blob).unwrap();
+    assert!(back.phrases.len() > 0, "no phrase earned its bytes");
+    let start = back.heads.as_ptr().addr() - HEADER;
+    assert!((start..start + blob.len()).contains(&back.phrases.addr()));
+    check(&back, &keys);
+}
+
 /// `blob` is either refused or answers everything it is asked without panicking. Nothing is
 /// claimed about *what* it answers: the bytes behind it are an attacker's.
 fn answers_or_is_refused(blob: &[u8], keys: &[String], probes: &[String], walk: bool) -> bool {

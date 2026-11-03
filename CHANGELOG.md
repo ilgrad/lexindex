@@ -164,6 +164,25 @@ All notable changes to this project are documented here. The format follows
 
   No time is claimed: on the arena's step table, fewer instructions have bought less than they
   promised.
+- **A loaded `DictIndex` reads its phrases where the blob holds them.** `from_bytes` and `load_mmap`
+  copied the phrase section into arrays of their own, so it sat on the heap a second time, and it
+  was most of what a mapped index kept there. The format is unchanged, and each blob is byte for
+  byte what it was. Heap a mapped load keeps after a pass of lookups, counted by the allocator on a
+  labelled build at block 1024, in bytes a key:
+
+  | corpus | keys | before | after |
+  |---|---:|---:|---:|
+  | paths | 1 M | 0.268 | 0.085 |
+  | titles-en | 1 M | 0.166 | 0.056 |
+  | urls | 1 M | 0.171 | 0.058 |
+  | titles-en | 10 M | 0.135 | 0.045 |
+  | urls | 10 M | 0.136 | 0.045 |
+
+  `from_bytes` shrinks by as much. A lookup makes the same loads from the blob's bytes instead of a
+  copy's, with one more addition a phrase. Instructions an `id` after `route_microblocks` at block
+  256: paths 3 826 → 3 868, titles-en 1 888 → 1 904, `words` unchanged, which holds no phrases; on the
+  labelled build at block 1024 paths 6 096 → 6 099 and titles-en 3 904 → 3 907. What that costs in
+  time is for a quiet machine.
 - **`DictIndex` blobs are 0.2–0.6 % smaller on text at a million keys, in the same format.** The
   trainer ranked a candidate by the bytes it covers, and now adds one for each use, which each use
   also spares. The encoder's slot for a symbol's first three bytes holds two symbols where it held

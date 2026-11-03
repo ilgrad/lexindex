@@ -493,7 +493,7 @@ impl DictIndex {
                     .map(|b| u32::from_le_bytes(b.try_into().expect("4 bytes")) as usize)
                     .ok_or_else(bad)?;
                 let end = flat.checked_add(4).ok_or_else(bad)?;
-                let dict = Dict::read(section.get(4..end).ok_or_else(bad)?).ok_or_else(bad)?;
+                let dict = Dict::read(section.subslice(4, end).ok_or_else(bad)?).ok_or_else(bad)?;
                 let labels = crate::labels::Labels::read(
                     section.subslice(end, section.len()).ok_or_else(bad)?,
                     verify,
@@ -503,7 +503,7 @@ impl DictIndex {
                 }
                 dict.with_labels(labels)
             } else {
-                Dict::read(&section).ok_or_else(bad)?
+                Dict::read(section).ok_or_else(bad)?
             }
         };
         let blocks = Offsets::new(

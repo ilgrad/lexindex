@@ -95,6 +95,21 @@ impl SharedBytes {
         })
     }
 
+    /// This view run on `more` bytes past its end, or `None` where its source ends sooner. A reader
+    /// that loads a fixed width from anywhere in the view and keeps only the view's bytes of it can
+    /// take the source's next bytes as its margin, where a padded copy would put the view's own
+    /// bytes on the heap a second time.
+    pub(crate) fn run_on(&self, more: usize) -> Option<Self> {
+        let whole = self.src.bytes();
+        let start = self.ptr.as_ptr().addr() - whole.as_ptr().addr();
+        let len = self.len.checked_add(more)?;
+        (start.checked_add(len)? <= whole.len()).then(|| Self {
+            src: self.src.clone(),
+            ptr: self.ptr,
+            len,
+        })
+    }
+
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.len
@@ -390,6 +405,20 @@ mod tests {
         assert_eq!(world.subslice(0, 3).unwrap().as_ref(), b"wor");
         assert!(world.subslice(0, 6).is_none()); // past the end of the view
         assert!(sb.subslice(5, 4).is_none()); // start > end
+    }
+
+    #[test]
+    fn a_view_runs_on_only_as_far_as_its_source() {
+        let sb = SharedBytes::from_owned(b"hello world".to_vec());
+        let hello = sb.subslice(0, 5).unwrap();
+        assert_eq!(hello.run_on(6).unwrap().as_ref(), b"hello world");
+        assert!(hello.run_on(7).is_none());
+        // A view of a view measures against the source, not against the view it was cut from.
+        let wor = sb.subslice(6, 11).unwrap().subslice(0, 3).unwrap();
+        assert_eq!(wor.run_on(2).unwrap().as_ref(), b"world");
+        assert!(wor.run_on(3).is_none());
+        assert!(wor.run_on(usize::MAX).is_none());
+        assert_eq!(sb.run_on(0).unwrap().as_ref(), b"hello world");
     }
 
     #[test]

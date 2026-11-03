@@ -14,6 +14,7 @@
 //! identifiers −23.6 %, and `words`, `uuid`, `numeric` and `opaque` left alone because the phrases
 //! never earn their dictionary there.
 
+use crate::blob::SharedBytes;
 use crate::fsst::{self, ESCAPE, Table};
 use crate::labels::{Label, Labels};
 use crate::packed::Alphabet;
@@ -297,37 +298,41 @@ impl Prices {
 /// and each phrase in it ends at a `u16` inside that group, so a phrase is two loads and no walk.
 /// Stored whole rather than front-coded against its neighbour — rank order is not lexicographic, so
 /// there is nothing to share.
+///
+/// Held as it is serialised, `[count u32][bases][ends][bytes]`, and read where it lies: a loaded
+/// index borrows the section from its blob. Reading it into arrays of its own put the section on
+/// the heap a second time, and it was most of what a mapped `DictIndex` held there — 727 of
+/// 1 048 KB on ten million article titles.
 #[derive(Clone)]
 pub(crate) struct Dict {
-    /// The phrases end to end, then [`MAX`] zero bytes: a decoder reads a fixed [`MAX`] from any
+    /// The section, then at least [`MAX`] bytes more: a decoder reads a fixed [`MAX`] from any
     /// phrase's start, which is one store where a copy of a length known only at run time is a
-    /// `memcpy` call, and the padding is what keeps the widest of those reads in bounds.
-    bytes: Vec<u8>,
-    /// Bytes of `bytes` that are phrases, which is what is written and read back.
-    used: usize,
-    /// Where each group of [`GROUP`] phrases starts.
+    /// `memcpy` call, and those bytes are what keeps the widest of the reads in bounds. What they
+    /// hold is never taken for a phrase's — every reader keeps a phrase's own length of what it
+    /// loaded — so a loaded index lets them be whatever follows the section in its blob, and pads
+    /// a copy with zeros only where the blob ends sooner.
+    raw: SharedBytes,
+    /// Where each group of [`GROUP`] phrases starts, kept apart from `raw`: four bytes a group, for
+    /// one address and one compare less at every phrase a lookup reads.
     bases: Vec<u32>,
-    /// Where each phrase ends inside its group, with the opening zero of every group, so group `g`
-    /// owns `ends[257 * g ..]`.
-    ends: Vec<u16>,
+    /// Where the `u16` ends start in `raw`: where each phrase ends inside its group, with the
+    /// opening zero of every group, so group `g` owns the [`ENDS`] from `ends + 2 * ENDS * g`.
+    ends: usize,
+    /// Where the phrase bytes start in `raw`.
+    bytes: usize,
+    /// Bytes from `bytes` on that are phrases, which is what is written and read back.
+    used: usize,
     count: usize,
     /// The trie labels a `BDX5` blob names past its phrases: ids from `count` on are their ranks.
     labels: Option<Arc<Labels>>,
 }
 
-/// Entries a group's slice of [`Dict::ends`] holds: one a phrase and the opening zero.
+/// Entries a group holds of [`Dict::ends`]: one a phrase and the opening zero.
 const ENDS: usize = GROUP + 1;
 
 impl Dict {
     pub(crate) fn empty() -> Self {
-        Self {
-            bytes: vec![0; MAX],
-            used: 0,
-            bases: Vec::new(),
-            ends: Vec::new(),
-            count: 0,
-            labels: None,
-        }
+        Self::of(&[])
     }
 
     /// The same phrases with `labels` named past them.
@@ -363,26 +368,34 @@ impl Dict {
     }
 
     pub(crate) fn of(phrases: &[Vec<u8>]) -> Self {
-        let mut dict = Self::empty();
-        dict.bytes.clear();
-        for group in phrases.chunks(GROUP) {
-            dict.bases.push(dict.bytes.len() as u32);
-            dict.ends.push(0);
-            for p in group {
+        let groups = phrases.len().div_ceil(GROUP);
+        let (ends, bytes) = (4 + 4 * groups, 4 + 4 * groups + 2 * ENDS * groups);
+        let mut raw = vec![0; bytes];
+        let mut bases = Vec::with_capacity(groups);
+        raw[..4].copy_from_slice(&(phrases.len() as u32).to_le_bytes());
+        for (g, group) in phrases.chunks(GROUP).enumerate() {
+            let base = raw.len() - bytes;
+            bases.push(base as u32);
+            raw[4 + 4 * g..8 + 4 * g].copy_from_slice(&(base as u32).to_le_bytes());
+            for (k, p) in group.iter().enumerate() {
                 debug_assert!((1..=MAX).contains(&p.len()));
-                dict.bytes.extend_from_slice(p);
-                dict.ends.push(
-                    (dict.bytes.len() - *dict.bases.last().expect("a group is open") as usize)
-                        as u16,
-                );
+                raw.extend_from_slice(p);
+                let end = (raw.len() - bytes - base) as u16;
+                let at = ends + 2 * (ENDS * g + k + 1);
+                raw[at..at + 2].copy_from_slice(&end.to_le_bytes());
             }
-            dict.ends
-                .resize(dict.ends.len() + ENDS - (group.len() + 1), 0);
         }
-        dict.count = phrases.len();
-        dict.used = dict.bytes.len();
-        dict.bytes.resize(dict.used + MAX, 0);
-        dict
+        let used = raw.len() - bytes;
+        raw.resize(bytes + used + MAX, 0);
+        Self {
+            raw: SharedBytes::from_owned(raw),
+            bases,
+            ends,
+            bytes,
+            used,
+            count: phrases.len(),
+            labels: None,
+        }
     }
 
     /// Ids the dictionary names: its phrases, and its labels after them.
@@ -391,19 +404,41 @@ impl Dict {
         self.count + self.labels.as_deref().map_or(0, Labels::len)
     }
 
-    /// The bytes of phrase `id`; `None` past the dictionary or on one this crate did not write.
+    /// Where the section's first byte is, for a test that asks whether a load borrowed it.
+    #[cfg(test)]
+    pub(crate) fn addr(&self) -> usize {
+        self.raw.as_ptr().addr()
+    }
+
+    /// Where phrase `id` starts and ends among the phrase bytes; `None` past the dictionary.
     #[inline(always)]
-    pub(crate) fn at(&self, id: usize) -> Option<&[u8]> {
+    fn span(&self, id: usize) -> Option<(usize, usize)> {
         if id >= self.count {
             return None;
         }
         let (g, k) = (id / GROUP, id % GROUP);
         let base = *self.bases.get(g)? as usize;
-        let start = base + usize::from(*self.ends.get(ENDS * g + k)?);
-        let end = base + usize::from(*self.ends.get(ENDS * g + k + 1)?);
-        // Bounded by the phrases rather than by the padding behind them, so that a dictionary cut
+        // A phrase's two ends are adjacent, the second at most the group's last.
+        let e = self
+            .raw
+            .get(self.ends + 2 * (ENDS * g + k)..)?
+            .first_chunk::<4>()?;
+        let (from, to) = (
+            u16::from_le_bytes([e[0], e[1]]),
+            u16::from_le_bytes([e[2], e[3]]),
+        );
+        Some((base + usize::from(from), base + usize::from(to)))
+    }
+
+    /// The bytes of phrase `id`; `None` past the dictionary or on one this crate did not write.
+    #[inline(always)]
+    pub(crate) fn at(&self, id: usize) -> Option<&[u8]> {
+        let (start, end) = self.span(id)?;
+        // Bounded by the phrases rather than by the bytes behind them, so that a dictionary cut
         // short is still a dictionary whose last phrase runs off the end.
-        self.bytes.get(..self.used)?.get(start..end)
+        self.raw
+            .get(self.bytes..self.bytes + self.used)?
+            .get(start..end)
     }
 
     /// Phrase `id` as a fixed [`MAX`] bytes from where it starts, with how many of them are its
@@ -415,15 +450,12 @@ impl Dict {
     /// stream rather than by the phrases.
     #[inline(always)]
     pub(crate) fn chunk(&self, id: usize) -> Option<(&[u8; MAX], usize)> {
-        if id >= self.count {
-            return None;
-        }
-        let (g, k) = (id / GROUP, id % GROUP);
-        let base = *self.bases.get(g)? as usize;
-        let from = usize::from(*self.ends.get(ENDS * g + k)?);
-        let to = usize::from(*self.ends.get(ENDS * g + k + 1)?);
-        let len = to.checked_sub(from)?;
-        Some((self.bytes.get(base + from..)?.first_chunk::<MAX>()?, len))
+        let (start, end) = self.span(id)?;
+        let len = end.checked_sub(start)?;
+        Some((
+            self.raw.get(self.bytes + start..)?.first_chunk::<MAX>()?,
+            len,
+        ))
     }
 
     /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count; in a `BDX5` blob
@@ -437,50 +469,44 @@ impl Dict {
     }
 
     fn flat_len(&self) -> usize {
-        4 + 4 * self.bases.len() + 2 * self.ends.len() + self.used
+        self.bytes + self.used
     }
 
     pub(crate) fn write_to(&self, out: &mut Vec<u8>) {
         if let Some(labels) = self.labels.as_deref() {
             out.extend_from_slice(&(self.flat_len() as u32).to_le_bytes());
-            self.write_flat(out);
+            out.extend_from_slice(&self.raw[..self.flat_len()]);
             labels.write_to(out);
         } else {
-            self.write_flat(out);
+            out.extend_from_slice(&self.raw[..self.flat_len()]);
         }
     }
 
-    fn write_flat(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&(self.count as u32).to_le_bytes());
-        for &b in &self.bases {
-            out.extend_from_slice(&b.to_le_bytes());
-        }
-        for &e in &self.ends {
-            out.extend_from_slice(&e.to_le_bytes());
-        }
-        out.extend_from_slice(&self.bytes[..self.used]);
-    }
-
-    pub(crate) fn read(bytes: &[u8]) -> Option<Self> {
-        let (count, rest) = bytes.split_first_chunk::<4>()?;
+    /// The dictionary `section` holds, borrowed from the bytes it views: they run on past it
+    /// wherever a blob holds anything after its dictionary, and a copy is padded where not.
+    pub(crate) fn read(section: SharedBytes) -> Option<Self> {
+        let (count, _) = section.split_first_chunk::<4>()?;
         let count = u32::from_le_bytes(*count) as usize;
         let groups = count.div_ceil(GROUP);
-        let (bases, rest) = rest.split_at_checked(4 * groups)?;
-        let (ends, bytes) = rest.split_at_checked(2 * ENDS * groups)?;
-        let mut padded = Vec::with_capacity(bytes.len() + MAX);
-        padded.extend_from_slice(bytes);
-        padded.resize(bytes.len() + MAX, 0);
+        let ends = groups.checked_mul(4)?.checked_add(4)?;
+        let bytes = groups.checked_mul(2 * ENDS)?.checked_add(ends)?;
+        let used = section.len().checked_sub(bytes)?;
+        let raw = section.run_on(MAX).unwrap_or_else(|| {
+            let mut padded = Vec::with_capacity(section.len() + MAX);
+            padded.extend_from_slice(&section);
+            padded.resize(section.len() + MAX, 0);
+            SharedBytes::from_owned(padded)
+        });
+        let bases = raw[4..ends]
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
+            .collect();
         let dict = Self {
-            bytes: padded,
-            used: bytes.len(),
-            bases: bases
-                .chunks_exact(4)
-                .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")))
-                .collect(),
-            ends: ends
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes(c.try_into().expect("2 bytes")))
-                .collect(),
+            raw,
+            bases,
+            ends,
+            bytes,
+            used,
             count,
             labels: None,
         };
@@ -1661,6 +1687,39 @@ mod tests {
         }
     }
 
+    /// A dictionary read from a view its source runs on past, as a blob's does.
+    fn read(bytes: &[u8]) -> Option<Dict> {
+        Dict::read(SharedBytes::copy_of(bytes))
+    }
+
+    /// A loaded dictionary reads the bytes behind its section as the margin of every chunk, where
+    /// a copy of it pads zeros: whatever they hold, no phrase, no chunk's length and no decode may
+    /// see one of them — and a section at the very end of its source is copied, not refused.
+    #[test]
+    fn the_bytes_behind_a_dictionary_are_never_a_phrase() {
+        let phrases: Vec<Vec<u8>> = (0..300u32)
+            .map(|i| format!("p{i}-{}", "y".repeat((i % 28) as usize)).into_bytes())
+            .collect();
+        let mut bytes = Vec::new();
+        Dict::of(&phrases).write_to(&mut bytes);
+        let n = bytes.len();
+        for behind in [0, 1, MAX - 1, MAX, 3 * MAX] {
+            let mut blob = bytes.clone();
+            blob.resize(n + behind, 0xA5);
+            let dict = Dict::read(SharedBytes::copy_of(&blob).subslice(0, n).unwrap())
+                .expect("our own dictionary");
+            let mut again = Vec::new();
+            dict.write_to(&mut again);
+            assert_eq!(again, bytes, "{behind}");
+            for (id, p) in phrases.iter().enumerate() {
+                assert_eq!(dict.at(id), Some(p.as_slice()), "{behind} {id}");
+                let (chunk, len) = dict.chunk(id).expect("a phrase we wrote");
+                assert_eq!(&chunk[..len], p.as_slice(), "{behind} {id}");
+            }
+            assert_eq!(dict.chunk(phrases.len()), None);
+        }
+    }
+
     #[test]
     fn a_dictionary_reads_back_every_phrase() {
         let phrases: Vec<Vec<u8>> = (0..1000u32)
@@ -1675,14 +1734,14 @@ mod tests {
         let mut bytes = Vec::new();
         dict.write_to(&mut bytes);
         assert_eq!(bytes.len(), dict.serialized_len());
-        let back = Dict::read(&bytes).expect("our own dictionary");
+        let back = read(&bytes).expect("our own dictionary");
         assert_eq!(back.len(), dict.len());
         for (id, p) in phrases.iter().enumerate() {
             assert_eq!(back.at(id), Some(p.as_slice()), "{id}");
         }
-        assert!(Dict::read(&bytes[..bytes.len() - 1]).is_none());
-        assert!(Dict::read(&[]).is_none());
-        assert_eq!(Dict::read(&0u32.to_le_bytes()).map(|d| d.len()), Some(0));
+        assert!(read(&bytes[..bytes.len() - 1]).is_none());
+        assert!(read(&[]).is_none());
+        assert_eq!(read(&0u32.to_le_bytes()).map(|d| d.len()), Some(0));
     }
 
     #[test]
@@ -1694,10 +1753,10 @@ mod tests {
         let mut b = bytes.clone();
         let at = 4 + 4 + 2;
         b[at..at + 2].copy_from_slice(&9999u16.to_le_bytes());
-        assert!(Dict::read(&b).is_none());
+        assert!(read(&b).is_none());
         let mut b = bytes.clone();
         b[at..at + 2].copy_from_slice(&0u16.to_le_bytes());
-        assert!(Dict::read(&b).is_none());
+        assert!(read(&b).is_none());
     }
 
     /// The parse is what the encoder charges for, so the two have to agree to the byte, and what
