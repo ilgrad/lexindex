@@ -791,6 +791,12 @@ one length have none inside another to look for. Together that took 3–16 % of 
 fourteen of eighteen corpora and 23 % on UUIDs, and moved the three of short keys under 2 %
 (`bench/results/step-table-counts-2026-11-01-arz-64e5419.txt`), counted and not yet timed.
 
+The merge lets go of what it no longer reads as it goes. Only a link reads a label; the chains read
+links and child runs no deeper than the deepest overlap a key starts at, which on most corpora leaves
+a small part of the trie; and writing reads none of it, with the superstring moving back inside its
+own allocation to make room for the entries. Peak fell 0.2–24.2 % on fifteen corpora, and what is
+left of it is the three arrays while the links are found, 9 bytes a node.
+
 The merge is 55–89 % of a build's instructions and its peak memory, and on URLs, domains and paths
 it is then thrown away. So from 2¹⁹ keys it has to earn its place first. The saving comes in two
 parts. Keys that are a proper prefix of the next are counted exactly, in one sorted pass. The rest,

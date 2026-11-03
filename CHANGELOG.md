@@ -56,8 +56,13 @@ All notable changes to this project are documented here. The format follows
   is still a zero-copy `&str` and membership one comparison.
   The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
   bytes, deterministically, ties to the lower slot, on every thread but for serving the overlaps; it
-  holds 9 bytes a trie node and a few dozen a key, freed before the arena is laid out. It costs
-  build time: against 4.5.3 on fourteen corpora of up to a million keys, in one session,
+  holds 9 bytes a trie node and a few dozen a key, and lets each part go when the walk stops reading
+  it: the labels once the links stand, the links and child runs below the deepest overlap before the
+  chains, the rest before the superstring is written, and the superstring then moves back inside its
+  own allocation. Against the same build holding them to the end, peak −0.2…−24.2 % on fifteen
+  corpora with every blob byte-identical: paths 629 → 477 MB, opaque 283 → 237, URLs at ten million
+  3 439 → 2 693, English titles at ten million 2 468 → 2 376. The comparison with 4.5.3 that follows
+  predates that and is measured again before the release. It costs build time: against 4.5.3 on fourteen corpora of up to a million keys, in one session,
   1.54–4.99× on one thread and 1.50–3.19× on eight, peak memory 0.99–2.99×, for 1.7–44.7 % fewer bytes
   (numbers 7.442 → 4.116, DNA 26.264 → 17.755); domains, paths and URLs, which merge nothing at a
   million keys, keep their bytes at 1.50–1.67× the time and 0.99–1.02× the peak; at ten million on

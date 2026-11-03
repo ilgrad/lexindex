@@ -288,18 +288,19 @@ impl StringArena {
         if fps.is_some_and(|f| f.len() != order.len()) {
             return None;
         }
-        let merged = crate::superstring::merge(keys, order)?;
+        let crate::superstring::Superstring { data, starts } =
+            crate::superstring::merge(keys, order)?;
         let spans: Vec<(u64, u32)> = order
             .iter()
             .zip(lens)
-            .map(|(&k, &len)| (merged.starts[k as usize], len))
+            .map(|(&k, &len)| (starts[k as usize], len))
             .collect();
-        let data = merged.data;
+        drop(starts);
         let shape = MergedShape::of(&spans, data.len(), fps.is_some())?;
         if beat.is_some_and(|beat| shape.bytes >= beat) {
             return None;
         }
-        let blob = lay_out_merged(&data, &spans, fps, &shape);
+        let blob = lay_out_merged(data, &spans, fps, &shape);
         Some(
             Self::from_shared(SharedBytes::from_owned(blob)).expect("freshly built arena is valid"),
         )
@@ -1595,13 +1596,13 @@ pub(crate) fn blocked_index_len(lens: &[u32]) -> Option<usize> {
 /// Write a merged arena: header, packed entries and their padding, the superstring, and the
 /// overflow table with its trailer when some length escapes.
 fn lay_out_merged(
-    data: &[u8],
+    data: Vec<u8>,
     spans: &[(u64, u32)],
     fps: Option<&[u8]>,
     shape: &MergedShape,
 ) -> Vec<u8> {
     let tag = tag_with(MERGED, fps.is_some()) | if shape.escaped > 0 { OVERFLOW } else { 0 };
-    let mut blob = Vec::with_capacity(shape.bytes);
+    let mut blob = Vec::with_capacity(shape.bytes - data.len());
     blob.extend_from_slice(&(spans.len() as u64 + 1).to_le_bytes());
     blob.push(tag);
     blob.extend_from_slice(&shape.min_len.to_le_bytes());
@@ -1635,7 +1636,13 @@ fn lay_out_merged(
         blob.push(acc as u8);
     }
     blob.resize(blob.len() + PAD, 0);
-    blob.extend_from_slice(data);
+    // The superstring moves back inside its own allocation, where a second copy of it would set
+    // the build's peak on a corpus that merges little.
+    let (front, data_len) = (blob, data.len());
+    let mut blob = data;
+    blob.reserve_exact(shape.bytes - data_len);
+    move_data(&mut blob, 0, data_len, front.len());
+    blob[..front.len()].copy_from_slice(&front);
     if shape.escaped > 0 {
         let len = overflow.len() as u64;
         overflow.extend_from_slice(&len.to_le_bytes());

@@ -265,9 +265,12 @@ pub(crate) fn merge<S: AsRef<str>>(keys: &[S], order: &[u32]) -> Option<Superstr
         return None;
     }
     let text = Text::new(keys);
-    let sweep = sweep(&text)?;
-    let chains = chain(&text, &sweep, order);
-    Some(lay_out(&text, &sweep, &chains, order))
+    let mut sweep = sweep(&text)?;
+    let chains = chain(&text, &mut sweep, order);
+    // The trie is free before the writing asks for the superstring on top of it.
+    let inside = sweep.inside;
+    drop((sweep.trie, sweep.term, sweep.lcp));
+    Some(lay_out(&text, &inside, &chains, order))
 }
 
 /// The bytes [`merge`] would make `keys` into, without writing them, for a caller that only reads
@@ -289,19 +292,19 @@ pub(crate) fn merge_len<S: AsRef<str>>(
     if stop.load(Relaxed) {
         return None;
     }
-    let sweep = sweep(&text)?;
+    let mut sweep = sweep(&text)?;
     if stop.load(Relaxed) {
         return None;
     }
-    let chains = chain(&text, &sweep, order);
-    Some(chained_len(&text, &sweep, &chains))
+    let chains = chain(&text, &mut sweep, order);
+    Some(chained_len(&text, &sweep.inside, &chains))
 }
 
 /// The bytes of the chains `link` makes: every free key, less what each link overlaps.
-fn chained_len(text: &Text, sweep: &Sweep, link: &[(u32, u32)]) -> usize {
+fn chained_len(text: &Text, inside: &[(u32, u32)], link: &[(u32, u32)]) -> usize {
     let mut total = 0usize;
     for (k, &(t, o)) in link.iter().enumerate() {
-        if sweep.inside[k].0 == NONE {
+        if inside[k].0 == NONE {
             total += text.len(k);
         }
         if t != NONE {
@@ -521,6 +524,8 @@ fn sweep(text: &Text) -> Option<Sweep> {
         fill_steps(&mut steps, &trie, start, end);
     }
     drop(steps);
+    // Only a link reads a label: a third of a node's bytes on a corpus of short runs.
+    trie.label = Vec::new();
     // The key ending at each terminal node, by its rank among them: one read and a popcount, not
     // a bisection over the terminals, which would miss the cache at every step.
     let mut terms_before = Vec::with_capacity(is_term.len());
@@ -609,13 +614,15 @@ fn sweep(text: &Text) -> Option<Sweep> {
 }
 
 /// The greedy chains over the free keys: `(next, overlap)` per key, `NONE` where a chain ends.
-fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
+fn chain(text: &Text, sweep: &mut Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     let n = order.len();
-    let trie = &sweep.trie;
-    let free = |k: usize| sweep.inside[k].0 == NONE;
-    let mut link = vec![(NONE, 0u32); n];
-    // A chain's head knows its tail and its tail its head; a key alone is both.
-    let mut other_end: Vec<u32> = (0..n as u32).collect();
+    let Sweep {
+        trie,
+        term,
+        lcp,
+        inside,
+    } = sweep;
+    let free = |k: usize| inside[k].0 == NONE;
     let depths = trie.level.len() - 1;
     // Where each free key waits first, by slot, found on every thread: the link of its node, the
     // longest overlap it could have, and that node's depth.
@@ -623,7 +630,7 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     on_threads(&mut first_wait, PARALLEL_KEYS, |at, out| {
         for (wait, &k) in out.iter_mut().zip(&order[at..]) {
             if free(k as usize) {
-                let v = trie.fail[sweep.term[k as usize] as usize];
+                let v = trie.fail[term[k as usize] as usize];
                 *wait = (v, trie.depth(v) as u32);
             }
         }
@@ -637,6 +644,25 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
         }
     }
     drop(first_wait);
+    // No key waits below the deepest overlap any key starts at, so the ranges there are never
+    // read. That level's ranges come from the keys in order instead, and the levels below it are
+    // never visited.
+    let deepest = (1..depths)
+        .rev()
+        .find(|&d| !waiting[d].is_empty())
+        .unwrap_or(0);
+    // From here a walk reads only nodes at or above that level, and a key's own overlaps are short
+    // on most corpora: the links and child runs of the rest are most of the trie, and this is where
+    // the chains' own arrays start to pile on top of it.
+    let kept = trie.level[deepest + 1] as usize;
+    trie.fail.truncate(kept);
+    trie.fail.shrink_to_fit();
+    trie.first.truncate(kept + 1);
+    trie.first.shrink_to_fit();
+    let trie = &*trie;
+    let mut link = vec![(NONE, 0u32); n];
+    // A chain's head knows its tail and its tail its head; a key alone is both.
+    let mut other_end: Vec<u32> = (0..n as u32).collect();
     // The keys under each node of the level at hand, and of the level below it: a range of key
     // indices, since the keys under a node are consecutive. `next[k]` leads from `k` to the first
     // key at or past it that is free and that nothing precedes yet.
@@ -664,19 +690,12 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     let mut ending = vec![(0u32, 0u32); at_len[depths]];
     for k in (0..n).filter(|&k| text.len(k) > 0) {
         let at = &mut at_len[text.len(k)];
-        ending[*at] = (sweep.term[k], k as u32);
+        ending[*at] = (term[k], k as u32);
         *at += 1;
     }
     drop(at_len);
     debug_assert!(ending.windows(2).all(|w| w[0] < w[1]));
     let mut ending_at = ending.len();
-    // No key waits below the deepest overlap any key starts at, so the ranges there are never
-    // read. That level's ranges come from the keys in order instead, and the levels below it are
-    // never visited.
-    let deepest = (1..depths)
-        .rev()
-        .find(|&d| !waiting[d].is_empty())
-        .unwrap_or(0);
     for d in (1..=deepest).rev() {
         let (lo, hi) = (trie.level[d], trie.level[d + 1]);
         let first_ending = ending.partition_point(|e| e.0 < lo);
@@ -684,7 +703,7 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
             // Nodes of depth `d` made so far: each key past it either makes the next or shares
             // the last.
             let mut made = 0usize;
-            for (k, &shared) in sweep.lcp.iter().enumerate() {
+            for (k, &shared) in lcp.iter().enumerate() {
                 if text.len(k) < d {
                     continue;
                 }
@@ -772,16 +791,16 @@ fn first_open(next: &mut [u32], mut k: u32) -> u32 {
 }
 
 /// Write the chains in the slot order of their heads and place every key.
-fn lay_out(text: &Text, sweep: &Sweep, link: &[(u32, u32)], order: &[u32]) -> Superstring {
+fn lay_out(text: &Text, inside: &[(u32, u32)], link: &[(u32, u32)], order: &[u32]) -> Superstring {
     let n = order.len();
-    let free = |k: usize| sweep.inside[k].0 == NONE;
+    let free = |k: usize| inside[k].0 == NONE;
     let mut preceded = vec![false; n];
     for &(t, _) in link {
         if t != NONE {
             preceded[t as usize] = true;
         }
     }
-    let total = chained_len(text, sweep, link);
+    let total = chained_len(text, inside, link);
     // A chain's bytes are known only by walking it, a dependent read a key, so the chains are
     // walked on every thread twice: once for their lengths, which place them, then to write them.
     // Chains run from one key to a third of all of them, so the lengths are handed out a few
@@ -885,10 +904,10 @@ fn lay_out(text: &Text, sweep: &Sweep, link: &[(u32, u32)], order: &[u32]) -> Su
         let mut c = k;
         while starts[c] == u64::MAX {
             path.push(c);
-            c = sweep.inside[c].0 as usize;
+            c = inside[c].0 as usize;
         }
         while let Some(p) = path.pop() {
-            let (container, offset) = sweep.inside[p];
+            let (container, offset) = inside[p];
             starts[p] = starts[container as usize] + u64::from(offset);
         }
     }
