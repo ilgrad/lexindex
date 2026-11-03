@@ -145,6 +145,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The merged `PerfectHashIndex` arena builds with up to 20 % fewer instructions and up to 45 % fewer
+  mispredicted branches, and writes the same bytes.** Three changes to the greedy merge, none to a
+  blob. The trie's nodes are laid down through one cursor a depth rather than through four indexed
+  arrays. A node's children are compared whole with one SSE2 load, up to sixteen of them, where a
+  bisection ended in a branch no predictor learns at every node a fallback visits. And the free keys
+  under a node are a range of key indices with one path-halved skip array, where lists were spliced
+  through every node of every level. Instructions and mispredicts of a whole `lexindex build` at a
+  million keys, the bytes compared on eight corpora:
+
+  | corpus | instructions, Gi | mispredicted, M |
+  |---|---:|---:|
+  | uuid | 8.05 → 6.47 | 21.8 → 11.9 |
+  | dna | 6.25 → 5.47 | 29.6 → 17.9 |
+  | titles-ru | 7.55 → 6.41 | 44.4 → 34.9 |
+  | idents | 5.37 → 4.95 | 33.8 → 26.5 |
+  | paths | 6.84 → 6.31 | 19.8 → 19.3 |
+
+  No time is claimed: on the arena's step table, fewer instructions have bought less than they
+  promised.
 - **`DictIndex` executes about 30 fewer bounds checks a `key`.** Counted per call from callgrind, a
   `key` ran 60 checks and now runs 29. Two kinds went: a stair's index, which its loop already keeps
   in range, and a symbol's length, read beside a word the same code has just been checked for. Nothing a

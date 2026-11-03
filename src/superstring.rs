@@ -18,9 +18,11 @@
 //! taken before any of length `d − 1`, and a key ending in a suffix that is a node `v` of depth `d`
 //! may be followed by any free key under `v` that nothing precedes yet and that does not start its
 //! own chain. A key's candidate overlaps are its failure chain, longest first, so it walks down
-//! that chain one node at a time, and the free keys under a node are a list concatenated from its
-//! children's, one level at a time from the deepest any key waits at up. The chains are then
-//! written one after another, each key once, minus its overlap with the one before.
+//! that chain one node at a time. The keys under a node are consecutive in sorted order, so each
+//! node of a level has a range of them, made from its children's, one level at a time from the
+//! deepest any key waits at up, and the first of a range still free is one skip along a
+//! path-compressed array. The chains are then written one after another, each key once, minus its
+//! overlap with the one before.
 //!
 //! **Ties.** Among the keys whose overlaps have the same length, the one in the lower slot is served
 //! first, and it takes the smallest key in byte order that it may. Chains are written in the slot
@@ -28,8 +30,8 @@
 //! and two builds of one key set give the same bytes on any number of threads.
 //!
 //! **Cost.** `O(N log σ)` for the automaton, `N` the bytes of all keys and `σ ≤ 256` the children a
-//! node can have, searched by bisection; `O(N + n log n)` for the merge, the log from serving each
-//! depth's keys in slot order. The nodes, the failure links, the contained keys and the writing of
+//! node can have, compared whole up to sixteen and searched by bisection past that; `O(N + n log n)`
+//! for the merge, the log from serving each depth's keys in slot order and from the skips. The nodes, the failure links, the contained keys and the writing of
 //! the chains run on every thread; serving the overlaps, in the order the ties fix, runs on one.
 //! Memory, all of it gone when this returns: one copy of the keys, nine bytes per trie node — there
 //! are at most `N` — and a few dozen bytes per key.
@@ -614,7 +616,6 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     let mut link = vec![(NONE, 0u32); n];
     // A chain's head knows its tail and its tail its head; a key alone is both.
     let mut other_end: Vec<u32> = (0..n as u32).collect();
-    let mut preceded = vec![false; n];
     let depths = trie.level.len() - 1;
     // Where each free key waits first, by slot, found on every thread: the link of its node, the
     // longest overlap it could have, and that node's depth.
@@ -636,28 +637,32 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
         }
     }
     drop(first_wait);
-    // The free keys under each node of the level at hand, and of the level below it: a list
-    // threaded through `list_next`, in byte order.
-    let mut list_next = vec![NONE; n];
+    // The keys under each node of the level at hand, and of the level below it: a range of key
+    // indices, since the keys under a node are consecutive. `next[k]` leads from `k` to the first
+    // key at or past it that is free and that nothing precedes yet.
+    let mut next: Vec<u32> = (0..n)
+        .map(|k| k as u32 + u32::from(!free(k)))
+        .chain([n as u32])
+        .collect();
     let widest = trie
         .level
         .windows(2)
         .map(|w| w[1] - w[0])
         .max()
         .unwrap_or(0) as usize;
-    let mut here = vec![(NONE, NONE); widest];
-    let mut below = vec![(NONE, NONE); widest];
-    // Free keys by their node, which is node order: a key's node is on the level of its length,
-    // and the nodes of a level are numbered in key order — a counting sort by length.
+    let mut here = vec![(0u32, 0u32); widest];
+    let mut below = vec![(0u32, 0u32); widest];
+    // Keys by their node, which is node order: a key's node is on the level of its length, and the
+    // nodes of a level are numbered in key order -- a counting sort by length.
     let mut at_len = vec![0usize; depths + 1];
-    for k in (0..n).filter(|&k| free(k)) {
+    for k in (0..n).filter(|&k| text.len(k) > 0) {
         at_len[text.len(k) + 1] += 1;
     }
     for d in 1..=depths {
         at_len[d] += at_len[d - 1];
     }
     let mut ending = vec![(0u32, 0u32); at_len[depths]];
-    for k in (0..n).filter(|&k| free(k)) {
+    for k in (0..n).filter(|&k| text.len(k) > 0) {
         let at = &mut at_len[text.len(k)];
         ending[*at] = (sweep.term[k], k as u32);
         *at += 1;
@@ -665,18 +670,16 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     drop(at_len);
     debug_assert!(ending.windows(2).all(|w| w[0] < w[1]));
     let mut ending_at = ending.len();
-    // No key waits below the deepest overlap any key starts at, so the lists there are never
-    // read. That level's lists come from the keys in order instead — a node's free keys are the
-    // keys under it, which are consecutive — and the levels below it are never visited.
+    // No key waits below the deepest overlap any key starts at, so the ranges there are never
+    // read. That level's ranges come from the keys in order instead, and the levels below it are
+    // never visited.
     let deepest = (1..depths)
         .rev()
         .find(|&d| !waiting[d].is_empty())
         .unwrap_or(0);
     for d in (1..=deepest).rev() {
         let (lo, hi) = (trie.level[d], trie.level[d + 1]);
-        let child_lo = hi;
         let first_ending = ending.partition_point(|e| e.0 < lo);
-        let mut e = first_ending;
         if d == deepest {
             // Nodes of depth `d` made so far: each key past it either makes the next or shares
             // the last.
@@ -685,42 +688,34 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
                 if text.len(k) < d {
                     continue;
                 }
-                made += usize::from((shared as usize) < d);
-                if !free(k) {
-                    continue;
+                if (shared as usize) < d {
+                    made += 1;
+                    here[made - 1].0 = k as u32;
                 }
-                list_next[k] = NONE;
-                let list = &mut here[made - 1];
-                if list.0 == NONE {
-                    list.0 = k as u32;
-                } else {
-                    list_next[list.1 as usize] = k as u32;
-                }
-                list.1 = k as u32;
+                here[made - 1].1 = k as u32 + 1;
             }
         } else {
-            for v in lo..hi {
-                let (mut head, mut tail) = (NONE, NONE);
-                if e < ending_at && ending[e].0 == v {
-                    let k = ending[e].1;
-                    list_next[k as usize] = NONE;
-                    (head, tail) = (k, k);
-                    e += 1;
-                }
-                let (c_lo, c_hi) = (trie.first[v as usize], trie.first[v as usize + 1]);
-                for c in c_lo..c_hi {
-                    let (h, t) = below[(c - child_lo) as usize];
-                    if h == NONE {
-                        continue;
-                    }
-                    if head == NONE {
-                        head = h;
+            // A level's children are the next level in order, so one cursor walks them. The key
+            // ending at a node sorts first under it, and a node that ends no key has children.
+            let mut ends = ending[first_ending..ending_at].iter();
+            let mut end = ends.next().map_or((NONE, NONE), |&pair| pair);
+            let starts = &trie.first[lo as usize..=hi as usize];
+            let mut child = 0usize;
+            for (range, (w, v)) in here.iter_mut().zip(starts.windows(2).zip(lo..)) {
+                let last = child + (w[1] - w[0]) as usize;
+                *range = if end.0 == v {
+                    let from = end.1;
+                    end = ends.next().map_or((NONE, NONE), |&pair| pair);
+                    let to = if child < last {
+                        below[last - 1].1
                     } else {
-                        list_next[tail as usize] = h;
-                    }
-                    tail = t;
-                }
-                here[(v - lo) as usize] = (head, tail);
+                        from + 1
+                    };
+                    (from, to)
+                } else {
+                    (below[child].0, below[last - 1].1)
+                };
+                child = last;
             }
         }
         ending_at = first_ending;
@@ -730,11 +725,11 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
         let mut batch = std::mem::take(&mut waiting[d]);
         batch.sort_by_key(|&(slot, _, _)| slot);
         for &(slot, s, v) in &batch {
-            let list = &mut here[(v - lo) as usize];
-            match take(list, &mut list_next, &preceded, other_end[s as usize]) {
+            let under = here[(v - lo) as usize];
+            match take(under, &mut next, other_end[s as usize]) {
                 Some(t) => {
                     link[s as usize] = (t, d as u32);
-                    preceded[t as usize] = true;
+                    next[t as usize] = t + 1;
                     let (head, tail) = (other_end[s as usize], other_end[t as usize]);
                     other_end[head as usize] = tail;
                     other_end[tail as usize] = head;
@@ -753,39 +748,26 @@ fn chain(text: &Text, sweep: &Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     link
 }
 
-/// The first key of `list` that nothing precedes yet and that is not `forbidden` — the head of
-/// the chain the taker ends, which would close it into a cycle — unlinked from the list. Keys
-/// that something already precedes are dropped from the list as they are met: they never become
-/// takeable again.
-fn take(list: &mut (u32, u32), next: &mut [u32], preceded: &[bool], forbidden: u32) -> Option<u32> {
-    while list.0 != NONE && preceded[list.0 as usize] {
-        list.0 = next[list.0 as usize];
+/// The first key of `under` that is free, that nothing precedes yet and that is not `forbidden` —
+/// the head of the chain the taker ends, which would close it into a cycle.
+fn take(under: (u32, u32), next: &mut [u32], forbidden: u32) -> Option<u32> {
+    let mut k = first_open(next, under.0);
+    if k == forbidden {
+        k = first_open(next, k + 1);
     }
-    if list.0 == NONE {
-        list.1 = NONE;
-        return None;
-    }
-    let head = list.0;
-    if head != forbidden {
-        list.0 = next[head as usize];
-        if list.0 == NONE {
-            list.1 = NONE;
-        }
-        return Some(head);
-    }
-    let prev = head;
+    (k < under.1).then_some(k)
+}
+
+/// The first key at or past `k` that `next` leads to and that leads nowhere, halving the path.
+fn first_open(next: &mut [u32], mut k: u32) -> u32 {
     loop {
-        let c = next[prev as usize];
-        if c == NONE {
-            return None;
+        let up = next[k as usize];
+        if up == k {
+            return k;
         }
-        next[prev as usize] = next[c as usize];
-        if list.1 == c {
-            list.1 = prev;
-        }
-        if !preceded[c as usize] {
-            return Some(c);
-        }
+        let past = next[up as usize];
+        next[k as usize] = past;
+        k = past;
     }
 }
 
