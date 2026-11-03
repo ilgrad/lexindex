@@ -540,7 +540,7 @@ refuses. The code is validated whole on load — its mode, its page widths, asce
 nothing left over — and a stored key that does not decode ends a walk and fails `key`, as the
 corrupted blob it is.
 
-**Trie labels, where they pay (`BDX5`, read from 4.7).** What front coding leaves of a path is a run
+**Trie labels, where they pay (`BDX5`, read from 5.0).** What front coding leaves of a path is a run
 of patricia-trie edge labels — directory and file names that recur under different parents — and
 on a million paths the second and later occurrences of repeated labels are 49 % of every byte front
 coding stores. A phrase reaches 32 bytes and only the spans the sampled miner sees often enough; a
@@ -754,7 +754,7 @@ only a handful of keys none of which any block holds keeps the flat table. The e
 once at build time and recorded in the tag, so reading it is a branch that never changes for the
 life of the index.
 
-**Since 4.6 the keys can be stored overlapped** (tag `0x13`). `build` also prices a greedy shortest
+**Since 5.0 the keys can be stored overlapped** (tag `0x13`). `build` also prices a greedy shortest
 common superstring of the keys: a key that occurs inside another costs no bytes, and two keys where
 one ends as the other begins share the overlap. Each slot is then one packed entry —
 `[fingerprint][length − min][start]`, least significant first, at most 57 bits so one unaligned
@@ -1120,7 +1120,7 @@ or — never — read it wrong.
 | `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
-| `BDX5` | 4.7 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
+| `BDX5` | 5.0 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
 | `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
@@ -1146,7 +1146,7 @@ is a magic neither has heard of, so they refuse it as malformed rather than as a
 direction, and so does an `OVL2` over a `StringIndex` base. An overlay embeds its base verbatim,
 so an `OVL2` over a `BMP5`, `BMP6` or `BCH6` base is refused by 2.0 with that base, and the
 migration is the base's: list its live keys on the old version, rebuild on 2.0, and put a fresh
-overlay over it. 4.6's merged `PerfectHashIndex` arena keeps the magic and adds an arena tag, `0x13`:
+overlay over it. 5.0's merged `PerfectHashIndex` arena keeps the magic and adds an arena tag, `0x13`:
 4.0–4.5 refuse such a blob as an unknown offset encoding, and one whose `build` kept a blocked arena
 loads on every 4.x.
 

@@ -23,7 +23,7 @@
 //! | `8` | — | — | 8 |
 //! | `0x13` | `[min_len u32][len_bits u8][start_bits u8][data_len u64]`, then one entry per slot | — | `(start_bits + len_bits) / 8` |
 //!
-//! **Merged** (`0x13`, since 4.6). The four layouts above store every key whole, in slot order.
+//! **Merged** (`0x13`, since 5.0). The four layouts above store every key whole, in slot order.
 //! This one stores a greedy shortest common superstring of the keys ([`crate::superstring`]): a key
 //! that occurs inside another costs no bytes, and two keys where one ends as the other begins
 //! share the overlap. An entry is wider than a blocked layout's share of its header — 23 to 32
