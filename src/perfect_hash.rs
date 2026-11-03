@@ -661,8 +661,9 @@ impl PerfectHashIndex {
         let spans = self.arena.spans_of(&slots, &fps, AHEAD);
         spans
             .iter()
+            .zip(&slots)
             .enumerate()
-            .map(|(i, span)| {
+            .map(|(i, (span, &slot))| {
                 if let Some(Some(sp)) = spans.get(i + AHEAD / 2) {
                     self.arena.prefetch_span(*sp);
                 }
@@ -670,7 +671,7 @@ impl PerfectHashIndex {
                     crate::blob::prefetch_key(key(i + AHEAD / 2));
                 }
                 let hit = span.and_then(|sp| {
-                    (self.arena.bytes_at(sp) == Some(key(i))).then_some(slots[i] as u32)
+                    (self.arena.bytes_at(sp) == Some(key(i))).then_some(slot as u32)
                 });
                 if hit.is_none() && !self.side.is_empty() {
                     return self.side_lookup(hashes[i], key(i));
