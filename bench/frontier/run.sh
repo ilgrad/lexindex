@@ -172,6 +172,9 @@ for type in 7 8 15 16; do
   processes+=("xcdat $type")
 done
 if [ -n "$only" ]; then
+  # The labelled build's microblock widths answer one question on two corpora, so only a run that
+  # names them times them.
+  processes+=("lexindex labels1024m64" "lexindex labels1024m128")
   mapfile -t processes < <(printf '%s\n' "${processes[@]}" | grep -E -- "$only" || true)
   if [ ${#processes[@]} -eq 0 ]; then
     echo "--only '$only' matches no process" >&2
