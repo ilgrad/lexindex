@@ -274,6 +274,8 @@ All notable changes to this project are documented here. The format follows
   come sorted skip it, as before.
 ### Documentation
 
+- **A mapped index sits on small pages.** `docs/usage.md` says what `load_mmap` gives up: a table of
+  2 MiB or more loaded with `load` asks for huge pages, and a mapping of it does not get them.
 - **`plan()`'s accuracy, re-scored against today's blobs.** `DictIndex` shrank and the estimate did
   not move, so the 1.0 / 4.2 / 7.2 % in the docs had gone stale: on the same 69 cells it is
   1.6 / 5.3 / 8.3 %. The ranking is still right on 19 of 19. The usage guide's account of the error

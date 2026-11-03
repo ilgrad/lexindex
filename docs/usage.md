@@ -218,6 +218,15 @@ the pages instead of copying them.
 the index size and the pages are shared across processes. The mapped file must stay immutable while an
 index borrows it.
 
+A mapped index sits on small pages. `load` copies a table of 2 MiB or more into memory that asks for
+transparent huge pages; a `load_mmap` table stays in the page cache, which Linux maps through 4 KiB
+pages here. A 63.6 MB `DoubleArrayIndex` over a million domains on btrfs had 63.5 MB on huge pages
+through `load` and none through `load_mmap`, with or without `MADV_HUGEPAGE` on the mapping. The
+price is page walks, and only a table past the TLB's reach pays it: at 10 M keys a
+`PerfectHashIndex::id` reads its arena 8–11 % faster on huge pages, while a 5.5 MB double array
+walked over running text pays under a nanosecond. Where lookups matter more than load time or shared
+pages, use `load`.
+
 The loaders, on two axes — whether the bytes are copied and how far they are checked:
 
 | Loader | Copies | Checks | For |
