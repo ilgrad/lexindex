@@ -100,13 +100,76 @@ impl Text {
 struct Trie {
     /// The byte on the edge into each node; the root's is unused.
     label: Vec<u8>,
-    /// Children of node `v` are the nodes `first[v] .. first[v + 1]`, one past the last node a
-    /// sentinel.
-    first: Vec<u32>,
+    /// Which nodes are each node's children.
+    runs: Runs,
     /// Longest proper suffix of each node's string that is also a node.
     fail: Vec<u32>,
     /// `level[d]` is the first node of depth `d`; the last entry is the node count.
     level: Vec<u32>,
+}
+
+/// Where each node's children start, at two bytes a node where a `u32` took four: its low half,
+/// since two neighbours differ by at most 256 children and 255 nodes by less than 2^16, so a base
+/// every 256 nodes gives back the rest. The bases are few enough to stay in cache, and a node's two
+/// halves are neighbours, so a lookup still reads one cold line.
+struct Runs {
+    base: Vec<u32>,
+    low: Vec<u16>,
+}
+
+/// Nodes a [`Runs`] base covers, as a power of two.
+const RUN_GROUP: usize = 8;
+
+impl Runs {
+    /// From each node's parent, ascending, the root's unread: a node's children start at the first
+    /// node whose parent is not before it, and a node without any gets the start of the next
+    /// one's, so every run ends where the next begins.
+    fn of_parents(parent: &[u32]) -> Self {
+        let nodes = parent.len();
+        let start = |v: usize| 1 + parent[1..].partition_point(|&p| (p as usize) < v);
+        let mut base = vec![0u32; (nodes >> RUN_GROUP) + 1];
+        on_threads(&mut base, 1 << 12, |at, out| {
+            let mut u = start(at << RUN_GROUP);
+            for (g, b) in (at..).zip(out) {
+                while u < nodes && (parent[u] as usize) < g << RUN_GROUP {
+                    u += 1;
+                }
+                *b = u as u32;
+            }
+        });
+        let mut low = vec![0u16; nodes + 1];
+        low[nodes] = nodes as u16;
+        on_threads(&mut low[..nodes], 1 << 16, |at, out| {
+            let mut u = start(at);
+            for (v, half) in (at..).zip(out) {
+                while u < nodes && (parent[u] as usize) < v {
+                    u += 1;
+                }
+                *half = u as u16;
+            }
+        });
+        Self { base, low }
+    }
+
+    /// The first child of `v`, or where it would be, and how many it has.
+    #[inline(always)]
+    fn of(&self, v: u32) -> (u32, u32) {
+        let v = v as usize;
+        let (here, next) = (self.low[v], self.low[v + 1]);
+        let base = self.base[v >> RUN_GROUP];
+        (
+            base + u32::from(here.wrapping_sub(base as u16)),
+            u32::from(next.wrapping_sub(here)),
+        )
+    }
+
+    /// Keep what the nodes below `kept` read.
+    fn truncate(&mut self, kept: usize) {
+        self.low.truncate(kept + 1);
+        self.low.shrink_to_fit();
+        self.base.truncate((kept >> RUN_GROUP) + 1);
+        self.base.shrink_to_fit();
+    }
 }
 
 /// The levels of a [`Trie`] a failure link of the level being built may read: every node above
@@ -115,7 +178,7 @@ struct Trie {
 #[derive(Clone, Copy)]
 struct Above<'a> {
     label: &'a [u8],
-    first: &'a [u32],
+    runs: &'a Runs,
     fail: &'a [u32],
     /// `steps[v * 256 + c]` is `step(v, c)`, for `v` below `shallow`.
     steps: &'a [u32],
@@ -127,8 +190,8 @@ impl Above<'_> {
     /// bisection ends in a compare no predictor learns at every node of a fallback.
     #[inline(always)]
     fn child(self, v: u32, c: u8) -> Option<u32> {
-        let (lo, hi) = (self.first[v as usize], self.first[v as usize + 1]);
-        let (at, len) = (lo as usize, (hi - lo) as usize);
+        let (lo, len) = self.runs.of(v);
+        let (at, len) = (lo as usize, len as usize);
         #[cfg(target_arch = "x86_64")]
         if len <= 16 {
             if let Some(window) = self.label.get(at..at + 16) {
@@ -184,7 +247,8 @@ fn fill_steps(steps: &mut [u32], trie: &Trie, from: usize, to: usize) {
             let f = trie.fail[v] as usize;
             steps.copy_within(f * 256..(f + 1) * 256, v * 256);
         }
-        for w in trie.first[v]..trie.first[v + 1] {
+        let (lo, len) = trie.runs.of(v as u32);
+        for w in lo..lo + len {
             steps[v * 256 + trie.label[w as usize] as usize] = w;
         }
     }
@@ -214,7 +278,7 @@ fn link_level(trie: &mut Trie, steps: &[u32], start: usize, end: usize) {
     let here = &mut here[..end - start];
     let above = Above {
         label: &trie.label,
-        first: &trie.first,
+        runs: &trie.runs,
         fail,
         steps,
         shallow: (steps.len() / 256) as u32,
@@ -487,20 +551,8 @@ fn sweep(text: &Text) -> Option<Sweep> {
     let mut fail = vec![0u32; nodes];
     let mut term = vec![0u32; n];
     lay_nodes(text, &lcp, &level, &mut label, &mut fail, &mut term);
-    // The parents run in node order, so a node's children start at the first node whose parent
-    // is not before it — and a node without any gets the start of the next one's, so every run
-    // ends where the next begins.
-    let mut first = vec![0u32; nodes + 1];
-    first[nodes] = nodes as u32;
-    on_threads(&mut first[..nodes], 1 << 16, |at, out| {
-        let mut u = 1 + fail[1..].partition_point(|&p| (p as usize) < at);
-        for (v, f) in (at..).zip(out) {
-            while u < nodes && (fail[u] as usize) < v {
-                u += 1;
-            }
-            *f = u as u32;
-        }
-    });
+    // The parents run in node order, so a node's children are one run of the next level.
+    let runs = Runs::of_parents(&fail);
     let mut is_term = vec![0u64; nodes.div_ceil(64)];
     for (i, &u) in term.iter().enumerate() {
         if text.len(i) > 0 {
@@ -509,7 +561,7 @@ fn sweep(text: &Text) -> Option<Sweep> {
     }
     let mut trie = Trie {
         label,
-        first,
+        runs,
         fail,
         level,
     };
@@ -590,7 +642,7 @@ fn sweep(text: &Text) -> Option<Sweep> {
             }
             let mut v = u;
             while !is_term(v) {
-                v = trie.first[v as usize];
+                v = trie.runs.of(v).0;
             }
             *place = (
                 key_at[rank(v) as usize],
@@ -657,8 +709,7 @@ fn chain(text: &Text, sweep: &mut Sweep, order: &[u32]) -> Vec<(u32, u32)> {
     let kept = trie.level[deepest + 1] as usize;
     trie.fail.truncate(kept);
     trie.fail.shrink_to_fit();
-    trie.first.truncate(kept + 1);
-    trie.first.shrink_to_fit();
+    trie.runs.truncate(kept);
     let trie = &*trie;
     let mut link = vec![(NONE, 0u32); n];
     // A chain's head knows its tail and its tail its head; a key alone is both.
@@ -718,10 +769,9 @@ fn chain(text: &Text, sweep: &mut Sweep, order: &[u32]) -> Vec<(u32, u32)> {
             // ending at a node sorts first under it, and a node that ends no key has children.
             let mut ends = ending[first_ending..ending_at].iter();
             let mut end = ends.next().map_or((NONE, NONE), |&pair| pair);
-            let starts = &trie.first[lo as usize..=hi as usize];
             let mut child = 0usize;
-            for (range, (w, v)) in here.iter_mut().zip(starts.windows(2).zip(lo..)) {
-                let last = child + (w[1] - w[0]) as usize;
+            for (range, v) in here.iter_mut().zip(lo..hi) {
+                let last = child + trie.runs.of(v).1 as usize;
                 *range = if end.0 == v {
                     let from = end.1;
                     end = ends.next().map_or((NONE, NONE), |&pair| pair);
@@ -980,6 +1030,31 @@ mod tests {
         let keys = sorted(&["中文", "文字", "字中", "é中", "", "中"]);
         let s = check(&keys, &identity(keys.len()));
         assert!(s.data.len() < keys.iter().map(String::len).sum::<usize>());
+    }
+
+    /// Runs over every shape a group can hold: leaves, a full fan-out of 256 on each of 255 nodes in
+    /// a row, which is the most the low half has to span, and a run crossing into the next group.
+    #[test]
+    fn runs_give_back_every_start_and_length() {
+        for counts in [
+            vec![1usize; 1_000],
+            vec![0, 0, 3, 0, 1, 256, 0, 2],
+            std::iter::repeat_n(256, 255).chain([0, 7, 256, 1]).collect(),
+            (0..3_000).map(|v| [256, 0, 1, 17][v % 4]).collect(),
+        ] {
+            let mut parent = vec![0u32];
+            for (v, &c) in counts.iter().enumerate() {
+                parent.resize(parent.len() + c, v as u32);
+            }
+            let nodes = parent.len();
+            let runs = Runs::of_parents(&parent);
+            let mut at = 1u32;
+            for v in 0..nodes {
+                let c = counts.get(v).copied().unwrap_or(0) as u32;
+                assert_eq!(runs.of(v as u32), (at, c), "node {v} of {nodes}");
+                at += c;
+            }
+        }
     }
 
     /// The same greedy written the obvious way, quadratic and over strings: contained keys by
