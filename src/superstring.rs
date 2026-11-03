@@ -1039,7 +1039,9 @@ mod tests {
         for counts in [
             vec![1usize; 1_000],
             vec![0, 0, 3, 0, 1, 256, 0, 2],
-            std::iter::repeat_n(256, 255).chain([0, 7, 256, 1]).collect(),
+            std::iter::repeat_n(256, 255)
+                .chain([0, 7, 256, 1])
+                .collect(),
             (0..3_000).map(|v| [256, 0, 1, 17][v % 4]).collect(),
         ] {
             let mut parent = vec![0u32];
