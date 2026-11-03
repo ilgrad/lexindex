@@ -31,8 +31,9 @@
 //!   search. The sidecar costs `⌈log2 n⌉` bits a key and about two for the perfect hash — 2.62
 //!   B/key on real words — and `fingerprint_bits / 8` more for `id` to reject a non-member at
 //!   `2^-fingerprint_bits`; at zero bits `id` is the dictionary's exact search and `id_unchecked`
-//!   the closed-vocabulary path, 3.8–9.0× faster than XCDAT's lookup — the fastest trie measured —
-//!   at 1.4–3.2× less space. Use it where a `DictIndex` is wanted and `id` is the hot path.
+//!   the closed-vocabulary path, 3.7–9.1× faster than XCDAT's lookup — the fastest trie measured —
+//!   in a free loop and 1.7–3.8× when each lookup waits on the last, at 1.4–3.2× less space. Use
+//!   it where a `DictIndex` is wanted and `id` is the hot path.
 //! - [`DoubleArrayIndex`] — a character-wise **double-array trie** for dictionary matching over
 //!   running text: every key that is a prefix of a text, the longest one, and every key occurring
 //!   anywhere in it, at one load a character. A label is a character rather than a byte, so a

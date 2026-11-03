@@ -49,10 +49,20 @@ All notable changes to this project are documented here. The format follows
   The merge runs on an Aho–Corasick automaton in `O(N log σ + n log n)` for `N` key
   bytes, deterministically, ties to the lower slot, on every thread but for serving the overlaps; it
   holds 9 bytes a trie node and a few dozen a key, freed before the arena is laid out. It costs
-  build time: against 4.5.3 on fourteen corpora of up to a million keys, 1.6–3.1× on eight threads
-  (the dictionary 65 → 137 ms, DNA 175 → 411, domains 151 → 442, identifiers 165 → 506) and 2.9–6.0×
-  on one CPU; `load_mmap` and `id` stay within 0.92–1.04×
-  (`bench/results/quiet-ab-2026-10-29-arz-1a885ac-merge.txt`). Those times predate a preflight: from
+  build time: against 4.5.3 on fourteen corpora of up to a million keys, in one session,
+  1.54–4.99× on one thread and 1.50–3.19× on eight, peak memory 0.99–2.99×, for 1.7–44.7 % fewer bytes
+  (numbers 7.442 → 4.116, DNA 26.264 → 17.755); domains, paths and URLs, which merge nothing at a
+  million keys, keep their bytes at 1.50–1.67× the time and 0.99–1.02× the peak; at ten million on
+  eight threads, English titles 2.21× the time and 2.14× the peak for 7.07 % fewer bytes, URLs 1.57×
+  and 1.68× for 3.19 % (`bench/results/rel-build-2026-11-03-arz-82f2cb1.txt`). A lookup against 4.5.3
+  in the same session (`bench/results/rel-1m-2026-11-03-arz-82f2cb1.txt`,
+  `bench/results/rel-scale-2026-11-03-arz-82f2cb1.txt`), at a million keys: a hit −6.3…+2.8 %, a chain
+  −2.8…−31.0 %, a batch −6.1…+4.8 %, `key` −15.5…+5.7 %, with fingerprints a hit −3.7…−26.3 %. A miss
+  reads −10.0…+3.8 % but for English titles +9.7 %, identifiers +9.2 %, Chinese titles +6.5 % and
+  bigrams +6.3 %. `key` at ten million: English titles +8.3 %, URLs +10.8 %, opaque keys +10.7 %, and
+  DNA at a hundred thousand +43.4 % (15.8 → 23.3 ns); a batch at ten million: +9.2 %, +5.8 %, +1.9 %.
+  Those miss, `key` and batch rows fall on corpora the arena merges, but other merged corpora do not
+  show them, and the cause per cell is not traced. From
   2¹⁹ keys, a build counts the keys that are a prefix of the next exactly, merges every 32nd, 16th
   and 8th slot, and leaves the merge out when the saving those draws carry to the whole set still
   does not reach the blocked arena. On eighteen corpora of up to a million keys, plain and with

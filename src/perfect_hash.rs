@@ -363,7 +363,7 @@ impl PerfectHashIndex {
     /// encoding rather than misread it.
     ///
     /// Measured on the 480 k-word dictionary, each index alone in its process: an absent probe
-    /// 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 bytes per key.
+    /// 38 → 29 ns, a member 45 → 50, the index 9.25 → 10.25 bytes per key.
     pub fn build_with_fingerprints<I, S>(items: I) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,

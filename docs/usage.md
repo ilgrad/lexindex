@@ -159,15 +159,16 @@ idx.keys_of([0, 2])           # ["apple", "banana"]
 `prefix("s")` on the 479 823-word system dictionary walks the whole `s` subtree of the FST and
 materialises every match — 45 064 `(str, int)` tuples — even if the caller wanted ten. With it, the
 walk stops at the tenth match. The saving is therefore proportional to how much of the result you
-*discard*, and it varies enormously by query (same dictionary, idle machine, min of 9 runs):
+*discard*, and it varies enormously by query (same dictionary, min of 9 runs,
+[`limit-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/limit-2026-11-03-arz-82f2cb1.txt)):
 
 | query | matches | full | `limit` | speedup |
 |---|---:|---:|---:|---:|
-| `prefix("s", limit=10)` | 45 064 | 10.96 ms | 0.004 ms | ~3 000× |
-| `prefix("a", limit=10)` | 25 192 | 4.83 ms | 0.003 ms | ~1 500× |
-| `prefix("un", limit=10)` | 20 358 | 4.09 ms | 0.006 ms | ~700× |
-| `subsequence("abc", limit=10)` | 1 910 | 41.31 ms | 0.51 ms | ~80× |
-| `fuzzy("hello", 2, limit=5)` | 242 | 1.52 ms | 0.26 ms | ~6× |
+| `prefix("s", limit=10)` | 45 064 | 10.07 ms | 0.003 ms | ~3 000× |
+| `prefix("a", limit=10)` | 25 192 | 4.31 ms | 0.003 ms | ~1 500× |
+| `prefix("un", limit=10)` | 20 358 | 3.63 ms | 0.004 ms | ~900× |
+| `subsequence("abc", limit=10)` | 1 910 | 36.49 ms | 0.46 ms | ~80× |
+| `fuzzy("hello", 2, limit=5)` | 242 | 1.27 ms | 0.20 ms | ~7× |
 
 Three regimes hide in that column, and they tell you when to reach for `limit`:
 
@@ -181,7 +182,7 @@ Three regimes hide in that column, and they tell you when to reach for `limit`:
   eagerly before the walk starts (deliberately, so a too-large distance raises up front rather than
   on first use). `limit` only trims the walk after that, hence single-digit gains.
 
-There is also a floor under every query: one call costs ~3 µs of FFI plus stream construction, so
+There is also a floor under every query: one call costs ~2 µs of FFI plus stream construction, so
 per-match cost at `limit=1` reads ~2 000 ns against a steady ~200 ns from `limit≈100` up. Asking
 for one match costs about the same as asking for ten — batch your UI accordingly.
 
@@ -244,8 +245,8 @@ That loader checks the transducer as a graph — every reachable node once, in t
 nodes and transitions rather than to the keys they spell, so a tiny blob spelling a billion keys is
 refused or accepted in microseconds — requires its values to be ranks and its keys to be UTF-8,
 and catches the panic at the load boundary, so a crafted blob raises `ValueError` like any other
-bad input. It costs 32× `from_bytes` (22.9 ms against 0.7 ms on
-479 823 words), which is the trade: pay it once for a stranger's blob, never for your
+bad input. It costs 38× `from_bytes` (23.0 ms against 0.6 ms on
+479 823 words, [`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt)), which is the trade: pay it once for a stranger's blob, never for your
 own. The overlay form exists for the same reason — an overlay's own framing is checksummed and
 validated either way, but the base region inside it is handed to a base loader, and over a
 `StringIndex` base that is exactly the choice above. The hash indexes need no such call: their
@@ -289,8 +290,8 @@ dict_ = PerfectHashIndex.load_mmap("verbs.bmp")   # arena mapped zero-copy; tiny
 n = PerfectHashIndex.build_to_file(lambda: (line.rstrip("\n") for line in open("keys.txt")), "keys.bmp")
 
 # a workload that is mostly misses (a stop list, a block list): one more byte per key, and an
-# absent key stops after one cache miss instead of two — 166 → 74 ns on the 480 k-word dictionary,
-# a member +3 ns, the same ids. build_to_file takes the same keyword.
+# absent key stops after one cache miss instead of two — 38 → 29 ns on the 480 k-word dictionary,
+# a member +5 ns, the same ids. build_to_file takes the same keyword.
 stop = PerfectHashIndex(stop_words, fingerprints=True)
 stop.has_fingerprints()        # True
 ```
@@ -400,7 +401,7 @@ words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 268–270 ns against 291–298
+faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 250–254 ns against 281–283
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
                                                   # 32 keys a block, "balanced" 256, "compact" 1024
 fewer = DictIndex(words_list, micro=128)    # 2.45 B/key against 2.64: microblocks of 128, not 16 --
@@ -420,7 +421,7 @@ and compares the stored suffixes there against the query without decoding them; 
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
 entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.64 bytes
-per key, `id` 291–298 ns and `key_into` 193–194, against 5.95 / 200–210 / 436–445 for
+per key, `id` 281–283 ns and `key_into` 198–199, against 5.95 / 167–173 / 446–458 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
 `route_microblocks()` trades memory for that walk over the restarts. It derives eight bytes of every
@@ -428,13 +429,13 @@ microblock's first key — 0.5 bytes a key at the default block, 0.25 at 1024, h
 and in no blob — and every lookup then picks its microblock off those words, walking the restarts
 only where the query's eight bytes tie a restart's. Deriving them reads the start of every block, so
 a `load_mmap` index is paged in whole by the call rather than as queries reach it. On the
-dictionary, routed, `id` reads 217–228 ns at the default block, and 239–241 at `block="compact"`
+dictionary, routed, `id` reads 213–215 ns at the default block, and 236–238 at `block="compact"`
 for 2.76 bytes a key in memory — faster than `"fast"` unrouted, at fewer bytes.
 
 At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 253 ns
-against 193–194 at the default, and `id` 313–328 against 291–298.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 259–261 ns
+against 198–199 at the default, and `id` 312–322 against 281–283.
 
 ## `HashedDictIndex` — a `DictIndex` whose `id` is a hash
 
@@ -465,9 +466,10 @@ member with its rank and a non-member with `None` except at `2^-fingerprint_bits
 cost, and the hash path is `id_unchecked` alone. On the 480 k-word dictionary the sidecar is 2.62
 bytes per key at zero bits and one more for every eight fingerprint bits, beside the dictionary's
 2.64: 5.25 in all, 6.25 at eight bits. On the frontier protocol — every key looked up once, in a
-shuffled order — `id_unchecked` answers in 14 to 78 ns and `id` at eight bits in 19 to 103 over
-nineteen corpora of half a million to ten million keys, against 245 to 716 for the dictionary's own
-`id` and 54 to 673 for XCDAT, the fastest trie measured
+shuffled order — `id_unchecked` answers in 14 to 78 ns and `id` at eight bits in 17 to 104 over
+nineteen corpora of half a million to ten million keys, against 235 to 709 for the dictionary's own
+`id` and 52 to 684 for XCDAT, the fastest trie measured. When each lookup waits on the last,
+`id_unchecked` reads 28 to 204 ns against XCDAT's 56 to 722
 ([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
@@ -657,9 +659,9 @@ idx.ids_into_arrow(col, out)                 # into memory you own
 ```
 
 On the shuffled dictionary (479 823 member probes, min of seven alternated rounds in one process,
-`local/arrowbench.py`): `CompactHashIndex` 48 ns a key against 145 for `ids_of` and 105 for
-`ids_of_bytes`; `PerfectHashIndex` 55 against 153 / 121; `ClosedHashIndex` 20 against 116 / 87;
-`StringIndex` 264 against 468 / 435, where the transducer walk is most of the cost either way.
+`local/arrowbench.py`, [`arrow-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/arrow-2026-11-03-arz-82f2cb1.txt)): `CompactHashIndex` 35 ns a key against 118 for `ids_of` and 82 for
+`ids_of_bytes`; `PerfectHashIndex` 26 against 114 / 85; `ClosedHashIndex` 12 against 90 / 63;
+`StringIndex` 131 against 290 / 263, where the transducer walk is most of the cost either way.
 
 ### Threads, including free-threaded CPython
 
@@ -1176,7 +1178,7 @@ stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect | hashed | double-array` names one instead and
 skips the plan entirely. The last two are never what `auto` picks, and they hold the corpus: `hashed`
 is a `HashedDictIndex` with no fingerprint, so exact.
-On the 479 823-word dictionary that is 468-490 ms against 127-135 over nine alternating runs --
+On the 479 823-word dictionary that is 507-517 ms against 91-93 over nine alternating runs --
 `--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes
 rather than modelling them, so an auto build there builds every candidate and then the winner again;

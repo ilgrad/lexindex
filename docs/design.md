@@ -352,9 +352,9 @@ entry whose prefix is at least a later entry's writes nothing that survives, so 
 over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
 a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
 decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
-**2.64 B/key** (`StringIndex` 5.95), `id` 291–298 ns against 200–210, `key_into` 193–194 against
-`key`'s 257–262; 128 and 512 give 2.66 and 2.52 B/key at 266–278 and 313–328 ns, and 1024 gives
-2.51 at 345–355. Against one level at the same size the reverse lookup halves and `id` does not move:
+**2.64 B/key** (`StringIndex` 5.95), `id` 281–283 ns against 167–173, `key_into` 198–199 against
+`key`'s 265–270; 128 and 512 give 2.66 and 2.52 B/key at 263–265 and 312–322 ns, and 1024 gives
+2.51 at 341–342. Against one level at the same size the reverse lookup halves and `id` does not move:
 244–246 ns and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for
 460–464 and 393. The one-level format still reaches further down — 2.701 at 1024 keys a block —
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
@@ -428,8 +428,10 @@ compared eleven, and hands that compare to the block's scan: 16.3 % fewer instru
 at the default block and 10.8 % at 1024, and 8 % less time at both, against 4.4.0 in one process
 ([`bench/results/id-ab-2026-09-24-arz-b362f43.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-b362f43.txt)).
 The rest of a paths lookup is the scan — 62 % of its instructions — which the trie does not touch.
-What the trie costs is a load's: a mapped load of paths takes 238 µs against 130 at the default
-block, and holds 0.10 bytes a key more.
+What the trie costs is a load's: a mapped load of paths takes 177 µs at the default block
+([`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt), on `performance`),
+where the A/B above, on `powersave`, read 238 against 130 without the trie, and holds 0.10 bytes a
+key more.
 
 That split is the other half of the block ladder: a larger block spends less on the search and more
 on the scan, one for one, so past a million keys `id` barely moves across the ladder while on the
@@ -705,8 +707,10 @@ gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/
 a **version-stable** 64-bit hash of each string (branch-free over three length
 classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, two
 multiply lanes over 32-byte blocks beyond — mixed by 64×64→128 multiplies folded to 64 bits with
-the length; 3.9 ns a dictionary word against 7.3 for the hash 2.0–3.x shipped, whose word loop and
-tail switch mispredicted on every length change — not
+the length; over dictionary words read in order, 3.9 ns a word against 7.3 for the hash 2.0–3.x
+shipped, whose word loop and tail switch mispredicted on every length change (2026-09-16), and in a
+shuffled order, where fetching the word is part of the pass, 13.4 against 13.8
+([`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt)) — not
 `std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
@@ -834,8 +838,11 @@ the dictionary at 9.67 B/key against 9.25 built (9.27 now).
 `build_with_fingerprints` sets bit `0x80` of the tag and stores one byte per slot behind the offsets —
 a fingerprint from the second hash, the one `CompactHashIndex` keeps — so a probe whose fingerprint
 does not match stops at the block and never reads the key. A lookup of an absent key is then one cache
-miss instead of two: on the dictionary 166 → 74 ns, a member 163 → 171, the index 10.90 → 11.90 B/key,
-the ids unchanged because the perfect hash is. The bytes follow the offsets rather than interleave with
+miss instead of two: on the dictionary, then in this layout, 166 → 74 ns, a member 163 → 171, the
+index 10.90 → 11.90 B/key, the ids unchanged because the perfect hash is. The dictionary now takes
+the overlapped layout, with its fingerprints in a row of their own, and reads 38 → 29 ns, a member
+45 → 50, 9.25 → 10.25 B/key
+([measured](benchmarks.md#a-fingerprinted-perfecthashindex-on-mostly-absent-keys)). The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
 extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 2.0's
 `BMP8`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
@@ -955,7 +962,7 @@ all inside a `catch_unwind` that turns the decoder's panic into an `IndexError`.
 the keys, so the cost is the graph's and not the language's: `fst` can spell a billion strings in
 896 bytes. The catch is load-bearing, not a backstop: a node cannot be checked without decoding
 it, and the specimen above is rejected by the catch, not by the address check. It costs
-32× the owned load (22.9 ms against 0.7 ms on 479 823 words), which
+38× the owned load (23.0 ms against 0.6 ms on 479 823 words), which
 is the right price once and the wrong price every time. `load_mmap`
 skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
 independent of blob size — the structural checks still run.
