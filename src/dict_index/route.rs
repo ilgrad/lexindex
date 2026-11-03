@@ -475,10 +475,11 @@ impl DictIndex {
         words.is_sorted().then_some(o)
     }
 
-    /// The microblock of block `b` — `r` of them — that `probe` falls in, off the block's words in
-    /// [`mroute`](Self::mroute), and how many bytes the probe shares with that microblock's first
-    /// key; `None` where only the restart run can say, which is where a restart's word is the
-    /// probe's own. `matched` is what the probe shares with the head, which it is above.
+    /// The restart of block `b` — `r` of them — that `probe` is routed to off the block's words in
+    /// [`mroute`](Self::mroute), and how many bytes the probe shares with it, which is below the
+    /// probe; `matched` is what the probe shares with the head, which it is above. With `false`,
+    /// that restart's microblock holds the probe. With `true`, a later restart's word is the probe's
+    /// own, so only the restart run can say, and the run from this restart on is all it has to read.
     #[inline(always)]
     pub(super) fn micro_routed(
         &self,
@@ -486,17 +487,24 @@ impl DictIndex {
         r: usize,
         probe: &[u8],
         matched: usize,
-    ) -> Option<(usize, usize)> {
+    ) -> (usize, usize, bool) {
         let per = self.per;
-        let group = self.mroute.get()?.get(b * per..(b + 1) * per)?;
+        let whole_run = (0, matched, true);
+        let Some(group) = self
+            .mroute
+            .get()
+            .and_then(|w| w.get(b * per..(b + 1) * per))
+        else {
+            return whole_run;
+        };
         let o = group[0];
         if o == NO_ROUTE {
-            return None;
+            return whole_run;
         }
         let o = o as usize;
         // The probe leaves the prefix every restart shares, above the head: above all of them.
         if matched < o {
-            return Some((r - 1, matched));
+            return (r - 1, matched, false);
         }
         let s = sample_at(probe, o);
         let words = &group[1..];
@@ -504,21 +512,19 @@ impl DictIndex {
         // below the probe is a bisection's answer: four branchless steps over fifteen words where a
         // compare of every word took fifteen, and five over thirty-one.
         let j = words.partition_point(|&w| w < s);
-        if words.get(j) == Some(&s) {
-            return None;
-        }
+        let tied = words.get(j) == Some(&s);
         let Some(&below) = j.checked_sub(1).map(|i| &words[i]) else {
-            return Some((0, matched));
+            return (0, matched, tied);
         };
         let i = ((below ^ s).leading_zeros() / 8) as usize;
         if may_end_before(below, i) {
-            return None;
+            return whole_run;
         }
         debug_assert!(
             o + i < probe.len(),
             "a route word below the probe agrees with its padding"
         );
-        Some((j, o + i))
+        (j, o + i, tied)
     }
 
     /// Pulls in what a lookup below boundary `l` is about to read, beside the head it reads first:
@@ -570,18 +576,19 @@ impl DictIndex {
         let r = self.micros_in(b);
         let block_base = self.blocks.at(b);
         let (j, matched) = if r > 1 {
-            match self.micro_routed(b, r, probe, matched) {
-                Some(routed) => routed,
-                None => {
-                    let data = self.restart_data_at(b, block_base);
-                    prefetch_run(data);
-                    let restarts = Entries::of(&self.codes_of(b).1, codec, data, r);
-                    let (j, matched, hit) = self.scan_run(codec, &restarts, r, probe, matched);
-                    if hit {
-                        return ((base + j * self.micro) as u64, true);
-                    }
-                    (j, matched)
+            let (from, shared, tied) = self.micro_routed(b, r, probe, matched);
+            if tied {
+                let data = self.restart_data_at(b, block_base);
+                prefetch_run(data);
+                let mut restarts = Entries::of(&self.codes_of(b).1, codec, data, r);
+                restarts.pass(from);
+                let (k, shared, hit) = self.scan_run(codec, &restarts, r - from, probe, shared);
+                if hit {
+                    return ((base + (from + k) * self.micro) as u64, true);
                 }
+                (from + k, shared)
+            } else {
+                (from, shared)
             }
         } else {
             (0, matched)

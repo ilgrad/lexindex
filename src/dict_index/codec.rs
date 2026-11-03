@@ -239,6 +239,21 @@ impl<'a> Entries<'a> {
         self.codes.is_frame()
     }
 
+    /// The run past its first `n` entries, for a walk that knows they are below what it looks for.
+    /// A run this crate did not write may read as an empty one.
+    #[inline]
+    pub(super) fn pass(&mut self, n: usize) {
+        for _ in 0..n {
+            let Some((_, len)) = self.head() else {
+                *self = Self::empty();
+                return;
+            };
+            self.skip(len);
+        }
+        self.count -= n;
+        self.at = 0;
+    }
+
     /// The next entry's shared-prefix length and suffix length, leaving the suffix itself for
     /// [`piece`](Self::piece) or [`skip`](Self::skip); `None` past the last header.
     #[inline(always)]

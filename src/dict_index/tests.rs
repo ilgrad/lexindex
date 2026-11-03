@@ -229,14 +229,19 @@ fn routed_as_scanned(idx: &DictIndex, queries: &[String], what: &str) -> usize {
                 return;
             }
             let matched = lcp(head, probe);
-            let Some(got) = idx.micro_routed(b, r, probe, matched) else {
-                return;
-            };
+            let (from, shared, tied) = idx.micro_routed(b, r, probe, matched);
             let codec = idx.codec_of(b);
-            let restarts = Entries::of(&idx.codes_of(b).1, codec, idx.restart_data(b), r);
-            let (j, m, hit) = idx.scan_run(codec, &restarts, r, probe, matched);
-            assert_eq!((j, m, hit), (got.0, got.1, false), "{what}: {query:?}");
-            routed += 1;
+            let restarts = || Entries::of(&idx.codes_of(b).1, codec, idx.restart_data(b), r);
+            let (j, m, hit) = idx.scan_run(codec, &restarts(), r, probe, matched);
+            if tied {
+                let mut rest = restarts();
+                rest.pass(from);
+                let (k, shared, part) = idx.scan_run(codec, &rest, r - from, probe, shared);
+                assert_eq!((j, m, hit), (from + k, shared, part), "{what}: {query:?}");
+            } else {
+                assert_eq!((j, m, hit), (from, shared, false), "{what}: {query:?}");
+                routed += 1;
+            }
         });
     }
     routed

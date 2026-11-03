@@ -152,6 +152,13 @@ All notable changes to this project are documented here. The format follows
   changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
   99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
   → 0.02.
+- **A routed `DictIndex` lookup that ties a restart's word scans the run from there.** Where a
+  restart's route word equals the probe's, only the restart run can say which microblock holds it,
+  and the scan started at the block's first restart. The words below the tie already rule out the
+  restarts before it, so the scan now starts at the last of them, with what the words say it shares.
+  That is every probe that is a restart itself, 5.9 % of hits at 256, and on `paths` 83 %. Nothing
+  grows. Instructions a lookup after `route_microblocks`: words −0.8 %, uuid −0.6 %, urls and
+  titles −1.9 %, identifiers −3.1 %, paths −1.4 %; mispredicted branches −0.1 to −1.7.
 - **A hash lookup asks one thing where it asked three or four.** `Mphf::index` checked the table's
   format, whether it had a first level, and that level's geometry before reading a seed. A table
   now always holds a level there, and any table but the common one holds a level that bumps every
