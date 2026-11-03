@@ -1,0 +1,16 @@
+## latency/1m [01:51:26 39000mC busy=2 swap=0MiB governor=performance]
+n = 1000000, 12 rounds, min ns/op (spread = (max-min)/min)
+probe set                        chi.id   chi.id_unchecked         chi.ids_of              ph.id    ph.id_unchecked          ph.ids_of  HashMap (control)
+members                      11.3 ± 7.8%          7.0 ± 2.6%         21.0 ±14.4%         34.0 ±33.4%          7.1 ± 0.6%         33.3 ±15.8%        188.2 ± 3.1%
+members scattered            36.0 ± 0.7%         29.3 ± 0.8%         16.8 ±56.0%         69.3 ± 9.2%         28.4 ± 2.2%         41.5 ± 5.6%        201.8 ± 3.2%
+90% members                  11.7 ± 2.4%          7.0 ± 2.3%         23.5 ± 2.6%         30.2 ±21.6%          7.0 ± 1.7%         32.8 ± 6.5%        174.0 ± 2.2%
+50% members                  11.6 ± 2.8%          6.5 ± 2.0%         23.1 ± 1.7%         28.3 ±14.5%          6.6 ± 0.8%         31.4 ± 3.7%        112.5 ± 1.7%
+absent                       11.1 ± 1.8%          5.9 ± 1.4%         22.1 ± 0.5%         17.3 ±28.5%          6.1 ± 1.1%         27.9 ± 6.2%         35.4 ± 1.5%
+## latency/10m [01:51:45 66000mC busy=1 swap=0MiB governor=performance]
+n = 10000000, 12 rounds, min ns/op (spread = (max-min)/min)
+probe set                        chi.id   chi.id_unchecked         chi.ids_of              ph.id    ph.id_unchecked          ph.ids_of  HashMap (control)
+members                      12.1 ±14.8%          7.1 ± 3.3%         25.2 ± 2.7%         71.1 ± 1.6%          7.0 ± 0.4%         56.9 ± 1.9%        258.3 ± 3.2%
+members scattered            45.3 ± 4.6%         33.6 ± 0.6%         28.5 ± 2.5%        106.8 ± 1.3%         32.6 ± 0.5%         63.9 ± 1.5%        286.1 ± 0.8%
+90% members                  19.3 ± 8.6%          7.2 ± 2.2%         25.2 ± 2.1%         69.0 ± 0.9%          7.1 ± 2.8%         55.2 ± 1.5%        241.8 ± 1.2%
+50% members                  22.0 ± 9.4%          7.2 ± 0.6%         24.9 ± 3.0%         59.0 ± 1.4%          7.2 ± 0.6%         53.0 ± 2.3%        166.8 ± 2.4%
+absent                       22.5 ±10.1%          7.3 ± 0.8%         24.4 ± 2.6%         44.8 ± 1.9%          7.2 ± 0.8%         44.4 ± 2.5%         60.8 ± 5.0%

@@ -1,0 +1,10 @@
+# versions prefix: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.0
+## prefix/run [01:35:21 39000mC busy=3 swap=0MiB governor=performance]
+479823 keys, 20000 three-byte prefixes, 763 matches each on average
+                  B/key       count    first 10     all+ids   keys only
+DictIndex 256      2.64        382        2170      100164       73358 
+DictIndex 512      2.52        414        2306       99775       70767 
+StringIndex        5.95        551        4094      154057      313535 
+marisa-trie        2.98     119453        2529       91924       92098 
+datrie            30.69     504994      504989      505276      505545 
+dawg2             23.96      66839        1425       47135       47126 

@@ -1,0 +1,14 @@
+## coldmmap/titles-en-10000000 [02:56:50 38000mC busy=15 swap=0MiB governor=performance]
+
+titles-en-10000000: 10000000 keys
+structure                  file B/k    mapped  after 1k  after 1M   cold ns  warm ns dropped
+DictIndex 32                   6.02      0.81      4.57      6.02   27101.8    583.9     yes
+DictIndex 32 (random)          6.02      0.81      1.81      6.02   62303.1   1281.6     yes
+DictIndex 256                  5.54      0.18      4.07      5.54   28485.7    556.9     yes
+DictIndex 256 (random)         5.54      0.18      1.06      5.54   74885.0   1303.2     yes
+DictIndex 1024                 5.37      0.12      3.96      5.38   27627.7    575.4     yes
+DictIndex 1024 (random)        5.37      0.12      1.16      5.38  100434.8   1322.2     yes
+CompactHashIndex               1.24      0.24      1.24      1.24    5816.6     28.8     yes
+CompactHashIndex (random)      1.24      0.24      0.70      1.24   49380.1    124.8     yes
+StringIndex                   13.25      0.01     10.10     13.25   86046.5    662.1     yes
+StringIndex (random)          13.25      0.01      2.27     13.25  358266.1   2648.5     yes

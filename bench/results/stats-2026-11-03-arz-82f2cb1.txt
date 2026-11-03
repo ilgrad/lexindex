@@ -1,0 +1,150 @@
+## stats/bars-100000 [01:45:58 39000mC busy=3 swap=0MiB governor=performance]
+words-full: 479823 keys, 100000 probes a pass (half members), 30 samples a structure
+
+structure                  B/key     min   median      p5     p95  95% CI of median   spread
+ClosedHashIndex             0.24     9.5      9.7     9.6    10.4       9.6 – 9.7       8.2%
+CompactHashIndex fp=1       1.24    13.7     14.4    13.8    15.7      14.4 – 14.5     13.5%
+DictIndex 256               2.64   249.3    251.2   250.0   255.9     251.0 – 251.6     2.3%
+DictIndex 512               2.52   277.4    278.9   277.7   294.7     278.7 – 279.4     6.1%
+StringIndex                 5.95   136.1    139.1   137.8   158.3     138.6 – 140.3    14.7%
+PerfectHashIndex            9.25    37.6     40.7    39.9    49.0      40.5 – 41.0     22.3%
+
+every sample, in the order drawn, ns a lookup:
+closed                  9.6 9.5 9.6 9.6 9.6 9.7 9.7 10.4 9.7 9.7 9.7 9.8 9.6 9.7 9.9 9.9 9.6 9.7 9.6 9.6 9.7 9.6 9.6 10.4 9.7 9.7 9.7 9.7 9.6 9.6
+compact1                13.7 13.8 14.4 14.4 14.5 14.4 14.4 15.7 14.4 14.5 14.9 15.7 14.3 14.5 15.7 15.7 14.4 14.6 14.4 14.4 14.4 14.4 14.4 16.3 14.6 14.5 14.4 14.5 14.4 14.4
+dict256                 249.3 250.1 250.0 251.3 251.3 251.0 250.6 255.8 251.8 250.6 254.7 254.4 251.0 252.6 255.9 255.6 251.1 250.9 250.9 251.3 251.3 251.1 252.0 257.1 252.0 250.7 251.2 251.1 251.0 251.1
+dict512                 277.8 277.7 277.4 278.4 278.7 278.2 285.7 280.8 278.9 282.0 294.7 278.8 279.5 294.9 286.2 281.0 278.9 278.3 278.4 278.6 279.1 279.5 278.7 283.3 279.3 278.8 278.8 279.2 278.6 279.0
+string                  138.9 136.1 138.7 142.4 139.8 140.0 158.3 139.8 138.4 140.6 144.2 140.8 138.1 145.4 159.0 141.2 138.5 137.9 137.8 138.7 138.8 138.3 156.9 144.3 138.9 139.3 138.4 138.5 138.5 139.2
+perfect                 37.6 40.5 40.7 41.4 40.2 40.5 48.9 41.0 40.7 43.6 48.5 40.2 41.0 48.8 49.0 40.7 41.0 40.2 40.5 40.3 40.5 39.9 51.6 42.4 40.7 40.6 40.2 40.1 40.3 40.9
+## stats/bars-200000 [01:46:02 69000mC busy=1 swap=0MiB governor=performance]
+words-full: 479823 keys, 200000 probes a pass (half members), 30 samples a structure
+
+structure                  B/key     min   median      p5     p95  95% CI of median   spread
+ClosedHashIndex             0.24    11.4     11.5    11.4    12.4      11.5 – 11.9      8.7%
+CompactHashIndex fp=1       1.24    13.7     13.8    13.7    14.3      13.8 – 13.9      4.4%
+DictIndex 256               2.64   252.3    252.7   252.4   254.5     252.6 – 253.0     0.8%
+DictIndex 512               2.52   278.7    279.4   278.7   284.5     279.1 – 279.6     2.1%
+StringIndex                 5.95   139.8    140.9   140.0   157.9     140.5 – 142.1    12.8%
+PerfectHashIndex            9.25    41.5     43.5    41.6    47.3      41.8 – 44.6     13.2%
+
+every sample, in the order drawn, ns a lookup:
+closed                  11.6 11.5 11.4 11.5 11.4 11.5 11.5 11.5 11.7 11.4 11.4 11.5 11.5 11.4 11.4 11.6 11.4 11.4 12.2 11.8 11.6 12.3 12.2 11.9 12.4 12.2 12.3 13.0 12.4 12.2
+compact1                13.8 13.9 13.8 13.9 13.8 13.8 13.8 13.9 13.8 13.7 13.8 13.9 13.8 13.8 13.8 13.9 13.7 13.7 13.7 13.8 13.7 14.3 14.3 13.8 14.2 14.2 14.2 14.4 14.2 14.3
+dict256                 253.3 252.5 252.4 255.3 253.6 252.5 253.5 253.0 252.6 252.5 252.7 252.7 252.8 252.7 253.2 252.4 253.5 252.5 252.4 252.9 254.5 252.3 252.4 252.7 252.7 252.7 253.5 252.6 253.0 253.9
+dict512                 278.9 279.0 284.5 281.2 280.0 278.8 281.1 279.2 278.8 279.1 278.7 279.5 279.3 279.0 279.1 279.3 280.9 279.5 279.6 279.6 281.8 279.3 280.0 279.5 279.1 279.2 278.7 279.9 279.6 313.8
+string                  140.8 140.1 157.2 140.5 140.9 141.2 156.9 140.0 140.6 142.7 161.1 140.4 141.0 140.2 157.9 140.6 140.3 141.1 156.6 140.3 139.8 140.2 157.5 140.6 144.6 140.4 156.9 140.9 141.6 143.9
+perfect                 41.6 41.6 41.8 41.8 41.6 41.7 41.6 41.8 41.5 41.7 43.5 44.8 41.8 41.8 42.9 42.4 43.4 44.7 45.9 44.1 45.6 44.8 47.3 44.5 44.8 44.4 47.7 44.7 44.9 44.4
+## stats/bars-400000 [01:46:10 68000mC busy=0 swap=0MiB governor=performance]
+words-full: 479823 keys, 400000 probes a pass (half members), 30 samples a structure
+
+structure                  B/key     min   median      p5     p95  95% CI of median   spread
+ClosedHashIndex             0.24    24.5     24.7    24.5    25.5      24.7 – 24.8      4.1%
+CompactHashIndex fp=1       1.24    24.8     24.9    24.8    25.5      24.9 – 25.1      3.2%
+DictIndex 256               2.64   272.4    273.5   272.5   278.1     273.2 – 274.3     2.1%
+DictIndex 512               2.52   301.8    303.2   301.9   317.8     302.7 – 303.8     5.3%
+StringIndex                 5.95   171.8    172.9   171.9   177.9     172.6 – 173.7     3.5%
+PerfectHashIndex            9.25    50.3     52.9    50.6    53.9      52.8 – 53.0      6.3%
+
+every sample, in the order drawn, ns a lookup:
+closed                  24.7 24.7 24.8 24.7 24.7 25.2 30.0 24.6 24.6 24.7 24.7 24.5 25.0 24.6 24.5 24.6 25.5 25.2 24.9 24.6 24.8 24.9 25.0 24.9 24.7 24.6 24.7 24.7 24.6 24.9
+compact1                24.8 24.9 25.3 25.0 25.3 25.5 31.2 24.8 24.8 24.9 24.8 24.8 24.8 24.8 24.8 24.9 24.9 25.2 25.0 25.2 25.1 24.8 24.9 25.1 25.1 24.9 25.1 24.9 25.2 25.0
+dict256                 273.4 274.0 273.1 278.1 272.6 273.3 278.2 273.0 273.5 274.2 272.5 274.3 274.6 272.4 273.8 273.1 273.4 273.2 274.5 273.3 273.0 273.1 275.3 274.4 273.1 274.5 273.4 273.7 277.9 274.5
+dict512                 302.9 305.6 303.3 304.6 302.2 302.5 302.4 304.0 303.9 302.2 303.9 301.9 304.2 303.8 301.8 302.3 339.2 303.4 303.0 304.6 301.9 303.5 303.7 303.7 302.9 303.0 302.4 303.1 317.8 302.5
+string                  171.8 207.6 172.6 172.3 174.9 173.4 172.6 174.2 175.2 172.8 172.7 172.1 172.9 172.5 172.1 173.5 174.6 177.9 172.5 173.1 174.1 174.6 173.9 172.9 171.9 173.0 172.4 171.9 174.2 172.5
+perfect                 53.2 53.9 53.0 52.9 52.7 52.8 53.1 52.9 52.8 52.9 52.7 52.7 52.8 52.8 52.9 52.7 53.5 53.2 52.8 53.5 53.8 52.9 53.2 53.0 53.0 52.9 54.3 53.0 50.3 50.6
+## stats/perf-100000/closed/0 [01:46:24 69000mC busy=1 swap=0MiB governor=performance]
+closed 0 passes, 0 found
+closed 0 passes, 0 found
+closed 0 passes, 0 found
+## stats/perf-100000/closed/100 [01:46:30 67000mC busy=2 swap=0MiB governor=performance]
+closed 100 passes, 10000000 found
+closed 100 passes, 10000000 found
+closed 100 passes, 10000000 found
+## stats/perf-100000/compact1/0 [01:46:35 67000mC busy=1 swap=0MiB governor=performance]
+compact1 0 passes, 0 found
+compact1 0 passes, 0 found
+compact1 0 passes, 0 found
+## stats/perf-100000/compact1/100 [01:46:40 68000mC busy=0 swap=0MiB governor=performance]
+compact1 100 passes, 5019200 found
+compact1 100 passes, 5019200 found
+compact1 100 passes, 5019200 found
+## stats/perf-100000/dict256/0 [01:46:45 69000mC busy=2 swap=0MiB governor=performance]
+dict256 0 passes, 0 found
+dict256 0 passes, 0 found
+dict256 0 passes, 0 found
+## stats/perf-100000/dict256/100 [01:46:51 68000mC busy=1 swap=0MiB governor=performance]
+dict256 100 passes, 5000000 found
+dict256 100 passes, 5000000 found
+dict256 100 passes, 5000000 found
+## stats/perf-100000/dict512/0 [01:47:05 69000mC busy=1 swap=0MiB governor=performance]
+dict512 0 passes, 0 found
+dict512 0 passes, 0 found
+dict512 0 passes, 0 found
+## stats/perf-100000/dict512/100 [01:47:09 69000mC busy=3 swap=0MiB governor=performance]
+dict512 100 passes, 5000000 found
+dict512 100 passes, 5000000 found
+dict512 100 passes, 5000000 found
+## stats/perf-100000/string/0 [01:47:24 68000mC busy=2 swap=0MiB governor=performance]
+string 0 passes, 0 found
+string 0 passes, 0 found
+string 0 passes, 0 found
+## stats/perf-100000/string/100 [01:47:30 68000mC busy=1 swap=0MiB governor=performance]
+string 100 passes, 5000000 found
+string 100 passes, 5000000 found
+string 100 passes, 5000000 found
+## stats/perf-100000/perfect/0 [01:47:39 67000mC busy=0 swap=0MiB governor=performance]
+perfect 0 passes, 0 found
+perfect 0 passes, 0 found
+perfect 0 passes, 0 found
+## stats/perf-100000/perfect/100 [01:47:45 68000mC busy=0 swap=0MiB governor=performance]
+perfect 100 passes, 5000000 found
+perfect 100 passes, 5000000 found
+perfect 100 passes, 5000000 found
+## stats/perf-400000/closed/0 [01:47:51 68000mC busy=3 swap=0MiB governor=performance]
+closed 0 passes, 0 found
+closed 0 passes, 0 found
+closed 0 passes, 0 found
+## stats/perf-400000/closed/100 [01:47:56 69000mC busy=2 swap=0MiB governor=performance]
+closed 100 passes, 40000000 found
+closed 100 passes, 40000000 found
+closed 100 passes, 40000000 found
+## stats/perf-400000/compact1/0 [01:48:04 67000mC busy=1 swap=0MiB governor=performance]
+compact1 0 passes, 0 found
+compact1 0 passes, 0 found
+compact1 0 passes, 0 found
+## stats/perf-400000/compact1/100 [01:48:10 67000mC busy=0 swap=0MiB governor=performance]
+compact1 100 passes, 20077300 found
+compact1 100 passes, 20077300 found
+compact1 100 passes, 20077300 found
+## stats/perf-400000/dict256/0 [01:48:17 69000mC busy=1 swap=0MiB governor=performance]
+dict256 0 passes, 0 found
+dict256 0 passes, 0 found
+dict256 0 passes, 0 found
+## stats/perf-400000/dict256/100 [01:48:23 67000mC busy=4 swap=0MiB governor=performance]
+dict256 100 passes, 20000000 found
+dict256 100 passes, 20000000 found
+dict256 100 passes, 20000000 found
+## stats/perf-400000/dict512/0 [01:49:02 67000mC busy=2 swap=0MiB governor=performance]
+dict512 0 passes, 0 found
+dict512 0 passes, 0 found
+dict512 0 passes, 0 found
+## stats/perf-400000/dict512/100 [01:49:07 68000mC busy=4 swap=0MiB governor=performance]
+dict512 100 passes, 20000000 found
+dict512 100 passes, 20000000 found
+dict512 100 passes, 20000000 found
+## stats/perf-400000/string/0 [01:49:50 67000mC busy=1 swap=0MiB governor=performance]
+string 0 passes, 0 found
+string 0 passes, 0 found
+string 0 passes, 0 found
+## stats/perf-400000/string/100 [01:49:56 67000mC busy=2 swap=0MiB governor=performance]
+string 100 passes, 20000000 found
+string 100 passes, 20000000 found
+string 100 passes, 20000000 found
+## stats/perf-400000/perfect/0 [01:50:21 68000mC busy=0 swap=0MiB governor=performance]
+perfect 0 passes, 0 found
+perfect 0 passes, 0 found
+perfect 0 passes, 0 found
+## stats/perf-400000/perfect/100 [01:50:26 68000mC busy=0 swap=0MiB governor=performance]
+perfect 100 passes, 20000000 found
+perfect 100 passes, 20000000 found
+perfect 100 passes, 20000000 found

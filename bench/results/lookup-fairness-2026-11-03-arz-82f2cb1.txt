@@ -1,0 +1,9 @@
+# versions lookup-fairness: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.0
+## lookup-fairness/run [01:27:39 39000mC busy=2 swap=0MiB governor=performance]
+479823 keys, 50000 hits and 49995 misses, ns per lookup
+                           hit      miss  miss/hit
+DictIndex.id               414       317      0.77
+marisa.get                 531       456      0.86
+marisa[] + except          496       826      1.66
+dawg2.get                  295       201      0.68
+datrie.get                 627       449      0.72

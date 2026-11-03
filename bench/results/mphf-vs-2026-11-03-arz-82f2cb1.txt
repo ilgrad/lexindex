@@ -1,0 +1,149 @@
+# versions mphf: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+## mphf/1000000/one [03:01:46 40000mC busy=15 swap=0MiB governor=performance]
+n 1000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.925     38.5   +4.7%      1.6   +9.7%      1.9   +9.4%           6.2      2.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.160     54.4   +7.5%      3.4   +9.6%        -                  15.2      0.0
+ph 0.11 PHast (SeedOnly)                 1.933    571.7   +1.3%      2.8   +6.8%        -                  14.4      0.0
+ptr_hash 2.1.3 compact                   2.144    143.5   +5.4%      3.6   +8.7%      4.2   +7.8%          15.7      0.0
+ptr_hash 2.1.3 balanced                  2.378     89.2   +4.0%      3.7   +9.8%      4.2   +7.7%           7.6      0.0
+ptr_hash 2.1.3 fast                      2.990     71.3   +6.8%      1.8   +6.9%      2.5   +8.7%           0.0      0.0
+sux 0.15 PHastR (8-bit, 4.25)            1.960     53.2  +11.8%      3.1   +5.6%        -                   0.0      0.0
+sux 0.15 PHastR (8-bit, 4.5)             1.919     49.5   +6.3%      3.3   +7.3%        -                   0.0      0.0
+sux 0.15 PHastR (8-bit, 4.75)            1.915     47.8   +6.9%      3.8   +6.9%        -                   0.0      0.0
+sux 0.15 PHastR (10-bit, 5.75)           1.850     99.1   +7.0%      3.8   +6.4%        -                   0.0      0.0
+sux 0.15 PHastR (10-bit, 6)              1.852     94.2   +7.3%      4.3   +4.7%        -                   0.0      0.0
+## mphf/1000000/eight [03:01:53 68000mC busy=2 swap=0MiB governor=performance]
+n 1000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.925     11.8  +23.3%      1.6  +12.5%      1.9  +16.2%          13.8      0.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.175     17.3   +7.8%      3.5   +8.9%        -                   9.0      0.0
+ph 0.11 PHast (SeedOnly)                 1.953     98.6   +1.0%      2.9   +3.7%        -                   7.6      0.0
+ptr_hash 2.1.3 compact                   2.144     76.9   +3.8%      3.6   +2.2%      4.2   +0.6%          19.3      0.0
+ptr_hash 2.1.3 balanced                  2.378     47.2   +1.1%      3.7   +4.1%      4.2   +5.9%           5.9      0.0
+ptr_hash 2.1.3 fast                      2.990     63.2   +0.3%      1.8  +10.9%      2.6  +10.0%           0.0      0.0
+sux 0.15 PHastR (8-bit, 4.25)            1.984     10.3  +33.7%      3.1   +9.1%        -                  11.7      0.0
+sux 0.15 PHastR (8-bit, 4.5)             1.943     10.3   +4.4%      3.5   +9.3%        -                   2.3      0.0
+sux 0.15 PHastR (8-bit, 4.75)            1.935     11.1   +1.2%      3.9   +3.8%        -                   0.2      0.0
+sux 0.15 PHastR (10-bit, 5.75)           1.886     20.8   +2.7%      4.0   +2.2%        -                   0.7      0.0
+sux 0.15 PHastR (10-bit, 6)              1.879     21.2  +15.1%      4.4   +0.7%        -                   0.5      0.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        no tracked page, no tracked page, no tracked page
+ph 0.11 PHast+ (ShiftOnlyWrapped)    no tracked page, no tracked page, no tracked page
+ph 0.11 PHast (SeedOnly)             no tracked page, no tracked page, no tracked page
+ptr_hash 2.1.3 compact               no tracked page, no tracked page, no tracked page
+ptr_hash 2.1.3 balanced              no tracked page, no tracked page, no tracked page
+ptr_hash 2.1.3 fast                  no tracked page, no tracked page, no tracked page
+sux 0.15 PHastR (8-bit, 4.25)        no tracked page, no tracked page, no tracked page
+sux 0.15 PHastR (8-bit, 4.5)         no tracked page, no tracked page, no tracked page
+sux 0.15 PHastR (8-bit, 4.75)        no tracked page, no tracked page, no tracked page
+sux 0.15 PHastR (10-bit, 5.75)       no tracked page, no tracked page, no tracked page
+sux 0.15 PHastR (10-bit, 6)          no tracked page, no tracked page, no tracked page
+## mphf/1000000/one-nothp [03:01:58 68000mC busy=2 swap=0MiB governor=performance]
+n 1000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.925     38.1   +1.8%      1.6   +6.2%      1.9   +1.8%           5.9      0.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.160     54.6   +6.7%      3.4   +2.1%        -                  15.2      0.0
+ph 0.11 PHast (SeedOnly)                 1.933    572.3   +0.3%      2.8   +6.7%        -                  14.6      0.0
+ptr_hash 2.1.3 compact                   2.144    146.1   +0.9%      3.6   +7.8%      4.2   +6.4%          15.8      0.0
+ptr_hash 2.1.3 balanced                  2.378     89.4   +3.2%      3.6   +6.0%      4.2   +6.1%           7.6      0.0
+ptr_hash 2.1.3 fast                      2.990     70.4   +1.0%      1.8   +6.4%      2.5   +5.6%           0.0      0.0
+sux 0.15 PHastR (8-bit, 4.25)            1.960     53.0   +1.5%      3.0   +2.3%        -                   0.1      0.0
+sux 0.15 PHastR (8-bit, 4.5)             1.919     49.1   +0.4%      3.3   +3.3%        -                   0.0      0.0
+sux 0.15 PHastR (8-bit, 4.75)            1.915     47.5   +0.2%      3.8   +1.0%        -                   0.0      0.0
+sux 0.15 PHastR (10-bit, 5.75)           1.850     99.3   +1.7%      3.8   +0.9%        -                   0.0      0.0
+sux 0.15 PHastR (10-bit, 6)              1.852     94.6   +1.0%      4.3   +2.1%        -                   0.0      0.0
+## mphf/10000000/one [03:02:05 69000mC busy=3 swap=0MiB governor=performance]
+n 10000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.915     34.6   +0.2%      2.4   +0.8%      2.4   +2.7%          30.2      6.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     60.5   +0.4%      4.9   +7.7%        -                 152.5      6.0
+ph 0.11 PHast (SeedOnly)                 1.921    579.4   +0.1%      3.6  +13.7%        -                 152.4      6.0
+ptr_hash 2.1.3 compact                   2.143    157.4   +0.3%      5.1   +0.6%      4.5   +1.9%         156.1     22.0
+ptr_hash 2.1.3 balanced                  2.378     99.6   +0.8%      5.1   +0.7%      4.5   +0.8%         152.4     22.0
+ptr_hash 2.1.3 fast                      2.990    144.5   +0.1%      2.8   +2.2%      2.8   +0.3%         152.6     22.0
+sux 0.15 PHastR (8-bit, 4.25)            1.943     57.8   +1.0%      4.4   +1.1%        -                  76.6     22.0
+sux 0.15 PHastR (8-bit, 4.5)             1.904     53.7   +0.4%      4.8   +2.3%        -                  76.6     22.0
+sux 0.15 PHastR (8-bit, 4.75)            1.899     52.1   +0.4%      5.6   +0.9%        -                  76.6     22.0
+sux 0.15 PHastR (10-bit, 5.75)           1.823    103.9   +0.7%      5.8   +0.7%        -                  76.9     22.0
+sux 0.15 PHastR (10-bit, 6)              1.823     99.1   +1.1%      6.4   +2.7%        -                  76.9     22.0
+## mphf/10000000/eight [03:03:00 68000mC busy=4 swap=0MiB governor=performance]
+n 10000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.915      9.4   +2.4%      2.4  +10.4%      2.5   +6.9%          49.0      6.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.149     14.8   +4.6%      5.2   +3.4%        -                 101.6      6.0
+ph 0.11 PHast (SeedOnly)                 1.925     89.3   +0.1%      4.1   +1.8%        -                  78.1      6.0
+ptr_hash 2.1.3 compact                   2.143     42.9   +0.6%      5.0   +1.0%      4.5   +2.6%         156.6      6.0
+ptr_hash 2.1.3 balanced                  2.378     26.7   +1.8%      5.1   +5.8%      4.5   +0.8%         151.7      6.0
+ptr_hash 2.1.3 fast                      2.990    132.3   +0.5%      2.8   +2.2%      2.8   +0.7%         151.7      6.0
+sux 0.15 PHastR (8-bit, 4.25)            1.946     10.4   +2.9%      4.4   +0.8%        -                  79.8      6.0
+sux 0.15 PHastR (8-bit, 4.5)             1.906     10.4  +10.1%      4.9   +0.4%        -                  79.4      6.0
+sux 0.15 PHastR (8-bit, 4.75)            1.901      9.9  +12.0%      5.6   +2.1%        -                  79.5      6.0
+sux 0.15 PHastR (10-bit, 5.75)           1.828     18.1   +1.3%      5.9   +0.5%        -                  81.6      6.0
+sux 0.15 PHastR (10-bit, 6)              1.827     17.3   +4.5%      6.4   +0.4%        -                  81.4      6.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        2 MB 10.32 -> 11.17 GB/s 0.25 -> 0.26 ns, 2 MB 8.44 -> 8.31 GB/s 0.27 -> 0.25 ns, 2 MB 9.22 -> 7.61 GB/s 0.25 -> 0.25 ns
+ph 0.11 PHast+ (ShiftOnlyWrapped)    2 MB 17.37 -> 16.85 GB/s 0.28 -> 0.28 ns, 2 MB 15.44 -> 17.62 GB/s 0.26 -> 0.26 ns, 2 MB 16.91 -> 17.60 GB/s 0.28 -> 0.26 ns
+ph 0.11 PHast (SeedOnly)             2 MB 17.18 -> 15.18 GB/s 0.27 -> 0.28 ns, 2 MB 16.52 -> 15.53 GB/s 0.29 -> 0.28 ns, 2 MB 16.39 -> 17.27 GB/s 0.27 -> 0.28 ns
+ptr_hash 2.1.3 compact               3 MB 19.78 -> 20.21 GB/s 0.27 -> 0.29 ns, 3 MB 20.29 -> 19.52 GB/s 0.27 -> 0.28 ns, 3 MB 19.79 -> 20.10 GB/s 0.29 -> 0.28 ns
+ptr_hash 2.1.3 balanced              3 MB 23.13 -> 20.50 GB/s 0.27 -> 0.28 ns, 3 MB 19.33 -> 20.52 GB/s 0.29 -> 0.28 ns, 3 MB 21.42 -> 23.19 GB/s 0.29 -> 0.28 ns
+ptr_hash 2.1.3 fast                  3 MB 24.79 -> 23.69 GB/s 0.29 -> 0.27 ns, 3 MB 25.37 -> 24.18 GB/s 0.29 -> 0.29 ns, 3 MB 25.34 -> 26.00 GB/s 0.29 -> 0.28 ns
+sux 0.15 PHastR (8-bit, 4.25)        2 MB 18.42 -> 18.01 GB/s 0.29 -> 0.26 ns, 2 MB 17.52 -> 18.36 GB/s 0.29 -> 0.29 ns, 2 MB 18.58 -> 19.63 GB/s 0.29 -> 0.28 ns
+sux 0.15 PHastR (8-bit, 4.5)         2 MB 17.16 -> 15.98 GB/s 0.28 -> 0.28 ns, 2 MB 16.29 -> 18.05 GB/s 0.29 -> 0.28 ns, 2 MB 17.97 -> 16.38 GB/s 0.29 -> 0.28 ns
+sux 0.15 PHastR (8-bit, 4.75)        2 MB 15.89 -> 14.87 GB/s 0.29 -> 0.27 ns, 2 MB 15.98 -> 15.25 GB/s 0.27 -> 0.27 ns, 2 MB 15.63 -> 16.78 GB/s 0.29 -> 0.28 ns
+sux 0.15 PHastR (10-bit, 5.75)       2 MB 17.29 -> 15.72 GB/s 0.29 -> 0.27 ns, 2 MB 17.33 -> 15.87 GB/s 0.27 -> 0.28 ns, 2 MB 16.25 -> 16.54 GB/s 0.27 -> 0.29 ns
+sux 0.15 PHastR (10-bit, 6)          2 MB 15.55 -> 14.79 GB/s 0.29 -> 0.29 ns, 2 MB 16.07 -> 16.02 GB/s 0.29 -> 0.29 ns, 2 MB 16.70 -> 16.92 GB/s 0.29 -> 0.29 ns
+## mphf/10000000/one-nothp [03:03:24 67000mC busy=3 swap=0MiB governor=performance]
+n 10000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.915     34.7   +2.9%      2.6   +0.8%      2.6   +1.8%          30.2      0.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     62.3   +0.6%      5.3   +0.5%        -                 152.6      0.0
+ph 0.11 PHast (SeedOnly)                 1.921    581.1   +0.1%      4.1   +0.5%        -                 152.5      0.0
+ptr_hash 2.1.3 compact                   2.143    157.8   +0.2%      5.1   +0.5%      4.5   +0.4%         156.2      0.0
+ptr_hash 2.1.3 balanced                  2.378     99.7   +0.5%      5.1   +2.6%      4.5   +0.8%         152.4      0.0
+ptr_hash 2.1.3 fast                      2.990    143.7   +1.1%      2.8   +2.3%      2.8   +0.9%         152.4      0.0
+sux 0.15 PHastR (8-bit, 4.25)            1.943     58.4   +3.5%      4.4   +0.7%        -                  76.7      0.0
+sux 0.15 PHastR (8-bit, 4.5)             1.904     53.7   +1.2%      4.8   +4.7%        -                  76.7      0.0
+sux 0.15 PHastR (8-bit, 4.75)            1.899     52.1   +0.2%      5.6   +0.9%        -                  76.7      0.0
+sux 0.15 PHastR (10-bit, 5.75)           1.823    104.0   +2.4%      5.8   +0.4%        -                  76.9      0.0
+sux 0.15 PHastR (10-bit, 6)              1.823     99.1   +0.4%      6.4   +0.3%        -                  76.9      0.0
+## mphf/100000000/one [03:04:19 69000mC busy=1 swap=0MiB governor=performance]
+n 100000000, 1 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.911     34.6   +0.2%      8.7   +1.8%      3.5   +1.8%         261.9     40.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.146     65.0   +1.5%     16.3   +7.7%        -                1525.8     42.0
+ph 0.11 PHast (SeedOnly)                 1.920    585.2   +0.1%     13.3   +1.1%        -                1525.9     42.0
+ptr_hash 2.1.3 compact                   2.143    156.1   +0.6%     16.2   +0.9%      5.8   +0.8%         906.3     42.0
+ptr_hash 2.1.3 balanced                  2.378     99.2   +0.7%     17.2   +1.4%      5.9   +1.7%         869.9     42.0
+ptr_hash 2.1.3 fast                      2.990    200.5   +3.8%     10.6   +0.8%      4.8   +2.3%        1434.4     42.0
+sux 0.15 PHastR (8-bit, 4.25)            1.942     61.3   +0.3%     15.7   +0.7%        -                 916.9     42.0
+sux 0.15 PHastR (8-bit, 4.5)             1.902     57.5   +0.3%     16.3   +1.9%        -                 924.4     42.0
+sux 0.15 PHastR (8-bit, 4.75)            1.897     56.2   +0.5%     17.8   +0.9%        -                 931.4     42.0
+sux 0.15 PHastR (10-bit, 5.75)           1.819    108.1   +0.5%     18.4   +0.9%        -                 900.2     42.0
+sux 0.15 PHastR (10-bit, 6)              1.819    102.0   +1.0%     18.8   +2.9%        -                 911.5     42.0
+## mphf/100000000/eight [03:14:57 61000mC busy=2 swap=0MiB governor=performance]
+n 100000000, 8 thread(s), builds min of 3 rounds, lookups over one shuffled probe order, min of 9 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns build peak MB  huge MB
+lexindex MPH3                            1.911      7.8   +4.0%      8.6   +1.3%      3.4   +5.6%         281.1     44.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     15.5   +0.8%     16.3   +6.6%        -                 967.9     44.0
+ph 0.11 PHast (SeedOnly)                 1.921     88.9   +0.1%     13.1   +0.9%        -                 952.7     44.0
+ptr_hash 2.1.3 compact                   2.143     39.5   +0.9%     16.2   +1.3%      5.9   +1.0%        1097.4     44.0
+ptr_hash 2.1.3 balanced                  2.378     23.0   +0.2%     17.0   +2.3%      5.9   +1.7%         911.8     44.0
+ptr_hash 2.1.3 fast                      2.990    207.2   +2.5%     10.6   +0.9%      4.8   +1.2%        1468.8     44.0
+sux 0.15 PHastR (8-bit, 4.25)            1.943     10.3   +3.4%     15.6   +2.0%        -                 941.0     44.0
+sux 0.15 PHastR (8-bit, 4.5)             1.903     10.1   +4.0%     16.3   +1.6%        -                 922.7     44.0
+sux 0.15 PHastR (8-bit, 4.75)            1.898     10.2   +4.0%     17.2   +5.1%        -                 933.7     44.0
+sux 0.15 PHastR (10-bit, 5.75)           1.821     17.2   +0.6%     18.1   +2.0%        -                 932.6     44.0
+sux 0.15 PHastR (10-bit, 6)              1.820     16.9   +3.5%     19.0   +2.4%        -                 903.2     44.0
+placement, per copy and round: resident MB; GB/s at which 8 threads read every line of its pages, 4 KiB at a time in a shuffled order; wall ns a load of 8 threads' independent loads of random lines of it -- each before the lookups -> after
+lexindex MPH3                        22 MB 32.79 -> 34.30 GB/s 1.14 -> 1.13 ns, 22 MB 42.23 -> 43.67 GB/s 1.29 -> 1.28 ns, 22 MB 41.84 -> 47.49 GB/s 1.24 -> 1.24 ns
+ph 0.11 PHast+ (ShiftOnlyWrapped)    26 MB 39.67 -> 40.14 GB/s 1.49 -> 1.49 ns, 26 MB 38.90 -> 37.71 GB/s 1.40 -> 1.40 ns, 26 MB 36.93 -> 38.79 GB/s 1.40 -> 1.39 ns
+ph 0.11 PHast (SeedOnly)             23 MB 44.21 -> 42.59 GB/s 1.24 -> 1.24 ns, 23 MB 42.90 -> 46.32 GB/s 1.26 -> 1.26 ns, 23 MB 41.40 -> 45.58 GB/s 1.28 -> 1.28 ns
+ptr_hash 2.1.3 compact               27 MB 35.69 -> 37.56 GB/s 1.45 -> 1.44 ns, 27 MB 40.32 -> 42.46 GB/s 1.51 -> 1.51 ns, 27 MB 36.73 -> 40.48 GB/s 1.51 -> 1.51 ns
+ptr_hash 2.1.3 balanced              30 MB 36.78 -> 38.46 GB/s 1.64 -> 1.64 ns, 30 MB 36.63 -> 41.22 GB/s 1.59 -> 1.60 ns, 30 MB 38.81 -> 37.34 GB/s 1.61 -> 1.61 ns
+ptr_hash 2.1.3 fast                  37 MB 33.36 -> 35.49 GB/s 1.93 -> 1.93 ns, 37 MB 35.69 -> 36.53 GB/s 1.90 -> 1.90 ns, 37 MB 33.54 -> 35.45 GB/s 1.88 -> 1.87 ns
+sux 0.15 PHastR (8-bit, 4.25)        24 MB 44.27 -> 44.62 GB/s 1.26 -> 1.26 ns, 24 MB 45.62 -> 43.99 GB/s 1.30 -> 1.30 ns, 24 MB 45.25 -> 45.73 GB/s 1.33 -> 1.33 ns
+sux 0.15 PHastR (8-bit, 4.5)         22 MB 47.18 -> 48.77 GB/s 1.21 -> 1.22 ns, 22 MB 50.63 -> 43.79 GB/s 1.22 -> 1.23 ns, 22 MB 47.74 -> 47.61 GB/s 1.22 -> 1.22 ns
+sux 0.15 PHastR (8-bit, 4.75)        23 MB 44.44 -> 47.44 GB/s 1.23 -> 1.23 ns, 22 MB 51.84 -> 42.54 GB/s 1.19 -> 1.19 ns, 23 MB 42.20 -> 46.00 GB/s 1.24 -> 1.23 ns
+sux 0.15 PHastR (10-bit, 5.75)       22 MB 49.29 -> 51.39 GB/s 1.21 -> 1.21 ns, 22 MB 41.25 -> 41.13 GB/s 1.17 -> 1.18 ns, 22 MB 43.93 -> 45.34 GB/s 1.16 -> 1.15 ns
+sux 0.15 PHastR (10-bit, 6)          22 MB 46.14 -> 50.88 GB/s 1.20 -> 1.19 ns, 22 MB 49.37 -> 41.77 GB/s 1.18 -> 1.19 ns, 22 MB 43.26 -> 46.45 GB/s 1.20 -> 1.19 ns

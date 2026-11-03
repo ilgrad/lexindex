@@ -1,0 +1,260 @@
+[00:36] waiting for the machine to settle before rel-1m (up to 30 min)
+[00:37] stage rel-1m
+[01:11] waiting for the machine to settle before rel-sentinels (up to 30 min)
+[01:12] stage rel-sentinels
+[01:14] waiting for the machine to settle before doc7 (up to 30 min)
+[01:15] stage doc7
+[01:16] waiting for the machine to settle before py (up to 30 min)
+[01:17] stage py
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/latency_py.py:115: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+[01:24] waiting for the machine to settle before compare (up to 30 min)
+[01:25] stage compare
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/compare.py:223: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  return lexindex.CompactHashIndex(KEYS, 1)
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/compare.py:227: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  return lexindex.CompactHashIndex(KEYS, 2)
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/compare.py:439: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  ch = lexindex.CompactHashIndex(KEYS, fp)
+[01:26] waiting for the machine to settle before lookup-fairness (up to 30 min)
+[01:27] stage lookup-fairness
+[01:27] waiting for the machine to settle before closed (up to 30 min)
+[01:27] stage closed
+[01:28] waiting for the machine to settle before negfp (up to 30 min)
+[01:28] stage negfp
+[01:29] waiting for the machine to settle before docnums (up to 30 min)
+[01:30] stage docnums
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
+* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
+  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
+  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
+  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
+  PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns  estimated
+the nanoseconds are a model of this crate's own machine, not a measurement of yours
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote /home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/work/docnums-cli.bin: DictIndex over 479823 keys, 1264362 bytes (2.64 B/key)
+[01:30] waiting for the machine to settle before dict (up to 30 min)
+[01:30] stage dict
+[01:34] waiting for the machine to settle before prefix (up to 30 min)
+[01:35] stage prefix
+[01:40] waiting for the machine to settle before limit (up to 30 min)
+[01:41] stage limit
+[01:42] stage arrow
+[01:42] waiting for the machine to settle before common-prefix (up to 30 min)
+[01:42] stage common-prefix
+[01:43] waiting for the machine to settle before rsmarisa (up to 30 min)
+[01:43] stage rsmarisa
+[01:45] waiting for the machine to settle before stats (up to 30 min)
+[01:45] stage stats
+[01:50] waiting for the machine to settle before latency (up to 30 min)
+[01:51] stage latency
+[01:56] waiting for the machine to settle before cjk (up to 30 min)
+[01:57] stage cjk
+[02:02] waiting for the machine to settle before sweep (up to 30 min)
+[02:03] stage sweep
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/sweep.py:46: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  ("CompactHashIndex fp=1", lambda keys: lexindex.CompactHashIndex(keys, 1), False),
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/q1102/out/pybench/sweep.py:46: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  ("CompactHashIndex fp=1", lambda keys: lexindex.CompactHashIndex(keys, 1), False),
+[02:16] waiting for the machine to settle before rel-build (up to 30 min)
+[02:17] stage rel-build
+[02:30] waiting for the machine to settle before rel-scale (up to 30 min)
+[02:31] stage rel-scale
+[02:47] waiting for the machine to settle before readscale (up to 30 min)
+[02:48] stage readscale
+[02:54] waiting for the machine to settle before coldmmap (up to 30 min)
+[02:56] stage coldmmap
+[02:57] waiting for the machine to settle before scale (up to 30 min)
+[02:58] stage scale
+[03:00] waiting for the machine to settle before mphf (up to 30 min)
+[03:01] stage mphf
+[03:20] waiting for the machine to settle before mphf-strings (up to 30 min)
+[03:21] stage mphf-strings
+[03:28] waiting for the machine to settle before mphf-consensus (up to 30 min)
+[03:30] stage mphf-consensus
+[03:32] waiting for the machine to settle before uops-pad (up to 30 min)
+[03:33] stage uops-pad
+[03:46] waiting for the machine to settle before mphf-misses (up to 30 min)
+[03:47] stage mphf-misses
+[03:54] waiting for the machine to settle before mphf-lanes-1b (up to 30 min)
+[03:55] stage mphf-lanes-1b
+mph built 7.5 s
+compact built 47.6 s
+fast built 0.0 s
+mphb8 round 0: wall 4.15, per thread min 32.81 mean 32.97 max 33.08 (x8 = 4.10 / 4.12 / 4.14)
+cmpb8 round 0: wall 3.63, per thread min 28.72 mean 28.80 max 28.86 (x8 = 3.59 / 3.60 / 3.61)
+mph8 round 0: wall 4.37, per thread min 33.69 mean 34.15 max 34.73 (x8 = 4.21 / 4.27 / 4.34)
+cmp8 round 0: wall 4.87, per thread min 38.35 mean 38.55 max 38.83 (x8 = 4.79 / 4.82 / 4.85)
+cmp8 round 1: wall 4.88, per thread min 38.23 mean 38.54 max 38.83 (x8 = 4.78 / 4.82 / 4.85)
+mph8 round 1: wall 4.42, per thread min 34.14 mean 34.66 max 35.26 (x8 = 4.27 / 4.33 / 4.41)
+cmpb8 round 1: wall 3.61, per thread min 28.50 mean 28.62 max 28.68 (x8 = 3.56 / 3.58 / 3.59)
+mphb8 round 1: wall 4.13, per thread min 32.65 mean 32.74 max 32.80 (x8 = 4.08 / 4.09 / 4.10)
+mphb8 round 2: wall 4.13, per thread min 32.68 mean 32.75 max 32.83 (x8 = 4.09 / 4.09 / 4.10)
+cmpb8 round 2: wall 3.58, per thread min 28.22 mean 28.39 max 28.45 (x8 = 3.53 / 3.55 / 3.56)
+mph8 round 2: wall 4.29, per thread min 33.74 mean 33.98 max 34.24 (x8 = 4.22 / 4.25 / 4.28)
+cmp8 round 2: wall 4.80, per thread min 37.87 mean 38.05 max 38.21 (x8 = 4.73 / 4.76 / 4.78)
+cmp8 round 3: wall 4.86, per thread min 38.12 mean 38.41 max 38.73 (x8 = 4.76 / 4.80 / 4.84)
+mph8 round 3: wall 4.35, per thread min 33.52 mean 33.99 max 34.60 (x8 = 4.19 / 4.25 / 4.33)
+cmpb8 round 3: wall 3.61, per thread min 28.57 mean 28.62 max 28.69 (x8 = 3.57 / 3.58 / 3.59)
+mphb8 round 3: wall 4.13, per thread min 32.60 mean 32.72 max 32.86 (x8 = 4.08 / 4.09 / 4.11)
+mphb8 round 4: wall 4.12, per thread min 32.47 mean 32.65 max 32.73 (x8 = 4.06 / 4.08 / 4.09)
+cmpb8 round 4: wall 3.57, per thread min 28.12 mean 28.31 max 28.43 (x8 = 3.52 / 3.54 / 3.55)
+mph8 round 4: wall 4.34, per thread min 33.61 mean 33.90 max 34.52 (x8 = 4.20 / 4.24 / 4.32)
+cmp8 round 4: wall 4.81, per thread min 37.62 mean 37.92 max 38.24 (x8 = 4.70 / 4.74 / 4.78)
+cmp8 round 5: wall 4.87, per thread min 38.26 mean 38.47 max 38.82 (x8 = 4.78 / 4.81 / 4.85)
+mph8 round 5: wall 4.34, per thread min 33.58 mean 34.03 max 34.64 (x8 = 4.20 / 4.25 / 4.33)
+cmpb8 round 5: wall 3.62, per thread min 28.61 mean 28.69 max 28.77 (x8 = 3.58 / 3.59 / 3.60)
+mphb8 round 5: wall 4.13, per thread min 32.69 mean 32.77 max 32.92 (x8 = 4.09 / 4.10 / 4.11)
+transparent huge pages off
+mph built 7.8 s
+compact built 47.8 s
+fast built 0.0 s
+mphb8 round 0: wall 4.10, per thread min 31.98 mean 32.33 max 32.57 (x8 = 4.00 / 4.04 / 4.07)
+cmpb8 round 0: wall 3.52, per thread min 27.47 mean 27.68 max 28.03 (x8 = 3.43 / 3.46 / 3.50)
+mph8 round 0: wall 4.33, per thread min 33.83 mean 34.15 max 34.47 (x8 = 4.23 / 4.27 / 4.31)
+cmp8 round 0: wall 4.74, per thread min 37.33 mean 37.54 max 37.77 (x8 = 4.67 / 4.69 / 4.72)
+cmp8 round 1: wall 4.73, per thread min 37.17 mean 37.44 max 37.68 (x8 = 4.65 / 4.68 / 4.71)
+mph8 round 1: wall 4.32, per thread min 33.73 mean 34.05 max 34.41 (x8 = 4.22 / 4.26 / 4.30)
+cmpb8 round 1: wall 3.50, per thread min 27.55 mean 27.62 max 27.76 (x8 = 3.44 / 3.45 / 3.47)
+mphb8 round 1: wall 4.08, per thread min 31.97 mean 32.34 max 32.51 (x8 = 4.00 / 4.04 / 4.06)
+mphb8 round 2: wall 4.07, per thread min 31.97 mean 32.25 max 32.38 (x8 = 4.00 / 4.03 / 4.05)
+cmpb8 round 2: wall 3.42, per thread min 27.05 mean 27.11 max 27.18 (x8 = 3.38 / 3.39 / 3.40)
+mph8 round 2: wall 4.28, per thread min 33.77 mean 33.98 max 34.14 (x8 = 4.22 / 4.25 / 4.27)
+cmp8 round 2: wall 4.70, per thread min 37.11 mean 37.35 max 37.50 (x8 = 4.64 / 4.67 / 4.69)
+cmp8 round 3: wall 4.74, per thread min 37.08 mean 37.43 max 37.72 (x8 = 4.64 / 4.68 / 4.72)
+mph8 round 3: wall 4.34, per thread min 33.48 mean 33.99 max 34.55 (x8 = 4.18 / 4.25 / 4.32)
+cmpb8 round 3: wall 3.50, per thread min 27.45 mean 27.61 max 27.79 (x8 = 3.43 / 3.45 / 3.47)
+mphb8 round 3: wall 4.09, per thread min 32.03 mean 32.30 max 32.50 (x8 = 4.00 / 4.04 / 4.06)
+mphb8 round 4: wall 4.08, per thread min 31.98 mean 32.26 max 32.42 (x8 = 4.00 / 4.03 / 4.05)
+cmpb8 round 4: wall 3.44, per thread min 27.16 mean 27.28 max 27.37 (x8 = 3.40 / 3.41 / 3.42)
+mph8 round 4: wall 4.34, per thread min 33.68 mean 33.95 max 34.63 (x8 = 4.21 / 4.24 / 4.33)
+cmp8 round 4: wall 4.74, per thread min 37.09 mean 37.35 max 37.67 (x8 = 4.64 / 4.67 / 4.71)
+cmp8 round 5: wall 4.74, per thread min 36.98 mean 37.42 max 37.67 (x8 = 4.62 / 4.68 / 4.71)
+mph8 round 5: wall 4.34, per thread min 33.33 mean 34.03 max 34.55 (x8 = 4.17 / 4.25 / 4.32)
+cmpb8 round 5: wall 3.48, per thread min 27.50 mean 27.59 max 27.66 (x8 = 3.44 / 3.45 / 3.46)
+mphb8 round 5: wall 4.08, per thread min 31.94 mean 32.32 max 32.51 (x8 = 3.99 / 4.04 / 4.06)
+mph built 7.4 s
+compact built 47.5 s
+fast built 0.0 s
+mphb8 round 0: wall 3.79, per thread min 29.72 mean 29.90 max 30.10 (x8 = 3.71 / 3.74 / 3.76)
+cmpb8 round 0: wall 3.30, per thread min 25.83 mean 25.96 max 26.25 (x8 = 3.23 / 3.25 / 3.28)
+mph8 round 0: wall 3.98, per thread min 30.94 mean 31.31 max 31.75 (x8 = 3.87 / 3.91 / 3.97)
+cmp8 round 0: wall 4.55, per thread min 35.86 mean 36.00 max 36.20 (x8 = 4.48 / 4.50 / 4.52)
+cmp8 round 1: wall 4.56, per thread min 35.82 mean 36.04 max 36.35 (x8 = 4.48 / 4.51 / 4.54)
+mph8 round 1: wall 3.98, per thread min 30.85 mean 31.24 max 31.72 (x8 = 3.86 / 3.91 / 3.97)
+cmpb8 round 1: wall 3.27, per thread min 25.76 mean 25.89 max 25.98 (x8 = 3.22 / 3.24 / 3.25)
+mphb8 round 1: wall 3.76, per thread min 29.64 mean 29.76 max 29.92 (x8 = 3.71 / 3.72 / 3.74)
+mphb8 round 2: wall 3.75, per thread min 29.24 mean 29.66 max 29.82 (x8 = 3.66 / 3.71 / 3.73)
+cmpb8 round 2: wall 3.15, per thread min 24.66 mean 24.96 max 25.07 (x8 = 3.08 / 3.12 / 3.13)
+mph8 round 2: wall 3.93, per thread min 30.78 mean 31.12 max 31.38 (x8 = 3.85 / 3.89 / 3.92)
+cmp8 round 2: wall 4.45, per thread min 35.11 mean 35.26 max 35.47 (x8 = 4.39 / 4.41 / 4.43)
+cmp8 round 3: wall 4.56, per thread min 35.67 mean 35.97 max 36.28 (x8 = 4.46 / 4.50 / 4.53)
+mph8 round 3: wall 3.97, per thread min 30.50 mean 31.09 max 31.61 (x8 = 3.81 / 3.89 / 3.95)
+cmpb8 round 3: wall 3.24, per thread min 25.47 mean 25.60 max 25.70 (x8 = 3.18 / 3.20 / 3.21)
+mphb8 round 3: wall 3.73, per thread min 29.23 mean 29.53 max 29.69 (x8 = 3.65 / 3.69 / 3.71)
+mphb8 round 4: wall 3.72, per thread min 29.19 mean 29.45 max 29.64 (x8 = 3.65 / 3.68 / 3.71)
+cmpb8 round 4: wall 3.14, per thread min 24.46 mean 24.81 max 24.92 (x8 = 3.06 / 3.10 / 3.12)
+mph8 round 4: wall 3.97, per thread min 30.21 mean 30.85 max 31.55 (x8 = 3.78 / 3.86 / 3.94)
+cmp8 round 4: wall 4.43, per thread min 34.97 mean 35.16 max 35.35 (x8 = 4.37 / 4.40 / 4.42)
+cmp8 round 5: wall 4.56, per thread min 35.74 mean 36.01 max 36.30 (x8 = 4.47 / 4.50 / 4.54)
+mph8 round 5: wall 3.97, per thread min 30.79 mean 31.20 max 31.56 (x8 = 3.85 / 3.90 / 3.94)
+cmpb8 round 5: wall 3.25, per thread min 25.54 mean 25.69 max 25.79 (x8 = 3.19 / 3.21 / 3.22)
+mphb8 round 5: wall 3.74, per thread min 29.40 mean 29.61 max 29.70 (x8 = 3.68 / 3.70 / 3.71)
+[03:58] waiting for the machine to settle before mphf-1b (up to 30 min)
+[04:01] stage mphf-1b
+[04:51] waiting for the machine to settle before frontier-1m (up to 30 min)
+[04:53] stage frontier-1m
+[06:08] waiting for the machine to settle before frontier-10m (up to 30 min)
+[06:09] stage frontier-10m
+[10:48] all done. Reopen Zed and say so.
