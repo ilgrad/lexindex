@@ -270,19 +270,17 @@ mod mph {
         );
         let dict_blob = std::fs::read(data("golden-5.0.0-dict.bdx")).unwrap();
         assert_eq!(&stored[48..48 + dict_blob.len()], &dict_blob[..]);
-        for name in ["golden-5.0.0-hashed.bhd", "golden-4.1.0-hashed.bhd"] {
-            let idx = lexindex::HashedDictIndex::load(data(name)).unwrap();
-            assert_eq!((idx.len(), idx.fingerprint_bits()), (sorted.len(), 8));
-            for (rank, key) in sorted.iter().enumerate() {
-                assert_eq!(idx.id(key), Some(rank as u64), "{name}: {key:?}");
-                assert_eq!(idx.id_unchecked(key), rank as u64, "{name}: {key:?}");
-            }
-            let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
-            assert!(
-                false_positives <= 20,
-                "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
-            );
+        let idx = lexindex::HashedDictIndex::load(&path).unwrap();
+        assert_eq!((idx.len(), idx.fingerprint_bits()), (sorted.len(), 8));
+        for (rank, key) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
+            assert_eq!(idx.id_unchecked(key), rank as u64, "{key:?}");
         }
+        let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
+        assert!(
+            false_positives <= 20,
+            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
+        );
     }
 
     /// The refused fixtures must stay what they were: a `BMP5`, a `BMP6` and two `BCH6` — one
@@ -1397,10 +1395,10 @@ fn every_golden_blob_inspects_from_its_header() {
         (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
         (BlobKind::Mphf, "MPH3", Some(1000), Some(mph), mph)
     );
-    // The hashed dictionary of 4.1: the 4.0 dictionary inside, the perfect hash the other 4.0
-    // blobs hold over the same keys, and eighteen bits a key of rank and fingerprint.
+    // The hashed dictionary: the pinned dictionary inside, the perfect hash the other pins hold
+    // over the same keys, and eighteen bits a key of rank and fingerprint.
     let i = inspect_file(data("golden-5.0.0-hashed.bhd")).unwrap();
-    let dict_bytes = inspect_file(data("golden-4.0.0-dict.bdx")).unwrap().bytes;
+    let dict_bytes = inspect_file(data("golden-5.0.0-dict.bdx")).unwrap().bytes;
     assert_eq!(
         (
             i.kind,
