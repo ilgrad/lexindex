@@ -27,11 +27,13 @@ All notable changes to this project are documented here. The format follows
   their users rebuild from the corpus or stay on 4.x. `MPH3` and `OVL2` keep their numbers.
 
 - **The MPHF cuts its first level into chunks of 2¹⁹ buckets, not 2¹⁶.** A boundary between two chunks
-  bumps about two hundred keys, so fewer of them save 0.015 bits a key at 10⁶ keys (1.923 → 1.908),
-  0.007 at 10⁷ and 0.006 at 10⁸. A larger chunk in flight costs memory: `CompactHashIndex` over 10⁷
-  listed keys adds 253.8 MB to the keys against 216.7, on 8 threads, and 2·10⁶ keys and
-  `PerfectHashIndex` do not move. Provisional: fewer chunks spread over fewer threads, and what that
-  costs a build is **not yet timed**.
+  bumps about two hundred keys, so fewer of them save 0.007 bits a key at 10⁷ keys and 0.006 at 10⁸.
+  A first level under four chunks is cut into eight pieces no smaller than 2¹⁴ buckets, as before, so
+  a table of 10⁶ keys keeps its seven boundaries, its 1.923 bits and its parallel build: at a quarter
+  of 2¹⁹ its first level would have been one piece, placed on one thread. A larger chunk in flight
+  costs memory: `CompactHashIndex` over 10⁷ listed keys adds 253.8 MB to the keys against 216.7, on
+  8 threads, and 2·10⁶ keys and `PerfectHashIndex` do not move. Provisional: what fewer chunks over
+  fewer threads cost a build of 10⁷ keys and up is **not yet timed**.
 
 ### Added
 
