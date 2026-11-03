@@ -34,7 +34,7 @@ All notable changes to this project are documented here. The format follows
   the Python constructor, `--labels` on `lexindex build --index dict`; it keeps the labels only
   where the blob comes out smaller — otherwise its blob is the plain layout's byte for byte — and
   no default builds them. `DictLayout` is the one argument the block, the microblock and the labels
-  go in. A pinned golden blob (`golden-4.7.0-dict-labels.bdx`) seeds the dictionary fuzz target.
+  go in. A pinned golden blob (`golden-5.0.0-dict-labels.bdx`) seeds the dictionary fuzz target.
 - **`PerfectHashIndex` stores its keys overlapped where that is smaller: 10.88 → 9.25 bytes a key
   on the 479 823-word dictionary.** A new arena encoding, tag `0x13`, holds a greedy shortest
   common superstring of the keys — a key inside another costs no bytes, and an overlap between two
@@ -164,6 +164,29 @@ All notable changes to this project are documented here. The format follows
 
   No time is claimed: on the arena's step table, fewer instructions have bought less than they
   promised.
+- **`DictIndex` blobs are 0.2–0.6 % smaller on text at a million keys, in the same format.** The
+  trainer ranked a candidate by the bytes it covers, and now adds one for each use, which each use
+  also spares. The encoder's slot for a symbol's first three bytes holds two symbols where it held
+  one, so a good symbol is not turned away by a better one, or by a hash collision. Only a build
+  encodes, so a reader is unchanged, and a 4.x reader reads these blobs. Bytes a key:
+
+  | corpus | before | after |
+  |---|---:|---:|
+  | `words` | 2.635 | 2.622 |
+  | identifiers | 5.228 | 5.220 |
+  | PyPI names | 4.165 | 4.141 |
+  | domains | 4.500 | 4.483 |
+  | titles-en | 7.370 | 7.325 |
+  | titles-ru | 6.862 | 6.841 |
+  | titles-zh | 5.851 | 5.831 |
+  | urls | 7.511 | 7.488 |
+  | paths | 9.871 | 9.829 |
+
+  At 100 000 keys the same corpora fall 0.2–1.0 %. A shard under a packed alphabet, such as numeric,
+  dna, uuid and opaque keys, is unchanged. On `words`, domains and titles-en a build and a lookup count
+  the same instructions to within 0.1 %; a `key` over only the first 20 000 words counts 2.4 % more.
+  The fresh-build pins moved to `golden-5.0.0-dict.bdx`, `-dict-coded.bdx` and `-hashed.bhd`, and
+  the blobs 4.0, 4.1 and 4.3 wrote stay as read fixtures, each still answering every key.
 - **`DictIndex` executes about 30 fewer bounds checks a `key`.** Counted per call from callgrind, a
   `key` ran 60 checks and now runs 29. Two kinds went: a stair's index, which its loop already keeps
   in range, and a symbol's length, read beside a word the same code has just been checked for. Nothing a

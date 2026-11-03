@@ -4,14 +4,14 @@
 //! code for each, and the code `255` followed by the byte itself for what no symbol covers.
 //!
 //! The table is trained once per shard of blocks, over a sample of the pieces that shard will
-//! store, by the encoder's own parse: five rounds of parse-and-count, each keeping the 255
-//! candidates — the current symbols and every adjacent pair up to eight bytes — that cover the
-//! most bytes. A symbol of three bytes or
-//! more is accepted only if the encoder's slot for its first three bytes is still free, so every
-//! symbol in the table is one the encoder can reach and a round's counts mean what they say. The
-//! encoder has the reference's shape: per two-byte prefix the best symbol of one or two bytes, and
-//! a hash of the first three bytes to at most one longer symbol, so a position costs one eight-byte
-//! load and at most two lookups. Decoding is one eight-byte store per code.
+//! store, by the encoder's own parse: four rounds of parse-and-count, each keeping the 255
+//! candidates — the current symbols and every adjacent pair up to eight bytes — that earn the most.
+//! A symbol of three bytes or more is accepted only if the encoder's slot for its first three bytes
+//! has room, so every symbol in the table is one the encoder can reach and a round's counts mean
+//! what they say. The encoder is close to the reference's shape: per two-byte prefix the best symbol
+//! of one or two bytes, and a hash of the first three bytes to at most [`WAYS`] longer symbols, so a
+//! position costs one eight-byte load and at most three lookups. Only a build encodes. Decoding is
+//! one eight-byte store per code and knows nothing of the slots.
 
 use crate::phrase::Map;
 use crate::room::{Room, commit};
@@ -24,6 +24,20 @@ const MAX_LEN: usize = 8;
 /// and the trainer runs once a shard and again on what each shard's phrases leave behind.
 const ROUNDS: usize = 4;
 const SLOTS: usize = 1024;
+/// Symbols of three bytes or more a slot holds, longest first. One, as in the reference, turns away
+/// a symbol that shares its first three bytes with a better one, or only their hash. Two alone moved
+/// the text corpora −0.30…+0.23 %, and with [`earned`] they are what takes all nine down; three and
+/// four moved them −0.17…+0.11 % more. Only a build searches a slot.
+const WAYS: usize = 2;
+
+/// What a candidate earns: the bytes it covers and one more for each use. Covered bytes alone, the
+/// reference's rule, count every use of a symbol as only its length, though each one also spares a
+/// code. With two ways this took the nine text corpora down 0.17–0.61 %; plus two and plus three grew
+/// domains 0.4–0.5 % instead, and `2 * len - 1` grew every corpus.
+#[inline(always)]
+fn earned(uses: u32, len: usize) -> u64 {
+    u64::from(uses) * (len as u64 + 1)
+}
 
 /// The symbols in code order, each as the little-endian word of its bytes and its length.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,7 +121,7 @@ pub(crate) struct Encoder {
     short: Vec<u16>,
     /// The same for the last byte of a string, where only a one-byte symbol applies.
     single: [u16; 256],
-    slots: Vec<Slot>,
+    slots: Vec<[Slot; WAYS]>,
 }
 
 impl Table {
@@ -214,7 +228,7 @@ impl Table {
             let mut gain: Map<(u64, u8), u64> = Map::default();
             for (&c, &(word, len)) in count1.iter().zip(&piece) {
                 if c > 0 {
-                    *gain.entry((word, len as u8)).or_default() += u64::from(c) * len as u64;
+                    *gain.entry((word, len as u8)).or_default() += earned(c, len);
                 }
             }
             // A pair is two codes the encoder emitted, and every emitted code was counted above:
@@ -235,7 +249,7 @@ impl Table {
                     }
                     *gain
                         .entry((wa | wb << (8 * la), (la + lb) as u8))
-                        .or_default() += u64::from(c) * (la + lb) as u64;
+                        .or_default() += earned(c, la + lb);
                 }
             }
             // The rank is (gain down, bytes up); comparing the bytes as one big-endian word and
@@ -269,17 +283,21 @@ impl Table {
     }
 
     /// The first `max` of `ranked` the encoder can reach: a symbol of three bytes or more only if
-    /// its slot is still free.
+    /// its slot still has room.
     fn reachable(ranked: impl Iterator<Item = (u64, usize)>, max: usize) -> Table {
         let max = max.min(MAX_SYMBOLS);
-        let mut taken = vec![false; SLOTS];
+        let mut taken = vec![0usize; SLOTS];
         let mut syms: Vec<([u8; 8], usize)> = Vec::with_capacity(max);
         for (word, len) in ranked {
             if syms.len() == max {
                 break;
             }
-            if len >= 3 && std::mem::replace(&mut taken[slot_of(word)], true) {
-                continue;
+            if len >= 3 {
+                let held = &mut taken[slot_of(word)];
+                if *held == WAYS {
+                    continue;
+                }
+                *held += 1;
             }
             syms.push((word.to_le_bytes(), len));
         }
@@ -290,7 +308,7 @@ impl Table {
         let esc = u16::from(ESCAPE) | 1 << 8;
         let mut short = vec![esc; 1 << 16];
         let mut single = [esc; 256];
-        let mut slots = vec![Slot::default(); SLOTS];
+        let mut slots = vec![[Slot::default(); WAYS]; SLOTS];
         for (code, (&word, &len)) in self.words.iter().zip(&self.lens).enumerate() {
             let entry = code as u16 | u16::from(len) << 8;
             match len {
@@ -307,14 +325,16 @@ impl Table {
                 }
                 2 => short[(word & 0xFFFF) as usize] = entry,
                 _ => {
-                    let slot = &mut slots[slot_of(word)];
-                    if slot.len < len {
-                        *slot = Slot {
-                            word,
-                            mask: low_mask(len as usize),
-                            code: code as u8,
-                            len,
-                        };
+                    let mut new = Slot {
+                        word,
+                        mask: low_mask(len as usize),
+                        code: code as u8,
+                        len,
+                    };
+                    for slot in &mut slots[slot_of(word)] {
+                        if slot.len < new.len {
+                            std::mem::swap(slot, &mut new);
+                        }
                     }
                 }
             }
@@ -401,9 +421,10 @@ impl Encoder {
     /// `rem` bytes left in the string. The code is `ESCAPE` for a byte nothing covers.
     #[inline(always)]
     pub(crate) fn step(&self, word: u64, rem: usize) -> (u8, usize) {
-        let e = &self.slots[slot_of(word)];
-        if e.len != 0 && e.len as usize <= rem && word & e.mask == e.word {
-            return (e.code, e.len as usize);
+        for e in &self.slots[slot_of(word)] {
+            if e.len != 0 && e.len as usize <= rem && word & e.mask == e.word {
+                return (e.code, e.len as usize);
+            }
         }
         let sc = if rem >= 2 {
             self.short[(word & 0xFFFF) as usize]
@@ -431,6 +452,22 @@ impl Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two symbols that share their first three bytes both reach the encoder, the longer asked
+    /// first, and a third in that slot is left out of the table rather than left unreachable.
+    #[test]
+    fn a_slot_holds_two_symbols_longest_first() {
+        let word = |s: &[u8]| (word_of(s), s.len());
+        let table = Table::reachable(
+            [word(b"abcd"), word(b"abcdef"), word(b"abcde")].into_iter(),
+            255,
+        );
+        assert_eq!(table.len(), 2);
+        let enc = table.encoder();
+        assert_eq!(enc.step(word_of(b"abcdefgh"), 8), (1, 6));
+        assert_eq!(enc.step(word_of(b"abcdxxxx"), 8), (0, 4));
+        assert_eq!(enc.step(word_of(b"abcdef"), 5), (0, 4));
+    }
 
     fn golden_keys() -> Vec<&'static str> {
         include_str!("../tests/data/golden-keys.txt")

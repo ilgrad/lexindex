@@ -440,7 +440,7 @@ def _label_corpus(seed, n):
 
 
 def test_dict_index_labels_keeps_the_smaller_blob_and_answers_every_key():
-    paths = _label_corpus(1, 4_000)
+    paths = _label_corpus(2, 4_000)
     plain = lexindex.DictIndex(paths, block=256)
     labelled = lexindex.DictIndex(paths, block=256, labels=True)
     blob = labelled.to_bytes()

@@ -1258,19 +1258,32 @@ fn the_same_keys_give_the_same_blob_on_any_thread_count() {
     }
 }
 
+/// Keys of four characters with nothing repeating, from a fixed generator. A counter spelled in
+/// the same letters is no such thing: its high places are one letter, and a symbol table takes
+/// those keys 15–29 % below what the alphabet can.
+fn four_letter_keys(n: usize, len: usize) -> Vec<String> {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    (0..n)
+        .map(|_| {
+            (0..len)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    b"ACGT"[(x >> 61) as usize & 3] as char
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// A corpus of four characters is what the packed alphabet exists for: it must be the codec
 /// the build settles on, every key must still answer, and the blob must survive a round trip —
 /// the codes of a run are continuous, so an entry starts mid-byte and a reader that assumed
 /// bytes would read the neighbour's.
 #[test]
 fn a_four_letter_corpus_packs_its_suffixes_and_still_answers() {
-    let mut keys: Vec<String> = (0..4000u32)
-        .map(|i| {
-            (0..12)
-                .map(|k| b"ACGT"[(i as usize >> (2 * k)) & 3] as char)
-                .collect()
-        })
-        .collect();
+    let mut keys = four_letter_keys(4000, 12);
     keys.sort();
     keys.dedup();
     for block in [4usize, 32, 256] {
@@ -1306,11 +1319,7 @@ fn two_shapes_in_one_blob_settle_on_their_own_codecs() {
     let mut keys: Vec<String> = (0..600u32)
         .map(|i| format!("https://example.com/a/{i:09}/index.html"))
         .collect();
-    keys.extend((0..600u32).map(|i| {
-        (0..14)
-            .map(|k| b"ACGT"[(i as usize >> (2 * k)) & 3] as char)
-            .collect::<String>()
-    }));
+    keys.extend(four_letter_keys(600, 14));
     keys.sort();
     keys.dedup();
     let idx = DictIndex::build_with_block(&keys, 256).unwrap();
@@ -1625,7 +1634,7 @@ fn a_labelled_blob_answers_what_the_plain_one_does() {
         }
     }
     let labelled = DictIndex::build_with(
-        label_corpus(1, 4_000),
+        label_corpus(2, 4_000),
         DictLayout::new(256).with_labels(true),
     )
     .unwrap();
@@ -1653,7 +1662,7 @@ proptest::proptest! {
 /// still answers with somebody else's bytes, never past a section or outside the ids.
 #[test]
 fn a_corrupted_label_dictionary_never_panics() {
-    let keys = label_corpus(1, 4_000);
+    let keys = label_corpus(2, 4_000);
     let idx = DictIndex::build_with(&keys, DictLayout::new(256).with_labels(true)).unwrap();
     assert!(idx.has_labels());
     let blob = idx.to_bytes();
@@ -1716,7 +1725,7 @@ fn a_dictionary_whose_labels_all_went_flat_is_no_labelled_blob() {
 /// A `BDX5` whose labels are themselves labelled or coded is no blob this crate writes.
 #[test]
 fn a_label_dictionary_that_names_labels_of_its_own_is_refused() {
-    let keys = label_corpus(1, 4_000);
+    let keys = label_corpus(2, 4_000);
     let firsts = |idx: &DictIndex| SharedBytes::from_owned(vec![b'a'; idx.len()]);
     let inner = DictIndex::build_with(&keys, DictLayout::new(256).with_labels(true)).unwrap();
     assert!(inner.has_labels());

@@ -25,6 +25,10 @@
 //! refused by name as well, and the blobs 4.0 writes are both the read fixtures and the ones
 //! pinned byte for byte. The standalone `MPH2` table fixture still parses: a table is keyed on
 //! nothing but the hashes it was handed.
+//!
+//! 5.0 trains a dictionary's symbol table differently, in the same format, so a build no longer
+//! writes what 4.x wrote. `golden-5.0.0-*` hold the pin, and the 4.x dictionaries stay beside them
+//! as the files a 5.0 reader has to answer from.
 
 use std::path::PathBuf;
 
@@ -241,9 +245,9 @@ mod mph {
         }
     }
 
-    /// 4.1's `BHD1`, pinned by its bytes like the hash blobs above and read back: the 4.0
-    /// dictionary blob is inside it byte for byte, every key answers its rank through the sidecar,
-    /// and non-members are held to the 8-bit table's false-positive rate.
+    /// `BHD1`, pinned by its bytes like the hash blobs above: the pinned dictionary blob is inside
+    /// it byte for byte. Read back, and 4.1's with it: every key answers its rank through the
+    /// sidecar, and non-members are held to the 8-bit table's false-positive rate.
     #[test]
     fn the_hashed_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
         let keys = keys();
@@ -254,27 +258,29 @@ mod mph {
         let fresh = lexindex::HashedDictIndex::from_dict(dict, 8)
             .unwrap()
             .to_bytes();
-        let path = data("golden-4.1.0-hashed.bhd");
+        let path = data("golden-5.0.0-hashed.bhd");
         let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         assert_eq!(&fresh[..4], b"BHD1");
         assert!(
             stored == fresh,
-            "golden-4.1.0-hashed.bhd changed; regenerate {}",
+            "golden-5.0.0-hashed.bhd changed; regenerate {}",
             path.display()
         );
-        let dict_blob = std::fs::read(data("golden-4.0.0-dict.bdx")).unwrap();
+        let dict_blob = std::fs::read(data("golden-5.0.0-dict.bdx")).unwrap();
         assert_eq!(&stored[48..48 + dict_blob.len()], &dict_blob[..]);
-        let idx = lexindex::HashedDictIndex::load(&path).unwrap();
-        assert_eq!((idx.len(), idx.fingerprint_bits()), (sorted.len(), 8));
-        for (rank, key) in sorted.iter().enumerate() {
-            assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
-            assert_eq!(idx.id_unchecked(key), rank as u64, "{key:?}");
+        for name in ["golden-5.0.0-hashed.bhd", "golden-4.1.0-hashed.bhd"] {
+            let idx = lexindex::HashedDictIndex::load(data(name)).unwrap();
+            assert_eq!((idx.len(), idx.fingerprint_bits()), (sorted.len(), 8));
+            for (rank, key) in sorted.iter().enumerate() {
+                assert_eq!(idx.id(key), Some(rank as u64), "{name}: {key:?}");
+                assert_eq!(idx.id_unchecked(key), rank as u64, "{name}: {key:?}");
+            }
+            let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
+            assert!(
+                false_positives <= 20,
+                "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
+            );
         }
-        let false_positives = non_members().iter().filter(|k| idx.contains(k)).count();
-        assert!(
-            false_positives <= 20,
-            "{false_positives} of 1 000 non-members accepted at 8 fingerprint bits",
-        );
     }
 
     /// The refused fixtures must stay what they were: a `BMP5`, a `BMP6` and two `BCH6` — one
@@ -848,32 +854,34 @@ fn the_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key() {
     sorted.sort();
     sorted.dedup();
     let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
-    let path = data("golden-4.0.0-dict.bdx");
+    let path = data("golden-5.0.0-dict.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert_eq!(&fresh[..4], b"BDX3");
     assert!(
         stored == fresh,
-        "golden-4.0.0-dict.bdx changed; regenerate {}",
+        "golden-5.0.0-dict.bdx changed; regenerate {}",
         path.display()
     );
-    let idx = lexindex::DictIndex::load(&path).unwrap();
-    assert_eq!(idx.len(), sorted.len());
-    for (rank, key) in sorted.iter().enumerate() {
-        assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
-        assert_eq!(
-            idx.key(rank as u64).as_deref(),
-            Some(key.as_str()),
-            "{rank}"
-        );
+    for name in ["golden-5.0.0-dict.bdx", "golden-4.0.0-dict.bdx"] {
+        let idx = lexindex::DictIndex::load(data(name)).unwrap();
+        assert_eq!(idx.len(), sorted.len());
+        for (rank, key) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(key), Some(rank as u64), "{name}: {key:?}");
+            assert_eq!(
+                idx.key(rank as u64).as_deref(),
+                Some(key.as_str()),
+                "{name}: {rank}"
+            );
+        }
+        for stranger in non_members() {
+            assert_eq!(idx.id(&stranger), None, "{name}: {stranger:?}");
+        }
+        let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+        assert_eq!(walked, sorted, "{name}");
     }
-    for stranger in non_members() {
-        assert_eq!(idx.id(&stranger), None, "{stranger:?}");
-    }
-    let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
-    assert_eq!(walked, sorted);
 }
 
-/// The keys `golden-4.3.0-dict.bdx` was built from: Russian words, Chinese words and a third of
+/// The keys of `golden-5.0.0-dict-coded.bdx` and `golden-4.3.0-dict.bdx`: Russian words, Chinese words and a third of
 /// them with a number, from a fixed generator. A corpus a build spells in a character code — the
 /// letters and the most frequent ideographs a byte each, the rest two — which the golden keys,
 /// ASCII but for four, are not.
@@ -911,39 +919,45 @@ fn the_coded_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_key(
     sorted.sort();
     sorted.dedup();
     let fresh = lexindex::DictIndex::build(&keys).unwrap().to_bytes();
-    let path = data("golden-4.3.0-dict.bdx");
+    let path = data("golden-5.0.0-dict-coded.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert_eq!(&fresh[..4], b"BDX4");
     assert!(
         stored == fresh,
-        "golden-4.3.0-dict.bdx changed; regenerate {}",
+        "golden-5.0.0-dict-coded.bdx changed; regenerate {}",
         path.display()
     );
-    let idx = lexindex::DictIndex::load(&path).unwrap();
-    assert!(idx.sections().chars > 0);
-    assert_eq!(idx.len(), sorted.len());
-    for (rank, key) in sorted.iter().enumerate() {
-        assert_eq!(idx.id(key), Some(rank as u64), "{key:?}");
-        assert_eq!(
-            idx.key(rank as u64).as_deref(),
-            Some(key.as_str()),
-            "{rank}"
-        );
+    for name in ["golden-5.0.0-dict-coded.bdx", "golden-4.3.0-dict.bdx"] {
+        let idx = lexindex::DictIndex::load(data(name)).unwrap();
+        assert!(idx.sections().chars > 0, "{name}");
+        assert_eq!(idx.len(), sorted.len());
+        for (rank, key) in sorted.iter().enumerate() {
+            assert_eq!(idx.id(key), Some(rank as u64), "{name}: {key:?}");
+            assert_eq!(
+                idx.key(rank as u64).as_deref(),
+                Some(key.as_str()),
+                "{name}: {rank}"
+            );
+        }
+        // `ё`, capitals and ideographs past the hundred and ten are spelled by nothing in the code.
+        for stranger in ["ёж", "Москва", "龍", "北", "", "-", "а-0"] {
+            let rank = sorted.partition_point(|k| k.as_str() < stranger) as u64;
+            let member = sorted
+                .binary_search_by(|k| k.as_str().cmp(stranger))
+                .is_ok();
+            assert_eq!(
+                idx.id(stranger),
+                member.then_some(rank),
+                "{name}: {stranger:?}"
+            );
+            assert_eq!(idx.lower_bound(stranger), rank, "{name}: {stranger:?}");
+        }
+        let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
+        assert_eq!(walked, sorted, "{name}");
     }
-    // `ё`, capitals and ideographs past the hundred and ten are spelled by nothing in the code.
-    for stranger in ["ёж", "Москва", "龍", "北", "", "-", "а-0"] {
-        let rank = sorted.partition_point(|k| k.as_str() < stranger) as u64;
-        let member = sorted
-            .binary_search_by(|k| k.as_str().cmp(stranger))
-            .is_ok();
-        assert_eq!(idx.id(stranger), member.then_some(rank), "{stranger:?}");
-        assert_eq!(idx.lower_bound(stranger), rank, "{stranger:?}");
-    }
-    let walked: Vec<String> = idx.iter().map(|(k, _)| k).collect();
-    assert_eq!(walked, sorted);
 }
 
-/// The keys `golden-4.7.0-dict-labels.bdx` was built from: paths under a few directories whose
+/// The keys `golden-5.0.0-dict-labels.bdx` was built from: paths under a few directories whose
 /// names recur under many parents, from a fixed generator — the shape a dictionary of trie labels
 /// is for.
 fn labelled_keys() -> Vec<String> {
@@ -989,12 +1003,12 @@ fn the_labelled_dict_blob_is_byte_identical_to_a_fresh_build_and_answers_every_k
         lexindex::DictIndex::build_with(&keys, lexindex::DictLayout::new(256).with_labels(true))
             .unwrap()
             .to_bytes();
-    let path = data("golden-4.7.0-dict-labels.bdx");
+    let path = data("golden-5.0.0-dict-labels.bdx");
     let stored = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert_eq!(&fresh[..4], b"BDX5");
     assert!(
         stored == fresh,
-        "golden-4.7.0-dict-labels.bdx changed; regenerate {}",
+        "golden-5.0.0-dict-labels.bdx changed; regenerate {}",
         path.display()
     );
     #[cfg(feature = "fuzzing")]

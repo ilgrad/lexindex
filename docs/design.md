@@ -260,7 +260,7 @@ number of blocks, each table is trained on 10 000 pieces sampled inside its own 
 train in parallel, and a lookup divides the block number by the shard to pick one. The suffixes of
 a million paths under `/usr/share` and of a million under `/home` are different languages, and one
 table over both is a compromise — a table a shard is worth 1.25 bytes a key on a path list, 0.23 on
-ten million article titles and 0.01 on the dictionary, against 0.015 for the tables themselves. The codec is the crate's own — 300 lines, the reference's encoder shape, decode at
+ten million article titles and 0.01 on the dictionary, against 0.015 for the tables themselves. The codec is the crate's own — 300 lines, the reference's encoder shape with two long symbols a hash slot, decode at
 parity with `fsst-rs`, which would have raised the MSRV — its serialised table is its own as well,
 so a `BDX3` neither reads nor writes a reference FSST table — and the training is deterministic, so a
 blob is a function of its keys like every other.
