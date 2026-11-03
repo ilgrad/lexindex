@@ -505,7 +505,7 @@ impl SuffixCmp for TieredCmp<'_> {
 
     #[inline(always)]
     fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
-        compare_tiered(self.table, self.split, self.dict, piece.bytes(), rest)
+        compare_tiered::<false>(self.table, self.split, self.dict, piece.bytes(), rest)
     }
 }
 
@@ -517,7 +517,7 @@ impl SuffixCmp for LabelledCmp<'_> {
 
     #[inline(always)]
     fn compare(&self, piece: Piece<'_>, rest: Rest<'_>) -> (usize, Ordering) {
-        compare_labelled(self.table, self.split, self.dict, piece.bytes(), rest)
+        compare_tiered::<true>(self.table, self.split, self.dict, piece.bytes(), rest)
     }
 }
 
@@ -658,11 +658,13 @@ fn compare_symbols(table: &Table, packed: &[u8], rest: Rest<'_>) -> (usize, Orde
 }
 
 /// [`compare_symbols`] where some of the byte codes name phrases instead: the same walk, with the
-/// phrase's bytes compared eight at a time. Kept apart from the plain loop rather than branching
-/// inside it — a shard that bought no phrases is the common one, and this is the inner loop of
-/// every lookup.
+/// phrase's bytes compared eight at a time, and where `LABELS` holds, ids past the phrases name trie
+/// labels: a label is decoded out of the nested dictionary and compared the same way. Kept apart from
+/// the plain loop rather than branching inside it — a shard that bought no phrases is the common one,
+/// and this is the inner loop of every lookup — and the labels are a constant for the same reason:
+/// a blob without them runs the loop it always ran.
 #[inline(always)]
-fn compare_tiered(
+fn compare_tiered<const LABELS: bool>(
     table: &Table,
     split: Split,
     dict: &Dict,
@@ -698,22 +700,42 @@ fn compare_tiered(
         let Some((id, took)) = split.read_at(packed, i) else {
             break;
         };
+        i += took;
         // The padded chunk, not the phrase's own bytes: its last word is a whole load off the
         // padding, where a slice of its length would have been assembled a byte at a time.
-        let Some((phrase, plen)) = dict.chunk(id) else {
+        if let Some((phrase, plen)) = dict.chunk(id) {
+            let mut k = 0;
+            for word in phrase.chunks_exact(8) {
+                if k >= plen {
+                    break;
+                }
+                let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
+                if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
+                    return answer;
+                }
+                k += 8;
+            }
+            continue;
+        }
+        if !LABELS {
+            break;
+        }
+        let Some(first) = dict.label_first(id) else {
             break;
         };
-        i += took;
-        let mut k = 0;
-        for word in phrase.chunks_exact(8) {
-            if k >= plen {
-                break;
-            }
-            let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
-            if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
-                return answer;
-            }
-            k += 8;
+        // An entry's suffix starts where its key branches, so a label is told from the probe
+        // at its first byte about half the time, and that compare needs no decode.
+        if c == rest.len() {
+            return (c, Ordering::Greater);
+        }
+        let theirs = rest.word(c) as u8;
+        if first != theirs {
+            return (c, first.cmp(&theirs));
+        }
+        match compare_label(dict, id, rest, &mut c) {
+            Some(None) => {}
+            Some(Some(answer)) => return answer,
+            None => break,
         }
     }
     ended(c, rest)
@@ -772,81 +794,6 @@ fn decode_tiered(
     // SAFETY: the loop wrote every byte below `o`, and a failed one commits nothing.
     unsafe { commit(out, o) };
     true
-}
-
-/// [`compare_tiered`] where ids past the phrases name trie labels: a label is decoded out of the
-/// nested dictionary and compared eight bytes at a time like a phrase. A loop of its own, so that a
-/// blob without labels runs the loop it always ran.
-#[inline(always)]
-fn compare_labelled(
-    table: &Table,
-    split: Split,
-    dict: &Dict,
-    packed: &[u8],
-    rest: Rest<'_>,
-) -> (usize, Ordering) {
-    let (words, lens) = table.parts();
-    let n = words.len().min(usize::from(split.symbols()));
-    let (words, lens) = (&words[..n], &lens[..n]);
-    let mut c = 0;
-    let mut i = 0;
-    while let Some(&code) = packed.get(i) {
-        let k = usize::from(code);
-        if k < words.len() {
-            i += 1;
-            if let Some(answer) = compare_word(words[k], usize::from(lens[k]), rest, &mut c) {
-                return answer;
-            }
-            continue;
-        }
-        if code == ESCAPE {
-            let Some(&b) = packed.get(i + 1) else {
-                break;
-            };
-            i += 2;
-            if let Some(answer) = compare_word(u64::from(b), 1, rest, &mut c) {
-                return answer;
-            }
-            continue;
-        }
-        let Some((id, took)) = split.read_at(packed, i) else {
-            break;
-        };
-        i += took;
-        if let Some((phrase, plen)) = dict.chunk(id) {
-            // As in `compare_tiered`: whole loads off the padding.
-            let mut k = 0;
-            for word in phrase.chunks_exact(8) {
-                if k >= plen {
-                    break;
-                }
-                let word = u64::from_le_bytes(word.try_into().expect("eight bytes"));
-                if let Some(answer) = compare_word(word, (plen - k).min(8), rest, &mut c) {
-                    return answer;
-                }
-                k += 8;
-            }
-            continue;
-        }
-        let Some(first) = dict.label_first(id) else {
-            break;
-        };
-        // An entry's suffix starts where its key branches, so a label is told from the probe
-        // at its first byte about half the time, and that compare needs no decode.
-        if c == rest.len() {
-            return (c, Ordering::Greater);
-        }
-        let theirs = rest.word(c) as u8;
-        if first != theirs {
-            return (c, first.cmp(&theirs));
-        }
-        match compare_label(dict, id, rest, &mut c) {
-            Some(None) => {}
-            Some(Some(answer)) => return answer,
-            None => break,
-        }
-    }
-    ended(c, rest)
 }
 
 /// Label `id` against `rest` from `c`, out of line: the decode is what a labelled compare spends
