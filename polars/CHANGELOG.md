@@ -10,8 +10,10 @@ moves on polars' cadence and not on the library's.
 - **A `DoubleArrayIndex` blob is served.** `id` and `contains` are exact; `id_unchecked` raises, as
   on the other kinds that answer by searching, and `key` raises, since a double array walks one way
   only. Until now the blob was refused as a kind the plugin did not know.
-- **A `PerfectHashIndex` with a merged arena is served**, the layout lexindex 4.6.0 writes for most
+- **A `PerfectHashIndex` with a merged arena is served**, the layout lexindex 5.0.0 writes for most
   keys; 0.1.1 refuses it as a format it cannot read.
+- **A `DictIndex` with trie labels is served**, the blob lexindex 5.0.0 writes for `labels=True` where
+  it is the smaller one; 0.1.1 refuses it as a format it cannot read.
 - **The cache can be bounded, read and emptied.** `LEXINDEX_POLARS_CACHE_BYTES` names the bytes of
   blobs the process may hold, past which the least recently used go; unset, there is no limit, as
   before. `lexindex_polars.cache_info()` reports the entries, their bytes, the hits and the loads,

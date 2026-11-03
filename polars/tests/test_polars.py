@@ -420,6 +420,41 @@ def test_a_merged_arena_answers_every_key(name):
     assert _ids(path, lambda c, p: c.lexindex.id(p), keys) == list(range(len(keys)))
 
 
+def test_a_labelled_dictionary_answers_both_ways(tmp_path):
+    # Names that recur under different parents, the shape labels pay on: on any other the build
+    # keeps the plain blob, and this would test nothing.
+    dirs = ["usr/share", "usr/lib", "home/me/src", "opt/tool", "var/log", "etc"]
+    names = [
+        "locale/translations",
+        "python3.14/site-packages",
+        "icons/hicolor/48x48",
+        "documentation",
+        "node_modules/.bin",
+        "x",
+        "release-notes",
+        "include/subdir",
+    ]
+    files = ["index.html", "README.md", "__init__.py", "Makefile", "a"]
+    state = 3
+
+    def pick(items):
+        nonlocal state
+        state ^= (state << 13) & 0xFFFFFFFFFFFFFFFF
+        state ^= state >> 7
+        state ^= (state << 17) & 0xFFFFFFFFFFFFFFFF
+        return items[state % len(items)]
+
+    keys = sorted(
+        {f"/{pick(dirs)}/{pick(names)}/{pick(names)}-{i % 97}/{pick(files)}" for i in range(4_000)}
+    )
+    path = tmp_path / "labelled.bdx"
+    lx.DictIndex(keys, block=256, labels=True).save(path)
+    assert path.read_bytes()[:4] == b"BDX5"
+    assert _ids(path, lambda c, p: c.lexindex.id(p), keys) == list(range(len(keys)))
+    frame = pl.DataFrame({"i": list(range(len(keys)))}, schema={"i": pl.UInt64})
+    assert frame.select(pl.col("i").lexindex.key(path))["i"].to_list() == keys
+
+
 def test_a_non_string_column_names_its_type(blobs):
     # Every error a plugin raises reaches Python as a ComputeError, whatever it was in Rust; the
     # message is what carries the kind.
