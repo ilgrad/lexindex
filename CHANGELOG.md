@@ -145,6 +145,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`DictIndex` executes about 30 fewer bounds checks a `key`.** Counted per call from callgrind, a
+  `key` ran 60 checks and now runs 29. Two kinds went: a stair's index, which its loop already keeps
+  in range, and a symbol's length, read beside a word the same code has just been checked for. Nothing a
+  blob supplies lost a check, and no `unsafe` block was added. Instructions a `key` at a million keys:
+  `words` 2 077 → 1 976, domains 2 407 → 2 276, titles-en 2 637 → 2 503, numeric 2 103 → 2 006. An
+  `id` loses 7–10 instructions: most of the checks it still runs guard the sections the loader
+  measured, and they stay. The hash indexes and `DoubleArrayIndex` execute none on `id`.
 - **`PerfectHashIndex::key` takes an ASCII key without the UTF-8 validator.** The validator walks
   a short key a byte at a time until a word is aligned, and that walk's exit is a branch no
   predictor learns. An `is_ascii` check, which is the standard library's and reads by words, decides

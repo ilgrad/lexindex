@@ -659,15 +659,17 @@ impl PerfectHashIndex {
         // offset lines prefetched ahead of the span pass, then its data lines ahead of the compare.
         let slots = mph.index_all(&hashes);
         let spans = self.arena.spans_of(&slots, &fps, AHEAD);
-        (0..n)
-            .map(|i| {
+        spans
+            .iter()
+            .enumerate()
+            .map(|(i, span)| {
                 if let Some(Some(sp)) = spans.get(i + AHEAD / 2) {
                     self.arena.prefetch_span(*sp);
                 }
                 if i + AHEAD / 2 < n {
                     crate::blob::prefetch_key(key(i + AHEAD / 2));
                 }
-                let hit = spans[i].and_then(|sp| {
+                let hit = span.and_then(|sp| {
                     (self.arena.bytes_at(sp) == Some(key(i))).then_some(slots[i] as u32)
                 });
                 if hit.is_none() && !self.side.is_empty() {

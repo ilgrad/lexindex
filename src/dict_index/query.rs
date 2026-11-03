@@ -361,8 +361,9 @@ impl DictIndex {
             // every stair kept is one the clamp would not have moved.
             let at = entries.reach();
             entries.skip(len);
-            // SAFETY: every slot below `depth` was written by the loop before this reads it.
-            while depth > 0 && unsafe { stair[depth - 1].assume_init() }.0 >= l {
+            // SAFETY: `depth` stops at `STAIRS`, the return below it comes before a write past
+            // that, and every slot below `depth` was written by the loop before this reads it.
+            while depth > 0 && unsafe { stair.get_unchecked(depth - 1).assume_init() }.0 >= l {
                 depth -= 1;
             }
             if depth == STAIRS {
@@ -394,8 +395,8 @@ impl DictIndex {
         // it cannot underflow because a stair is kept only where its prefix is the shorter. The
         // last stair is the key's own tail, and asks for all of it — so that call, alone, carries
         // no cap at all.
-        // SAFETY: as above -- the walk wrote every slot below `depth`.
-        let kept = |i: usize| unsafe { stair[i].assume_init() };
+        // SAFETY: as above -- `i` is below `depth`, and the walk wrote every slot below that.
+        let kept = |i: usize| unsafe { stair.get_unchecked(i).assume_init() };
         let Some(last) = depth.checked_sub(1) else {
             return true;
         };

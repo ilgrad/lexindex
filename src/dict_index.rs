@@ -532,15 +532,19 @@ impl DictIndex {
     /// The suffix codec block `b` was encoded under.
     #[inline(always)]
     fn codec_of(&self, b: usize) -> &Codec {
-        let s = self.shard_of(b);
-        &self.codecs[if s < self.codecs.len() { s } else { 0 }]
+        match self.codecs.get(self.shard_of(b)) {
+            Some(codec) => codec,
+            None => &self.codecs[0],
+        }
     }
 
     /// The header codes block `b`'s entries were written under, the microblocks' first.
     #[inline(always)]
     fn codes_of(&self, b: usize) -> &(Code, Code) {
-        let s = self.shard_of(b);
-        &self.codes[if s < self.codes.len() { s } else { 0 }]
+        match self.codes.get(self.shard_of(b)) {
+            Some(codes) => codes,
+            None => &self.codes[0],
+        }
     }
 
     #[inline(always)]

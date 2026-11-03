@@ -137,7 +137,7 @@ impl Table {
 
     /// The symbol behind `code` as (word, length); `None` for a code past the table, which is
     /// where the escape always is.
-    #[inline(always)]
+    #[cfg(test)]
     pub(crate) fn symbol(&self, code: u8) -> Option<(u64, usize)> {
         let i = code as usize;
         Some((*self.words.get(i)?, self.lens[i] as usize))
@@ -336,6 +336,7 @@ impl Table {
             out,
             packed.len().saturating_mul(8).min(cap.saturating_add(7)),
         );
+        let (words, lens) = self.parts();
         let mut o = 0;
         let mut i = 0;
         while i < packed.len() && o < cap {
@@ -348,11 +349,12 @@ impl Table {
                 o += 1;
                 i += 2;
             } else {
-                let Some((word, len)) = self.symbol(code) else {
+                let k = usize::from(code);
+                let Some(word) = words.get(k) else {
                     return false;
                 };
                 room.put(o, &word.to_le_bytes());
-                o += len;
+                o += usize::from(lens[k]);
                 i += 1;
             }
         }

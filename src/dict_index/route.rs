@@ -513,7 +513,8 @@ impl DictIndex {
         // compare of every word took fifteen, and five over thirty-one.
         let j = words.partition_point(|&w| w < s);
         let tied = words.get(j) == Some(&s);
-        let Some(&below) = j.checked_sub(1).map(|i| &words[i]) else {
+        // Past the words at `j == 0`, by wrapping: one compare says both things.
+        let Some(&below) = words.get(j.wrapping_sub(1)) else {
             return (0, matched, tied);
         };
         let i = ((below ^ s).leading_zeros() / 8) as usize;

@@ -741,6 +741,7 @@ fn decode_tiered(
         return false;
     };
     let mut room = Room::of(out, room.min(cap.saturating_add(phrase::MAX)));
+    let (words, lens) = table.parts();
     let mut o = 0;
     let mut i = 0;
     while i < packed.len() && o < cap {
@@ -759,11 +760,12 @@ fn decode_tiered(
             o += 1;
             i += 2;
         } else {
-            let Some((word, len)) = table.symbol(packed[i]) else {
+            let k = usize::from(packed[i]);
+            let Some(word) = words.get(k) else {
                 return false;
             };
             room.put(o, &word.to_le_bytes());
-            o += len;
+            o += usize::from(lens[k]);
             i += 1;
         }
     }
@@ -891,6 +893,7 @@ fn decode_labelled(
             return false;
         };
         let mut room = Room::of(out, room.min(wanted.saturating_add(phrase::MAX)));
+        let (words, lens) = table.parts();
         let mut o = 0;
         let mut label = None;
         while i < packed.len() && o < wanted {
@@ -912,12 +915,13 @@ fn decode_labelled(
                 o += 1;
                 i += 2;
             } else {
-                let Some((word, len)) = table.symbol(packed[i]) else {
+                let k = usize::from(packed[i]);
+                let Some(word) = words.get(k) else {
                     out.truncate(start);
                     return false;
                 };
                 room.put(o, &word.to_le_bytes());
-                o += len;
+                o += usize::from(lens[k]);
                 i += 1;
             }
         }
