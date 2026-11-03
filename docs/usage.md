@@ -423,6 +423,7 @@ paths = DictIndex(path_list, block=1024, labels=True)  # also tries a dictionary
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
+# It takes the constructor's block, micro and labels.
 DictIndex.build_to_file((line.rstrip("\n") for line in open("words.txt")), "words.bdx")
 words = DictIndex.load("words.bdx")        # checked like the others
 words = DictIndex.load_mmap("words.bdx")   # keys and block data borrowed; header, tables and 8 B/block read
@@ -1251,8 +1252,9 @@ it where the blob comes out smaller -- path lists, URLs, titles, whose directory
 under different parents -- and writes the plain blob, byte for byte, where it does not. A lookup
 then reads 1.5 labels on average, +24 % instructions on paths and +6-10 % elsewhere, counted and
 not yet timed, which is why no default builds them. Which labels pay is a count over every key, so
-a labelled build holds the corpus whatever `--stream` says, and says so on a file large enough to
-have streamed.
+a streamed labelled build walks the keys five times rather than three and holds, while it chooses, a
+filter of 2-4 bytes a key and each label seen twice; it holds no corpus. Its peak went 290 → 582 MB
+on 7.3 million paths and 738 → 1 086 MB on 100 million bigrams, and the bytes are the held build's.
 
 `--stream` decides whether the build holds the corpus. With a named `--index` and a keys file --
 never standard input, which cannot be rewound -- `build` feeds the file straight into the streaming

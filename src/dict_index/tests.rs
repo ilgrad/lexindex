@@ -547,7 +547,9 @@ fn a_streamed_build_spells_its_keys_as_the_sorting_one_does() {
             .unwrap()
             .to_bytes();
         assert_eq!(&want[..4], CODED_MAGIC, "block {block}");
-        let n = DictIndex::build_to_file_runs(&twice, &path, block, || Ok(()), 4096).unwrap();
+        let n =
+            DictIndex::build_to_file_runs(&twice, &path, DictLayout::new(block), || Ok(()), 4096)
+                .unwrap();
         assert_eq!(n, keys.len());
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -705,7 +707,8 @@ fn a_streamed_build_over_a_collapsed_merge_writes_the_same_blob() {
             .unwrap()
             .to_bytes();
         // A 32-byte run budget over this corpus is dozens of runs against a fan-in of four.
-        let n = DictIndex::build_to_file_runs(&keys, &path, block, || Ok(()), 32).unwrap();
+        let n = DictIndex::build_to_file_runs(&keys, &path, DictLayout::new(block), || Ok(()), 32)
+            .unwrap();
         assert_eq!(n, keys.len());
         assert_eq!(std::fs::read(&path).unwrap(), want, "block {block}");
         assert_eq!(entries(&dir), ["idx.bdx"], "the runs directory is gone");
@@ -993,7 +996,8 @@ fn build_to_file_writes_the_blob_build_would_have_run_by_run() {
         let want = DictIndex::build_with_block(&keys, block)
             .unwrap()
             .to_bytes();
-        let n = DictIndex::build_to_file_runs(&twice, &path, block, || Ok(()), 64).unwrap();
+        let n = DictIndex::build_to_file_runs(&twice, &path, DictLayout::new(block), || Ok(()), 64)
+            .unwrap();
         assert_eq!(n, keys.len());
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -1037,7 +1041,9 @@ fn build_to_file_refuses_what_it_cannot_hold_and_publishes_nothing() {
     // A key no run can hold is an error, not an unbounded allocation -- and the empty index
     // written above is still there.
     let long = "x".repeat(65);
-    let err = DictIndex::build_to_file_runs([long.as_str()], &path, 32, || Ok(()), 64).unwrap_err();
+    let err =
+        DictIndex::build_to_file_runs([long.as_str()], &path, DictLayout::new(32), || Ok(()), 64)
+            .unwrap_err();
     assert!(err.to_string().contains("run budget"), "{err}");
     assert!(DictIndex::load(&path).unwrap().is_empty());
     for block in [0, MAX_BLOCK + 1] {
@@ -1059,7 +1065,8 @@ fn build_to_file_refuses_what_it_cannot_hold_and_publishes_nothing() {
             Ok(())
         }
     };
-    let err = DictIndex::build_to_file_runs(&keys, &path, 32, late, 64).unwrap_err();
+    let err =
+        DictIndex::build_to_file_runs(&keys, &path, DictLayout::new(32), late, 64).unwrap_err();
     assert!(matches!(err, IndexError::Format("late")), "{err}");
     assert_eq!(
         calls.get(),
@@ -1811,6 +1818,139 @@ fn a_label_dictionary_nested_without_end_is_refused_at_the_first_level() {
     );
 }
 
+/// Every layout a labelled streamed build can take over `keys`, each in one run and spilled, against
+/// the bytes the sorting build makes; the keys arrive shuffled and twice over.
+fn assert_streams_labelled(name: &str, keys: &[String], layouts: &[DictLayout]) {
+    let dir = std::env::temp_dir();
+    let mut twice: Vec<&str> = keys.iter().map(String::as_str).collect();
+    twice.extend(keys.iter().rev().map(String::as_str));
+    for (i, &layout) in layouts.iter().enumerate() {
+        let whole = DictIndex::build_with(keys, layout).unwrap().to_bytes();
+        for budget in [1 << 24, 1 << 13] {
+            let path = dir.join(format!(
+                "lexindex_streamed_labels_{}_{name}_{i}_{budget}.bdx",
+                std::process::id()
+            ));
+            let n =
+                DictIndex::build_to_file_runs(&twice, &path, layout, || Ok(()), budget).unwrap();
+            let written = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            assert_eq!(n, keys.len(), "{name} {i} {budget}");
+            assert!(
+                written == whole,
+                "{name}: layout {i} at a budget of {budget} differs, {} vs {} bytes",
+                written.len(),
+                whole.len()
+            );
+            let leftovers: Vec<_> = std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+                .filter(|f| f.contains(&format!("streamed_labels_{}_{name}_", std::process::id())))
+                .collect();
+            assert!(leftovers.is_empty(), "{name}: left behind {leftovers:?}");
+        }
+    }
+}
+
+#[test]
+fn a_streamed_labelled_build_writes_the_blob_the_sorting_one_does() {
+    let layouts = [
+        DictLayout::new(256).with_labels(true),
+        DictLayout::new(1024).with_labels(true),
+        DictLayout::new(1024).with_micro(64).with_labels(true),
+        DictLayout::new(32).with_labels(true),
+    ];
+    let wins = label_corpus(2, 4_000);
+    assert_eq!(
+        &DictIndex::build_with(&wins, layouts[0]).unwrap().to_bytes()[..4],
+        LABELLED_MAGIC,
+        "the corpus has to be one the labels win"
+    );
+    assert_streams_labelled("wins", &wins, &layouts);
+    // Where the labels lose the plain blob has to come out, not the labelled one written first.
+    let loses = label_corpus(1, 4_000);
+    assert_streams_labelled("flip", &loses, &layouts);
+    let words: Vec<String> = (0..3_000u32).map(|i| format!("{:x}", i * 7919)).collect();
+    assert_streams_labelled("none", &words, &layouts);
+    assert_streams_labelled("short", &["only".to_string()], &layouts);
+    assert_streams_labelled("empty", &[], &layouts);
+    // A character code takes no labels, sorted or streamed.
+    let coded: Vec<String> = (0..2_000u32)
+        .map(|i| {
+            format!(
+                "\u{4e2d}\u{6587}{}\u{5b57}{}",
+                char::from_u32(0x4e00 + i % 512).unwrap(),
+                i
+            )
+        })
+        .collect();
+    let mut coded = coded;
+    coded.sort_unstable();
+    assert!(
+        DictIndex::build_with(&coded, layouts[0])
+            .unwrap()
+            .is_coded(),
+        "the corpus has to be one a code wins"
+    );
+    assert_streams_labelled("coded", &coded, &layouts);
+}
+
+/// A parse names a block's labels under the block's own shard's symbols, whichever walk it is on.
+#[test]
+fn a_streamed_labelled_build_parses_a_block_under_its_own_shard() {
+    let mut keys = label_corpus(2, 4_000);
+    keys.sort_unstable();
+    keys.dedup();
+    for (block, shard) in [(32usize, 1usize), (32, 3), (8, 2), (4, 5)] {
+        let _held = Shards::of(shard);
+        let layout = DictLayout::new(block).with_labels(true);
+        assert_streams_labelled(&format!("shard{block}-{shard}"), &keys, &[layout]);
+    }
+}
+
+#[test]
+fn a_streamed_build_takes_the_layout_the_sorting_one_does() {
+    let keys = label_corpus(3, 1_500);
+    let layouts = [
+        DictLayout::new(256).with_micro(64),
+        DictLayout::new(128).with_micro(128),
+        DictLayout::new(1),
+    ];
+    assert_streams_labelled("plain", &keys, &layouts);
+    let path = std::env::temp_dir().join(format!("lexindex_refused_{}", std::process::id()));
+    for (layout, why) in [
+        (DictLayout::new(0), "block"),
+        (DictLayout::new(2048), "block"),
+        (DictLayout::new(256).with_micro(3), "micro"),
+        (DictLayout::new(256).with_micro(0), "micro"),
+    ] {
+        let err = DictIndex::build_to_file_with(&keys, &path, layout).unwrap_err();
+        assert!(err.to_string().contains(why), "{err}");
+        assert!(!path.exists());
+    }
+}
+
+#[test]
+fn a_late_word_from_the_caller_stops_a_labelled_build_with_nothing_published() {
+    let keys = label_corpus(2, 2_000);
+    let path = std::env::temp_dir().join(format!("lexindex_late_labels_{}", std::process::id()));
+    std::fs::write(&path, b"what was there").unwrap();
+    let mut asked = 0;
+    let late = || {
+        asked += 1;
+        if asked == 2 {
+            Err(IndexError::Format("the source failed"))
+        } else {
+            Ok(())
+        }
+    };
+    let layout = DictLayout::new(256).with_labels(true);
+    let err = DictIndex::build_to_file_runs(&keys, &path, layout, late, 1 << 13).unwrap_err();
+    assert!(err.to_string().contains("the source failed"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), b"what was there");
+    std::fs::remove_file(&path).unwrap();
+}
+
 #[test]
 fn a_streamed_build_shards_its_tables_the_way_the_sorting_one_does() {
     let keys = corpus();
@@ -1822,7 +1962,7 @@ fn a_streamed_build_shards_its_tables_the_way_the_sorting_one_does() {
         let want = DictIndex::build_with_block(&keys, block)
             .unwrap()
             .to_bytes();
-        DictIndex::build_to_file_runs(&feed, &path, block, || Ok(()), 64).unwrap();
+        DictIndex::build_to_file_runs(&feed, &path, DictLayout::new(block), || Ok(()), 64).unwrap();
         assert_eq!(
             std::fs::read(&path).unwrap(),
             want,

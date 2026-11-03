@@ -402,21 +402,8 @@ impl DictIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let DictLayout {
-            block,
-            micro,
-            labels,
-        } = layout;
-        if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
-        }
-        let micro = match micro {
-            Some(micro) if micro == 0 || block % micro != 0 => {
-                return Err(IndexError::Format("dict: micro must divide block"));
-            }
-            Some(micro) => micro,
-            None => micro_for(block),
-        };
+        let (block, micro) = layout.sizes()?;
+        let labels = layout.labels;
         let keys: Vec<S> = items.into_iter().collect();
         let threads = build_threads(keys.len(), block);
         let mut view = view_of(&keys, threads);
@@ -531,7 +518,43 @@ impl DictIndex {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        Self::build_to_file_checked(items, path, block, || Ok(()))
+        Self::build_to_file_with(items, path, DictLayout::new(block))
+    }
+
+    /// [`build_to_file`](Self::build_to_file) with the block, the microblock and the labels of
+    /// `layout`, writing the bytes [`build_with`](Self::build_with) makes.
+    ///
+    /// **`labels` costs what this constructor exists to avoid, in part.** The labels are chosen over
+    /// the whole corpus, so it holds two more things while it chooses: 2 to 4 bytes a key for a
+    /// filter of the labels seen twice, and each of those labels until it knows which pay. The peak
+    /// went 290 → 582 MB on 7.3 million paths and 738 → 1 086 MB on 100 million bigrams, against
+    /// 2 105 MB for the sorting build of those paths. It walks the keys twice more, for the parse
+    /// that decides them and for the second encoding, and for that encoding holds a second blob on
+    /// disk beside the output.
+    ///
+    /// ```
+    /// use lexindex::{DictIndex, DictLayout};
+    /// let keys = ["usr/lib/a", "usr/lib/b", "var/lib/a", "var/lib/b"];
+    /// let layout = DictLayout::new(32).with_labels(true);
+    /// let path = std::env::temp_dir().join(format!("lexindex-doc-{}.bdx", std::process::id()));
+    /// assert_eq!(DictIndex::build_to_file_with(keys, &path, layout)?, 4);
+    /// assert_eq!(
+    ///     std::fs::read(&path)?,
+    ///     DictIndex::build_with(keys, layout)?.to_bytes()
+    /// );
+    /// # std::fs::remove_file(&path)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn build_to_file_with<I, S>(
+        items: I,
+        path: impl AsRef<std::path::Path>,
+        layout: DictLayout,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self::build_to_file_checked(items, path, layout, || Ok(()))
     }
 
     /// [`build_to_file`](Self::build_to_file) with a last word from the caller, asked once the
@@ -544,7 +567,7 @@ impl DictIndex {
     pub(crate) fn build_to_file_checked<I, S, C>(
         items: I,
         path: impl AsRef<std::path::Path>,
-        block: usize,
+        layout: DictLayout,
         check: C,
     ) -> Result<usize, IndexError>
     where
@@ -552,7 +575,7 @@ impl DictIndex {
         S: AsRef<str>,
         C: FnMut() -> Result<(), IndexError>,
     {
-        Self::build_to_file_runs(items, path.as_ref(), block, check, RUN_BYTES)
+        Self::build_to_file_runs(items, path.as_ref(), layout, check, RUN_BYTES)
     }
 
     /// [`build_to_file_checked`](Self::build_to_file_checked) with the run budget exposed, so a
@@ -560,7 +583,7 @@ impl DictIndex {
     pub(super) fn build_to_file_runs<I, S, C>(
         items: I,
         path: &std::path::Path,
-        block: usize,
+        layout: DictLayout,
         mut check: C,
         run_bytes: usize,
     ) -> Result<usize, IndexError>
@@ -569,13 +592,13 @@ impl DictIndex {
         S: AsRef<str>,
         C: FnMut() -> Result<(), IndexError>,
     {
-        if !(1..=MAX_BLOCK).contains(&block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
-        }
+        layout.sizes()?;
         let mut run = Run::with_budget(run_bytes);
         let mut runs = Runs::beside(path);
+        let mut read = 0usize;
         for key in items {
             let key = key.as_ref();
+            read += 1;
             if !run.fits(key) {
                 if run.is_empty() {
                     return Err(IndexError::Format("dict: a key longer than the run budget"));
@@ -587,30 +610,36 @@ impl DictIndex {
         }
         check()?;
         if runs.is_empty() {
-            return Self::write_sorted(&mut run, path, block, check);
+            return Self::write_sorted(&mut run, path, layout, read, check);
         }
         if !run.is_empty() {
             runs.spill(run.sorted())?;
         }
         // The run's arena is the build's largest allocation and nothing reads it again.
         drop(run);
-        Self::write_sorted(&mut runs, path, block, check)
+        Self::write_sorted(&mut runs, path, layout, read, check)
     }
 
-    /// The three passes and the write, over a key stream that can be walked again.
+    /// The passes and the write, over a key stream that can be walked again; `read` is how many keys
+    /// went into it, repeats among them.
     fn write_sorted<R, C>(
         src: R,
         path: &std::path::Path,
-        block: usize,
+        layout: DictLayout,
+        read: usize,
         mut check: C,
     ) -> Result<usize, IndexError>
     where
         R: Replay,
         C: FnMut() -> Result<(), IndexError>,
     {
-        use std::io::{Read, Seek, SeekFrom, Write};
-
+        let (block, micro) = layout.sizes()?;
         let mut src = src;
+        // Labels want a count over every key, and sifting them in the first pass and counting them
+        // in the second costs no walk of its own.
+        let mut edges = layout
+            .labels
+            .then(|| crate::labels::EdgeCount::for_keys(read));
         // Pass one: the block heads, their ends and samples, and the key count. None of the three
         // depends on the symbol table, and the count is what fixes the training stride below.
         let mut n = 0usize;
@@ -625,8 +654,14 @@ impl DictIndex {
             bytes += key.len() as u64;
             high += charcode::high_bytes(key.as_bytes());
             n += 1;
+            if let Some(edges) = &mut edges {
+                edges.sift(key.as_bytes());
+            }
             Ok(())
         })?;
+        if let Some(edges) = &mut edges {
+            edges.sifted();
+        }
         // The code is chosen on exactly the counts `choose_code` takes over the same keys, so the
         // file is the blob `build` makes; a corpus the bound rules out pays for no tally pass.
         let code = if charcode::worth_counting(bytes, high) {
@@ -639,6 +674,10 @@ impl DictIndex {
         } else {
             None
         };
+        // A corpus in a character code takes no labels, as `build_with` has it.
+        if code.is_some() {
+            edges = None;
+        }
         let mut spelt: Vec<u8> = Vec::new();
         if let Some(code) = &code {
             let mut at = 0;
@@ -657,7 +696,6 @@ impl DictIndex {
         // Every head is in, so the prefix they share is known and the samples are taken past it.
         let g = common_head_raw(&heads, &head_ends);
         let nb = n.div_ceil(block);
-        let micro = micro_for(block);
         let shard = shard_blocks_for(block);
         let span = shard * block;
         let shards = nb.div_ceil(shard).max(1);
@@ -694,6 +732,9 @@ impl DictIndex {
             prev.clear();
             prev.extend_from_slice(bytes);
             i += 1;
+            if let Some(edges) = &mut edges {
+                edges.count(key.as_bytes());
+            }
             Ok(())
         })?;
         let (tables, phrases) = {
@@ -710,180 +751,53 @@ impl DictIndex {
         drop(arena);
         drop(spans);
 
-        let mut at_shard = 0usize;
-        let mut encoder = tables[0].encoder();
+        // A labelled blob is built as well only to be compared, and the parse that names its labels
+        // needs the phrases the plain one takes.
+        let labelled = match edges {
+            Some(edges) => phrases.labelled_from(edges, &mut src, block, micro, &tables)?,
+            None => None,
+        };
         let head_width = offsets::width_of(&head_ends, offsets::SHIFT);
         let (head_bases, head_deltas) = offsets::pack(&head_ends, offsets::SHIFT, head_width);
         drop(head_ends);
-        let mut blocks = Vec::with_capacity(nb);
-        let mut micros = Vec::with_capacity(nb * block.div_ceil(micro));
+        let frame = Frame {
+            n,
+            block,
+            micro,
+            shard,
+            g,
+            heads: &heads,
+            head_width,
+            head_bases,
+            head_deltas,
+            tables: &tables,
+            code,
+        };
         crate::blob::write_atomically_with(path, |w| {
-            // The header is written last: it carries the block data's length and a hash over every
-            // section, and neither is known until the encoding is done.
-            w.write_all(&[0u8; HEADER])?;
-            w.write_all(&heads)?;
-            w.write_all(&head_bases)?;
-            w.write_all(&head_deltas)?;
-
-            // Pass three: encode. The block and microblock starts fall out of it, which is why
-            // their sections were left to the end.
-            let mut data_len = 0u64;
-            let mut coded = Vec::with_capacity(64);
-            // A shard's entries are coded once, from all of its runs at once, so a shard is
-            // collected before any of it is written: a couple of megabytes of pairs and coded
-            // suffixes, against the key stream this build exists for. Its keys are buffered a
-            // block at a time, because a block is written restarts first and they arrive last.
-            let mut codes: Vec<(Code, Code)> = Vec::with_capacity(shards);
-            let mut codecs: Vec<Codec> = Vec::with_capacity(shards);
-            let mut pairs = Vec::new();
-            let mut collected = Collected::default();
-            let mut parsed = phrase::Scratch::default();
-            let mut scratch = Scratch::default();
-            let mut keys: Vec<u8> = Vec::with_capacity(block * 32);
-            // `ends[k]` closes the k-th buffered key, so the first entry is where the first
-            // one starts and what `truncate` leaves behind.
-            let mut ends: Vec<usize> = Vec::with_capacity(block + 1);
-            ends.push(0);
-            let mut i = 0usize;
-            src.each(&mut |key| {
-                if i % block == 0 && i > 0 {
-                    let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
-                    collect_block(&mut collected, &view, micro, &encoder, &mut coded);
-                    keys.clear();
-                    ends.truncate(1);
-                }
-                if i % span == 0 && i > 0 {
-                    let (codec, pair) = collected.settle(
-                        tables[at_shard].clone(),
-                        &phrases,
-                        &mut pairs,
-                        &mut parsed,
-                    );
-                    Shard {
-                        collected: &collected,
-                        pairs: &pairs,
-                        codec: &codec,
-                        codes: &pair,
-                    }
-                    .write(
-                        &mut data_len,
-                        &mut blocks,
-                        &mut micros,
-                        &mut scratch,
-                        &mut |bytes| Ok(w.write_all(bytes)?),
-                    )?;
-                    codes.push(pair);
-                    codecs.push(codec);
-                    collected.clear();
-                    at_shard = i / span;
-                    encoder = tables[at_shard].encoder();
-                }
-                keys.extend_from_slice(spell(code, key, &mut spelt)?);
-                ends.push(keys.len());
-                i += 1;
-                Ok(())
-            })?;
-            let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
-            if !view.is_empty() {
-                collect_block(&mut collected, &view, micro, &encoder, &mut coded);
-            }
-            let (codec, pair) =
-                collected.settle(tables[at_shard].clone(), &phrases, &mut pairs, &mut parsed);
-            Shard {
-                collected: &collected,
-                pairs: &pairs,
-                codec: &codec,
-                codes: &pair,
-            }
-            .write(
-                &mut data_len,
-                &mut blocks,
-                &mut micros,
-                &mut scratch,
-                &mut |bytes| Ok(w.write_all(bytes)?),
-            )?;
-            codes.push(pair);
-            codecs.push(codec);
-            // Both dictionaries follow the data, because neither a shard's suffix codec nor its
-            // header codes is known until the shard is coded.
-            let mut table_bytes = Vec::with_capacity(codecs_len(&codecs));
-            write_codecs(&codecs, &mut table_bytes);
-            w.write_all(&table_bytes)?;
-            let mut code_bytes = Vec::with_capacity(codes_len(&codes));
-            write_codes(&codes, &mut code_bytes);
-            w.write_all(&code_bytes)?;
-            // A dictionary no shard bought is bytes the blob carries and nothing names.
-            let kept = if codecs.iter().any(Codec::has_phrases) {
-                &phrases.dict
-            } else {
-                &Dict::empty()
+            let Some(labelled) = &labelled else {
+                frame.encode(&mut src, &phrases, w)?;
+                return check();
             };
-            let mut dictionary = Vec::with_capacity(kept.serialized_len());
-            kept.write_to(&mut dictionary);
-            w.write_all(&dictionary)?;
-            if i != n {
-                return Err(IndexError::Format(
-                    "dict: the key stream changed between passes",
-                ));
-            }
-
-            // The two start arrays are the last sections precisely because this is where they are
-            // known: their widths fall out of the encoding that has just finished.
-            let block_width = offsets::width_of(&blocks, offsets::SHIFT);
-            let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
-            // A block that is one microblock starts its only microblock where the block starts.
-            rebase_micros(&mut micros, &blocks, block.div_ceil(micro));
-            let micros: &[u64] = if block.div_ceil(micro) == 1 {
-                &[]
-            } else {
-                &micros
+            // The one a labelled build should keep goes straight to its place, and the plain one
+            // beside it, since a corpus that asked for labels mostly keeps them.
+            let first = frame.encode(&mut src, labelled, w)?;
+            let mut spare = crate::blob::Spare::beside(path)?;
+            let plain = {
+                let mut spare = std::io::BufWriter::new(spare.file());
+                let plain = frame.encode(&mut src, &phrases, &mut spare)?;
+                std::io::Write::flush(&mut spare)?;
+                plain
             };
-            let micro_width = offsets::packed_width_of(micros);
-            let micro_deltas = offsets::packed_pack(micros, micro_width);
-            w.write_all(&block_bases)?;
-            w.write_all(&block_deltas)?;
-            w.write_all(&micro_deltas)?;
-            let mut chars = Vec::with_capacity(code.map_or(0, CharCode::serialized_len));
-            if let Some(code) = code {
-                code.write_to(&mut chars);
+            let named = first.has_labels || first.phrases > phrases.dict.phrases();
+            if !(named && first.bytes < plain.bytes) {
+                std::io::Write::flush(w)?;
+                let file = w.get_mut();
+                file.set_len(0)?;
+                std::io::Seek::rewind(file)?;
+                let spare = spare.file();
+                std::io::Seek::rewind(spare)?;
+                std::io::copy(spare, file)?;
             }
-            w.write_all(&chars)?;
-            w.flush()?;
-            // The payload hash runs over the sections in blob order, so it is taken from the file
-            // rather than from the stream: one sequential read of what was just written.
-            let file = w.get_mut();
-            file.seek(SeekFrom::Start(HEADER as u64))?;
-            let mut hasher = crate::blob::BlockHasher::new();
-            let mut buf = vec![0u8; 1 << 20];
-            loop {
-                let got = file.read(&mut buf)?;
-                if got == 0 {
-                    break;
-                }
-                hasher.update(&buf[..got]);
-            }
-            let mut h = [0u8; HEADER];
-            h[0..4].copy_from_slice(if code.is_some() { CODED_MAGIC } else { MAGIC });
-            h[4..12].copy_from_slice(&(n as u64).to_le_bytes());
-            h[12..16].copy_from_slice(&(block as u32).to_le_bytes());
-            h[16..24].copy_from_slice(&(heads.len() as u64).to_le_bytes());
-            h[24..32].copy_from_slice(&data_len.to_le_bytes());
-            h[32..36].copy_from_slice(&(table_bytes.len() as u32).to_le_bytes());
-            h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
-            h[44] = head_width as u8;
-            h[45] = block_width as u8;
-            h[46] = offsets::SHIFT as u8;
-            h[47] = micro_width as u8;
-            h[48..50].copy_from_slice(&(micro as u16).to_le_bytes());
-            h[50..52].copy_from_slice(&(shard as u16).to_le_bytes());
-            h[52..56].copy_from_slice(&(code_bytes.len() as u32).to_le_bytes());
-            h[56..58].copy_from_slice(&(g as u16).to_le_bytes());
-            h[58..62].copy_from_slice(&(dictionary.len() as u32).to_le_bytes());
-            h[62..66].copy_from_slice(&(chars.len() as u32).to_le_bytes());
-            let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
-            h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
-            file.seek(SeekFrom::Start(0))?;
-            file.write_all(&h)?;
             check()
         })?;
         Ok(n)
@@ -1184,5 +1098,232 @@ impl DictIndex {
         };
         idx.ties = Ties::derive(&idx.samples, |b| idx.head(b));
         Ok(idx)
+    }
+}
+
+/// What every encoding of a streamed build shares: all of it known before the first entry is coded.
+struct Frame<'a> {
+    n: usize,
+    block: usize,
+    micro: usize,
+    shard: usize,
+    g: usize,
+    heads: &'a [u8],
+    head_width: u32,
+    head_bases: Vec<u8>,
+    head_deltas: Vec<u8>,
+    tables: &'a [Table],
+    code: Option<&'a CharCode>,
+}
+
+/// What a streamed encoding comes to: its size, and what its dictionary kept.
+struct Encoded {
+    bytes: u64,
+    has_labels: bool,
+    phrases: usize,
+}
+
+impl Frame<'_> {
+    /// The blob under `phrases`, whole, over one more walk of `src`, into `w`.
+    fn encode<R: Replay>(
+        &self,
+        src: &mut R,
+        phrases: &Phrases,
+        w: &mut std::io::BufWriter<&mut std::fs::File>,
+    ) -> Result<Encoded, IndexError> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        let (block, micro) = (self.block, self.micro);
+        let (shard, span) = (self.shard, self.shard * self.block);
+        let nb = self.n.div_ceil(block);
+        let mut at_shard = 0usize;
+        let mut encoder = self.tables[0].encoder();
+        let mut blocks = Vec::with_capacity(nb);
+        let mut micros = Vec::with_capacity(nb * block.div_ceil(micro));
+        let mut spelt: Vec<u8> = Vec::new();
+        // The header is written last: it carries the block data's length and a hash over every
+        // section, and neither is known until the encoding is done.
+        w.write_all(&[0u8; HEADER])?;
+        w.write_all(self.heads)?;
+        w.write_all(&self.head_bases)?;
+        w.write_all(&self.head_deltas)?;
+
+        // Pass three: encode. The block and microblock starts fall out of it, which is why
+        // their sections were left to the end.
+        let mut data_len = 0u64;
+        let mut coded = Vec::with_capacity(64);
+        // A shard's entries are coded once, from all of its runs at once, so a shard is
+        // collected before any of it is written: a couple of megabytes of pairs and coded
+        // suffixes, against the key stream this build exists for. Its keys are buffered a
+        // block at a time, because a block is written restarts first and they arrive last.
+        let shards = nb.div_ceil(shard).max(1);
+        let mut codes: Vec<(Code, Code)> = Vec::with_capacity(shards);
+        let mut codecs: Vec<Codec> = Vec::with_capacity(shards);
+        let mut pairs = Vec::new();
+        let mut collected = Collected::default();
+        let mut parsed = phrase::Scratch::default();
+        let mut scratch = Scratch::default();
+        let mut keys: Vec<u8> = Vec::with_capacity(block * 32);
+        // `ends[k]` closes the k-th buffered key, so the first entry is where the first
+        // one starts and what `truncate` leaves behind.
+        let mut ends: Vec<usize> = Vec::with_capacity(block + 1);
+        ends.push(0);
+        let mut i = 0usize;
+        src.each(&mut |key| {
+            if i % block == 0 && i > 0 {
+                let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
+                collect_block(&mut collected, &view, micro, &encoder, &mut coded);
+                keys.clear();
+                ends.truncate(1);
+            }
+            if i % span == 0 && i > 0 {
+                let (codec, pair) = collected.settle(
+                    self.tables[at_shard].clone(),
+                    phrases,
+                    &mut pairs,
+                    &mut parsed,
+                );
+                Shard {
+                    collected: &collected,
+                    pairs: &pairs,
+                    codec: &codec,
+                    codes: &pair,
+                }
+                .write(
+                    &mut data_len,
+                    &mut blocks,
+                    &mut micros,
+                    &mut scratch,
+                    &mut |bytes| Ok(w.write_all(bytes)?),
+                )?;
+                codes.push(pair);
+                codecs.push(codec);
+                collected.clear();
+                at_shard = i / span;
+                encoder = self.tables[at_shard].encoder();
+            }
+            keys.extend_from_slice(spell(self.code, key, &mut spelt)?);
+            ends.push(keys.len());
+            i += 1;
+            Ok(())
+        })?;
+        let view: Vec<&[u8]> = ends.windows(2).map(|w| &keys[w[0]..w[1]]).collect();
+        if !view.is_empty() {
+            collect_block(&mut collected, &view, micro, &encoder, &mut coded);
+        }
+        let (codec, pair) = collected.settle(
+            self.tables[at_shard].clone(),
+            phrases,
+            &mut pairs,
+            &mut parsed,
+        );
+        Shard {
+            collected: &collected,
+            pairs: &pairs,
+            codec: &codec,
+            codes: &pair,
+        }
+        .write(
+            &mut data_len,
+            &mut blocks,
+            &mut micros,
+            &mut scratch,
+            &mut |bytes| Ok(w.write_all(bytes)?),
+        )?;
+        codes.push(pair);
+        codecs.push(codec);
+        // Both dictionaries follow the data, because neither a shard's suffix codec nor its
+        // header codes is known until the shard is coded.
+        let mut table_bytes = Vec::with_capacity(codecs_len(&codecs));
+        write_codecs(&codecs, &mut table_bytes);
+        w.write_all(&table_bytes)?;
+        let mut code_bytes = Vec::with_capacity(codes_len(&codes));
+        write_codes(&codes, &mut code_bytes);
+        w.write_all(&code_bytes)?;
+        // A dictionary no shard bought is bytes the blob carries and nothing names.
+        let kept = if codecs.iter().any(Codec::has_phrases) {
+            &phrases.dict
+        } else {
+            &Dict::empty()
+        };
+        let mut dictionary = Vec::with_capacity(kept.serialized_len());
+        kept.write_to(&mut dictionary);
+        w.write_all(&dictionary)?;
+        if i != self.n {
+            return Err(IndexError::Format(
+                "dict: the key stream changed between passes",
+            ));
+        }
+
+        // The two start arrays are the last sections precisely because this is where they are
+        // known: their widths fall out of the encoding that has just finished.
+        let block_width = offsets::width_of(&blocks, offsets::SHIFT);
+        let (block_bases, block_deltas) = offsets::pack(&blocks, offsets::SHIFT, block_width);
+        // A block that is one microblock starts its only microblock where the block starts.
+        rebase_micros(&mut micros, &blocks, block.div_ceil(micro));
+        let micros: &[u64] = if block.div_ceil(micro) == 1 {
+            &[]
+        } else {
+            &micros
+        };
+        let micro_width = offsets::packed_width_of(micros);
+        let micro_deltas = offsets::packed_pack(micros, micro_width);
+        w.write_all(&block_bases)?;
+        w.write_all(&block_deltas)?;
+        w.write_all(&micro_deltas)?;
+        let mut chars = Vec::with_capacity(self.code.map_or(0, CharCode::serialized_len));
+        if let Some(code) = self.code {
+            code.write_to(&mut chars);
+        }
+        w.write_all(&chars)?;
+        w.flush()?;
+        // The payload hash runs over the sections in blob order, so it is taken from the file
+        // rather than from the stream: one sequential read of what was just written.
+        let file = w.get_mut();
+        file.seek(SeekFrom::Start(HEADER as u64))?;
+        let mut hasher = crate::blob::BlockHasher::new();
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let got = file.read(&mut buf)?;
+            if got == 0 {
+                break;
+            }
+            hasher.update(&buf[..got]);
+        }
+        let mut h = [0u8; HEADER];
+        h[0..4].copy_from_slice(if self.code.is_some() {
+            CODED_MAGIC
+        } else if kept.has_labels() {
+            LABELLED_MAGIC
+        } else {
+            MAGIC
+        });
+        h[4..12].copy_from_slice(&(self.n as u64).to_le_bytes());
+        h[12..16].copy_from_slice(&(self.block as u32).to_le_bytes());
+        h[16..24].copy_from_slice(&(self.heads.len() as u64).to_le_bytes());
+        h[24..32].copy_from_slice(&data_len.to_le_bytes());
+        h[32..36].copy_from_slice(&(table_bytes.len() as u32).to_le_bytes());
+        h[36..44].copy_from_slice(&hasher.finish().to_le_bytes());
+        h[44] = self.head_width as u8;
+        h[45] = block_width as u8;
+        h[46] = offsets::SHIFT as u8;
+        h[47] = micro_width as u8;
+        h[48..50].copy_from_slice(&(self.micro as u16).to_le_bytes());
+        h[50..52].copy_from_slice(&(self.shard as u16).to_le_bytes());
+        h[52..56].copy_from_slice(&(code_bytes.len() as u32).to_le_bytes());
+        h[56..58].copy_from_slice(&(self.g as u16).to_le_bytes());
+        h[58..62].copy_from_slice(&(dictionary.len() as u32).to_le_bytes());
+        h[62..66].copy_from_slice(&(chars.len() as u32).to_le_bytes());
+        let check_word = crate::blob::hash_bytes(&h[..CHECKED]) as u32;
+        h[CHECKED..HEADER].copy_from_slice(&check_word.to_le_bytes());
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&h)?;
+        let file = w.get_mut();
+        file.seek(SeekFrom::End(0))?;
+        Ok(Encoded {
+            bytes: file.stream_position()?,
+            has_labels: kept.has_labels(),
+            phrases: kept.phrases(),
+        })
     }
 }

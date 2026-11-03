@@ -69,7 +69,7 @@ options (`--name value` or `--name=value`):
                  fast / balanced / compact (32 / 256 / 1024)
   --labels       with `--index dict`: also try a dictionary of the corpus's trie labels
                  and keep it where the blob comes out smaller -- paths, URLs, titles --
-                 for a lookup that reads more. Holds the corpus, whatever `--stream` says
+                 for a lookup that reads more
   --stream MODE  when to build straight to the blob instead of holding the corpus:
                  auto (default), always, never, or the keys-file size past which to do
                  it (1000, 512M, 4G). `auto` is a quarter of the memory the machine
@@ -528,18 +528,14 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto => None,
         Choice::Hashed | Choice::DoubleArray => unreachable!("built above"),
     };
-    // The label dictionary is chosen over the whole corpus -- which labels pay is a count across
-    // every key -- so a labelled build holds the keys, and a large file is held too, with a note.
     if let Some((kind, block)) = decided {
-        if big.is_some() && can_stream(kind) && !cmd.labels {
+        if big.is_some() && can_stream(kind) {
             let src = Source::new(path);
-            let n = stream_to_file(kind, &src, dest, block)?;
+            let n = stream_to_file(kind, &src, dest, block, cmd.labels)?;
             note_blank(path, src.blank.get(), err)?;
             return note_written(kind.name(), n, dest, err);
         }
-        if big.is_some() && cmd.labels {
-            note_labels_hold(path, err)?;
-        } else if big.is_some() {
+        if big.is_some() {
             note_no_stream(path, kind.name(), err)?;
         }
     }
@@ -564,15 +560,6 @@ fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fai
         err,
         "reading {path}: this file is large enough to build without holding it, but {name} has \
          no streaming build in this configuration."
-    )
-    .map_err(io_fail)
-}
-
-fn note_labels_hold(path: &str, err: &mut dyn Write) -> Result<(), Fail> {
-    writeln!(
-        err,
-        "reading {path}: this file is large enough to build without holding it, but --labels \
-         chooses its label dictionary over the whole corpus, so it is held."
     )
     .map_err(io_fail)
 }
@@ -682,13 +669,14 @@ fn stream_to_file(
     src: &Source,
     dest: &Path,
     block: Option<usize>,
+    labels: bool,
 ) -> Result<usize, Fail> {
     let part = dest.with_file_name(format!(
         "{}.part.{}",
         dest.file_name().unwrap_or_default().to_string_lossy(),
         std::process::id()
     ));
-    let built = build_streamed(kind, src, &part, block);
+    let built = build_streamed(kind, src, &part, block, labels);
     let failed = src.failed.borrow_mut().take();
     let n = match (built, failed) {
         (Ok(n), None) => n,
@@ -709,13 +697,15 @@ fn build_streamed(
     src: &Source,
     dest: &Path,
     block: Option<usize>,
+    labels: bool,
 ) -> Result<usize, Fail> {
     let n = match kind {
         Kind::String => StringIndex::build_to_file(src.keys(), dest)?,
-        Kind::Dict => match block {
-            Some(b) => DictIndex::build_to_file_with_block(src.keys(), dest, b)?,
-            None => DictIndex::build_to_file(src.keys(), dest)?,
-        },
+        Kind::Dict => {
+            let block = block.unwrap_or(DictLayout::default().block);
+            let layout = DictLayout::new(block).with_labels(labels);
+            DictIndex::build_to_file_with(src.keys(), dest, layout)?
+        }
         #[cfg(feature = "mph")]
         Kind::Compact => CompactHashIndex::build_bits_to_file(src.keys(), dest, 8)?,
         #[cfg(feature = "mph")]
@@ -1509,12 +1499,6 @@ mod tests {
                 assert_eq!((code, out.as_str()), (0, ""), "{index} {mode}: {err}");
                 assert!(
                     err.contains(&format!("wrote {dest}: {kind} over 2000 keys")),
-                    "{index} {mode}: {err}"
-                );
-                // A labelled build holds the corpus whatever `--stream` says, and says so.
-                assert_eq!(
-                    err.contains("--labels chooses its label dictionary over the whole corpus"),
-                    mode == "always" && block.contains(&"--labels"),
                     "{index} {mode}: {err}"
                 );
                 written.push(std::fs::read(&blob).unwrap());

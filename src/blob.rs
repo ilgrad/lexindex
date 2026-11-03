@@ -203,14 +203,34 @@ static WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 /// both POSIX and Windows; the temporary is opened `O_EXCL` (never following a planted symlink),
 /// and on Unix the parent directory is fsynced so the rename itself is durable. Streaming section
 /// by section means `save` peaks at the index's own memory, not index + a full serialised copy.
-pub(crate) fn write_atomically_with(
+/// A scratch file beside `path`, under the name [`write_atomically_with`] would take and with the
+/// same refusal of anything already there, removed however the build ends.
+pub(crate) struct Spare {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+}
+
+impl Spare {
+    pub(crate) fn beside(path: &std::path::Path) -> Result<Self, crate::IndexError> {
+        let (path, file) = fresh_beside(path)?;
+        Ok(Self { path, file })
+    }
+
+    pub(crate) fn file(&mut self) -> &mut std::fs::File {
+        &mut self.file
+    }
+}
+
+impl Drop for Spare {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.path).ok();
+    }
+}
+
+/// A file of our own beside `path`, under a name of its own.
+fn fresh_beside(
     path: &std::path::Path,
-    // `IndexError`, not `io::Result`: a streaming builder writing through this closure fails on the
-    // caller's input (keys out of order) as readily as on the disk, and laundering that through
-    // `io::Error::other` would report a precondition violation as an I/O fault.
-    write: impl FnOnce(&mut std::io::BufWriter<&mut std::fs::File>) -> Result<(), crate::IndexError>,
-) -> Result<(), crate::IndexError> {
-    use std::io::Write;
+) -> Result<(std::path::PathBuf, std::fs::File), crate::IndexError> {
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     let stem = path
         .file_name()
@@ -221,33 +241,42 @@ pub(crate) fn write_atomically_with(
     // included, so the write can only land on a fresh file we made. The pid+counter name keeps two
     // threads (or a stale temp from a crashed run) from colliding; on the rare collision we retry
     // with the next counter, bounded so a hostile racer cannot spin us forever.
-    let (tmp, mut file) = {
-        let mut attempt = Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
-        for _ in 0..128 {
-            let seq = WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let mut tmp = dir.join(stem);
-            tmp.as_mut_os_string()
-                .push(format!(".{}.{seq}.tmp", std::process::id()));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                // Read access too, not because anything reads the temporary but because
-                // `MmapMut::map_mut` needs an `O_RDWR` descriptor, and the streaming
-                // `PerfectHashIndex::build_to_file` fills its arena through a mapping. The file is
-                // ours alone until the rename, so the wider descriptor is not wider exposure.
-                .read(true)
-                .create_new(true)
-                .open(&tmp)
-            {
-                Ok(f) => {
-                    attempt = Ok((tmp, f));
-                    break;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e.into()),
+    let mut attempt = Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+    for _ in 0..128 {
+        let seq = WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut tmp = dir.join(stem);
+        tmp.as_mut_os_string()
+            .push(format!(".{}.{seq}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            // Read access too, not because anything reads the temporary but because
+            // `MmapMut::map_mut` needs an `O_RDWR` descriptor, and the streaming
+            // `PerfectHashIndex::build_to_file` fills its arena through a mapping. The file is
+            // ours alone until the rename, so the wider descriptor is not wider exposure.
+            .read(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(f) => {
+                attempt = Ok((tmp, f));
+                break;
             }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
         }
-        attempt?
-    };
+    }
+    Ok(attempt?)
+}
+
+pub(crate) fn write_atomically_with(
+    path: &std::path::Path,
+    // `IndexError`, not `io::Result`: a streaming builder writing through this closure fails on the
+    // caller's input (keys out of order) as readily as on the disk, and laundering that through
+    // `io::Error::other` would report a precondition violation as an I/O fault.
+    write: impl FnOnce(&mut std::io::BufWriter<&mut std::fs::File>) -> Result<(), crate::IndexError>,
+) -> Result<(), crate::IndexError> {
+    use std::io::Write;
+    let (tmp, mut file) = fresh_beside(path)?;
     // Replacing an existing file should keep its permissions, not silently widen them to the umask
     // default (best effort, Unix only — ACLs and xattrs are out of scope).
     #[cfg(unix)]
@@ -274,7 +303,7 @@ pub(crate) fn write_atomically_with(
     // stops on a directory's fsync as an unsupported operation instead of returning an error, and the
     // call is best effort, so the interpreter skips it.
     #[cfg(all(unix, not(miri)))]
-    if let Ok(d) = std::fs::File::open(dir) {
+    if let Ok(d) = std::fs::File::open(path.parent().unwrap_or_else(|| std::path::Path::new("."))) {
         let _ = d.sync_all();
     }
     Ok(())

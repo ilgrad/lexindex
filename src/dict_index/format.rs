@@ -141,6 +141,20 @@ impl Default for DictLayout {
 }
 
 impl DictLayout {
+    /// The block and the microblock this asks for, or the error of a pair no build can lay out.
+    pub(super) fn sizes(self) -> Result<(usize, usize), IndexError> {
+        if !(1..=MAX_BLOCK).contains(&self.block) {
+            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+        }
+        match self.micro {
+            Some(micro) if micro == 0 || self.block % micro != 0 => {
+                Err(IndexError::Format("dict: micro must divide block"))
+            }
+            Some(micro) => Ok((self.block, micro)),
+            None => Ok((self.block, micro_for(self.block))),
+        }
+    }
+
     /// `block` keys a block, the microblocks the block chooses, no labels.
     pub const fn new(block: usize) -> Self {
         Self {

@@ -545,9 +545,9 @@ of patricia-trie edge labels — directory and file names that recur under diffe
 on a million paths the second and later occurrences of repeated labels are 49 % of every byte front
 coding stores. A phrase reaches 32 bytes and only the spans the sampled miner sees often enough; a
 label used two to nine times, or longer, is spelled by symbols at every occurrence. A labelled
-build counts the labels of every key's residual (the right-branching depths of a key are the
-suffix minima of the lcp array, so one stack pass over the sorted keys cuts them), admits those
-that pay — `count · (0.58 len − 2.5) > 0.6 len + 3`, two to 255 bytes, none a phrase already — and
+build counts the edges of the keys' patricia trie (an edge ends where the next key leaves the path
+of the key before it, so one stack of depths and that one key are all the walk holds), admits those
+that pay — `count · (0.58 len − 2.5) > 0.6 len + 3`, five to 255 bytes, none a phrase already — and
 names them past the phrases: an id from the phrase count on is a label, a shard names it with the
 two- or three-byte reference a phrase takes, and the dynamic-programming parse takes a label
 wherever it is cheapest, not only where the trie cuts. Since it does not cut where the trie does,

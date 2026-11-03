@@ -601,6 +601,20 @@ def test_dict_index_build_to_file_writes_what_the_constructor_would(tmp_path):
     assert [e.name for e in tmp_path.iterdir()] == ["words.bdx"]  # no scratch left beside it
     with pytest.raises(ValueError, match="block"):
         lexindex.DictIndex.build_to_file(words, tmp_path / "x.bdx", block=0)
+    with pytest.raises(ValueError, match="micro"):
+        lexindex.DictIndex.build_to_file(words, tmp_path / "x.bdx", block=256, micro=3)
+
+
+def test_dict_index_build_to_file_takes_the_constructors_layout(tmp_path):
+    paths = _label_corpus(2, 4_000)
+    p = tmp_path / "paths.bdx"
+    for kwargs in ({"labels": True}, {"block": 1024, "micro": 64, "labels": True}, {"micro": 64}):
+        assert lexindex.DictIndex.build_to_file(iter(paths), p, **kwargs) == len(set(paths))
+        assert p.read_bytes() == lexindex.DictIndex(paths, **kwargs).to_bytes()
+    assert p.read_bytes()[:4] == b"BDX3"
+    lexindex.DictIndex.build_to_file(iter(paths), p, labels=True)
+    assert p.read_bytes()[:4] == b"BDX5"
+    assert [e.name for e in tmp_path.iterdir()] == ["paths.bdx"]
 
 
 def test_dict_index_build_to_file_aborts_when_the_iterable_raises(tmp_path):

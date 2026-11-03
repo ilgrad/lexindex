@@ -449,21 +449,46 @@ impl Phrases {
     /// The phrases of `self` with the trie labels of `keys` named past them, where any pay: those a
     /// lookup reads most as phrases of their own, the others nested.
     pub(super) fn labelled<K: AsKey + Sync>(
-        self,
+        &self,
         keys: &[K],
         block: usize,
         micro: usize,
         tables: &[Table],
     ) -> Option<Self> {
-        let phrases: Vec<Vec<u8>> = (0..self.dict.phrases())
-            .map(|id| self.dict.at(id).map(<[u8]>::to_vec))
-            .collect::<Option<_>>()?;
+        let phrases = self.listed()?;
         let room = phrase::IDS_MAX - phrases.len();
         let got = crate::labels::select(keys, &phrases, room, block, micro, tables)?;
-        let mut phrases = phrases;
+        Some(Self::past(phrases, got))
+    }
+
+    /// [`labelled`](Self::labelled) off a key stream whose edges `count` holds: the same labels, at
+    /// one more walk of `src`.
+    pub(super) fn labelled_from<R: Replay>(
+        &self,
+        count: crate::labels::EdgeCount,
+        src: &mut R,
+        block: usize,
+        micro: usize,
+        tables: &[Table],
+    ) -> Result<Option<Self>, IndexError> {
+        let Some(phrases) = self.listed() else {
+            return Ok(None);
+        };
+        let room = phrase::IDS_MAX - phrases.len();
+        let got = count.select(src, &phrases, room, block, micro, tables)?;
+        Ok(got.map(|got| Self::past(phrases, got)))
+    }
+
+    fn listed(&self) -> Option<Vec<Vec<u8>>> {
+        (0..self.dict.phrases())
+            .map(|id| self.dict.at(id).map(<[u8]>::to_vec))
+            .collect()
+    }
+
+    fn past(mut phrases: Vec<Vec<u8>>, got: crate::labels::Selected) -> Self {
         phrases.extend(got.flat);
         let dict = Dict::of(&phrases);
-        Some(match got.nested {
+        match got.nested {
             Some((labels, store)) => Self {
                 trie: Trie::of(phrases.iter().chain(&labels).map(Vec::as_slice)),
                 dict: dict.with_labels(store),
@@ -472,7 +497,7 @@ impl Phrases {
                 trie: Trie::of(phrases.iter().map(Vec::as_slice)),
                 dict,
             },
-        })
+        }
     }
 }
 

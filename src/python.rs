@@ -1871,21 +1871,38 @@ impl PyDictIndex {
     /// What is still held is the block heads, the per-block arrays and one start a microblock,
     /// about `(mean head length + 20) / block + 8 / micro` bytes per key -- so a bigger `block` is
     /// what a corpus whose heads crowd memory wants. `block` takes a number or a name, as the
-    /// constructor's does. If the iterable raises, the build is abandoned with `path`
+    /// constructor's does, and `micro` and `labels` are the constructor's too. `labels=True` walks
+    /// the keys five times rather than three and holds, while it chooses, a filter of 2-4 bytes a
+    /// key and each label seen twice. If the iterable raises, the build is abandoned with `path`
     /// untouched.
     #[staticmethod]
     #[pyo3(
-        signature = (items, path, block = BlockArg::Size(DictProfile::Balanced.block())),
-        text_signature = "(items, path, block=256)"
+        signature = (
+            items,
+            path,
+            block = BlockArg::Size(DictProfile::Balanced.block()),
+            micro = None,
+            labels = false
+        ),
+        text_signature = "(items, path, block=256, micro=None, labels=False)"
     )]
-    fn build_to_file(items: &Bound<'_, PyAny>, path: PathBuf, block: BlockArg) -> PyResult<usize> {
-        let block = block.block()?;
+    fn build_to_file(
+        items: &Bound<'_, PyAny>,
+        path: PathBuf,
+        block: BlockArg,
+        micro: Option<usize>,
+        labels: bool,
+    ) -> PyResult<usize> {
+        let mut layout = DictLayout::new(block.block()?).with_labels(labels);
+        if let Some(micro) = micro {
+            layout = layout.with_micro(micro);
+        }
         let err = Rc::new(RefCell::new(None));
         let seen = Rc::clone(&err);
         let written = DictIndex::build_to_file_checked(
             stream_strs(items.try_iter()?, Rc::clone(&err)),
             &path,
-            block,
+            layout,
             move || {
                 if seen.borrow().is_some() {
                     Err(crate::IndexError::Format(

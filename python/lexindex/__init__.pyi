@@ -520,6 +520,8 @@ class DictIndex:
         items: Iterable[str],
         path: str | os.PathLike[str],
         block: int | Literal["fast", "balanced", "compact"] = 256,
+        micro: int | None = None,
+        labels: bool = False,
     ) -> int:
         """The constructor for a corpus that does not fit in memory, written straight to `path`.
 
@@ -530,7 +532,9 @@ class DictIndex:
         ``(mean head length + 20) / block + 8 / micro`` bytes per key. The
         file is exactly what the constructor followed by ``save`` would have written. Returns the
         number of distinct keys. If the iterable raises, the build is abandoned with `path`
-        untouched.
+        untouched. ``micro`` and ``labels`` are the constructor's; ``labels=True`` walks the keys
+        five times rather than three and holds, while it chooses, a filter of 2-4 bytes a key and
+        each label seen twice.
         """
 
     def __len__(self) -> int: ...

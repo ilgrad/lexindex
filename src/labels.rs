@@ -26,7 +26,8 @@ use crate::blob::SharedBytes;
 use crate::dict_index::{
     AsKey, Bytes, DictIndex, MAGIC, build_threads, micro_for, shard_blocks_for,
 };
-use crate::fsst::Table;
+use crate::extsort::Replay;
+use crate::fsst::{Encoder, Table};
 use crate::phrase::{self, LABEL_MAX, Map, Trie};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -190,6 +191,61 @@ struct Usage {
 /// from `i` on that share more than `a` bytes with it: a microblock's entry by that microblock, a
 /// restart by its whole block. A key that shares exactly `a` is told apart by the label's first
 /// byte, which costs no decode.
+struct Parse {
+    trie: Trie,
+    uses: Vec<Usage>,
+    phrases: usize,
+    micro: usize,
+}
+
+impl Parse {
+    fn over(phrases: &[Vec<u8>], kept: &[(&[u8], u32)], micro: usize) -> Self {
+        Self {
+            trie: Trie::of(
+                phrases
+                    .iter()
+                    .map(Vec::as_slice)
+                    .chain(kept.iter().map(|&(l, _)| l)),
+            ),
+            uses: kept.iter().map(|_| Usage::default()).collect(),
+            phrases: phrases.len(),
+            micro,
+        }
+    }
+
+    /// One block's picks: `keys` are its keys, and `lcps[i]` what key `i` shares with key `i - 1`,
+    /// so `lcps[0]` is not read. Nothing outside the block decides any of it.
+    fn block<K: AsKey>(
+        &self,
+        keys: &[K],
+        lcps: &[usize],
+        encoder: &Encoder,
+        w: &mut phrase::Scratch,
+    ) {
+        let (end, micro) = (keys.len(), self.micro);
+        for i in 1..end {
+            let (shared, scope) = if i % micro == 0 {
+                let shared = lcps[i + 1 - micro..=i].iter().copied().min();
+                (shared.unwrap_or(0), end)
+            } else {
+                (lcps[i], ((i / micro + 1) * micro).min(end))
+            };
+            let suffix = &keys[i].key_bytes()[shared..];
+            phrase::picks(suffix, encoder, &self.trie, w, |at, id| {
+                let Some(used) = id.checked_sub(self.phrases).map(|rank| &self.uses[rank]) else {
+                    return;
+                };
+                let depth = shared + at;
+                let reach = lcps[i + 1..scope].iter().take_while(|&&l| l > depth);
+                used.picks.fetch_add(1, Ordering::Relaxed);
+                used.reads
+                    .fetch_add(1 + reach.count() as u64, Ordering::Relaxed);
+            });
+        }
+    }
+}
+
+/// [`Parse`] over `keys`, a range of blocks a thread.
 fn usage<K: AsKey + Sync>(
     keys: &[K],
     lcps: &[usize],
@@ -200,13 +256,7 @@ fn usage<K: AsKey + Sync>(
     kept: &[(&[u8], u32)],
 ) -> Vec<Usage> {
     let n = keys.len();
-    let trie = Trie::of(
-        phrases
-            .iter()
-            .map(Vec::as_slice)
-            .chain(kept.iter().map(|&(l, _)| l)),
-    );
-    let uses: Vec<Usage> = kept.iter().map(|_| Usage::default()).collect();
+    let parsing = Parse::over(phrases, kept, micro);
     let shard = shard_blocks_for(block);
     let blocks = n.div_ceil(block);
     let parse = |range: std::ops::Range<usize>| {
@@ -222,26 +272,7 @@ fn usage<K: AsKey + Sync>(
             };
             let start = b * block;
             let end = (start + block).min(n);
-            for i in start + 1..end {
-                let off = i - start;
-                let (shared, scope) = if off % micro == 0 {
-                    let shared = lcps[i + 1 - micro..=i].iter().copied().min();
-                    (shared.unwrap_or(0), end)
-                } else {
-                    (lcps[i], (start + (off / micro + 1) * micro).min(end))
-                };
-                let suffix = &keys[i].key_bytes()[shared..];
-                phrase::picks(suffix, encoder, &trie, &mut w, |at, id| {
-                    let Some(used) = id.checked_sub(phrases.len()).map(|rank| &uses[rank]) else {
-                        return;
-                    };
-                    let depth = shared + at;
-                    let reach = lcps[i + 1..scope].iter().take_while(|&&l| l > depth);
-                    used.picks.fetch_add(1, Ordering::Relaxed);
-                    used.reads
-                        .fetch_add(1 + reach.count() as u64, Ordering::Relaxed);
-                });
-            }
+            parsing.block(&keys[start..end], &lcps[start..end], encoder, &mut w);
         }
     };
     let threads = build_threads(n, block);
@@ -255,7 +286,245 @@ fn usage<K: AsKey + Sync>(
             }
         });
     }
-    uses
+    parsing.uses
+}
+
+/// [`Parse`] over a key stream, a block at a time on this thread: a block needs nothing past itself,
+/// so the walk holds one block's keys.
+fn usage_of_stream<R: Replay>(
+    src: &mut R,
+    block: usize,
+    micro: usize,
+    tables: &[Table],
+    phrases: &[Vec<u8>],
+    kept: &[(&[u8], u32)],
+) -> Result<Vec<Usage>, IndexError> {
+    let parsing = Parse::over(phrases, kept, micro);
+    let shard = shard_blocks_for(block);
+    let mut w = phrase::Scratch::default();
+    let mut lcps = Vec::new();
+    let mut parse_block = |b: usize, bytes: &[u8], ends: &[usize]| {
+        let view: Vec<Bytes<'_>> = ends.windows(2).map(|e| Bytes(&bytes[e[0]..e[1]])).collect();
+        lcps.clear();
+        lcps.push(0);
+        lcps.extend(
+            view.windows(2)
+                .map(|p| crate::dict_index::lcp(p[0].key_bytes(), p[1].key_bytes())),
+        );
+        let encoder = tables[(b / shard).min(tables.len() - 1)].encoder();
+        parsing.block(&view, &lcps, &encoder, &mut w);
+    };
+    let (mut bytes, mut ends, mut i) = (Vec::new(), vec![0usize], 0usize);
+    src.each(&mut |key| {
+        if i % block == 0 && i > 0 {
+            parse_block(i / block - 1, &bytes, &ends);
+            bytes.clear();
+            ends.truncate(1);
+        }
+        bytes.extend_from_slice(key.as_bytes());
+        ends.push(bytes.len());
+        i += 1;
+        Ok(())
+    })?;
+    if i > 0 {
+        parse_block((i - 1) / block, &bytes, &ends);
+    }
+    Ok(parsing.uses)
+}
+
+/// The edges of the patricia trie over a sorted, distinct key stream, off nothing but the key before
+/// and the depths on its path: the edges below where the next key leaves that path end there, and
+/// every edge ends once. `open` holds the path's depths, ascending from the root's 0.
+fn close_edges<'a>(
+    open: &mut Vec<usize>,
+    last: &'a [u8],
+    shared: usize,
+    edge: &mut impl FnMut(&'a [u8]),
+) {
+    while let Some(&deep) = open.last() {
+        if deep <= shared {
+            break;
+        }
+        open.pop();
+        let from = open.last().map_or(shared, |&up| up.max(shared));
+        edge(&last[from..deep]);
+    }
+    if open.last() != Some(&shared) {
+        open.push(shared);
+    }
+}
+
+/// A key's end opened on the path `open`; a key that is empty ends at the root.
+fn open_key(open: &mut Vec<usize>, len: usize) {
+    if open.last().is_some_and(|&at| at < len) {
+        open.push(len);
+    }
+}
+
+/// Whether a label of `len` bytes could pay at any count: under five bytes a reference costs what
+/// the symbols do, and past [`LABEL_MAX`] no parse looks.
+fn may_pay(len: usize) -> bool {
+    (5..=LABEL_MAX).contains(&len)
+}
+
+/// The labels that pay at `counts`, past those `phrases` holds already, the most used first, ties in
+/// byte order, so that the cut at `room` is a function of the keys.
+fn admitted<'a>(
+    counts: impl Iterator<Item = (&'a [u8], u32)>,
+    phrases: &[Vec<u8>],
+    room: usize,
+) -> Vec<(&'a [u8], u32)> {
+    let known: std::collections::HashSet<&[u8]> = phrases.iter().map(Vec::as_slice).collect();
+    let mut kept: Vec<(&[u8], u32)> = counts
+        .filter(|&(l, c)| pays(l.len(), u64::from(c)) && !known.contains(l))
+        .collect();
+    kept.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    kept.truncate(room.min(phrase::IDS_MAX));
+    kept
+}
+
+/// Bits of each of [`Seen`]'s two tables a key buys, at most twice this after rounding up. Past 8 a
+/// bit costs about what it spares the count on a million paths, at about 70 bytes an extra label.
+const SEEN_BITS_A_KEY: usize = 8;
+
+/// Which labels a pass saw at least twice, with false positives only: what keeps most of the labels
+/// that occur once, the bulk of them on any corpus, out of the exact count behind it.
+struct Seen {
+    once: Vec<u64>,
+    twice: Vec<u64>,
+}
+
+impl Seen {
+    fn for_keys(keys: usize) -> Self {
+        let bits = keys
+            .saturating_mul(SEEN_BITS_A_KEY)
+            .next_power_of_two()
+            .max(1 << 16);
+        Self {
+            once: vec![0; bits / 64],
+            twice: vec![0; bits / 64],
+        }
+    }
+
+    /// The two bits of `label`, each as a word's index and a mask in it.
+    #[inline]
+    fn places(&self, label: &[u8]) -> [(usize, u64); 2] {
+        let hash = crate::blob::hash_bytes(label);
+        let words = self.once.len();
+        let place = |h: u64| {
+            let word = (h >> 6) as usize & (words - 1);
+            (word, 1u64 << (h & 63))
+        };
+        [place(hash), place(hash >> 32)]
+    }
+
+    fn add(&mut self, label: &[u8]) {
+        let [(a, x), (b, y)] = self.places(label);
+        if self.once[a] & x != 0 && self.once[b] & y != 0 {
+            self.twice[a] |= x;
+            self.twice[b] |= y;
+        }
+        self.once[a] |= x;
+        self.once[b] |= y;
+    }
+
+    fn twice(&self, label: &[u8]) -> bool {
+        let [(a, x), (b, y)] = self.places(label);
+        self.twice[a] & x != 0 && self.twice[b] & y != 0
+    }
+}
+
+/// The edges of a key stream, walked once to [`sift`](Self::sift) the labels that occur once and
+/// once more to [`count`](Self::count) the others: the streamed build's half of [`select`], which
+/// holds a label only from the second pass and only if the first saw it twice.
+pub(crate) struct EdgeCount {
+    last: Vec<u8>,
+    open: Vec<usize>,
+    seen: Seen,
+    counts: Map<Box<[u8]>, u32>,
+}
+
+impl EdgeCount {
+    pub(crate) fn for_keys(keys: usize) -> Self {
+        Self {
+            last: Vec::new(),
+            open: vec![0],
+            seen: Seen::for_keys(keys),
+            counts: Map::default(),
+        }
+    }
+
+    fn walk(last: &mut Vec<u8>, open: &mut Vec<usize>, key: &[u8], edge: &mut impl FnMut(&[u8])) {
+        let shared = crate::dict_index::lcp(last, key);
+        close_edges(open, last, shared, edge);
+        open_key(open, key.len());
+        last.clear();
+        last.extend_from_slice(key);
+    }
+
+    pub(crate) fn sift(&mut self, key: &[u8]) {
+        let seen = &mut self.seen;
+        Self::walk(&mut self.last, &mut self.open, key, &mut |label| {
+            if may_pay(label.len()) {
+                seen.add(label);
+            }
+        });
+    }
+
+    /// The first pass is over: the path of its last key has edges still open.
+    pub(crate) fn sifted(&mut self) {
+        let seen = &mut self.seen;
+        close_edges(&mut self.open, &self.last, 0, &mut |label: &[u8]| {
+            if may_pay(label.len()) {
+                seen.add(label);
+            }
+        });
+        self.last.clear();
+    }
+
+    fn tally(seen: &Seen, counts: &mut Map<Box<[u8]>, u32>, label: &[u8]) {
+        if !may_pay(label.len()) || !seen.twice(label) {
+            return;
+        }
+        match counts.get_mut(label) {
+            Some(count) => *count += 1,
+            None => {
+                counts.insert(label.into(), 1);
+            }
+        }
+    }
+
+    pub(crate) fn count(&mut self, key: &[u8]) {
+        let (seen, counts) = (&self.seen, &mut self.counts);
+        Self::walk(&mut self.last, &mut self.open, key, &mut |label| {
+            Self::tally(seen, counts, label);
+        });
+    }
+
+    /// The labels worth a dictionary, as [`select`] chooses them over the same keys: one more walk
+    /// of `src`, for the parse's picks. `None` where none pays.
+    pub(crate) fn select<R: Replay>(
+        mut self,
+        src: &mut R,
+        phrases: &[Vec<u8>],
+        room: usize,
+        block: usize,
+        micro: usize,
+        tables: &[Table],
+    ) -> Result<Option<Selected>, IndexError> {
+        let (seen, counts) = (&self.seen, &mut self.counts);
+        close_edges(&mut self.open, &self.last, 0, &mut |label: &[u8]| {
+            Self::tally(seen, counts, label);
+        });
+        let Self { seen, counts, .. } = self;
+        drop(seen);
+        let kept = admitted(counts.iter().map(|(l, &c)| (l.as_ref(), c)), phrases, room);
+        if room == 0 || kept.is_empty() {
+            return Ok(None);
+        }
+        let uses = usage_of_stream(src, block, micro, tables, phrases, &kept)?;
+        Ok(selected_from(&kept, &uses))
+    }
 }
 
 /// What a dictionary names past its phrases.
@@ -292,54 +561,33 @@ pub(crate) fn select<K: AsKey + Sync>(
     for (i, slot) in lcps.iter_mut().enumerate().take(n).skip(1) {
         *slot = crate::dict_index::lcp(key(i - 1), key(i));
     }
-    // The depths at which a key branches from the keys after it are the suffix minima of the lcp
-    // array to its right; with what it shares with the key before, they cut its residual into the
-    // edges of the patricia trie. One stack, walked from the right.
     let mut counts: Map<&[u8], u32> = Map::default();
-    let mut stack: Vec<usize> = Vec::new();
-    let mut cuts: Vec<usize> = Vec::new();
-    for i in (0..n).rev() {
-        let next = lcps[i + 1];
-        while stack.last().is_some_and(|&v| v >= next) {
-            stack.pop();
+    let mut edge = |label| {
+        if may_pay(<[u8]>::len(label)) {
+            *counts.entry(label).or_insert(0) += 1;
         }
-        stack.push(next);
-        let (d0, k) = (lcps[i], key(i));
-        cuts.clear();
-        cuts.push(d0);
-        cuts.extend(
-            stack
-                .iter()
-                .rev()
-                .take_while(|&&v| v > d0)
-                .filter(|&&v| v < k.len()),
-        );
-        cuts.sort_unstable();
-        if cuts.last().is_some_and(|&c| c < k.len()) {
-            cuts.push(k.len());
-        }
-        for w in cuts.windows(2) {
-            let label = &k[w[0]..w[1]];
-            if (2..=LABEL_MAX).contains(&label.len()) {
-                *counts.entry(label).or_insert(0) += 1;
-            }
-        }
+    };
+    let mut open = vec![0];
+    open_key(&mut open, key(0).len());
+    for (i, &shared) in lcps.iter().enumerate().take(n).skip(1) {
+        close_edges(&mut open, key(i - 1), shared, &mut edge);
+        open_key(&mut open, key(i).len());
     }
-    let known: std::collections::HashSet<&[u8]> = phrases.iter().map(Vec::as_slice).collect();
-    let mut kept: Vec<(&[u8], u32)> = counts
-        .into_iter()
-        .filter(|&(l, c)| pays(l.len(), u64::from(c)) && !known.contains(l))
-        .collect();
+    close_edges(&mut open, key(n - 1), 0, &mut edge);
+    let kept = admitted(counts.into_iter(), phrases, room);
     if kept.is_empty() {
         return None;
     }
-    // The most used first, ties in byte order, so that the cut is a function of the keys.
-    kept.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    kept.truncate(room.min(phrase::IDS_MAX));
     let uses = usage(keys, &lcps, block, micro, tables, phrases, &kept);
+    selected_from(&kept, &uses)
+}
+
+/// What the parse's `uses` of `kept` leave: the labels that pay for themselves once it has chosen,
+/// the flat ones apart and the others in their nested dictionary.
+fn selected_from(kept: &[(&[u8], u32)], uses: &[Usage]) -> Option<Selected> {
     let mut used: Vec<(&[u8], u64, u64)> = kept
         .iter()
-        .zip(&uses)
+        .zip(uses)
         .map(|(&(l, _), u)| {
             let picks = u.picks.load(Ordering::Relaxed);
             (l, picks, u.reads.load(Ordering::Relaxed))
@@ -415,6 +663,106 @@ mod tests {
             all.extend_from_slice(labels);
         }
         all
+    }
+
+    /// The patricia edges as a walk from the right finds them, a key's residual cut at the depths
+    /// where a later key branches from it: the definition [`close_edges`] has to agree with.
+    fn edges_by_definition(keys: &[Vec<u8>]) -> Vec<Vec<u8>> {
+        let n = keys.len();
+        let mut lcps = vec![0usize; n + 1];
+        for i in 1..n {
+            lcps[i] = crate::dict_index::lcp(&keys[i - 1], &keys[i]);
+        }
+        let (mut stack, mut cuts, mut out) = (Vec::new(), Vec::new(), Vec::new());
+        for i in (0..n).rev() {
+            let next = lcps[i + 1];
+            while stack.last().is_some_and(|&v| v >= next) {
+                stack.pop();
+            }
+            stack.push(next);
+            let (d0, k) = (lcps[i], &keys[i]);
+            cuts.clear();
+            cuts.push(d0);
+            cuts.extend(
+                stack
+                    .iter()
+                    .rev()
+                    .take_while(|&&v| v > d0)
+                    .filter(|&&v| v < k.len()),
+            );
+            cuts.sort_unstable();
+            if cuts.last().is_some_and(|&c| c < k.len()) {
+                cuts.push(k.len());
+            }
+            out.extend(cuts.windows(2).map(|w| k[w[0]..w[1]].to_vec()));
+        }
+        out.sort_unstable();
+        out
+    }
+
+    fn edges_by_walk(keys: &[Vec<u8>]) -> Vec<Vec<u8>> {
+        let (mut last, mut open, mut out) = (Vec::new(), vec![0], Vec::new());
+        for key in keys {
+            EdgeCount::walk(&mut last, &mut open, key, &mut |label| {
+                out.push(label.to_vec());
+            });
+        }
+        close_edges(&mut open, &last, 0, &mut |label: &[u8]| {
+            out.push(label.to_vec());
+        });
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn the_walk_forward_finds_the_edges_of_the_definition() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move |m: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % m
+        };
+        for round in 0..400 {
+            let (count, alphabet, longest) = (1 + next(60), 1 + next(4), 1 + next(12));
+            let mut keys: Vec<Vec<u8>> = (0..count)
+                .map(|_| {
+                    let len = next(longest + 1);
+                    (0..len).map(|_| b'a' + next(alphabet) as u8).collect()
+                })
+                .collect();
+            keys.sort_unstable();
+            keys.dedup();
+            assert_eq!(
+                edges_by_walk(&keys),
+                edges_by_definition(&keys),
+                "round {round}: {keys:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_label_seen_twice_is_never_missed() {
+        let mut seen = Seen::for_keys(100);
+        let labels: Vec<Vec<u8>> = (0..50_000u32).map(|i| i.to_le_bytes().to_vec()).collect();
+        for label in &labels {
+            seen.add(label);
+        }
+        let once = labels.iter().filter(|l| seen.twice(l)).count();
+        for label in &labels {
+            seen.add(label);
+        }
+        assert!(labels.iter().all(|l| seen.twice(l)));
+        // 65 536 bits a table is about 0.76 bits set a label, so the table is nearly full here and
+        // this bound only says that a label met once is not always taken for two.
+        assert!(once < labels.len(), "{once}");
+    }
+
+    #[test]
+    fn what_may_pay_is_all_that_can() {
+        assert!(!pays(4, u64::MAX) && !may_pay(4));
+        assert!(pays(5, 1 << 20) && may_pay(5));
+        assert!(may_pay(LABEL_MAX) && !may_pay(LABEL_MAX + 1));
     }
 
     /// Six directories holding the same files and the same subdirectory. A file's name is read by
@@ -526,6 +874,50 @@ mod tests {
         };
         assert_eq!(got(&uses[0]), (3, 4));
         assert_eq!(got(&uses[1]), (0, 0));
+    }
+
+    /// Two tables, one that spells the label in one code, cheaper than a reference, and one that
+    /// spells nothing: which of them a block is parsed under decides whether the label is picked, so
+    /// a walk that names the wrong shard shows.
+    #[test]
+    fn a_walk_of_the_keys_counts_what_the_sorted_build_counts() {
+        const LABEL: &[u8] = b"-labels-";
+        let keys: Vec<String> = (0..70_000u32)
+            .map(|i| format!("{i:06}-labels-{:02}", i % 89))
+            .collect();
+        let mut lcps = vec![0; keys.len() + 1];
+        for i in 1..keys.len() {
+            lcps[i] = crate::dict_index::lcp(keys[i - 1].as_bytes(), keys[i].as_bytes());
+        }
+        let tables = [Table::train(&[]), Table::train(&[LABEL; 64])];
+        let kept: [(&[u8], u32); 1] = [(LABEL, 0)];
+        let got = |uses: &[Usage]| -> Vec<(u64, u64)> {
+            uses.iter()
+                .map(|u| {
+                    (
+                        u.picks.load(Ordering::Relaxed),
+                        u.reads.load(Ordering::Relaxed),
+                    )
+                })
+                .collect()
+        };
+        let block = 1024;
+        let micro = micro_for(block);
+        assert!(shard_blocks_for(block) * block < keys.len(), "two shards");
+        let held = got(&usage(&keys, &lcps, block, micro, &tables, &[], &kept));
+        let mut run = crate::extsort::Run::with_budget(1 << 24);
+        for key in &keys {
+            run.push(key);
+        }
+        let walked = usage_of_stream(&mut &mut run, block, micro, &tables, &[], &kept).unwrap();
+        assert_eq!(got(&walked), held);
+        let flipped = [tables[1].clone(), tables[0].clone()];
+        assert_ne!(
+            got(&usage(&keys, &lcps, block, micro, &flipped, &[], &kept)),
+            held,
+            "the tables have to move the picks"
+        );
+        assert!(held[0].0 > 0);
     }
 
     #[test]

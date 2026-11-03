@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows
   widths, and it was the one the signature led with. In Rust `CompactHashIndex::build` and
   `build_to_file` are deprecated for `build_bits(items, 8)` and `build_bits_to_file`; in Python
   passing `fingerprint_bytes` raises a `DeprecationWarning`, and `fingerprint_bits=` takes its place.
-  Both spellings write the same blob, byte for byte. They go in 5.0.
+  Both spellings write the same blob, byte for byte. They go in 6.0.
 
 ### Added
 
@@ -35,6 +35,13 @@ All notable changes to this project are documented here. The format follows
   where the blob comes out smaller — otherwise its blob is the plain layout's byte for byte — and
   no default builds them. `DictLayout` is the one argument the block, the microblock and the labels
   go in. A pinned golden blob (`golden-5.0.0-dict-labels.bdx`) seeds the dictionary fuzz target.
+  The streamed build takes the layout too, and writes the same bytes:
+  `DictIndex::build_to_file_with(keys, path, layout)`, `micro=` and `labels=` on Python's
+  `build_to_file`, and `--labels` with `--stream` no longer holds the file. It walks the keys five
+  times rather than three, and holds a filter and the labels it has seen twice while it chooses:
+  the peak went 290 → 582 MB on 7.3 million paths and 738 → 1 086 MB on 100 million bigrams, whose
+  file went 5.31 → 3.80 bytes a key. Compared with the sorting build on 21 corpora and layouts up to
+  ten million keys, every file is byte-identical.
 - **`PerfectHashIndex` stores its keys overlapped where that is smaller: 10.88 → 9.25 bytes a key
   on the 479 823-word dictionary.** A new arena encoding, tag `0x13`, holds a greedy shortest
   common superstring of the keys — a key inside another costs no bytes, and an overlap between two
