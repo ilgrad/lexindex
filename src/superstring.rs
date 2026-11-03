@@ -121,9 +121,29 @@ struct Above<'a> {
 }
 
 impl Above<'_> {
+    /// The child of `v` on byte `c`. A run of up to sixteen labels is compared whole, where a
+    /// bisection ends in a compare no predictor learns at every node of a fallback.
+    #[inline(always)]
     fn child(self, v: u32, c: u8) -> Option<u32> {
         let (lo, hi) = (self.first[v as usize], self.first[v as usize + 1]);
-        let run = &self.label[lo as usize..hi as usize];
+        let (at, len) = (lo as usize, (hi - lo) as usize);
+        #[cfg(target_arch = "x86_64")]
+        if len <= 16 {
+            if let Some(window) = self.label.get(at..at + 16) {
+                use std::arch::x86_64::{
+                    __m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
+                };
+                // SAFETY: `window` is sixteen readable bytes, an unaligned load asks no more, and
+                // SSE2 is in the x86-64 baseline.
+                let equal = unsafe {
+                    let word = _mm_loadu_si128(window.as_ptr().cast::<__m128i>());
+                    _mm_movemask_epi8(_mm_cmpeq_epi8(word, _mm_set1_epi8(c as i8)))
+                };
+                let k = (equal as u32 | 1 << 16).trailing_zeros();
+                return ((k as usize) < len).then_some(lo + k);
+            }
+        }
+        let run = &self.label[at..at + len];
         run.binary_search(&c).ok().map(|k| lo + k as u32)
     }
 

@@ -114,7 +114,7 @@ array's `decode` and `slot`, a character of a `&str` and a slot read unchecked; 
 for an instruction the x86-64 baseline lacks, whose one obligation is that the CPU has it — the
 perfect hash's `Remap::get_popcnt`, its remap lookup with `popcnt`, and the double array's
 `place_avx2` and `slots_malformed_avx2`, its build's placement and its load's slot check with AVX2.
-There are seventy-four `unsafe` blocks:
+There are seventy-five `unsafe` blocks:
 thirteen memory maps, counting the writable one `build_to_file` uses on
 a temporary file it created itself; seven in the huge-page allocator; eight that write into a `Vec`'s
 spare capacity and then extend it; five unchecked loads inside the key hash, where the index is in bounds by the length
@@ -131,7 +131,9 @@ whatever the blob holds — a debug build checks it, and so the fuzz targets do;
 those builds, on x86-64 only and each only once `is_x86_feature_detected!` has found its
 instruction — every other target and Miri run the portable build, and tests hold each pair to
 the same answers; one SSE2 compare over a transducer state's transitions, part of the x86-64
-baseline, whose loads read sixteen bytes each of a window that holds sixteen or thirty-two; and
+baseline, whose loads read sixteen bytes each of a window that holds sixteen or thirty-two; one
+more SSE2 compare, over a trie node's children while a merged arena is built from the caller's keys,
+whose load reads a slice of sixteen bytes; and
 twelve in the double array's walks, which read a slot, the code table
 and a character of the text unchecked, and
 decode a text into buffers on the stack. A slot's bound is what the load's walk over every slot
