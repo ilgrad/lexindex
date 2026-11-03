@@ -928,3 +928,30 @@ fn decode_labelled(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Rest::word` at every start and offset of every key length to twenty is `word_at` of the
+    /// key at `at + c`: the one load and shift for a key of eight bytes or more, the whole key's
+    /// tail shifted down under eight, zero at and past the end.
+    #[test]
+    fn rest_word_is_the_key_word_past_at() {
+        let bytes: Vec<u8> = (1..=20u8).map(|k| k.wrapping_mul(53) | 1).collect();
+        for len in 0..=20 {
+            let key = &bytes[..len];
+            let tail = tail_word(key);
+            for at in 0..=len {
+                let rest = Rest { key, at, tail };
+                for c in 0..=len - at + 2 {
+                    assert_eq!(
+                        rest.word(c),
+                        fsst::word_at(key, at + c),
+                        "len {len} at {at} c {c}"
+                    );
+                }
+            }
+        }
+    }
+}

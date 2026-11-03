@@ -515,4 +515,24 @@ mod tests {
         assert_eq!(t.symbol(1), Some((word_of(b"xyz"), 3)));
         assert_eq!(t.symbol(2), None);
     }
+
+    /// `word_at` at every offset of every length to twenty, against the zero-padded definition:
+    /// the whole word, the shifted last word, the offsets at and past the end, and the gather.
+    #[test]
+    fn word_at_is_the_zero_padded_word_at_every_offset() {
+        let bytes: Vec<u8> = (1..=20u8).map(|k| k.wrapping_mul(37) | 1).collect();
+        for len in 0..=20 {
+            let s = &bytes[..len];
+            for i in 0..=24 {
+                let naive = s
+                    .get(i..)
+                    .unwrap_or_default()
+                    .iter()
+                    .take(8)
+                    .enumerate()
+                    .fold(0u64, |w, (k, &b)| w | u64::from(b) << (8 * k));
+                assert_eq!(word_at(s, i), naive, "len {len} at {i}");
+            }
+        }
+    }
 }
