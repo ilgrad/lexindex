@@ -679,12 +679,7 @@ fn build_and_save(
     block: Option<usize>,
     labels: bool,
 ) -> Result<usize, Fail> {
-    let dict = || -> Result<DictIndex, IndexError> {
-        match block {
-            Some(b) => DictIndex::build_with_block(keys, b),
-            None => DictIndex::build(keys),
-        }
-    };
+    let layout = block.map_or_else(DictLayout::default, DictLayout::new);
     let n = match kind {
         Kind::String => {
             let index = StringIndex::build(keys)?;
@@ -692,7 +687,6 @@ fn build_and_save(
             index.len()
         }
         Kind::Dict => {
-            let layout = block.map_or_else(DictLayout::default, DictLayout::new);
             let index = DictIndex::build_with(keys, layout.with_labels(labels))?;
             index.save(dest)?;
             index.len()
@@ -705,7 +699,7 @@ fn build_and_save(
         #[cfg(feature = "mph")]
         Kind::Hashed => {
             // No fingerprint, which is what `plan` prices `HashedDictIndex` at.
-            let index = HashedDictIndex::from_dict(dict()?, 0)?;
+            let index = HashedDictIndex::from_dict(DictIndex::build_with(keys, layout)?, 0)?;
             index.save(dest)?;
             index.len()
         }

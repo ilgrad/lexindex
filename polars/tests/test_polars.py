@@ -411,7 +411,7 @@ def test_a_crafted_string_index_is_refused_by_name(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["golden-4.6.0-perfect-merged.bmp", "golden-4.6.0-perfect-merged-fp.bmp"]
+    "name", ["golden-5.0.0-perfect-merged.bmp", "golden-5.0.0-perfect-merged-fp.bmp"]
 )
 def test_a_merged_arena_answers_every_key(name):
     path = SPECIMENS / name
