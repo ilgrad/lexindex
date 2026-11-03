@@ -143,6 +143,12 @@ impl Packed {
         (word & mask, (word >> self.width) & mask)
     }
 
+    /// Pull in the line entry `i` will be read from.
+    #[inline(always)]
+    pub(crate) fn prefetch(&self, i: usize) {
+        crate::blob::prefetch_byte_unchecked(&self.deltas, i * self.width as usize / 8);
+    }
+
     pub(crate) fn section(&self) -> &SharedBytes {
         &self.deltas
     }

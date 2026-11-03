@@ -137,6 +137,19 @@ pub(super) fn head_of<'a>(heads: &'a [u8], ends: &Offsets, b: usize) -> &'a [u8]
     heads.get(at(start)..at(end)).unwrap_or_default()
 }
 
+/// Pulls in a run's next three lines. The header word at its start is read at once, and the suffix
+/// the scan then compares sits further in, so the two misses overlap instead of following each
+/// other. The count is fixed because a loop to the run's end exits at a length no predictor learns:
+/// counted on `paths`, 1.5 mispredicted branches a probe. A shorter run names its last byte over
+/// again; past three lines the scan has found the key or the stream prefetcher has found the scan.
+#[inline(always)]
+fn prefetch_run(data: &[u8]) {
+    let last = data.len().saturating_sub(1);
+    for reach in [64, 128, 192] {
+        crate::blob::prefetch_byte_unchecked(data, reach.min(last));
+    }
+}
+
 impl DictIndex {
     /// `query` as the keys are spelled, handed to `f` with what the bytes stand for. A blob without
     /// a code hands the query over as it is. One with a code spells it into a buffer on the stack
@@ -186,6 +199,7 @@ impl DictIndex {
                 Ok((lo, hi)) => self.head_boundary(bytes, lo, hi),
                 Err(l) => l,
             };
+            self.prefetch_block(l);
             let (rank, hit) = self.locate_in(l, bytes);
             (rank, hit && probe == Probe::Exact)
         })
@@ -213,6 +227,7 @@ impl DictIndex {
             Ok(s) => self.sample_boundary(probe, s),
             Err(l) => (l, None),
         };
+        self.prefetch_block(l);
         match known {
             Some((matched, len)) if matched == len && matched == probe.len() => {
                 (((l - 1) * self.block) as u64, true)
@@ -506,6 +521,29 @@ impl DictIndex {
         Some((j, o + i))
     }
 
+    /// Pulls in what a lookup below boundary `l` is about to read, beside the head it reads first:
+    /// the block's microblock offsets and its route words. Each has an address known now, but is
+    /// read in sequence behind the head compare, whose exit no predictor learns, and the route's
+    /// words behind each other, a bisection over a group of two to five lines. A batch has pulled
+    /// its blocks in already and does not come through here.
+    #[inline(always)]
+    fn prefetch_block(&self, l: usize) {
+        let per = self.per;
+        if l == 0 || per == 1 {
+            return;
+        }
+        let first = (l - 1) * per;
+        self.micros.prefetch(first);
+        self.micros.prefetch(first + per - 1);
+        if let Some(words) = self.mroute.get() {
+            let mut at = first;
+            while at < first + per {
+                crate::blob::prefetch_unchecked(words, at);
+                at += 64 / size_of::<u64>();
+            }
+        }
+    }
+
     /// The rest of [`locate`](Self::locate) once the block boundary is known: the block below it
     /// is the only one that can hold `probe`. Its restart words, or its restart run where they
     /// tie, say which of its microblocks can, and that one microblock is scanned — the block
@@ -535,12 +573,9 @@ impl DictIndex {
             match self.micro_routed(b, r, probe, matched) {
                 Some(routed) => routed,
                 None => {
-                    let restarts = Entries::of(
-                        &self.codes_of(b).1,
-                        codec,
-                        self.restart_data_at(b, block_base),
-                        r,
-                    );
+                    let data = self.restart_data_at(b, block_base);
+                    prefetch_run(data);
+                    let restarts = Entries::of(&self.codes_of(b).1, codec, data, r);
                     let (j, matched, hit) = self.scan_run(codec, &restarts, r, probe, matched);
                     if hit {
                         return ((base + j * self.micro) as u64, true);
@@ -552,12 +587,9 @@ impl DictIndex {
             (0, matched)
         };
         let count = self.micro_count(b, j);
-        let entries = Entries::of(
-            &self.codes_of(b).0,
-            codec,
-            self.micro_data_at(b, j, block_base),
-            count,
-        );
+        let data = self.micro_data_at(b, j, block_base);
+        prefetch_run(data);
+        let entries = Entries::of(&self.codes_of(b).0, codec, data, count);
         let (k, _, hit) = self.scan_run(codec, &entries, count, probe, matched);
         let rank = base + j * self.micro + k + usize::from(!hit);
         (rank as u64, hit)

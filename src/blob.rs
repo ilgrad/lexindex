@@ -133,9 +133,14 @@ pub(crate) fn prefetch_byte(data: &[u8], i: usize) {
 /// [`prefetch_byte`] without the range check, for a loop whose `i` is in range by construction
 /// and would pay a compare, a branch and a reload of the length on every key for it. Sound for any
 /// `i` all the same: a prefetch never faults, and the address is formed without `add`'s promise.
-#[cfg(feature = "mph")]
 #[inline(always)]
 pub(crate) fn prefetch_byte_unchecked(data: &[u8], i: usize) {
+    prefetch_unchecked(data, i);
+}
+
+/// [`prefetch_byte_unchecked`] for a slice of any element.
+#[inline(always)]
+pub(crate) fn prefetch_unchecked<T>(data: &[T], i: usize) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: a prefetch has no effect but on the cache, whatever the address, and `wrapping_add`
     // is defined for any offset.

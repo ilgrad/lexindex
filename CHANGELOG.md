@@ -145,6 +145,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **A `DictIndex` lookup pulls its microblock in ahead of the scan.** Once the block is known, its
+  microblock offsets and its route words are prefetched beside the head compare, and once the run
+  is known, its next three lines: each of these is read behind a miss whose address the next one
+  does not need, so they overlap instead of following each other. Hints only — nothing is read
+  early and the blob is unchanged. Instructions a lookup, over each corpus's probes: words +2.5 %,
+  paths +1.5 %, urls +1.8 %, numeric +2.4 % (+3.1, +1.6, +2.2, +2.7 % after `route_microblocks`),
+  the price of the hints, and mispredicted branches unchanged. What they buy in nanoseconds, at a
+  million keys and at ten, is for a quiet machine.
 - **The shared-prefix count behind a `DictIndex` lookup has no byte loop left.** `lcp` compared the
   tail under eight bytes a byte at a time, a loop whose exit falls on whatever byte differs and
   that no predictor learns. The tail is now a few overlapping loads placed at their own offsets in
