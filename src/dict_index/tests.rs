@@ -2313,3 +2313,44 @@ fn load_mmap_borrows_the_file_and_answers_like_the_owned_index() {
     // SAFETY: nothing to map; the open fails.
     assert!(unsafe { DictIndex::load_mmap(&path) }.is_err());
 }
+
+/// Bytes of every length to twenty, drawn from a fixed seed; the pair differs at `at`, or is
+/// equal over the shorter one where `at` is past it.
+fn differing_pair(seed: &mut u64, la: usize, lb: usize, at: usize) -> (Vec<u8>, Vec<u8>) {
+    let mut byte = || {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        (*seed >> 56) as u8
+    };
+    let a: Vec<u8> = (0..la).map(|_| byte()).collect();
+    let mut b: Vec<u8> = a[..la.min(lb)].to_vec();
+    while b.len() < lb {
+        b.push(byte());
+    }
+    if at < la.min(lb) {
+        b[at] = a[at].wrapping_add(1 + byte() % 255);
+    }
+    (a, b)
+}
+
+#[test]
+fn lcp_agrees_with_the_byte_definition() {
+    // Every pair of lengths to twenty bytes with the first differing byte at every position, or
+    // none: the whole-word loop, the last-word tail, the two quads and the three bytes all get
+    // their turn, in both orders.
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    for la in 0..=20 {
+        for lb in 0..=20 {
+            for at in 0..=la.min(lb) {
+                let (a, b) = differing_pair(&mut seed, la, lb, at);
+                let naive = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+                assert_eq!(lcp(&a, &b), naive, "{a:?} {b:?}");
+                assert_eq!(lcp(&b, &a), naive, "{b:?} {a:?}");
+            }
+        }
+    }
+    assert_eq!(lcp(b"", b""), 0);
+    assert_eq!(lcp(b"a\0", b"a"), 1);
+    assert_eq!(lcp(b"a\0b", b"a\0c"), 2);
+}

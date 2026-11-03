@@ -373,6 +373,12 @@ impl AsKey for Bytes<'_> {
 }
 
 /// How many leading bytes `a` and `b` share.
+///
+/// Whole words first. The tail under eight bytes was a byte loop whose exit no predictor learns;
+/// it is now a few overlapping loads placed at their own offsets in one word, so that the first
+/// differing byte is one `trailing_zeros`: the last eight bytes of each slice where both run to
+/// eight — the bytes read twice are equal, so their `xor` is zero —, four bytes at `0` and at
+/// `n - 4` for a shorter slice of four or more, and its first, middle and last byte under four.
 #[inline]
 pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
     let n = a.len().min(b.len());
@@ -384,10 +390,30 @@ pub(crate) fn lcp(a: &[u8], b: &[u8]) -> usize {
         }
         i += 8;
     }
-    while i < n && a[i] == b[i] {
-        i += 1;
+    if i == n {
+        return n;
     }
-    i
+    let (at, x) = if n >= 8 {
+        (n - 8, fsst::word_at(a, n - 8) ^ fsst::word_at(b, n - 8))
+    } else if n >= 4 {
+        let head = u64::from(quad_at(a, 0) ^ quad_at(b, 0));
+        let tail = u64::from(quad_at(a, n - 4) ^ quad_at(b, n - 4));
+        (0, head | tail << (8 * (n - 4)))
+    } else {
+        let byte = |k: usize| u64::from(a[k] ^ b[k]) << (8 * k);
+        (0, byte(0) | byte(n / 2) | byte(n - 1))
+    };
+    if x == 0 {
+        n
+    } else {
+        at + (x.trailing_zeros() / 8) as usize
+    }
+}
+
+/// The four bytes at `s[i..]` as a little-endian word; the caller has them in bounds.
+#[inline(always)]
+fn quad_at(s: &[u8], i: usize) -> u32 {
+    u32::from_le_bytes(s[i..i + 4].try_into().unwrap())
 }
 
 /// The keys an [`encode_all`] arena holds, one view each.

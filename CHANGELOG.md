@@ -145,6 +145,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The shared-prefix count behind a `DictIndex` lookup has no byte loop left.** `lcp` compared the
+  tail under eight bytes a byte at a time, a loop whose exit falls on whatever byte differs and
+  that no predictor learns. The tail is now a few overlapping loads placed at their own offsets in
+  one word — the last eight bytes of both slices where they run to eight, four bytes at each end
+  for a shorter one, its first, middle and last byte under four — and the first differing byte is
+  one `trailing_zeros`. The equality test before a block's scan is read off the same count rather
+  than a second compare. Instructions per lookup, built in one process over the probes of each
+  corpus: numeric −0.57 %, paths −0.13 %, words +0.08 %, urls +0.06 %. Nanoseconds are for a
+  quiet machine. The blob is unchanged.
 - **A `DictIndex` lookup bisects its route and shifts to its shard.** The route to a microblock
   bisects its sorted route words instead of comparing all of them, and a block's shard is a shift
   where the blob's shard is a power of two, as every build writes it, instead of a 64-bit `div`.

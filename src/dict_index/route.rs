@@ -516,10 +516,11 @@ impl DictIndex {
         }
         let b = l - 1;
         let head = self.head(b);
-        if head == probe {
+        let matched = lcp(head, probe);
+        if matched == head.len() && matched == probe.len() {
             return ((b * self.block) as u64, true);
         }
-        self.locate_past(b, probe, lcp(head, probe))
+        self.locate_past(b, probe, matched)
     }
 
     /// [`locate_in`](Self::locate_in) past block `b`'s head, which is below `probe` and shares
