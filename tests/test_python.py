@@ -1759,14 +1759,14 @@ def test_inspect_reads_the_header_of_every_index(tmp_path):
     keys = ["apple", "banana", "cherry"]
     for idx, kind, fmt in [
         (lexindex.StringIndex(keys), "StringIndex", "BIX4"),
-        (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP8"),
-        (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH8"),
-        (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL2"),
+        (lexindex.PerfectHashIndex(keys), "PerfectHashIndex", "BMP9"),
+        (lexindex.CompactHashIndex(keys, 2), "CompactHashIndex", "BCH9"),
+        (lexindex.ClosedHashIndex(keys), "ClosedHashIndex", "BCL3"),
         (lexindex.DictIndex(keys), "DictIndex", "BDX3"),
         (
             lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys), 8),
             "HashedDictIndex",
-            "BHD1",
+            "BHD2",
         ),
         (lexindex.DoubleArrayIndex(keys), "DoubleArrayIndex", "BDA1"),
     ]:
@@ -1799,7 +1799,7 @@ def test_inspect_refuses_what_is_not_a_blob(tmp_path):
     with pytest.raises(ValueError, match="PerfectHashIndex"):
         lexindex.inspect(b"BMP4 from before 1.0")
     with pytest.raises(ValueError, match="truncated"):
-        lexindex.inspect(b"BCH8 cut short")
+        lexindex.inspect(b"BCH9 cut short")
     with pytest.raises(TypeError):
         lexindex.inspect(42)
     with pytest.raises(OSError):

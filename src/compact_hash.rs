@@ -24,8 +24,10 @@ use crate::pages::Pages;
 const LEGACY_MAGICS: [&[u8; 4]; 7] = [
     b"BCH1", b"BCH2", b"BCH3", b"BCH4", b"BCH5", b"BCH6", b"BCH7",
 ];
-/// `[magic 4][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64][check u32]`
+/// 4.x's, keyed on the hash 5.0 replaced. No keys are in it, so nothing can dump it.
 const MAGIC_V8: &[u8; 4] = b"BCH8";
+/// `[magic 4][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64][check u32]`
+const MAGIC_V9: &[u8; 4] = b"BCH9";
 const HEADER_V7: usize = 40;
 const CHECKED_V7: usize = 36; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 20; // hash u64 + fingerprint u64 + id u32
@@ -941,12 +943,11 @@ impl CompactHashIndex {
     /// 16 bits, 29.9 at 32 (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
     /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
     /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys
-    /// colliding in **both** 64-bit hashes at once: they get one id. For random keys that is
-    /// `≈ 2^-128` a pair from 17 bytes up, but `≈ 2^-64` for two keys of one length up to 16
-    /// bytes — an expected 2.7·10⁻⁶ merges among 10⁷ such keys of one length, 2.7 % among 10⁹.
-    /// Someone who chooses the keys makes such a pair with a birthday search of ~2^32 hash steps,
-    /// minutes on one core, and in a few dozen tries with keys of 97 bytes or more; over keys a
-    /// third party submits, use [`PerfectHashIndex`](crate::PerfectHashIndex), which stores them.
+    /// colliding in **both** 64-bit hashes at once: they get one id. For random keys of any length
+    /// that is `≈ 2^-127` a pair — an expected 2.9·10⁻²¹ merges among 10⁹ keys. No search for such a
+    /// pair is known below the ~2^64 steps of a birthday; that is no proof, since the hash is not
+    /// cryptographic, so over keys a third party submits use
+    /// [`PerfectHashIndex`](crate::PerfectHashIndex), which stores them.
     /// Keys colliding in the slot hash alone are served exactly, from a side table keyed by the
     /// full second hash.
     pub fn build_bits<I, S>(items: I, fingerprint_bits: u32) -> Result<Self, IndexError>
@@ -1534,7 +1535,7 @@ impl CompactHashIndex {
         Ok((header, mph_buf, side_buf))
     }
 
-    /// Serialise to `[magic "BCH8"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
+    /// Serialise to `[magic "BCH9"][n u64][fp_bits u32][mph_len u64][side_len u32][payload u64]
     /// [check u32][MPH blob][bit-packed fingerprints][side entries]`. `check` is a hash of the
     /// preceding header bytes and `payload` a streaming hash of everything after it, verified on
     /// owned loads; the MPH region carries its own header and validates its own lengths, which is
@@ -1597,7 +1598,10 @@ impl CompactHashIndex {
                  index from its keys",
             ));
         }
-        if bytes.len() < HEADER_V7 || &bytes[0..4] != MAGIC_V8 {
+        if bytes.len() >= 4 && &bytes[0..4] == MAGIC_V8 {
+            return Err(IndexError::Format(crate::blob::REFUSED_BCH8));
+        }
+        if bytes.len() < HEADER_V7 || &bytes[0..4] != MAGIC_V9 {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
         let check = u32::from_le_bytes(bytes[CHECKED_V7..HEADER_V7].try_into().unwrap());
@@ -1779,7 +1783,7 @@ impl CompactHashIndex {
     }
 }
 
-/// The `BCH8` header over its scalars and the payload hash, checksummed.
+/// The `BCH9` header over its scalars and the payload hash, checksummed.
 fn header_v7(
     n: usize,
     fp_bits: u32,
@@ -1788,7 +1792,7 @@ fn header_v7(
     payload: u64,
 ) -> [u8; HEADER_V7] {
     let mut header = [0u8; HEADER_V7];
-    header[0..4].copy_from_slice(MAGIC_V8);
+    header[0..4].copy_from_slice(MAGIC_V9);
     header[4..12].copy_from_slice(&(n as u64).to_le_bytes());
     header[12..16].copy_from_slice(&fp_bits.to_le_bytes());
     header[16..24].copy_from_slice(&(mph_len as u64).to_le_bytes());
@@ -2071,7 +2075,16 @@ mod tests {
     fn a_blob_from_before_1_2_is_refused_by_name() {
         let idx = CompactHashIndex::build_bits(["alpha", "beta", "gamma"], 8).unwrap();
         let good = idx.to_bytes().unwrap();
-        assert_eq!(&good[0..4], b"BCH8");
+        assert_eq!(&good[0..4], b"BCH9");
+        let mut old = good.clone();
+        old[0..4].copy_from_slice(MAGIC_V8);
+        let err = from_bytes(&old).err().expect("refused").to_string();
+        assert!(
+            err.contains("lexindex 4.x")
+                && err.contains("stores no keys")
+                && err.contains("corpus"),
+            "{err}"
+        );
         for magic in LEGACY_MAGICS {
             let mut old = good.clone();
             old[0..4].copy_from_slice(magic);
@@ -2168,14 +2181,24 @@ mod tests {
         assert_eq!(pulled, 0, "the iterator must not be consumed");
     }
 
-    /// The limit the build documents: keys equal in both 64-bit hashes are one key to it, as a key
-    /// written twice is.
+    /// One key to every 4.x build, which could not tell them from a key written twice; two now. The
+    /// limit stands for whatever pair is equal in both hashes, and none is known: no test can
+    /// reach it through keys.
     #[test]
-    fn keys_sharing_both_hashes_are_one_key() {
+    fn the_pair_equal_in_both_4x_hashes_is_two_keys() {
         let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
         let idx = CompactHashIndex::build_bits([a, b, "filler"], 8).unwrap();
+        assert_eq!(idx.len(), 3);
+        assert_ne!(idx.id(a), idx.id(b));
+    }
+
+    /// The limit the build documents: a pair of hashes given twice is one key, as a key written
+    /// twice is, because the build holds nothing else to tell them apart by.
+    #[test]
+    fn equal_hash_pairs_are_one_key() {
+        let idx =
+            CompactHashIndex::build_from_pairs(vec![(11, 22), (11, 22), (33, 44)], 1).unwrap();
         assert_eq!(idx.len(), 2);
-        assert_eq!(idx.id(a), idx.id(b));
     }
 
     /// Side ids are handed out verbatim by `id()`, so the loader must pin them to the tail range

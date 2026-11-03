@@ -23,7 +23,9 @@ use crate::{DictIndex, IndexError};
 
 /// `[magic 4][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32][payload u64][check u32]`,
 /// then the embedded `BDX3` or `BDX4` blob, the MPH blob, the bit-packed rank table and the side table.
-const MAGIC: &[u8; 4] = b"BHD1";
+const MAGIC: &[u8; 4] = b"BHD2";
+/// 4.x's, the same layout, keyed on the hash 5.0 replaced. The dictionary inside it holds the keys.
+const MAGIC_V1: &[u8; 4] = b"BHD1";
 const HEADER: usize = 48;
 const CHECKED: usize = 44; // header bytes the trailing check covers
 const SIDE_ENTRY: usize = 24; // hash u64 + full second hash u64 + rank u64
@@ -64,6 +66,19 @@ pub struct HashedDictIndex {
     side: Vec<(u64, u64, u64)>,
 }
 
+/// A dictionary's keys are distinct, so two equal `(hash, second hash)` pairs among them are a
+/// collision in both, which no side table can serve.
+fn refuse_equal_hash_pairs(mut members: Vec<(u64, u64)>) -> Result<(), IndexError> {
+    members.sort_unstable();
+    if members.windows(2).any(|w| w[0] == w[1]) {
+        return Err(IndexError::Build(
+            "hashed-dict: two keys share both 64-bit hashes, so no width can tell them \
+             apart; a PerfectHashIndex or the DictIndex alone serves them exactly",
+        ));
+    }
+    Ok(())
+}
+
 /// The bits a rank below `n` takes: `⌈log2 n⌉`, and at least one, so that no table is zero bits
 /// wide.
 fn rank_bits(n: usize) -> u32 {
@@ -99,8 +114,7 @@ impl HashedDictIndex {
     /// while the perfect hash is built over the distinct hashes and the ranks are written at their
     /// slots. The same dictionary and width give the same blob, byte for byte, on any machine.
     /// Two keys that collide in the 64-bit key hash are served exactly, from a side table keyed by
-    /// the full second hash. Two keys colliding in both at once — `≈ 2^-64` a pair of one length
-    /// up to 16 bytes, `≈ 2^-128` longer, and cheap to make for whoever chooses the keys (see
+    /// the full second hash. Two keys colliding in both at once — `≈ 2^-127` a pair (see
     /// [`CompactHashIndex::build_bits`](crate::CompactHashIndex::build_bits)) — would share a rank,
     /// so the build refuses them with [`IndexError::Build`].
     pub fn from_dict(dict: DictIndex, fingerprint_bits: u32) -> Result<Self, IndexError> {
@@ -161,8 +175,7 @@ impl HashedDictIndex {
         hashes.dedup();
 
         // Every key of a shared hash but the lowest-ranked goes to the side table, which tells
-        // them apart by the second hash. A dictionary's keys are distinct, so two of them that
-        // share the second hash too are a collision in both, which nothing here can serve.
+        // them apart by the second hash.
         let mut side: Vec<(u64, u64, u64)> = Vec::new();
         if !collided.is_empty() {
             let mut owned = vec![false; collided.len()];
@@ -176,13 +189,7 @@ impl HashedDictIndex {
                     members.push((h, full));
                 }
             }
-            members.sort_unstable();
-            if members.windows(2).any(|w| w[0] == w[1]) {
-                return Err(IndexError::Build(
-                    "hashed-dict: two keys share both 64-bit hashes, so no width can tell them \
-                     apart; a PerfectHashIndex or the DictIndex alone serves them exactly",
-                ));
-            }
+            refuse_equal_hash_pairs(members)?;
         }
 
         let m = hashes.len();
@@ -478,7 +485,7 @@ impl HashedDictIndex {
         (h, mph_buf, side_buf)
     }
 
-    /// Serialise to `[magic "BHD1"][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32]
+    /// Serialise to `[magic "BHD2"][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32]
     /// [payload u64][check u32][dictionary][MPH blob][bit-packed ranks][side entries]`, where the
     /// dictionary is its own `DictIndex` blob byte for byte, with its own checksums. `check` is a
     /// hash of the preceding header bytes and `payload` one of the three sections after the
@@ -552,6 +559,9 @@ impl HashedDictIndex {
     /// the MPH region located, not parsed.
     fn parse_frame(blob: &SharedBytes, verify: bool) -> Result<Frame, IndexError> {
         let bytes = blob.as_ref();
+        if bytes.len() >= 4 && &bytes[0..4] == MAGIC_V1 {
+            return Err(IndexError::Format(crate::blob::REFUSED_BHD1));
+        }
         if bytes.len() < HEADER || &bytes[0..4] != MAGIC {
             return Err(IndexError::Format("bad magic or truncated header"));
         }
@@ -892,6 +902,22 @@ mod tests {
     }
 
     #[test]
+    fn a_4x_blob_is_refused_with_the_way_off() {
+        let dict = DictIndex::build(["a", "b"]).unwrap();
+        let mut old = HashedDictIndex::from_dict(dict, 8).unwrap().to_bytes();
+        old[0..4].copy_from_slice(MAGIC_V1);
+        let err = HashedDictIndex::from_bytes(&old)
+            .expect_err("refused")
+            .to_string();
+        assert!(
+            err.contains("lexindex 4.x")
+                && err.contains("lexindex dump")
+                && err.contains("lexindex build"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn a_fingerprint_past_32_bits_is_refused() {
         let dict = DictIndex::build(["a", "b"]).unwrap();
         let err = HashedDictIndex::from_dict(dict, 33).unwrap_err();
@@ -901,19 +927,27 @@ mod tests {
 
     /// Two keys equal in both 64-bit hashes cannot both keep their ranks — the side table
     /// matches on the pair, and answered both with the second key's rank — so the build refuses
-    /// them, at every width: a dictionary's keys are distinct, so equal pairs are a collision.
+    /// them: a dictionary's keys are distinct, so equal pairs are a collision. No such keys are
+    /// known since 5.0, so this feeds the check the pairs themselves, out of order.
     #[test]
-    fn keys_sharing_both_hashes_are_refused_at_every_width() {
+    fn equal_hash_pairs_are_refused() {
+        let err = refuse_equal_hash_pairs(vec![(7, 2), (7, 1), (7, 2)]).unwrap_err();
+        assert!(err.to_string().contains("both 64-bit hashes"), "{err}");
+        assert!(refuse_equal_hash_pairs(vec![(7, 2), (7, 1), (8, 2)]).is_ok());
+    }
+
+    /// Refused at every width under 4.x, this pair builds and keeps its ranks now.
+    #[test]
+    fn the_pair_4x_refused_keeps_its_ranks() {
         let (a, b) = crate::hash::DOUBLE_COLLIDING_PAIR;
         let mut keys = words(500);
         keys.extend([a.to_string(), b.to_string()]);
+        let sorted = ranked(&keys);
+        let rank = |k: &str| sorted.iter().position(|s| s == k).unwrap() as u64;
         for bits in [0u32, 1, 8, 16] {
-            let dict = DictIndex::build(&keys).unwrap();
-            let err = HashedDictIndex::from_dict(dict, bits).unwrap_err();
-            assert!(
-                err.to_string().contains("both 64-bit hashes"),
-                "bits={bits}: {err}"
-            );
+            let idx = build(&keys, bits);
+            assert_eq!(idx.id(a), Some(rank(a)), "bits={bits}");
+            assert_eq!(idx.id(b), Some(rank(b)), "bits={bits}");
         }
     }
 

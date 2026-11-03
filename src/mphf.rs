@@ -207,13 +207,22 @@ const TAIL_TRIES: u32 = 64;
 const MAX_LEVELS: usize = 16;
 
 /// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary
-/// between two costs about two hundred keys bumped, so they are few and large.
-const CHUNK: u64 = 1 << 16;
+/// between two costs about two hundred keys bumped, so they are few and large. 2¹⁹ against 2¹⁶ takes
+/// 0.007 bits a key off 10⁷ keys and 0.006 off 10⁸; a first level under four chunks is cut into
+/// [`PIECES`] no smaller than [`PIECE_FLOOR`] instead, so a table of 10⁶ keys keeps the eight
+/// pieces, the seven boundaries and the parallel build it had at 2¹⁶. Provisional: what fewer
+/// chunks over fewer threads cost a build of 10⁷ keys and up has not been measured.
+const CHUNK: u64 = 1 << 19;
 
 /// Fewest buckets per chunk on a level after the first: about the window, so that a chunk's
-/// placement order is the level's. A first level is cut no finer than a quarter chunk: a boundary
-/// costs about two hundred keys whatever the level, and a level that small builds in milliseconds.
+/// placement order is the level's.
 const MIN_CHUNK: u64 = 1 << 12;
+
+/// Fewest buckets per piece of a first level cut into [`PIECES`]: a boundary costs about two
+/// hundred keys whatever the level, and a level of 2¹⁴ buckets, about 74 000 keys, builds in
+/// milliseconds on one thread. A quarter of a 2¹⁶ chunk, and it does not follow [`CHUNK`]: at a
+/// quarter of 2¹⁹ a level of 10⁶ keys would be one piece, placed on one thread.
+const PIECE_FLOOR: u64 = 1 << 14;
 
 /// Chunks a level too small for whole chunks is cut into; and the pieces the last two chunks'
 /// worth of a first level is cut into, so that however many threads there are finish together.
@@ -221,10 +230,11 @@ const PIECES: u64 = 8;
 
 /// Where each chunk of a level of `buckets` starts; the last runs to the end. A boundary between
 /// two chunks costs about two hundred keys bumped whatever the level's size, so the first level,
-/// which holds nearly every key, is cut into chunks of [`CHUNK`] only — and a level below two of
-/// them is one chunk — while a `deep` level, a few per cent of the keys, is cut into [`PIECES`]
-/// so that it too spreads over the threads. Derived from the level, never from the thread
-/// count, so that the count cannot reach the result.
+/// which holds nearly every key, is cut into chunks of [`CHUNK`] only — a first level under four
+/// chunks into [`PIECES`] no smaller than [`PIECE_FLOOR`], and one below two pieces is one chunk —
+/// while a `deep` level, a few per cent of the keys, is cut into [`PIECES`] so that it too spreads
+/// over the threads. Derived from the level, never from the thread count, so that the count
+/// cannot reach the result.
 fn chunk_starts(buckets: u64, deep: bool) -> Vec<u64> {
     let pieces = tun(17, PIECES as f64) as u64;
     let tail = tun(19, PIECES as f64) as u64;
@@ -232,7 +242,11 @@ fn chunk_starts(buckets: u64, deep: bool) -> Vec<u64> {
     let mut starts = vec![0];
     let mut at = 0;
     if deep || buckets < 4 * chunk || tail == 0 {
-        let floor = if deep { MIN_CHUNK } else { chunk / 4 };
+        let floor = if deep {
+            MIN_CHUNK
+        } else {
+            PIECE_FLOOR.min(chunk / 4)
+        };
         let size = (buckets / pieces).clamp(floor, chunk);
         while buckets - at >= 2 * size {
             at += size;
@@ -4580,6 +4594,28 @@ mod tests {
     /// chunks and on one of whole chunks and pieces, in groups or in one, with a last word of
     /// group marks part full, and keys piled into one bucket too.
     #[test]
+    fn a_first_level_of_a_million_keys_keeps_eight_pieces_whatever_the_chunk() {
+        let million = Level::shape(1_000_000, Geometry::Mph3).buckets;
+        assert!(
+            million < 4 * CHUNK,
+            "a level under four chunks is cut into pieces"
+        );
+        assert_eq!(chunk_starts(million, false).len(), PIECES as usize);
+        let small = Level::shape(100_000, Geometry::Mph3).buckets;
+        assert!(
+            small < 2 * PIECE_FLOOR,
+            "a level under two pieces is one chunk"
+        );
+        assert_eq!(chunk_starts(small, false).len(), 1);
+        let ten = Level::shape(10_000_000, Geometry::Mph3).buckets;
+        assert!(
+            ten >= 4 * CHUNK,
+            "a level of four chunks and more is cut into chunks"
+        );
+        assert!(chunk_starts(ten, false).len() > PIECES as usize);
+    }
+
+    #[test]
     fn keys_in_any_order_are_grouped_by_bucket() {
         let piled: Vec<u64> = (0..300_003u64)
             .map(|i| mix(i) >> (if i % 3 == 0 { 0 } else { 40 }))
@@ -5064,14 +5100,14 @@ mod tests {
     /// only after a deliberate change, with the `write_golden_mphf` spike.
     #[test]
     fn the_current_golden_blob_is_byte_identical_to_a_fresh_build() {
-        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-4.0.0-mphf.bin");
+        const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-5.0.0-mphf.bin");
         let mphf = Mphf::build(&golden_hashes()).expect("build");
         assert!(mphf.table.v1.is_none());
         assert_eq!(&GOLDEN[..4], MAGIC);
         assert_eq!(
             mphf.to_bytes(),
             GOLDEN,
-            "regenerate tests/data/golden-4.0.0-mphf.bin"
+            "regenerate tests/data/golden-5.0.0-mphf.bin"
         );
         assert_eq!(Mphf::from_bytes(GOLDEN).expect("parses"), mphf);
     }
@@ -5633,7 +5669,7 @@ mod spike {
         let blob = Mphf::build(&golden_hashes()).expect("build").to_bytes();
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/data/golden-4.0.0-mphf.bin"
+            "/tests/data/golden-5.0.0-mphf.bin"
         );
         std::fs::write(path, &blob).expect("write the fixture");
         println!("{path}: {} bytes", blob.len());

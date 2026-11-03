@@ -30,6 +30,32 @@ All notable changes to this project are documented here. The format follows
   `TypeError` in Python; `retire_id` stays on every base.
 - **A refused build answers `IndexError::Build`, not `Format`,** and `Build` is no longer behind `mph`.
   The C ABI answers `LEXINDEX_STATUS_BUILD`.
+- **The key hash carries 128 bits of state on every path.** Through 4.x both hashes of a key up to
+  16 bytes were functions of one folded 64-bit product and the length, so a birthday search found two
+  keys equal in both in 3.7·10⁹ steps, and from 97 bytes a block spelling the lane state erased the
+  next eight bytes from both. `CompactHashIndex` and `ClosedHashIndex` gave such keys one id. Now two
+  products to 16 bytes and three per 32-byte block stay unfolded until the merge, every word reaches
+  two of them, and the one product a text key can zero keeps its factors. A random pair shares both
+  hashes at `≈ 2^-127` at any length, an expected 2.9·10⁻²¹ merges among 10⁹ keys, and no chosen pair
+  is known below a birthday's 2^64 steps. That is no proof. Retired operations a `PerfectHashIndex::id`
+  hit, counted and **not yet timed**: urls 180 → 243, paths 233 → 339, uuid 175 → 234, domains
+  170 → 186, numeric 170 → 181.
+- **Every hash blob takes a new number: `BMP9`, `BCH9`, `BCL3`, `BHD2`.** Under the new hash a 4.x blob
+  would answer wrong ids, so `BMP8`, `BCH8`, `BCL2` and `BHD1` are refused by name, and so is an
+  `OVL2` over one, with the base's message. **A `PerfectHashIndex` or `HashedDictIndex` converts**:
+  4.x's `lexindex dump old.blob` piped into this version's `lexindex build - new.blob --index perfect`
+  (`--index hashed`). The perfect hash's ids change; the dictionary's ranks do not. **A
+  `CompactHashIndex` or `ClosedHashIndex` does not**: they store no keys, nothing can dump them, and
+  their users rebuild from the corpus or stay on 4.x. `MPH3` and `OVL2` keep their numbers.
+
+- **The MPHF cuts its first level into chunks of 2¹⁹ buckets, not 2¹⁶.** A boundary between two chunks
+  bumps about two hundred keys, so fewer of them save 0.007 bits a key at 10⁷ keys and 0.006 at 10⁸.
+  A first level under four chunks is cut into eight pieces no smaller than 2¹⁴ buckets, as before, so
+  a table of 10⁶ keys keeps its seven boundaries, its 1.923 bits and its parallel build: at a quarter
+  of 2¹⁹ its first level would have been one piece, placed on one thread. A larger chunk in flight
+  costs memory: `CompactHashIndex` over 10⁷ listed keys adds 253.8 MB to the keys against 216.7, on
+  8 threads, and 2·10⁶ keys and `PerfectHashIndex` do not move. Provisional: what fewer chunks over
+  fewer threads cost a build of 10⁷ keys and up is **not yet timed**.
 
 ### Added
 

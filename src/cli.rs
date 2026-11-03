@@ -1874,6 +1874,23 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// `dump` is 4.x's way off a 4.x blob; this version's says so rather than calling it corrupt.
+    #[test]
+    fn dump_names_the_way_off_a_4x_blob() {
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/");
+        let perfect = format!("{data}golden-4.0.0-perfect.bmp");
+        let (code, _, err) = go(&["dump", &perfect], "");
+        assert_ne!(code, 0);
+        assert!(
+            err.contains("lexindex dump") && err.contains("lexindex build"),
+            "{err}"
+        );
+        let compact = format!("{data}golden-4.0.0-compact.bch");
+        let (code, _, err) = go(&["dump", &compact], "");
+        assert_ne!(code, 0);
+        assert!(err.contains("corpus"), "{err}");
+    }
+
     /// A `HashedDictIndex` dumps its dictionary, and `inspect` names it; `build` does not write
     /// one, so the blob comes from the library.
     #[cfg(feature = "mph")]
@@ -1933,7 +1950,7 @@ mod tests {
         let blob = dir.join("auto.bin");
         let dest = blob.to_str().unwrap();
         assert_eq!(go(&["build", keys.as_str(), dest], "").0, 0);
-        assert_ne!(&std::fs::read(&blob).unwrap()[..4], b"BCL2");
+        assert_ne!(&std::fs::read(&blob).unwrap()[..4], b"BCL3");
         let (_, out, _) = go(&["inspect", dest], "");
         assert!(out.contains("kind: DictIndex\n"), "{out}");
         if !cfg!(feature = "mph") {
@@ -1956,14 +1973,14 @@ mod tests {
             go(&["build", keys.as_str(), dest, "--closed-vocabulary"], "").0,
             0
         );
-        assert_eq!(&std::fs::read(&open).unwrap()[..4], b"BCL2");
+        assert_eq!(&std::fs::read(&open).unwrap()[..4], b"BCL3");
 
         // Asking for one by name builds it whatever the needs would have said.
         let named = dir.join("named.bin");
         let dest = named.to_str().unwrap();
         let (code, _, err) = go(&["build", keys.as_str(), dest, "--index", "closed"], "");
         assert_eq!(code, 0, "{err}");
-        assert_eq!(&std::fs::read(&named).unwrap()[..4], b"BCL2");
+        assert_eq!(&std::fs::read(&named).unwrap()[..4], b"BCL3");
         // No ladder was printed, so there is nothing to explain.
         assert!(!err.contains("excluded"), "{err}");
 

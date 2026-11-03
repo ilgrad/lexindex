@@ -61,7 +61,7 @@ fingerprint per key and no stored keys at all**:
   version-stable 64-bit hash to a slot in `[0, n)`. That slot *is* the id — but an MPH returns a slot
   for any input, so a membership check is needed.
 - **membership: a `b`-bit fingerprint.** Each slot stores a `fingerprint_bits`-wide fingerprint
-  computed from a **second** 64-bit hash of the key — the same two lane products folded under other
+  computed from a **second** 64-bit hash of the key — the same 128-bit state merged under other
   constants, one multiply over the slot hash. `id(key)` accepts the slot only if the query's
   fingerprint matches the stored one. The two hashes are uncorrelated for well-distributed keys, which makes the chance a non-member both lands on a used slot and matches its
   fingerprint about `2^-fingerprint_bits` — the tunable false-positive rate — ≈`2^-8k` by design:
@@ -79,7 +79,7 @@ Because the keys themselves are never stored, size is just the MPH (0.24 B/key �
 10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.3 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.74 B/key at 4 bits
 (6.25% false positives), 1.24 at the 8-bit default (0.39%), 2.24 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
-`id → key`. The serialised blob is `[magic "BCH8"][n][fp_bits][mph length][side_len]
+`id → key`. The serialised blob is `[magic "BCH9"][n][fp_bits][mph length][side_len]
 [payload][check][MPH blob][bit-packed fingerprints][side]` (`ceil(m·b/8)` bytes, fingerprint
 *i* at bits `[i·b, (i+1)·b)`, little-endian, where `m` = `n` minus the side-table entries), with a
 32-bit check over the lexindex header — it frames every section, so it is
@@ -101,14 +101,17 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
 one silent case left is a pair colliding in *both* 64-bit hashes at once, which is indistinguishable
-from a duplicate key by construction and collapses into one entry. For random keys of 17 bytes or
-more that is `≈ 2^-128` a pair. Up to 16 bytes the hash's second lane product is a constant, so both
-hashes are functions of one 64-bit product and the length: `≈ 2^-64` a pair of one length, or
-an expected 0.027 merges among 10⁹ such keys of one length. Chosen keys do it on purpose: a
-birthday search on that product found two 16-byte keys equal in both hashes in 3.7·10⁹ steps on one core, and from 97
-bytes a block that starts with the lane state zeroes a product, so the next eight bytes reach
-neither hash. `HashedDictIndex` knows its keys are distinct and refuses such a pair at build;
-`PerfectHashIndex` stores its keys and serves both. The `2^-128` rate also
+from a duplicate key by construction and collapses into one entry. For random keys of any length
+that is `≈ 2^-127` a pair: an expected 2.9·10⁻²¹ merges among 10⁹ keys (`n(n-1)/2 · 2^-127`, Maxima and
+PARI/GP agreeing). Both hashes merge one 128-bit state, two products unfolded up to 16 bytes and three
+per 32-byte block above. No search for such a pair is known below the 2^64 steps of a birthday.
+That is the end of a known attack, not a proof: the hash is not cryptographic, and its rounds keep
+some algebra. Through 4.x it was cheaper: up to 16 bytes both hashes were functions of one 64-bit
+product and the length, `≈ 2^-64` a pair of one length, and a birthday search found two 16-byte
+keys equal in both in 3.7·10⁹ steps on one core; from 97 bytes a block that started with the lane
+state zeroed a product, so the next eight bytes reached neither hash.
+`HashedDictIndex` knows its keys are distinct and refuses such a pair at build;
+`PerfectHashIndex` stores its keys and serves both. The `2^-127` rate also
 holds only if no *structured* difference collides in both, and the hash through 1.1 did not manage
 it: its per-word round, a 64-bit multiply and a rotate, kept a difference in the top bits of one
 word confined to the top bits of the product and dropped it into byte 3 of the next word, where
@@ -229,7 +232,7 @@ rather than `fingerprint_bits = 0` because a membership check that always says y
 signature that lies, and because the hot path is then one call with no compare behind it — the
 `id_unchecked` of the other two hash indexes as the only method. Size is the perfect hash and a
 36-byte header: **0.24 B/key** on real words, a fifth of the smallest fingerprinted index and a
-tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL2"][n][mph length][side_len]
+tenth of any trie, flat in `n`. The serialised blob is `[magic "BCL3"][n][mph length][side_len]
 [payload][check][MPH blob][side]`, the `CompactHashIndex` layout without its fingerprint section,
 under the same 64-bit hash collision rule: keys sharing a hash resolve through the side table on
 their full second hash, exact for members. There is no `load_mmap`: the blob is the perfect hash,
@@ -616,7 +619,7 @@ it builds the perfect hash over the distinct hashes and writes each rank at its 
 side table matched on the full second hash before the rank table is read, exact for members at any
 width. The same dictionary and width give the same blob, byte for byte.
 
-The serialised blob is a 48-byte header — `[magic "BHD1"][n][fingerprint_bits][dictionary bytes]
+The serialised blob is a 48-byte header — `[magic "BHD2"][n][fingerprint_bits][dictionary bytes]
 [mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` or `BDX4` blob unchanged, the MPH blob,
 the rank table and the side table. Embedding the dictionary verbatim keeps one loader for it: the
 region goes to `DictIndex`'s own, which checks it as it checks a standalone blob, and the pair is
@@ -710,12 +713,10 @@ at 5.0 — `Overlay` does not take it, its ids being ranks, and the C ABI leaves
 A minimal perfect hash maps a *fixed* set of `n` distinct strings to distinct slots `[0, n)` with no
 gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/mphf.rs`), keyed on
 a **version-stable** 64-bit hash of each string (branch-free over three length
-classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, two
-multiply lanes over 32-byte blocks beyond — mixed by 64×64→128 multiplies folded to 64 bits with
-the length; over dictionary words read in order, 3.9 ns a word against 7.3 for the hash 2.0–3.x
-shipped, whose word loop and tail switch mispredicted on every length change (2026-09-16), and in a
-shuffled order, where fetching the word is part of the pass, 13.4 against 13.8
-([`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt)) — not
+classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, 32-byte
+blocks beyond — read into a 128-bit state by 64×64→128 multiplies left unfolded, and merged with the
+length; 3.9 ns a dictionary word in 4.0, not yet re-timed for 5.0's state, against 7.3 for the hash
+2.0–3.x shipped, whose word loop and tail switch mispredicted on every length change — not
 `std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
@@ -732,7 +733,7 @@ at 100 M, and **~2.7%** at 1 G — almost always empty, and no longer a failure 
 key in the side probe.
 
 `id_unchecked` skips the stored-key comparison — the fastest possible lookup, for a closed vocabulary
-where membership is already guaranteed. The serialised blob is `[magic "BMP8"][n][mph length]
+where membership is already guaranteed. The serialised blob is `[magic "BMP9"][n][mph length]
 [side_len][payload][check][MPH blob][arena bytes][side]` — the payload hash covers everything after
 the header and is verified on owned loads. The arena is `[n+1][tag][offsets][data]`, and the tag
 names one of five encodings.
@@ -836,9 +837,8 @@ entries can point anywhere in the data, so their ends say nothing; the header na
 length instead, which the load checks against the section — what refuses a truncated file — and
 each entry is checked where it is read, as under the blocked layouts: inside the data, and
 validated as UTF-8 before it is handed out as a `&str`. So `load_mmap` stays `O(1)`, and a crafted
-entry answers no key rather than being refused at load. The magic stays
-`BMP8`: 4.0–4.5 refuse a merged arena as an unknown offset encoding, and a blob that keeps a
-blocked arena crosses the versions in both directions. `build_to_file` and an overlay's
+entry answers no key rather than being refused at load. The magic did not change for it: a reader
+that knows no merged arena refuses one as an unknown offset encoding. `build_to_file` and an overlay's
 `compact_to_file` hold no key set to merge and write the blocked layout. `plan` prices the arena
 apart from the rest of the index, whose size is a line in `n`: the overlap grows with `n`, so it
 reads the saving a key at the sample and at its bottom half and quarter by hash and carries it to
@@ -855,8 +855,8 @@ the overlapped layout, with its fingerprints in a row of their own, and reads 38
 45 → 50, 9.25 → 10.25 B/key
 ([measured](benchmarks.md#a-fingerprinted-perfecthashindex-on-mostly-absent-keys)). The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
-extra line splits cost a member probe 6 ns against 3 for this layout. The blob's magic is 2.0's
-`BMP8`; the tag alone would already stop a reader from before 2.0, as an unknown arena encoding.
+extra line splits cost a member probe 6 ns against 3 for this layout. The tag alone would
+already stop a reader from before 2.0, as an unknown arena encoding.
 
 `PerfectHashIndex` stores full keys (exact membership + `id → key`) where `CompactHashIndex` stores only
 a fingerprint (probabilistic, no reverse); the two share the same version-stable slot hash, so choosing
@@ -1095,6 +1095,18 @@ a perfect hash's id is a slot, and both the hash and the seed geometry changed. 
 change is a heavier break than a format change for exactly that reason, which is why it waits for a
 major rather than riding one.
 
+**The key hash moved again in 5.0, for the same reason a major is the only place it could.** `BMP8`,
+`BCH8`, `BCL2` and `BHD1` are keyed on a hash up to 16 bytes one 64-bit product wide, and `5.0`
+refuses all four by name; a blob read under the new hash would answer wrong ids. The rule holds
+for the two with keys in them: **4.x's** `lexindex dump old.blob`, piped into 5.0's
+`lexindex build - new.blob --index perfect` (or `--index hashed`, whose ranks stay; a perfect hash's
+ids are slots, and move). 5.0's own `dump` refuses them with that sentence, since it would have to
+read a format it refuses. `CompactHashIndex` and `ClosedHashIndex` store no keys in any version, so
+**nothing converts them**: their users need the corpus they built from. Without it, the
+only option left is to keep that blob on 4.x, with the double collisions 4.x allows. `MPH3` keeps
+its number, as a table is keyed on the hashes it was handed, and `OVL2` keeps its own, as an overlay
+over a 4.x base is refused with the base.
+
 The minimum supported Rust version is the `rust-version` field in `Cargo.toml`, currently **1.85**,
 and a CI job derives its toolchain from that field so the two cannot drift. Raising it is a minor
 release, not a patch.
@@ -1121,16 +1133,16 @@ or — never — read it wrong.
 | Magic | Written by | Structure | Older formats |
 |---|---|---|---|
 | `BIX4` | 1.0 | `StringIndex` | unchanged since 0.5; every published `BIX4` loads |
-| `BMP8` | 4.0 | `PerfectHashIndex` | `BMP1`–`BMP7` **refused by name** |
-| `BCH8` | 4.0 | `CompactHashIndex` | `BCH1`–`BCH7` **refused by name** |
-| `BCL2` | 4.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) **refused by name** |
+| `BMP9` | 5.0 | `PerfectHashIndex` | `BMP1`–`BMP8` **refused by name**; `BMP8` (4.x) names `lexindex dump \| lexindex build` |
+| `BCH9` | 5.0 | `CompactHashIndex` | `BCH1`–`BCH8` **refused by name**; `BCH8` (4.x) stores no keys, so it names its corpus |
+| `BCL3` | 5.0 | `ClosedHashIndex` | `BCL1` (2.0–3.x) and `BCL2` (4.x) **refused by name**; `BCL2` stores no keys, so it names its corpus |
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
 | `BDX5` | 5.0 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
-| `BHD1` | 4.1 | `HashedDictIndex` | none: the first; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
+| `BHD2` | 5.0 | `HashedDictIndex` | `BHD1` (4.1–4.x) **refused by name**, naming `lexindex dump \| lexindex build`; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
-| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP8`, `BCH8`, `BCL2` and `BHD1` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
+| `MPH3` | 4.0 | the minimal perfect hash, inside `BMP9`, `BCH9`, `BCL3` and `BHD2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
 
 **The policy is that a refusal must say which version wrote the file.** A blob refused on a bare "bad
 magic" sends someone hunting for disk corruption when the file is intact and merely old, so all three

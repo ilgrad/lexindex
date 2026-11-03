@@ -546,11 +546,11 @@ The C ABI, the plugin and the `lexindex` command open files that may be anyone's
 
 **Equal in both hashes is why the last two rows differ.** `CompactHashIndex` and `ClosedHashIndex`
 keep no keys, so at build a pair equal in both 64-bit hashes looks like one key given twice, and
-they share an id. For random keys that is `≈ 2^-128` a pair from 17 bytes up, and `≈ 2^-64` a pair
-of one length up to 16 bytes. **Chosen keys reach it on purpose**: a birthday search found a 16-byte
-pair in 3.7·10⁹ steps on one core ([the design notes](design.md#compacthashindex)). If a stranger
-chooses the keys you build over, use an index from the first five rows. `plan` and the `lexindex` command
-leave the last two out unless told the vocabulary is closed.
+they share an id. For random keys of any length that is `≈ 2^-127` a pair. No chosen pair is known
+since 5.0, where 4.x gave one to a birthday search in 3.7·10⁹ steps; the hash is not cryptographic
+and carries no proof ([the design notes](design.md#compacthashindex)), so if a stranger
+chooses the keys you build over, use an index from the first five rows. `plan` and
+the `lexindex` command leave the last two out unless told the vocabulary is closed.
 
 ## `Overlay` — edits without a rebuild
 
@@ -1152,7 +1152,9 @@ format a later version stops reading, and it round-trips — rebuilding from a d
 blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
 an error that says so rather than an empty file, and **the key list they were built from is the only
 way across a format change: keep it.** `DoubleArrayIndex` answers no `id -> key`, and the same goes
-for it. For the rest, dump with the version that wrote the blob, before upgrading; see
+for it. Off 4.x, whose hash blobs 5.0 refuses, the `dump` is 4.x's and the `build` 5.0's, with
+`--index perfect` or `--index hashed` to keep the kind. A 4.x `CompactHashIndex` or
+`ClosedHashIndex` converts to nothing: rebuild it from the corpus it came from. See
 [Upgrading to 5.0](migration-5.md).
 
 `plan` and `build` take the same six **needs**, which say what the index must be able to do and so

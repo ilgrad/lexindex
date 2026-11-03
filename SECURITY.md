@@ -93,10 +93,15 @@ deliberately re-checksummed.
 reloadable. Someone who chooses the keys or the queries can therefore search offline for collisions
 and for `CompactHashIndex` false positives. Neither is a memory-safety problem, and a collision in
 one of the two 64-bit hashes costs a side-table probe — but a collision in **both** at once costs
-correctness, and it is cheap for whoever chooses the keys: a birthday search finds two 16-byte keys
-equal in both hashes in ~2^32 hash steps, minutes on one core, and keys of 97 bytes or more need a
-few dozen tries. `CompactHashIndex` and `ClosedHashIndex` give such keys one id; `HashedDictIndex`
-refuses to build over them; `PerfectHashIndex` and the ordered indexes are not affected. lexindex
+correctness. Since 5.0 both hashes merge a 128-bit state on every path: a random pair shares them at
+≈ 2^-127, and no search for a chosen pair is known below the 2^64 steps of a birthday. That is not a
+proof, and the hash is not cryptographic: its rounds have algebra left in them, and a crafted *byte*
+query can still reach a zero factor, which buys a false positive. Through 4.x such a pair was cheap:
+a birthday search found two 16-byte keys equal in both in ~2^32 steps, minutes on one core, and keys
+of 97 bytes or more took a few dozen tries, so an index built under 4.x from a stranger's keys keeps
+that exposure until it is rebuilt. `CompactHashIndex` and `ClosedHashIndex` give such keys one id;
+`HashedDictIndex` refuses to build over them; `PerfectHashIndex` and the ordered indexes are not
+affected. lexindex
 is not a HashDoS defence and must not be used as one. If a third party chooses your keys, build a
 `PerfectHashIndex` or an ordered index over them; if lookup latency is a resource you are
 protecting, put a keyed hash in front.
@@ -151,8 +156,8 @@ writing memory the C caller vouched for in the function's `# Safety` line — th
 verbatim — after a null check on every function that has a status to report one in.
 `unsafe_op_in_unsafe_fn` is denied, so every one names its own justification. Miri and
 AddressSanitizer run weekly over the byte-range code and the C ABI, Miri also on a 32-bit
-target, and libFuzzer daily over the eight parsers a target can hold to a return value: `BCH8`,
-`BMP8`, `BCL2`, `BDX3`, `BDX4`, `BDX5`, `BHD1` and `BDA1` — loaded and then queried, since a dictionary's
+target, and libFuzzer daily over the eight parsers a target can hold to a return value: `BCH9`,
+`BMP9`, `BCL3`, `BDX3`, `BDX4`, `BDX5`, `BHD2` and `BDA1` — loaded and then queried, since a dictionary's
 block data is bounds-checked and a sidecar's rank clamped on the read rather than at load — `OVL2`/`OVL1`, and
 the standalone `MPH3`/`MPH2`/`MPH1` from inside, each run
 starting from the
