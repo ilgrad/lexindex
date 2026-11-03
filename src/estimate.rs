@@ -1491,8 +1491,9 @@ fn hash_half<'a>(keys: &[&'a str]) -> Vec<&'a str> {
 fn saving_per_key(keys: &[&str]) -> f64 {
     let raw: usize = keys.iter().map(|k| k.len()).sum();
     let order: Vec<u32> = (0..keys.len() as u32).collect();
-    match crate::superstring::merge(keys, &order) {
-        Some(merged) => raw.saturating_sub(merged.data.len()) as f64 / keys.len().max(1) as f64,
+    let go = std::sync::atomic::AtomicBool::new(false);
+    match crate::superstring::merge_len(keys, &order, &go) {
+        Some(merged) => raw.saturating_sub(merged) as f64 / keys.len().max(1) as f64,
         None => 0.0,
     }
 }

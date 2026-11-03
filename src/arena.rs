@@ -77,6 +77,7 @@
 
 use crate::IndexError;
 use crate::blob::SharedBytes;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 /// Byte width of a flat offset in an arena small enough for 32-bit offsets, and in one that is not.
 /// Both double as their own tag byte, which is what they were before the blocked layouts existed.
@@ -1462,16 +1463,32 @@ fn merge_cannot_win<S: AsRef<str>>(
         MergedShape::from_need(&need, n, shortest, start_bits, data as usize, fingerprints)
             .is_none_or(|shape| shape.bytes < blocked)
     };
-    let unpromising =
-        |every| rest_of_draw(keys, order, every).filter(|&rest| !wins_with(rest * 9 / 5));
-    let estimate = || {
-        unpromising(32)?;
-        let sixteenth = unpromising(16)?;
-        let eighth = unpromising(8)?;
-        let line = eighth + 14 * eighth.saturating_sub(sixteenth);
-        Some(line + line / 8)
+    // The thirtysecond settles a key set the merge wins for a seventh of the work, so it goes alone.
+    // The other two take six sevenths of the work on the key sets it loses, and go together: both
+    // must come back unpromising for the answer to be `true`, so whichever ends the other changes
+    // no byte, the answer reading the same two numbers in any order the threads ran in.
+    let stop = AtomicBool::new(false);
+    let unpromising = |draw: &[&str], every| {
+        let rest = rest_of_draw(draw, every, &stop).filter(|&rest| !wins_with(rest * 9 / 5));
+        if rest.is_none() {
+            stop.store(true, Relaxed);
+        }
+        rest
     };
-    estimate().is_some_and(|rest| !wins_with(rest))
+    if unpromising(&draw_of(keys, order, 32), 32).is_none() {
+        return false;
+    }
+    let (draw_16, draw_8) = (draw_of(keys, order, 16), draw_of(keys, order, 8));
+    let (mut sixteenth, mut eighth) = (None, None);
+    std::thread::scope(|scope| {
+        scope.spawn(|| sixteenth = unpromising(&draw_16, 16));
+        eighth = unpromising(&draw_8, 8);
+    });
+    let (Some(sixteenth), Some(eighth)) = (sixteenth, eighth) else {
+        return false;
+    };
+    let line = eighth + 14 * eighth.saturating_sub(sixteenth);
+    !wins_with(line + line / 8)
 }
 
 /// Below this many keys [`merge_cannot_win`] does not ask: the merge is cheap in absolute terms and
@@ -1505,17 +1522,22 @@ fn prefix_contained_bytes<'a>(mut keys: impl Iterator<Item = &'a str>) -> u64 {
     bytes
 }
 
-/// What a merge saves on every `every`-th slot's key beyond its prefix-contained keys, scaled to
-/// the whole set. `None` when the draw cannot be merged.
-fn rest_of_draw<S: AsRef<str>>(keys: &[S], order: &[u32], every: usize) -> Option<u64> {
+/// Every `every`-th slot's key, sorted as `keys` are. On the caller's thread, since `keys` need not
+/// be `Sync` and the strings they lend are.
+fn draw_of<'a, S: AsRef<str>>(keys: &'a [S], order: &[u32], every: usize) -> Vec<&'a str> {
     let mut picked: Vec<u32> = order.iter().step_by(every).copied().collect();
     picked.sort_unstable();
-    let draw: Vec<&str> = picked.iter().map(|&k| keys[k as usize].as_ref()).collect();
+    picked.iter().map(|&k| keys[k as usize].as_ref()).collect()
+}
+
+/// What a merge saves on a draw of every `every`-th key beyond its prefix-contained keys, scaled to
+/// the whole set. `None` when the draw cannot be merged, or `stop` is set before it is.
+fn rest_of_draw(draw: &[&str], every: usize, stop: &AtomicBool) -> Option<u64> {
     let slots: Vec<u32> = (0..draw.len() as u32).collect();
-    let merged = crate::superstring::merge(&draw, &slots)?;
+    let merged = crate::superstring::merge_len(draw, &slots, stop)?;
     let bytes: u64 = draw.iter().map(|key| key.len() as u64).sum();
     let free = bytes - prefix_contained_bytes(draw.iter().copied());
-    Some((free - merged.data.len() as u64) * every as u64)
+    Some((free - merged as u64) * every as u64)
 }
 
 /// `need[b]`: the lengths whose excess past `min_len` takes a field of `b` bits at least, all ones
@@ -2572,8 +2594,15 @@ mod tests {
     #[test]
     fn the_rest_of_a_draw_leaves_out_the_prefix_contained_keys() {
         let keys = ["ab", "abcd", "bc", "cdx", "y"];
-        assert_eq!(rest_of_draw(&keys, &[0, 1, 2, 3, 4], 1), Some(4));
-        assert_eq!(rest_of_draw(&keys, &[1, 4, 3, 0, 2], 2), Some(8));
+        let go = AtomicBool::new(false);
+        let rest = |order, every| rest_of_draw(&draw_of(&keys, order, every), every, &go);
+        assert_eq!(rest(&[0, 1, 2, 3, 4], 1), Some(4));
+        assert_eq!(rest(&[1, 4, 3, 0, 2], 2), Some(8));
+        let stopped = AtomicBool::new(true);
+        assert_eq!(
+            rest_of_draw(&draw_of(&keys, &[0, 1, 2, 3, 4], 1), 1, &stopped),
+            None
+        );
     }
 
     #[test]

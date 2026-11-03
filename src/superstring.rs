@@ -248,6 +248,47 @@ pub(crate) fn merge<S: AsRef<str>>(keys: &[S], order: &[u32]) -> Option<Superstr
     Some(lay_out(&text, &sweep, &chains, order))
 }
 
+/// The bytes [`merge`] would make `keys` into, without writing them, for a caller that only reads
+/// the length: a third of a merge's time is the writing. `None` as there, and as soon as a phase
+/// ends with `stop` set, for a caller that no longer wants the answer.
+pub(crate) fn merge_len<S: AsRef<str>>(
+    keys: &[S],
+    order: &[u32],
+    stop: &std::sync::atomic::AtomicBool,
+) -> Option<usize> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let n = keys.len();
+    debug_assert_eq!(order.len(), n);
+    debug_assert!(keys.windows(2).all(|w| w[0].as_ref() < w[1].as_ref()));
+    if n == 0 || n >= NONE as usize {
+        return None;
+    }
+    let text = Text::new(keys);
+    if stop.load(Relaxed) {
+        return None;
+    }
+    let sweep = sweep(&text)?;
+    if stop.load(Relaxed) {
+        return None;
+    }
+    let chains = chain(&text, &sweep, order);
+    Some(chained_len(&text, &sweep, &chains))
+}
+
+/// The bytes of the chains `link` makes: every free key, less what each link overlaps.
+fn chained_len(text: &Text, sweep: &Sweep, link: &[(u32, u32)]) -> usize {
+    let mut total = 0usize;
+    for (k, &(t, o)) in link.iter().enumerate() {
+        if sweep.inside[k].0 == NONE {
+            total += text.len(k);
+        }
+        if t != NONE {
+            total -= o as usize;
+        }
+    }
+    total
+}
+
 fn common_prefix(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
@@ -731,16 +772,12 @@ fn lay_out(text: &Text, sweep: &Sweep, link: &[(u32, u32)], order: &[u32]) -> Su
     let n = order.len();
     let free = |k: usize| sweep.inside[k].0 == NONE;
     let mut preceded = vec![false; n];
-    let mut total = 0usize;
-    for (k, &(t, o)) in link.iter().enumerate() {
-        if free(k) {
-            total += text.len(k);
-        }
+    for &(t, _) in link {
         if t != NONE {
             preceded[t as usize] = true;
-            total -= o as usize;
         }
     }
+    let total = chained_len(text, sweep, link);
     // A chain's bytes are known only by walking it, a dependent read a key, so the chains are
     // walked on every thread twice: once for their lengths, which place them, then to write them.
     // Chains run from one key to a third of all of them, so the lengths are handed out a few
@@ -876,6 +913,10 @@ mod tests {
             assert_eq!(&s.data[at..at + k.len()], k.as_bytes(), "key {k:?}");
         }
         assert!(std::str::from_utf8(&s.data).is_ok());
+        let go = std::sync::atomic::AtomicBool::new(false);
+        assert_eq!(merge_len(keys, order, &go), Some(s.data.len()));
+        let stopped = std::sync::atomic::AtomicBool::new(true);
+        assert_eq!(merge_len(keys, order, &stopped), None);
         s
     }
 

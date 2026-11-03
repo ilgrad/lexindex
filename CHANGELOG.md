@@ -152,6 +152,14 @@ All notable changes to this project are documented here. The format follows
   changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
   99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
   → 0.02.
+- **A build that decides against merging draws less.** The check that a merged arena cannot win
+  reads the length of three merges of a sample, and it wrote each of them out first; it now stops at
+  the length. The sample of every 32nd key goes alone, since it settles a key set the merge wins,
+  and the other two run together, either ending the other as soon as it finds the merge promising.
+  The verdict reads the same numbers, and the blob is byte for byte what it was on domains, paths,
+  urls, numeric and titles at a million keys. `plan()`'s draw of what a merge saves stops at the
+  length too. Instructions a build fall under 1 %, and only on the key sets the merge loses; what it
+  buys in wall time is for a quiet machine.
 - **`PerfectHashIndex::ids_of` picks the arena's layout once a batch, not once a key.** Each layout
   has its own loop over the slots, and the prefetch of an offset no longer checks a range it does
   not read. An entry of a merged arena that straddles two lines now has both named. Instructions a
