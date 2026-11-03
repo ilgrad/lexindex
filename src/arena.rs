@@ -1434,7 +1434,9 @@ impl MergedShape {
 /// `1/16` are carried to `r = 1` along a line, `A + B r`, which reads high where the saving
 /// saturates and on the mark where it does not, and an eighth goes on top for a draw's noise. If
 /// that much still does not beat the blocked arena, the merge is left out. If a draw alone reaches
-/// `5/9` of the way, it runs at once, for the price of that draw.
+/// `5/9` of the way, it runs at once, for the price of that draw. And since the rest grows no faster
+/// than `r`, the first draw times 32, with the same eighth on top, is as much as the key set can
+/// hold: if that does not beat the blocked arena either, the other two draws have nothing to add.
 ///
 /// `false` costs the build the draws and changes no byte. `true` on a key set the merge would have
 /// won keeps the blocked arena, not one that grew. That takes a saving the draws do not hold: few
@@ -1475,8 +1477,11 @@ fn merge_cannot_win<S: AsRef<str>>(
         }
         rest
     };
-    if unpromising(&draw_of(keys, order, 32), 32).is_none() {
+    let Some(thirtysecond) = unpromising(&draw_of(keys, order, 32), 32) else {
         return false;
+    };
+    if !wins_with(thirtysecond * 32 + thirtysecond * 4) {
+        return true;
     }
     let (draw_16, draw_8) = (draw_of(keys, order, 16), draw_of(keys, order, 8));
     let (mut sixteenth, mut eighth) = (None, None);

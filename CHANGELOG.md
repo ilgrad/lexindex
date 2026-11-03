@@ -201,7 +201,10 @@ All notable changes to this project are documented here. The format follows
   The verdict reads the same numbers, and the blob is byte for byte what it was on domains, paths,
   urls, numeric and titles at a million keys. `plan()`'s draw of what a merge saves stops at the
   length too. Instructions a build fall under 1 %, and only on the key sets the merge loses; what it
-  buys in wall time is for a quiet machine.
+  buys in wall time is for a quiet machine. Where the sample of every 32nd key, carried to the whole
+  key set, already does not beat the blocked arena, the other two are not drawn at all: no verdict
+  moved on 21 corpora, and a build of a million `urls` went from 3.173 to 2.703 Gi (−15 %), the one
+  of them it settles.
 - **`PerfectHashIndex::ids_of` picks the arena's layout once a batch, not once a key.** Each layout
   has its own loop over the slots, and the prefetch of an offset no longer checks a range it does
   not read. An entry of a merged arena that straddles two lines now has both named. Instructions a
