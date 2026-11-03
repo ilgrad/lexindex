@@ -171,7 +171,12 @@ the same rule over their own eight scalars.
 and read at random on 4 KiB pages it misses the TLB on most lookups. Every table of the MPH of a
 huge page or more is allocated on a 2 MiB boundary and advised `MADV_HUGEPAGE` before its first
 write, so a Linux kernel with transparent huge pages at `madvise` — the common default — or
-`always` backs it with 2 MiB pages from the first touch. The advice is best effort: where it is
+`always` backs it with 2 MiB pages from the first touch. Before the advice the range's whole huge
+pages are given back (`MADV_DONTNEED`): an allocator hands out memory it was handed back, populated
+on small pages by whatever wrote it, and over such a range the advice alone takes only when
+khugepaged gets to it — a 7.7 MB `DictIndex` built after another had been freed landed with none of
+its four huge pages, a 12 MB `CompactHashIndex` at 10 M keys with one of six, where a fresh process
+gets every one. Nothing has been written yet, so nothing is lost. The advice is best effort: where it is
 refused the table sits on small pages and reads the same, a table below 2 MiB is an ordinary
 allocation, and the file-backed tables of `load_mmap` are outside its reach. The byte arrays an
 index owns around it — a `PerfectHashIndex`'s arena, a `CompactHashIndex`'s fingerprints, a

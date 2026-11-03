@@ -102,6 +102,20 @@ All notable changes to this project are documented here. The format follows
   and answers every key.
 ### Fixed
 
+- **A table of 2 MiB or more sits on huge pages whatever memory the allocator hands back.** The
+  tables asked for huge pages (`MADV_HUGEPAGE`) before their first write, which backs a range with
+  2 MiB pages at the fault — but an allocator hands out memory it was handed back, already populated
+  on small pages by whatever wrote it, and over such a range the advice alone waits for khugepaged.
+  Counted over the crate's indexes built one after another in one process, on this machine's
+  `enabled = madvise`: a 7.7 MB labelled `DictIndex` landed with none of its four huge pages, a
+  12.6 MB `HashedDictIndex` with four of six, a 12 MB `CompactHashIndex` at 10 M keys with one of
+  six and the 2.2 MB `ClosedHashIndex` with none, and on a million titles even the 63 MB
+  `PerfectHashIndex` arena took no huge page — while the first table of a fresh process got every
+  one. The range's whole huge pages are now given back
+  (`MADV_DONTNEED`) before the advice, so the first write faults them in as huge pages; nothing has
+  been written yet, so nothing is lost, and the tail short of a huge page stays as it was. Every
+  table now gets its huge pages at every build; what that is worth in nanoseconds on an index built
+  and queried in one process is for a quiet machine.
 - **A standalone `Mphf` blob whose level sits at the top of `u64` is refused at load.** Its keys and
   slice did not fit in 64 bits together, so a debug build, which the fuzz targets are, panicked on
   the add in a lookup under a header that checksums; a release build wrapped and stayed below `n`.

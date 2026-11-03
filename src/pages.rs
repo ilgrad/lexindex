@@ -5,7 +5,8 @@
 //! the one that matters. On 2 MiB pages the same table is a dozen entries. Linux backs a range
 //! with huge pages at its first touch if the range was advised so before it (under the common
 //! `transparent_hugepage/enabled = madvise`), so a [`Pages`] of a huge page or more is allocated
-//! on a huge-page boundary, advised, and only then written. Below that size it is an ordinary
+//! on a huge-page boundary, its pages given back in case the allocator recycled memory that was
+//! already touched, advised, and only then written. Below that size it is an ordinary
 //! allocation; where the advice is refused — huge pages off, another operating system — the
 //! table sits on small pages and reads the same.
 
@@ -118,17 +119,35 @@ impl<T> Pages<T> {
     }
 }
 
-/// Asks the kernel for huge pages over `bytes` from `ptr`, a huge-page-aligned range of a live
-/// allocation. Best effort: a kernel without them refuses, and the table reads the same.
+/// Asks the kernel for huge pages over `bytes` from `ptr`, a huge-page-aligned range of a live,
+/// unwritten allocation. Best effort: a kernel without them refuses, and the table reads the same.
+///
+/// The advice only takes at a fault, so the range's whole huge pages are first given back: the
+/// allocator hands out memory it was given back before, populated on small pages by whatever
+/// wrote it, and over such a range `MADV_HUGEPAGE` alone changes nothing until khugepaged gets
+/// to it. Measured over the crate's own indexes built in one process after another: a 7.7 MB
+/// `DictIndex` landed with none of its four huge pages, a 12 MB `CompactHashIndex` with one of
+/// six, where a fresh process gets every one. Discarding costs a page-table walk of the range and
+/// loses nothing, since nothing has been written yet; the tail short of a huge page is left as
+/// it is, since it could not be one.
 #[cfg(all(target_os = "linux", not(miri)))]
 fn advise_huge(ptr: *mut u8, bytes: usize) {
     use std::ffi::{c_int, c_void};
     unsafe extern "C" {
         fn madvise(addr: *mut c_void, length: usize, advice: c_int) -> c_int;
     }
+    const MADV_DONTNEED: c_int = 4;
     const MADV_HUGEPAGE: c_int = 14;
-    // SAFETY: a range of this process's own mapping, and the advice writes no byte of it.
-    let _ = unsafe { madvise(ptr.cast(), bytes, MADV_HUGEPAGE) };
+    let whole = bytes & !(HUGE - 1);
+    // SAFETY: a range of this process's own allocation, which nothing has written yet, so there
+    // is nothing to lose in it; `whole` ends on a huge-page boundary inside it, so no page past
+    // the allocation's end is touched. The advice writes no byte.
+    unsafe {
+        if whole > 0 {
+            let _ = madvise(ptr.cast(), whole, MADV_DONTNEED);
+        }
+        let _ = madvise(ptr.cast(), bytes, MADV_HUGEPAGE);
+    }
 }
 
 #[cfg(not(all(target_os = "linux", not(miri))))]
