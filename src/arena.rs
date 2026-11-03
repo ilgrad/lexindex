@@ -538,22 +538,14 @@ impl StringArena {
     /// offset pair 4 + k bytes in are regularly on different cache lines, and pulling in only the
     /// first leaves `ids_of` stalling on the second. Measured on the dictionary, prefetching the
     /// base alone cost `ids_of` 9 % against the flat table it replaced; with both it is level. A
-    /// third names the fingerprint byte, which follows the offsets.
+    /// third names the fingerprint byte, which follows the offsets. A merged arena's are named by
+    /// [`spans_of`](Self::spans_of).
     #[inline(always)]
-    pub(crate) fn prefetch_offsets(&self, i: usize) {
+    fn prefetch_offsets(&self, i: usize) {
         if i >= self.n {
             return;
         }
         let bytes = self.blob.as_ref();
-        if split(self.tag).layout == MERGED {
-            let bit = i as u64 * u64::from(self.packed.width);
-            let g = split(self.tag);
-            if g.fp == 1 {
-                crate::blob::prefetch_byte(bytes, HEADER + PARAMS + i);
-            }
-            crate::blob::prefetch_byte(bytes, HEADER + PARAMS + g.fp * self.n + (bit / 8) as usize);
-            return;
-        }
         let at = offsets_start(self.tag, i);
         crate::blob::prefetch_byte(bytes, at);
         let g = split(self.tag);
@@ -573,6 +565,156 @@ impl StringArena {
         }
     }
 
+    /// [`span`](Self::span) of each slot of a batch, each slot's offsets pulled in `ahead` slots
+    /// before they are read; `fps`, on an arena that stores fingerprints, decides as
+    /// [`span_matching`](Self::span_matching) does. Every slot of an arena has its layout, so the
+    /// layout is picked once here instead of per key, and the hints need no range check: a slot's
+    /// address is arithmetic, a hint reads nothing, and the slot is checked where it is read.
+    pub(crate) fn spans_of(
+        &self,
+        slots: &[u64],
+        fps: &[u8],
+        ahead: usize,
+    ) -> Vec<Option<(usize, usize)>> {
+        let tag = self.plain;
+        if tag == MERGED {
+            self.merged_spans::<0>(slots, fps, ahead)
+        } else if tag == MERGED | FP {
+            self.merged_spans::<1>(slots, fps, ahead)
+        } else if tag == BLOCK_U16 {
+            self.u16_spans::<0>(slots, fps, ahead)
+        } else if tag == BLOCK_U16 | FP {
+            self.u16_spans::<1>(slots, fps, ahead)
+        } else if tag == BLOCK_U8 {
+            self.u8_spans::<0>(slots, fps, ahead)
+        } else if tag == BLOCK_U8 | FP {
+            self.u8_spans::<1>(slots, fps, ahead)
+        } else {
+            let prefetch = |s| self.prefetch_offsets(s);
+            let entry = |i, want| self.entry(i, want).map(|e| e.0);
+            if fps.is_empty() {
+                self.spans_with::<0>(slots, fps, ahead, prefetch, entry)
+            } else {
+                self.spans_with::<1>(slots, fps, ahead, prefetch, entry)
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn spans_with<const F: usize>(
+        &self,
+        slots: &[u64],
+        fps: &[u8],
+        ahead: usize,
+        prefetch: impl Fn(usize),
+        entry: impl Fn(usize, Option<u8>) -> Option<(usize, usize)>,
+    ) -> Vec<Option<(usize, usize)>> {
+        let mut spans = Vec::with_capacity(slots.len());
+        for (at, &slot) in slots.iter().enumerate() {
+            if let Some(&s) = slots.get(at + ahead) {
+                prefetch(s as usize);
+            }
+            let want = if F == 1 { Some(fps[at]) } else { None };
+            let i = slot as usize;
+            spans.push(if i < self.n { entry(i, want) } else { None });
+        }
+        spans
+    }
+
+    fn merged_spans<const F: usize>(
+        &self,
+        slots: &[u64],
+        fps: &[u8],
+        ahead: usize,
+    ) -> Vec<Option<(usize, usize)>> {
+        let bytes = self.blob.as_ref();
+        let width = u64::from(self.packed.width);
+        let table = HEADER + PARAMS + F * self.n;
+        self.spans_with::<F>(
+            slots,
+            fps,
+            ahead,
+            |s| {
+                if F == 1 {
+                    crate::blob::prefetch_byte_unchecked(bytes, HEADER + PARAMS + s);
+                }
+                let at = table + (s as u64 * width / 8) as usize;
+                crate::blob::prefetch_byte_unchecked(bytes, at);
+                crate::blob::prefetch_byte_unchecked(bytes, at + 7);
+            },
+            // SAFETY: `i < n`, checked by `spans_with`, the layout is merged, `F` is what the tag
+            // says, and `bytes` is the arena's blob.
+            |i, want| unsafe { self.merged_entry::<F>(bytes, i, want) }.map(|e| e.0),
+        )
+    }
+
+    fn u16_spans<const F: usize>(
+        &self,
+        slots: &[u64],
+        fps: &[u8],
+        ahead: usize,
+    ) -> Vec<Option<(usize, usize)>> {
+        let bytes = self.blob.as_ref();
+        let overflow = || &bytes[self.data_end..self.overflow_end];
+        self.spans_with::<F>(
+            slots,
+            fps,
+            ahead,
+            |s| {
+                let at = offsets_start_in(BLOCK_U16, NARROW, F, s);
+                let k = s % B_U16;
+                crate::blob::prefetch_byte_unchecked(bytes, at);
+                crate::blob::prefetch_byte_unchecked(bytes, at + NARROW + k * 2);
+                if F == 1 {
+                    crate::blob::prefetch_byte_unchecked(bytes, at + NARROW + (B_U16 + 1) * 2 + k);
+                }
+            },
+            |i, want| {
+                let at = offsets_start_in(BLOCK_U16, NARROW, F, i);
+                // SAFETY: `i < n`, checked by `spans_with`, and the tag names this layout.
+                let block = unsafe { self.table_at(bytes, at, block_bytes(B_U16, 2, NARROW, F)) };
+                self.in_data(in_block_u16::<F, NARROW>(block, overflow, i, want)?.0)
+            },
+        )
+    }
+
+    fn u8_spans<const F: usize>(
+        &self,
+        slots: &[u64],
+        fps: &[u8],
+        ahead: usize,
+    ) -> Vec<Option<(usize, usize)>> {
+        let bytes = self.blob.as_ref();
+        let overflow = || &bytes[self.data_end..self.overflow_end];
+        self.spans_with::<F>(
+            slots,
+            fps,
+            ahead,
+            |s| {
+                let at = offsets_start_in(BLOCK_U8, NARROW, F, s);
+                let k = s % B_U8;
+                crate::blob::prefetch_byte_unchecked(bytes, at);
+                crate::blob::prefetch_byte_unchecked(bytes, at + NARROW + k);
+                if F == 1 {
+                    crate::blob::prefetch_byte_unchecked(bytes, at + NARROW + B_U8 + 1 + k);
+                }
+            },
+            |i, want| {
+                let at = offsets_start_in(BLOCK_U8, NARROW, F, i);
+                // SAFETY: `i < n`, checked by `spans_with`, and the tag names this layout.
+                let block = unsafe { self.table_at(bytes, at, block_bytes(B_U8, 1, NARROW, F)) };
+                self.in_data(in_block_u8::<F, NARROW>(block, overflow, i, want)?.0)
+            },
+        )
+    }
+
+    /// A span relative to the data region, as the blob's position it stands for; `None` past the
+    /// data, as a corrupt blob's may be.
+    #[inline(always)]
+    fn in_data(&self, (lo, hi): (usize, usize)) -> Option<(usize, usize)> {
+        (hi <= self.data_len).then_some((self.data_start + lo, self.data_start + hi))
+    }
+
     /// Absolute `(start, end)` byte span of slot `i` in the blob, or `None` if out of range /
     /// corrupt. Splitting `get` into span + [`str_at`](Self::str_at) lets a batch caller prefetch
     /// the data bytes between the two.
@@ -582,7 +724,7 @@ impl StringArena {
     }
 
     /// [`span`](Self::span) with the fingerprint filter of [`get_matching`](Self::get_matching).
-    #[inline(always)]
+    #[cfg(any(test, feature = "fuzzing"))]
     pub(crate) fn span_matching(&self, i: usize, fp: u8) -> Option<(usize, usize)> {
         Some(self.entry(i, Some(fp))?.0)
     }
@@ -2612,6 +2754,22 @@ mod tests {
         };
         let agree = |a: &StringArena, keys: &[String], at: &str| {
             let slots = (0..=a.len()).step_by(if cfg!(miri) { 17 } else { 1 });
+            let batch: Vec<u64> = slots.clone().chain([a.len()]).map(|i| i as u64).collect();
+            let each = |read: &dyn Fn(usize) -> Option<(usize, usize)>| -> Vec<_> {
+                batch.iter().map(|&i| read(i as usize)).collect()
+            };
+            if a.has_fingerprints() {
+                for fp in [0xA5, 0x5A] {
+                    let want = each(&|i| a.span_matching(i, fp));
+                    assert_eq!(
+                        a.spans_of(&batch, &vec![fp; batch.len()], 3),
+                        want,
+                        "{at} fp {fp}"
+                    );
+                }
+            } else {
+                assert_eq!(a.spans_of(&batch, &[], 3), each(&|i| a.span(i)), "{at}");
+            }
             for i in slots.chain([a.len()]) {
                 for key in [keys[i % keys.len()].as_str(), keys[0].as_str(), ""] {
                     let b = key.as_bytes();

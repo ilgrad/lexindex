@@ -152,6 +152,11 @@ All notable changes to this project are documented here. The format follows
   changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
   99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
   → 0.02.
+- **`PerfectHashIndex::ids_of` picks the arena's layout once a batch, not once a key.** Each layout
+  has its own loop over the slots, and the prefetch of an offset no longer checks a range it does
+  not read. An entry of a merged arena that straddles two lines now has both named. Instructions a
+  key: domains 264 → 222, dna 230 → 209, titles-en 238 → 217, and with fingerprints domains 309 →
+  260; mispredicted branches unchanged.
 - **A `DictIndex` lookup pulls its microblock in ahead of the scan.** Once the block is known, its
   microblock offsets and its route words are prefetched beside the head compare, and once the run
   is known, its next three lines: each of these is read behind a miss whose address the next one

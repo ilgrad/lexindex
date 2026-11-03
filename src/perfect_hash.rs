@@ -658,17 +658,7 @@ impl PerfectHashIndex {
         // three passes are just a pipeline: pilots prefetched inside `index_all`, then the arena's
         // offset lines prefetched ahead of the span pass, then its data lines ahead of the compare.
         let slots = mph.index_all(&hashes);
-        let mut spans: Vec<Option<(usize, usize)>> = Vec::with_capacity(slots.len());
-        for (i, &slot) in slots.iter().enumerate() {
-            if let Some(&s) = slots.get(i + AHEAD) {
-                self.arena.prefetch_offsets(s as usize);
-            }
-            spans.push(if fingerprints {
-                self.arena.span_matching(slot as usize, fps[i])
-            } else {
-                self.arena.span(slot as usize)
-            });
-        }
+        let spans = self.arena.spans_of(&slots, &fps, AHEAD);
         (0..n)
             .map(|i| {
                 if let Some(Some(sp)) = spans.get(i + AHEAD / 2) {
