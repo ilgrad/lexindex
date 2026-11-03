@@ -70,25 +70,28 @@ fn rank_bits(n: usize) -> u32 {
     u64::BITS - (n.max(2) as u64 - 1).leading_zeros()
 }
 
-fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
-    if bits <= MAX_FP_BITS {
-        Ok(())
-    } else {
-        Err(IndexError::Format(
-            "hashed-dict: fingerprint_bits must be in 0..=32",
-        ))
-    }
+/// Bits the rank table of `n` keys takes at zero fingerprint bits, which is what
+/// [`plan`](crate::plan) adds to a dictionary and a perfect hash.
+pub(crate) fn table_bits(n: usize) -> u64 {
+    n as u64 * u64::from(rank_bits(n))
 }
+
+const BAD_FP_BITS: &str = "hashed-dict: fingerprint_bits must be in 0..=32";
+const TABLE_TOO_LARGE: &str = "hashed-dict: rank table too large";
 
 /// Bytes a table of `count` values of `width` bits occupies. `count ≤ u32::MAX` and `width ≤ 64`,
 /// so the product fits a `u64`; whether the table fits *this platform's* address space is
 /// answered here rather than by a truncating cast on a 32-bit target.
-fn table_len(count: usize, width: u32) -> Result<usize, IndexError> {
-    usize::try_from((count as u64 * u64::from(width)).div_ceil(8))
-        .map_err(|_| IndexError::Format("hashed-dict: rank table too large"))
+fn table_len(count: usize, width: u32) -> Option<usize> {
+    usize::try_from((count as u64 * u64::from(width)).div_ceil(8)).ok()
 }
 
 impl HashedDictIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// Build the sidecar over `dict`, storing `fingerprint_bits` (`0..=32`) of a second hash
     /// beside each key's rank. See [`HashedDictIndex`] for what the width decides.
     ///
@@ -109,7 +112,9 @@ impl HashedDictIndex {
         dict: Arc<DictIndex>,
         fingerprint_bits: u32,
     ) -> Result<Self, IndexError> {
-        check_fingerprint_bits(fingerprint_bits)?;
+        if fingerprint_bits > MAX_FP_BITS {
+            return Err(IndexError::Build(BAD_FP_BITS));
+        }
         let n = dict.len();
         if n > u32::MAX as usize {
             return Err(IndexError::Build("hashed-dict: more than u32::MAX keys"));
@@ -117,7 +122,7 @@ impl HashedDictIndex {
         let mut pairs: Vec<(u64, u64)> = Vec::with_capacity(n);
         pairs.extend(dict.iter().map(|(key, _)| hash_pair_bytes(key.as_bytes())));
         if pairs.len() != n {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "hashed-dict: the dictionary's walk ended before its last key",
             ));
         }
@@ -200,7 +205,8 @@ impl HashedDictIndex {
         }
         side.sort_unstable();
 
-        let mut ranks = Pages::zeroed(table_len(m, width)?);
+        let mut ranks =
+            Pages::zeroed(table_len(m, width).ok_or(IndexError::Build(TABLE_TOO_LARGE))?);
         // One bit a slot: this only has to catch a construction that was not minimal/perfect.
         let mut seen = vec![0u64; m.div_ceil(64)];
         let mask = if fp_bits == 0 { 0 } else { fp_mask(fp_bits) };
@@ -217,7 +223,7 @@ impl HashedDictIndex {
             }
             let slot = slot as usize;
             if slot >= m || (seen[slot / 64] >> (slot % 64)) & 1 == 1 {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "hashed-dict: construction was not minimal/perfect",
                 ));
             }
@@ -562,7 +568,9 @@ impl HashedDictIndex {
         }
         let n = n64 as usize;
         let fp_bits = u32_at(12);
-        check_fingerprint_bits(fp_bits)?;
+        if fp_bits > MAX_FP_BITS {
+            return Err(IndexError::Format(BAD_FP_BITS));
+        }
         let width = rank_bits(n) + fp_bits;
         // Header-supplied lengths are converted and added checked, so a fabricated one fails
         // cleanly on every target width instead of truncating or wrapping on a 32-bit one.
@@ -588,7 +596,7 @@ impl HashedDictIndex {
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format("hashed-dict: mph length out of range"))?;
         let ranks_end = mph_end
-            .checked_add(table_len(n - side_len, width)?)
+            .checked_add(table_len(n - side_len, width).ok_or(IndexError::Format(TABLE_TOO_LARGE))?)
             .filter(|&e| e <= bytes.len())
             .ok_or(IndexError::Format(
                 "hashed-dict: rank table length mismatch",
@@ -887,6 +895,7 @@ mod tests {
     fn a_fingerprint_past_32_bits_is_refused() {
         let dict = DictIndex::build(["a", "b"]).unwrap();
         let err = HashedDictIndex::from_dict(dict, 33).unwrap_err();
+        assert!(matches!(err, IndexError::Build(_)), "{err}");
         assert!(err.to_string().contains("0..=32"), "{err}");
     }
 
@@ -1093,7 +1102,7 @@ mod tests {
             bad[at..at + value.len()].copy_from_slice(value);
             reseal(&mut bad, dict_len);
             let err = HashedDictIndex::from_bytes(&bad).unwrap_err().to_string();
-            assert!(err.contains(why), "{err}");
+            assert!(err.contains("format error") && err.contains(why), "{err}");
         };
         refuse(4, &(1u64 << 32).to_le_bytes(), "u32::MAX");
         refuse(12, &33u32.to_le_bytes(), "0..=32");

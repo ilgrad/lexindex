@@ -178,7 +178,7 @@ impl Runs {
         for key in keys {
             let key = key.as_ref();
             let len = u32::try_from(key.len())
-                .map_err(|_| IndexError::Format("extsort: a key longer than 4 GiB"))?;
+                .map_err(|_| IndexError::Build("extsort: a key longer than 4 GiB"))?;
             w.write_all(&len.to_le_bytes())?;
             w.write_all(key.as_bytes())?;
             n += 1;

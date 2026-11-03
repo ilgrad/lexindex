@@ -19,18 +19,19 @@ print(p["best"]["kind"])               # the cheapest index that answers them
 print(p["text"])                       # the whole ladder, and why the winner won
 
 # An index that cannot answer what was asked is left out of the ranking rather than ranked last.
-assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "StringIndex"}
+assert {e["kind"] for e in p["estimates"]} == {"DictIndex", "HashedDictIndex", "StringIndex"}
 ```
 
 Which index wins is a property of your keys and not of this library — six fruit names are not a
 corpus, and neither is a range of numbers, which an fst folds into almost nothing. Run it on the
 keys you actually have. The keywords are `reverse` (`key(id)` as well as `id(key)`), `ordered`,
-`prefix`, `fuzzy` and `exact` — the last rules out the two probabilistic indexes, which is where
-their size comes from. Nothing is required by default, so a bare `plan(keys)` prices all five it
-can name: `HashedDictIndex` and `DoubleArrayIndex` are not ranked yet. **The default is a closed
-vocabulary:** a bare `plan(keys)` can recommend an index that answers a key it never held with some
-member's id, while the `lexindex` command assumes an open one and implies `exact`. Pass `exact=True`
-unless every key you will ask about is in `keys`.
+`prefix`, `common_prefix`, `fuzzy` and `closed_vocabulary`. `HashedDictIndex` is priced at zero fingerprint bits: exact at its dictionary's search,
+and under a closed vocabulary at `id_unchecked`. `DoubleArrayIndex` leaves the ranking on a corpus
+past what its 23-bit slots hold. **The default is an open vocabulary**, in Python, in Rust's
+`Needs::default()` and on the command line alike: a key the index never held has to be answered as
+one, so a bare `plan(keys)` prices the five exact indexes. `closed_vocabulary=True` puts the two
+probabilistic indexes back, which is where their size comes from, and is the promise that every key
+you will ask about is in `keys`: one of them answers a stranger with some member's id.
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
 bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
@@ -488,8 +489,7 @@ nineteen corpora of half a million to ten million keys, against 235 to 709 for t
 ([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
-dictionary answers. `plan` does not price it yet, and `Overlay` does not take it: its ids are
-ranks, as `DictIndex`'s are.
+dictionary answers. `Overlay` does not take it: its ids are ranks, as `DictIndex`'s are.
 
 ## `DoubleArrayIndex` — a lexicon against running text
 
@@ -549,8 +549,8 @@ keep no keys, so at build a pair equal in both 64-bit hashes looks like one key 
 they share an id. For random keys that is `≈ 2^-128` a pair from 17 bytes up, and `≈ 2^-64` a pair
 of one length up to 16 bytes. **Chosen keys reach it on purpose**: a birthday search found a 16-byte
 pair in 3.7·10⁹ steps on one core ([the design notes](design.md#compacthashindex)). If a stranger
-chooses the keys you build over, use an index from the first five rows. `plan(keys, exact=True)` and
-the `lexindex` command leave the last two out; a bare `plan(keys)` does not.
+chooses the keys you build over, use an index from the first five rows. `plan` and the `lexindex` command
+leave the last two out unless told the vocabulary is closed.
 
 ## `Overlay` — edits without a rebuild
 
@@ -607,17 +607,17 @@ does not carry; saving it again writes the current one and it gains them.
 
 `key`, `keys` and `compact` need the base to store its keys. `CompactHashIndex` does not, so an
 overlay over it answers membership and raises `TypeError` for the rest — in Rust that same absence is
-a compile error, since the methods live on a trait the keyless index cannot implement. Removal over
-that base also inherits its false-positive rate: a `contains` that was never true of a real key can
-retire an id, so remove by a key you know is present — or by the id itself:
+a compile error, since the methods live on a trait the keyless index cannot implement. `remove` by
+key goes the same way, a `TypeError` naming the base and a compile error in Rust, since a key that
+index never held can match a live id and take a real key with it. Remove by the id itself:
 
 ```python
 ids = {key: ov.add(key) for key in ("neologism", "typo")}   # whatever the caller already stores
 ov.retire_id(ids.pop("typo"))                               # the tombstone, with no key to be wrong
 ```
 
-`retire_id` sets exactly the tombstone `remove` sets and asks the base nothing, so it is the one
-removal a false positive cannot mislead. An id at or above `id_space()`, or one already retired, is
+`retire_id` sets exactly the tombstone `remove` sets and asks the base nothing, so a false positive
+cannot mislead it. An id at or above `id_space()`, or one already retired, is
 `False` and changes nothing.
 
 ### Batched lookups into a buffer
@@ -929,8 +929,8 @@ and the wrong loader is already refused by the base tag rather than by the type.
 
 `key`, `keys` and `compact` need the base to store its keys, which `CompactHashIndex` does not — an
 overlay over it answers membership and nothing else, and the absence is a compile error rather than a
-runtime one. Removal over that base also inherits its false-positive rate: a `contains` that was
-never true of a real key can retire an id, so remove by a key you know is present.
+runtime one. `remove` needs exact membership (`OverlayExact`), which that base does not have either:
+a key it never held can match a live id. Over it, `retire_id` removes by the id `add` handed back.
 
 The blob records which base wrote it, so `from_bytes_with` refuses a mismatch before calling the
 loader — handing perfect-hash bytes to the wrong deserialiser is not something a caller can do by
@@ -1057,19 +1057,23 @@ own key iterators, and computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 wrote words.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
 
 $ lexindex inspect words.bin
@@ -1146,22 +1150,24 @@ indexes, construction order for `PerfectHashIndex`, and live keys only for an `O
 for one reason: **`lexindex dump old.blob | lexindex build - new.blob` is the migration path** off a
 format a later version stops reading, and it round-trips — rebuilding from a dump reproduces the
 blob byte for byte. `CompactHashIndex` and `ClosedHashIndex` store no keys at all, so dumping one is
-an error that says so rather than an empty file.
+an error that says so rather than an empty file, and **the key list they were built from is the only
+way across a format change: keep it.** `DoubleArrayIndex` answers no `id -> key`, and the same goes
+for it. For the rest, dump with the version that wrote the blob, before upgrading; see
+[Upgrading to 5.0](migration-5.md).
 
-`plan` and `build` take the same five **needs**, which say what the index must be able to do and so
-narrow what may be picked — with none of them the only question asked is `id(key)`, and the two
-probabilistic indexes are allowed:
+`plan` and `build` take the same six **needs**, which say what the index must be able to do and so
+narrow what may be picked — with none of them the only question asked is an exact `id(key)`:
 
 ```text
 --reverse    key(id) as well as id(key)
 --ordered    ids in lexicographic order, and in-order iteration
 --prefix     prefix and range queries (an ordered index)
+--common-prefix  every key that is a prefix of a query, and the longest
 --fuzzy      Levenshtein and subsequence queries      -- only StringIndex answers this
---exact      a non-member must be answered as one     -- bars CompactHashIndex and ClosedHashIndex
 ```
 
-**The command line assumes an open vocabulary, and so implies `--exact`.** Asked to rank with no
-needs at all, the honest answer on size is `ClosedHashIndex` at 0.24 bytes a key — and it answers a
+**The command line assumes an open vocabulary, as the library does.** Asked to rank with no needs at
+all, the honest answer on size is `ClosedHashIndex` at 0.24 bytes a key — and it answers a
 key it has never seen with some member's id, because it stores nothing to check against. That is the
 right index for a fixed vocabulary and a trap for anything else, and a ranking is read by someone
 who has not yet decided. So `plan` and `--index auto` leave the two probabilistic indexes out and
@@ -1170,12 +1176,15 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns  estimated at block 1024
-  DictIndex              1252952 bytes   2.61 B/key    336 ns  estimated at block 256
-  DictIndex              1357175 bytes   2.83 B/key    311 ns  estimated at block 32
-  StringIndex            2882400 bytes   6.01 B/key    297 ns  estimated
-  PerfectHashIndex       4448821 bytes   9.27 B/key    130 ns  estimated
-the nanoseconds are a model of this crate's own machine, not a measurement of yours
+* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
++ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
++ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
+  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
++ PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns   9.51 B/key resident     93.6 ms build  estimated
+  DoubleArrayIndex      11708630 bytes  24.40 B/key    173 ns  24.40 B/key resident    236.8 ms build  estimated
+* and + are what no other row beats on both size and speed
+the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
 (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
 in this file, and they are ranked with the rest.
@@ -1184,15 +1193,14 @@ in this file, and they are ranked with the rest.
 `--closed-vocabulary` is that promise, and puts both back in the ranking. The line is printed only
 when the default is what excluded them: ask for `--prefix` and they were never candidates, so
 nothing is explained. Naming an index with `--index closed` builds it whatever the needs say — the
-needs narrow a *choice*, and naming one is not a choice to narrow. The library is unchanged:
-`Needs::default()` in Rust and Python still asks only for `id(key)`, because a program that calls
-`plan` has a caller who decided, and a command line has a person who is still deciding.
+needs narrow a *choice*, and naming one is not a choice to narrow. The same promise is
+`Needs::default().closed_vocabulary()` in Rust and `closed_vocabulary=True` in Python.
 
 `build` writes only the blob: the ladder and the one-line summary both go to **stderr**, so stdout
 stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect | hashed | double-array` names one instead and
-skips the plan entirely. The last two are never what `auto` picks, and they hold the corpus: `hashed`
-is a `HashedDictIndex` with no fingerprint, so exact.
+skips the plan entirely. The last two have no streaming build, so they hold the corpus: `hashed` is
+a `HashedDictIndex` with no fingerprint, so exact.
 On the 479 823-word dictionary that is 507-517 ms against 91-93 over nine alternating runs --
 `--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes
@@ -1214,11 +1222,19 @@ operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stran
 read off a log serve as they are. An op is also a question the index has to answer: `reverse` rules
 out the two indexes that store no keys and a prefix query asks for an ordered one, whatever the
 flags said. The ordered pair is where this decides something. On the same word list
-`--objective common_prefix=9,hits=1` answers `StringIndex` at 397 ns against 1853 for the fastest
-dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 276 ns against 806 -- and
-`hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 56 ns a key.
+`--objective common_prefix=9,hits=1` answers `DoubleArrayIndex` at 343 ns against `StringIndex`'s 397
+and 1853 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 276 ns
+against 806 -- and `hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 55 ns a key.
 
-**The nanoseconds are modelled, and of one machine.** `a + b·s + c·len + d·s·len` per structure,
+**Beside the winner, the front.** `pareto()` in Rust, `p["pareto"]` in Python and the `+` on the
+ladder are the rows no other row beats on both size and speed, smallest first: the whole trade this
+corpus offers under this objective, where `best` is one point on it. Each row also carries `micro`,
+the keys a microblock holds at its block; `resident_bytes` (`B/key resident`), what a mapped load
+holds once every page has been read, the blob and the tables a load derives; and `build_secs`.
+On a modelled row the heap beside the blob reads up to 30 % high on Latin keys and 25 % low on
+Chinese ones: a few per cent of `resident_bytes`, since that heap is a small share of it.
+
+**The nanoseconds are modelled, and of one machine, as are the build times.** `a + b·s + c·len + d·s·len` per structure,
 operation and `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the blob
 over 64 KiB -- what a lookup waits on is how far its bytes are from the CPU, which the key count
 alone does not say. The constants are fitted to 240 cells timed on this crate's own hardware -- a

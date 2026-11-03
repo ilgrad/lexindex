@@ -903,6 +903,11 @@ pub struct CompactHashIndex {
 }
 
 impl CompactHashIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// [`build_bits`](Self::build_bits) with the width in whole bytes: 1, 2 or 4, for
     /// `8 × fingerprint_bytes` bits.
     pub fn build<I, S>(items: I, fingerprint_bytes: usize) -> Result<Self, IndexError>
@@ -911,7 +916,7 @@ impl CompactHashIndex {
         S: AsRef<str>,
     {
         if !matches!(fingerprint_bytes, 1 | 2 | 4) {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "compact-hash: fingerprint_bytes must be 1, 2, or 4",
             ));
         }
@@ -971,7 +976,7 @@ impl CompactHashIndex {
         pairs.dedup();
         let n = pairs.len();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "compact-hash: more than u32::MAX keys; ids are u32",
             ));
         }
@@ -1023,7 +1028,7 @@ impl CompactHashIndex {
             }
             let slot = slot as usize;
             if slot >= m || seen[slot / 64] >> (slot % 64) & 1 == 1 {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "compact-hash: construction was not minimal/perfect",
                 ));
             }
@@ -1052,7 +1057,7 @@ impl CompactHashIndex {
         S: AsRef<str>,
     {
         if !matches!(fingerprint_bytes, 1 | 2 | 4) {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "compact-hash: fingerprint_bytes must be 1, 2, or 4",
             ));
         }
@@ -1134,7 +1139,7 @@ impl CompactHashIndex {
         let pairs = stream_pairs(pairs, &mut scratch, &mut check, budget)?;
         let (n, side_len) = pairs.counts();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "compact-hash: more than u32::MAX keys; ids are u32",
             ));
         }
@@ -1798,7 +1803,7 @@ fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
     if (1..=64).contains(&bits) {
         Ok(())
     } else {
-        Err(IndexError::Format(
+        Err(IndexError::Build(
             "compact-hash: fingerprint_bits must be in 1..=64",
         ))
     }
@@ -1809,7 +1814,7 @@ fn check_fingerprint_bits(bits: u32) -> Result<(), IndexError> {
 /// space is answered here rather than by a truncating cast on a 32-bit target.
 fn fp_table_len(count: usize, bits: u32) -> Result<usize, IndexError> {
     usize::try_from((count as u64 * bits as u64).div_ceil(8))
-        .map_err(|_| IndexError::Format("compact-hash: fingerprint table too large"))
+        .map_err(|_| IndexError::Build("compact-hash: fingerprint table too large"))
 }
 
 /// The low `bits` of a fingerprint, `bits` in `1..=64`.

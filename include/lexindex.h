@@ -47,7 +47,7 @@ typedef enum {
    */
   LEXINDEX_STATUS_IO = 5,
   /**
-   * The perfect hash could not be built from these keys.
+   * An index could not be built from these keys.
    */
   LEXINDEX_STATUS_BUILD = 6,
   /**

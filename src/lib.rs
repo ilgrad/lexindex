@@ -117,7 +117,7 @@ pub use dict_index::{DictIndex, DictLayout, DictProfile, DictSections};
 pub use double_array::DoubleArrayIndex;
 pub use estimate::{Estimate, Kind, Needs, Objective, Plan, Workload, plan, plan_file, plan_for};
 pub use inspect::{BlobInfo, BlobKind, OverlayInfo, inspect, inspect_file};
-pub use overlay::{Overlay, OverlayBase, OverlayKeys};
+pub use overlay::{Overlay, OverlayBase, OverlayExact, OverlayKeys};
 pub use string_index::StringIndex;
 
 // The minimal-perfect-hash indexes (`PerfectHashIndex`, `CompactHashIndex`) and their shared key hash
@@ -380,19 +380,22 @@ use std::fmt;
 
 /// Errors from building, querying, or (de)serialising an index.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IndexError {
     /// An error from the underlying finite-state transducer.
     Fst(fst::Error),
     /// An I/O error from [`StringIndex::save`] / [`StringIndex::load`].
     Io(std::io::Error),
-    /// A malformed serialised buffer (bad magic, version, length, or offsets).
+    /// A malformed serialised buffer (bad magic, version, length, or offsets). Only reading a blob
+    /// answers this: a build that cannot go ahead answers [`Build`](Self::Build).
     Format(&'static str),
     /// A fuzzy/automaton query could not be compiled (e.g. the Levenshtein automaton for the given
     /// query and edit distance would be too large).
     Automaton(String),
-    /// Constructing the minimal perfect hash failed after exhausting its retry seeds — extremely
-    /// rare; rebuilding with a different key set is the only recourse.
-    #[cfg(feature = "mph")]
+    /// An index could not be built from these keys and these arguments: a block or a fingerprint
+    /// width out of range, more keys than the index numbers, a double array past its slots, a
+    /// source that failed part way through, or — extremely rarely — a minimal perfect hash that
+    /// exhausted its retry seeds, where a different key set is the only recourse.
     Build(&'static str),
 }
 
@@ -403,7 +406,6 @@ impl fmt::Display for IndexError {
             IndexError::Io(e) => write!(f, "io error: {e}"),
             IndexError::Format(m) => write!(f, "format error: {m}"),
             IndexError::Automaton(m) => write!(f, "automaton error: {m}"),
-            #[cfg(feature = "mph")]
             IndexError::Build(m) => write!(f, "build error: {m}"),
         }
     }
@@ -414,9 +416,7 @@ impl std::error::Error for IndexError {
         match self {
             IndexError::Fst(e) => Some(e),
             IndexError::Io(e) => Some(e),
-            IndexError::Format(_) | IndexError::Automaton(_) => None,
-            #[cfg(feature = "mph")]
-            IndexError::Build(_) => None,
+            IndexError::Format(_) | IndexError::Automaton(_) | IndexError::Build(_) => None,
         }
     }
 }
@@ -437,6 +437,41 @@ impl From<std::io::Error> for IndexError {
 mod tests {
     use super::*;
     use std::error::Error;
+
+    /// A build that cannot go ahead and a blob that cannot be read are different errors: a caller
+    /// retries neither the same way, and neither is the other's fault.
+    #[test]
+    fn a_build_refusal_is_not_a_format_error() {
+        let refused = |r: Result<DictIndex, IndexError>| matches!(r, Err(IndexError::Build(_)));
+        assert!(refused(DictIndex::build_with_block(["a"], 0)));
+        assert!(refused(DictIndex::build_with_block(["a"], 1 << 20)));
+        assert!(refused(DictIndex::build_sorted_with_block(["b", "a"], 32)));
+        assert!(matches!(
+            DictIndex::from_bytes(b"not a blob"),
+            Err(IndexError::Format(_))
+        ));
+        assert!(IndexError::Build("x").to_string().contains("build error"));
+        assert!(IndexError::Build("x").source().is_none());
+    }
+
+    #[cfg(feature = "mph")]
+    #[test]
+    fn a_hash_build_refuses_with_a_build_error_and_its_blob_with_a_format_error() {
+        assert!(matches!(
+            CompactHashIndex::build(["a", "b"], 3),
+            Err(IndexError::Build(_))
+        ));
+        let dict = || DictIndex::build(["a", "b"]).unwrap();
+        assert!(matches!(
+            HashedDictIndex::from_dict(dict(), 33),
+            Err(IndexError::Build(_))
+        ));
+        let blob = HashedDictIndex::from_dict(dict(), 0).unwrap().to_bytes();
+        assert!(matches!(
+            HashedDictIndex::from_bytes(&blob[..blob.len() / 2]),
+            Err(IndexError::Format(_))
+        ));
+    }
 
     #[test]
     fn index_error_display_and_source() {

@@ -1,6 +1,6 @@
 //! What each index would cost on a set of keys, and which of them answer the caller's questions.
 //!
-//! Five indexes with five size curves is a choice nobody should have to make from a README table:
+//! Seven indexes with seven size curves is a choice nobody should have to make from a README table:
 //! the sizes are corpus-specific, and the spread between them on one corpus is larger than the
 //! spread of any one of them across corpora. [`plan`] sorts the keys once, measures the statistics
 //! the formats are actually paid in, and prices every index the caller's [`Needs`] allow.
@@ -30,11 +30,11 @@
 
 use crate::charcode::{self, CharCode, Tally};
 use crate::dict_index::{AsKey, views};
-use crate::{DictIndex, IndexError, StringIndex, dict_index};
+use crate::{DictIndex, DoubleArrayIndex, IndexError, StringIndex, dict_index};
 use std::fmt;
 
 #[cfg(feature = "mph")]
-use crate::{ClosedHashIndex, CompactHashIndex, PerfectHashIndex};
+use crate::{ClosedHashIndex, CompactHashIndex, HashedDictIndex, PerfectHashIndex};
 
 /// Keys a sample holds. Below this the plan builds the real indexes instead of modelling them.
 const SAMPLE: usize = 100_000;
@@ -86,15 +86,21 @@ const CLOSE: f64 = 1.3;
 /// byte.
 const THIN_SUFFIX: f64 = 2.0;
 
-/// What the caller has to be able to do with the index. Nothing is required by default, so a
-/// `Needs::default()` asks only for `id(key)`.
+/// What the caller has to be able to do with the index.
+///
+/// `Needs::default()` asks for `id(key)` over an **open vocabulary**: a key the index never held
+/// must be answered as one, so [`exact`](Self::exact) is on and the two probabilistic indexes are
+/// not offered. [`closed_vocabulary`](Self::closed_vocabulary) is the promise that takes it off,
+/// which is the same ranking `--closed-vocabulary` and `closed_vocabulary=True` ask for.
 ///
 /// ```
 /// # use lexindex::Needs;
 /// let needs = Needs::default().reverse().prefix();
-/// assert!(needs.reverse && needs.prefix && !needs.fuzzy);
+/// assert!(needs.reverse && needs.prefix && !needs.fuzzy && needs.exact);
+/// assert!(!Needs::default().closed_vocabulary().exact);
 /// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Needs {
     /// `key(id)` as well as `id(key)`.
     pub reverse: bool,
@@ -102,11 +108,27 @@ pub struct Needs {
     pub ordered: bool,
     /// Prefix and range queries.
     pub prefix: bool,
+    /// Every key that is a prefix of a query, and the longest of them: the reverse of
+    /// [`prefix`](Self::prefix), and a question a trie answers without keeping its keys in order.
+    pub common_prefix: bool,
     /// Fuzzy (Levenshtein) or subsequence queries.
     pub fuzzy: bool,
     /// A non-member must be answered as one. Without it a probabilistic index is allowed, which is
     /// how the two smallest ones get their size.
     pub exact: bool,
+}
+
+impl Default for Needs {
+    fn default() -> Self {
+        Self {
+            reverse: false,
+            ordered: false,
+            prefix: false,
+            common_prefix: false,
+            fuzzy: false,
+            exact: true,
+        }
+    }
 }
 
 impl Needs {
@@ -128,21 +150,31 @@ impl Needs {
         self
     }
 
+    /// Require [`common_prefix`](Self::common_prefix).
+    pub fn common_prefix(mut self) -> Self {
+        self.common_prefix = true;
+        self
+    }
+
     /// Require [`fuzzy`](Self::fuzzy).
     pub fn fuzzy(mut self) -> Self {
         self.fuzzy = true;
         self
     }
 
-    /// Require [`exact`](Self::exact) membership.
-    pub fn exact(mut self) -> Self {
-        self.exact = true;
+    /// Every key this index will be asked about is one it holds, so it need not recognise a
+    /// stranger: [`exact`](Self::exact) goes off and the two probabilistic indexes are ranked with
+    /// the rest. Promise it only of a vocabulary you control: `ClosedHashIndex` answers a stranger
+    /// with some member's id, and nothing in the blob would later say so.
+    pub fn closed_vocabulary(mut self) -> Self {
+        self.exact = false;
         self
     }
 }
 
 /// One of the crate's indexes, as an answer rather than a type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Kind {
     /// [`CompactHashIndex`](crate::CompactHashIndex): smallest, `string → id` only, probabilistic.
     Compact,
@@ -154,38 +186,49 @@ pub enum Kind {
     String,
     /// [`DictIndex`]: an ordered dictionary, front-coded; no automata.
     Dict,
+    /// [`HashedDictIndex`](crate::HashedDictIndex) at zero fingerprint bits, over the default
+    /// block: a dictionary and a perfect hash beside it. Its `id` is the dictionary's own search,
+    /// exact; a closed vocabulary calls `id_unchecked` and pays for a hash, which is how the plan
+    /// prices it when [`Needs::exact`] is off.
+    Hashed,
+    /// [`DoubleArrayIndex`]: a character-wise trie, exact, for matching a lexicon against text. It
+    /// holds at most 2^23 keys and 2^23 trie slots, and a corpus past either is not a candidate.
+    DoubleArray,
 }
 
 impl Kind {
     /// Whether an index of this kind answers everything `needs` asks for — what [`plan`] filters
-    /// the five candidates by, public so a caller that presents the ranking can say *why* a kind
+    /// the candidates by, public so a caller that presents the ranking can say *why* a kind
     /// is missing from it without restating the table.
     ///
     /// ```
     /// use lexindex::{Kind, Needs};
-    /// // The two hash indexes answer `id(key)` and nothing else.
-    /// assert!(Kind::Closed.answers(Needs::default()));
-    /// assert!(!Kind::Closed.answers(Needs::default().exact()));
-    /// assert!(Kind::Dict.answers(Needs::default().prefix().exact()));
+    /// // The two hash indexes answer `id(key)` and nothing else, over a closed vocabulary.
+    /// assert!(Kind::Closed.answers(Needs::default().closed_vocabulary()));
+    /// assert!(!Kind::Closed.answers(Needs::default()));
+    /// assert!(Kind::Dict.answers(Needs::default().prefix()));
     /// assert!(!Kind::Dict.answers(Needs::default().fuzzy()));
     /// ```
     pub fn answers(self, needs: Needs) -> bool {
-        let (reverse, ordered, fuzzy, exact) = match self {
-            Self::Compact => (false, false, false, false),
-            Self::Closed => (false, false, false, false),
-            Self::Perfect => (true, false, false, true),
-            Self::String => (true, true, true, true),
-            Self::Dict => (true, true, false, true),
+        let (reverse, ordered, common_prefix, fuzzy, exact) = match self {
+            Self::Compact => (false, false, false, false, false),
+            Self::Closed => (false, false, false, false, false),
+            Self::Perfect => (true, false, false, false, true),
+            Self::String => (true, true, true, true, true),
+            Self::Dict => (true, true, true, false, true),
+            Self::Hashed => (true, true, true, false, true),
+            Self::DoubleArray => (false, false, true, false, true),
         };
         (!needs.reverse || reverse)
             && (!(needs.ordered || needs.prefix) || ordered)
+            && (!needs.common_prefix || common_prefix)
             && (!needs.fuzzy || fuzzy)
             && (!needs.exact || exact)
     }
 
-    /// Whether this build has the index at all: three of the five are behind the `mph` feature.
+    /// Whether this build has the index at all: four of the seven are behind the `mph` feature.
     const fn available(self) -> bool {
-        matches!(self, Self::String | Self::Dict) || cfg!(feature = "mph")
+        matches!(self, Self::String | Self::Dict | Self::DoubleArray) || cfg!(feature = "mph")
     }
 
     /// The type's name, for an explanation a reader can act on.
@@ -196,6 +239,8 @@ impl Kind {
             Self::Perfect => "PerfectHashIndex",
             Self::String => "StringIndex",
             Self::Dict => "DictIndex",
+            Self::Hashed => "HashedDictIndex",
+            Self::DoubleArray => "DoubleArrayIndex",
         }
     }
 }
@@ -208,8 +253,8 @@ impl Kind {
 /// ```
 /// # use lexindex::{plan_for, Needs, Objective, Kind};
 /// let keys = ["apple", "apricot", "banana", "blueberry"];
-/// let small = plan_for(&keys, Needs::default().exact(), Objective::Memory)?;
-/// let quick = plan_for(&keys, Needs::default().exact(), Objective::Latency)?;
+/// let small = plan_for(&keys, Needs::default(), Objective::Memory)?;
+/// let quick = plan_for(&keys, Needs::default(), Objective::Latency)?;
 /// assert!(small.best().bytes <= quick.best().bytes);
 /// assert!(quick.nanos(&quick.best()) <= small.nanos(&small.best()));
 /// # Ok::<(), lexindex::IndexError>(())
@@ -253,16 +298,18 @@ impl Objective {
 ///
 /// Every operation is a question the index must be able to answer, so the plan adds it to the
 /// [`Needs`]: a share of [`reverse`](Self::reverse) rules out the two indexes that store no keys,
-/// as [`Needs::reverse`] does, and a share of any of the three prefix queries asks for an ordered
-/// index, as [`Needs::prefix`] does.
+/// as [`Needs::reverse`] does, a share of [`prefix`](Self::prefix) asks for an ordered index, as
+/// [`Needs::prefix`] does, and a share of [`common_prefix`](Self::common_prefix) or
+/// [`longest_prefix`](Self::longest_prefix) for one that can walk a query, as
+/// [`Needs::common_prefix`] does.
 ///
 /// ```
 /// # use lexindex::{plan_for, Kind, Needs, Objective, Workload};
 /// let keys = ["apple", "apricot", "banana", "blueberry"];
 /// let asked = Workload::default().hits(1).common_prefix(9);
 /// let p = plan_for(&keys, Needs::default(), Objective::Workload(asked))?;
-/// // A prefix query asks for an ordered index, whatever the needs said.
-/// assert!(matches!(p.best().kind, Kind::String | Kind::Dict));
+/// // A common-prefix query is a walk of the query, whatever the needs said.
+/// assert!(matches!(p.best().kind, Kind::String | Kind::Dict | Kind::DoubleArray));
 /// # Ok::<(), lexindex::IndexError>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -326,10 +373,8 @@ impl Workload {
     fn asks(self, needs: Needs) -> Needs {
         Needs {
             reverse: needs.reverse || self.reverse > 0,
-            prefix: needs.prefix
-                || self.prefix > 0
-                || self.common_prefix > 0
-                || self.longest_prefix > 0,
+            prefix: needs.prefix || self.prefix > 0,
+            common_prefix: needs.common_prefix || self.common_prefix > 0 || self.longest_prefix > 0,
             ..needs
         }
     }
@@ -504,8 +549,8 @@ impl Ops {
 /// at 100 000 keys, eleven at 1 000 000 and six at 10 000 000, in one process, every operation over
 /// fresh probes of its own and every structure timed at every place in its operation's round.
 /// `bench/latency_model.py measure` produced them and `fit` re-derives these tables from
-/// `bench/results/latency-model-2026-09-23-arz-7731027.json`, with no slope below zero; the two
-/// `HashedDictIndex` lanes that artifact also holds are measured and not priced. Mean absolute
+/// `bench/results/latency-model-2026-09-23-arz-7731027.json`, with no slope below zero — all but
+/// the [`DoubleArray`](Kind::DoubleArray) row and [`HASHED_ID`], which were not fitted. Mean absolute
 /// error is 6–12 % of the measurement on `id(key)` and 26–42 % on prefix counts, whose cost is
 /// mostly how many keys the prefix matches.
 ///
@@ -529,7 +574,7 @@ impl Ops {
 /// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
 /// through the Python binding so that every one of them carries that call. Nothing here rescales
 /// them for another machine, and no number they produce is a measurement of the caller's corpus.
-const COST: [(Kind, Ops); 4] = [
+const COST: [(Kind, Ops); 5] = [
     (
         Kind::Closed,
         Ops {
@@ -590,7 +635,42 @@ const COST: [(Kind, Ops); 4] = [
             longest_prefix: Some(cost(212.7, 17.36, 0.000, 0.968)),
         },
     ),
+    // Published points, not a fit, until the model is refit. A walk is one load a character at
+    // `d·s·len` over the binding's call, and each lane is set where a table publishes it, by the
+    // table's own ratio to `StringIndex` read through that row of this model — docs/benchmarks.md
+    // says to compare ratios, only within a column — since the tables run on other protocols.
+    //
+    // The call, 28 ns: `StringIndex` and `DictIndex` on words at docs/benchmarks.md:124 and :120
+    // (232, 323) against :830 (200-210, 291-298). `id`, d = 2.075: 231 ns at 17.80 B/key on a
+    // million bigrams of 10.9 bytes, 0.85x `StringIndex`, docs/benchmarks.md:826 and :816.
+    // `common_prefix`, d = 4.784: 473 against 530 at 24.42 B/key on words (mean 9.35 bytes),
+    // docs/benchmarks.md:1520; `longest_prefix`, d = 3.643: 234 against 295, the same row. A walk
+    // that misses stops early and no table publishes it, so the three `id` lanes are one. `ids_of`
+    // here is a loop, so a batch saves nothing.
+    (
+        Kind::DoubleArray,
+        Ops {
+            floor: 0.00,
+            mixed: cost(28.0, 0.00, 0.000, 2.075),
+            hit: cost(28.0, 0.00, 0.000, 2.075),
+            miss: cost(28.0, 0.00, 0.000, 2.075),
+            batch16: cost(28.0, 0.00, 0.000, 2.075),
+            batch1024: cost(28.0, 0.00, 0.000, 2.075),
+            key: None,
+            prefix: None,
+            common_prefix: Some(cost(28.0, 0.00, 0.000, 4.784)),
+            longest_prefix: Some(cost(28.0, 0.00, 0.000, 3.643)),
+        },
+    ),
 ];
+
+/// `id_unchecked` on [`Kind::Hashed`]: the published point, not a fit, until the model is refit.
+/// `ClosedHashIndex`'s slopes, whose path this is with one more table to read, and `a` set so that
+/// a million bigrams read 62 ns plus the call's 28 (docs/benchmarks.md:823, and the call as at
+/// [`COST`]), at the blob's 4.65 B/key: 1.93 of dictionary (:830) and 2.72 of sidecar.
+///
+/// `ids_of` at zero bits is the dictionary's, so a closed vocabulary's batch is this in a loop.
+const HASHED_ID: Cost = cost(34.8, 8.87, 0.060, 0.000);
 
 /// [`Kind::Dict`] is a curve, not a point: the block trades a scan against a search and both ends
 /// of 32..=1024 were measured. Ascending by block, interpolated in between and clamped outside.
@@ -657,15 +737,32 @@ const DICT_COST: [(usize, Ops); 4] = [
     ),
 ];
 
-/// The constants for one candidate.
-fn ops_of(kind: Kind, block: Option<usize>) -> Ops {
-    if kind != Kind::Dict {
-        let (_, ops) = COST
-            .iter()
-            .find(|(k, _)| *k == kind)
-            .expect("every kind but Dict is in the table");
-        return *ops;
+/// The constants for one candidate, under a vocabulary that is `exact` or closed.
+fn ops_of(kind: Kind, block: Option<usize>, exact: bool) -> Ops {
+    match kind {
+        Kind::Dict => dict_ops(block),
+        // At zero bits `id` is `dict().id`, so an open vocabulary pays the dictionary's search;
+        // a closed one calls `id_unchecked`. Everything else was always the dictionary's.
+        Kind::Hashed if exact => dict_ops(block),
+        Kind::Hashed => Ops {
+            mixed: HASHED_ID,
+            hit: HASHED_ID,
+            miss: HASHED_ID,
+            batch16: HASHED_ID,
+            batch1024: HASHED_ID,
+            ..dict_ops(block)
+        },
+        _ => {
+            COST.iter()
+                .find(|(k, _)| *k == kind)
+                .expect("every kind but the two dictionaries is in the table")
+                .1
+        }
     }
+}
+
+/// [`Kind::Dict`]'s curve at `block`.
+fn dict_ops(block: Option<usize>) -> Ops {
     let block = block.unwrap_or(dict_index::DEFAULT_BLOCK);
     let at = DICT_COST.partition_point(|(b, _)| *b < block);
     if at == 0 {
@@ -683,8 +780,14 @@ fn ops_of(kind: Kind, block: Option<usize>) -> Ops {
 
 /// What one operation of `objective` is modelled to cost on a candidate: `id(key)`, unless the
 /// objective is a workload, whose mean operation it is.
-fn nanos_of(objective: Objective, estimate: &Estimate, keys: usize, mean_len: f64) -> f64 {
-    let ops = ops_of(estimate.kind, estimate.block);
+fn nanos_of(
+    objective: Objective,
+    estimate: &Estimate,
+    exact: bool,
+    keys: usize,
+    mean_len: f64,
+) -> f64 {
+    let ops = ops_of(estimate.kind, estimate.block, exact);
     let (s, len) = ops.at(estimate.bytes, keys, mean_len);
     match objective {
         Objective::Workload(workload) => workload.nanos(&ops, s, len),
@@ -692,15 +795,54 @@ fn nanos_of(objective: Objective, estimate: &Estimate, keys: usize, mean_len: f6
     }
 }
 
-/// What one index is expected to weigh.
+/// A build's cost at a key of [`BUILD_LEN`] bytes, nanoseconds a key, and whether it grows with the
+/// key's length as a build that keeps the keys does. Published points, not a fit, until the model
+/// is refit: the build column at docs/benchmarks.md:821-830, a million bigrams on 4.4.0-4.5.
+/// `ClosedHashIndex` has no row there, and is `CompactHashIndex`'s build less the fingerprints.
+const BUILD: [(Kind, f64, bool); 7] = [
+    (Kind::Compact, 37.0, false),
+    (Kind::Closed, 37.0, false),
+    (Kind::Perfect, 228.0, true),
+    (Kind::String, 241.0, true),
+    (Kind::Dict, 206.0, true),
+    (Kind::Hashed, 262.0, true),
+    (Kind::DoubleArray, 577.0, true),
+];
+
+/// The mean key length of the corpus [`BUILD`] was read on, docs/benchmarks.md:796.
+const BUILD_LEN: f64 = 10.9;
+
+/// What building `kind` over `keys` keys of mean length `mean_len` is modelled to take, in seconds.
+fn build_secs(kind: Kind, keys: usize, mean_len: f64) -> f64 {
+    let (_, nanos, keyed) = BUILD
+        .iter()
+        .find(|(k, ..)| *k == kind)
+        .expect("every kind is in the table");
+    let scale = if *keyed { mean_len / BUILD_LEN } else { 1.0 };
+    nanos * scale * keys as f64 * 1e-9
+}
+
+/// What one index is expected to cost.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Estimate {
     /// The index this is about.
     pub kind: Kind,
     /// Bytes its serialised blob is expected to take.
     pub bytes: u64,
-    /// Keys a block holds, for [`Kind::Dict`], and `None` for the rest.
+    /// Keys a block holds, for [`Kind::Dict`] and [`Kind::Hashed`], and `None` for the rest.
     pub block: Option<usize>,
+    /// Keys a microblock holds at that block, the two dictionaries' other knob: a lookup scans one.
+    pub micro: Option<usize>,
+    /// Bytes a mapped load holds once every page has been read: `bytes`, and the heap beside them,
+    /// which is the tables a load derives rather than borrows. On a [`Kind::Closed`] there is no
+    /// mapping, and the load is `bytes`. A `StringIndex`'s first prefix walk and a `DictIndex`'s
+    /// `route_microblocks` add a table more, which only those calls ask for.
+    pub resident_bytes: u64,
+    /// Seconds a build is modelled to take, from one machine's numbers: an ordering, like
+    /// [`Plan::nanos`], never a prediction of yours. Modelled even where `bytes` was weighed, so
+    /// that a plan over the same keys is the same plan.
+    pub build_secs: f64,
     /// Whether `bytes` was weighed rather than modelled — true for every candidate when the corpus
     /// is no larger than the sample.
     pub measured: bool,
@@ -740,6 +882,37 @@ impl Plan {
         &self.estimates
     }
 
+    /// The candidates no other beats on both size and speed, smallest first and so slowest first:
+    /// the whole trade this corpus offers, where [`best`](Self::best) is one point on it. Speed is
+    /// [`nanos`](Self::nanos), so it is a front for this plan's [`Objective`]; whatever that
+    /// objective is, `best` is on it. Of candidates equal on both, the first in the ranking stands
+    /// for them.
+    ///
+    /// ```
+    /// # use lexindex::{plan, Needs};
+    /// let p = plan(&["apple", "apricot", "banana"], Needs::default())?;
+    /// let front = p.pareto();
+    /// assert!(front.windows(2).all(|w| w[0].bytes < w[1].bytes));
+    /// assert!(front.contains(&p.best()));
+    /// # Ok::<(), lexindex::IndexError>(())
+    /// ```
+    pub fn pareto(&self) -> Vec<Estimate> {
+        let mut front = self.estimates.clone();
+        front.sort_by(|x, y| {
+            x.bytes
+                .cmp(&y.bytes)
+                .then(self.nanos(x).total_cmp(&self.nanos(y)))
+        });
+        let mut fastest = f64::INFINITY;
+        front.retain(|e| {
+            let nanos = self.nanos(e);
+            let keep = nanos < fastest;
+            fastest = fastest.min(nanos);
+            keep
+        });
+        front
+    }
+
     /// What this plan ranked by.
     pub fn objective(&self) -> Objective {
         self.objective
@@ -753,8 +926,8 @@ impl Plan {
     /// # use lexindex::{plan_for, Kind, Needs, Objective, Workload};
     /// let asked = Objective::Workload(Workload::default().hits(9).longest_prefix(1));
     /// let p = plan_for(&["apple", "apricot"], Needs::default(), asked)?;
-    /// // A prefix query is a question only an ordered index answers.
-    /// assert!(p.needs().prefix && !Kind::Perfect.answers(p.needs()));
+    /// // A walk of the query is a question a perfect hash does not answer.
+    /// assert!(p.needs().common_prefix && !Kind::Perfect.answers(p.needs()));
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn needs(&self) -> Needs {
@@ -782,7 +955,13 @@ impl Plan {
     /// # Ok::<(), lexindex::IndexError>(())
     /// ```
     pub fn nanos(&self, estimate: &Estimate) -> f64 {
-        nanos_of(self.objective, estimate, self.keys, self.mean_len)
+        nanos_of(
+            self.objective,
+            estimate,
+            self.needs.exact,
+            self.keys,
+            self.mean_len,
+        )
     }
 
     /// Distinct keys the plan was made for.
@@ -802,15 +981,20 @@ impl Plan {
     /// Different kinds, because two `DictIndex` blocks are always within a few per cent of each
     /// other and warning about that would be warning about every plan: they come off the same
     /// model, the ladder names both, and picking between them is a speed decision rather than a
-    /// size one. By bytes whatever the [`Objective`] is, since what this doubts is the size
-    /// estimate.
+    /// size one. A [`Kind::Hashed`] row counts as its dictionary here, since it holds one and its
+    /// bytes come off the same estimate. By bytes whatever the [`Objective`] is, since what this
+    /// doubts is the size estimate.
     pub fn close(&self) -> bool {
+        let family = |kind| match kind {
+            Kind::Hashed => Kind::Dict,
+            other => other,
+        };
         let Some(first) = self.estimates.iter().min_by_key(|e| e.bytes) else {
             return false;
         };
         self.estimates
             .iter()
-            .filter(|e| e.kind != first.kind)
+            .filter(|e| family(e.kind) != family(first.kind))
             .map(|e| e.bytes)
             .min()
             .is_some_and(|bytes| bytes as f64 <= first.bytes as f64 * CLOSE)
@@ -828,6 +1012,7 @@ impl Plan {
 impl fmt::Display for Plan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let best = self.best();
+        let front = self.pareto();
         writeln!(
             f,
             "{} keys, mean length {:.1}, mean shared prefix {:.1}, ranked by {}",
@@ -843,8 +1028,11 @@ impl fmt::Display for Plan {
         )?;
         for e in &self.estimates {
             // By block as well as kind: three of these rows are dictionaries.
-            let mark = if (e.kind, e.block) == (best.kind, best.block) {
+            let same = |o: &Estimate| (e.kind, e.block) == (o.kind, o.block);
+            let mark = if same(&best) {
                 '*'
+            } else if front.iter().any(same) {
+                '+'
             } else {
                 ' '
             };
@@ -854,18 +1042,28 @@ impl fmt::Display for Plan {
             };
             writeln!(
                 f,
-                "{mark} {:<17} {:>12} bytes  {:5.2} B/key  {:>5.0} ns  {}{}",
+                "{mark} {:<17} {:>12} bytes  {:5.2} B/key  {:>5.0} ns  {:5.2} B/key resident  \
+                 {:>7.1} ms build  {}{}",
                 e.kind.name(),
                 e.bytes,
                 e.bytes_per_key(self.keys),
                 self.nanos(e),
+                e.resident_bytes as f64 / self.keys.max(1) as f64,
+                e.build_secs * 1e3,
                 if e.measured { "built" } else { "estimated" },
                 block
             )?;
         }
+        if front.len() > 1 {
+            writeln!(
+                f,
+                "the rows marked * and + are what no other row beats on both size and speed"
+            )?;
+        }
         writeln!(
             f,
-            "the nanoseconds are a model of this crate's own machine, not a measurement of yours"
+            "the nanoseconds and the build times are a model of this crate's own machine, not a \
+             measurement of yours"
         )?;
         if self.close() {
             writeln!(
@@ -1175,6 +1373,8 @@ struct Sample {
     dict_shape: Shape,
     /// What that code's table weighs, zero without one.
     chars: f64,
+    /// What a load holds for that code beside the keys' own blocks, zero without one.
+    chars_held: f64,
     /// What an fst spends a key at the run draw's density.
     ///
     /// Read off [`RunSample`] and carried across flat, because how far an fst minimises below its
@@ -1194,6 +1394,9 @@ struct Sample {
     /// The ranking survives — the number is still two orders under every other index's, so a plan
     /// picks the fst — but the byte count does not, and [`Plan::thin`] is what says so.
     fst_per_key: f64,
+    /// What the run draw's double array weighs, and `None` if the draw is already past what the
+    /// format holds, which the corpus is then too.
+    double_array: Option<DoubleArrayFit>,
     /// Each hash index fitted over two sample sizes: their blobs are a header, a perfect hash and
     /// a per-key table, and at a hundred thousand keys the header is still 0.06 bytes a key --
     /// scaling one measurement by `n` carries that constant with it and reads 34 % high.
@@ -1206,8 +1409,13 @@ impl Sample {
     fn of(spread: &[&str], runs: &[&str], shape: &Shape) -> Result<Self, IndexError> {
         let fst_per_key =
             StringIndex::build(runs)?.serialized_len() as f64 / runs.len().max(1) as f64;
-        let (dict, dict_shape, chars) = match code_for(spread, runs, shape) {
-            None => (Self::dict_fits(spread, runs, shape.n)?, shape.clone(), 0.0),
+        let (dict, dict_shape, chars, chars_held) = match code_for(spread, runs, shape) {
+            None => (
+                Self::dict_fits(spread, runs, shape.n)?,
+                shape.clone(),
+                0.0,
+                0.0,
+            ),
             Some(code) => {
                 let spell = |keys: &[&str]| {
                     dict_index::encode_all(&code, keys)
@@ -1227,6 +1435,7 @@ impl Sample {
                     Self::dict_fits(&coded_spread, &coded_runs, shape.n)?,
                     dict_shape,
                     code.serialized_len() as f64,
+                    code.held() as f64,
                 )
             }
         };
@@ -1234,7 +1443,9 @@ impl Sample {
             dict,
             dict_shape,
             chars,
+            chars_held,
             fst_per_key,
+            double_array: DoubleArrayFit::of(runs),
             #[cfg(feature = "mph")]
             hash_fit: hash_fits(spread)?,
         })
@@ -1258,6 +1469,20 @@ impl Sample {
             .unwrap_or_else(|_| unreachable!("one fit a priced block")))
     }
 
+    /// What a mapped load of a `DictIndex` holds at `block` over the corpus `shape` describes. Its
+    /// samples scale with the blocks and its tables with the shards, read off the run draw; the
+    /// phrases are the whole dictionary the uniform draw bought for the corpus; a coded blob adds
+    /// the code. It may hold samples of the decoded heads as well, a choice each blob makes on its
+    /// own ties, which is left out rather than guessed: eight bytes a block, where it is taken.
+    fn dict_held(&self, shape: &Shape, block: usize) -> f64 {
+        let rates = &self.dict_fit(block).rates;
+        let blocks = shape.n.div_ceil(block) as f64;
+        rates.held_per_block * blocks
+            + rates.held_per_shard * shards_for(shape.n, block) as f64
+            + rates.phrases_held
+            + self.chars_held
+    }
+
     /// The fit for a block, or the nearest priced one. Nothing in the crate asks for a block
     /// outside [`DICT_BLOCKS`]; the constants move smoothly with it, so the nearest is the best
     /// answer available rather than an error.
@@ -1268,6 +1493,49 @@ impl Sample {
             .expect("DICT_BLOCKS is never empty")
     }
 }
+
+/// A [`DoubleArrayIndex`] is a slot a trie node and its code tables, and a trie node is a character
+/// a key does not share with the key before it. So the slots follow [`Shape`] exactly, once a run
+/// draw says what a suffix byte costs: how many bytes a character takes, and how full the rows pack.
+/// Read off the run draw for the reason [`Sample::fst_per_key`] is, since it keeps the neighbours.
+/// Scored against the built blob on seven corpora of a third of a million to a million keys it lands
+/// −0.03 to +2.9 %, and +12.7 % on jieba's lexicon, whose rows the draw packs less tightly.
+struct DoubleArrayFit {
+    /// Bytes of slots per byte of suffix.
+    per_suffix: f64,
+    /// The header and the code tables.
+    fixed: f64,
+    /// What a mapped load holds beside them, read as flat: an alphabet stops growing early.
+    held: f64,
+}
+
+impl DoubleArrayFit {
+    fn of(runs: &[&str]) -> Option<Self> {
+        let index = DoubleArrayIndex::build(runs).ok()?;
+        let shape = Shape::of(runs);
+        let suffix = shape.len.saturating_sub(shape.lcp1) as f64;
+        let slots = index.slot_bytes() as f64;
+        Some(Self {
+            per_suffix: if suffix > 0.0 { slots / suffix } else { 0.0 },
+            fixed: (index.serialized_len() - index.slot_bytes()) as f64,
+            held: index.held() as f64,
+        })
+    }
+
+    /// The blob over `shape`, and `None` if its slots would not fit the format. The estimate is
+    /// within [`DOUBLE_ARRAY_MARGIN`] of a build that may still refuse, so short of the limit by
+    /// that much is as close as a plan can offer one.
+    fn bytes(&self, shape: &Shape) -> Option<f64> {
+        let slots = self.per_suffix * shape.len.saturating_sub(shape.lcp1) as f64;
+        (shape.n <= crate::double_array::MAX_KEYS
+            && slots * DOUBLE_ARRAY_MARGIN <= (crate::double_array::MAX_SLOTS * 8) as f64)
+            .then_some(self.fixed + slots)
+    }
+}
+
+/// How far the plan stays under what a [`DoubleArrayIndex`] holds. A candidate over the line is
+/// left out rather than offered to a build that would refuse it. See [`DoubleArrayFit::bytes`].
+const DOUBLE_ARRAY_MARGIN: f64 = 1.1;
 
 /// One build's rates: the suffix ratio, what a stored entry's header costs, the packed arrays a
 /// block, a shard's vocabulary, and the dictionary a key of the corpus.
@@ -1305,6 +1573,12 @@ struct Rates {
     /// The phrase dictionary's bytes per key of the corpus: the dictionary the sample bought for
     /// the corpus, over the keys that will name it.
     phrases: f64,
+    /// What a mapped load derives per block, its samples and the tries over them.
+    held_per_block: f64,
+    /// What a mapped load derives per shard, its decoded table and header code.
+    held_per_shard: f64,
+    /// The phrase dictionary as a load holds it, whole: the one the sample bought for the corpus.
+    phrases_held: f64,
 }
 
 impl Rates {
@@ -1316,6 +1590,7 @@ impl Rates {
         Self {
             ratio: spread.ratio,
             phrases: spread.phrases,
+            phrases_held: spread.phrases_held,
             ..runs
         }
     }
@@ -1342,6 +1617,9 @@ impl Rates {
             per_block: (s.head_ends + s.block_offsets + s.micro_offsets) as f64 / blocks,
             table: (s.tables + s.header_codes) as f64 / shards_for(keys, dict.block()) as f64,
             phrases: s.phrases as f64 / corpus.max(1) as f64,
+            held_per_block: dict.held().blocks as f64 / blocks,
+            held_per_shard: dict.held().shards as f64 / shards_for(keys, dict.block()) as f64,
+            phrases_held: dict.held().phrases as f64,
         }
     }
 }
@@ -1598,12 +1876,18 @@ pub fn plan_for<S: AsRef<str>>(
     let shape = Shape::of(&sorted);
     let candidates = candidates(needs);
     let mut estimates = if sorted.len() <= sample_size() {
-        weigh(&sorted, &candidates)?
+        weigh(&sorted, &shape, &candidates)?
     } else {
         let (spread, runs) = draws(&sorted, sample_size());
         model(&shape, &Sample::of(&spread, &runs, &shape)?, &candidates)
     };
-    rank(&mut estimates, objective, sorted.len(), shape.mean_len());
+    rank(
+        &mut estimates,
+        objective,
+        needs.exact,
+        sorted.len(),
+        shape.mean_len(),
+    );
     Ok(Plan {
         keys: sorted.len(),
         mean_len: shape.mean_len(),
@@ -1662,7 +1946,7 @@ fn plan_file_with(
     read_lines(path, &mut |key| {
         if !run.fits(key) {
             if run.is_empty() {
-                return Err(IndexError::Format("plan: a key longer than the run budget"));
+                return Err(IndexError::Build("plan: a key longer than the run budget"));
             }
             runs.spill(run.sorted())?;
             run.clear();
@@ -1711,7 +1995,7 @@ fn plan_file_with(
     let mut estimates = match all {
         Some(keys) => {
             let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-            weigh(&keys, &candidates)?
+            weigh(&keys, &shape, &candidates)?
         }
         None => {
             let (spread, adjacent) = (spread.finish(), adjacent.finish());
@@ -1724,7 +2008,13 @@ fn plan_file_with(
             )
         }
     };
-    rank(&mut estimates, objective, shape.n, shape.mean_len());
+    rank(
+        &mut estimates,
+        objective,
+        needs.exact,
+        shape.n,
+        shape.mean_len(),
+    );
     Ok(Plan {
         keys: shape.n,
         mean_len: shape.mean_len(),
@@ -1769,12 +2059,15 @@ fn read_lines(
     }
 }
 
-/// Put the candidates in the objective's order, best first. Ties, and every order, break on bytes,
-/// so two runs over the same keys rank them the same way.
-fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len: f64) {
-    let nanos = |e: &Estimate| nanos_of(objective, e, keys, mean_len);
+/// Put the candidates in the objective's order, best first. Ties, and every order, break on bytes
+/// and then on nanoseconds, so two runs over the same keys rank them the same way and the winner is
+/// never one the [front](Plan::pareto) leaves out.
+fn rank(estimates: &mut [Estimate], objective: Objective, exact: bool, keys: usize, mean_len: f64) {
+    let nanos = |e: &Estimate| nanos_of(objective, e, exact, keys, mean_len);
     match objective {
-        Objective::Memory => estimates.sort_by_key(|e| e.bytes),
+        Objective::Memory => {
+            estimates.sort_by(|x, y| x.bytes.cmp(&y.bytes).then(nanos(x).total_cmp(&nanos(y))));
+        }
         Objective::Latency | Objective::Workload(_) => {
             estimates.sort_by(|x, y| nanos(x).total_cmp(&nanos(y)).then(x.bytes.cmp(&y.bytes)));
         }
@@ -1788,7 +2081,12 @@ fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len:
             // What it gives up on the objective it does worse on. The winner is the candidate
             // whose worse ratio is smallest, which is the one nearest to both at once.
             let worse = |e: &Estimate| (e.bytes as f64 / smallest).max(nanos(e) / fastest);
-            estimates.sort_by(|x, y| worse(x).total_cmp(&worse(y)).then(x.bytes.cmp(&y.bytes)));
+            estimates.sort_by(|x, y| {
+                worse(x)
+                    .total_cmp(&worse(y))
+                    .then(x.bytes.cmp(&y.bytes))
+                    .then(nanos(x).total_cmp(&nanos(y)))
+            });
         }
     }
 }
@@ -1796,21 +2094,23 @@ fn rank(estimates: &mut [Estimate], objective: Objective, keys: usize, mean_len:
 /// Every index the needs allow, as the ladder's rows: one per kind, except [`Kind::Dict`], which
 /// is one per [`DICT_BLOCKS`] entry because its block is a choice and not a default.
 fn candidates(needs: Needs) -> Vec<(Kind, Option<usize>)> {
-    let mut out = Vec::with_capacity(4 + DICT_BLOCKS.len());
+    let mut out = Vec::with_capacity(6 + DICT_BLOCKS.len());
     for kind in [
         Kind::Compact,
         Kind::Closed,
         Kind::Perfect,
         Kind::String,
         Kind::Dict,
+        Kind::Hashed,
+        Kind::DoubleArray,
     ] {
         if !kind.answers(needs) || !kind.available() {
             continue;
         }
-        if kind == Kind::Dict {
-            out.extend(DICT_BLOCKS.map(|block| (kind, Some(block))));
-        } else {
-            out.push((kind, None));
+        match kind {
+            Kind::Dict => out.extend(DICT_BLOCKS.map(|block| (kind, Some(block)))),
+            Kind::Hashed => out.push((kind, Some(dict_index::DEFAULT_BLOCK))),
+            _ => out.push((kind, None)),
         }
     }
     out
@@ -1836,74 +2136,137 @@ fn draws<'a>(sorted: &[&'a str], want: usize) -> (Vec<&'a str>, Vec<&'a str>) {
 }
 
 /// Build every candidate and report what it weighs. What a corpus no larger than the sample gets,
-/// since the sample would be the corpus.
-fn weigh(keys: &[&str], candidates: &[(Kind, Option<usize>)]) -> Result<Vec<Estimate>, IndexError> {
+/// since the sample would be the corpus. A corpus a format cannot hold is not a failure of the plan:
+/// that candidate leaves the ladder, and [`StringIndex`] is always on it.
+fn weigh(
+    keys: &[&str],
+    shape: &Shape,
+    candidates: &[(Kind, Option<usize>)],
+) -> Result<Vec<Estimate>, IndexError> {
     let mut out = Vec::with_capacity(candidates.len());
     for &(kind, at) in candidates {
-        let (bytes, block) = match kind {
-            Kind::String => (StringIndex::build(keys)?.serialized_len() as u64, None),
+        let (bytes, held, block) = match kind {
+            Kind::String => (StringIndex::build(keys)?.serialized_len() as u64, 0, None),
             Kind::Dict => {
                 let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                let index = DictIndex::build_with_block(keys, block)?;
                 (
-                    DictIndex::build_with_block(keys, block)?.serialized_len() as u64,
+                    index.serialized_len() as u64,
+                    index.held().total(),
                     Some(block),
                 )
             }
             #[cfg(feature = "mph")]
-            Kind::Compact => (
-                CompactHashIndex::build_bits(keys, 8)?.serialized_len()? as u64,
+            Kind::Compact => {
+                let index = CompactHashIndex::build_bits(keys, 8)?;
+                (index.serialized_len()? as u64, index.mphf_len(), None)
+            }
+            #[cfg(feature = "mph")]
+            Kind::Closed => (
+                ClosedHashIndex::build(keys)?.serialized_len() as u64,
+                0,
                 None,
             ),
             #[cfg(feature = "mph")]
-            Kind::Closed => (ClosedHashIndex::build(keys)?.serialized_len() as u64, None),
+            Kind::Perfect => {
+                let index = PerfectHashIndex::build(keys)?;
+                (index.serialized_len()? as u64, index.mphf_len(), None)
+            }
             #[cfg(feature = "mph")]
-            Kind::Perfect => (
-                PerfectHashIndex::build(keys)?.serialized_len()? as u64,
-                None,
-            ),
+            Kind::Hashed => {
+                let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                let dict = DictIndex::build_with_block(keys, block)?;
+                let Ok(index) = HashedDictIndex::from_dict(dict, 0) else {
+                    continue;
+                };
+                let held = index.dict().held().total() + index.mphf_len();
+                (index.serialized_len() as u64, held, Some(block))
+            }
+            Kind::DoubleArray => {
+                let Ok(index) = DoubleArrayIndex::build(keys) else {
+                    continue;
+                };
+                (index.serialized_len() as u64, index.held(), None)
+            }
             #[cfg(not(feature = "mph"))]
             _ => unreachable!("the hash indexes are not candidates without their feature"),
         };
-        out.push(Estimate {
-            kind,
-            bytes,
-            block,
-            measured: true,
-        });
+        out.push(estimate(kind, bytes, held as u64, block, shape, true));
     }
     Ok(out)
+}
+
+/// One row of the ladder, from what was weighed or modelled for it.
+fn estimate(
+    kind: Kind,
+    bytes: u64,
+    held: u64,
+    block: Option<usize>,
+    shape: &Shape,
+    measured: bool,
+) -> Estimate {
+    Estimate {
+        kind,
+        bytes,
+        block,
+        micro: block.map(dict_index::micro_for),
+        resident_bytes: bytes + held,
+        build_secs: build_secs(kind, shape.n, shape.mean_len()),
+        measured,
+    }
 }
 
 /// Price every candidate at `n` from the exact shape and the sample's constants.
 fn model(shape: &Shape, sample: &Sample, candidates: &[(Kind, Option<usize>)]) -> Vec<Estimate> {
     candidates
         .iter()
-        .map(|&(kind, at)| {
-            let (bytes, block) = match kind {
-                Kind::String => (sample.fst_per_key * shape.n as f64, None),
+        .filter_map(|&(kind, at)| {
+            // A mapped load copies the perfect hash out of the file, and the closed index's blob
+            // is that hash.
+            #[cfg(feature = "mph")]
+            let mphf = line(sample.hash_fit.closed, shape.n);
+            let (bytes, held, block) = match kind {
+                Kind::String => (sample.fst_per_key * shape.n as f64, 0.0, None),
                 Kind::Dict => {
                     let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
                     let fit = sample.dict_fit(block);
                     (
                         dict_bytes(&sample.dict_shape, fit, block) + sample.chars,
+                        sample.dict_held(shape, block),
                         Some(block),
                     )
                 }
                 #[cfg(feature = "mph")]
-                Kind::Compact => (line(sample.hash_fit.compact, shape.n), None),
+                Kind::Compact => (line(sample.hash_fit.compact, shape.n), mphf, None),
                 #[cfg(feature = "mph")]
-                Kind::Closed => (line(sample.hash_fit.closed, shape.n), None),
+                Kind::Closed => (mphf, 0.0, None),
                 #[cfg(feature = "mph")]
-                Kind::Perfect => (sample.hash_fit.perfect.bytes(shape), None),
+                Kind::Perfect => (sample.hash_fit.perfect.bytes(shape), mphf, None),
+                #[cfg(feature = "mph")]
+                Kind::Hashed => {
+                    let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
+                    let fit = sample.dict_fit(block);
+                    let dict = dict_bytes(&sample.dict_shape, fit, block) + sample.chars;
+                    // The perfect hash is the closed index's; the ranks are `⌈log2 n⌉` bits a key.
+                    let ranks = crate::hashed_dict::table_bits(shape.n) as f64 / 8.0;
+                    let held = sample.dict_held(shape, block) + mphf;
+                    (dict + mphf + ranks, held, Some(block))
+                }
+                Kind::DoubleArray => {
+                    let fit = sample.double_array.as_ref()?;
+                    (fit.bytes(shape)?, fit.held, None)
+                }
                 #[cfg(not(feature = "mph"))]
                 _ => unreachable!("the hash indexes are not candidates without their feature"),
             };
-            Estimate {
+            Some(estimate(
                 kind,
-                bytes: bytes.max(0.0) as u64,
+                bytes.max(0.0) as u64,
+                held.max(0.0) as u64,
                 block,
-                measured: false,
-            }
+                shape,
+                false,
+            ))
         })
         .collect()
 }
@@ -1978,13 +2341,14 @@ mod tests {
     #[test]
     fn every_candidate_answers_what_was_asked() {
         let keys = corpus(2_000);
-        for bits in 0..32u8 {
+        for bits in 0..64u8 {
             let needs = Needs {
                 reverse: bits & 1 != 0,
                 ordered: bits & 2 != 0,
                 prefix: bits & 4 != 0,
                 fuzzy: bits & 8 != 0,
                 exact: bits & 16 != 0,
+                common_prefix: bits & 32 != 0,
             };
             let plan = plan(&keys, needs).unwrap();
             assert!(!plan.estimates().is_empty(), "{needs:?}");
@@ -2004,13 +2368,14 @@ mod tests {
     #[test]
     fn memory_ranks_exactly_as_it_always_did() {
         let keys = corpus(2_000);
-        for bits in 0..32u8 {
+        for bits in 0..64u8 {
             let needs = Needs {
                 reverse: bits & 1 != 0,
                 ordered: bits & 2 != 0,
                 prefix: bits & 4 != 0,
                 fuzzy: bits & 8 != 0,
                 exact: bits & 16 != 0,
+                common_prefix: bits & 32 != 0,
             };
             let p = plan(&keys, needs).unwrap();
             assert_eq!(p.objective(), Objective::Memory);
@@ -2025,7 +2390,7 @@ mod tests {
     #[test]
     fn latency_and_memory_pick_different_indexes() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact().reverse();
+        let needs = Needs::default().reverse();
         let small = plan_for(&keys, needs, Objective::Memory).unwrap();
         let quick = plan_for(&keys, needs, Objective::Latency).unwrap();
         assert_eq!(small.best().kind, Kind::Dict);
@@ -2053,7 +2418,7 @@ mod tests {
     #[test]
     fn balanced_gives_up_less_than_either_extreme() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact().reverse();
+        let needs = Needs::default().reverse();
         let plans: Vec<Plan> = [Objective::Memory, Objective::Latency, Objective::Balanced]
             .into_iter()
             .map(|o| plan_for(&keys, needs, o).unwrap())
@@ -2073,7 +2438,7 @@ mod tests {
     #[test]
     fn the_dict_cost_follows_the_block_it_was_measured_at() {
         let at = |block: usize| {
-            let ops = ops_of(Kind::Dict, Some(block));
+            let ops = ops_of(Kind::Dict, Some(block), true);
             let (s, len) = ops.at(300_000, SAMPLE, 10.0);
             ops.mixed.nanos(s, len)
         };
@@ -2099,9 +2464,14 @@ mod tests {
             (Kind::Dict, Some(32)),
             (Kind::Dict, Some(100)),
             (Kind::Dict, Some(1024)),
+            (Kind::Hashed, Some(256)),
+            (Kind::DoubleArray, None),
         ];
-        for (kind, block) in kinds {
-            let ops = ops_of(kind, block);
+        for (kind, block, exact) in kinds
+            .into_iter()
+            .flat_map(|(k, b)| [(k, b, true), (k, b, false)])
+        {
+            let ops = ops_of(kind, block, exact);
             assert!(ops.floor >= 0.0, "{kind:?} {block:?}");
             let costs = [ops.mixed, ops.hit, ops.miss, ops.batch16, ops.batch1024]
                 .into_iter()
@@ -2157,14 +2527,17 @@ mod tests {
             Kind::Perfect,
             Kind::String,
             Kind::Dict,
+            Kind::Hashed,
+            Kind::DoubleArray,
         ] {
-            let ops = ops_of(kind, None);
+            let ops = ops_of(kind, None, true);
             let reverse = kind.answers(Needs::default().reverse());
             let prefix = kind.answers(Needs::default().prefix());
+            let walk = kind.answers(Needs::default().common_prefix());
             assert_eq!(ops.key.is_some(), reverse, "{kind:?}");
             assert_eq!(ops.prefix.is_some(), prefix, "{kind:?}");
-            assert_eq!(ops.common_prefix.is_some(), prefix, "{kind:?}");
-            assert_eq!(ops.longest_prefix.is_some(), prefix, "{kind:?}");
+            assert_eq!(ops.common_prefix.is_some(), walk, "{kind:?}");
+            assert_eq!(ops.longest_prefix.is_some(), walk, "{kind:?}");
         }
     }
 
@@ -2172,7 +2545,7 @@ mod tests {
     /// saves hits and misses the share it saved the mixed lookups it was measured on.
     #[test]
     fn a_batch_is_priced_between_the_sizes_measured() {
-        let ops = ops_of(Kind::Perfect, None);
+        let ops = ops_of(Kind::Perfect, None, true);
         let (s, len) = ops.at(1 << 30, SAMPLE * 100, 12.0);
         let at = |size: u32| Workload::default().hits(1).batch(size).nanos(&ops, s, len);
         let hit = ops.hit.nanos(s, len);
@@ -2197,19 +2570,28 @@ mod tests {
     #[test]
     fn a_workload_ranks_by_what_it_asks() {
         let keys = corpus(2_000);
-        let best = |asked: Workload| {
-            plan_for(&keys, Needs::default(), Objective::Workload(asked))
+        let best = |needs: Needs, asked: Workload| {
+            plan_for(&keys, needs, Objective::Workload(asked))
                 .unwrap()
                 .best()
                 .kind
         };
+        let (open, closed) = (Needs::default(), Needs::default().closed_vocabulary());
         assert_eq!(
-            best(Workload::default().hits(1).common_prefix(9)),
+            best(open, Workload::default().hits(1).common_prefix(9)),
             Kind::String
         );
-        assert_eq!(best(Workload::default().hits(1).prefix(9)), Kind::Dict);
+        assert_eq!(
+            best(open, Workload::default().hits(1).prefix(9)),
+            Kind::Dict
+        );
         if cfg!(feature = "mph") {
-            let kind = best(Workload::default().hits(1).batch(1_024));
+            // A closed vocabulary's hits cost a hash, and the prefix counts are its dictionary's.
+            assert_eq!(
+                best(closed, Workload::default().hits(1).prefix(9)),
+                Kind::Hashed
+            );
+            let kind = best(closed, Workload::default().hits(1).batch(1_024));
             assert!(matches!(kind, Kind::Closed | Kind::Compact), "{kind:?}");
         }
     }
@@ -2233,11 +2615,11 @@ mod tests {
             (Workload::default().prefix(1), Needs::default().prefix()),
             (
                 Workload::default().common_prefix(1),
-                Needs::default().prefix(),
+                Needs::default().common_prefix(),
             ),
             (
                 Workload::default().longest_prefix(1),
-                Needs::default().prefix(),
+                Needs::default().common_prefix(),
             ),
         ] {
             let got = plan_for(&keys, Needs::default(), Objective::Workload(asked)).unwrap();
@@ -2250,7 +2632,7 @@ mod tests {
     #[test]
     fn a_workload_that_asks_nothing_is_latency() {
         let keys = corpus(2_000);
-        let needs = Needs::default().exact();
+        let needs = Needs::default();
         let latency = plan_for(&keys, needs, Objective::Latency).unwrap();
         let empty = plan_for(&keys, needs, Objective::Workload(Workload::default())).unwrap();
         assert_eq!(latency.estimates(), empty.estimates());
@@ -2295,6 +2677,274 @@ mod tests {
             assert!(text.contains(" ns  "), "{text}");
             assert!(text.contains("not a measurement of yours"), "{text}");
         }
+    }
+
+    /// Every kind is a candidate where it answers: weighed below the sample and modelled above it,
+    /// the row is the size of the build it names.
+    #[test]
+    fn both_new_kinds_are_priced_where_they_answer() {
+        let keys = corpus(1_500);
+        let has = |p: &Plan, kind| p.estimates().iter().any(|e| e.kind == kind);
+        let any = plan(&keys, Needs::default()).unwrap();
+        assert!(has(&any, Kind::DoubleArray));
+        assert_eq!(has(&any, Kind::Hashed), cfg!(feature = "mph"));
+        let double = any
+            .estimates()
+            .iter()
+            .find(|e| e.kind == Kind::DoubleArray)
+            .unwrap();
+        assert!(double.measured);
+        assert_eq!(
+            double.bytes,
+            DoubleArrayIndex::build(&keys).unwrap().serialized_len() as u64
+        );
+        let ordered = plan(&keys, Needs::default().ordered()).unwrap();
+        assert!(!has(&ordered, Kind::DoubleArray), "no in-order iteration");
+        let walk = plan(&keys, Needs::default().common_prefix()).unwrap();
+        assert!(has(&walk, Kind::DoubleArray), "a walk is what it is for");
+        assert!(!has(&walk, Kind::Perfect));
+    }
+
+    /// A corpus past what a double array holds has no such row. The run draw of a corpus of long
+    /// distinct keys is within the format; the corpus, by the shape, is not.
+    #[test]
+    fn a_corpus_past_the_double_array_limit_is_not_offered_one() {
+        let fit = DoubleArrayFit {
+            per_suffix: 10.0,
+            fixed: 100.0,
+            held: 0.0,
+        };
+        let shape = |n: usize, suffix: u64| Shape {
+            n,
+            len: suffix,
+            ..Shape::default()
+        };
+        assert_eq!(fit.bytes(&shape(1_000, 1_000)), Some(10_100.0));
+        let slots = (crate::double_array::MAX_SLOTS * 8) as u64;
+        assert_eq!(fit.bytes(&shape(1_000, slots)), None, "past the slots");
+        assert_eq!(
+            fit.bytes(&shape(crate::double_array::MAX_KEYS + 1, 1_000)),
+            None,
+            "past the ids"
+        );
+    }
+
+    /// Below the sample a refusal is the build's own: more characters than a label holds.
+    #[test]
+    fn a_refused_double_array_leaves_the_ladder_and_not_the_plan() {
+        let keys: Vec<String> = (0x1_0000..0x1_0000 + 66_000u32)
+            .filter_map(char::from_u32)
+            .map(|c| c.to_string())
+            .collect();
+        assert!(DoubleArrayIndex::build(&keys).is_err());
+        let p = plan(&keys, Needs::default().common_prefix()).unwrap();
+        assert!(p.estimates().iter().all(|e| e.kind != Kind::DoubleArray));
+        assert!(p.estimates().iter().any(|e| e.kind == Kind::String));
+    }
+
+    /// At zero bits `id` is the dictionary's own search, so an exact `Hashed` row costs its
+    /// dictionary and can never beat it; a closed vocabulary pays for a hash, and with keys to
+    /// give back and nothing else to compare with, that wins.
+    #[cfg(feature = "mph")]
+    #[test]
+    fn hashed_is_priced_by_the_vocabulary() {
+        let keys = corpus(2_000);
+        let open = Needs::default().reverse().prefix();
+        let row = |p: &Plan| {
+            *p.estimates()
+                .iter()
+                .find(|e| e.kind == Kind::Hashed)
+                .unwrap()
+        };
+        let closed = open.closed_vocabulary();
+        let open = plan_for(&keys, open, Objective::Latency).unwrap();
+        assert_ne!(open.best().kind, Kind::Hashed);
+        let dict = open
+            .estimates()
+            .iter()
+            .find(|e| e.kind == Kind::Dict && e.block == Some(256))
+            .unwrap();
+        assert!(open.nanos(&row(&open)) >= open.nanos(dict));
+        let closed = plan_for(&keys, closed, Objective::Latency).unwrap();
+        assert_eq!(closed.best().kind, Kind::Hashed, "{closed}");
+        assert!(closed.nanos(&row(&closed)) < open.nanos(&row(&open)));
+    }
+
+    /// A `Hashed` row holds its dictionary, so the two do not make a close call.
+    #[test]
+    fn a_hashed_row_is_not_a_close_call_against_its_dictionary() {
+        let shape = Shape::default();
+        let rows = vec![
+            estimate(Kind::Dict, 1_000, 0, Some(256), &shape, false),
+            estimate(Kind::Hashed, 1_100, 0, Some(256), &shape, false),
+        ];
+        let p = Plan {
+            keys: 1_000,
+            mean_len: 10.0,
+            mean_lcp: 4.0,
+            estimates: rows,
+            needs: Needs::default(),
+            objective: Objective::Memory,
+        };
+        assert!(!p.close());
+    }
+
+    /// Beside `bytes` every row carries its knobs and what it costs to hold and to build.
+    #[test]
+    fn every_row_carries_its_micro_its_resident_bytes_and_its_build() {
+        let keys = corpus(1_500);
+        let p = plan(&keys, Needs::default().closed_vocabulary()).unwrap();
+        for e in p.estimates() {
+            assert_eq!(e.micro.is_some(), e.block.is_some(), "{e:?}");
+            assert_eq!(e.micro, e.block.map(dict_index::micro_for), "{e:?}");
+            assert!(e.resident_bytes >= e.bytes, "{e:?}");
+            assert!(e.build_secs > 0.0, "{e:?}");
+            assert_eq!(
+                e.resident_bytes > e.bytes,
+                !matches!(e.kind, Kind::Closed | Kind::String | Kind::DoubleArray),
+                "{e:?}"
+            );
+        }
+        let row = |kind| p.estimates().iter().find(|e| e.kind == kind).copied();
+        if let (Some(compact), Some(perfect)) = (row(Kind::Compact), row(Kind::Perfect)) {
+            assert!(compact.build_secs < perfect.build_secs, "the keyless build");
+        }
+        // Longer keys cost a keyed build more and a keyless one nothing.
+        let at = |kind, len| build_secs(kind, 1_000_000, len);
+        assert!(at(Kind::Dict, 40.0) > at(Kind::Dict, 10.0));
+        assert_eq!(at(Kind::Closed, 40.0), at(Kind::Closed, 10.0));
+    }
+
+    /// Past the sample a row's resident bytes are modelled, near what the load would hold.
+    #[test]
+    fn the_model_prices_what_a_load_holds() {
+        let keys = corpus(30_000);
+        let p = with_sample(4_096, || {
+            plan(&keys, Needs::default().closed_vocabulary()).unwrap()
+        });
+        assert!(p.estimates().iter().all(|e| !e.measured));
+        for e in p.estimates() {
+            let held = (e.resident_bytes - e.bytes) as f64;
+            let truth = match e.kind {
+                Kind::Dict => DictIndex::build_with_block(&keys, e.block.unwrap())
+                    .unwrap()
+                    .held()
+                    .total() as f64,
+                _ => continue,
+            };
+            assert!(
+                (held - truth).abs() < 0.25 * truth,
+                "{:?} at {:?}: {held} against {truth}",
+                e.kind,
+                e.block
+            );
+        }
+    }
+
+    /// Whatever a [`Plan`] is ranked by: the front is sorted both ways, nothing off it beats
+    /// anything on it, everything off it is beaten by something on it, and the winner is on it.
+    fn check_front(p: &Plan) {
+        let front = p.pareto();
+        assert!(!front.is_empty());
+        assert!(front.contains(&p.best()), "{p}");
+        for w in front.windows(2) {
+            assert!(w[0].bytes < w[1].bytes, "{p}");
+            assert!(p.nanos(&w[0]) > p.nanos(&w[1]), "{p}");
+        }
+        let beats = |x: &Estimate, y: &Estimate| {
+            x.bytes <= y.bytes
+                && p.nanos(x) <= p.nanos(y)
+                && (x.bytes < y.bytes || p.nanos(x) < p.nanos(y))
+        };
+        for e in p.estimates() {
+            let on = front.contains(e);
+            assert!(!on || !p.estimates().iter().any(|o| beats(o, e)), "{p}");
+            let answered = front
+                .iter()
+                .any(|o| beats(o, e) || (o.bytes == e.bytes && p.nanos(o) == p.nanos(e)));
+            assert!(on || answered, "{p}");
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(24))]
+
+        #[test]
+        fn the_front_is_a_front_and_the_winner_is_on_it(
+            keys in proptest::collection::vec("[a-c]{0,6}|[0-9]{1,8}|北京[a-z]{0,3}", 0..300),
+            reverse: bool,
+            prefix: bool,
+            closed: bool,
+            weights in proptest::array::uniform3(0u64..4),
+        ) {
+            let needs = Needs {
+                reverse,
+                prefix,
+                exact: !closed,
+                ..Needs::default()
+            };
+            let asked = Workload::default()
+                .hits(weights[0])
+                .misses(weights[1])
+                .common_prefix(weights[2]);
+            for objective in [
+                Objective::Memory,
+                Objective::Latency,
+                Objective::Balanced,
+                Objective::Workload(asked),
+            ] {
+                check_front(&plan_for(&keys, needs, objective).unwrap());
+            }
+        }
+    }
+
+    /// A front of more than one row, and the ladder marks it.
+    #[cfg(feature = "mph")]
+    #[test]
+    fn the_ladder_marks_the_front() {
+        let p = plan_for(
+            &corpus(1_000),
+            Needs::default().reverse(),
+            Objective::Memory,
+        )
+        .unwrap();
+        let front = p.pareto();
+        assert!(front.len() > 1, "{p}");
+        let text = p.to_string();
+        assert_eq!(text.matches("\n* ").count(), 1, "{text}");
+        assert_eq!(text.matches("\n+ ").count(), front.len() - 1, "{text}");
+        assert!(text.contains("* and + are what"), "{text}");
+    }
+
+    /// The default is the vocabulary a stranger's key can reach: exact, and so without the two
+    /// indexes that answer one with a member's id. Saying it is closed puts them back, wherever
+    /// in the chain it is said.
+    #[test]
+    fn the_default_is_an_open_vocabulary() {
+        assert!(Needs::default().exact);
+        let keys = corpus(500);
+        let kinds = |needs| {
+            plan(&keys, needs)
+                .unwrap()
+                .estimates()
+                .iter()
+                .map(|e| e.kind)
+                .collect::<Vec<_>>()
+        };
+        for probabilistic in [Kind::Compact, Kind::Closed] {
+            assert!(!probabilistic.answers(Needs::default()));
+            assert!(!kinds(Needs::default()).contains(&probabilistic));
+            let closed = Needs::default().closed_vocabulary();
+            assert!(probabilistic.answers(closed));
+            assert_eq!(
+                kinds(closed).contains(&probabilistic),
+                cfg!(feature = "mph")
+            );
+        }
+        assert_eq!(
+            Needs::default().closed_vocabulary().reverse(),
+            Needs::default().reverse().closed_vocabulary()
+        );
     }
 
     #[test]
@@ -2361,7 +3011,8 @@ mod tests {
     #[test]
     fn the_model_lands_near_the_truth() {
         let keys = corpus(20_000);
-        let plan = with_sample(2_000, || plan(&keys, Needs::default()).unwrap());
+        let every = Needs::default().closed_vocabulary();
+        let plan = with_sample(2_000, || plan(&keys, every).unwrap());
         assert!(plan.estimates().iter().all(|e| !e.measured));
         for e in plan.estimates() {
             let truth = match e.kind {
@@ -2381,6 +3032,13 @@ mod tests {
                     .unwrap()
                     .serialized_len()
                     .unwrap() as u64,
+                #[cfg(feature = "mph")]
+                Kind::Hashed => HashedDictIndex::from_dict(DictIndex::build(&keys).unwrap(), 0)
+                    .unwrap()
+                    .serialized_len() as u64,
+                Kind::DoubleArray => {
+                    DoubleArrayIndex::build(&keys).unwrap().serialized_len() as u64
+                }
                 #[cfg(not(feature = "mph"))]
                 _ => unreachable!(),
             };
@@ -2449,7 +3107,7 @@ mod tests {
         assert_eq!(blocks.len(), DICT_BLOCKS.len(), "one row a block");
 
         let text = plan.to_string();
-        assert_eq!(text.matches('*').count(), 1, "one winner: {text}");
+        assert_eq!(text.matches("\n* ").count(), 1, "one winner: {text}");
         for block in DICT_BLOCKS {
             assert!(text.contains(&format!("at block {block}")), "{text}");
         }
@@ -2583,12 +3241,8 @@ mod tests {
     /// that would be warning about every plan. The doubt is about kinds.
     #[test]
     fn two_dict_blocks_are_not_the_close_call() {
-        let estimate = |kind, block, bytes| Estimate {
-            kind,
-            bytes,
-            block,
-            measured: false,
-        };
+        let shape = Shape::default();
+        let estimate = |kind, block, bytes| estimate(kind, bytes, 0, block, &shape, false);
         let of = |estimates| Plan {
             keys: 1_000,
             mean_len: 10.0,

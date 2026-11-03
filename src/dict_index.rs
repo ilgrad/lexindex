@@ -284,6 +284,26 @@ pub struct DictIndex {
     mroute: OnceLock<Box<[u64]>>,
 }
 
+/// What a [`DictIndex`] holds on the heap beside the sections a mapped load borrows, in the parts
+/// [`plan`](crate::plan) scales apart.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Held {
+    /// The samples and the tries over them, which grow with the blocks.
+    pub(crate) blocks: usize,
+    /// The shards' tables and codes, which grow with the shards.
+    pub(crate) shards: usize,
+    /// The phrase dictionary, one for the blob, grown with what the corpus can afford.
+    pub(crate) phrases: usize,
+    /// The character code, one for the blob, and bounded by the alphabet.
+    pub(crate) code: usize,
+}
+
+impl Held {
+    pub(crate) fn total(self) -> usize {
+        self.blocks + self.shards + self.phrases + self.code
+    }
+}
+
 /// The first word of a block's [`DictIndex::mroute`] group that leaves the block to its restart
 /// run.
 const NO_ROUTE: u64 = u64::MAX;

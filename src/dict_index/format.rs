@@ -144,11 +144,11 @@ impl DictLayout {
     /// The block and the microblock this asks for, or the error of a pair no build can lay out.
     pub(super) fn sizes(self) -> Result<(usize, usize), IndexError> {
         if !(1..=MAX_BLOCK).contains(&self.block) {
-            return Err(IndexError::Format("dict: block must be in 1..=1024"));
+            return Err(IndexError::Build("dict: block must be in 1..=1024"));
         }
         match self.micro {
             Some(micro) if micro == 0 || self.block % micro != 0 => {
-                Err(IndexError::Format("dict: micro must divide block"))
+                Err(IndexError::Build("dict: micro must divide block"))
             }
             Some(micro) => Ok((self.block, micro)),
             None => Ok((self.block, micro_for(self.block))),
@@ -283,6 +283,28 @@ impl DictIndex {
             + self.micros.len()
             + self.data.len()
             + self.chars_len()
+    }
+
+    /// What this holds on the heap beside the sections a mapped load borrows.
+    pub(crate) fn held(&self) -> Held {
+        let codec = |c: &Codec| match c {
+            Codec::Symbols { table, .. } => table.held(),
+            Codec::Packed(alphabet) => alphabet.held(),
+        };
+        let raw = self.raw.as_ref().map_or(0, |r| r.held());
+        Held {
+            blocks: self.samples.len() * 8 + self.ties.as_ref().map_or(0, |t| t.held()) + raw,
+            shards: self.codecs.len() * size_of::<Codec>()
+                + self.codecs.iter().map(codec).sum::<usize>()
+                + self.codes.len() * size_of::<(Code, Code)>()
+                + self
+                    .codes
+                    .iter()
+                    .map(|(a, b)| a.held() + b.held())
+                    .sum::<usize>(),
+            phrases: self.phrases.held(),
+            code: self.code.as_ref().map_or(0, |c| c.held()),
+        }
     }
 
     /// Where this index's bytes go, section by section: [`DictSections`].

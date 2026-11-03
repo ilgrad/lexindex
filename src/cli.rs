@@ -40,16 +40,16 @@ usage:
            migration path off a format a later version stops reading
 
 needs — what the index must be able to do. They narrow what `plan` ranks and what
-`--index auto` may pick; with none of them the only question asked is `id(key)`:
+`--index auto` may pick; with none of them the only question asked is an exact `id(key)`:
   --reverse    key(id) as well as id(key)
   --ordered    ids in lexicographic order, and in-order iteration
   --prefix     prefix and range queries (an ordered index)
+  --common-prefix  every key that is a prefix of a query, and the longest
   --fuzzy      Levenshtein and subsequence queries
-  --exact      a non-member must be answered as one, barring the probabilistic indexes
 
-`plan` and `--index auto` assume an **open** vocabulary and so imply `--exact`: left to itself
-the ranking is won by the index that answers a stranger with some member's id, and nothing in
-the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
+`plan` and `--index auto` assume an **open** vocabulary, as `Needs::default()` does: left to
+itself the ranking is won by the index that answers a stranger with some member's id, and nothing
+in the blob would later say so. Pass `--closed-vocabulary` when every key you will ask about is in
 the file, and the two probabilistic indexes are ranked with the rest — `ClosedHashIndex` at
 0.24 bytes a key, `CompactHashIndex` at 1.24. Naming an index with `--index` builds it whatever
 the needs say.
@@ -63,8 +63,8 @@ options (`--name value` or `--name=value`):
                  for. The nanoseconds are a model of this crate's own machine, never a
                  measurement of yours
   --index NAME   auto (default), dict, string, compact, closed, perfect, hashed,
-                 double-array. The last two are never what auto picks: hashed is
-                 HashedDictIndex with no fingerprint, so exact, and both hold the corpus
+                 double-array. hashed is HashedDictIndex with no fingerprint, so exact;
+                 it and double-array hold the corpus to build
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
                  fast / balanced / compact (32 / 256 / 1024)
   --labels       with `--index dict`: also try a dictionary of the corpus's trie labels
@@ -127,10 +127,6 @@ enum Accepts {
 enum Choice {
     Auto,
     One(Kind),
-    /// `Kind` cannot name this one before 5.0, so the planner does not rank it.
-    Hashed,
-    /// As [`Hashed`](Self::Hashed).
-    DoubleArray,
 }
 
 /// One subcommand's arguments, parsed.
@@ -145,9 +141,9 @@ struct Cmd {
     json: bool,
     stream: Stream,
     objective: Objective,
-    /// Whether `--exact` was added because nothing said the vocabulary was closed. Only then is
-    /// the ladder worth a line about what it left out.
-    implied_exact: bool,
+    /// Whether the vocabulary is open because nothing said it was closed, which is every run but
+    /// one with `--closed-vocabulary`: the ladder is worth a line about what that left out.
+    open_by_default: bool,
 }
 
 fn objective(name: &str) -> Result<Objective, Fail> {
@@ -199,8 +195,8 @@ fn choice(name: &str) -> Result<Choice, Fail> {
         "compact" => Choice::One(Kind::Compact),
         "closed" => Choice::One(Kind::Closed),
         "perfect" => Choice::One(Kind::Perfect),
-        "hashed" => Choice::Hashed,
-        "double-array" => Choice::DoubleArray,
+        "hashed" => Choice::One(Kind::Hashed),
+        "double-array" => Choice::One(Kind::DoubleArray),
         other => return Err(Fail::Usage(format!("--index: no such index `{other}`"))),
     })
 }
@@ -334,9 +330,8 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
         json: false,
         stream: Stream::Auto,
         objective: Objective::Memory,
-        implied_exact: false,
+        open_by_default: true,
     };
-    let mut closed_vocabulary = false;
     let mut at = 0;
     while at < args.len() {
         let arg = &args[at];
@@ -349,17 +344,18 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
             "--sections" if accepts == Accepts::Sections => cmd.sections = true,
             "--json" if accepts == Accepts::Sections => cmd.json = true,
             "--closed-vocabulary" if !matches!(accepts, Accepts::Nothing | Accepts::Sections) => {
-                closed_vocabulary = true;
+                cmd.needs = cmd.needs.closed_vocabulary();
+                cmd.open_by_default = false;
             }
-            "--reverse" | "--ordered" | "--prefix" | "--fuzzy" | "--exact"
+            "--reverse" | "--ordered" | "--prefix" | "--common-prefix" | "--fuzzy"
                 if !matches!(accepts, Accepts::Nothing | Accepts::Sections) =>
             {
                 let flag = match name {
                     "--reverse" => &mut cmd.needs.reverse,
                     "--ordered" => &mut cmd.needs.ordered,
                     "--prefix" => &mut cmd.needs.prefix,
-                    "--fuzzy" => &mut cmd.needs.fuzzy,
-                    _ => &mut cmd.needs.exact,
+                    "--common-prefix" => &mut cmd.needs.common_prefix,
+                    _ => &mut cmd.needs.fuzzy,
                 };
                 *flag = true;
             }
@@ -385,18 +381,6 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
     }
     if cmd.positional.len() != want {
         return Err(Fail::Usage(format!("expected `lexindex {form}`")));
-    }
-    // With no needs at all the cheapest index that answers `id(key)` is the one that answers a
-    // stranger with some other key's id, and nothing in the output would say so. A tool asked
-    // "which index" should not answer with the one whose failure is silent unless the caller has
-    // said the vocabulary is closed. The library's `Needs::default()` is unchanged: this is the
-    // command line choosing a default for a person, not the API choosing one for a program.
-    if !matches!(accepts, Accepts::Nothing | Accepts::Sections)
-        && !closed_vocabulary
-        && !cmd.needs.exact
-    {
-        cmd.needs.exact = true;
-        cmd.implied_exact = true;
     }
     Ok(cmd)
 }
@@ -451,19 +435,18 @@ fn cmd_plan(
         plan_file(path, cmd.needs, cmd.objective)?
     };
     write!(out, "{ranked}").map_err(io_fail)?;
-    note_implied_exact(cmd, &ranked, err)
+    note_open_vocabulary(cmd, &ranked, err)
 }
 
-/// What the ladder left out and how to ask for it back. Printed only when `--exact` was the
-/// command line's idea rather than the caller's, since otherwise it says nothing new.
-fn note_implied_exact(cmd: &Cmd, ranked: &Plan, err: &mut dyn Write) -> Result<(), Fail> {
+/// What the ladder left out and how to ask for it back.
+fn note_open_vocabulary(cmd: &Cmd, ranked: &Plan, err: &mut dyn Write) -> Result<(), Fail> {
     // The plan's needs rather than the command line's: a workload's operations add to them.
     let mut without = ranked.needs();
     without.exact = false;
     // And only when the default is what excluded them: an index that answers nothing but `id(key)`
     // is already ruled out by any other need, and a build without `mph` does not have one at all —
     // in either case the line would name something that was never a candidate.
-    if !cmd.implied_exact || !cfg!(feature = "mph") || !Kind::Closed.answers(without) {
+    if !cmd.open_by_default || !cfg!(feature = "mph") || !Kind::Closed.answers(without) {
         return Ok(());
     }
     writeln!(
@@ -491,26 +474,6 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
     }
     let (path, dest) = (&cmd.positional[0], Path::new(&cmd.positional[1]));
     let big = stream_above(cmd.stream, path);
-    let unranked = match cmd.index {
-        Choice::Hashed => Some("HashedDictIndex"),
-        Choice::DoubleArray => Some("DoubleArrayIndex"),
-        Choice::Auto | Choice::One(_) => None,
-    };
-    if let Some(name) = unranked {
-        if big.is_some() {
-            note_no_stream(path, name, err)?;
-        }
-        let (keys, blank) = read_keys(path, stdin)?;
-        note_blank(path, blank, err)?;
-        let n = if cmd.index == Choice::Hashed {
-            build_hashed(&keys, dest)?
-        } else {
-            let index = DoubleArrayIndex::build(&keys)?;
-            index.save(dest)?;
-            index.len()
-        };
-        return note_written(name, n, dest, err);
-    }
     // What to build, decided before the keys are read wherever it can be. `--index auto` over a
     // file prices it with `plan_file`, which does not hold it either, so a ranked build streams as
     // readily as a named one; standard input is the exception, since it cannot be priced and then
@@ -521,12 +484,11 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         Choice::Auto if path != "-" => {
             let ranked = plan_file(path, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, &ranked, err)?;
+            note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
             Some((best.kind, best.block))
         }
         Choice::Auto => None,
-        Choice::Hashed | Choice::DoubleArray => unreachable!("built above"),
     };
     if let Some((kind, block)) = decided {
         if big.is_some() && can_stream(kind) {
@@ -546,7 +508,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
         None => {
             let ranked = plan_for(&keys, cmd.needs, cmd.objective)?;
             write!(err, "{ranked}").map_err(io_fail)?;
-            note_implied_exact(cmd, &ranked, err)?;
+            note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
             (best.kind, best.block)
         }
@@ -562,20 +524,6 @@ fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fai
          no streaming build in this configuration."
     )
     .map_err(io_fail)
-}
-
-#[cfg(feature = "mph")]
-fn build_hashed(keys: &[String], dest: &Path) -> Result<usize, Fail> {
-    let index = HashedDictIndex::from_dict(DictIndex::build(keys)?, 0)?;
-    index.save(dest)?;
-    Ok(index.len())
-}
-
-#[cfg(not(feature = "mph"))]
-fn build_hashed(_: &[String], _: &Path) -> Result<usize, Fail> {
-    Err(Fail::Failed(
-        "HashedDictIndex needs the `mph` feature, which this build does not have".to_string(),
-    ))
 }
 
 /// What was written, and what it cost a key.
@@ -600,6 +548,7 @@ fn can_stream(kind: Kind) -> bool {
         Kind::Compact | Kind::Closed => cfg!(feature = "mph"),
         // Its file build fills the arena through a mapping.
         Kind::Perfect => cfg!(all(feature = "mph", feature = "mmap")),
+        _ => false,
     }
 }
 
@@ -712,10 +661,9 @@ fn build_streamed(
         Kind::Closed => ClosedHashIndex::build_to_file(src.keys(), dest)?,
         #[cfg(all(feature = "mph", feature = "mmap"))]
         Kind::Perfect => PerfectHashIndex::build_to_file(dest, || src.keys())?,
-        #[cfg(not(all(feature = "mph", feature = "mmap")))]
         other => {
             return Err(Fail::Failed(format!(
-                "{} has no streaming build without the `mph` and `mmap` features",
+                "{} has no streaming build in this configuration",
                 other.name()
             )));
         }
@@ -731,6 +679,12 @@ fn build_and_save(
     block: Option<usize>,
     labels: bool,
 ) -> Result<usize, Fail> {
+    let dict = || -> Result<DictIndex, IndexError> {
+        match block {
+            Some(b) => DictIndex::build_with_block(keys, b),
+            None => DictIndex::build(keys),
+        }
+    };
     let n = match kind {
         Kind::String => {
             let index = StringIndex::build(keys)?;
@@ -740,6 +694,18 @@ fn build_and_save(
         Kind::Dict => {
             let layout = block.map_or_else(DictLayout::default, DictLayout::new);
             let index = DictIndex::build_with(keys, layout.with_labels(labels))?;
+            index.save(dest)?;
+            index.len()
+        }
+        Kind::DoubleArray => {
+            let index = DoubleArrayIndex::build(keys)?;
+            index.save(dest)?;
+            index.len()
+        }
+        #[cfg(feature = "mph")]
+        Kind::Hashed => {
+            // No fingerprint, which is what `plan` prices `HashedDictIndex` at.
+            let index = HashedDictIndex::from_dict(dict()?, 0)?;
             index.save(dest)?;
             index.len()
         }
@@ -762,7 +728,9 @@ fn build_and_save(
             index.save(dest)?;
             index.len()
         }
-        #[cfg(not(feature = "mph"))]
+        // `Kind` is `#[non_exhaustive]`, which binds only outside the crate that defines it, as
+        // `cmd_dump` says of `BlobKind`.
+        #[allow(unreachable_patterns)]
         other => {
             return Err(Fail::Failed(format!(
                 "{} needs the `mph` feature, which this build does not have",
@@ -794,8 +762,8 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
     let mut sink = std::io::BufWriter::new(out);
     let keyless = |what: &str| {
         Fail::Failed(format!(
-            "{path}: a {what} stores no keys, so there is nothing to dump — the key list it was \
-             built from is the only way back"
+            "{path}: a {what} stores no keys, so there is nothing to dump — keep the key list it \
+             was built from, which is the only way across a format change"
         ))
     };
     match info.kind {
@@ -833,7 +801,7 @@ fn cmd_dump(cmd: &Cmd, out: &mut dyn Write) -> Result<(), Fail> {
         BlobKind::DoubleArrayIndex => {
             return Err(Fail::Failed(format!(
                 "{path}: a DoubleArrayIndex answers no id -> key, so it cannot be dumped; keep the \
-                 key list it was built from"
+                 key list it was built from, which is the only way across a format change"
             )));
         }
         #[cfg(not(feature = "mph"))]
@@ -1283,7 +1251,7 @@ mod tests {
         assert_eq!(out.lines().count(), 3, "{out}");
         assert!(out.contains("StringIndex"), "{out}");
         // The remaining needs parse and narrow nothing that is not already covered.
-        let (code, _, _) = go(&["plan", &keys, "--ordered", "--exact"], "");
+        let (code, _, _) = go(&["plan", &keys, "--ordered"], "");
         assert_eq!(code, 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1463,7 +1431,9 @@ mod tests {
         let marked: Vec<&str> = err.lines().filter(|l| l.starts_with('*')).collect();
         assert_eq!(marked.len(), 1, "one winner: {err}");
         assert_eq!(
-            err.lines().filter(|l| l.contains("at block ")).count(),
+            err.lines()
+                .filter(|l| l.contains(" DictIndex") && l.contains("at block "))
+                .count(),
             3,
             "one row a priced block: {err}"
         );
@@ -1478,6 +1448,47 @@ mod tests {
             quoted,
             "the blob is the line that was marked: {err}"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `--index auto` may pick either kind that has no streaming build, and the blob is the kind the
+    /// ladder marked.
+    #[test]
+    fn auto_can_pick_a_hashed_dictionary_and_a_double_array() {
+        let dir = tmpdir();
+        let keys = keys_file(&dir, &corpus(2_000));
+        let asked: [(&str, &[&str]); 2] = [
+            (
+                "DoubleArrayIndex",
+                &["--common-prefix", "--objective", "latency"],
+            ),
+            (
+                "HashedDictIndex",
+                &[
+                    "--closed-vocabulary",
+                    "--reverse",
+                    "--prefix",
+                    "--objective",
+                    "latency",
+                ],
+            ),
+        ];
+        for (name, needs) in asked {
+            if name == "HashedDictIndex" && !cfg!(feature = "mph") {
+                continue;
+            }
+            let blob = dir.join(format!("{name}.bin"));
+            let mut args = vec!["build", keys.as_str(), blob.to_str().unwrap()];
+            args.extend_from_slice(needs);
+            let (code, _, err) = go(&args, "");
+            assert_eq!(code, 0, "{err}");
+            let won = err.lines().find(|l| l.starts_with('*')).unwrap();
+            assert!(won.contains(name), "{err}");
+            assert!(err.contains(&format!(": {name} over ")), "{err}");
+            let (code, out, err) = go(&["inspect", blob.to_str().unwrap()], "");
+            assert_eq!(code, 0, "{err}");
+            assert!(out.contains(name), "{out}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1759,11 +1770,8 @@ mod tests {
         let keys = keys_file(&dir, &corpus(300));
         let dest = dir.join("auto.bin");
         let out_path = dest.to_str().unwrap();
-        // `--reverse --prefix --exact` leaves the two ordered indexes, and the ladder names both.
-        let (code, out, err) = go(
-            &["build", &keys, out_path, "--reverse", "--prefix", "--exact"],
-            "",
-        );
+        // `--reverse --prefix` leaves the ordered indexes, and the ladder names them.
+        let (code, out, err) = go(&["build", &keys, out_path, "--reverse", "--prefix"], "");
         assert_eq!((code, out.as_str()), (0, ""), "{err}");
         assert!(err.contains("300 keys, mean length"), "{err}");
         assert!(err.contains("StringIndex"), "{err}");
@@ -1817,6 +1825,7 @@ mod tests {
             if matches!(index, "compact" | "closed") {
                 assert_eq!((code, out.as_str()), (1, ""), "{index}");
                 assert!(err.contains("stores no keys"), "{index}: {err}");
+                assert!(err.contains("keep the key list"), "{index}: {err}");
                 continue;
             }
             if index == "double-array" {
@@ -1958,9 +1967,10 @@ mod tests {
         // No ladder was printed, so there is nothing to explain.
         assert!(!err.contains("excluded"), "{err}");
 
-        // An explicit `--exact` is the caller's own, so the line stays out of the way.
-        let (_, _, err) = go(&["plan", keys.as_str(), "--exact"], "");
-        assert!(!err.contains("excluded"), "{err}");
+        // The default has no spelling of its own, so a flag cannot disagree with `--closed-vocabulary`.
+        let (code, _, err) = go(&["plan", keys.as_str(), "--exact"], "");
+        assert_eq!(code, 2);
+        assert!(err.contains("no such option `--exact`"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

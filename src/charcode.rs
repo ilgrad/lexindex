@@ -461,6 +461,17 @@ impl CharCode {
 
     /// `[mode u8][characters varint][leads u8][lead widths, less one, a byte each][the characters'
     /// code points as varints, the first whole and each after it past the one before]`.
+    /// Bytes this code holds on the heap.
+    pub(crate) fn held(&self) -> usize {
+        size_of::<Self>()
+            + self.firsts.len() * 2
+            + self.index.low.len() * size_of::<Word>()
+            + self.index.pages.len() * 2
+            + self.index.words.len() * 2
+            + size_of::<[u32; 256]>()
+            + self.utf8.len() * 4
+    }
+
     pub(crate) fn serialized_len(&self) -> usize {
         self.len
     }

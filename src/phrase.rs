@@ -458,6 +458,13 @@ impl Dict {
         ))
     }
 
+    /// Bytes this dictionary holds on the heap beside what a mapped load borrows: the group bases,
+    /// and its labels' own. The phrases stay in the blob, unless it ends too soon for a decoder's
+    /// fixed read, which only a copy a few bytes long pays for.
+    pub(crate) fn held(&self) -> usize {
+        self.bases.len() * 4 + self.labels.as_deref().map_or(0, Labels::held)
+    }
+
     /// `[count u32][bases][ends][bytes]`, the two arrays derived from the count; in a `BDX5` blob
     /// behind its own `u32` length and followed by the labels' blob.
     pub(crate) fn serialized_len(&self) -> usize {

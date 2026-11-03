@@ -24,6 +24,13 @@ pub(super) struct RawRoute {
     samples: Vec<u64>,
 }
 
+impl RawRoute {
+    /// Bytes this holds on the heap, itself too: it is boxed.
+    pub(super) fn held(&self) -> usize {
+        size_of::<Self>() + self.prefix.len() + self.samples.len() * 8
+    }
+}
+
 /// The sample the search runs on: the eight bytes of a key at `g`, zero-padded, in byte order.
 ///
 /// Every head shares its first `g` bytes, so ordering by this word is ordering by the head.

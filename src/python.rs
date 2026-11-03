@@ -187,7 +187,7 @@ impl PyStringIndex {
             &path,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "string-index: the input iterable raised before it ended",
                     ))
                 } else {
@@ -215,7 +215,7 @@ impl PyStringIndex {
             &path,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "string-index: the input iterable raised before it ended",
                     ))
                 } else {
@@ -867,7 +867,7 @@ impl PyPerfectHashIndex {
             replay,
             || {
                 if seen.borrow().is_some() {
-                    Err(IndexError::Format(
+                    Err(IndexError::Build(
                         "perfect-hash: the source raised before it ended",
                     ))
                 } else {
@@ -1202,7 +1202,7 @@ fn fingerprint_width(
         }
         None => {
             if !matches!(fingerprint_bytes, 1 | 2 | 4) {
-                return Err(to_py(IndexError::Format(
+                return Err(to_py(IndexError::Build(
                     "compact-hash: fingerprint_bytes must be 1, 2, or 4",
                 )));
             }
@@ -1210,7 +1210,7 @@ fn fingerprint_width(
         }
     };
     if !(1..=64).contains(&bits) {
-        return Err(to_py(IndexError::Format(
+        return Err(to_py(IndexError::Build(
             "compact-hash: fingerprint_bits must be in 1..=64",
         )));
     }
@@ -1298,7 +1298,7 @@ impl PyCompactHashIndex {
             bits,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "compact-hash: the input iterable raised before it ended",
                     ))
                 } else {
@@ -1905,7 +1905,7 @@ impl PyDictIndex {
             layout,
             move || {
                 if seen.borrow().is_some() {
-                    Err(crate::IndexError::Format(
+                    Err(crate::IndexError::Build(
                         "dict: the input iterable raised before it ended",
                     ))
                 } else {
@@ -2835,6 +2835,23 @@ macro_rules! on_keyed_base {
     };
 }
 
+/// Same, for the two bases whose membership is exact, which is what a removal by key asks.
+macro_rules! on_exact_base {
+    (mut $held:expr, |$ov:ident| $body:expr) => {
+        match &mut *$held {
+            OverlayInner::String($ov) => Ok($body),
+            OverlayInner::Perfect($ov) => Ok($body),
+            OverlayInner::Compact(_) => Err(no_key_removal()),
+        }
+    };
+}
+
+fn no_key_removal() -> PyErr {
+    PyTypeError::new_err(
+        "an overlay over a CompactHashIndex has no remove(): its membership is probabilistic, so a key it never held could retire a real key's id. Pass the id you were given to retire_id()",
+    )
+}
+
 fn no_keys() -> PyErr {
     PyTypeError::new_err(
         "a CompactHashIndex stores no keys, so an overlay over it has no key(), keys(), compact(), compact_to_file() or compact_with_remap()",
@@ -2984,20 +3001,19 @@ impl PyOverlay {
 
     /// Remove `key`, returning whether it was there. The id is retired, never reissued.
     ///
-    /// Over a `CompactHashIndex` base this inherits that index's false-positive rate: a `contains`
-    /// that was never true of a real key can retire an id. Remove by a key you know is present, or
-    /// by the id itself with `retire_id`.
-    fn remove(&self, py: Python<'_>, key: &str) -> bool {
-        on_base!(mut self.lock(py), |ov| ov.remove(key))
+    /// Raises `TypeError` on a `CompactHashIndex` base, whose membership is probabilistic: a key it
+    /// never held could retire a real key's id. Retire the id itself with `retire_id`.
+    fn remove(&self, py: Python<'_>, key: &str) -> PyResult<bool> {
+        on_exact_base!(mut self.lock(py), |ov| ov.remove(key))
     }
 
     /// Retire `id` itself, returning whether it was live: the same tombstone `remove` sets, without
     /// the key lookup in front of it.
     ///
-    /// Over a `CompactHashIndex` base that lookup is the part a false positive corrupts, so an
-    /// application holding the id it was given when the key was added should retire that id and
-    /// never ask the question. An id at or above `id_space()`, or one already retired, is `False`
-    /// and changes nothing.
+    /// Over a `CompactHashIndex` base that lookup is what a false positive would corrupt, so there
+    /// this is the only removal: an application keeps the id it was given when the key was added,
+    /// and retires that. An id at or above `id_space()`, or one already retired, is `False` and
+    /// changes nothing.
     fn retire_id(&self, py: Python<'_>, id: u64) -> bool {
         on_base!(mut self.lock(py), |ov| ov.retire_id(id))
     }
@@ -3584,13 +3600,15 @@ fn blob_info<'py>(py: Python<'py>, info: &crate::BlobInfo) -> PyResult<Bound<'py
 /// number reads about a hundredfold high. It is still far under every other index, so the ranking
 /// picks the fst -- but `thin` is set, and a byte count under that flag is not one to quote.
 ///
-/// The keyword arguments say what the index has to be able to do. One that cannot is left out of
-/// the ranking rather than ranked last, so `estimates` holds only usable answers and `best` is
-/// always one of them. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
+/// The keyword arguments say what the index has to be able to do, and the vocabulary is open unless
+/// `closed_vocabulary` says otherwise. One that cannot is left out of the ranking rather than ranked
+/// last, so `estimates` holds only usable answers and `best` is
+/// always one of them. `pareto` is the candidates no other beats on both `bytes` and `nanos`,
+/// smallest first. `close` marks a pair the estimate cannot separate and `thin` a corpus whose
 /// suffixes are too short for a sampled compression ratio to carry; either one means build rather
 /// than trust the number. `text` is the whole thing as the paragraph the Rust `Plan` prints.
 #[pyfunction(name = "plan")]
-#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, fuzzy=false, exact=false, objective=crate::Objective::Memory))]
+#[pyo3(signature = (keys, *, reverse=false, ordered=false, prefix=false, common_prefix=false, fuzzy=false, closed_vocabulary=false, objective=crate::Objective::Memory))]
 // The arguments are the keyword arguments; pyo3 binds them one by one, so a parameter object here
 // would be a dict the caller has to build rather than a call they can read.
 #[allow(clippy::too_many_arguments)]
@@ -3600,8 +3618,9 @@ fn py_plan<'py>(
     reverse: bool,
     ordered: bool,
     prefix: bool,
+    common_prefix: bool,
     fuzzy: bool,
-    exact: bool,
+    closed_vocabulary: bool,
     #[pyo3(from_py_with = objective_of)] objective: crate::Objective,
 ) -> PyResult<Bound<'py, PyDict>> {
     let keys = collect_strs(keys)?;
@@ -3609,8 +3628,9 @@ fn py_plan<'py>(
         reverse,
         ordered,
         prefix,
+        common_prefix,
         fuzzy,
-        exact,
+        exact: !closed_vocabulary,
     };
     let plan = py
         .detach(|| crate::plan_for(&keys, needs, objective))
@@ -3627,6 +3647,11 @@ fn py_plan<'py>(
         estimates.append(estimate_dict(py, e, &plan)?)?;
     }
     d.set_item("estimates", estimates)?;
+    let front = PyList::empty(py);
+    for e in plan.pareto() {
+        front.append(estimate_dict(py, &e, &plan)?)?;
+    }
+    d.set_item("pareto", front)?;
     d.set_item("close", plan.close())?;
     d.set_item("thin", plan.thin())?;
     d.set_item("text", plan.to_string())?;
@@ -3695,6 +3720,9 @@ fn estimate_dict<'py>(
     d.set_item("bytes", e.bytes)?;
     d.set_item("bytes_per_key", e.bytes_per_key(plan.keys()))?;
     d.set_item("block", e.block)?;
+    d.set_item("micro", e.micro)?;
+    d.set_item("resident_bytes", e.resident_bytes)?;
+    d.set_item("build_secs", e.build_secs)?;
     d.set_item("measured", e.measured)?;
     d.set_item("nanos", plan.nanos(e))?;
     Ok(d)

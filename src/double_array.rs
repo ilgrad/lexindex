@@ -52,8 +52,8 @@ const BASE_MASK: u64 = (1 << BASE_BITS) - 1;
 const ID_SHIFT: u32 = BASE_SHIFT + BASE_BITS;
 
 /// Ids and bases are 23 bits.
-const MAX_KEYS: usize = 1 << (64 - ID_SHIFT);
-const MAX_SLOTS: usize = 1 << BASE_BITS;
+pub(crate) const MAX_KEYS: usize = 1 << (64 - ID_SHIFT);
+pub(crate) const MAX_SLOTS: usize = 1 << BASE_BITS;
 /// Label 0 is "not in the lexicon".
 const MAX_ALPHABET: usize = LABEL_MASK as usize;
 /// The code table covers the Basic Multilingual Plane; the characters past it are looked up.
@@ -425,7 +425,7 @@ unsafe fn place_avx2(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError>
 #[inline(always)]
 fn place_with(t: &Trie, max_label: usize) -> Result<Vec<u32>, IndexError> {
     let too_many = || {
-        IndexError::Format(
+        IndexError::Build(
             "double-array: the trie needs more than 8 388 608 slots; bases are 23 bits",
         )
     };
@@ -721,7 +721,7 @@ impl DoubleArrayIndex {
     fn build_ranked<S: AsRef<str>>(keys: &[S]) -> Result<Self, IndexError> {
         let n = keys.len();
         if n > MAX_KEYS {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: more than 8 388 608 keys; ids are 23 bits",
             ));
         }
@@ -753,7 +753,7 @@ impl DoubleArrayIndex {
             .collect();
         drop(freq);
         if chars.len() > MAX_ALPHABET {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: more than 65 535 distinct characters; labels are 16 bits",
             ));
         }
@@ -800,7 +800,7 @@ impl DoubleArrayIndex {
             top + max_label + 1
         };
         if n_slots > MAX_SLOTS {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "double-array: the trie needs more than 8 388 608 slots; bases are 23 bits",
             ));
         }
@@ -1126,6 +1126,16 @@ impl DoubleArrayIndex {
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it.
     pub fn serialized_len(&self) -> usize {
         self.blob.len()
+    }
+
+    /// What a mapped load holds on the heap: the characters past the Basic Multilingual Plane.
+    pub(crate) fn held(&self) -> usize {
+        self.supp.len() * size_of::<(u32, u16)>()
+    }
+
+    /// The blob's bytes of slots, which is what [`plan`](crate::plan) scales with the corpus.
+    pub(crate) fn slot_bytes(&self) -> usize {
+        self.slots.len()
     }
 
     /// Reconstruct from [`DoubleArrayIndex::to_bytes`] output.

@@ -46,6 +46,13 @@ pub(crate) struct Table {
     lens: Vec<u8>,
 }
 
+impl Table {
+    /// Bytes this table holds on the heap.
+    pub(crate) fn held(&self) -> usize {
+        self.words.len() * 8 + self.lens.len()
+    }
+}
+
 /// At most eight bytes as a little-endian word, zero-padded.
 #[inline(always)]
 fn word_of(bytes: &[u8]) -> u64 {

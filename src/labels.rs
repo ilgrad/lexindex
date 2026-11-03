@@ -87,6 +87,11 @@ thread_local! {
 }
 
 impl Labels {
+    /// Bytes the nested dictionary holds on the heap; its keys and first bytes stay in the blob.
+    pub(crate) fn held(&self) -> usize {
+        self.index.held().total()
+    }
+
     /// Labels as a blob holds them; `None` on an index this crate would not have written there —
     /// one that names labels of its own, or one in a character code.
     pub(crate) fn of(index: DictIndex, firsts: SharedBytes) -> Option<Self> {

@@ -91,10 +91,15 @@ class Estimate(TypedDict):
         "PerfectHashIndex",
         "StringIndex",
         "DictIndex",
+        "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     bytes: int
     bytes_per_key: float
     block: int | None
+    micro: int | None
+    resident_bytes: int
+    build_secs: float
     measured: bool
 
 
@@ -106,6 +111,7 @@ class Plan(TypedDict):
     mean_lcp: float
     best: Estimate
     estimates: list[Estimate]
+    pareto: list[Estimate]
     close: bool
     thin: bool
     text: str

@@ -335,6 +335,11 @@ pub struct PerfectHashIndex {
 }
 
 impl PerfectHashIndex {
+    /// The perfect hash's bytes, which a mapped load copies out of the file rather than borrows.
+    pub(crate) fn mphf_len(&self) -> usize {
+        self.mph.as_ref().map_or(0, Mphf::byte_len)
+    }
+
     /// Build from a collection of strings. Duplicates are removed; ids are arbitrary slots in `[0, n)`
     /// (no defined order — use [`crate::StringIndex`] when order matters).
     ///
@@ -385,12 +390,12 @@ impl PerfectHashIndex {
         keys.dedup_by(|a, b| a.as_ref() == b.as_ref());
         let n = keys.len();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "perfect-hash: more than u32::MAX keys; ids are u32",
             ));
         }
         if keys.iter().any(|k| k.as_ref().len() > u32::MAX as usize) {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "perfect-hash: a key is longer than u32::MAX bytes",
             ));
         }
@@ -447,7 +452,7 @@ impl PerfectHashIndex {
         for (i, h) in hashes.iter().enumerate() {
             let slot = mph.index(*h) as usize;
             if slot >= n || by_slot[slot] != NO_KEY {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "perfect-hash: construction was not minimal/perfect",
                 ));
             }
@@ -496,7 +501,7 @@ impl PerfectHashIndex {
             }
             let slot = mph.index(*h) as usize;
             if slot >= m || by_slot[slot] != NO_KEY {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "perfect-hash: construction was not minimal/perfect",
                 ));
             }
@@ -1082,7 +1087,7 @@ impl PerfectHashIndex {
         for item in source() {
             let key = item.as_ref();
             lens.push(u32::try_from(key.len()).map_err(|_| {
-                IndexError::Format("perfect-hash: a key is longer than u32::MAX bytes")
+                IndexError::Build("perfect-hash: a key is longer than u32::MAX bytes")
             })?);
             let (hash, fingerprint) = hash_pair(key);
             hashes.push(hash);
@@ -1094,7 +1099,7 @@ impl PerfectHashIndex {
         check()?;
         let n = hashes.len();
         if n > u32::MAX as usize {
-            return Err(IndexError::Format(
+            return Err(IndexError::Build(
                 "perfect-hash: more than u32::MAX keys; ids are u32",
             ));
         }
@@ -1139,7 +1144,7 @@ impl PerfectHashIndex {
             }
             let slot = mph.index(*h) as usize;
             if slot >= m || taken[slot] {
-                return Err(IndexError::Format(
+                return Err(IndexError::Build(
                     "perfect-hash: construction was not minimal/perfect",
                 ));
             }

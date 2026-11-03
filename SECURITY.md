@@ -174,10 +174,10 @@ fuzzes it for ten minutes across all of them, starting from the seeds.
   bounded to a panic by `fst` being safe Rust, and answered by `from_untrusted_bytes`.
 - **`CompactHashIndex` reporting a key it never held.** Its membership is probabilistic by
   construction, at the false-positive rate `fingerprint_bits` buys.
-- **`Overlay::remove` retiring an id over a probabilistic base, and `Overlay::add` answering a
-  stranger's id there.** Removal is by id, and a false positive can supply one; both methods
-  document it, and the base alone would have answered the same. `Overlay::retire_id` takes the id
-  and no key, so a caller that keeps the ids it was issued has a removal nothing can mislead.
+- **`Overlay::add` answering a stranger's id over a probabilistic base.** It is documented, and the
+  base alone would have answered the same. `remove` by key is not on that base at all since 5.0, a
+  compile error in Rust and a `TypeError` in Python: `Overlay::retire_id` takes the id and no key,
+  so a caller that keeps the ids it was issued has a removal nothing can mislead.
 - **Hash collisions found offline**, including keys equal in both hashes that a keyless hash index
   takes for one key. See above: choose the index for keys you do not control accordingly.
 - **Memory exhaustion building a genuinely huge index.** Allocation is proportional to the key set

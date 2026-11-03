@@ -859,19 +859,18 @@ class Overlay:
     def remove(self, key: str) -> bool:
         """Remove ``key``, returning whether it was there.
 
-        Over a ``CompactHashIndex`` base this inherits that index's false-positive rate: a
-        ``contains`` that was never true of a real key can retire an id. Remove by a key you know
-        is present, or by the id itself with ``retire_id``.
+        Raises ``TypeError`` on a ``CompactHashIndex`` base, whose membership is probabilistic: a
+        key it never held could retire a real key's id. Retire the id itself with ``retire_id``.
         """
 
     def retire_id(self, id: int) -> bool:
         """Retire ``id`` itself, returning whether it was live.
 
         The same tombstone ``remove`` sets, without the key lookup in front of it -- which over
-        a ``CompactHashIndex`` base is the part a false positive corrupts. An application that
-        stored the id it was given when the key was added has the exact id to retire and needs no
-        membership test. An id at or above ``id_space``, or one already retired, is ``False``
-        and changes nothing.
+        a ``CompactHashIndex`` base is what a false positive would corrupt, so there this is the
+        only removal. An application that stored the id it was given when the key was added has the
+        exact id to retire and needs no membership test. An id at or above ``id_space``, or one
+        already retired, is ``False`` and changes nothing.
         """
 
     def key(self, id: int) -> str | None:
@@ -1013,8 +1012,12 @@ class Estimate(TypedDict):
     """What one index would weigh on the keys ``plan`` was given.
 
     ``bytes`` is the size of its serialised blob and ``bytes_per_key`` that over the number of
-    distinct keys. ``block`` is the ``DictIndex`` block the estimate was priced at and ``None``
-    for every other index. ``measured`` is ``True`` when the index was built rather than modelled,
+    distinct keys. ``block`` is the block a ``DictIndex`` or a ``HashedDictIndex`` was priced at
+    and ``None`` for every other index, and ``micro`` the keys a microblock holds at that block.
+    ``resident_bytes`` is what a mapped load holds once every page has been read: the blob, and the
+    heap of the tables a load derives. ``build_secs`` is a modelled build time on this crate's own
+    machine, an ordering like ``nanos`` and never a prediction of yours. ``measured`` is ``True``
+    when the index was built rather than modelled,
     which is what happens below the 100 000-key sample size.
 
     ``nanos`` is the modelled cost of one ``id(key)`` -- or, ranked by a ``Workload``, of
@@ -1030,10 +1033,15 @@ class Estimate(TypedDict):
         "PerfectHashIndex",
         "StringIndex",
         "DictIndex",
+        "HashedDictIndex",
+        "DoubleArrayIndex",
     ]
     bytes: int
     bytes_per_key: float
     block: int | None
+    micro: int | None
+    resident_bytes: int
+    build_secs: float
     measured: bool
     nanos: float
 
@@ -1043,7 +1051,9 @@ class Plan(TypedDict):
     ``estimates`` is every index that answers what was asked, in the objective's order, and
     ``best`` is its first entry. ``keys`` counts the distinct keys, ``mean_length`` is their mean
     length in bytes and ``mean_lcp`` the mean prefix an adjacent pair shares -- the difference
-    between the two is the suffix a front-coded format actually stores.
+    between the two is the suffix a front-coded format actually stores. ``pareto`` is the candidates
+    no other beats on both ``bytes`` and ``nanos``, smallest first: the whole trade the corpus
+    offers, with ``best`` always on it.
 
     ``close`` says the two cheapest are within 1.3x of each other, which is inside what an estimate
     can separate; ``thin`` says the mean suffix is under two bytes, where a compression ratio read
@@ -1056,6 +1066,7 @@ class Plan(TypedDict):
     mean_lcp: float
     best: Estimate
     estimates: list[Estimate]
+    pareto: list[Estimate]
     close: bool
     thin: bool
     text: str
@@ -1071,8 +1082,9 @@ class Workload(TypedDict, total=False):
     hits and the misses.
 
     Every operation is a question the index has to answer, so it adds to the keyword arguments: a
-    share of ``reverse`` rules out the two indexes that store no keys, and any prefix query asks
-    for an ordered one. A workload that asks nothing is ``"latency"``.
+    share of ``reverse`` rules out the two indexes that store no keys, ``prefix`` asks for an
+    ordered one, and ``common_prefix`` and ``longest_prefix`` for one that can walk a query. A
+    workload that asks nothing is ``"latency"``.
     """
 
     hits: int
@@ -1089,13 +1101,14 @@ def plan(
     reverse: bool = False,
     ordered: bool = False,
     prefix: bool = False,
+    common_prefix: bool = False,
     fuzzy: bool = False,
-    exact: bool = False,
+    closed_vocabulary: bool = False,
     objective: Literal["memory", "latency", "balanced"] | Workload = ...,
 ) -> Plan:
     """What each index would cost on these keys, and which of them answer your questions.
 
-    Five indexes with five corpus-specific size curves is a choice nobody should have to make from
+    Seven indexes with seven corpus-specific size curves is a choice nobody should have to make from
     a README table: the spread between them on one corpus is larger than the spread of any one of
     them across corpora. The keys are sorted once and priced from the statistics the formats are
     actually paid in -- the count, the mean length, the shared prefixes.
@@ -1120,10 +1133,12 @@ def plan(
     block as well as a kind.
 
     The keyword arguments say what the index has to be able to do -- ``key(id)`` as well as
-    ``id(key)``; ids in lexicographic order; prefix and range queries; fuzzy search; and exact
-    membership, without which a probabilistic index is allowed, which is how the two smallest get
-    their size. An index that cannot answer one of them is left out of the ranking rather than
-    ranked last.
+    ``id(key)``; ids in lexicographic order; prefix and range queries; the keys that are prefixes
+    of a query; fuzzy search. An index that cannot answer one of them is left out of the ranking
+    rather than ranked last. The vocabulary is **open** by default: a key the index never held has
+    to be answered as one, as with Rust's ``Needs::default()`` and on the command line.
+    ``closed_vocabulary=True`` is the promise that every key you will ask about is in ``keys``, and
+    puts the two probabilistic indexes back, which is where their size comes from.
 
     ``objective`` is what the ranking is *for*: ``memory`` (the default, the smallest blob),
     ``latency`` (the fastest ``id(key)``, from the model behind ``nanos``), ``balanced``
