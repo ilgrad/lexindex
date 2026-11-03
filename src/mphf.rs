@@ -706,14 +706,7 @@ fn ell(k: usize, slice: u64) -> i64 {
 /// perfect hash, and both indexes in this crate answer it with a stored key or a fingerprint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mphf {
-    table: Table,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Table {
-    /// The 1.0 format, readable but no longer written.
-    V1(V1),
-    V2(V2),
+    table: V2,
 }
 
 /// One bumping level: a seed per bucket over the keys it was handed.
@@ -786,6 +779,15 @@ impl Level {
             mode_bits,
             shipped: mode_bits == MODE_BITS && slice == SLICE && shift == Self::SHIPPED.shift,
             seeds: Pages::default(),
+        }
+    }
+
+    /// One bucket whose seed bumps every key, over no keys: what a table without a level of the
+    /// shipped geometry holds where a lookup reads one.
+    fn bumping_all() -> Self {
+        Self {
+            seeds: Pages::from_slice(&[0]),
+            ..Self::of(0, 1, SLICE, MODE_BITS)
         }
     }
 
@@ -1392,13 +1394,19 @@ struct V2 {
     n: u64,
     /// The seed geometry of every level, which the magic names.
     geometry: Geometry,
-    /// The bumping level over every key, inline because it is on every lookup; `None` when `n` is
-    /// at most [`TAIL_KEYS`].
-    first: Option<Level>,
+    /// The level every lookup reads, inline: the first level when it has the shipped geometry.
+    /// Any other table holds [`Level::bumping_all`] here and goes on from the bump, so that a
+    /// lookup asks one thing, whether the seed is zero, and no table pays for what it is not: a
+    /// lookup of a long key is only fast under the width of the reorder buffer.
+    placing: Level,
+    /// A first level of any other geometry: under 2^15 keys, or an `MPH2` blob's.
+    other_first: Option<Level>,
     /// The levels the bumped keys go to, in order.
     rest: Vec<Level>,
     tail: Tail,
     remap: Remap,
+    /// The 1.0 format, readable but no longer written: a table of this kind answers from here.
+    v1: Option<Box<V1>>,
 }
 
 /// What a placement pass reads: one level's shape and its keys, grouped by bucket.
@@ -1977,43 +1985,88 @@ fn bucket_ends(keys: &[u64], from: usize, buckets: u64, first: u64, ends: &mut [
 }
 
 impl V2 {
+    /// A table of `levels`, the first of them over every key.
+    fn of_levels(
+        n: u64,
+        geometry: Geometry,
+        mut levels: impl Iterator<Item = Level>,
+        tail: Tail,
+        remap: Remap,
+    ) -> Self {
+        let (placing, other_first) = match levels.next() {
+            Some(l) if l.shipped => (l, None),
+            other => (Level::bumping_all(), other),
+        };
+        Self {
+            n,
+            geometry,
+            placing,
+            other_first,
+            rest: levels.collect(),
+            tail,
+            remap,
+            v1: None,
+        }
+    }
+
+    /// A 1.0 table: no level of this format, so every lookup bumps and goes to `v1`.
+    fn of_v1(v1: V1) -> Self {
+        Self {
+            v1: Some(Box::new(v1)),
+            ..Self::of_levels(
+                0,
+                Geometry::Mph3,
+                std::iter::empty(),
+                Tail::EMPTY,
+                Remap::default(),
+            )
+        }
+    }
+
+    /// The bumping level over every key; `None` when `n` is at most [`TAIL_KEYS`].
+    fn first(&self) -> Option<&Level> {
+        if self.placing.n == 0 {
+            self.other_first.as_ref()
+        } else {
+            Some(&self.placing)
+        }
+    }
+
     fn levels(&self) -> impl Iterator<Item = &Level> {
-        self.first.iter().chain(&self.rest)
+        self.first().into_iter().chain(&self.rest)
     }
 
     fn level_count(&self) -> usize {
-        usize::from(self.first.is_some()) + self.rest.len()
+        usize::from(self.first().is_some()) + self.rest.len()
     }
 
+    /// The shipped geometry as immediates: three registers and three moves fewer in the placed
+    /// path, and no other table comes this way, since its seed here is zero.
     #[inline(always)]
     fn index(&self, h: u64) -> u64 {
-        match &self.first {
-            // The shipped geometry as immediates: three registers and three moves fewer in the
-            // placed path, and a loop over many keys is unswitched on the invariant. Asked first,
-            // since no level is shipped and one byte answers both.
-            Some(l) if l.shipped => {
-                let seed = l.seed_of(h);
-                if seed != 0 {
-                    return l.shipped_value(h, seed);
-                }
-            }
-            Some(l) => {
-                let seed = l.seed_of(h);
-                if seed != 0 {
-                    return l.value(h, seed);
-                }
-            }
-            None => {}
+        let l = &self.placing;
+        let seed = l.seed_of(h);
+        if seed != 0 {
+            return l.shipped_value(h, seed);
         }
         self.index_bumped(h)
     }
 
-    /// A key the first level bumped: try each further level, then the tail, and map what places it
-    /// to a hole. A hash that was never built in can reach a bucket nothing was ever bumped from,
-    /// in which case the tail is empty and 0 is as good an answer as any.
+    /// A key [`placing`](Self::placing) bumped: try a first level of another geometry, each further
+    /// level, then the tail, and map what places it to a hole. A hash that was never built in can
+    /// reach a bucket nothing was ever bumped from, in which case the tail is empty and 0 is as
+    /// good an answer as any.
     #[cold]
     #[inline(never)]
     fn index_bumped(&self, h: u64) -> u64 {
+        if let Some(l) = &self.other_first {
+            let seed = l.seed_of(h);
+            if seed != 0 {
+                return l.later_value(h, seed);
+            }
+        } else if let Some(t) = &self.v1 {
+            return t.index(h);
+        }
         self.bumped_value(h).map_or(0, |v| self.remap.get(v))
     }
 
@@ -2055,15 +2108,11 @@ impl V2 {
         prefetch_seeds: usize,
         retry_seeds: usize,
     ) -> Vec<u64> {
-        let Some(l) = self
-            .first
-            .as_ref()
-            .filter(|l| l.seeds.len() >= prefetch_seeds)
-        else {
+        let Some(l) = self.first().filter(|l| l.seeds.len() >= prefetch_seeds) else {
             // Unswitched by hand: LLVM leaves the loop whole, and with the geometry checked inside
             // it where the shipped path landed followed unrelated edits — a jump more a key in
             // one build, none in the next. Out here it is one path, and no check a key.
-            return match &self.first {
+            return match self.first() {
                 Some(l) if l.shipped => hashes
                     .iter()
                     .map(|&h| match l.seed_of(h) {
@@ -2327,15 +2376,13 @@ impl V2 {
         let remap = Remap::encode(&values, n)?;
         phase("remap stream");
 
-        let mut levels = levels.into_iter();
-        Ok(Self {
+        Ok(Self::of_levels(
             n,
-            geometry: Geometry::Mph3,
-            first: levels.next(),
-            rest: levels.collect(),
+            Geometry::Mph3,
+            levels.into_iter(),
             tail,
             remap,
-        })
+        ))
     }
 
     /// One bumping level over `n` keys from `source`, grouped by bucket in bucket order. Returns
@@ -2765,14 +2812,13 @@ impl V2 {
                     "mphf: empty table with a non-empty shape",
                 ));
             }
-            return Ok(Self {
-                n: 0,
+            return Ok(Self::of_levels(
+                0,
                 geometry,
-                first: None,
-                rest: Vec::new(),
+                std::iter::empty(),
                 tail,
-                remap: Remap::default(),
-            });
+                Remap::default(),
+            ));
         }
 
         let mut levels = Vec::with_capacity(level_count);
@@ -2958,15 +3004,13 @@ impl V2 {
             ));
         }
 
-        let mut levels = levels.into_iter();
-        Ok(Self {
+        Ok(Self::of_levels(
             n,
             geometry,
-            first: levels.next(),
-            rest: levels.collect(),
+            levels.into_iter(),
             tail,
             remap,
-        })
+        ))
     }
 }
 
@@ -3648,16 +3692,22 @@ fn seed_bucket_wide(
 }
 
 impl Mphf {
+    /// A table over no keys, for an index that keeps one whatever it holds: [`index`](Self::index)
+    /// answers 0 on it, and the index, which writes no table for no keys, does not write it.
+    pub(crate) fn empty() -> Self {
+        let empty = std::iter::empty();
+        Self {
+            table: V2::of_levels(0, Geometry::Mph3, empty, Tail::EMPTY, Remap::default()),
+        }
+    }
+
     /// The id of `h` in `[0, n)`.
     ///
     /// Must not be called on an empty table: `[0, 0)` has no inhabitant, so there is no answer to
     /// return; callers check `n() != 0` first.
     #[inline(always)]
     pub fn index(&self, h: u64) -> u64 {
-        match &self.table {
-            Table::V2(t) => t.index(h),
-            Table::V1(t) => t.index(h),
-        }
+        self.table.index(h)
     }
 
     /// [`index`](Self::index) over a batch, which a single lookup cannot see past: the cache lines
@@ -3671,9 +3721,9 @@ impl Mphf {
     /// high and low words — so they are answered after their block, in stages that each run a few
     /// keys behind the one before.
     pub fn index_all(&self, hashes: &[u64]) -> Vec<u64> {
-        match &self.table {
-            Table::V2(t) => t.index_all(hashes),
-            Table::V1(t) => {
+        match &self.table.v1 {
+            None => self.table.index_all(hashes),
+            Some(t) => {
                 const AHEAD: usize = 16;
                 let mut out = Vec::with_capacity(hashes.len());
                 for (i, &h) in hashes.iter().enumerate() {
@@ -3689,9 +3739,9 @@ impl Mphf {
 
     /// How many keys are in the image.
     pub fn n(&self) -> u64 {
-        match &self.table {
-            Table::V2(t) => t.n,
-            Table::V1(t) => t.n,
+        match &self.table.v1 {
+            None => self.table.n,
+            Some(t) => t.n,
         }
     }
 
@@ -3704,18 +3754,18 @@ impl Mphf {
         if n == 0 {
             return 0.0;
         }
-        let header = match &self.table {
-            Table::V2(t) => header_len(t.level_count()),
-            Table::V1(_) => HEADER_V1,
+        let header = match &self.table.v1 {
+            None => header_len(self.table.level_count()),
+            Some(_) => HEADER_V1,
         };
         ((self.byte_len() - header) * 8) as f64 / n as f64
     }
 
     /// Bytes [`to_bytes`](Self::to_bytes) will write.
     pub fn byte_len(&self) -> usize {
-        match &self.table {
-            Table::V2(t) => t.byte_len(),
-            Table::V1(t) => t.byte_len(),
+        match &self.table.v1 {
+            None => self.table.byte_len(),
+            Some(t) => t.byte_len(),
         }
     }
 
@@ -3725,18 +3775,18 @@ impl Mphf {
     /// them, which is stronger than recording it: a loader that recomputes the lengths cannot be
     /// told a length that disagrees with the table it describes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        match &self.table {
-            Table::V2(t) => t.to_bytes(),
-            Table::V1(t) => t.to_bytes(),
+        match &self.table.v1 {
+            None => self.table.to_bytes(),
+            Some(t) => t.to_bytes(),
         }
     }
 
     /// [`to_bytes`](Self::to_bytes) written to `w` section by section rather than assembled
     /// first: the same bytes, without holding a second copy of the table.
     pub(crate) fn write_into(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
-        match &self.table {
-            Table::V2(t) => t.write_into(w),
-            Table::V1(t) => w.write_all(&t.to_bytes()),
+        match &self.table.v1 {
+            None => self.table.write_into(w),
+            Some(t) => w.write_all(&t.to_bytes()),
         }
     }
 
@@ -3749,8 +3799,8 @@ impl Mphf {
     /// and a blob that is merely wrong rather than malformed answers wrong ids, not unsound ones.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IndexError> {
         let table = match bytes.get(0..4) {
-            Some(m) if m == MAGIC || m == MAGIC_V2 => Table::V2(V2::from_bytes(bytes)?),
-            Some(m) if m == MAGIC_V1 => Table::V1(V1::from_bytes(bytes)?),
+            Some(m) if m == MAGIC || m == MAGIC_V2 => V2::from_bytes(bytes)?,
+            Some(m) if m == MAGIC_V1 => V2::of_v1(V1::from_bytes(bytes)?),
             _ => return Err(IndexError::Format("mphf: bad magic or truncated header")),
         };
         Ok(Self { table })
@@ -3782,7 +3832,7 @@ impl Mphf {
             ));
         }
         Ok(Self {
-            table: Table::V2(V2::build_streaming(n, hashes, threads)?),
+            table: V2::build_streaming(n, hashes, threads)?,
         })
     }
 
@@ -3802,7 +3852,7 @@ impl Mphf {
             ));
         }
         Ok(Self {
-            table: Table::V2(V2::build(hashes, threads.max(1))?),
+            table: V2::build(hashes, threads.max(1))?,
         })
     }
 }
@@ -4208,10 +4258,8 @@ mod tests {
     }
 
     fn v2(m: &Mphf) -> &V2 {
-        match &m.table {
-            Table::V2(t) => t,
-            Table::V1(_) => panic!("a built table is V2"),
-        }
+        assert!(m.table.v1.is_none(), "a built table is V2");
+        &m.table
     }
 
     #[test]
@@ -4303,7 +4351,7 @@ mod tests {
     fn a_shipped_value_is_the_law_under_every_seed() {
         let hs = hashes(1 << 16);
         let m = Mphf::build(&hs).expect("build");
-        let l = v2(&m).first.as_ref().expect("a first level");
+        let l = v2(&m).first().expect("a first level");
         assert_eq!(l.form(), Level::SHIPPED);
         assert!(l.shipped);
         let stride = SLICE >> (8 - MODE_BITS);
@@ -4473,7 +4521,7 @@ mod tests {
         let hs = hashes(200_000);
         let m = Mphf::build(&hs).expect("build");
         let t = v2(&m);
-        let first = t.first.as_ref().expect("a first level");
+        let first = t.first().expect("a first level");
         let entries = t.rest.iter().map(|l| l.n).sum::<u64>() + t.tail.range;
         assert_eq!(t.remap.len, entries);
         assert!(t.remap.subs.len() > 4, "a few blocks prove little");
@@ -4657,7 +4705,7 @@ mod tests {
         ] {
             let m = assert_bijection(&hashes(n));
             let t = v2(&m);
-            assert_eq!(t.first.is_none(), n <= TAIL_KEYS as usize, "n = {n}");
+            assert_eq!(t.first().is_none(), n <= TAIL_KEYS as usize, "n = {n}");
         }
     }
 
@@ -5018,7 +5066,7 @@ mod tests {
     fn the_current_golden_blob_is_byte_identical_to_a_fresh_build() {
         const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-4.0.0-mphf.bin");
         let mphf = Mphf::build(&golden_hashes()).expect("build");
-        assert!(matches!(mphf.table, Table::V2(_)));
+        assert!(mphf.table.v1.is_none());
         assert_eq!(&GOLDEN[..4], MAGIC);
         assert_eq!(
             mphf.to_bytes(),
@@ -5038,9 +5086,7 @@ mod tests {
         const GOLDEN: &[u8] = include_bytes!("../tests/data/golden-2.0.0-mphf.bin");
         let mphf = Mphf::from_bytes(GOLDEN).expect("the committed MPH2 fixture parses");
         assert_eq!(&GOLDEN[..4], MAGIC_V2);
-        let Table::V2(t) = &mphf.table else {
-            panic!("an MPH2 blob is a levels table");
-        };
+        let t = v2(&mphf);
         assert_eq!(t.geometry, Geometry::Mph2);
         assert!(
             t.levels()
@@ -5073,7 +5119,7 @@ mod tests {
         let mphf = Mphf::from_bytes(GOLDEN).expect("the committed MPH1 fixture parses");
         assert_eq!(mphf.to_bytes(), GOLDEN);
         assert_eq!(mphf.byte_len(), GOLDEN.len());
-        assert!(matches!(mphf.table, Table::V1(_)));
+        assert!(mphf.table.v1.is_some());
         assert!(mphf.n() > 0);
         for h in [0u64, 1, u64::MAX, 0x9e37_79b9_7f4a_7c15] {
             assert!(mphf.index(h) < mphf.n());
@@ -5089,9 +5135,7 @@ mod tests {
     #[test]
     fn every_seed_places_the_extreme_hashes_below_n() {
         let mphf = Mphf::build(&golden_hashes()).expect("build");
-        let Table::V2(t) = &mphf.table else {
-            panic!("a fresh build is a levels table");
-        };
+        let t = v2(&mphf);
         let l = t.levels().next().expect("a first level");
         for seed in 1..=u8::MAX {
             for h in [0, u64::MAX] {
@@ -5312,13 +5356,12 @@ mod spike {
 
     /// The levels a table has: keys on each, and in the tail.
     fn shape(m: &Mphf) -> String {
-        match &m.table {
-            Table::V2(t) => {
-                let levels: Vec<String> = t.levels().map(|l| l.n.to_string()).collect();
-                format!("levels [{}] tail {}", levels.join(", "), t.tail.keys)
-            }
-            Table::V1(_) => "v1".to_string(),
+        let t = &m.table;
+        if t.v1.is_some() {
+            return "v1".to_string();
         }
+        let levels: Vec<String> = t.levels().map(|l| l.n.to_string()).collect();
+        format!("levels [{}] tail {}", levels.join(", "), t.tail.keys)
     }
 
     /// One thread, 10 M keys — the number the construction work is measured against.
@@ -5403,9 +5446,7 @@ mod spike {
                 assert!(id < n && !seen[id], "{cfg}: not a bijection");
                 seen[id] = true;
             }
-            let Table::V2(v) = &m.table else {
-                unreachable!()
-            };
+            let v = &m.table;
             let (seeds, low, high) = v.sections();
             // Lookup cost over a shuffled probe order, min of 3.
             let mut order: Vec<u32> = (0..n as u32).collect();
@@ -5436,7 +5477,7 @@ mod spike {
                 .collect();
             // Where the first level's bumped keys come from: buckets by size, and the share of
             // each size's keys that were bumped.
-            if let Some(l) = &v.first {
+            if let Some(l) = v.first() {
                 let mut size = vec![0u32; l.buckets as usize];
                 for &h in &hs {
                     size[bucket_of(h, l.buckets) as usize] += 1;

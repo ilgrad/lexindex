@@ -49,7 +49,7 @@ struct Frame {
 
 /// `string → dense id` over a closed vocabulary: the minimal perfect hash and nothing else.
 pub struct ClosedHashIndex {
-    mph: Option<Mphf>, // over one hash per distinct hash value; None iff empty
+    mph: Mphf, // over one hash per distinct hash value; `Mphf::empty` iff empty
     n: usize,
     // (hash, full 64-bit second hash, id) for every key whose 64-bit hash collides with another
     // key's, sorted; almost always empty. Keys here have tail ids [m, n) and no slot in the hash.
@@ -88,7 +88,7 @@ impl ClosedHashIndex {
         }
         if n == 0 {
             return Ok(Self {
-                mph: None,
+                mph: Mphf::empty(),
                 n: 0,
                 side: Vec::new(),
             });
@@ -125,11 +125,7 @@ impl ClosedHashIndex {
             }
             seen[slot / 64] |= 1 << (slot % 64);
         }
-        Ok(Self {
-            mph: Some(mph),
-            n,
-            side,
-        })
+        Ok(Self { mph, n, side })
     }
 
     /// Build straight to a file, from a source that need not fit in memory: the file
@@ -311,7 +307,7 @@ impl ClosedHashIndex {
     /// always below `m`. `0` for an empty index, which has no table to ask.
     #[inline]
     fn slot_for(&self, h: u64) -> u32 {
-        self.mph.as_ref().map_or(0, |mph| mph.index(h) as u32)
+        self.mph.index(h) as u32
     }
 
     /// [`id`](Self::id) for an index that contains at least one hash collision: the side probe,
@@ -343,9 +339,6 @@ impl ClosedHashIndex {
     /// [`ids_of`](Self::ids_of) over `n` keys given as bytes by position, for a caller whose keys
     /// are not `str`s — a lookup reading an Arrow buffer.
     pub(crate) fn ids_of_with<'a, F: Fn(usize) -> &'a [u8]>(&self, n: usize, key: F) -> Vec<u32> {
-        let Some(mph) = &self.mph else {
-            return vec![0; n];
-        };
         if !self.side.is_empty() {
             return (0..n).map(|i| self.id_with_side(key(i))).collect();
         }
@@ -360,7 +353,8 @@ impl ClosedHashIndex {
             }
             hashes.push(hash_key_bytes(key(i)));
         }
-        mph.index_all(&hashes)
+        self.mph
+            .index_all(&hashes)
             .into_iter()
             .map(|slot| slot as u32)
             .collect()
@@ -369,9 +363,10 @@ impl ClosedHashIndex {
     /// Serialised header + owned sections, shared by [`to_bytes`](Self::to_bytes) and the
     /// streaming [`save`](Self::save) so the two emit byte-identical blobs.
     fn serialised_parts(&self) -> ([u8; HEADER], Vec<u8>, Vec<u8>) {
-        let mph_buf = match &self.mph {
-            Some(mph) => mph.to_bytes(),
-            None => Vec::new(),
+        let mph_buf = if self.n == 0 {
+            Vec::new()
+        } else {
+            self.mph.to_bytes()
         };
         let mut side_buf = Vec::with_capacity(self.side.len() * SIDE_ENTRY);
         for &(h, second, id) in &self.side {
@@ -403,10 +398,7 @@ impl ClosedHashIndex {
     /// Length of the [`to_bytes`](Self::to_bytes) blob in bytes, without producing it — for sizing
     /// a buffer or reporting bytes/key; [`save`](Self::save) writes exactly this many.
     pub fn serialized_len(&self) -> usize {
-        let mph = match &self.mph {
-            Some(mph) => mph.byte_len(),
-            None => 0,
-        };
+        let mph = if self.n == 0 { 0 } else { self.mph.byte_len() };
         HEADER + mph + self.side.len() * SIDE_ENTRY
     }
 
@@ -421,13 +413,13 @@ impl ClosedHashIndex {
         let frame = Self::parse_frame(bytes)?;
         let m = frame.n - frame.side.len();
         let mph = if frame.n == 0 {
-            None
+            Mphf::empty()
         } else {
             let mph = Mphf::from_bytes(&bytes[frame.mph])?;
             if mph.n() != m as u64 {
                 return Err(IndexError::Format("mph / header length mismatch"));
             }
-            Some(mph)
+            mph
         };
         Ok(Self {
             mph,

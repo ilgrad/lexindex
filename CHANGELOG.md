@@ -152,6 +152,15 @@ All notable changes to this project are documented here. The format follows
   changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
   99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
   → 0.02.
+- **A hash lookup asks one thing where it asked three or four.** `Mphf::index` checked the table's
+  format, whether it had a first level, and that level's geometry before reading a seed. A table
+  now always holds a level there, and any table but the common one holds a level that bumps every
+  key, so all of those questions moved behind the one a lookup asks anyway, whether the seed is
+  zero. `ClosedHashIndex` keeps its table unconditionally as well. Per `id` at a million keys,
+  instructions and predicted branches: `ClosedHashIndex` on `words` 100.5 → 88.6 and 15.2 → 10.3,
+  on `paths` 143.8 → 132.9 and 15.6 → 11.7; `CompactHashIndex` on `words` 122.6 → 110.7, and
+  `PerfectHashIndex` −9. A table under 2^15 keys pays for this: its first level has another
+  geometry and now goes the long way, +1 to +4 instructions and +7 to +10 operations an `id`.
 - **A build that decides against merging draws less.** The check that a merged arena cannot win
   reads the length of three merges of a sample, and it wrote each of them out first; it now stops at
   the length. The sample of every 32nd key goes alone, since it settles a key set the merge wins,
