@@ -227,11 +227,14 @@ All notable changes to this project are documented here. The format follows
   measured, and they stay. The hash indexes and `DoubleArrayIndex` execute none on `id`.
 - **`PerfectHashIndex::key` takes an ASCII key without the UTF-8 validator.** The validator walks
   a short key a byte at a time until a word is aligned, and that walk's exit is a branch no
-  predictor learns. An `is_ascii` check, which is the standard library's and reads by words, decides
-  first; a key with any byte above 0x7F goes to the validator as before, so what is refused has not
-  changed. Instructions a call at a million keys: dna 161 → 71, domains 183 → 91, titles-en 181 →
-  99, on `words` 158 → 76; on Cyrillic titles the same 451. Mispredicted branches a call on dna: 0.91
-  → 0.02.
+  predictor learns. A check by words that overlap at the end decides first, with no byte loop at
+  all; a key with any byte above 0x7F goes to the validator as before, so what is refused has not
+  changed. Not the standard library's `is_ascii`: its byte walk past the last 64-byte chunk made
+  `paths` slower than the validator. Instructions and mispredicted branches of a `key` call and its
+  copy into a `String`, a million keys, against 4.5.3's path: paths 285 → 181 and 3.13 → 1.37, urls
+  251 → 143 and 2.57 → 0.66, domains 235 → 122 and 2.10 → 0.40, titles-en 231 → 134 and 2.86 → 1.22,
+  dna 210 → 118 and 0.92 → 0.00, `words` 210 → 110 and 1.95 → 0.38. Keys mostly outside ASCII pay
+  for the extra pass: Cyrillic titles 502 → 515 and 4.40 → 4.97, Chinese 300 → 305 and 2.04 → 2.22.
 - **A routed `DictIndex` lookup that ties a restart's word scans the run from there.** Where a
   restart's route word equals the probe's, only the restart run can say which microblock holds it,
   and the scan started at the block's first restart. The words below the tie already rule out the
