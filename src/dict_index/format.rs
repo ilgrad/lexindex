@@ -82,38 +82,34 @@ impl DictSections {
     }
 }
 
-/// A block size named for what an index is wanted for, for a caller who would rather not pick the
-/// number. Each name keeps its meaning while the block it stands for follows the measurements, and
-/// anything between them is still a number: [`DictIndex::build_with_block`] takes `1..=1024`.
-///
-/// On real words the three store **2.85 / 2.64 / 2.51** bytes a key, answer `id` in 253–254 /
-/// 281–283 / 341–342 ns and `key_into` in 141–142 / 198–199 / 307; all three are under
-/// `marisa-trie`'s 2.955 floor on that corpus.
+/// A [`DictLayout`] named for what an index is wanted for, for a caller who would rather not pick
+/// the numbers. Each name keeps its meaning while the layout it stands for follows the measurements,
+/// and anything between them is still a layout of your own: [`DictIndex::build_with`] takes any.
 ///
 /// ```
 /// use lexindex::{DictIndex, DictProfile};
-/// let index = DictIndex::build_with_block(["fig", "kiwi"], DictProfile::Compact.block())?;
+/// let index = DictIndex::build_with(["fig", "kiwi"], DictProfile::Compact.layout())?;
 /// assert_eq!(index.block(), 1024);
 /// # Ok::<(), lexindex::IndexError>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DictProfile {
-    /// A block is one microblock, so a lookup scans it whole and no restart is stored to reach
-    /// one: the fast end of the published curve.
+    /// Blocks of 128 in microblocks of 8, for the shortest scan once
+    /// [`DictIndex::route_microblocks`] has sent a lookup straight to its microblock.
     Fast,
-    /// What [`DictIndex::build`] uses.
+    /// What [`DictIndex::build`] uses: blocks of 256, in the microblocks the block chooses.
     Balanced,
-    /// The largest block a blob can name.
+    /// The largest block a blob can name, in the microblocks the block chooses.
     Compact,
 }
 
 impl DictProfile {
-    /// Keys a block holds under this profile, for the builders that take a block.
-    pub const fn block(self) -> usize {
+    /// The layout this profile stands for.
+    pub const fn layout(self) -> DictLayout {
         match self {
-            Self::Fast => 32,
-            Self::Balanced => DEFAULT_BLOCK,
-            Self::Compact => MAX_BLOCK,
+            Self::Fast => DictLayout::new(128).with_micro(8),
+            Self::Balanced => DictLayout::new(DEFAULT_BLOCK),
+            Self::Compact => DictLayout::new(MAX_BLOCK),
         }
     }
 }

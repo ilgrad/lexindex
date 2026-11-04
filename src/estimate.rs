@@ -47,15 +47,35 @@ const SAMPLE: usize = 100_000;
 /// 4 096 price alike, and 4 096 has the better median and worst case of the two.
 const RUN: usize = 4096;
 
-/// The [`DictIndex`] blocks the plan prices. The block is a knob, not a constant — on an English
-/// word list the three named points of its curve span 2.51 to 2.85 bytes a key — so a ranking that
-/// offered one of them would be answering a question the caller did not ask. Ascending, so that
-/// candidates tying on bytes keep block order in the ladder.
-const DICT_BLOCKS: [usize; 3] = [
-    crate::DictProfile::Fast.block(),
-    crate::DictProfile::Balanced.block(),
-    crate::DictProfile::Compact.block(),
+/// The [`DictIndex`] layouts the plan prices. The block is a knob, not a constant, so a ranking that
+/// offered one of them would be answering a question the caller did not ask.
+const DICT_LAYOUTS: [crate::DictLayout; 3] = [
+    crate::DictProfile::Fast.layout(),
+    crate::DictProfile::Balanced.layout(),
+    crate::DictProfile::Compact.layout(),
 ];
+
+/// Their blocks, one layout to a block. Ascending, so that candidates tying on bytes keep block order
+/// in the ladder.
+const DICT_BLOCKS: [usize; 3] = [
+    DICT_LAYOUTS[0].block,
+    DICT_LAYOUTS[1].block,
+    DICT_LAYOUTS[2].block,
+];
+
+/// The microblock a block is priced at: its layout's, or the block's own choice.
+fn priced_micro(block: usize) -> usize {
+    DICT_LAYOUTS
+        .iter()
+        .find(|layout| layout.block == block)
+        .and_then(|layout| layout.micro)
+        .unwrap_or_else(|| dict_index::micro_for(block))
+}
+
+/// The layout a block is priced at.
+fn priced_layout(block: usize) -> crate::DictLayout {
+    crate::DictLayout::new(block).with_micro(priced_micro(block))
+}
 
 #[cfg(test)]
 thread_local! {
@@ -1036,9 +1056,12 @@ impl fmt::Display for Plan {
             } else {
                 ' '
             };
-            let block = match e.block {
-                Some(b) => format!(" at block {b}"),
-                None => String::new(),
+            let block = match (e.block, e.micro) {
+                (Some(b), Some(m)) if m != dict_index::micro_for(b) => {
+                    format!(" at block {b} micro {m}")
+                }
+                (Some(b), _) => format!(" at block {b}"),
+                _ => String::new(),
             };
             writeln!(
                 f,
@@ -1459,7 +1482,8 @@ impl Sample {
         corpus: usize,
     ) -> Result<[DictFit; DICT_BLOCKS.len()], IndexError> {
         let draws = Draws::of(spread, runs, corpus);
-        let (spread_blob, runs_blobs) = DictIndex::plan_builds(spread, runs, &DICT_BLOCKS, corpus)?;
+        let layouts = DICT_BLOCKS.map(|block| (block, priced_micro(block)));
+        let (spread_blob, runs_blobs) = DictIndex::plan_builds(spread, runs, &layouts, corpus)?;
         let mut dict = Vec::with_capacity(DICT_BLOCKS.len());
         for (block, runs_blob) in DICT_BLOCKS.into_iter().zip(&runs_blobs) {
             dict.push(DictFit::of(&draws, block, &spread_blob, runs_blob));
@@ -2149,7 +2173,7 @@ fn weigh(
             Kind::String => (StringIndex::build(keys)?.serialized_len() as u64, 0, None),
             Kind::Dict => {
                 let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
-                let index = DictIndex::build_with_block(keys, block)?;
+                let index = DictIndex::build_with(keys, priced_layout(block))?;
                 (
                     index.serialized_len() as u64,
                     index.held().total(),
@@ -2175,7 +2199,7 @@ fn weigh(
             #[cfg(feature = "mph")]
             Kind::Hashed => {
                 let block = at.unwrap_or(dict_index::DEFAULT_BLOCK);
-                let dict = DictIndex::build_with_block(keys, block)?;
+                let dict = DictIndex::build_with(keys, priced_layout(block))?;
                 let Ok(index) = HashedDictIndex::from_dict(dict, 0) else {
                     continue;
                 };
@@ -2209,7 +2233,7 @@ fn estimate(
         kind,
         bytes,
         block,
-        micro: block.map(dict_index::micro_for),
+        micro: block.map(priced_micro),
         resident_bytes: bytes + held,
         build_secs: build_secs(kind, shape.n, shape.mean_len()),
         measured,
@@ -2278,7 +2302,7 @@ fn dict_bytes(shape: &Shape, fit: &DictFit, block: usize) -> f64 {
     let n = shape.n as f64;
     let blocks = shape.n.div_ceil(block) as f64;
     let entries = n - blocks;
-    let restarts = blocks * (block.div_ceil(dict_index::micro_for(block)) - 1) as f64;
+    let restarts = blocks * (block.div_ceil(priced_micro(block)) - 1) as f64;
     let r = &fit.rates;
     let tables = shards_for(shape.n, block) as f64 * r.table;
     dict_index::HEADER as f64
@@ -2796,7 +2820,7 @@ mod tests {
         let p = plan(&keys, Needs::default().closed_vocabulary()).unwrap();
         for e in p.estimates() {
             assert_eq!(e.micro.is_some(), e.block.is_some(), "{e:?}");
-            assert_eq!(e.micro, e.block.map(dict_index::micro_for), "{e:?}");
+            assert_eq!(e.micro, e.block.map(priced_micro), "{e:?}");
             assert!(e.resident_bytes >= e.bytes, "{e:?}");
             assert!(e.build_secs > 0.0, "{e:?}");
             assert_eq!(
@@ -2826,7 +2850,7 @@ mod tests {
         for e in p.estimates() {
             let held = (e.resident_bytes - e.bytes) as f64;
             let truth = match e.kind {
-                Kind::Dict => DictIndex::build_with_block(&keys, e.block.unwrap())
+                Kind::Dict => DictIndex::build_with(&keys, priced_layout(e.block.unwrap()))
                     .unwrap()
                     .held()
                     .total() as f64,
@@ -2968,7 +2992,7 @@ mod tests {
             .iter()
             .find(|e| e.kind == Kind::Dict)
             .unwrap();
-        let built = DictIndex::build_with_block(&keys, dict.block.unwrap())
+        let built = DictIndex::build_with(&keys, priced_layout(dict.block.unwrap()))
             .unwrap()
             .serialized_len();
         assert_eq!(
@@ -3017,7 +3041,7 @@ mod tests {
         for e in plan.estimates() {
             let truth = match e.kind {
                 Kind::String => StringIndex::build(&keys).unwrap().serialized_len() as u64,
-                Kind::Dict => DictIndex::build_with_block(&keys, e.block.unwrap())
+                Kind::Dict => DictIndex::build_with(&keys, priced_layout(e.block.unwrap()))
                     .unwrap()
                     .serialized_len() as u64,
                 #[cfg(feature = "mph")]
@@ -3096,7 +3120,7 @@ mod tests {
         for e in &dicts {
             let block = e.block.unwrap();
             assert!(DICT_BLOCKS.contains(&block), "{block}");
-            let built = DictIndex::build_with_block(&keys, block)
+            let built = DictIndex::build_with(&keys, priced_layout(block))
                 .unwrap()
                 .serialized_len() as u64;
             assert_eq!(e.bytes, built, "at block {block}");
@@ -3132,7 +3156,7 @@ mod tests {
         assert_eq!(dicts.len(), DICT_BLOCKS.len());
         for e in &dicts {
             assert!(!e.measured);
-            let truth = DictIndex::build_with_block(&keys, e.block.unwrap())
+            let truth = DictIndex::build_with(&keys, priced_layout(e.block.unwrap()))
                 .unwrap()
                 .serialized_len() as f64;
             let err = (e.bytes as f64 - truth) / truth;
@@ -3163,7 +3187,7 @@ mod tests {
         });
         for e in plan.estimates().iter().filter(|e| e.kind == Kind::Dict) {
             assert!(!e.measured);
-            let truth = DictIndex::build_with_block(&keys, e.block.unwrap())
+            let truth = DictIndex::build_with(&keys, priced_layout(e.block.unwrap()))
                 .unwrap()
                 .serialized_len() as f64;
             let err = (e.bytes as f64 - truth) / truth;

@@ -811,7 +811,7 @@ fn the_trainers_are_bounded_by_a_budget_and_not_by_the_core_count() {
 }
 
 #[test]
-fn the_profiles_name_three_points_of_the_block_curve() {
+fn the_profiles_name_three_layouts() {
     let keys = corpus();
     let mut sizes = Vec::new();
     for profile in [
@@ -819,13 +819,21 @@ fn the_profiles_name_three_points_of_the_block_curve() {
         DictProfile::Balanced,
         DictProfile::Compact,
     ] {
-        let idx = DictIndex::build_with_block(&keys, profile.block()).unwrap();
-        assert_eq!(idx.block(), profile.block(), "{profile:?}");
+        let layout = profile.layout();
+        let idx = DictIndex::build_with(&keys, layout).unwrap();
+        assert_eq!(idx.block(), layout.block, "{profile:?}");
+        assert_eq!(
+            idx.micro,
+            layout.micro.unwrap_or(micro_for(layout.block)),
+            "{profile:?}"
+        );
         check(&idx, &keys);
         sizes.push(idx.serialized_len());
     }
     assert!(sizes[0] > sizes[1] && sizes[1] > sizes[2], "{sizes:?}");
-    assert_eq!(DictProfile::Balanced.block(), DEFAULT_BLOCK);
+    assert_eq!(DictProfile::Fast.layout().block, 128);
+    assert_eq!(DictProfile::Fast.layout().micro, Some(8));
+    assert_eq!(DictProfile::Balanced.layout(), DictLayout::default());
     assert_eq!(DictIndex::build(&keys).unwrap().block(), DEFAULT_BLOCK);
 }
 

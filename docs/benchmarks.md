@@ -1475,9 +1475,10 @@ per key, well under the 2.98 marisa stores on this corpus** — and unlike maris
 and `lower_bound` at all, since a marisa id is not the lexicographic rank (7 051 of 19 999
 consecutive sorted pairs come back with a decreasing id). Pick 32 or 64 if the lookups are hot,
 512 or 1024 if the bytes are — or name the point instead of the number: `DictProfile::Fast`,
-`Balanced` and `Compact` in Rust, `block="fast" | "balanced" | "compact"` in Python, are 32,
-256 and 1024. Where a quarter of a byte a key of memory costs less than the scan, `Compact` routed
-is both smaller and faster than `Fast`: 2.76 bytes a key at 236–238 ns against 2.85 at 253–254.
+`Balanced` and `Compact` in Rust, `block="fast" | "balanced" | "compact"` in Python, are 128 in
+microblocks of 8, 256 and 1024. Where a quarter of a byte a key of memory costs less than the scan,
+`Compact` routed is both smaller and faster than block 32: 2.76 bytes a key at 236–238 ns against
+2.85 at 253–254.
 
 <sub>Measured 2026-11-03 at `82f2cb1`, on `performance`
 ([`bench/results/dictbench-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/dictbench-2026-11-03-arz-82f2cb1.txt)),

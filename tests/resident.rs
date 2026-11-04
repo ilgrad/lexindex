@@ -3,8 +3,8 @@
 #![cfg(all(feature = "mph", feature = "mmap"))]
 
 use lexindex::{
-    ClosedHashIndex, CompactHashIndex, DictIndex, DoubleArrayIndex, Estimate, HashedDictIndex,
-    Kind, Needs, PerfectHashIndex, StringIndex, plan,
+    ClosedHashIndex, CompactHashIndex, DictIndex, DictLayout, DoubleArrayIndex, Estimate,
+    HashedDictIndex, Kind, Needs, PerfectHashIndex, StringIndex, plan,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::Path;
@@ -51,7 +51,12 @@ fn heap_of<T>(load: impl FnOnce() -> T) -> usize {
 
 /// The heap a load of this row's index keeps, and the bytes of its file.
 fn counted(e: &Estimate, keys: &[&str], path: &Path) -> (usize, usize) {
-    let block = || e.block.expect("a dictionary names its block");
+    // A row prices one layout, so what it quotes is that layout's build.
+    let layout = || {
+        let block = e.block.expect("a dictionary names its block");
+        let micro = e.micro.expect("and its microblock");
+        DictLayout::new(block).with_micro(micro)
+    };
     // SAFETY: of every `load_mmap`: nothing writes the file while it is mapped, and each mapping
     // ends before the next `save`.
     let heap = unsafe {
@@ -61,12 +66,12 @@ fn counted(e: &Estimate, keys: &[&str], path: &Path) -> (usize, usize) {
                 heap_of(|| StringIndex::load_mmap(path).unwrap())
             }
             Kind::Dict => {
-                let dict = DictIndex::build_with_block(keys, block()).unwrap();
+                let dict = DictIndex::build_with(keys, layout()).unwrap();
                 dict.save(path).unwrap();
                 heap_of(|| DictIndex::load_mmap(path).unwrap())
             }
             Kind::Hashed => {
-                let dict = DictIndex::build_with_block(keys, block()).unwrap();
+                let dict = DictIndex::build_with(keys, layout()).unwrap();
                 HashedDictIndex::from_dict(dict, 0)
                     .unwrap()
                     .save(path)

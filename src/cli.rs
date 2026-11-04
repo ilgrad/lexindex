@@ -10,8 +10,8 @@
 //! — one program, whichever way it was installed.
 
 use lexindex::{
-    BlobInfo, BlobKind, DictIndex, DictLayout, DictProfile, DoubleArrayIndex, IndexError, Kind,
-    Needs, Objective, Overlay, OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
+    BlobInfo, BlobKind, DictIndex, DictLayout, DictProfile, DoubleArrayIndex, Estimate, IndexError,
+    Kind, Needs, Objective, Overlay, OverlayBase, Plan, StringIndex, Workload, plan_file, plan_for,
 };
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -66,7 +66,7 @@ options (`--name value` or `--name=value`):
                  double-array. hashed is HashedDictIndex with no fingerprint, so exact;
                  it and double-array hold the corpus to build
   --block SPEC   keys per DictIndex block, with `--index dict`: 1..=1024, or one of
-                 fast / balanced / compact (32 / 256 / 1024)
+                 fast / balanced / compact (128 in microblocks of 8 / 256 / 1024)
   --labels       with `--index dict`: also try a dictionary of the corpus's trie labels
                  and keep it where the blob comes out smaller -- paths, URLs, titles --
                  for a lookup that reads more
@@ -135,7 +135,7 @@ struct Cmd {
     positional: Vec<String>,
     needs: Needs,
     index: Choice,
-    block: Option<usize>,
+    block: Option<DictLayout>,
     labels: bool,
     sections: bool,
     json: bool,
@@ -278,14 +278,14 @@ fn stream_above(mode: Stream, path: &str) -> Option<u64> {
     (bytes >= floor).then_some(bytes)
 }
 
-/// A `--block` spec: one of the three named points of the size/speed curve, or the number itself.
-/// The bounds are `DictProfile`'s own, so the two cannot drift apart.
-fn block_size(spec: &str) -> Result<usize, Fail> {
-    let max = DictProfile::Compact.block();
+/// A `--block` spec: one of the three named layouts, or a block of that many keys in the microblocks
+/// it chooses. The bounds are `DictProfile`'s own, so the two cannot drift apart.
+fn block_layout(spec: &str) -> Result<DictLayout, Fail> {
+    let max = DictProfile::Compact.layout().block;
     let n = match spec {
-        "fast" => DictProfile::Fast.block(),
-        "balanced" => DictProfile::Balanced.block(),
-        "compact" => max,
+        "fast" => return Ok(DictProfile::Fast.layout()),
+        "balanced" => return Ok(DictProfile::Balanced.layout()),
+        "compact" => return Ok(DictProfile::Compact.layout()),
         other => other.parse().map_err(|_| {
             Fail::Usage(format!(
                 "--block: `{other}` is neither a number nor one of fast / balanced / compact"
@@ -293,7 +293,7 @@ fn block_size(spec: &str) -> Result<usize, Fail> {
         })?,
     };
     if (1..=max).contains(&n) {
-        Ok(n)
+        Ok(DictLayout::new(n))
     } else {
         Err(Fail::Usage(format!("--block: {n} is outside 1..={max}")))
     }
@@ -366,7 +366,7 @@ fn parse(args: &[String], accepts: Accepts, want: usize, form: &str) -> Result<C
                 cmd.index = choice(&value(args, &mut at, name, inline)?)?;
             }
             "--block" if accepts == Accepts::NeedsAndIndex => {
-                cmd.block = Some(block_size(&value(args, &mut at, name, inline)?)?);
+                cmd.block = Some(block_layout(&value(args, &mut at, name, inline)?)?);
             }
             "--labels" if accepts == Accepts::NeedsAndIndex => cmd.labels = true,
             "--stream" if accepts == Accepts::NeedsAndIndex => {
@@ -486,7 +486,7 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             write!(err, "{ranked}").map_err(io_fail)?;
             note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
-            Some((best.kind, best.block))
+            Some((best.kind, priced_layout(&best)))
         }
         Choice::Auto => None,
     };
@@ -510,11 +510,17 @@ fn cmd_build(cmd: &Cmd, stdin: &mut dyn BufRead, err: &mut dyn Write) -> Result<
             write!(err, "{ranked}").map_err(io_fail)?;
             note_open_vocabulary(cmd, &ranked, err)?;
             let best = ranked.best();
-            (best.kind, best.block)
+            (best.kind, priced_layout(&best))
         }
     };
     let n = build_and_save(kind, &keys, dest, block, cmd.labels)?;
     note_written(kind.name(), n, dest, err)
+}
+
+/// The layout a row of the ladder priced, so that what is built is the blob it quoted.
+fn priced_layout(row: &Estimate) -> Option<DictLayout> {
+    let (block, micro) = row.block.zip(row.micro)?;
+    Some(DictLayout::new(block).with_micro(micro))
 }
 
 fn note_no_stream(path: &str, name: &str, err: &mut dyn Write) -> Result<(), Fail> {
@@ -617,7 +623,7 @@ fn stream_to_file(
     kind: Kind,
     src: &Source,
     dest: &Path,
-    block: Option<usize>,
+    block: Option<DictLayout>,
     labels: bool,
 ) -> Result<usize, Fail> {
     let part = dest.with_file_name(format!(
@@ -645,14 +651,13 @@ fn build_streamed(
     kind: Kind,
     src: &Source,
     dest: &Path,
-    block: Option<usize>,
+    block: Option<DictLayout>,
     labels: bool,
 ) -> Result<usize, Fail> {
     let n = match kind {
         Kind::String => StringIndex::build_to_file(src.keys(), dest)?,
         Kind::Dict => {
-            let block = block.unwrap_or(DictLayout::default().block);
-            let layout = DictLayout::new(block).with_labels(labels);
+            let layout = block.unwrap_or_default().with_labels(labels);
             DictIndex::build_to_file_with(src.keys(), dest, layout)?
         }
         #[cfg(feature = "mph")]
@@ -676,10 +681,10 @@ fn build_and_save(
     kind: Kind,
     keys: &[String],
     dest: &Path,
-    block: Option<usize>,
+    block: Option<DictLayout>,
     labels: bool,
 ) -> Result<usize, Fail> {
-    let layout = block.map_or_else(DictLayout::default, DictLayout::new);
+    let layout = block.unwrap_or_default();
     let n = match kind {
         Kind::String => {
             let index = StringIndex::build(keys)?;
@@ -1755,6 +1760,30 @@ mod tests {
             assert_eq!(code, 1);
             assert!(err.contains("needs the `mph` feature"), "{err}");
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_named_block_builds_the_whole_of_its_layout() {
+        let dir = tmpdir();
+        let text = corpus(2_000);
+        let keys = keys_file(&dir, &text);
+        let dest = dir.join("fast.bin");
+        let (code, _, err) = go(
+            &[
+                "build",
+                &keys,
+                dest.to_str().unwrap(),
+                "--index",
+                "dict",
+                "--block",
+                "fast",
+            ],
+            "",
+        );
+        assert_eq!(code, 0, "{err}");
+        let want = DictIndex::build_with(text.lines(), DictProfile::Fast.layout()).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), want.to_bytes());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

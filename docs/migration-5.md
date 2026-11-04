@@ -13,6 +13,8 @@ different question, and code that matched a refused build as `IndexError::Format
 | `Kind` | five variants, exhaustive | seven, `#[non_exhaustive]` |
 | `Needs`, `Estimate` | open to literals | `#[non_exhaustive]` |
 | `Estimate` | `bytes`, `block`, `measured` | also `micro`, `resident_bytes`, `build_secs` |
+| `DictProfile::Fast`, `block="fast"`, `--block fast` | block 32 | block 128 in microblocks of 8 |
+| `DictProfile::block()` | the profile's block | **gone**: `layout()`, a `DictLayout` for `build_with` |
 | Common-prefix and longest-prefix walks | asked for `prefix` | ask for `common_prefix` |
 | `--index auto` | never a `HashedDictIndex` or a `DoubleArrayIndex` | may pick either |
 | `Overlay::remove` over `CompactHashIndex` | compiled, and could retire a real key's id | does not compile; `TypeError` in Python |

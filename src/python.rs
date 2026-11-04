@@ -1780,8 +1780,9 @@ impl PyClosedHashIndex {
 }
 
 /// The `block` argument of the `DictIndex` constructors: keys a block holds, or the name of a
-/// [`DictProfile`] that stands for one. One argument rather than two that can contradict each
-/// other, so there is no pair of settings a caller has to be told the precedence of.
+/// [`DictProfile`]. One argument rather than two that can contradict each other, so there is no pair
+/// of settings a caller has to be told the precedence of. A `micro` given beside a name wins over
+/// the name's, as it does over a block's own choice.
 #[derive(FromPyObject)]
 enum BlockArg {
     #[pyo3(annotation = "int")]
@@ -1791,13 +1792,13 @@ enum BlockArg {
 }
 
 impl BlockArg {
-    fn block(self) -> PyResult<usize> {
+    fn layout(self) -> PyResult<DictLayout> {
         match self {
-            Self::Size(n) => Ok(n),
+            Self::Size(n) => Ok(DictLayout::new(n)),
             Self::Name(name) => match name.as_str() {
-                "fast" => Ok(DictProfile::Fast.block()),
-                "balanced" => Ok(DictProfile::Balanced.block()),
-                "compact" => Ok(DictProfile::Compact.block()),
+                "fast" => Ok(DictProfile::Fast.layout()),
+                "balanced" => Ok(DictProfile::Balanced.layout()),
+                "compact" => Ok(DictProfile::Compact.layout()),
                 _ => Err(PyValueError::new_err(format!(
                     "dict: block must be an int in 1..=1024 or one of 'fast', 'balanced', \
                      'compact', not {name:?}"
@@ -1823,8 +1824,8 @@ impl PyDictIndex {
     /// larger ones smaller -- 32 / 64 / 128 / 256 /
     /// 512 / 1024 gave 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51 bytes per key on the dictionary,
     /// every one under `marisa-trie`'s 2.955 floor. `block` also takes the name of a point on that
-    /// curve instead of a number: `"fast"` (32), `"balanced"` (256, the default) or `"compact"`
-    /// (1024). `micro` sets the microblock size instead, `1..=block` and dividing it: at the
+    /// curve instead of a number: `"fast"` (128 in microblocks of 8), `"balanced"` (256, the default)
+    /// or `"compact"` (1024). `micro` sets the microblock size instead, `1..=block` and dividing it: at the
     /// default block, 128 stored 0.12–0.34 bytes a key less than the 16 chosen by default on
     /// fourteen corpora, for a longer scan whose cost is not measured yet. `labels=True` tries a
     /// dictionary of the corpus's trie labels as well and keeps it where the blob comes out
@@ -1837,7 +1838,7 @@ impl PyDictIndex {
     #[pyo3(
         signature = (
             items,
-            block = BlockArg::Size(DictProfile::Balanced.block()),
+            block = BlockArg::Size(DictProfile::Balanced.layout().block),
             micro = None,
             labels = false
         ),
@@ -1850,7 +1851,7 @@ impl PyDictIndex {
         micro: Option<usize>,
         labels: bool,
     ) -> PyResult<Self> {
-        let mut layout = DictLayout::new(block.block()?).with_labels(labels);
+        let mut layout = block.layout()?.with_labels(labels);
         if let Some(micro) = micro {
             layout = layout.with_micro(micro);
         }
@@ -1880,7 +1881,7 @@ impl PyDictIndex {
         signature = (
             items,
             path,
-            block = BlockArg::Size(DictProfile::Balanced.block()),
+            block = BlockArg::Size(DictProfile::Balanced.layout().block),
             micro = None,
             labels = false
         ),
@@ -1893,7 +1894,7 @@ impl PyDictIndex {
         micro: Option<usize>,
         labels: bool,
     ) -> PyResult<usize> {
-        let mut layout = DictLayout::new(block.block()?).with_labels(labels);
+        let mut layout = block.layout()?.with_labels(labels);
         if let Some(micro) = micro {
             layout = layout.with_micro(micro);
         }

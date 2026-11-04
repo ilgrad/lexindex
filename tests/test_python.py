@@ -546,10 +546,10 @@ def test_dict_index_in_a_character_code_answers_what_the_fst_does():
 def test_dict_index_block_takes_a_profile_name(tmp_path):
     words = sorted({f"token-{i * 7919 % 10007:05}" for i in range(20_000)})
     sizes = []
-    for name, block in (("fast", 32), ("balanced", 256), ("compact", 1024)):
+    for name, block, micro in (("fast", 128, 8), ("balanced", 256, None), ("compact", 1024, None)):
         di = lexindex.DictIndex(words, block=name)
         assert di.block == block
-        assert di.to_bytes() == lexindex.DictIndex(words, block).to_bytes()
+        assert di.to_bytes() == lexindex.DictIndex(words, block, micro=micro).to_bytes()
         p = tmp_path / f"{name}.bdx"
         assert lexindex.DictIndex.build_to_file(words, p, block=name) == len(words)
         assert p.read_bytes() == di.to_bytes()
@@ -1878,9 +1878,10 @@ def test_plan_prices_every_index_that_answers_the_question():
     # The block is a candidate of its own, so the dictionary is three rows, each the build at its
     # own block -- the hashed one rides on the default, and every other kind carries no block.
     dicts = {e["block"]: e for e in p["estimates"] if e["kind"] == "DictIndex"}
-    assert sorted(dicts) == [32, 256, 1024]
+    assert sorted(dicts) == [128, 256, 1024]
+    assert dicts[128]["micro"] == 8
     for block, e in dicts.items():
-        assert e["bytes"] == len(lexindex.DictIndex(keys, block).to_bytes())
+        assert e["bytes"] == len(lexindex.DictIndex(keys, block, micro=e["micro"]).to_bytes())
     assert by_kind["HashedDictIndex"]["block"] == 256
     assert by_kind["DoubleArrayIndex"]["bytes"] == len(lexindex.DoubleArrayIndex(keys).to_bytes())
     others = [e for e in p["estimates"] if e["kind"] not in ("DictIndex", "HashedDictIndex")]

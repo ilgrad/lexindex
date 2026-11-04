@@ -412,8 +412,9 @@ words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
 faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 250–254 ns against 281–283
-smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is
-                                                  # 32 keys a block, "balanced" 256, "compact" 1024
+smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is 128
+                                                  # keys a block in microblocks of 8, "balanced"
+                                                  # 256, "compact" 1024
 fewer = DictIndex(words_list, micro=128)    # 2.45 B/key against 2.64: microblocks of 128, not 16 --
                                             # fewer restarts, a longer scan (its id cost unmeasured)
 paths = DictIndex(path_list, block=1024, labels=True)  # also tries a dictionary of the trie labels
@@ -446,7 +447,7 @@ and in no blob — and every lookup then picks its microblock off those words, w
 only where the query's eight bytes tie a restart's. Deriving them reads the start of every block, so
 a `load_mmap` index is paged in whole by the call rather than as queries reach it. On the
 dictionary, routed, `id` reads 213–215 ns at the default block, and 236–238 at `block="compact"`
-for 2.76 bytes a key in memory — faster than `"fast"` unrouted, at fewer bytes.
+for 2.76 bytes a key in memory — faster than block 32 unrouted, at fewer bytes.
 
 At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
@@ -1259,8 +1260,8 @@ binding, so every number carries that call, and the model reads 297 ns for `Stri
 word list where the Rust harness in `docs/benchmarks.md` measures 256-270. The overhead falls on
 every candidate, so it moves the numbers and not the ranking -- but do not quote them as your own.
 
-`--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 32 / 256 /
-1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices all
+`--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 128 in
+microblocks of 8 / 256 / 1024 -- and requires `--index dict`. It is refused alongside `auto` on purpose: the plan prices all
 three named blocks as candidates of their own and ranks them with the rest, so a block named beside
 `auto` would ask the planner to choose one and then overrule its answer. `--index auto` builds the
 block on the line it marked; to choose one yourself, read it off the ladder and name both.

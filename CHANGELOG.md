@@ -30,6 +30,10 @@ All notable changes to this project are documented here. The format follows
   `TypeError` in Python; `retire_id` stays on every base.
 - **A refused build answers `IndexError::Build`, not `Format`,** and `Build` is no longer behind `mph`.
   The C ABI answers `LEXINDEX_STATUS_BUILD`.
+- **`DictProfile::Fast` is block 128 in microblocks of 8,** and so are `block="fast"` and
+  `--block fast`, where they were block 32. Routed, it answered `id` faster than block 32 on all five
+  corpora timed, and `plan` prices that layout now. `DictProfile::block()` is gone, since
+  a block no longer says what a profile is: `layout()` gives the `DictLayout`.
 - **The key hash carries 128 bits of state on every path.** Through 4.x both hashes of a key up to
   16 bytes were functions of one folded 64-bit product and the length, so a birthday search found two
   keys equal in both in 3.7·10⁹ steps, and from 97 bytes a block spelling the lane state erased the

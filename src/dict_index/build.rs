@@ -300,8 +300,8 @@ impl DictIndex {
     /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51
     /// bytes per key, `id` at 253–254 / 250–254 / 263–265 / 281–283 / 312–322 / 341–342 ns and
     /// `key_into` at 141–142 / 151–152 / 169–171 / 198–199 / 259–261 / 307. Every block is
-    /// under `marisa-trie`'s 2.955 floor on that corpus. [`DictProfile`] names three points of
-    /// that curve for a caller who does not want to pick one.
+    /// under `marisa-trie`'s 2.955 floor on that corpus. [`DictProfile`] names three layouts
+    /// for a caller who does not want to pick one.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -864,7 +864,7 @@ impl DictIndex {
     pub(crate) fn plan_builds<K: AsKey + Sync>(
         spread: &[K],
         runs: &[K],
-        blocks: &[usize],
+        layouts: &[(usize, usize)],
         corpus: usize,
     ) -> Result<(Self, Vec<Self>), IndexError> {
         let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
@@ -885,10 +885,9 @@ impl DictIndex {
         // consecutive keys are what carries one — but not its own dictionary: it would mine the
         // vocabulary of a hundred thousand keys, and what a block costs is read off a blob the
         // corpus's vocabulary coded.
-        let runs = blocks
+        let runs = layouts
             .iter()
-            .map(|&block| {
-                let micro = micro_for(block);
+            .map(|&(block, micro)| {
                 let threads = build_threads(runs.len(), block);
                 let pieces = build_pieces(runs, block, micro, 0);
                 let tables = train_shards(&pieces, train_threads(threads));
