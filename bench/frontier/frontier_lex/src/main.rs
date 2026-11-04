@@ -117,6 +117,25 @@ impl<const M: usize> Probe for LabelledMicro<M> {
     }
 }
 
+/// [`Routed`] with `M` keys a microblock rather than the block's own choice: more restart words for
+/// a shorter scan.
+struct RoutedMicro<const M: usize>(DictIndex, usize);
+
+impl<const M: usize> Probe for RoutedMicro<M> {
+    fn build(keys: &[String], block: usize) -> Self {
+        let layout = DictLayout::new(block).with_micro(M);
+        let dict = DictIndex::build_with(keys, layout).expect("dict build");
+        let words = dict.route_microblocks();
+        Self(dict, words)
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len() + self.1
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.probe(key)
+    }
+}
+
 /// `DictIndex` with its restart words derived, which the build includes. The words are memory the
 /// index holds and no blob carries, so its size is the blob and the words.
 struct Routed(DictIndex, usize);
@@ -276,7 +295,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|labels256|labels1024|labels1024m64|labels1024m128|string|hashed0|hashed8|hashed16|da|perfect>..."
+            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|routed64m8|routed128m8|routed256m8|labels256|labels1024|labels1024m64|labels1024m128|string|hashed0|hashed8|hashed16|da|perfect>..."
         );
         std::process::exit(2);
     }
@@ -309,6 +328,24 @@ fn main() {
             "routed1024" => {
                 run::<Routed>(&keys, 1024, "lexindex DictIndex block 1024 routed", chained)
             }
+            "routed64m8" => run::<RoutedMicro<8>>(
+                &keys,
+                64,
+                "lexindex DictIndex block 64 micro 8 routed",
+                chained,
+            ),
+            "routed128m8" => run::<RoutedMicro<8>>(
+                &keys,
+                128,
+                "lexindex DictIndex block 128 micro 8 routed",
+                chained,
+            ),
+            "routed256m8" => run::<RoutedMicro<8>>(
+                &keys,
+                256,
+                "lexindex DictIndex block 256 micro 8 routed",
+                chained,
+            ),
             "labels256" => {
                 run::<Labelled>(&keys, 256, "lexindex DictIndex block 256 labelled", chained)
             }
