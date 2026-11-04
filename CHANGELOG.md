@@ -34,12 +34,14 @@ All notable changes to this project are documented here. The format follows
   16 bytes were functions of one folded 64-bit product and the length, so a birthday search found two
   keys equal in both in 3.7·10⁹ steps, and from 97 bytes a block spelling the lane state erased the
   next eight bytes from both. `CompactHashIndex` and `ClosedHashIndex` gave such keys one id. Now two
-  products to 16 bytes and three per 32-byte block stay unfolded until the merge, every word reaches
-  two of them, and the one product a text key can zero keeps its factors. A random pair shares both
-  hashes at `≈ 2^-127` at any length, an expected 2.9·10⁻²¹ merges among 10⁹ keys, and no chosen pair
-  is known below a birthday's 2^64 steps. That is no proof. Retired operations a `PerfectHashIndex::id`
-  hit, counted and **not yet timed**: urls 180 → 243, paths 233 → 339, uuid 175 → 234, domains
-  170 → 186, numeric 170 → 181.
+  products to 16 bytes and two per 32-byte block stay unfolded until the merge, and a product whose
+  factor a key can zero keeps its factors. Independent keys share both hashes at `≈ 2^-127` a pair
+  at any length, 2.9·10⁻²¹ merges among 10⁹ keys, and keys that differ in one half of a block, a
+  shared head and a short id, at `≈ 2^-124`, 1.8·10⁻²⁰, extrapolated from exact counts at small word
+  widths. **This protects ordinary keys, not against an adversary:** up to 16 bytes no chosen pair is
+  known below a birthday's 2^64 steps, and above 16 bytes one must be assumed cheap, so keys a stranger
+  chooses still belong in `PerfectHashIndex` or an ordered index. Retired operations a
+  `PerfectHashIndex::id` hit: urls 179 → 204, paths 229 → 270, uuid 172 → 196, dna 155 → 174.
 - **Every hash blob takes a new number: `BMP9`, `BCH9`, `BCL3`, `BHD2`.** Under the new hash a 4.x blob
   would answer wrong ids, so `BMP8`, `BCH8`, `BCL2` and `BHD1` are refused by name, and so is an
   `OVL2` over one, with the base's message. **A `PerfectHashIndex` or `HashedDictIndex` converts**:

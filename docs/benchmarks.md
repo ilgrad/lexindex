@@ -1770,10 +1770,10 @@ shared prefix (`https://example.com/a/b/…`), a shared suffix (`…@mail.exampl
 numeric tail (`key_000000001`), plain decimal integers, UUIDs, Cyrillic, DNA, and filesystem paths.
 
 <sub>Committed output:
-[`bench/results/hash-quality-2026-11-02-arz-bccbf24-dirty.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-11-02-arz-bccbf24-dirty.txt)
-(5.0's 128-bit state: avalanche worst 4.26 over 88 064 cells, bit independence worst 5.15 over
+[`bench/results/hash-quality-2026-11-04-arz-8ca5a3c-dirty.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-11-04-arz-8ca5a3c-dirty.txt)
+(5.0's 128-bit state: avalanche worst 4.53 over 88 064 cells, bit independence worst 4.82 over
 1 806 336, against this battery's bound today of `|z| < 6.5`; no double collision, no slot collision,
-per-corpus largest 2.60), and
+per-corpus largest 1.61), and
 [`bench/results/hash-quality-2026-09-16-arz-166ac74.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-16-arz-166ac74.txt)
 (the 4.0 hash with its derived fingerprint; the run before the fingerprint was derived is
 [`hash-quality-2026-09-16-arz-67650b3.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-quality-2026-09-16-arz-67650b3.txt),

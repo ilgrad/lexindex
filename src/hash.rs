@@ -8,49 +8,47 @@
 //! Both hashes read a key the same way — into a 128-bit [`state`] — and differ only in the
 //! constants they [`merge`] it with, so [`hash_pair_bytes`] reads the key once. A key of 4..=16
 //! bytes is two words from four overlapping 4-byte loads, 17..=32 bytes its first and last sixteen,
-//! and a longer key runs 32-byte blocks and then one round over what is left. Below 4 bytes, one
+//! and a longer key runs 32-byte blocks and then one round over its last 32 bytes. Below 4 bytes, one
 //! word holds a fan-out of them. No loop and no branch on the length inside a class, so a stream of
 //! keys in one class costs no branch mispredictions, where the hash 2.0–3.x shipped — one multiply
 //! per 8-byte word, in a loop, then a tail switch — lost 6 of its 9.5 ns to them.
 //!
 //! Two distinct keys share both hashes only if their states collide, or two different states merge
-//! alike: ≈ 2^-127 a pair of random keys. 4.x was at ≈ 2^-64 up to 16 bytes, where both hashes were
-//! functions of one folded product, and a birthday search on that product found a chosen pair in
-//! ≈ 2^32 steps (`DOUBLE_COLLIDING_PAIR`); above 32 bytes a zero factor erased the bytes beside it.
-//! What shapes the state, each point a collision found by trying the simpler form:
+//! alike. Keys independent in all their words do at ≈ 2^-127 a pair. Keys that differ in one half of
+//! a round only — a shared head and a short id, the usual URL or path — do at ≈ 2^-124: the round is
+//! then one [`protected`] product, which a test counts exactly at small word widths, 1.80 times a
+//! random function's rate at 8 bits and 3.21 at 16. That rises linearly with the width, to about 11
+//! at 64; the last step is an extrapolation. 4.x was at ≈ 2^-64 up to 16 bytes, where both hashes
+//! were functions of one folded product. What shapes the state:
 //!
-//! - **No product is folded before the merge.** A step that folds 128 free key bits to 64 collides
-//!   in 2^32 steps whatever its constants: hold the rest of the key still and search on it alone.
-//! - **Every word reaches two products.** An unfolded product can be refactored,
-//!   `x * y == (x / 3) * (y * 3)`, and two different products over four words leave one to vary
-//!   while the other stands still. A fifth word read by the third product alone gives the two others
-//!   a free compensation in it, and a 2-dimensional lattice then cancels their linear change.
-//! - **`r`'s factors are not a XOR of the words.** With `x = w0 ^ w2`, `y = w1 ^ w3`, swapping both
-//!   products' factors at once keeps `p`, `q` and `r`: `(X, Y, U, U ^ X ^ Y)` against
-//!   `(Y, X, U ^ X ^ Y, U)` under their masks collide for every `X`, `Y`, `U`, and a rotation only
-//!   moves it to low-weight factor pairs `(s, s + 1)`. A multiply by an odd constant turns such a
-//!   low-weight change into a word-wide one.
+//! - **No product is folded before the merge.** A round that folds each half of a block to 64 bits
+//!   leaves two keys sharing one half at 2^-64, no adversary needed, and a birthday search finds such
+//!   a pair among plain URLs in 2^33 steps (`ONE_HALF_PAIRS`).
+//! - **A change to either half moves both words of the state**, which is why a round sums one
+//!   product's low word with the other's high word, and XORs the two left over.
 //! - **`lo ^ hi` is `!0` for every product divisible by 2^64 − 1**, whatever the factors, and that
-//!   number has 128 divisors. An unfolded product has no such value: `x * y` is injective in `y` for
-//!   any `x != 0`.
-//! - **Text cannot spell a masked factor to zero**: the masks of `p` and `q` hold byte pairs no UTF-8
-//!   has, a test checks it. So the state enters only `r`, which [`protected`] keeps from losing it. A
-//!   crafted *byte* query can reach those zeros, and buys what any stranger's query can: a false
-//!   positive.
+//!   number has 128 divisors. An unfolded product has no such value.
+//! - **What a zero factor would erase comes back**: [`protected`] adds the factors in, because the
+//!   state enters a factor, and 4.x's keys spelled the state there to erase the next eight bytes.
+//!   Text cannot spell the masked factors to zero: their masks hold byte pairs no UTF-8 has, a test
+//!   checks it. A crafted *byte* query can, and buys what any stranger's query can: a false positive.
 //! - **One side of the state sums and the other XORs**, so that two equal products neither cancel
 //!   nor fold into 64 bits.
 //!
-//! This is no proof, and not a cryptographic hash. The rounds have algebra left in them; a search
-//! below the 2^64 of a birthday may exist, and none is known. Keys a third party chooses still
-//! belong in a `PerfectHashIndex` or an ordered index.
+//! This is no proof, and not a cryptographic hash. Up to 16 bytes no search for a pair is known below
+//! the 2^64 of a birthday. Above 16 bytes nothing here resists one: a change to one product can be
+//! paid for by the other, whose factors follow from factoring a 128-bit number, so a chosen pair
+//! must be assumed cheap, though none has been built. A third product over every word prices that
+//! higher, at up to 68 % of a lookup on long keys, which is why it is not here. Keys a third party
+//! chooses belong in a `PerfectHashIndex` or an ordered index.
 //!
 //! The constants are consecutive 64-bit words of π's fraction — nothing up the sleeve (PARI/GP:
 //! `frac(Pi)` scaled by 2^64, the first word `0x243F6A8885A308D3`) — keeping the odd ones with 27
 //! to 35 bits set. Different constants in every position matter: one mask for `p`'s and `q`'s factors
 //! would let a key swap the two products outright.
 
-/// The slot hash's constants: the masks of the factors of `p` and `q`, the merge's two, and the state
-/// at the start of a key.
+/// The slot hash's constants: the masks of the factors up to 16 bytes, those above it, the merge's two,
+/// and the state at the start of a key.
 const SLOT: [u64; 8] = [
     0x243f_6a88_85a3_08d3,
     0x082e_fa98_ec4e_6c89,
@@ -151,18 +149,18 @@ fn four_words(b: &[u8]) -> [u64; 4] {
     unsafe { [r8(b, 0), r8(b, 8), r8(b, n - 16), r8(b, n - 8)] }
 }
 
-/// The last product of a round and what it adds back, `(x * y + x, hi + y)`. At any fixed `y` this
-/// still holds `x` (at `y == 1`, all of it but the top bit), and at any fixed `x` holds `y`, where a
-/// plain product at a zero factor would lose the other. This is the one product whose factors a key
-/// can spell to zero, and the one that carries the state.
+/// A product and what it adds back, `(lo + x, hi + y)`. At any fixed `y` this still holds `x` (at
+/// `y == 1`, all of it but the top bit), and at any fixed `x` holds `y`, where a plain product at a
+/// zero factor would lose the other. It also collides less: counted at 16-bit words, 3.21 times a
+/// random function's rate, against 16.0 for the plain product.
 #[inline(always)]
 fn protected(x: u64, y: u64) -> (u64, u64) {
     let (lo, hi) = wide(x, y);
     (lo.wrapping_add(x), hi.wrapping_add(y))
 }
 
-/// Up to 16 bytes at the start of a key, where the state is a constant, nothing is there to lose,
-/// and the masks keep `x` and `y` of the two products apart.
+/// Up to 16 bytes, where the state is a constant, nothing is there to lose, and the masks keep the
+/// factors of the two products apart.
 #[inline(always)]
 fn round2(w: (u64, u64)) -> (u64, u64) {
     let (pl, ph) = wide(w.0 ^ SLOT[0], w.1 ^ SLOT[1]);
@@ -170,56 +168,35 @@ fn round2(w: (u64, u64)) -> (u64, u64) {
     (pl ^ rh, ph ^ rl)
 }
 
-/// [`round2`] with a state to keep: up to 16 bytes after other rounds.
-#[inline(always)]
-fn round2_chained(w: (u64, u64), s: (u64, u64)) -> (u64, u64) {
-    let (pl, ph) = wide(w.0 ^ SLOT[0], w.1 ^ SLOT[1]);
-    let (rl, rh) = protected(w.0 ^ s.1, w.1 ^ s.0);
-    (pl ^ rh, ph ^ rl)
-}
-
-/// Four words and a state into the next state: three products, every word in two of them. A change
-/// in the state is a change in a factor of `r`, kept by [`protected`], and to undo it a word has to
-/// move `p` or `q`, whose other factor text cannot zero.
+/// Four words and a state into the next state: two products left unfolded, one over each half of the
+/// block.
 #[inline(always)]
 fn round(w: [u64; 4], s: (u64, u64)) -> (u64, u64) {
-    let (u, v) = (w[2] ^ SLOT[2], w[3] ^ SLOT[3]);
-    let (x, y) = (
-        w[0] ^ u.wrapping_mul(SLOT[3]) ^ s.1,
-        w[1] ^ v.wrapping_mul(SLOT[2]) ^ s.0,
-    );
-    let (pl, ph) = wide(w[0] ^ SLOT[0], w[1] ^ SLOT[1]);
-    let (ql, qh) = wide(u, v);
-    let (a, c) = (pl.wrapping_add(qh), ph ^ ql);
-    let (rl, rh) = protected(x, y);
-    (a ^ rh, c.wrapping_add(rl))
+    let (pl, ph) = protected(w[0] ^ s.0, w[1] ^ SLOT[2]);
+    let (ql, qh) = protected(w[2] ^ s.1, w[3] ^ SLOT[3]);
+    (pl.wrapping_add(qh), ph ^ ql)
 }
 
-/// The 128-bit state of any key: one round to 32 bytes, or a round over each leading 32-byte block
-/// and one over what is left.
+/// The 128-bit state of any key: [`round2`] to 16 bytes, one [`round`] to 32, or a round over each
+/// leading 32-byte block and one over the last 32 bytes.
 #[inline(always)]
 fn state(b: &[u8]) -> (u64, u64) {
     let n = b.len();
-    if n > 32 {
-        let mut s = START;
-        let mut rest = b;
-        while rest.len() > 32 {
-            // SAFETY: rest holds more than 32 bytes, so every load below leaves eight.
-            let w = unsafe { [r8(rest, 0), r8(rest, 8), r8(rest, 16), r8(rest, 24)] };
-            s = round(w, s);
-            rest = &rest[32..];
-        }
-        return if rest.len() > 16 {
-            round(four_words(rest), s)
-        } else {
-            round2_chained(two_words(rest), s)
-        };
+    if n <= 16 {
+        return round2(two_words(b));
     }
-    if n > 16 {
-        round(four_words(b), START)
-    } else {
-        round2(two_words(b))
+    if n <= 32 {
+        return round(four_words(b), START);
     }
+    let mut s = START;
+    let mut rest = b;
+    while rest.len() > 32 {
+        // SAFETY: rest holds more than 32 bytes, so every load below leaves eight.
+        let w = unsafe { [r8(rest, 0), r8(rest, 8), r8(rest, 16), r8(rest, 24)] };
+        s = round(w, s);
+        rest = &rest[32..];
+    }
+    round(four_words(&b[n - 32..]), s)
 }
 
 /// The **slot** hash: what the perfect hash indexes by. Structured keys like `"key_0001"` differ
@@ -251,8 +228,8 @@ pub fn hash_key_bytes(b: &[u8]) -> u64 {
 ///
 /// Callers keep all 64 bits and truncate to the table width themselves; the collision side table
 /// stores the full value, so two distinct keys merge only when they collide in *both* 64-bit hashes
-/// at once — ~`2^-127` a pair of random keys of any length, not the `2^-(64+b)` a truncated side
-/// match would allow.
+/// at once — ~`2^-127` a pair of independent keys of any length, ~`2^-124` for keys that differ in one
+/// half of a round, not the `2^-(64+b)` a truncated side match would allow.
 #[inline]
 pub(crate) fn fingerprint_full(s: &str) -> u64 {
     fingerprint_full_bytes(s.as_bytes())
@@ -267,10 +244,10 @@ pub(crate) fn fingerprint_full_bytes(b: &[u8]) -> u64 {
 /// `(hash_key, fingerprint_full)`: the fingerprint is one more merge of the hash's own state, so it
 /// costs a multiply and a few additions over the hash, not a second pass over the key. The pair is
 /// a 128-bit function of the 128-bit state, on every path: two keys that agree on both hashes agree
-/// on the state, at `2^-128` a pair, or merged alike from two states, at `2^-128` too. Nothing here
-/// is a security primitive, but no search for such a pair is known below the 2^64 steps of a
-/// birthday. Every `CompactHashIndex` path needs both hashes; `PerfectHashIndex::build` keeps using
-/// [`hash_key`] alone, and `build_to_file` takes both, the second for its replay digest.
+/// on the state, or merged alike from two states, at `2^-128` a pair. The module's notes give the
+/// state's own rates. Nothing here is a security primitive. Every `CompactHashIndex` path needs both
+/// hashes; `PerfectHashIndex::build` keeps using [`hash_key`] alone, and `build_to_file` takes both,
+/// the second for its replay digest.
 #[inline]
 pub(crate) fn hash_pair(s: &str) -> (u64, u64) {
     hash_pair_bytes(s.as_bytes())
@@ -337,6 +314,21 @@ const ZERO_FACTOR_BYTES: [&str; 6] = [
     "AAAAAAAA", "victim01", "attacker", "zzzzzzzz", "12345678", "--------",
 ];
 
+/// Keys that differ in their last 16 bytes only, each pair equal in both hashes under a round that
+/// folds each half of a block to one 64-bit word: a birthday search on that word, Brent's over 16 hex
+/// characters, found them in 8.1·10⁹ and 4.4·10⁹ steps. That round was a candidate for 5.0.
+#[cfg(test)]
+const ONE_HALF_PAIRS: [(&str, &str); 2] = [
+    (
+        "https://example/c8a26416ff6d49be",
+        "https://example/d1af3e50091a8a11",
+    ),
+    (
+        "https://example.com/items/2026//e3dd0bf20d0db844",
+        "https://example.com/items/2026//67b5324e49543cf0",
+    ),
+];
+
 #[cfg(test)]
 mod golden {
     use super::{fingerprint_full, hash_key};
@@ -359,6 +351,38 @@ mod golden {
         assert_ne!(a, b);
         let ((ha, fa), (hb, fb)) = (super::hash_pair(a), super::hash_pair(b));
         assert!(ha != hb && fa != fb, "{a:?} {b:?}: {ha:#x} {fa:#x}");
+    }
+
+    #[test]
+    fn keys_that_differ_in_one_half_keep_both_hashes_apart() {
+        for (a, b) in super::ONE_HALF_PAIRS {
+            let ((ha, fa), (hb, fb)) = (super::hash_pair(a), super::hash_pair(b));
+            assert!(ha != hb && fa != fb, "{a:?} {b:?}: {ha:#x} {fa:#x}");
+        }
+    }
+
+    /// The rate the module's notes quote for a round whose other half stands still, against a random
+    /// function's, counted over every pair of factors at a small word width. PARI/GP agrees at 8 and
+    /// 10 bits; 3.21 at 16 and the extrapolation to 64 rest on the same count.
+    #[test]
+    fn a_protected_product_collides_a_few_times_oftener_than_a_random_function() {
+        for (w, want) in [(8u32, 1.8012), (10, 2.1764), (12, 2.526)] {
+            let (n, m) = (1u64 << w, (1u64 << w) - 1);
+            let mut seen = vec![0u32; 1 << (2 * w)];
+            for x in 0..n {
+                for y in 0..n {
+                    let (lo, hi) = ((x * y) & m, (x * y) >> w);
+                    seen[(((lo + x) & m) << w | ((hi + y) & m)) as usize] += 1;
+                }
+            }
+            let same: u64 = seen
+                .iter()
+                .map(|&c| c as u64 * (c as u64).saturating_sub(1))
+                .sum();
+            let pairs = n * n * (n * n - 1);
+            let rate = same as f64 / pairs as f64 * (n * n) as f64;
+            assert!((rate - want).abs() < 0.001, "w = {w}: {rate}");
+        }
     }
 
     /// Six keys that shared one `(hash, fingerprint)` under 4.x: their second block starts with
@@ -439,96 +463,47 @@ mod golden {
         }
     }
 
-    /// `p`, `q` and `r` each at a degenerate factor, over 32 bytes: the other words still reach
-    /// two products, so nothing they hold goes.
+    /// Every factor of a round at a degenerate value, over 32 bytes: the other word still reaches
+    /// the state.
     #[test]
     fn a_degenerate_factor_loses_nothing_up_to_32_bytes() {
         use super::{SLOT, START};
         for d in DEGENERATE {
-            let mut families: Vec<(&str, Vec<Vec<u8>>)> = Vec::new();
-            for &free in &[0x1111_1111_1111_1111u64, 0x2222_2222_2222_2222] {
-                let fixed = |w: [u64; 4]| key_of_words(&w);
-                families.push((
-                    "p first",
-                    others()
-                        .iter()
-                        .map(|&o| fixed([d ^ SLOT[0], o, free, free]))
-                        .collect(),
-                ));
-                families.push((
-                    "q second",
-                    others()
-                        .iter()
-                        .map(|&o| fixed([o, free, free, d ^ SLOT[3]]))
-                        .collect(),
-                ));
-                // The word that makes `x` the degenerate value, for each `w[2]`.
-                families.push((
-                    "r first",
-                    others()
-                        .iter()
-                        .map(|&o| {
-                            let u = o ^ SLOT[2];
-                            let w0 = d ^ u.wrapping_mul(SLOT[3]) ^ START.1;
-                            fixed([w0, free, o, free])
-                        })
-                        .collect(),
-                ));
-                // The word that makes `y` the degenerate value, for each `w[3]`.
-                families.push((
-                    "r second",
-                    others()
-                        .iter()
-                        .map(|&o| {
-                            let v = o ^ SLOT[3];
-                            let w1 = d ^ v.wrapping_mul(SLOT[2]) ^ START.0;
-                            fixed([free, w1, free, o])
-                        })
-                        .collect(),
-                ));
-            }
-            for (name, keys) in &families {
-                all_apart(&format!("{name} {d:#x}"), keys);
+            for free in [0x1111_1111_1111_1111u64, 0x2222_2222_2222_2222] {
+                let family = |name: &str, words: &dyn Fn(u64) -> [u64; 4]| {
+                    let keys: Vec<Vec<u8>> =
+                        others().iter().map(|&o| key_of_words(&words(o))).collect();
+                    all_apart(&format!("{name} {d:#x}"), &keys);
+                };
+                family("p first", &|o| [d ^ START.0, o, free, free]);
+                family("p second", &|o| [o, d ^ SLOT[2], free, free]);
+                family("q first", &|o| [free, free, d ^ START.1, o]);
+                family("q second", &|o| [free, free, o, d ^ SLOT[3]]);
             }
         }
     }
 
-    /// The state is what carries the earlier blocks, and `r` is the one product that reads it, so a
-    /// tail making one of `r`'s factors degenerate is the 4.x family again if that product loses
-    /// the other. Two states equal on the side that makes the factor, and apart on the other,
-    /// reading the same tail: reaching them through keys takes a 2^32 search, reaching them here
-    /// does not.
+    /// The state is what carries the earlier blocks, so a block whose words make a factor degenerate
+    /// is the 4.x family again if the round loses what the state holds. Two states apart in one word,
+    /// reading the same block: reaching them through keys takes a search, reaching them here does not.
     #[test]
     fn a_degenerate_factor_keeps_the_state() {
-        use super::{SLOT, round, round2_chained};
-        let word = 0x1234_5678_9abc_def0u64;
-        let (u, v) = (word ^ SLOT[2], word ^ SLOT[3]);
-        let (from_u, from_v) = (u.wrapping_mul(SLOT[3]), v.wrapping_mul(SLOT[2]));
+        use super::{SLOT, round};
+        let (word, fixed) = (0x1234_5678_9abc_def0u64, 0x5555_5555_5555_5555u64);
         for d in DEGENERATE {
             for other in others() {
                 let delta = (other >> 1).max(1);
                 let (one, two) = (other, other ^ delta);
-                // `x` is `d` under both states, and `y` differs. Then `y` is `d`, and `x` differs.
-                let x_side = (one, 0x5555_5555_5555_5555);
-                let w = [d ^ from_u ^ x_side.1, word, word, word];
-                let (s0, s1) = (x_side, (two, x_side.1));
-                assert_ne!(round(w, s0), round(w, s1), "x = {d:#x}, {delta:#x}");
-                let w = [d ^ x_side.1, word];
-                assert_ne!(
-                    round2_chained((w[0], w[1]), s0),
-                    round2_chained((w[0], w[1]), s1),
-                    "x = {d:#x}, {delta:#x}"
-                );
-                let y_side = (0x5555_5555_5555_5555, one);
-                let w = [word, d ^ from_v ^ y_side.0, word, word];
-                let (s0, s1) = (y_side, (y_side.0, two));
-                assert_ne!(round(w, s0), round(w, s1), "y = {d:#x}, {delta:#x}");
-                let w = (word, d ^ y_side.0);
-                assert_ne!(
-                    round2_chained(w, s0),
-                    round2_chained(w, s1),
-                    "y = {d:#x}, {delta:#x}"
-                );
+                // One product's first factor is `d` under both states, and the other's moves.
+                let w = [d ^ fixed, word, word, word];
+                assert_ne!(round(w, (fixed, one)), round(w, (fixed, two)), "{d:#x}");
+                let w = [word, word, d ^ fixed, word];
+                assert_ne!(round(w, (one, fixed)), round(w, (two, fixed)), "{d:#x}");
+                // A second factor is `d`, and the state moves the first.
+                let w = [word, d ^ SLOT[2], word, word];
+                assert_ne!(round(w, (one, fixed)), round(w, (two, fixed)), "{d:#x}");
+                let w = [word, word, word, d ^ SLOT[3]];
+                assert_ne!(round(w, (fixed, one)), round(w, (fixed, two)), "{d:#x}");
             }
         }
     }
@@ -559,7 +534,7 @@ mod golden {
         })
     }
 
-    /// What keeps a text key from zeroing `p` or `q`: the module's masks hold byte pairs no UTF-8
+    /// What keeps a text key from zeroing a masked factor: the module's masks hold byte pairs no UTF-8
     /// has. Above 16 bytes a word is 8 contiguous bytes of the key. Up to 16 it is two 4-byte
     /// loads from anywhere in it, so one half has to be unspellable by itself.
     #[test]
@@ -612,12 +587,12 @@ mod golden {
                 ("é中🎉", 0x46ee_c03e_55ae_12dc),
                 ("member-00042", 0xbafd_4268_35d7_41ba),
                 ("sixteen bytes!!!", 0x7a43_26ab_bbaa_d659),
-                ("a key of 17 bytes", 0x1ebf_7994_9833_2915),
-                ("thirty-two bytes, the class edge", 0xe971_4047_07ed_228a),
-                ("thirty-three bytes: one block in!", 0xa374_d354_e36d_2eab),
+                ("a key of 17 bytes", 0x3d70_7ffb_519a_d2c3),
+                ("thirty-two bytes, the class edge", 0xf69a_74bf_892e_4d12),
+                ("thirty-three bytes: one block in!", 0x0415_85b5_fa6f_3f0f),
                 (
                     "a key long enough for the block loop to run twice over it, and then some",
-                    0x6705_eccd_c7ee_c074,
+                    0x8f4b_bfec_6811_fed5,
                 ),
             ],
         );
@@ -633,11 +608,11 @@ mod golden {
                 ("apple", 0x8bd7_a46b_7637_3ea3),
                 ("é中🎉", 0x55ce_ae48_ee9d_43e5),
                 ("member-00042", 0x771b_93ab_2476_7e25),
-                ("a key of 17 bytes", 0x1456_53e5_d0ab_1564),
-                ("thirty-three bytes: one block in!", 0x9ffe_8533_f9e0_d0d6),
+                ("a key of 17 bytes", 0x18af_fa05_8814_1cbb),
+                ("thirty-three bytes: one block in!", 0x8606_576b_0a13_0d24),
                 (
                     "a key long enough for the block loop to run twice over it, and then some",
-                    0x2042_371b_af9a_45e0,
+                    0x0ffe_4796_a12a_b92c,
                 ),
             ],
         );

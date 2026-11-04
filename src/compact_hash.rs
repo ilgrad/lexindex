@@ -943,10 +943,10 @@ impl CompactHashIndex {
     /// 16 bits, 29.9 at 32 (`examples/peak.rs`, real-word bigrams). Both hashes are kept at their full 64 bits here
     /// regardless of `fingerprint_bits` (the width only governs what the fingerprint *table*
     /// stores), so the one thing the build cannot tell from a duplicate is two *distinct* keys
-    /// colliding in **both** 64-bit hashes at once: they get one id. For random keys of any length
-    /// that is `≈ 2^-127` a pair — an expected 2.9·10⁻²¹ merges among 10⁹ keys. No search for such a
-    /// pair is known below the ~2^64 steps of a birthday; that is no proof, since the hash is not
-    /// cryptographic, so over keys a third party submits use
+    /// colliding in **both** 64-bit hashes at once: they get one id. For ordinary keys of any length
+    /// that is `≈ 2^-124` a pair at worst — an expected 1.8·10⁻²⁰ merges among 10⁹ keys. Above 16
+    /// bytes a chosen pair must be assumed cheap, since the hash is not cryptographic, so over keys a
+    /// third party submits use
     /// [`PerfectHashIndex`](crate::PerfectHashIndex), which stores them.
     /// Keys colliding in the slot hash alone are served exactly, from a side table keyed by the
     /// full second hash.

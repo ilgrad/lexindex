@@ -101,12 +101,22 @@ Keys that collide in the 64-bit hash get tail ids in a side table (see
 so the fingerprint setting never decides whether two colliding keys stay distinct, and the side probe
 runs *before* the fingerprint table (a side key's truncated bits may tie its representative's). The
 one silent case left is a pair colliding in *both* 64-bit hashes at once, which is indistinguishable
-from a duplicate key by construction and collapses into one entry. For random keys of any length
-that is `≈ 2^-127` a pair: an expected 2.9·10⁻²¹ merges among 10⁹ keys (`n(n-1)/2 · 2^-127`, Maxima and
-PARI/GP agreeing). Both hashes merge one 128-bit state, two products unfolded up to 16 bytes and three
-per 32-byte block above. No search for such a pair is known below the 2^64 steps of a birthday.
-That is the end of a known attack, not a proof: the hash is not cryptographic, and its rounds keep
-some algebra. Through 4.x it was cheaper: up to 16 bytes both hashes were functions of one 64-bit
+from a duplicate key by construction and collapses into one entry. Both hashes merge one 128-bit
+state, two products unfolded up to 16 bytes and two per 32-byte block above. For keys independent in
+all their words that is `≈ 2^-127` a pair: an expected 2.9·10⁻²¹ merges among 10⁹ keys
+(`n(n-1)/2 · 2^-127`, Maxima and PARI/GP agreeing). Keys that differ in one half of a block, a shared
+head and a short id, reach one product only, which collides more often than a random function:
+counting every pair of factors at 8, 10, 12, 14 and 16-bit words gives 1.80, 2.18, 2.53, 2.87 and 3.21
+times its rate, rising linearly to about 11 at 64 bits. That last step is an extrapolation. It gives
+`≈ 2^-124` a pair, 1.8·10⁻²⁰ merges among 10⁹ such keys. A cheaper round folding each half to 64 bits
+was rejected on this: `https://example/c8a26416ff6d49be` and `https://example/d1af3e50091a8a11`
+are equal in both of its hashes, and its rate on such keys is `2^-64`, 0.027 merges among 10⁹.
+Up to 16 bytes no search for a chosen pair is known below the 2^64 steps of a birthday. Above 16 bytes
+a change to one product can be paid for by the other, so a chosen pair must be assumed cheap, though
+none has been built. A third product over every word prices it higher and costs up to 68 % of a
+lookup on long keys, against 4.x on the same machine, where this round's worst is 37 %
+([`bench/results/hash-forms-2026-11-04-arz-8ca5a3c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-forms-2026-11-04-arz-8ca5a3c.txt)).
+Through 4.x it was cheaper at every length: up to 16 bytes both hashes were functions of one 64-bit
 product and the length, `≈ 2^-64` a pair of one length, and a birthday search found two 16-byte
 keys equal in both in 3.7·10⁹ steps on one core; from 97 bytes a block that started with the lane
 state zeroed a product, so the next eight bytes reached neither hash.

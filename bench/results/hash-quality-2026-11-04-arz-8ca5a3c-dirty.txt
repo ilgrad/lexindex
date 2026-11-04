@@ -1,8 +1,8 @@
 # cargo test --release --features bench-mphf -- --ignored --nocapture hash_quality
-# lexindex 4.5.3 tree on branch v5-hash over bccbf24, working tree of the commit that adds this file,
-# 2026-11-02, arz (Ryzen 7 5800HS, Zen 3), rustc 1.99.1
+# lexindex 4.5.3 tree on branch rel5-merge over 8ca5a3c, working tree of the commit that adds this file,
+# 2026-11-04, arz (Ryzen 7 5800HS, Zen 3), rustc 1.99.1
 #
-# The hash 5.0 ships: a 128-bit state, two unfolded products to 16 bytes, three per 32-byte block
+# The hash 5.0 ships: a 128-bit state, two unfolded products to 16 bytes, two per 32-byte block
 # above, merged by a folded product with its operands added back (src/hash.rs). Same battery, cell
 # counts and bound as the 2026-09-16 runs over the 4.0 hash.
 #
@@ -16,25 +16,25 @@ lexindex hash quality — bound |z| < 6.5
 corpus source: /usr/share/dict/words plus generated families
 
 avalanche (strict, 8192 keys per cell, 5 lengths, both hashes)
-  worst |z|   4.26   fingerprint len 24 in-bit 106 out-bit 30
+  worst |z|   4.53   fingerprint len 24 in-bit 23 out-bit 35
 
 bit independence (2048 keys, lengths 8/16/24/80, both hashes, ≤128 input bits each)
-  worst |z|   5.15   fingerprint len 80 in-bit 559 out-bits (43,58)
+  worst |z|   4.82   fingerprint len 24 in-bit 28 out-bits (33,39)
 
 two-byte differential (24-byte keys, 2048 bases per combo)
   17664 combos, worst double collision 0/2048   none
 
 per corpus (n = 100 000 where the family allows it)
   family           n   coll   z top12   z low12     z fp8   z joint
-  words       100000      0      1.62     -0.07     -0.80     -0.20
-  bigrams     100000      0     -0.16      1.06      0.91      0.33
-  prefixed    100000      0     -0.22     -0.61      1.43     -0.80
-  suffixed    100000      0      0.53      2.60      0.03      1.16
-  paths       100000      0     -0.31     -0.26     -0.17     -0.31
+  words       100000      0      1.40     -0.52     -1.10     -0.05
+  bigrams     100000      0      1.16     -1.33      1.06      0.34
+  prefixed    100000      0      0.19      0.27      1.50      0.29
+  suffixed    100000      0     -1.61     -1.45      1.60     -0.90
+  paths       100000      0     -1.25      0.86      0.20     -1.10
   numeric     100000      0      0.18      0.10     -0.20     -0.48
   decimal     100000      0      0.82      0.15      0.11      1.23
-  uuid        100000      0     -0.21     -0.11     -0.60     -1.31
+  uuid        100000      0     -0.78      0.56      0.47     -0.99
   cyrillic    100000      0     -0.13     -0.77     -0.61      0.77
-  dna         100000      0     -0.33     -1.36      1.28     -0.55
+  dna         100000      0      0.05      0.47      0.42      0.05
 
 all cells within the bound

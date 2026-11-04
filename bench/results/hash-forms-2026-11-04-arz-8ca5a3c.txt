@@ -1,0 +1,1381 @@
+# local/w1b/campaign.sh hash5: the forms of 5.0's key hash above 16 bytes, over 8ca5a3c, 2026-11-04,
+# arz (Ryzen 7 5800HS, Zen 3), governor performance, one core. Each process builds every form and
+# alternates them, `1` and `2` being two instances of a form; `row` gives minimum, median, then the
+# five rounds. 4x = the 4.x hash. v5o = three products per block, every word in two. hy = each half
+# folded to one 64-bit word. hu = two products unfolded, what 5.0 ships.
+## hash5/paths-1000000/closed [16:07:20 40000mC busy=3 swap=0MiB governor=performance]
+# paths-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg paths-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216682 bytes, 0.2408 B/key, magic BCL2
+hg paths-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216332 bytes, 0.2404 B/key, magic BCL3
+hg paths-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 216681 bytes, 0.2408 B/key, magic BCL3
+hg paths-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 216600 bytes, 0.2407 B/key, magic BCL3
+row paths-1000000 closed hit 4x 1 59.34 59.37 ns [59.39 59.34 59.40 59.35 59.37]
+row paths-1000000 closed hit v5o 1 99.32 99.54 ns [99.54 99.32 99.55 99.54 99.34]
+row paths-1000000 closed hit hy 1 73.90 73.98 ns [73.98 74.52 73.90 73.98 73.97]
+row paths-1000000 closed hit hu 1 73.87 73.91 ns [73.96 73.87 73.91 74.76 73.91]
+row paths-1000000 closed hit hu 2 73.88 73.97 ns [74.03 73.88 73.97 73.91 74.49]
+row paths-1000000 closed hit hy 2 73.84 73.95 ns [73.96 73.95 74.25 73.84 73.88]
+row paths-1000000 closed hit v5o 2 99.27 99.37 ns [99.37 99.82 99.37 99.38 99.27]
+row paths-1000000 closed hit 4x 2 59.24 59.31 ns [59.32 59.29 59.24 59.37 59.31]
+row paths-1000000 closed hit hashmap ctl 176.39 176.54 ns [176.54 177.24 176.46 176.39 177.06]
+row paths-1000000 closed chain 4x 1 201.18 201.39 ns [201.39 205.07 201.26 201.18 201.47]
+row paths-1000000 closed chain v5o 1 207.39 207.53 ns [207.86 207.42 207.53 207.39 208.00]
+row paths-1000000 closed chain hy 1 206.47 206.59 ns [207.50 206.58 206.47 207.07 206.59]
+row paths-1000000 closed chain hu 1 204.78 205.11 ns [205.06 207.74 208.66 204.78 205.11]
+row paths-1000000 closed chain hu 2 204.30 204.52 ns [204.34 204.55 204.52 204.85 204.30]
+row paths-1000000 closed chain hy 2 205.94 206.49 ns [206.49 205.94 206.31 209.08 206.53]
+row paths-1000000 closed chain v5o 2 206.95 207.36 ns [207.36 206.95 207.08 207.42 207.72]
+row paths-1000000 closed chain 4x 2 201.13 201.39 ns [201.28 201.13 201.39 201.68 201.51]
+row paths-1000000 closed chain hashmap ctl 176.58 176.59 ns [176.74 176.58 176.70 176.58 176.59]
+row paths-1000000 closed batch 4x 1 39.22 39.26 ns [39.28 39.26 39.22 39.27 39.26]
+row paths-1000000 closed batch v5o 1 55.40 55.44 ns [55.44 55.50 55.40 55.40 55.55]
+row paths-1000000 closed batch hy 1 46.06 46.12 ns [46.06 46.22 46.26 46.09 46.12]
+row paths-1000000 closed batch hu 1 44.92 45.06 ns [44.92 45.18 45.02 45.06 45.08]
+row paths-1000000 closed batch hu 2 44.93 44.97 ns [45.00 44.97 45.06 44.93 44.95]
+row paths-1000000 closed batch hy 2 46.07 46.20 ns [46.23 46.19 46.07 46.38 46.20]
+row paths-1000000 closed batch v5o 2 55.40 55.44 ns [55.45 55.42 55.40 55.44 55.49]
+row paths-1000000 closed batch 4x 2 39.23 39.31 ns [39.39 39.31 39.33 39.23 39.29]
+## hash5/paths-1000000/compact [16:07:50 57000mC busy=4 swap=0MiB governor=performance]
+# paths-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg paths-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116686 bytes, 1.2408 B/key, magic BCH8
+hg paths-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116336 bytes, 1.2404 B/key, magic BCH9
+hg paths-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1116685 bytes, 1.2408 B/key, magic BCH9
+hg paths-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1116604 bytes, 1.2407 B/key, magic BCH9
+row paths-1000000 compact hit 4x 1 69.83 69.96 ns [69.83 69.96 69.93 70.16 70.02]
+row paths-1000000 compact hit v5o 1 108.73 108.75 ns [109.13 108.74 108.77 108.73 108.75]
+row paths-1000000 compact hit hy 1 92.25 92.29 ns [92.29 92.34 92.29 92.25 92.31]
+row paths-1000000 compact hit hu 1 89.79 89.85 ns [89.79 89.94 89.85 89.84 89.87]
+row paths-1000000 compact hit hu 2 89.64 89.67 ns [89.70 89.88 89.65 89.64 89.67]
+row paths-1000000 compact hit hy 2 92.25 92.34 ns [92.34 92.25 92.37 92.33 93.29]
+row paths-1000000 compact hit v5o 2 108.67 108.89 ns [108.67 108.89 109.05 108.78 109.51]
+row paths-1000000 compact hit 4x 2 70.02 70.06 ns [70.02 70.08 70.06 70.25 70.05]
+row paths-1000000 compact hit hashmap ctl 176.71 176.93 ns [176.77 176.71 176.93 176.99 177.32]
+row paths-1000000 compact miss 4x 1 62.51 62.78 ns [69.12 62.53 62.78 62.51 63.34]
+row paths-1000000 compact miss v5o 1 92.01 92.53 ns [105.23 92.39 92.01 92.53 93.16]
+row paths-1000000 compact miss hy 1 78.84 79.39 ns [87.66 79.39 79.40 78.84 79.34]
+row paths-1000000 compact miss hu 1 75.46 76.02 ns [82.22 76.02 77.13 75.46 75.90]
+row paths-1000000 compact miss hu 2 75.18 75.93 ns [79.78 76.26 75.93 75.89 75.18]
+row paths-1000000 compact miss hy 2 78.96 79.09 ns [82.17 80.07 79.09 79.04 78.96]
+row paths-1000000 compact miss v5o 2 91.60 92.63 ns [95.27 93.20 92.10 91.60 92.63]
+row paths-1000000 compact miss 4x 2 62.64 62.89 ns [63.70 63.62 62.64 62.89 62.67]
+row paths-1000000 compact miss hashmap ctl 137.98 138.35 ns [140.04 138.35 138.47 137.98 138.12]
+row paths-1000000 compact chain 4x 1 215.81 220.59 ns [222.41 215.81 220.59 220.18 220.77]
+row paths-1000000 compact chain v5o 1 223.55 228.77 ns [229.38 223.55 228.77 223.58 229.21]
+row paths-1000000 compact chain hy 1 217.13 217.91 ns [224.02 217.82 217.13 217.91 218.26]
+row paths-1000000 compact chain hu 1 214.91 215.95 ns [221.60 215.19 216.82 215.95 214.91]
+row paths-1000000 compact chain hu 2 214.45 214.74 ns [215.52 215.00 214.74 214.55 214.45]
+row paths-1000000 compact chain hy 2 217.21 217.24 ns [217.21 217.53 217.21 217.31 217.24]
+row paths-1000000 compact chain v5o 2 223.34 224.18 ns [223.34 228.70 224.18 227.52 223.57]
+row paths-1000000 compact chain 4x 2 215.61 216.42 ns [215.90 221.66 215.61 221.80 216.42]
+row paths-1000000 compact chain hashmap ctl 176.86 176.91 ns [176.89 176.91 176.86 176.95 177.01]
+row paths-1000000 compact batch 4x 1 58.42 58.91 ns [58.42 58.99 58.89 59.59 58.91]
+row paths-1000000 compact batch v5o 1 76.19 76.26 ns [77.14 76.26 76.19 76.59 76.26]
+row paths-1000000 compact batch hy 1 64.20 64.49 ns [64.20 64.64 64.53 64.49 64.44]
+row paths-1000000 compact batch hu 1 62.88 63.09 ns [62.88 63.38 63.13 63.09 63.05]
+row paths-1000000 compact batch hu 2 63.00 63.16 ns [63.00 63.44 63.16 63.24 63.15]
+row paths-1000000 compact batch hy 2 64.40 64.54 ns [64.40 64.71 64.50 64.54 64.56]
+row paths-1000000 compact batch v5o 2 76.06 76.27 ns [77.12 76.32 76.26 76.27 76.06]
+row paths-1000000 compact batch 4x 2 58.83 59.00 ns [59.14 58.83 59.00 58.99 59.02]
+## hash5/paths-1000000/hashed [16:08:25 60000mC busy=2 swap=0MiB governor=performance]
+# paths-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg paths-1000000 hashed 4x mappings=2 rss_kb=11228 huge_kb=8192 coverage=73.0% thp_fault_alloc=+4 thp_fault_fallback=+0
+# 4x blob 12407599 bytes, 13.7862 B/key, magic BHD1
+hg paths-1000000 hashed v5o mappings=3 rss_kb=19376 huge_kb=14336 coverage=74.0% thp_fault_alloc=+4 thp_fault_fallback=+0
+# v5o blob 12407249 bytes, 13.7858 B/key, magic BHD2
+hg paths-1000000 hashed hy mappings=3 rss_kb=19376 huge_kb=14336 coverage=74.0% thp_fault_alloc=+4 thp_fault_fallback=+0
+# hy blob 12407598 bytes, 13.7862 B/key, magic BHD2
+hg paths-1000000 hashed hu mappings=4 rss_kb=27524 huge_kb=20480 coverage=74.4% thp_fault_alloc=+4 thp_fault_fallback=+0
+# hu blob 12407517 bytes, 13.7861 B/key, magic BHD2
+row paths-1000000 hashed hit 4x 1 91.01 91.07 ns [91.01 91.07 91.07 93.57 91.02]
+row paths-1000000 hashed hit v5o 1 115.08 115.16 ns [115.41 115.16 115.08 115.13 115.27]
+row paths-1000000 hashed hit hy 1 113.26 113.38 ns [113.29 113.39 113.43 113.26 113.38]
+row paths-1000000 hashed hit hu 1 107.29 107.49 ns [107.49 107.74 107.29 107.43 107.50]
+row paths-1000000 hashed hit hu 2 107.36 107.50 ns [107.50 107.54 107.55 107.48 107.36]
+row paths-1000000 hashed hit hy 2 113.24 113.32 ns [113.42 113.24 113.30 113.32 113.54]
+row paths-1000000 hashed hit v5o 2 115.04 115.17 ns [115.04 115.17 115.25 115.42 115.15]
+row paths-1000000 hashed hit 4x 2 90.96 91.10 ns [91.10 90.96 91.23 91.57 90.98]
+row paths-1000000 hashed hit hashmap ctl 176.35 176.54 ns [177.94 176.47 176.35 176.57 176.54]
+row paths-1000000 hashed miss 4x 1 88.86 89.57 ns [90.33 90.81 89.57 88.97 88.86]
+row paths-1000000 hashed miss v5o 1 109.66 110.41 ns [113.64 111.42 110.41 110.24 109.66]
+row paths-1000000 hashed miss hy 1 106.33 108.71 ns [112.41 109.10 108.71 106.33 106.44]
+row paths-1000000 hashed miss hu 1 101.27 102.23 ns [106.12 102.23 103.99 101.53 101.27]
+row paths-1000000 hashed miss hu 2 100.90 102.70 ns [105.03 102.70 103.37 101.66 100.90]
+row paths-1000000 hashed miss hy 2 105.50 107.08 ns [109.12 109.46 107.08 106.46 105.50]
+row paths-1000000 hashed miss v5o 2 109.67 110.44 ns [111.97 110.79 110.44 109.67 110.00]
+row paths-1000000 hashed miss 4x 2 89.07 89.81 ns [89.81 89.15 90.71 89.07 89.83]
+row paths-1000000 hashed miss hashmap ctl 138.81 140.30 ns [146.56 144.39 140.30 139.52 138.81]
+row paths-1000000 hashed chain 4x 1 225.83 227.75 ns [237.30 225.92 227.75 225.83 234.12]
+row paths-1000000 hashed chain v5o 1 235.30 244.03 ns [244.05 235.43 244.30 235.30 244.03]
+row paths-1000000 hashed chain hy 1 225.57 235.33 ns [235.53 225.57 235.33 225.66 235.85]
+row paths-1000000 hashed chain hu 1 229.29 238.27 ns [238.95 229.29 238.27 237.97 239.33]
+row paths-1000000 hashed chain hu 2 229.35 230.70 ns [238.05 230.70 229.35 238.20 229.66]
+row paths-1000000 hashed chain hy 2 226.20 227.63 ns [232.62 226.20 227.63 239.07 226.76]
+row paths-1000000 hashed chain v5o 2 234.92 236.56 ns [242.07 236.56 235.97 244.11 234.92]
+row paths-1000000 hashed chain 4x 2 225.24 225.79 ns [225.79 225.24 225.28 232.51 226.16]
+row paths-1000000 hashed chain hashmap ctl 176.44 176.57 ns [176.57 176.56 176.44 176.64 176.81]
+row paths-1000000 hashed batch 4x 1 46.93 47.08 ns [46.93 47.30 47.07 47.08 47.09]
+row paths-1000000 hashed batch v5o 1 65.11 65.29 ns [65.11 65.35 65.18 65.29 65.40]
+row paths-1000000 hashed batch hy 1 52.33 52.37 ns [52.37 52.33 52.40 52.36 52.50]
+row paths-1000000 hashed batch hu 1 51.11 51.17 ns [51.17 51.15 51.23 51.11 51.33]
+row paths-1000000 hashed batch hu 2 51.18 51.24 ns [51.18 51.19 51.24 51.25 51.35]
+row paths-1000000 hashed batch hy 2 52.32 52.37 ns [52.37 52.45 52.40 52.32 52.32]
+row paths-1000000 hashed batch v5o 2 65.09 65.15 ns [65.17 65.40 65.09 65.15 65.14]
+row paths-1000000 hashed batch 4x 2 46.95 47.07 ns [47.10 46.95 47.10 46.95 47.07]
+## hash5/paths-1000000/perfect [16:09:12 60000mC busy=2 swap=0MiB governor=performance]
+# paths-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg paths-1000000 perfect 4x mappings=1 rss_kb=108664 huge_kb=108544 coverage=99.9% thp_fault_alloc=+53 thp_fault_fallback=+0
+# 4x blob 111488408 bytes, 123.8760 B/key, magic BMP8
+hg paths-1000000 perfect v5o mappings=1 rss_kb=108664 huge_kb=108544 coverage=99.9% thp_fault_alloc=+53 thp_fault_fallback=+0
+# v5o blob 111488058 bytes, 123.8756 B/key, magic BMP9
+hg paths-1000000 perfect hy mappings=1 rss_kb=108664 huge_kb=108544 coverage=99.9% thp_fault_alloc=+53 thp_fault_fallback=+0
+# hy blob 111488407 bytes, 123.8760 B/key, magic BMP9
+hg paths-1000000 perfect hu mappings=1 rss_kb=108664 huge_kb=108544 coverage=99.9% thp_fault_alloc=+53 thp_fault_fallback=+0
+# hu blob 111488326 bytes, 123.8759 B/key, magic BMP9
+place paths-1000000 perfect 4x 1 bytes=111488408 random1=10.59ns random8=3.40ns seq8=23.0GB/s
+place paths-1000000 perfect 4x 2 bytes=111488408 random1=10.96ns random8=3.19ns seq8=23.2GB/s
+place paths-1000000 perfect v5o 1 bytes=111488058 random1=10.82ns random8=3.11ns seq8=23.4GB/s
+place paths-1000000 perfect v5o 2 bytes=111488058 random1=10.78ns random8=3.23ns seq8=23.1GB/s
+place paths-1000000 perfect hy 1 bytes=111488407 random1=10.88ns random8=3.23ns seq8=23.4GB/s
+place paths-1000000 perfect hy 2 bytes=111488407 random1=10.95ns random8=3.38ns seq8=22.8GB/s
+place paths-1000000 perfect hu 1 bytes=111488326 random1=10.72ns random8=3.65ns seq8=22.9GB/s
+place paths-1000000 perfect hu 2 bytes=111488326 random1=10.81ns random8=3.30ns seq8=21.7GB/s
+row paths-1000000 perfect hit 4x 1 146.08 146.22 ns [154.92 146.11 146.25 146.22 146.08]
+row paths-1000000 perfect hit v5o 1 169.09 169.29 ns [172.33 169.32 169.29 169.09 169.20]
+row paths-1000000 perfect hit hy 1 162.58 162.66 ns [163.27 162.66 162.58 168.35 162.61]
+row paths-1000000 perfect hit hu 1 153.01 153.42 ns [153.44 160.17 153.01 153.27 153.42]
+row paths-1000000 perfect hit hu 2 153.59 153.87 ns [153.82 153.87 153.98 153.59 158.67]
+row paths-1000000 perfect hit hy 2 162.32 162.79 ns [162.79 162.32 162.52 162.80 165.40]
+row paths-1000000 perfect hit v5o 2 168.36 168.74 ns [171.00 168.74 168.74 172.27 168.36]
+row paths-1000000 perfect hit 4x 2 145.48 145.62 ns [145.62 145.48 145.75 146.28 145.55]
+row paths-1000000 perfect hit hashmap ctl 176.65 176.78 ns [176.71 176.86 176.65 177.02 176.78]
+row paths-1000000 perfect miss 4x 1 83.91 84.68 ns [84.68 83.91 84.06 88.49 85.84]
+row paths-1000000 perfect miss v5o 1 112.70 113.69 ns [115.81 113.09 112.70 114.12 113.69]
+row paths-1000000 perfect miss hy 1 100.90 101.28 ns [104.65 101.28 100.90 101.01 101.82]
+row paths-1000000 perfect miss hu 1 100.13 100.68 ns [100.76 101.37 100.51 100.13 100.68]
+row paths-1000000 perfect miss hu 2 100.51 101.01 ns [101.01 102.04 100.58 100.51 108.43]
+row paths-1000000 perfect miss hy 2 101.18 102.16 ns [103.64 102.16 101.38 101.18 104.34]
+row paths-1000000 perfect miss v5o 2 112.33 113.90 ns [113.05 114.12 112.33 118.84 113.90]
+row paths-1000000 perfect miss 4x 2 81.48 83.94 ns [81.48 83.94 83.34 91.40 84.17]
+row paths-1000000 perfect miss hashmap ctl 140.39 141.45 ns [145.78 140.39 141.27 148.04 141.45]
+row paths-1000000 perfect chain 4x 1 226.17 226.47 ns [228.20 226.36 226.17 227.06 226.47]
+row paths-1000000 perfect chain v5o 1 238.23 238.54 ns [238.54 238.23 239.08 238.55 238.25]
+row paths-1000000 perfect chain hy 1 228.08 228.22 ns [228.08 228.15 228.41 228.22 228.92]
+row paths-1000000 perfect chain hu 1 226.98 227.22 ns [226.98 227.42 227.13 227.22 227.28]
+row paths-1000000 perfect chain hu 2 228.12 228.97 ns [228.12 228.98 228.64 228.97 229.12]
+row paths-1000000 perfect chain hy 2 227.80 228.11 ns [227.88 229.57 228.53 227.80 228.11]
+row paths-1000000 perfect chain v5o 2 237.28 237.41 ns [237.67 237.41 237.28 237.35 237.67]
+row paths-1000000 perfect chain 4x 2 225.08 225.50 ns [225.50 225.83 228.85 225.08 225.44]
+row paths-1000000 perfect chain hashmap ctl 176.62 176.75 ns [176.75 176.75 176.66 177.04 176.62]
+row paths-1000000 perfect batch 4x 1 75.98 86.10 ns [75.98 86.16 86.10 85.98 86.34]
+row paths-1000000 perfect batch v5o 1 92.06 92.14 ns [92.14 92.13 92.06 92.17 92.16]
+row paths-1000000 perfect batch hy 1 86.20 86.42 ns [86.42 86.28 86.63 86.20 86.57]
+row paths-1000000 perfect batch hu 1 86.92 86.98 ns [86.95 87.02 86.98 86.92 87.14]
+row paths-1000000 perfect batch hu 2 86.98 87.16 ns [86.98 87.16 87.04 87.36 87.28]
+row paths-1000000 perfect batch hy 2 86.21 86.39 ns [86.21 86.34 86.39 86.49 86.54]
+row paths-1000000 perfect batch v5o 2 91.86 92.07 ns [92.00 91.86 92.10 92.07 92.35]
+row paths-1000000 perfect batch 4x 2 85.85 86.00 ns [85.85 86.07 85.91 86.00 86.04]
+## hash5/urls-1000000/closed [16:10:00 65000mC busy=4 swap=0MiB governor=performance]
+# urls-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg urls-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216364 bytes, 0.2404 B/key, magic BCL2
+hg urls-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216569 bytes, 0.2406 B/key, magic BCL3
+hg urls-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 216621 bytes, 0.2407 B/key, magic BCL3
+hg urls-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 217250 bytes, 0.2414 B/key, magic BCL3
+row urls-1000000 closed hit 4x 1 39.26 39.39 ns [39.62 39.26 39.67 39.39 39.34]
+row urls-1000000 closed hit v5o 1 56.31 56.66 ns [56.66 56.67 56.31 57.55 56.41]
+row urls-1000000 closed hit hy 1 49.33 49.56 ns [50.53 49.86 49.56 49.43 49.33]
+row urls-1000000 closed hit hu 1 49.95 50.47 ns [51.89 50.67 50.47 49.95 50.36]
+row urls-1000000 closed hit hu 2 50.45 50.47 ns [51.28 50.47 50.52 50.45 50.46]
+row urls-1000000 closed hit hy 2 49.45 49.50 ns [50.55 49.50 51.09 49.50 49.45]
+row urls-1000000 closed hit v5o 2 56.32 56.39 ns [56.39 56.34 56.79 56.40 56.32]
+row urls-1000000 closed hit 4x 2 39.23 39.33 ns [39.31 39.78 39.33 39.62 39.23]
+row urls-1000000 closed hit hashmap ctl 147.91 147.99 ns [148.38 147.99 147.91 147.91 148.04]
+row urls-1000000 closed chain 4x 1 155.04 161.13 ns [155.04 161.13 161.31 161.57 161.02]
+row urls-1000000 closed chain v5o 1 163.01 164.47 ns [163.01 164.87 164.47 163.98 165.32]
+row urls-1000000 closed chain hy 1 160.59 160.62 ns [161.28 160.61 161.03 160.62 160.59]
+row urls-1000000 closed chain hu 1 161.91 162.30 ns [163.37 162.30 161.91 162.34 162.02]
+row urls-1000000 closed chain hu 2 161.91 162.24 ns [162.24 162.32 162.08 162.53 161.91]
+row urls-1000000 closed chain hy 2 160.88 160.95 ns [160.95 161.90 161.39 160.90 160.88]
+row urls-1000000 closed chain v5o 2 163.83 164.28 ns [163.86 164.28 163.83 164.29 165.16]
+row urls-1000000 closed chain 4x 2 159.82 160.19 ns [160.22 160.83 159.82 159.98 160.19]
+row urls-1000000 closed chain hashmap ctl 149.12 149.19 ns [149.33 149.17 149.20 149.19 149.12]
+row urls-1000000 closed batch 4x 1 14.96 15.10 ns [15.30 15.28 15.10 14.96 15.10]
+row urls-1000000 closed batch v5o 1 15.17 15.41 ns [15.44 15.48 15.22 15.17 15.41]
+row urls-1000000 closed batch hy 1 14.30 14.64 ns [14.73 14.64 14.64 14.42 14.30]
+row urls-1000000 closed batch hu 1 14.45 14.82 ns [14.84 14.92 14.79 14.82 14.45]
+row urls-1000000 closed batch hu 2 14.60 14.85 ns [14.86 14.85 14.84 14.86 14.60]
+row urls-1000000 closed batch hy 2 14.47 14.63 ns [14.74 14.63 14.75 14.53 14.47]
+row urls-1000000 closed batch v5o 2 15.37 15.48 ns [15.48 15.50 15.75 15.43 15.37]
+row urls-1000000 closed batch 4x 2 15.00 15.09 ns [15.30 15.32 15.08 15.00 15.09]
+## hash5/urls-1000000/compact [16:10:22 64000mC busy=0 swap=0MiB governor=performance]
+# urls-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg urls-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116368 bytes, 1.2404 B/key, magic BCH8
+hg urls-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116573 bytes, 1.2406 B/key, magic BCH9
+hg urls-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1116625 bytes, 1.2407 B/key, magic BCH9
+hg urls-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1117254 bytes, 1.2414 B/key, magic BCH9
+row urls-1000000 compact hit 4x 1 53.64 53.73 ns [53.64 53.71 53.73 53.77 54.80]
+row urls-1000000 compact hit v5o 1 68.19 68.28 ns [68.19 68.27 68.28 68.37 68.29]
+row urls-1000000 compact hit hy 1 57.34 57.42 ns [58.69 57.34 57.42 57.53 57.39]
+row urls-1000000 compact hit hu 1 57.25 57.31 ns [57.37 57.31 57.35 57.25 57.29]
+row urls-1000000 compact hit hu 2 57.15 57.17 ns [57.19 57.17 57.29 57.15 57.16]
+row urls-1000000 compact hit hy 2 57.35 57.39 ns [57.35 57.39 57.51 57.41 57.37]
+row urls-1000000 compact hit v5o 2 68.26 68.34 ns [68.26 68.66 68.31 68.35 68.34]
+row urls-1000000 compact hit 4x 2 53.85 53.87 ns [53.86 53.91 53.87 53.99 53.85]
+row urls-1000000 compact hit hashmap ctl 149.12 149.31 ns [149.12 149.38 149.14 149.40 149.31]
+row urls-1000000 compact miss 4x 1 31.44 32.30 ns [49.20 33.62 32.30 31.44 32.19]
+row urls-1000000 compact miss v5o 1 38.95 39.54 ns [56.24 43.02 39.40 38.95 39.54]
+row urls-1000000 compact miss hy 1 33.30 33.89 ns [43.83 33.30 34.88 33.63 33.89]
+row urls-1000000 compact miss hu 1 31.92 33.48 ns [41.73 31.92 33.76 33.48 33.47]
+row urls-1000000 compact miss hu 2 31.37 33.87 ns [40.57 31.37 33.23 33.87 35.04]
+row urls-1000000 compact miss hy 2 30.56 33.53 ns [39.68 30.56 33.53 33.50 34.65]
+row urls-1000000 compact miss v5o 2 39.13 40.04 ns [43.10 39.13 39.39 42.53 40.04]
+row urls-1000000 compact miss 4x 2 31.55 33.45 ns [34.01 33.45 31.55 36.33 32.58]
+row urls-1000000 compact miss hashmap ctl 79.25 80.53 ns [83.29 80.53 79.25 88.48 79.31]
+row urls-1000000 compact chain 4x 1 177.94 178.87 ns [180.55 177.94 178.87 181.70 177.94]
+row urls-1000000 compact chain v5o 1 183.86 184.36 ns [184.42 184.36 184.00 184.77 183.86]
+row urls-1000000 compact chain hy 1 180.64 181.14 ns [180.64 181.14 181.26 180.77 185.23]
+row urls-1000000 compact chain hu 1 181.71 181.90 ns [181.90 181.83 182.42 182.36 181.71]
+row urls-1000000 compact chain hu 2 180.71 180.86 ns [180.71 185.47 180.82 181.25 180.86]
+row urls-1000000 compact chain hy 2 180.86 181.09 ns [181.06 180.86 181.09 181.76 182.04]
+row urls-1000000 compact chain v5o 2 183.54 183.63 ns [183.63 183.54 183.95 183.62 183.81]
+row urls-1000000 compact chain 4x 2 179.29 179.82 ns [179.29 180.32 179.82 179.89 179.73]
+row urls-1000000 compact chain hashmap ctl 148.79 149.15 ns [149.24 148.80 149.15 148.79 149.33]
+row urls-1000000 compact batch 4x 1 30.23 30.48 ns [30.23 30.63 30.48 30.74 30.25]
+row urls-1000000 compact batch v5o 1 32.28 32.50 ns [32.39 32.59 32.50 32.52 32.28]
+row urls-1000000 compact batch hy 1 29.92 30.27 ns [29.92 30.58 30.33 30.27 30.19]
+row urls-1000000 compact batch hu 1 30.07 30.30 ns [30.07 30.42 30.31 30.30 30.16]
+row urls-1000000 compact batch hu 2 30.20 30.32 ns [30.20 30.88 30.32 30.33 30.31]
+row urls-1000000 compact batch hy 2 30.20 30.37 ns [30.37 30.44 30.28 30.39 30.20]
+row urls-1000000 compact batch v5o 2 32.26 32.55 ns [32.66 32.55 32.55 32.41 32.26]
+row urls-1000000 compact batch 4x 2 30.42 30.65 ns [30.65 30.67 30.62 30.74 30.42]
+## hash5/urls-1000000/hashed [16:10:48 69000mC busy=1 swap=0MiB governor=performance]
+# urls-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg urls-1000000 hashed 4x mappings=2 rss_kb=9376 huge_kb=8192 coverage=87.4% thp_fault_alloc=+4 thp_fault_fallback=+0
+# 4x blob 10196507 bytes, 11.3295 B/key, magic BHD1
+hg urls-1000000 hashed v5o mappings=3 rss_kb=17720 huge_kb=14336 coverage=80.9% thp_fault_alloc=+3 thp_fault_fallback=+0
+# v5o blob 10196712 bytes, 11.3297 B/key, magic BHD2
+hg urls-1000000 hashed hy mappings=3 rss_kb=19768 huge_kb=14336 coverage=72.5% thp_fault_alloc=+3 thp_fault_fallback=+0
+# hy blob 10196764 bytes, 11.3297 B/key, magic BHD2
+hg urls-1000000 hashed hu mappings=3 rss_kb=19768 huge_kb=16384 coverage=82.9% thp_fault_alloc=+4 thp_fault_fallback=+0
+# hu blob 10197393 bytes, 11.3304 B/key, magic BHD2
+row urls-1000000 hashed hit 4x 1 65.49 65.56 ns [65.49 65.56 65.54 65.61 65.60]
+row urls-1000000 hashed hit v5o 1 94.17 94.37 ns [94.68 94.37 94.31 94.40 94.17]
+row urls-1000000 hashed hit hy 1 70.69 70.79 ns [70.69 70.80 70.79 70.72 71.28]
+row urls-1000000 hashed hit hu 1 70.81 70.83 ns [70.93 71.27 70.83 70.81 70.81]
+row urls-1000000 hashed hit hu 2 70.80 70.83 ns [70.83 70.80 70.88 71.03 70.81]
+row urls-1000000 hashed hit hy 2 70.84 70.87 ns [70.84 70.86 70.99 71.04 70.87]
+row urls-1000000 hashed hit v5o 2 95.04 95.23 ns [95.27 95.04 95.36 95.10 95.23]
+row urls-1000000 hashed hit 4x 2 65.65 65.68 ns [65.73 65.65 65.68 65.68 65.73]
+row urls-1000000 hashed hit hashmap ctl 149.50 149.88 ns [150.23 149.73 149.50 149.88 151.16]
+row urls-1000000 hashed miss 4x 1 53.95 54.48 ns [62.54 54.41 54.48 55.93 53.95]
+row urls-1000000 hashed miss v5o 1 71.66 72.34 ns [82.28 71.66 74.40 72.34 72.11]
+row urls-1000000 hashed miss hy 1 56.95 58.02 ns [60.78 57.38 56.95 58.45 58.02]
+row urls-1000000 hashed miss hu 1 57.17 57.76 ns [59.37 57.33 57.17 58.17 57.76]
+row urls-1000000 hashed miss hu 2 56.40 58.22 ns [58.37 56.40 58.06 58.30 58.22]
+row urls-1000000 hashed miss hy 2 56.64 58.86 ns [57.36 56.64 59.16 58.90 58.86]
+row urls-1000000 hashed miss v5o 2 70.26 73.45 ns [73.45 70.26 75.35 73.45 73.34]
+row urls-1000000 hashed miss 4x 2 52.42 54.73 ns [54.09 52.42 55.53 54.73 55.07]
+row urls-1000000 hashed miss hashmap ctl 101.17 102.43 ns [103.03 101.17 102.43 102.80 101.72]
+row urls-1000000 hashed chain 4x 1 190.11 190.55 ns [190.11 191.33 191.72 190.33 190.55]
+row urls-1000000 hashed chain v5o 1 190.31 190.99 ns [190.64 190.31 190.99 191.20 191.17]
+row urls-1000000 hashed chain hy 1 193.46 193.54 ns [193.61 193.46 193.66 193.54 193.53]
+row urls-1000000 hashed chain hu 1 191.32 191.58 ns [191.58 193.74 191.69 191.32 191.56]
+row urls-1000000 hashed chain hu 2 193.30 193.73 ns [193.82 193.34 194.56 193.73 193.30]
+row urls-1000000 hashed chain hy 2 190.41 190.59 ns [190.41 190.59 190.48 191.21 191.18]
+row urls-1000000 hashed chain v5o 2 194.12 195.78 ns [195.78 201.51 196.61 194.18 194.12]
+row urls-1000000 hashed chain 4x 2 189.19 189.96 ns [190.13 189.96 189.19 189.73 196.48]
+row urls-1000000 hashed chain hashmap ctl 149.81 149.85 ns [149.87 149.85 149.82 149.81 149.86]
+row urls-1000000 hashed batch 4x 1 36.21 36.62 ns [36.21 36.69 36.47 36.62 36.85]
+row urls-1000000 hashed batch v5o 1 38.68 38.85 ns [38.84 38.92 39.08 38.85 38.68]
+row urls-1000000 hashed batch hy 1 36.51 36.56 ns [36.80 36.54 36.56 36.51 36.69]
+row urls-1000000 hashed batch hu 1 36.37 36.56 ns [36.56 36.41 36.60 36.72 36.37]
+row urls-1000000 hashed batch hu 2 36.41 36.76 ns [36.76 36.41 36.83 40.67 36.43]
+row urls-1000000 hashed batch hy 2 36.41 36.58 ns [36.58 36.55 36.71 36.41 36.60]
+row urls-1000000 hashed batch v5o 2 38.80 38.94 ns [39.04 39.02 38.93 38.80 38.94]
+row urls-1000000 hashed batch 4x 2 36.48 36.53 ns [36.62 36.59 36.53 36.48 36.49]
+## hash5/urls-1000000/perfect [16:11:25 68000mC busy=3 swap=0MiB governor=performance]
+# urls-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg urls-1000000 perfect 4x mappings=1 rss_kb=47796 huge_kb=47104 coverage=98.6% thp_fault_alloc=+23 thp_fault_fallback=+0
+# 4x blob 49157210 bytes, 54.6191 B/key, magic BMP8
+hg urls-1000000 perfect v5o mappings=1 rss_kb=47796 huge_kb=47104 coverage=98.6% thp_fault_alloc=+23 thp_fault_fallback=+0
+# v5o blob 49157415 bytes, 54.6193 B/key, magic BMP9
+hg urls-1000000 perfect hy mappings=1 rss_kb=47796 huge_kb=47104 coverage=98.6% thp_fault_alloc=+23 thp_fault_fallback=+0
+# hy blob 49157467 bytes, 54.6194 B/key, magic BMP9
+hg urls-1000000 perfect hu mappings=1 rss_kb=47796 huge_kb=47104 coverage=98.6% thp_fault_alloc=+23 thp_fault_fallback=+0
+# hu blob 49158096 bytes, 54.6201 B/key, magic BMP9
+row urls-1000000 perfect hit 4x 1 95.59 96.03 ns [95.59 96.03 96.08 95.91 96.16]
+row urls-1000000 perfect hit v5o 1 131.04 131.13 ns [131.13 131.04 131.78 131.08 131.31]
+row urls-1000000 perfect hit hy 1 124.67 124.86 ns [124.94 124.76 124.87 124.67 124.86]
+row urls-1000000 perfect hit hu 1 124.94 125.07 ns [125.07 124.94 125.17 125.22 125.01]
+row urls-1000000 perfect hit hu 2 124.97 125.23 ns [125.00 124.97 125.23 125.28 125.23]
+row urls-1000000 perfect hit hy 2 124.64 124.82 ns [124.67 124.95 124.64 124.82 124.99]
+row urls-1000000 perfect hit v5o 2 130.72 131.06 ns [131.06 131.41 130.72 131.36 130.97]
+row urls-1000000 perfect hit 4x 2 96.12 96.18 ns [96.19 96.22 96.16 96.18 96.12]
+row urls-1000000 perfect hit hashmap ctl 149.83 150.21 ns [150.70 149.97 150.66 149.83 150.21]
+row urls-1000000 perfect miss 4x 1 43.93 46.58 ns [59.92 46.66 43.93 44.45 46.58]
+row urls-1000000 perfect miss v5o 1 55.64 57.23 ns [72.32 57.23 56.59 55.64 58.58]
+row urls-1000000 perfect miss hy 1 47.08 48.31 ns [56.98 49.17 47.88 47.08 48.31]
+row urls-1000000 perfect miss hu 1 47.83 48.22 ns [56.05 50.95 48.02 47.83 48.22]
+row urls-1000000 perfect miss hu 2 47.82 51.27 ns [55.42 51.27 48.00 47.82 62.39]
+row urls-1000000 perfect miss hy 2 48.13 50.02 ns [53.01 50.02 48.13 48.14 58.29]
+row urls-1000000 perfect miss v5o 2 56.76 62.22 ns [62.22 59.67 56.76 79.22 64.89]
+row urls-1000000 perfect miss 4x 2 44.61 49.36 ns [49.36 45.34 44.61 66.26 49.77]
+row urls-1000000 perfect miss hashmap ctl 83.04 86.22 ns [89.07 86.22 83.37 83.04 88.93]
+row urls-1000000 perfect chain 4x 1 207.23 210.88 ns [213.92 210.88 210.88 207.23 211.55]
+row urls-1000000 perfect chain v5o 1 207.67 214.60 ns [214.79 211.54 216.65 207.67 214.60]
+row urls-1000000 perfect chain hy 1 203.67 205.13 ns [205.13 205.84 204.84 203.67 209.20]
+row urls-1000000 perfect chain hu 1 204.98 205.48 ns [204.98 209.66 205.48 209.74 205.05]
+row urls-1000000 perfect chain hu 2 204.25 209.24 ns [204.94 211.47 204.25 209.24 209.95]
+row urls-1000000 perfect chain hy 2 203.94 209.33 ns [204.56 209.44 203.94 209.33 209.75]
+row urls-1000000 perfect chain v5o 2 206.44 209.85 ns [206.44 215.69 207.13 214.53 209.85]
+row urls-1000000 perfect chain 4x 2 204.33 208.53 ns [206.81 210.52 204.33 208.53 211.30]
+row urls-1000000 perfect chain hashmap ctl 148.05 149.27 ns [149.47 149.27 148.86 148.05 150.19]
+row urls-1000000 perfect batch 4x 1 52.76 61.52 ns [52.76 61.52 61.51 61.60 61.53]
+row urls-1000000 perfect batch v5o 1 63.62 63.70 ns [63.70 63.76 63.62 63.64 63.78]
+row urls-1000000 perfect batch hy 1 60.63 60.85 ns [60.96 60.63 60.64 60.85 61.18]
+row urls-1000000 perfect batch hu 1 61.82 61.84 ns [61.84 61.88 61.82 61.83 62.03]
+row urls-1000000 perfect batch hu 2 61.69 61.89 ns [61.99 61.69 61.85 61.89 61.97]
+row urls-1000000 perfect batch hy 2 60.62 60.85 ns [60.96 60.85 60.62 61.06 60.74]
+row urls-1000000 perfect batch v5o 2 63.41 63.52 ns [63.43 63.60 63.74 63.52 63.41]
+row urls-1000000 perfect batch 4x 2 61.35 61.43 ns [61.42 61.43 61.35 63.36 61.56]
+## hash5/uuid-1000000/closed [16:12:02 66000mC busy=0 swap=0MiB governor=performance]
+# uuid-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg uuid-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216726 bytes, 0.2408 B/key, magic BCL2
+hg uuid-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216538 bytes, 0.2406 B/key, magic BCL3
+hg uuid-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 217271 bytes, 0.2414 B/key, magic BCL3
+hg uuid-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 217066 bytes, 0.2412 B/key, magic BCL3
+row uuid-1000000 closed hit 4x 1 36.41 36.49 ns [36.45 36.49 36.59 36.41 36.58]
+row uuid-1000000 closed hit v5o 1 52.05 52.15 ns [52.09 52.15 52.77 52.05 52.77]
+row uuid-1000000 closed hit hy 1 46.44 46.50 ns [46.50 46.57 46.50 46.44 46.79]
+row uuid-1000000 closed hit hu 1 47.35 47.42 ns [47.56 47.69 47.35 47.42 47.41]
+row uuid-1000000 closed hit hu 2 47.27 47.32 ns [47.47 48.59 47.29 47.27 47.32]
+row uuid-1000000 closed hit hy 2 46.40 46.46 ns [46.48 46.49 46.45 46.40 46.46]
+row uuid-1000000 closed hit v5o 2 51.98 52.07 ns [52.01 52.07 52.11 52.07 51.98]
+row uuid-1000000 closed hit 4x 2 36.48 36.55 ns [36.51 36.59 36.63 36.48 36.55]
+row uuid-1000000 closed hit hashmap ctl 131.81 131.97 ns [132.08 132.10 131.95 131.81 131.97]
+row uuid-1000000 closed chain 4x 1 155.35 156.95 ns [156.93 157.13 156.95 155.35 160.08]
+row uuid-1000000 closed chain v5o 1 157.40 158.15 ns [158.68 157.40 158.39 158.15 157.58]
+row uuid-1000000 closed chain hy 1 155.01 155.30 ns [156.06 155.01 156.02 155.30 155.08]
+row uuid-1000000 closed chain hu 1 155.84 156.22 ns [156.22 157.31 155.84 156.22 156.44]
+row uuid-1000000 closed chain hu 2 156.72 157.13 ns [157.61 156.80 157.34 156.72 157.13]
+row uuid-1000000 closed chain hy 2 156.08 156.23 ns [162.59 156.08 156.09 156.63 156.23]
+row uuid-1000000 closed chain v5o 2 157.69 158.13 ns [158.13 157.92 158.67 157.69 158.43]
+row uuid-1000000 closed chain 4x 2 156.24 157.00 ns [157.26 157.00 161.69 156.89 156.24]
+row uuid-1000000 closed chain hashmap ctl 131.82 131.82 ns [131.82 131.82 131.82 131.87 132.02]
+row uuid-1000000 closed batch 4x 1 12.88 12.97 ns [14.67 13.18 12.97 12.88 12.93]
+row uuid-1000000 closed batch v5o 1 12.73 12.78 ns [13.08 12.98 12.73 12.76 12.78]
+row uuid-1000000 closed batch hy 1 12.00 12.03 ns [12.00 12.16 12.25 12.03 12.03]
+row uuid-1000000 closed batch hu 1 12.03 12.15 ns [12.03 12.18 12.35 12.07 12.15]
+row uuid-1000000 closed batch hu 2 12.03 12.04 ns [12.03 12.04 12.32 12.04 12.07]
+row uuid-1000000 closed batch hy 2 12.08 12.16 ns [12.13 12.17 12.20 12.16 12.08]
+row uuid-1000000 closed batch v5o 2 12.75 12.76 ns [12.75 12.76 12.77 12.80 12.75]
+row uuid-1000000 closed batch 4x 2 12.71 12.76 ns [12.72 12.82 12.87 12.71 12.76]
+## hash5/uuid-1000000/compact [16:12:22 65000mC busy=2 swap=0MiB governor=performance]
+# uuid-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg uuid-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116730 bytes, 1.2408 B/key, magic BCH8
+hg uuid-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116542 bytes, 1.2406 B/key, magic BCH9
+hg uuid-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1117275 bytes, 1.2414 B/key, magic BCH9
+hg uuid-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1117070 bytes, 1.2412 B/key, magic BCH9
+row uuid-1000000 compact hit 4x 1 49.97 50.65 ns [50.65 49.97 50.68 50.19 50.65]
+row uuid-1000000 compact hit v5o 1 60.47 61.09 ns [61.32 60.47 61.09 60.69 61.18]
+row uuid-1000000 compact hit hy 1 53.80 53.82 ns [53.80 53.82 53.88 53.83 53.81]
+row uuid-1000000 compact hit hu 1 53.94 54.04 ns [53.94 54.09 54.04 53.95 54.05]
+row uuid-1000000 compact hit hu 2 53.78 53.92 ns [54.32 54.06 53.78 53.92 53.88]
+row uuid-1000000 compact hit hy 2 53.41 53.84 ns [53.84 53.89 53.41 54.02 53.83]
+row uuid-1000000 compact hit v5o 2 60.31 60.89 ns [60.89 60.89 60.31 60.91 60.91]
+row uuid-1000000 compact hit 4x 2 50.02 50.69 ns [50.69 50.68 50.02 50.77 50.90]
+row uuid-1000000 compact hit hashmap ctl 131.54 131.64 ns [132.51 131.63 131.82 131.54 131.64]
+row uuid-1000000 compact miss 4x 1 31.71 34.61 ns [45.28 31.71 34.30 46.04 34.61]
+row uuid-1000000 compact miss v5o 1 38.31 39.62 ns [47.31 38.31 39.51 59.07 39.62]
+row uuid-1000000 compact miss hy 1 32.34 36.74 ns [36.74 33.26 37.24 54.50 32.34]
+row uuid-1000000 compact miss hu 1 32.78 34.07 ns [35.56 33.75 34.98 34.07 32.78]
+row uuid-1000000 compact miss hu 2 33.79 34.56 ns [35.30 33.79 34.56 34.11 36.16]
+row uuid-1000000 compact miss hy 2 33.37 33.78 ns [33.67 33.78 33.37 33.96 34.16]
+row uuid-1000000 compact miss v5o 2 37.93 39.66 ns [38.28 39.66 37.93 42.94 40.36]
+row uuid-1000000 compact miss 4x 2 31.51 32.12 ns [31.59 34.49 31.51 38.98 32.12]
+row uuid-1000000 compact miss hashmap ctl 90.72 91.05 ns [90.72 91.84 91.05 106.15 90.79]
+row uuid-1000000 compact chain 4x 1 175.69 176.14 ns [176.54 176.23 175.87 176.14 175.69]
+row uuid-1000000 compact chain v5o 1 177.89 178.13 ns [177.89 178.13 178.18 178.22 177.98]
+row uuid-1000000 compact chain hy 1 173.44 174.18 ns [175.15 173.64 174.40 174.18 173.44]
+row uuid-1000000 compact chain hu 1 175.28 175.50 ns [175.73 175.28 175.50 175.37 176.40]
+row uuid-1000000 compact chain hu 2 175.51 175.69 ns [175.69 176.06 175.57 175.95 175.51]
+row uuid-1000000 compact chain hy 2 175.59 175.97 ns [184.88 175.91 176.14 175.59 175.97]
+row uuid-1000000 compact chain v5o 2 177.22 177.58 ns [177.22 177.61 177.58 177.30 177.89]
+row uuid-1000000 compact chain 4x 2 175.50 175.89 ns [175.50 176.23 175.89 176.98 175.52]
+row uuid-1000000 compact chain hashmap ctl 131.68 131.75 ns [131.70 131.75 131.68 131.81 131.77]
+row uuid-1000000 compact batch 4x 1 28.93 29.20 ns [28.93 31.62 29.20 29.47 29.05]
+row uuid-1000000 compact batch v5o 1 29.97 30.34 ns [29.97 30.50 30.34 30.49 30.31]
+row uuid-1000000 compact batch hy 1 29.13 29.29 ns [29.13 29.50 29.34 29.29 29.23]
+row uuid-1000000 compact batch hu 1 29.00 29.29 ns [29.00 29.56 29.36 29.29 29.27]
+row uuid-1000000 compact batch hu 2 29.26 29.39 ns [29.26 29.57 29.39 29.31 29.43]
+row uuid-1000000 compact batch hy 2 28.99 29.13 ns [29.26 29.52 29.05 29.13 28.99]
+row uuid-1000000 compact batch v5o 2 30.28 30.38 ns [30.56 30.42 30.32 30.38 30.28]
+row uuid-1000000 compact batch 4x 2 29.11 29.24 ns [29.40 29.24 29.22 29.50 29.11]
+## hash5/uuid-1000000/hashed [16:12:47 67000mC busy=1 swap=0MiB governor=performance]
+# uuid-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg uuid-1000000 hashed 4x mappings=2 rss_kb=18704 huge_kb=16384 coverage=87.6% thp_fault_alloc=+8 thp_fault_fallback=+0
+# 4x blob 19605846 bytes, 21.7843 B/key, magic BHD1
+hg uuid-1000000 hashed v5o mappings=2 rss_kb=18704 huge_kb=16384 coverage=87.6% thp_fault_alloc=+8 thp_fault_fallback=+0
+# v5o blob 19605658 bytes, 21.7841 B/key, magic BHD2
+hg uuid-1000000 hashed hy mappings=2 rss_kb=18704 huge_kb=16384 coverage=87.6% thp_fault_alloc=+8 thp_fault_fallback=+0
+# hy blob 19606391 bytes, 21.7849 B/key, magic BHD2
+hg uuid-1000000 hashed hu mappings=2 rss_kb=18704 huge_kb=16384 coverage=87.6% thp_fault_alloc=+8 thp_fault_fallback=+0
+# hu blob 19606186 bytes, 21.7847 B/key, magic BHD2
+row uuid-1000000 hashed hit 4x 1 62.48 62.53 ns [62.48 62.53 62.60 62.71 62.53]
+row uuid-1000000 hashed hit v5o 1 92.54 92.61 ns [92.61 92.69 92.81 92.59 92.54]
+row uuid-1000000 hashed hit hy 1 64.75 64.86 ns [64.75 65.45 64.86 64.81 64.98]
+row uuid-1000000 hashed hit hu 1 64.90 64.95 ns [64.97 65.03 64.93 64.90 64.95]
+row uuid-1000000 hashed hit hu 2 64.66 64.74 ns [64.85 64.69 64.66 64.79 64.74]
+row uuid-1000000 hashed hit hy 2 64.75 64.80 ns [64.94 64.83 64.80 64.79 64.75]
+row uuid-1000000 hashed hit v5o 2 92.32 92.65 ns [92.32 95.09 92.76 92.65 92.43]
+row uuid-1000000 hashed hit 4x 2 62.56 62.60 ns [62.62 62.60 62.58 62.56 63.33]
+row uuid-1000000 hashed hit hashmap ctl 131.46 131.55 ns [131.55 131.67 131.57 131.47 131.46]
+row uuid-1000000 hashed miss 4x 1 47.50 48.76 ns [56.72 48.76 50.33 48.20 47.50]
+row uuid-1000000 hashed miss v5o 1 64.76 65.36 ns [73.81 64.78 68.38 64.76 65.36]
+row uuid-1000000 hashed miss hy 1 49.20 50.07 ns [53.12 50.07 49.20 49.42 50.10]
+row uuid-1000000 hashed miss hu 1 49.47 49.95 ns [50.77 51.40 49.88 49.95 49.47]
+row uuid-1000000 hashed miss hu 2 49.90 50.14 ns [50.85 52.83 49.97 50.14 49.90]
+row uuid-1000000 hashed miss hy 2 49.44 49.92 ns [49.92 56.13 49.87 50.95 49.44]
+row uuid-1000000 hashed miss v5o 2 64.13 64.80 ns [64.13 84.39 90.39 64.80 64.20]
+row uuid-1000000 hashed miss 4x 2 48.02 48.41 ns [48.22 68.67 56.72 48.41 48.02]
+row uuid-1000000 hashed miss hashmap ctl 94.26 94.45 ns [94.34 95.39 101.24 94.45 94.26]
+row uuid-1000000 hashed chain 4x 1 190.01 190.65 ns [190.83 190.76 190.65 190.01 190.04]
+row uuid-1000000 hashed chain v5o 1 191.03 191.25 ns [193.32 191.19 191.25 191.79 191.03]
+row uuid-1000000 hashed chain hy 1 188.86 189.24 ns [188.86 189.90 188.94 189.24 189.59]
+row uuid-1000000 hashed chain hu 1 189.44 190.35 ns [189.44 190.22 190.49 190.35 190.56]
+row uuid-1000000 hashed chain hu 2 189.36 189.61 ns [190.77 189.36 189.61 190.39 189.47]
+row uuid-1000000 hashed chain hy 2 189.23 189.45 ns [189.23 189.44 190.26 189.45 190.11]
+row uuid-1000000 hashed chain v5o 2 191.50 192.12 ns [191.50 192.57 192.12 191.51 192.29]
+row uuid-1000000 hashed chain 4x 2 189.82 190.42 ns [190.45 189.82 190.42 190.71 189.83]
+row uuid-1000000 hashed chain hashmap ctl 131.78 132.04 ns [132.07 131.85 132.26 131.78 132.04]
+row uuid-1000000 hashed batch 4x 1 17.50 17.56 ns [17.98 17.55 17.50 17.56 17.56]
+row uuid-1000000 hashed batch v5o 1 18.40 18.50 ns [18.71 18.50 18.40 18.61 18.47]
+row uuid-1000000 hashed batch hy 1 17.42 17.58 ns [18.08 18.13 17.58 17.53 17.42]
+row uuid-1000000 hashed batch hu 1 17.34 17.45 ns [17.34 17.45 17.55 17.43 17.49]
+row uuid-1000000 hashed batch hu 2 17.28 17.53 ns [17.28 17.75 17.53 17.55 17.51]
+row uuid-1000000 hashed batch hy 2 17.26 17.44 ns [17.26 17.37 17.44 17.54 17.48]
+row uuid-1000000 hashed batch v5o 2 18.28 18.44 ns [18.28 18.34 18.47 18.44 18.47]
+row uuid-1000000 hashed batch 4x 2 17.40 17.51 ns [17.40 17.65 17.63 17.50 17.51]
+## hash5/uuid-1000000/perfect [16:13:17 68000mC busy=6 swap=0MiB governor=performance]
+# uuid-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg uuid-1000000 perfect 4x mappings=1 rss_kb=30560 huge_kb=28672 coverage=93.8% thp_fault_alloc=+14 thp_fault_fallback=+0
+# 4x blob 31510130 bytes, 35.0113 B/key, magic BMP8
+hg uuid-1000000 perfect v5o mappings=1 rss_kb=30560 huge_kb=28672 coverage=93.8% thp_fault_alloc=+14 thp_fault_fallback=+0
+# v5o blob 31509942 bytes, 35.0110 B/key, magic BMP9
+hg uuid-1000000 perfect hy mappings=1 rss_kb=30560 huge_kb=28672 coverage=93.8% thp_fault_alloc=+14 thp_fault_fallback=+0
+# hy blob 31510675 bytes, 35.0119 B/key, magic BMP9
+hg uuid-1000000 perfect hu mappings=1 rss_kb=30560 huge_kb=28672 coverage=93.8% thp_fault_alloc=+14 thp_fault_fallback=+0
+# hu blob 31510470 bytes, 35.0116 B/key, magic BMP9
+row uuid-1000000 perfect hit 4x 1 85.08 85.64 ns [85.08 85.64 85.66 85.65 85.63]
+row uuid-1000000 perfect hit v5o 1 119.56 119.75 ns [119.56 119.99 119.74 119.83 119.75]
+row uuid-1000000 perfect hit hy 1 116.66 116.77 ns [116.74 116.77 116.89 116.66 116.81]
+row uuid-1000000 perfect hit hu 1 117.33 117.44 ns [117.34 117.33 117.44 117.49 117.59]
+row uuid-1000000 perfect hit hu 2 117.25 117.34 ns [117.58 117.34 117.34 120.33 117.25]
+row uuid-1000000 perfect hit hy 2 116.79 116.80 ns [116.84 116.80 116.80 117.01 116.79]
+row uuid-1000000 perfect hit v5o 2 119.92 120.09 ns [120.73 119.97 119.92 120.09 120.12]
+row uuid-1000000 perfect hit 4x 2 85.61 85.81 ns [86.03 85.77 85.61 86.07 85.81]
+row uuid-1000000 perfect hit hashmap ctl 130.68 130.86 ns [130.68 130.92 130.86 131.20 130.79]
+row uuid-1000000 perfect miss 4x 1 84.40 85.47 ns [84.40 86.74 85.37 88.49 85.47]
+row uuid-1000000 perfect miss v5o 1 113.91 114.92 ns [114.92 115.23 113.91 115.23 114.33]
+row uuid-1000000 perfect miss hy 1 110.41 111.44 ns [111.05 112.18 110.41 112.24 111.44]
+row uuid-1000000 perfect miss hu 1 111.16 111.61 ns [111.61 112.54 111.16 112.22 111.61]
+row uuid-1000000 perfect miss hu 2 111.57 112.04 ns [111.57 112.11 112.04 111.81 112.05]
+row uuid-1000000 perfect miss hy 2 110.98 111.77 ns [110.98 111.98 111.77 111.49 112.00]
+row uuid-1000000 perfect miss v5o 2 114.09 114.62 ns [114.21 114.62 115.40 114.09 115.68]
+row uuid-1000000 perfect miss 4x 2 84.64 86.24 ns [87.45 84.64 86.24 85.55 86.57]
+row uuid-1000000 perfect miss hashmap ctl 106.28 107.15 ns [111.00 107.15 106.28 107.56 106.87]
+row uuid-1000000 perfect chain 4x 1 205.04 205.14 ns [205.11 205.88 205.04 205.30 205.14]
+row uuid-1000000 perfect chain v5o 1 207.85 208.62 ns [212.67 208.87 208.47 207.85 208.62]
+row uuid-1000000 perfect chain hy 1 206.39 206.83 ns [207.19 206.39 206.82 206.83 209.77]
+row uuid-1000000 perfect chain hu 1 205.98 206.17 ns [205.98 206.17 206.12 207.77 206.93]
+row uuid-1000000 perfect chain hu 2 205.84 206.26 ns [206.43 206.63 205.84 206.26 205.96]
+row uuid-1000000 perfect chain hy 2 205.97 206.00 ns [206.03 205.99 206.85 206.00 205.97]
+row uuid-1000000 perfect chain v5o 2 207.84 207.96 ns [207.96 208.39 207.87 208.80 207.84]
+row uuid-1000000 perfect chain 4x 2 204.70 205.03 ns [205.03 204.89 205.29 205.10 204.70]
+row uuid-1000000 perfect chain hashmap ctl 129.50 129.63 ns [129.68 129.50 129.63 129.60 129.95]
+row uuid-1000000 perfect batch 4x 1 38.44 38.49 ns [38.87 38.47 38.49 38.51 38.44]
+row uuid-1000000 perfect batch v5o 1 38.95 39.07 ns [38.95 39.05 39.10 39.07 39.13]
+row uuid-1000000 perfect batch hy 1 38.12 38.15 ns [38.12 38.14 38.19 38.15 38.18]
+row uuid-1000000 perfect batch hu 1 38.73 38.82 ns [38.73 38.76 38.83 38.90 38.82]
+row uuid-1000000 perfect batch hu 2 38.79 38.85 ns [38.85 38.90 38.79 38.89 38.79]
+row uuid-1000000 perfect batch hy 2 38.06 38.13 ns [38.20 38.06 38.14 38.09 38.13]
+row uuid-1000000 perfect batch v5o 2 38.94 38.98 ns [38.99 38.94 38.98 38.96 39.01]
+row uuid-1000000 perfect batch 4x 2 38.44 38.49 ns [38.44 38.49 38.60 38.44 38.61]
+## hash5/titles-en-1000000/closed [16:13:54 67000mC busy=1 swap=0MiB governor=performance]
+# titles-en-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg titles-en-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216404 bytes, 0.2404 B/key, magic BCL2
+hg titles-en-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216353 bytes, 0.2404 B/key, magic BCL3
+hg titles-en-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 216383 bytes, 0.2404 B/key, magic BCL3
+hg titles-en-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 216788 bytes, 0.2409 B/key, magic BCL3
+row titles-en-1000000 closed hit 4x 1 31.06 31.11 ns [31.54 31.08 31.11 31.06 31.14]
+row titles-en-1000000 closed hit v5o 1 37.73 37.82 ns [37.73 37.85 37.81 37.82 37.83]
+row titles-en-1000000 closed hit hy 1 33.14 33.23 ns [33.14 33.23 33.26 33.23 33.43]
+row titles-en-1000000 closed hit hu 1 33.73 33.79 ns [33.78 33.73 33.79 33.83 33.84]
+row titles-en-1000000 closed hit hu 2 33.80 33.84 ns [33.82 33.84 33.87 33.92 33.80]
+row titles-en-1000000 closed hit hy 2 33.14 33.27 ns [33.38 33.18 33.27 33.29 33.14]
+row titles-en-1000000 closed hit v5o 2 37.70 37.74 ns [37.72 37.70 37.75 37.87 37.74]
+row titles-en-1000000 closed hit 4x 2 31.12 31.13 ns [31.13 31.25 31.13 31.15 31.12]
+row titles-en-1000000 closed hit hashmap ctl 124.86 125.13 ns [125.03 125.55 124.86 125.21 125.13]
+row titles-en-1000000 closed chain 4x 1 141.88 142.95 ns [143.38 141.88 143.41 142.95 142.25]
+row titles-en-1000000 closed chain v5o 1 144.58 144.70 ns [153.20 145.05 144.70 144.58 144.69]
+row titles-en-1000000 closed chain hy 1 143.10 143.70 ns [145.03 143.70 143.51 143.10 143.83]
+row titles-en-1000000 closed chain hu 1 143.72 144.16 ns [144.91 143.86 143.72 144.46 144.16]
+row titles-en-1000000 closed chain hu 2 143.18 143.67 ns [143.18 143.29 147.94 144.12 143.67]
+row titles-en-1000000 closed chain hy 2 143.21 143.45 ns [145.04 143.45 144.38 143.32 143.21]
+row titles-en-1000000 closed chain v5o 2 144.79 145.05 ns [145.05 144.79 146.26 145.11 144.93]
+row titles-en-1000000 closed chain 4x 2 142.81 143.01 ns [142.94 143.91 143.01 144.26 142.81]
+row titles-en-1000000 closed chain hashmap ctl 124.34 124.52 ns [124.35 124.67 124.57 124.34 124.52]
+row titles-en-1000000 closed batch 4x 1 10.33 10.38 ns [10.47 10.35 10.49 10.38 10.33]
+row titles-en-1000000 closed batch v5o 1 11.62 11.69 ns [11.62 11.69 11.70 11.70 11.68]
+row titles-en-1000000 closed batch hy 1 10.78 10.82 ns [10.78 10.85 10.80 10.82 10.88]
+row titles-en-1000000 closed batch hu 1 10.78 10.82 ns [10.83 10.82 10.84 10.82 10.78]
+row titles-en-1000000 closed batch hu 2 10.81 10.85 ns [10.89 10.85 10.81 10.84 10.89]
+row titles-en-1000000 closed batch hy 2 10.84 10.88 ns [10.89 10.84 10.88 10.87 10.88]
+row titles-en-1000000 closed batch v5o 2 11.66 11.70 ns [11.66 11.66 11.78 11.71 11.70]
+row titles-en-1000000 closed batch 4x 2 10.33 10.36 ns [10.35 10.33 10.37 10.73 10.36]
+## hash5/titles-en-1000000/compact [16:14:13 67000mC busy=1 swap=0MiB governor=performance]
+# titles-en-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg titles-en-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116408 bytes, 1.2405 B/key, magic BCH8
+hg titles-en-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116357 bytes, 1.2404 B/key, magic BCH9
+hg titles-en-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1116387 bytes, 1.2404 B/key, magic BCH9
+hg titles-en-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1116792 bytes, 1.2409 B/key, magic BCH9
+row titles-en-1000000 compact hit 4x 1 41.65 41.97 ns [42.78 41.97 42.98 41.65 41.72]
+row titles-en-1000000 compact hit v5o 1 49.80 49.89 ns [50.91 50.09 49.89 49.81 49.80]
+row titles-en-1000000 compact hit hy 1 44.78 46.08 ns [46.12 46.17 46.08 44.78 44.96]
+row titles-en-1000000 compact hit hu 1 46.03 46.14 ns [47.44 47.50 46.14 46.03 46.12]
+row titles-en-1000000 compact hit hu 2 46.04 46.17 ns [47.64 47.44 46.17 46.09 46.04]
+row titles-en-1000000 compact hit hy 2 44.92 45.04 ns [46.17 46.34 45.04 45.03 44.92]
+row titles-en-1000000 compact hit v5o 2 49.39 49.43 ns [50.74 50.73 49.39 49.43 49.42]
+row titles-en-1000000 compact hit 4x 2 41.46 41.50 ns [42.43 42.61 41.47 41.50 41.46]
+row titles-en-1000000 compact hit hashmap ctl 125.18 125.68 ns [127.17 125.68 125.68 125.47 125.18]
+row titles-en-1000000 compact miss 4x 1 24.19 24.97 ns [42.09 24.19 24.97 24.49 25.72]
+row titles-en-1000000 compact miss v5o 1 28.31 29.16 ns [46.30 29.16 28.31 28.94 29.52]
+row titles-en-1000000 compact miss hy 1 25.29 25.99 ns [36.38 26.00 25.90 25.29 25.99]
+row titles-en-1000000 compact miss hu 1 26.45 26.84 ns [30.32 26.84 26.45 26.63 27.19]
+row titles-en-1000000 compact miss hu 2 25.42 26.16 ns [28.37 26.15 26.29 26.16 25.42]
+row titles-en-1000000 compact miss hy 2 23.93 24.93 ns [26.04 24.44 25.13 24.93 23.93]
+row titles-en-1000000 compact miss v5o 2 26.72 27.39 ns [29.54 27.39 27.20 27.88 26.72]
+row titles-en-1000000 compact miss 4x 2 23.64 24.18 ns [24.18 25.19 23.64 25.17 23.99]
+row titles-en-1000000 compact miss hashmap ctl 63.21 64.00 ns [63.99 64.00 63.21 64.73 64.67]
+row titles-en-1000000 compact chain 4x 1 165.11 165.74 ns [165.98 165.11 166.40 165.74 165.50]
+row titles-en-1000000 compact chain v5o 1 166.62 167.18 ns [172.60 167.49 167.18 166.62 166.84]
+row titles-en-1000000 compact chain hy 1 163.13 163.70 ns [163.25 163.13 171.06 163.70 164.74]
+row titles-en-1000000 compact chain hu 1 164.26 164.51 ns [164.26 164.51 164.96 165.25 164.34]
+row titles-en-1000000 compact chain hu 2 164.93 165.10 ns [165.45 165.02 164.93 165.10 165.64]
+row titles-en-1000000 compact chain hy 2 164.13 164.48 ns [164.48 164.95 164.13 164.17 164.67]
+row titles-en-1000000 compact chain v5o 2 164.63 166.02 ns [166.02 164.63 166.12 172.33 165.14]
+row titles-en-1000000 compact chain 4x 2 163.93 164.02 ns [163.93 164.00 164.02 164.75 165.91]
+row titles-en-1000000 compact chain hashmap ctl 126.17 126.37 ns [126.54 126.37 126.79 126.26 126.17]
+row titles-en-1000000 compact batch 4x 1 14.04 14.04 ns [14.74 14.04 14.05 14.04 14.04]
+row titles-en-1000000 compact batch v5o 1 15.25 15.26 ns [16.01 15.28 15.25 15.25 15.26]
+row titles-en-1000000 compact batch hy 1 14.39 14.41 ns [15.19 14.39 14.43 14.41 14.40]
+row titles-en-1000000 compact batch hu 1 14.80 14.86 ns [14.80 14.92 14.94 14.85 14.86]
+row titles-en-1000000 compact batch hu 2 14.88 14.90 ns [14.88 14.91 14.97 14.90 14.90]
+row titles-en-1000000 compact batch hy 2 14.51 14.56 ns [14.51 14.56 14.58 14.60 14.55]
+row titles-en-1000000 compact batch v5o 2 15.12 15.12 ns [15.12 15.12 15.14 15.16 15.12]
+row titles-en-1000000 compact batch 4x 2 13.97 14.01 ns [14.01 14.02 14.00 13.97 14.02]
+## hash5/titles-en-1000000/hashed [16:14:34 69000mC busy=2 swap=0MiB governor=performance]
+# titles-en-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg titles-en-1000000 hashed 4x mappings=2 rss_kb=9356 huge_kb=8192 coverage=87.6% thp_fault_alloc=+4 thp_fault_fallback=+0
+# 4x blob 10058593 bytes, 11.1762 B/key, magic BHD1
+hg titles-en-1000000 hashed v5o mappings=2 rss_kb=9356 huge_kb=8192 coverage=87.6% thp_fault_alloc=+4 thp_fault_fallback=+0
+# v5o blob 10058542 bytes, 11.1762 B/key, magic BHD2
+hg titles-en-1000000 hashed hy mappings=2 rss_kb=9356 huge_kb=8192 coverage=87.6% thp_fault_alloc=+4 thp_fault_fallback=+0
+# hy blob 10058572 bytes, 11.1762 B/key, magic BHD2
+hg titles-en-1000000 hashed hu mappings=2 rss_kb=9356 huge_kb=8192 coverage=87.6% thp_fault_alloc=+4 thp_fault_fallback=+0
+# hu blob 10058977 bytes, 11.1766 B/key, magic BHD2
+row titles-en-1000000 hashed hit 4x 1 52.86 53.22 ns [52.86 53.28 53.14 53.26 53.22]
+row titles-en-1000000 hashed hit v5o 1 61.02 61.26 ns [61.02 61.18 61.34 61.26 61.28]
+row titles-en-1000000 hashed hit hy 1 56.65 56.97 ns [56.65 57.11 56.84 56.97 57.04]
+row titles-en-1000000 hashed hit hu 1 57.31 57.40 ns [57.40 57.31 57.37 57.43 57.48]
+row titles-en-1000000 hashed hit hu 2 57.31 57.43 ns [57.31 57.41 57.43 57.56 57.55]
+row titles-en-1000000 hashed hit hy 2 56.80 56.89 ns [56.80 56.96 56.81 56.89 57.00]
+row titles-en-1000000 hashed hit v5o 2 61.49 61.63 ns [61.55 61.49 61.71 61.64 61.63]
+row titles-en-1000000 hashed hit 4x 2 53.48 53.61 ns [53.48 53.70 53.70 53.54 53.61]
+row titles-en-1000000 hashed hit hashmap ctl 126.30 126.70 ns [126.33 126.30 126.72 126.70 126.99]
+row titles-en-1000000 hashed miss 4x 1 37.67 38.54 ns [47.38 38.54 37.67 49.21 37.92]
+row titles-en-1000000 hashed miss v5o 1 41.88 43.13 ns [48.95 41.88 42.74 43.13 43.26]
+row titles-en-1000000 hashed miss hy 1 38.94 39.10 ns [42.36 39.03 38.94 39.10 40.23]
+row titles-en-1000000 hashed miss hu 1 39.25 39.71 ns [41.61 39.25 39.47 39.79 39.71]
+row titles-en-1000000 hashed miss hu 2 39.00 39.44 ns [40.62 39.00 39.44 39.17 41.42]
+row titles-en-1000000 hashed miss hy 2 39.46 39.59 ns [39.62 39.51 39.46 39.59 40.42]
+row titles-en-1000000 hashed miss v5o 2 42.24 43.85 ns [45.06 42.88 42.24 46.56 43.85]
+row titles-en-1000000 hashed miss 4x 2 36.81 38.88 ns [39.65 36.81 37.92 44.57 38.88]
+row titles-en-1000000 hashed miss hashmap ctl 68.93 70.16 ns [70.60 69.42 68.93 97.38 70.16]
+row titles-en-1000000 hashed chain 4x 1 177.76 178.46 ns [178.46 178.79 177.76 178.82 178.00]
+row titles-en-1000000 hashed chain v5o 1 177.29 177.41 ns [177.29 177.89 177.35 181.37 177.41]
+row titles-en-1000000 hashed chain hy 1 177.06 177.19 ns [177.68 177.07 177.35 177.19 177.06]
+row titles-en-1000000 hashed chain hu 1 177.21 177.55 ns [177.74 177.52 177.21 177.55 177.94]
+row titles-en-1000000 hashed chain hu 2 177.85 178.16 ns [178.00 178.77 177.85 178.44 178.16]
+row titles-en-1000000 hashed chain hy 2 177.53 177.80 ns [177.80 177.53 177.96 177.70 178.73]
+row titles-en-1000000 hashed chain v5o 2 179.66 179.76 ns [179.76 179.66 180.13 183.76 179.74]
+row titles-en-1000000 hashed chain 4x 2 177.09 177.46 ns [177.09 177.84 177.46 177.63 177.18]
+row titles-en-1000000 hashed chain hashmap ctl 126.39 126.45 ns [126.65 126.39 126.45 126.41 126.68]
+row titles-en-1000000 hashed batch 4x 1 16.00 16.16 ns [16.43 16.16 16.00 16.14 16.49]
+row titles-en-1000000 hashed batch v5o 1 17.38 17.80 ns [17.87 17.80 17.38 17.47 17.82]
+row titles-en-1000000 hashed batch hy 1 16.54 16.58 ns [17.05 16.56 16.58 16.75 16.54]
+row titles-en-1000000 hashed batch hu 1 16.61 17.01 ns [17.84 16.98 17.01 16.61 17.18]
+row titles-en-1000000 hashed batch hu 2 16.70 16.71 ns [16.77 16.86 16.71 16.71 16.70]
+row titles-en-1000000 hashed batch hy 2 16.44 16.54 ns [16.44 16.61 16.45 16.54 16.66]
+row titles-en-1000000 hashed batch v5o 2 17.35 17.41 ns [17.35 17.41 19.69 18.14 17.35]
+row titles-en-1000000 hashed batch 4x 2 16.02 16.09 ns [16.02 16.21 16.77 16.09 16.04]
+## hash5/titles-en-1000000/perfect [16:15:07 69000mC busy=1 swap=0MiB governor=performance]
+# titles-en-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg titles-en-1000000 perfect 4x mappings=1 rss_kb=19924 huge_kb=18432 coverage=92.5% thp_fault_alloc=+9 thp_fault_fallback=+0
+# 4x blob 20615874 bytes, 22.9065 B/key, magic BMP8
+hg titles-en-1000000 perfect v5o mappings=1 rss_kb=19924 huge_kb=18432 coverage=92.5% thp_fault_alloc=+9 thp_fault_fallback=+0
+# v5o blob 20615824 bytes, 22.9065 B/key, magic BMP9
+hg titles-en-1000000 perfect hy mappings=1 rss_kb=19924 huge_kb=18432 coverage=92.5% thp_fault_alloc=+9 thp_fault_fallback=+0
+# hy blob 20615842 bytes, 22.9065 B/key, magic BMP9
+hg titles-en-1000000 perfect hu mappings=1 rss_kb=19924 huge_kb=18432 coverage=92.5% thp_fault_alloc=+9 thp_fault_fallback=+0
+# hu blob 20616301 bytes, 22.9070 B/key, magic BMP9
+row titles-en-1000000 perfect hit 4x 1 79.98 80.26 ns [79.98 80.30 80.22 81.48 80.26]
+row titles-en-1000000 perfect hit v5o 1 100.13 100.28 ns [100.13 100.48 100.28 100.21 100.82]
+row titles-en-1000000 perfect hit hy 1 84.68 84.74 ns [84.77 84.74 84.78 84.68 84.74]
+row titles-en-1000000 perfect hit hu 1 85.47 85.61 ns [85.61 85.68 85.52 85.47 85.94]
+row titles-en-1000000 perfect hit hu 2 85.66 85.71 ns [85.83 85.66 85.87 85.67 85.71]
+row titles-en-1000000 perfect hit hy 2 84.68 84.73 ns [84.69 84.73 84.68 84.82 84.75]
+row titles-en-1000000 perfect hit v5o 2 100.39 100.43 ns [100.39 100.43 100.40 100.69 101.40]
+row titles-en-1000000 perfect hit 4x 2 80.35 80.42 ns [80.38 80.47 80.35 80.42 80.59]
+row titles-en-1000000 perfect hit hashmap ctl 125.58 125.83 ns [125.68 126.04 125.58 125.83 126.03]
+row titles-en-1000000 perfect miss 4x 1 38.13 39.84 ns [55.27 39.84 38.13 40.12 38.64]
+row titles-en-1000000 perfect miss v5o 1 43.95 44.43 ns [58.64 44.43 43.95 44.66 44.03]
+row titles-en-1000000 perfect miss hy 1 39.89 41.31 ns [52.18 41.19 39.89 41.86 41.31]
+row titles-en-1000000 perfect miss hu 1 42.12 42.58 ns [48.21 42.53 42.58 42.12 42.77]
+row titles-en-1000000 perfect miss hu 2 42.43 43.24 ns [45.99 43.21 43.24 42.43 43.65]
+row titles-en-1000000 perfect miss hy 2 41.33 42.11 ns [43.52 42.11 41.79 41.33 44.47]
+row titles-en-1000000 perfect miss v5o 2 43.84 44.82 ns [45.65 44.82 44.45 43.84 46.60]
+row titles-en-1000000 perfect miss 4x 2 38.10 39.55 ns [40.62 38.64 39.55 38.10 40.37]
+row titles-en-1000000 perfect miss hashmap ctl 69.64 70.38 ns [72.14 69.99 69.64 70.38 71.34]
+row titles-en-1000000 perfect chain 4x 1 194.96 195.45 ns [196.31 195.22 194.96 195.47 195.45]
+row titles-en-1000000 perfect chain v5o 1 198.35 199.03 ns [200.45 199.03 199.61 198.35 198.63]
+row titles-en-1000000 perfect chain hy 1 196.73 197.68 ns [198.28 197.01 198.09 197.68 196.73]
+row titles-en-1000000 perfect chain hu 1 196.78 197.00 ns [197.00 197.39 197.12 196.78 196.96]
+row titles-en-1000000 perfect chain hu 2 197.03 197.51 ns [197.03 200.70 197.51 198.20 197.47]
+row titles-en-1000000 perfect chain hy 2 196.77 197.20 ns [196.77 197.50 197.20 197.47 197.14]
+row titles-en-1000000 perfect chain v5o 2 198.28 198.70 ns [199.79 198.28 199.45 198.32 198.70]
+row titles-en-1000000 perfect chain 4x 2 195.87 196.05 ns [196.47 196.79 195.91 195.87 196.05]
+row titles-en-1000000 perfect chain hashmap ctl 125.19 125.45 ns [125.45 125.19 125.73 126.38 125.42]
+row titles-en-1000000 perfect batch 4x 1 34.10 34.13 ns [34.99 34.13 35.25 34.12 34.10]
+row titles-en-1000000 perfect batch v5o 1 35.14 35.21 ns [35.14 35.21 35.20 35.39 35.36]
+row titles-en-1000000 perfect batch hy 1 34.02 34.14 ns [34.02 34.14 34.13 34.20 34.23]
+row titles-en-1000000 perfect batch hu 1 34.74 35.64 ns [35.64 38.16 35.82 34.84 34.74]
+row titles-en-1000000 perfect batch hu 2 34.76 34.81 ns [34.76 35.34 35.84 34.81 34.81]
+row titles-en-1000000 perfect batch hy 2 34.08 34.16 ns [34.09 34.91 34.08 34.18 34.16]
+row titles-en-1000000 perfect batch v5o 2 35.15 35.78 ns [35.78 36.13 36.35 35.19 35.15]
+row titles-en-1000000 perfect batch 4x 2 34.07 34.11 ns [35.28 34.11 35.10 34.07 34.07]
+## hash5/dna-1000000/closed [16:15:40 68000mC busy=4 swap=0MiB governor=performance]
+# dna-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg dna-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216330 bytes, 0.2404 B/key, magic BCL2
+hg dna-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216414 bytes, 0.2405 B/key, magic BCL3
+hg dna-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 216426 bytes, 0.2405 B/key, magic BCL3
+hg dna-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 216846 bytes, 0.2409 B/key, magic BCL3
+row dna-1000000 closed hit 4x 1 26.37 26.43 ns [27.33 26.43 26.47 26.37 26.39]
+row dna-1000000 closed hit v5o 1 33.16 33.29 ns [33.16 33.29 33.23 33.31 33.34]
+row dna-1000000 closed hit hy 1 27.75 27.76 ns [27.89 28.18 27.76 27.75 27.75]
+row dna-1000000 closed hit hu 1 28.34 28.41 ns [28.68 28.34 28.37 28.41 28.41]
+row dna-1000000 closed hit hu 2 28.36 28.46 ns [28.36 28.46 28.69 28.48 28.43]
+row dna-1000000 closed hit hy 2 27.68 27.72 ns [27.68 27.69 27.79 27.72 28.01]
+row dna-1000000 closed hit v5o 2 33.60 33.62 ns [33.62 33.67 33.60 33.61 33.65]
+row dna-1000000 closed hit 4x 2 26.57 26.57 ns [26.57 26.58 26.57 26.68 26.57]
+row dna-1000000 closed hit hashmap ctl 124.66 124.90 ns [124.66 124.86 124.90 124.94 128.39]
+row dna-1000000 closed chain 4x 1 136.73 136.83 ns [137.58 136.83 136.77 137.04 136.73]
+row dna-1000000 closed chain v5o 1 138.91 138.94 ns [138.91 138.93 139.03 138.94 139.56]
+row dna-1000000 closed chain hy 1 138.33 139.04 ns [138.33 139.04 145.70 139.47 138.67]
+row dna-1000000 closed chain hu 1 137.67 138.05 ns [137.99 138.28 138.05 137.67 138.17]
+row dna-1000000 closed chain hu 2 138.07 138.49 ns [138.07 138.49 139.35 138.64 138.23]
+row dna-1000000 closed chain hy 2 138.14 138.66 ns [138.14 138.34 138.66 138.68 138.81]
+row dna-1000000 closed chain v5o 2 139.57 140.10 ns [140.49 139.57 140.10 139.70 144.19]
+row dna-1000000 closed chain 4x 2 137.19 137.90 ns [137.82 137.19 137.90 139.20 137.99]
+row dna-1000000 closed chain hashmap ctl 125.66 125.71 ns [125.70 125.66 125.79 125.71 126.11]
+row dna-1000000 closed batch 4x 1 8.76 8.79 ns [10.56 8.77 8.79 9.39 8.76]
+row dna-1000000 closed batch v5o 1 9.15 9.18 ns [10.10 9.18 9.15 9.18 9.40]
+row dna-1000000 closed batch hy 1 8.68 8.69 ns [9.27 8.69 8.69 8.72 8.68]
+row dna-1000000 closed batch hu 1 8.68 8.69 ns [8.69 8.68 8.68 8.71 8.72]
+row dna-1000000 closed batch hu 2 8.81 8.83 ns [8.85 8.83 8.91 8.81 8.82]
+row dna-1000000 closed batch hy 2 8.62 8.68 ns [8.70 8.65 8.62 8.73 8.68]
+row dna-1000000 closed batch v5o 2 9.14 9.14 ns [9.14 9.18 9.18 9.14 9.14]
+row dna-1000000 closed batch 4x 2 8.80 8.83 ns [8.83 8.80 8.88 8.83 8.83]
+## hash5/dna-1000000/compact [16:15:58 63000mC busy=1 swap=0MiB governor=performance]
+# dna-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg dna-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116334 bytes, 1.2404 B/key, magic BCH8
+hg dna-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116418 bytes, 1.2405 B/key, magic BCH9
+hg dna-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1116430 bytes, 1.2405 B/key, magic BCH9
+hg dna-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1116850 bytes, 1.2409 B/key, magic BCH9
+row dna-1000000 compact hit 4x 1 37.47 37.54 ns [38.90 37.54 39.16 37.47 37.48]
+row dna-1000000 compact hit v5o 1 46.15 46.28 ns [47.80 46.15 47.68 46.23 46.28]
+row dna-1000000 compact hit hy 1 39.44 39.55 ns [43.46 39.55 41.35 39.44 39.46]
+row dna-1000000 compact hit hu 1 42.11 43.73 ns [44.06 42.74 43.99 43.73 42.11]
+row dna-1000000 compact hit hu 2 42.10 43.45 ns [44.92 42.10 44.00 43.45 42.36]
+row dna-1000000 compact hit hy 2 39.66 41.08 ns [41.60 39.71 41.47 41.08 39.66]
+row dna-1000000 compact hit v5o 2 46.18 47.07 ns [47.94 47.16 47.07 46.18 46.55]
+row dna-1000000 compact hit 4x 2 37.42 38.04 ns [38.04 39.18 37.58 38.73 37.42]
+row dna-1000000 compact hit hashmap ctl 124.97 125.58 ns [126.03 126.04 125.58 125.56 124.97]
+row dna-1000000 compact miss 4x 1 21.08 22.39 ns [38.25 21.08 22.39 21.20 22.44]
+row dna-1000000 compact miss v5o 1 26.17 26.40 ns [42.68 26.29 26.17 26.52 26.40]
+row dna-1000000 compact miss hy 1 21.33 21.74 ns [31.70 21.74 22.45 21.43 21.33]
+row dna-1000000 compact miss hu 1 23.58 24.03 ns [31.25 24.09 24.03 23.84 23.58]
+row dna-1000000 compact miss hu 2 24.02 24.11 ns [28.97 24.77 24.02 24.11 24.03]
+row dna-1000000 compact miss hy 2 21.19 21.66 ns [24.77 22.71 21.43 21.19 21.66]
+row dna-1000000 compact miss v5o 2 25.30 26.22 ns [27.71 28.62 25.30 26.22 25.97]
+row dna-1000000 compact miss 4x 2 20.82 22.14 ns [22.14 25.33 20.82 22.68 21.16]
+row dna-1000000 compact miss hashmap ctl 70.94 71.18 ns [75.55 70.94 71.18 71.24 71.07]
+row dna-1000000 compact chain 4x 1 158.02 158.33 ns [158.17 158.42 158.02 158.33 158.38]
+row dna-1000000 compact chain v5o 1 159.50 159.85 ns [159.85 160.05 159.50 160.46 159.70]
+row dna-1000000 compact chain hy 1 157.06 157.36 ns [157.84 157.81 157.36 157.34 157.06]
+row dna-1000000 compact chain hu 1 158.30 158.96 ns [158.82 159.03 164.24 158.30 158.96]
+row dna-1000000 compact chain hu 2 158.27 158.84 ns [158.41 158.84 159.01 158.27 159.19]
+row dna-1000000 compact chain hy 2 158.79 159.75 ns [159.53 158.79 159.75 159.86 164.95]
+row dna-1000000 compact chain v5o 2 158.86 159.40 ns [159.29 159.50 159.44 158.86 159.40]
+row dna-1000000 compact chain 4x 2 157.88 158.51 ns [157.88 159.27 158.73 158.51 158.02]
+row dna-1000000 compact chain hashmap ctl 125.37 125.44 ns [125.44 125.37 125.58 125.44 125.49]
+row dna-1000000 compact batch 4x 1 11.92 11.94 ns [13.08 11.99 11.92 11.92 11.94]
+row dna-1000000 compact batch v5o 1 12.58 12.63 ns [13.49 12.68 12.58 12.63 12.58]
+row dna-1000000 compact batch hy 1 11.82 11.84 ns [12.28 11.84 11.82 11.91 11.84]
+row dna-1000000 compact batch hu 1 12.27 12.30 ns [12.45 12.31 12.30 12.27 12.27]
+row dna-1000000 compact batch hu 2 12.27 12.30 ns [12.52 12.30 12.35 12.30 12.27]
+row dna-1000000 compact batch hy 2 11.99 12.01 ns [12.01 12.03 12.04 11.99 12.00]
+row dna-1000000 compact batch v5o 2 12.53 12.56 ns [12.63 12.71 12.54 12.53 12.56]
+row dna-1000000 compact batch 4x 2 11.71 11.74 ns [11.71 11.74 11.76 11.72 11.74]
+## hash5/dna-1000000/hashed [16:16:18 69000mC busy=1 swap=0MiB governor=performance]
+# dna-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg dna-1000000 hashed 4x mappings=2 rss_kb=6772 huge_kb=4096 coverage=60.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# 4x blob 7320497 bytes, 8.1339 B/key, magic BHD1
+hg dna-1000000 hashed v5o mappings=2 rss_kb=6772 huge_kb=4096 coverage=60.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# v5o blob 7320581 bytes, 8.1340 B/key, magic BHD2
+hg dna-1000000 hashed hy mappings=3 rss_kb=10464 huge_kb=6144 coverage=58.7% thp_fault_alloc=+2 thp_fault_fallback=+0
+# hy blob 7320593 bytes, 8.1340 B/key, magic BHD2
+hg dna-1000000 hashed hu mappings=3 rss_kb=10464 huge_kb=6144 coverage=58.7% thp_fault_alloc=+2 thp_fault_fallback=+0
+# hu blob 7321013 bytes, 8.1345 B/key, magic BHD2
+row dna-1000000 hashed hit 4x 1 46.74 47.12 ns [48.40 47.12 46.74 47.33 46.78]
+row dna-1000000 hashed hit v5o 1 54.71 54.77 ns [56.58 54.71 54.73 54.77 55.07]
+row dna-1000000 hashed hit hy 1 50.83 51.00 ns [52.47 50.86 50.83 51.00 51.04]
+row dna-1000000 hashed hit hu 1 51.75 51.89 ns [53.64 52.02 51.75 51.79 51.89]
+row dna-1000000 hashed hit hu 2 51.96 52.34 ns [52.58 52.22 52.34 51.96 52.39]
+row dna-1000000 hashed hit hy 2 50.86 50.97 ns [50.97 54.59 50.99 50.94 50.86]
+row dna-1000000 hashed hit v5o 2 55.16 55.26 ns [55.24 55.16 55.26 55.30 55.53]
+row dna-1000000 hashed hit 4x 2 47.08 47.15 ns [47.08 47.15 47.26 47.11 47.19]
+row dna-1000000 hashed hit hashmap ctl 124.93 125.17 ns [125.28 125.17 125.03 124.93 125.51]
+row dna-1000000 hashed miss 4x 1 24.17 24.77 ns [49.96 32.34 24.71 24.77 24.17]
+row dna-1000000 hashed miss v5o 1 28.44 29.01 ns [53.37 36.55 29.01 28.44 28.57]
+row dna-1000000 hashed miss hy 1 25.32 32.86 ns [40.73 33.57 32.86 25.96 25.32]
+row dna-1000000 hashed miss hu 1 27.17 33.89 ns [38.28 34.89 33.89 27.17 29.89]
+row dna-1000000 hashed miss hu 2 27.02 31.01 ns [36.32 34.10 31.01 28.94 27.02]
+row dna-1000000 hashed miss hy 2 25.23 27.66 ns [34.96 33.35 27.66 25.68 25.23]
+row dna-1000000 hashed miss v5o 2 27.73 30.55 ns [37.28 36.50 30.55 27.90 27.73]
+row dna-1000000 hashed miss 4x 2 23.58 25.31 ns [31.35 30.50 25.31 23.65 23.58]
+row dna-1000000 hashed miss hashmap ctl 54.57 55.88 ns [72.30 72.28 55.71 55.88 54.57]
+row dna-1000000 hashed chain 4x 1 168.78 170.79 ns [168.78 171.27 170.79 171.02 170.64]
+row dna-1000000 hashed chain v5o 1 171.80 172.52 ns [172.52 172.09 173.37 171.80 172.67]
+row dna-1000000 hashed chain hy 1 170.98 171.27 ns [177.66 171.17 170.98 171.27 171.40]
+row dna-1000000 hashed chain hu 1 171.46 171.78 ns [171.46 171.74 171.78 172.48 172.09]
+row dna-1000000 hashed chain hu 2 171.29 171.85 ns [171.29 172.67 172.42 171.51 171.85]
+row dna-1000000 hashed chain hy 2 171.32 171.60 ns [172.53 172.21 171.60 171.41 171.32]
+row dna-1000000 hashed chain v5o 2 171.95 172.92 ns [172.92 172.08 171.95 178.65 172.97]
+row dna-1000000 hashed chain 4x 2 170.69 170.74 ns [170.70 170.74 170.69 171.35 171.26]
+row dna-1000000 hashed chain hashmap ctl 125.52 125.53 ns [125.52 125.52 125.53 125.71 125.53]
+row dna-1000000 hashed batch 4x 1 13.69 13.77 ns [14.41 13.69 13.78 13.77 13.72]
+row dna-1000000 hashed batch v5o 1 14.78 14.97 ns [15.40 15.09 14.82 14.78 14.97]
+row dna-1000000 hashed batch hy 1 13.86 13.98 ns [13.86 14.07 14.06 13.98 13.96]
+row dna-1000000 hashed batch hu 1 14.04 14.14 ns [14.15 14.14 14.04 14.16 14.09]
+row dna-1000000 hashed batch hu 2 14.04 14.09 ns [14.09 14.08 14.17 14.04 14.16]
+row dna-1000000 hashed batch hy 2 13.99 14.18 ns [14.56 14.19 14.09 14.18 13.99]
+row dna-1000000 hashed batch v5o 2 15.05 15.09 ns [15.07 15.05 15.21 15.09 15.11]
+row dna-1000000 hashed batch 4x 2 13.76 13.83 ns [14.02 13.83 13.76 13.78 13.88]
+## hash5/dna-1000000/perfect [16:16:44 69000mC busy=4 swap=0MiB governor=performance]
+# dna-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg dna-1000000 perfect 4x mappings=1 rss_kb=15464 huge_kb=14336 coverage=92.7% thp_fault_alloc=+7 thp_fault_fallback=+0
+# 4x blob 16047864 bytes, 17.8310 B/key, magic BMP8
+hg dna-1000000 perfect v5o mappings=1 rss_kb=15464 huge_kb=14336 coverage=92.7% thp_fault_alloc=+7 thp_fault_fallback=+0
+# v5o blob 16047948 bytes, 17.8311 B/key, magic BMP9
+hg dna-1000000 perfect hy mappings=1 rss_kb=15464 huge_kb=14336 coverage=92.7% thp_fault_alloc=+7 thp_fault_fallback=+0
+# hy blob 16047960 bytes, 17.8311 B/key, magic BMP9
+hg dna-1000000 perfect hu mappings=1 rss_kb=15464 huge_kb=14336 coverage=92.7% thp_fault_alloc=+7 thp_fault_fallback=+0
+# hu blob 16048380 bytes, 17.8315 B/key, magic BMP9
+row dna-1000000 perfect hit 4x 1 74.57 74.78 ns [74.79 74.60 74.57 74.78 74.91]
+row dna-1000000 perfect hit v5o 1 100.13 100.54 ns [100.59 100.61 100.13 100.54 100.21]
+row dna-1000000 perfect hit hy 1 76.28 76.40 ns [76.90 76.28 76.40 76.54 76.34]
+row dna-1000000 perfect hit hu 1 77.14 77.26 ns [77.29 77.21 77.26 77.27 77.14]
+row dna-1000000 perfect hit hu 2 77.03 77.13 ns [77.18 77.15 77.07 77.13 77.03]
+row dna-1000000 perfect hit hy 2 76.17 76.26 ns [76.25 76.17 76.32 76.26 76.29]
+row dna-1000000 perfect hit v5o 2 101.46 101.66 ns [101.62 102.11 101.66 101.92 101.46]
+row dna-1000000 perfect hit 4x 2 74.90 74.94 ns [74.94 74.97 74.98 74.90 74.94]
+row dna-1000000 perfect hit hashmap ctl 125.95 125.95 ns [125.97 125.95 125.95 125.95 126.18]
+row dna-1000000 perfect miss 4x 1 61.92 64.70 ns [72.20 65.43 61.92 64.70 62.08]
+row dna-1000000 perfect miss v5o 1 77.90 80.55 ns [92.65 80.55 78.26 80.65 77.90]
+row dna-1000000 perfect miss hy 1 63.15 66.42 ns [73.22 66.42 63.15 66.60 65.93]
+row dna-1000000 perfect miss hu 1 65.89 67.10 ns [73.76 67.10 65.89 68.89 66.61]
+row dna-1000000 perfect miss hu 2 66.31 67.09 ns [73.49 67.02 68.13 67.09 66.31]
+row dna-1000000 perfect miss hy 2 65.87 66.38 ns [72.58 69.20 66.38 66.21 65.87]
+row dna-1000000 perfect miss v5o 2 79.36 80.06 ns [91.50 80.06 80.85 79.36 79.73]
+row dna-1000000 perfect miss 4x 2 61.50 64.50 ns [69.49 63.13 64.71 61.50 64.50]
+row dna-1000000 perfect miss hashmap ctl 66.17 67.34 ns [75.63 68.04 66.76 67.34 66.17]
+row dna-1000000 perfect chain 4x 1 185.87 186.04 ns [185.99 186.38 186.19 185.87 186.04]
+row dna-1000000 perfect chain v5o 1 188.31 188.66 ns [188.72 188.66 188.71 188.46 188.31]
+row dna-1000000 perfect chain hy 1 186.40 186.64 ns [186.40 187.19 186.87 186.55 186.64]
+row dna-1000000 perfect chain hu 1 187.71 187.86 ns [187.82 187.71 192.28 187.86 187.88]
+row dna-1000000 perfect chain hu 2 187.64 188.04 ns [189.59 187.64 187.67 188.04 188.44]
+row dna-1000000 perfect chain hy 2 186.69 187.43 ns [188.15 186.69 187.18 187.43 187.44]
+row dna-1000000 perfect chain v5o 2 189.87 190.28 ns [190.28 189.87 190.61 190.32 190.18]
+row dna-1000000 perfect chain 4x 2 186.68 186.83 ns [186.83 187.23 186.77 187.15 186.68]
+row dna-1000000 perfect chain hashmap ctl 125.04 125.18 ns [125.49 125.21 125.04 125.18 125.09]
+row dna-1000000 perfect batch 4x 1 29.92 29.94 ns [29.92 30.01 29.93 29.97 29.94]
+row dna-1000000 perfect batch v5o 1 30.42 30.50 ns [30.42 30.54 30.47 30.50 30.51]
+row dna-1000000 perfect batch hy 1 29.89 29.96 ns [29.91 29.89 29.96 29.96 30.00]
+row dna-1000000 perfect batch hu 1 30.22 30.29 ns [30.29 30.30 30.22 30.30 30.27]
+row dna-1000000 perfect batch hu 2 30.18 30.21 ns [30.18 30.20 30.23 30.21 30.26]
+row dna-1000000 perfect batch hy 2 29.85 29.92 ns [29.92 29.90 29.85 32.06 29.93]
+row dna-1000000 perfect batch v5o 2 30.44 30.48 ns [30.44 30.44 30.48 30.51 30.50]
+row dna-1000000 perfect batch 4x 2 29.87 29.97 ns [29.97 29.92 29.87 30.05 29.97]
+## hash5/domains-1000000/closed [16:17:16 67000mC busy=3 swap=0MiB governor=performance]
+# domains-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg domains-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216332 bytes, 0.2404 B/key, magic BCL2
+hg domains-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 216674 bytes, 0.2407 B/key, magic BCL3
+hg domains-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 217114 bytes, 0.2412 B/key, magic BCL3
+hg domains-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 216971 bytes, 0.2411 B/key, magic BCL3
+row domains-1000000 closed hit 4x 1 29.69 29.72 ns [30.68 30.25 29.71 29.69 29.72]
+row domains-1000000 closed hit v5o 1 32.45 32.50 ns [33.66 32.45 32.45 32.51 32.50]
+row domains-1000000 closed hit hy 1 31.19 31.23 ns [31.62 31.19 32.10 31.23 31.23]
+row domains-1000000 closed hit hu 1 31.55 31.62 ns [31.71 31.58 31.62 31.66 31.55]
+row domains-1000000 closed hit hu 2 31.65 31.70 ns [31.69 31.99 31.70 34.16 31.65]
+row domains-1000000 closed hit hy 2 31.12 31.23 ns [31.43 31.23 31.12 31.21 31.23]
+row domains-1000000 closed hit v5o 2 32.54 32.58 ns [33.24 32.56 32.58 32.61 32.54]
+row domains-1000000 closed hit 4x 2 29.74 29.85 ns [29.97 29.85 29.79 30.88 29.74]
+row domains-1000000 closed hit hashmap ctl 122.19 122.40 ns [122.60 122.30 122.40 122.19 122.42]
+row domains-1000000 closed chain 4x 1 138.46 139.11 ns [138.46 139.50 139.82 139.08 139.11]
+row domains-1000000 closed chain v5o 1 139.71 140.28 ns [139.71 140.42 140.28 140.28 140.09]
+row domains-1000000 closed chain hy 1 140.19 140.64 ns [140.19 144.43 140.78 140.64 140.35]
+row domains-1000000 closed chain hu 1 139.06 139.27 ns [140.37 139.27 139.22 139.06 139.66]
+row domains-1000000 closed chain hu 2 140.09 140.32 ns [140.09 140.27 140.32 140.34 140.58]
+row domains-1000000 closed chain hy 2 139.76 140.37 ns [140.21 140.47 139.76 140.57 140.37]
+row domains-1000000 closed chain v5o 2 140.09 140.44 ns [141.96 140.96 140.44 140.09 140.18]
+row domains-1000000 closed chain 4x 2 139.77 140.03 ns [139.98 139.77 140.03 141.67 140.94]
+row domains-1000000 closed chain hashmap ctl 122.86 122.89 ns [123.03 122.86 122.89 122.87 122.92]
+row domains-1000000 closed batch 4x 1 9.09 9.10 ns [10.32 9.20 9.10 9.10 9.09]
+row domains-1000000 closed batch v5o 1 9.46 9.48 ns [10.51 9.49 9.46 9.46 9.48]
+row domains-1000000 closed batch hy 1 9.31 9.33 ns [10.41 9.31 9.33 9.32 9.35]
+row domains-1000000 closed batch hu 1 9.32 9.35 ns [9.98 9.38 9.35 9.35 9.32]
+row domains-1000000 closed batch hu 2 9.37 9.44 ns [9.37 9.47 9.46 9.42 9.44]
+row domains-1000000 closed batch hy 2 9.27 9.29 ns [9.27 9.27 9.29 9.37 9.30]
+row domains-1000000 closed batch v5o 2 9.45 9.47 ns [9.49 9.45 9.48 9.47 9.46]
+row domains-1000000 closed batch 4x 2 9.08 9.09 ns [9.09 9.09 9.09 9.08 9.09]
+## hash5/domains-1000000/compact [16:17:34 64000mC busy=1 swap=0MiB governor=performance]
+# domains-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg domains-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116336 bytes, 1.2404 B/key, magic BCH8
+hg domains-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1116678 bytes, 1.2408 B/key, magic BCH9
+hg domains-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1117118 bytes, 1.2412 B/key, magic BCH9
+hg domains-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1116975 bytes, 1.2411 B/key, magic BCH9
+row domains-1000000 compact hit 4x 1 38.67 38.73 ns [39.47 38.73 38.67 38.77 38.72]
+row domains-1000000 compact hit v5o 1 44.47 44.52 ns [44.65 45.10 44.52 44.51 44.47]
+row domains-1000000 compact hit hy 1 42.26 42.28 ns [42.26 42.85 42.38 42.28 42.26]
+row domains-1000000 compact hit hu 1 43.17 43.23 ns [43.19 43.23 43.30 43.17 43.63]
+row domains-1000000 compact hit hu 2 43.26 43.36 ns [43.43 43.42 43.26 43.32 43.36]
+row domains-1000000 compact hit hy 2 42.60 42.75 ns [42.77 42.60 42.69 42.75 43.02]
+row domains-1000000 compact hit v5o 2 44.62 44.69 ns [44.62 44.69 44.76 45.52 44.64]
+row domains-1000000 compact hit 4x 2 38.91 39.05 ns [39.01 39.05 39.28 39.06 38.91]
+row domains-1000000 compact hit hashmap ctl 121.31 121.54 ns [121.31 121.70 121.44 121.64 121.54]
+row domains-1000000 compact miss 4x 1 21.57 22.37 ns [39.27 22.07 22.37 21.57 22.41]
+row domains-1000000 compact miss v5o 1 24.02 24.23 ns [40.81 24.38 24.02 24.23 24.11]
+row domains-1000000 compact miss hy 1 22.84 23.60 ns [31.94 22.86 23.60 22.84 23.70]
+row domains-1000000 compact miss hu 1 23.29 23.71 ns [26.92 23.29 23.51 23.96 23.71]
+row domains-1000000 compact miss hu 2 23.24 23.58 ns [25.36 23.58 23.26 23.85 23.24]
+row domains-1000000 compact miss hy 2 22.98 23.44 ns [24.39 23.44 24.34 23.40 22.98]
+row domains-1000000 compact miss v5o 2 23.89 24.46 ns [24.73 24.08 24.90 23.89 24.46]
+row domains-1000000 compact miss 4x 2 21.66 22.14 ns [22.14 22.76 21.68 22.60 21.66]
+row domains-1000000 compact miss hashmap ctl 56.95 57.59 ns [58.57 57.06 58.05 56.95 57.59]
+row domains-1000000 compact chain 4x 1 158.21 158.77 ns [158.21 158.77 158.40 159.11 159.37]
+row domains-1000000 compact chain v5o 1 159.04 159.41 ns [159.81 161.07 159.41 159.04 159.10]
+row domains-1000000 compact chain hy 1 158.54 158.92 ns [160.38 158.55 158.92 159.54 158.54]
+row domains-1000000 compact chain hu 1 159.92 160.22 ns [160.22 159.96 161.12 159.92 160.99]
+row domains-1000000 compact chain hu 2 159.89 160.02 ns [159.93 160.65 160.02 159.89 160.23]
+row domains-1000000 compact chain hy 2 160.11 160.59 ns [160.85 160.19 160.11 160.85 160.59]
+row domains-1000000 compact chain v5o 2 159.33 159.72 ns [159.34 159.96 159.33 160.45 159.72]
+row domains-1000000 compact chain 4x 2 159.35 160.03 ns [159.35 160.06 160.52 160.03 159.63]
+row domains-1000000 compact chain hashmap ctl 122.53 122.56 ns [122.56 122.99 122.56 124.12 122.53]
+row domains-1000000 compact batch 4x 1 12.50 12.54 ns [13.38 12.54 12.50 12.52 12.54]
+row domains-1000000 compact batch v5o 1 12.77 12.80 ns [13.42 12.77 12.80 12.79 13.56]
+row domains-1000000 compact batch hy 1 12.58 12.61 ns [12.79 12.67 12.58 12.61 12.59]
+row domains-1000000 compact batch hu 1 13.09 13.11 ns [13.15 13.12 13.11 13.09 13.11]
+row domains-1000000 compact batch hu 2 13.10 13.15 ns [13.10 13.15 13.15 13.19 13.23]
+row domains-1000000 compact batch hy 2 12.59 12.64 ns [12.64 12.64 12.59 12.68 12.64]
+row domains-1000000 compact batch v5o 2 12.76 12.76 ns [12.81 12.76 12.76 12.76 12.80]
+row domains-1000000 compact batch 4x 2 12.41 12.45 ns [12.43 12.58 12.56 12.45 12.41]
+## hash5/domains-1000000/hashed [16:17:55 69000mC busy=5 swap=0MiB governor=performance]
+# domains-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg domains-1000000 hashed 4x mappings=2 rss_kb=6888 huge_kb=4096 coverage=59.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# 4x blob 7445226 bytes, 8.2725 B/key, magic BHD1
+hg domains-1000000 hashed v5o mappings=2 rss_kb=6888 huge_kb=4096 coverage=59.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# v5o blob 7445568 bytes, 8.2729 B/key, magic BHD2
+hg domains-1000000 hashed hy mappings=2 rss_kb=6888 huge_kb=4096 coverage=59.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# hy blob 7446008 bytes, 8.2733 B/key, magic BHD2
+hg domains-1000000 hashed hu mappings=2 rss_kb=6888 huge_kb=4096 coverage=59.5% thp_fault_alloc=+2 thp_fault_fallback=+0
+# hu blob 7445865 bytes, 8.2732 B/key, magic BHD2
+row domains-1000000 hashed hit 4x 1 49.77 49.83 ns [50.99 49.83 49.97 49.79 49.77]
+row domains-1000000 hashed hit v5o 1 54.22 54.28 ns [55.68 54.95 54.22 54.28 54.22]
+row domains-1000000 hashed hit hy 1 52.40 53.75 ns [53.75 53.95 53.82 52.64 52.40]
+row domains-1000000 hashed hit hu 1 52.15 52.42 ns [52.77 53.52 52.32 52.42 52.15]
+row domains-1000000 hashed hit hu 2 52.05 52.51 ns [53.33 52.51 52.14 56.96 52.05]
+row domains-1000000 hashed hit hy 2 52.44 52.84 ns [53.93 52.46 53.85 52.44 52.84]
+row domains-1000000 hashed hit v5o 2 54.43 54.66 ns [55.86 54.66 55.60 54.43 54.54]
+row domains-1000000 hashed hit 4x 2 49.73 49.97 ns [50.74 49.73 50.88 49.89 49.97]
+row domains-1000000 hashed hit hashmap ctl 121.48 121.58 ns [121.48 121.86 121.58 121.84 121.53]
+row domains-1000000 hashed miss 4x 1 33.20 34.00 ns [52.65 34.00 34.45 33.70 33.20]
+row domains-1000000 hashed miss v5o 1 36.76 37.01 ns [53.15 37.24 36.76 36.78 37.01]
+row domains-1000000 hashed miss hy 1 34.60 36.20 ns [48.11 36.20 34.60 35.99 36.68]
+row domains-1000000 hashed miss hu 1 35.44 35.79 ns [43.03 35.44 35.49 35.79 38.12]
+row domains-1000000 hashed miss hu 2 35.22 35.34 ns [38.68 35.29 35.22 35.34 35.72]
+row domains-1000000 hashed miss hy 2 35.49 35.52 ns [37.14 35.52 35.49 35.49 35.69]
+row domains-1000000 hashed miss v5o 2 36.16 37.20 ns [38.02 37.20 37.65 36.16 36.78]
+row domains-1000000 hashed miss 4x 2 32.22 33.28 ns [34.27 32.66 34.19 32.22 33.28]
+row domains-1000000 hashed miss hashmap ctl 61.61 62.25 ns [62.44 64.54 62.25 61.61 61.67]
+row domains-1000000 hashed chain 4x 1 171.12 171.95 ns [171.51 171.12 172.29 171.95 177.63]
+row domains-1000000 hashed chain v5o 1 171.11 172.06 ns [171.11 172.08 172.26 172.06 172.02]
+row domains-1000000 hashed chain hy 1 170.80 171.13 ns [171.42 170.80 171.13 170.83 171.28]
+row domains-1000000 hashed chain hu 1 172.25 172.40 ns [172.76 172.34 172.41 172.25 172.40]
+row domains-1000000 hashed chain hu 2 170.56 171.26 ns [170.56 171.51 171.21 171.66 171.26]
+row domains-1000000 hashed chain hy 2 171.16 171.72 ns [171.75 171.98 171.70 171.72 171.16]
+row domains-1000000 hashed chain v5o 2 172.77 173.25 ns [172.77 173.25 172.96 173.34 173.39]
+row domains-1000000 hashed chain 4x 2 170.83 171.39 ns [172.03 171.42 171.17 170.83 171.39]
+row domains-1000000 hashed chain hashmap ctl 122.32 122.44 ns [124.29 122.37 122.32 122.44 122.54]
+row domains-1000000 hashed batch 4x 1 31.54 31.93 ns [31.73 32.02 31.93 31.96 31.54]
+row domains-1000000 hashed batch v5o 1 32.72 32.88 ns [32.83 32.89 32.88 32.88 32.72]
+row domains-1000000 hashed batch hy 1 32.31 32.34 ns [32.34 32.46 32.31 32.36 32.31]
+row domains-1000000 hashed batch hu 1 32.26 32.55 ns [32.65 32.58 32.55 32.48 32.26]
+row domains-1000000 hashed batch hu 2 32.16 32.28 ns [32.47 32.32 32.16 32.27 32.28]
+row domains-1000000 hashed batch hy 2 32.24 32.36 ns [32.36 32.30 32.39 32.67 32.24]
+row domains-1000000 hashed batch v5o 2 32.68 32.96 ns [33.01 32.96 33.06 32.88 32.68]
+row domains-1000000 hashed batch 4x 2 31.49 31.94 ns [32.08 31.93 31.94 32.52 31.49]
+## hash5/domains-1000000/perfect [16:18:25 67000mC busy=2 swap=0MiB governor=performance]
+# domains-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg domains-1000000 perfect 4x mappings=1 rss_kb=13368 huge_kb=12288 coverage=91.9% thp_fault_alloc=+6 thp_fault_fallback=+0
+# 4x blob 13905057 bytes, 15.4501 B/key, magic BMP8
+hg domains-1000000 perfect v5o mappings=1 rss_kb=13372 huge_kb=12288 coverage=91.9% thp_fault_alloc=+6 thp_fault_fallback=+0
+# v5o blob 13908255 bytes, 15.4536 B/key, magic BMP9
+hg domains-1000000 perfect hy mappings=1 rss_kb=13372 huge_kb=12288 coverage=91.9% thp_fault_alloc=+6 thp_fault_fallback=+0
+# hy blob 13906995 bytes, 15.4522 B/key, magic BMP9
+hg domains-1000000 perfect hu mappings=1 rss_kb=15416 huge_kb=12288 coverage=79.7% thp_fault_alloc=+5 thp_fault_fallback=+0
+# hu blob 13903996 bytes, 15.4489 B/key, magic BMP9
+row domains-1000000 perfect hit 4x 1 75.17 75.19 ns [75.19 75.19 75.20 75.17 75.18]
+row domains-1000000 perfect hit v5o 1 85.00 85.13 ns [85.10 85.32 85.30 85.13 85.00]
+row domains-1000000 perfect hit hy 1 75.91 75.96 ns [75.91 76.21 75.94 75.96 76.73]
+row domains-1000000 perfect hit hu 1 76.71 76.80 ns [76.80 77.22 76.73 76.71 76.85]
+row domains-1000000 perfect hit hu 2 76.83 76.91 ns [76.95 76.83 76.91 76.85 77.33]
+row domains-1000000 perfect hit hy 2 76.08 76.24 ns [76.30 76.27 76.24 76.10 76.08]
+row domains-1000000 perfect hit v5o 2 85.32 85.48 ns [85.32 85.77 85.39 85.48 85.52]
+row domains-1000000 perfect hit 4x 2 75.41 75.45 ns [75.44 75.45 75.41 75.48 75.45]
+row domains-1000000 perfect hit hashmap ctl 123.12 123.40 ns [123.89 123.37 123.42 123.40 123.12]
+row domains-1000000 perfect miss 4x 1 32.09 32.43 ns [44.46 32.26 32.09 32.49 32.43]
+row domains-1000000 perfect miss v5o 1 33.63 34.06 ns [40.09 33.89 34.09 34.06 33.63]
+row domains-1000000 perfect miss hy 1 32.88 33.09 ns [35.47 32.97 33.09 34.36 32.88]
+row domains-1000000 perfect miss hu 1 33.87 34.09 ns [34.69 33.87 34.09 36.77 33.87]
+row domains-1000000 perfect miss hu 2 33.37 33.67 ns [34.10 33.67 33.55 37.14 33.37]
+row domains-1000000 perfect miss hy 2 33.29 33.71 ns [33.49 33.71 35.68 33.96 33.29]
+row domains-1000000 perfect miss v5o 2 33.82 34.29 ns [34.29 35.10 34.94 33.94 33.82]
+row domains-1000000 perfect miss 4x 2 31.99 32.41 ns [32.41 33.22 32.20 32.42 31.99]
+row domains-1000000 perfect miss hashmap ctl 57.50 58.06 ns [58.06 58.93 57.50 58.69 57.54]
+row domains-1000000 perfect chain 4x 1 184.96 185.03 ns [185.10 185.05 185.03 184.96 184.98]
+row domains-1000000 perfect chain v5o 1 184.86 185.30 ns [185.19 185.62 185.59 185.30 184.86]
+row domains-1000000 perfect chain hy 1 185.13 185.31 ns [185.13 185.79 185.84 185.30 185.31]
+row domains-1000000 perfect chain hu 1 185.85 185.88 ns [185.87 185.85 185.88 186.15 185.93]
+row domains-1000000 perfect chain hu 2 185.29 185.48 ns [185.88 185.45 185.29 189.35 185.48]
+row domains-1000000 perfect chain hy 2 185.82 185.86 ns [186.20 185.86 185.84 186.10 185.82]
+row domains-1000000 perfect chain v5o 2 186.43 186.65 ns [186.67 186.43 186.52 186.65 186.68]
+row domains-1000000 perfect chain 4x 2 185.30 185.65 ns [185.70 185.51 185.80 185.65 185.30]
+row domains-1000000 perfect chain hashmap ctl 123.11 123.12 ns [123.11 123.12 123.27 123.11 123.56]
+row domains-1000000 perfect batch 4x 1 30.81 30.88 ns [30.85 30.88 30.97 30.81 30.90]
+row domains-1000000 perfect batch v5o 1 31.31 31.33 ns [31.32 31.46 31.33 31.36 31.31]
+row domains-1000000 perfect batch hy 1 31.02 31.05 ns [31.05 31.47 31.15 31.02 31.02]
+row domains-1000000 perfect batch hu 1 31.34 31.37 ns [31.37 31.41 31.37 31.38 31.34]
+row domains-1000000 perfect batch hu 2 31.43 31.44 ns [31.43 31.56 31.46 31.43 31.44]
+row domains-1000000 perfect batch hy 2 30.98 31.01 ns [32.37 31.01 30.99 30.98 31.01]
+row domains-1000000 perfect batch v5o 2 31.17 31.20 ns [31.54 31.20 31.17 31.18 31.32]
+row domains-1000000 perfect batch 4x 2 30.83 30.86 ns [30.86 30.86 30.83 30.84 30.91]
+## hash5/numeric-1000000/closed [16:18:54 67000mC busy=2 swap=0MiB governor=performance]
+# numeric-1000000 closed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg numeric-1000000 closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 216692 bytes, 0.2408 B/key, magic BCL2
+hg numeric-1000000 closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 217147 bytes, 0.2413 B/key, magic BCL3
+hg numeric-1000000 closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 217147 bytes, 0.2413 B/key, magic BCL3
+hg numeric-1000000 closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 217147 bytes, 0.2413 B/key, magic BCL3
+row numeric-1000000 closed hit 4x 1 30.20 30.25 ns [31.28 30.21 30.20 30.25 30.55]
+row numeric-1000000 closed hit v5o 1 31.11 31.28 ns [32.67 31.28 31.13 31.11 31.50]
+row numeric-1000000 closed hit hy 1 30.93 31.01 ns [32.17 30.96 31.18 30.93 31.01]
+row numeric-1000000 closed hit hu 1 30.96 31.02 ns [32.15 31.02 30.96 31.05 30.97]
+row numeric-1000000 closed hit hu 2 31.19 31.24 ns [31.24 31.20 31.25 31.26 31.19]
+row numeric-1000000 closed hit hy 2 30.83 30.89 ns [30.99 30.83 30.89 30.85 30.89]
+row numeric-1000000 closed hit v5o 2 31.17 31.26 ns [31.17 31.23 31.27 31.28 31.26]
+row numeric-1000000 closed hit 4x 2 30.28 30.29 ns [30.29 30.28 30.44 30.38 30.28]
+row numeric-1000000 closed hit hashmap ctl 113.81 113.96 ns [113.96 114.07 113.96 113.81 113.95]
+row numeric-1000000 closed chain 4x 1 137.25 137.44 ns [137.52 137.81 137.25 137.44 137.44]
+row numeric-1000000 closed chain v5o 1 138.45 138.83 ns [139.39 139.44 138.45 138.83 138.50]
+row numeric-1000000 closed chain hy 1 138.88 139.36 ns [146.52 139.36 138.88 138.97 139.66]
+row numeric-1000000 closed chain hu 1 137.94 138.30 ns [142.70 138.30 138.71 137.94 138.04]
+row numeric-1000000 closed chain hu 2 138.04 138.08 ns [139.48 138.33 138.04 138.08 138.07]
+row numeric-1000000 closed chain hy 2 137.92 138.46 ns [138.19 139.50 144.38 138.46 137.92]
+row numeric-1000000 closed chain v5o 2 138.81 139.71 ns [139.71 138.81 141.94 138.97 140.33]
+row numeric-1000000 closed chain 4x 2 137.93 138.50 ns [138.77 138.50 138.59 137.93 138.25]
+row numeric-1000000 closed chain hashmap ctl 115.19 115.27 ns [115.39 115.28 115.27 115.21 115.19]
+row numeric-1000000 closed batch 4x 1 8.72 8.73 ns [10.27 8.73 8.75 8.72 8.73]
+row numeric-1000000 closed batch v5o 1 8.88 8.95 ns [10.14 8.98 8.88 8.88 8.95]
+row numeric-1000000 closed batch hy 1 8.83 8.85 ns [10.47 8.85 8.84 8.85 8.83]
+row numeric-1000000 closed batch hu 1 8.71 8.73 ns [10.00 8.71 8.73 8.74 8.72]
+row numeric-1000000 closed batch hu 2 8.79 8.95 ns [9.91 8.79 8.81 9.01 8.95]
+row numeric-1000000 closed batch hy 2 8.73 8.82 ns [9.22 8.73 8.76 8.82 8.86]
+row numeric-1000000 closed batch v5o 2 8.81 8.84 ns [8.81 8.83 8.90 8.87 8.84]
+row numeric-1000000 closed batch 4x 2 8.76 8.78 ns [8.78 8.84 8.79 8.77 8.76]
+## hash5/numeric-1000000/compact [16:19:12 63000mC busy=2 swap=0MiB governor=performance]
+# numeric-1000000 compact: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg numeric-1000000 compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 1116696 bytes, 1.2408 B/key, magic BCH8
+hg numeric-1000000 compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 1117151 bytes, 1.2413 B/key, magic BCH9
+hg numeric-1000000 compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 1117151 bytes, 1.2413 B/key, magic BCH9
+hg numeric-1000000 compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 1117151 bytes, 1.2413 B/key, magic BCH9
+row numeric-1000000 compact hit 4x 1 40.60 40.64 ns [40.66 40.70 40.64 40.63 40.60]
+row numeric-1000000 compact hit v5o 1 44.65 44.69 ns [44.76 44.69 44.74 44.68 44.65]
+row numeric-1000000 compact hit hy 1 44.03 44.08 ns [44.03 44.16 44.06 44.08 44.18]
+row numeric-1000000 compact hit hu 1 44.66 44.67 ns [44.74 44.67 44.66 44.67 44.71]
+row numeric-1000000 compact hit hu 2 44.51 44.56 ns [44.53 44.61 44.99 44.51 44.56]
+row numeric-1000000 compact hit hy 2 44.11 44.15 ns [44.48 44.11 44.16 44.15 44.15]
+row numeric-1000000 compact hit v5o 2 44.69 44.85 ns [44.86 44.87 44.69 44.81 44.85]
+row numeric-1000000 compact hit 4x 2 40.76 40.85 ns [40.85 40.86 40.76 40.80 40.98]
+row numeric-1000000 compact hit hashmap ctl 114.75 114.79 ns [114.75 114.97 114.79 114.77 114.86]
+row numeric-1000000 compact miss 4x 1 18.58 20.39 ns [31.55 21.84 20.39 18.58 18.92]
+row numeric-1000000 compact miss v5o 1 19.46 20.14 ns [26.14 22.80 20.14 19.52 19.46]
+row numeric-1000000 compact miss hy 1 18.95 22.17 ns [23.42 22.17 24.27 19.30 18.95]
+row numeric-1000000 compact miss hu 1 19.64 22.86 ns [23.02 22.86 22.86 19.64 20.52]
+row numeric-1000000 compact miss hu 2 19.07 22.16 ns [22.72 22.46 22.16 19.53 19.07]
+row numeric-1000000 compact miss hy 2 19.50 22.34 ns [22.76 23.13 22.34 19.53 19.50]
+row numeric-1000000 compact miss v5o 2 19.70 22.95 ns [23.03 23.49 22.95 19.70 19.84]
+row numeric-1000000 compact miss 4x 2 18.35 21.53 ns [21.53 23.29 21.60 18.89 18.35]
+row numeric-1000000 compact miss hashmap ctl 46.33 50.87 ns [57.97 58.06 50.87 48.43 46.33]
+row numeric-1000000 compact chain 4x 1 155.71 156.88 ns [155.71 156.20 156.88 157.67 156.95]
+row numeric-1000000 compact chain v5o 1 157.38 158.77 ns [157.66 157.38 158.77 158.84 164.00]
+row numeric-1000000 compact chain hy 1 157.53 158.47 ns [157.53 159.58 158.47 158.82 158.12]
+row numeric-1000000 compact chain hu 1 157.89 158.12 ns [158.22 157.99 157.89 158.12 158.22]
+row numeric-1000000 compact chain hu 2 156.56 156.87 ns [156.61 156.98 156.56 157.15 156.87]
+row numeric-1000000 compact chain hy 2 157.85 158.06 ns [158.70 157.98 158.67 157.85 158.06]
+row numeric-1000000 compact chain v5o 2 157.51 157.86 ns [163.78 157.86 158.47 157.51 157.58]
+row numeric-1000000 compact chain 4x 2 157.08 157.60 ns [157.44 157.60 157.99 157.08 157.84]
+row numeric-1000000 compact chain hashmap ctl 114.72 114.84 ns [114.78 114.96 116.40 114.84 114.72]
+row numeric-1000000 compact batch 4x 1 25.59 25.70 ns [25.84 25.68 25.70 25.83 25.59]
+row numeric-1000000 compact batch v5o 1 26.17 26.24 ns [26.29 26.24 26.22 26.17 26.32]
+row numeric-1000000 compact batch hy 1 26.16 26.23 ns [26.16 26.35 26.49 26.23 26.17]
+row numeric-1000000 compact batch hu 1 26.27 26.40 ns [26.27 26.56 26.37 26.40 26.42]
+row numeric-1000000 compact batch hu 2 26.29 26.33 ns [26.38 26.44 26.29 26.32 26.33]
+row numeric-1000000 compact batch hy 2 26.02 26.14 ns [26.27 26.21 26.08 26.14 26.02]
+row numeric-1000000 compact batch v5o 2 26.15 26.25 ns [27.08 26.30 26.25 26.22 26.15]
+row numeric-1000000 compact batch 4x 2 25.48 25.57 ns [25.67 25.57 25.73 25.57 25.48]
+## hash5/numeric-1000000/hashed [16:19:33 69000mC busy=1 swap=0MiB governor=performance]
+# numeric-1000000 hashed: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg numeric-1000000 hashed 4x mappings=1 rss_kb=3080 huge_kb=2048 coverage=66.5% thp_fault_alloc=+1 thp_fault_fallback=+0
+# 4x blob 4302371 bytes, 4.7804 B/key, magic BHD1
+hg numeric-1000000 hashed v5o mappings=1 rss_kb=3080 huge_kb=2048 coverage=66.5% thp_fault_alloc=+1 thp_fault_fallback=+0
+# v5o blob 4302826 bytes, 4.7809 B/key, magic BHD2
+hg numeric-1000000 hashed hy mappings=1 rss_kb=3080 huge_kb=2048 coverage=66.5% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hy blob 4302826 bytes, 4.7809 B/key, magic BHD2
+hg numeric-1000000 hashed hu mappings=1 rss_kb=3080 huge_kb=2048 coverage=66.5% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hu blob 4302826 bytes, 4.7809 B/key, magic BHD2
+row numeric-1000000 hashed hit 4x 1 50.56 50.63 ns [50.56 50.92 50.65 50.63 50.56]
+row numeric-1000000 hashed hit v5o 1 54.71 54.75 ns [54.74 54.75 54.76 54.83 54.71]
+row numeric-1000000 hashed hit hy 1 53.11 53.16 ns [53.56 53.16 53.16 53.11 53.25]
+row numeric-1000000 hashed hit hu 1 52.89 52.90 ns [52.98 52.90 52.89 52.92 52.89]
+row numeric-1000000 hashed hit hu 2 52.88 52.92 ns [52.99 52.88 52.92 52.88 53.00]
+row numeric-1000000 hashed hit hy 2 53.08 53.16 ns [53.16 53.16 53.18 53.17 53.08]
+row numeric-1000000 hashed hit v5o 2 54.72 54.75 ns [54.78 54.72 54.82 54.75 54.72]
+row numeric-1000000 hashed hit 4x 2 50.87 50.96 ns [51.12 50.96 50.87 51.11 50.91]
+row numeric-1000000 hashed hit hashmap ctl 114.94 115.05 ns [115.11 115.00 116.27 115.05 114.94]
+row numeric-1000000 hashed miss 4x 1 32.26 32.70 ns [43.08 32.82 32.70 32.57 32.26]
+row numeric-1000000 hashed miss v5o 1 34.36 35.32 ns [41.22 35.32 35.42 34.36 34.66]
+row numeric-1000000 hashed miss hy 1 33.39 34.17 ns [37.43 34.17 33.39 33.42 34.81]
+row numeric-1000000 hashed miss hu 1 33.59 33.85 ns [36.29 33.66 33.59 33.85 34.03]
+row numeric-1000000 hashed miss hu 2 33.31 33.58 ns [35.61 33.91 33.31 33.58 33.54]
+row numeric-1000000 hashed miss hy 2 33.36 34.23 ns [34.88 34.23 33.36 34.08 34.39]
+row numeric-1000000 hashed miss v5o 2 34.16 34.66 ns [38.79 35.67 34.16 34.62 34.66]
+row numeric-1000000 hashed miss 4x 2 32.08 32.60 ns [34.68 32.60 32.42 32.08 32.84]
+row numeric-1000000 hashed miss hashmap ctl 61.48 61.99 ns [62.09 61.97 61.99 62.33 61.48]
+row numeric-1000000 hashed chain 4x 1 167.85 169.58 ns [167.85 169.69 169.49 169.58 170.14]
+row numeric-1000000 hashed chain v5o 1 171.09 172.35 ns [177.44 171.09 171.40 172.35 172.60]
+row numeric-1000000 hashed chain hy 1 170.82 171.67 ns [172.10 171.67 172.04 171.11 170.82]
+row numeric-1000000 hashed chain hu 1 170.69 170.85 ns [170.69 170.85 170.85 171.29 171.77]
+row numeric-1000000 hashed chain hu 2 170.52 171.01 ns [171.41 170.64 171.01 171.18 170.52]
+row numeric-1000000 hashed chain hy 2 171.52 171.82 ns [171.78 171.52 171.82 172.36 172.02]
+row numeric-1000000 hashed chain v5o 2 170.83 171.27 ns [171.53 170.83 171.24 171.60 171.27]
+row numeric-1000000 hashed chain 4x 2 170.47 171.42 ns [177.55 171.42 170.71 171.53 170.47]
+row numeric-1000000 hashed chain hashmap ctl 115.50 115.60 ns [115.60 115.50 115.75 115.54 115.71]
+row numeric-1000000 hashed batch 4x 1 31.13 31.15 ns [31.13 31.15 31.15 31.27 31.21]
+row numeric-1000000 hashed batch v5o 1 31.75 31.81 ns [31.84 31.91 31.75 31.76 31.81]
+row numeric-1000000 hashed batch hy 1 31.42 31.54 ns [31.90 31.58 31.53 31.42 31.54]
+row numeric-1000000 hashed batch hu 1 31.24 31.53 ns [31.24 31.53 31.76 31.52 31.59]
+row numeric-1000000 hashed batch hu 2 31.44 31.51 ns [31.62 31.51 31.58 31.47 31.44]
+row numeric-1000000 hashed batch hy 2 31.44 31.50 ns [31.69 31.60 31.44 31.50 31.46]
+row numeric-1000000 hashed batch v5o 2 31.70 31.84 ns [31.89 31.84 31.80 31.86 31.70]
+row numeric-1000000 hashed batch 4x 2 31.05 31.24 ns [31.26 31.44 31.05 31.24 31.18]
+## hash5/numeric-1000000/perfect [16:19:59 68000mC busy=0 swap=0MiB governor=performance]
+# numeric-1000000 perfect: 900000 keys built, 100000 held out, 900000 hits, 100000 misses, 200000 mixed
+hg numeric-1000000 perfect 4x mappings=1 rss_kb=3436 huge_kb=2048 coverage=59.6% thp_fault_alloc=+1 thp_fault_fallback=+0
+# 4x blob 3731130 bytes, 4.1457 B/key, magic BMP8
+hg numeric-1000000 perfect v5o mappings=2 rss_kb=6872 huge_kb=4096 coverage=59.6% thp_fault_alloc=+1 thp_fault_fallback=+0
+# v5o blob 3731587 bytes, 4.1462 B/key, magic BMP9
+hg numeric-1000000 perfect hy mappings=2 rss_kb=6872 huge_kb=4096 coverage=59.6% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hy blob 3731587 bytes, 4.1462 B/key, magic BMP9
+hg numeric-1000000 perfect hu mappings=2 rss_kb=6872 huge_kb=4096 coverage=59.6% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hu blob 3731587 bytes, 4.1462 B/key, magic BMP9
+row numeric-1000000 perfect hit 4x 1 63.32 63.34 ns [63.32 63.33 63.37 63.34 63.36]
+row numeric-1000000 perfect hit v5o 1 64.85 64.92 ns [64.92 64.85 68.60 64.89 64.99]
+row numeric-1000000 perfect hit hy 1 63.81 63.87 ns [63.94 63.81 63.86 64.13 63.87]
+row numeric-1000000 perfect hit hu 1 64.49 64.58 ns [64.82 64.49 64.69 64.50 64.58]
+row numeric-1000000 perfect hit hu 2 64.45 64.56 ns [64.61 64.45 64.47 64.56 64.69]
+row numeric-1000000 perfect hit hy 2 64.16 64.33 ns [64.33 64.35 64.16 68.34 64.30]
+row numeric-1000000 perfect hit v5o 2 64.52 64.57 ns [64.84 64.56 64.57 64.58 64.52]
+row numeric-1000000 perfect hit 4x 2 62.92 63.07 ns [63.07 62.94 63.57 63.41 62.92]
+row numeric-1000000 perfect hit hashmap ctl 115.14 115.23 ns [115.30 115.21 115.33 115.23 115.14]
+row numeric-1000000 perfect miss 4x 1 45.68 47.19 ns [56.10 48.53 46.51 47.19 45.68]
+row numeric-1000000 perfect miss v5o 1 50.71 52.24 ns [56.50 52.24 53.37 50.79 50.71]
+row numeric-1000000 perfect miss hy 1 45.36 47.37 ns [49.48 49.43 45.36 46.28 47.37]
+row numeric-1000000 perfect miss hu 1 46.90 47.43 ns [48.11 47.08 46.90 47.49 47.43]
+row numeric-1000000 perfect miss hu 2 46.72 46.86 ns [47.39 46.72 46.85 47.83 46.86]
+row numeric-1000000 perfect miss hy 2 46.58 47.30 ns [46.58 47.27 47.51 47.81 47.30]
+row numeric-1000000 perfect miss v5o 2 50.40 50.59 ns [50.40 50.55 50.79 50.59 50.86]
+row numeric-1000000 perfect miss 4x 2 44.72 45.81 ns [46.22 44.72 45.81 45.41 45.81]
+row numeric-1000000 perfect miss hashmap ctl 63.15 64.45 ns [64.80 64.65 63.15 64.45 63.32]
+row numeric-1000000 perfect chain 4x 1 154.47 155.49 ns [154.47 156.12 155.61 155.01 155.49]
+row numeric-1000000 perfect chain v5o 1 154.74 155.12 ns [154.74 155.57 155.47 154.88 155.12]
+row numeric-1000000 perfect chain hy 1 155.19 155.46 ns [156.08 155.37 156.23 155.19 155.46]
+row numeric-1000000 perfect chain hu 1 154.32 154.80 ns [160.51 154.32 154.49 156.87 154.80]
+row numeric-1000000 perfect chain hu 2 153.84 154.09 ns [154.73 153.92 154.09 153.84 155.31]
+row numeric-1000000 perfect chain hy 2 154.68 155.05 ns [155.70 154.81 154.68 155.05 155.41]
+row numeric-1000000 perfect chain v5o 2 154.03 154.35 ns [154.65 154.03 154.78 154.11 154.35]
+row numeric-1000000 perfect chain 4x 2 154.20 154.47 ns [156.20 154.30 154.80 154.20 154.47]
+row numeric-1000000 perfect chain hashmap ctl 115.11 115.24 ns [115.27 115.11 115.19 115.24 117.11]
+row numeric-1000000 perfect batch 4x 1 25.48 25.57 ns [34.95 25.57 25.53 25.63 25.48]
+row numeric-1000000 perfect batch v5o 1 26.00 26.04 ns [26.04 26.02 26.11 26.00 26.37]
+row numeric-1000000 perfect batch hy 1 25.46 25.51 ns [25.48 25.46 25.51 25.51 25.88]
+row numeric-1000000 perfect batch hu 1 25.95 26.01 ns [26.01 25.98 26.10 25.95 26.06]
+row numeric-1000000 perfect batch hu 2 25.88 25.92 ns [25.88 25.96 26.00 25.92 25.92]
+row numeric-1000000 perfect batch hy 2 25.62 25.66 ns [25.62 25.73 25.72 25.66 25.62]
+row numeric-1000000 perfect batch v5o 2 25.98 26.02 ns [26.02 25.98 26.00 26.02 26.17]
+row numeric-1000000 perfect batch 4x 2 25.41 25.54 ns [25.54 25.57 25.55 25.46 25.41]
+## hash5/words-full/closed [16:20:24 69000mC busy=0 swap=0MiB governor=performance]
+# words-full closed: 431841 keys built, 47982 held out, 431841 hits, 47982 misses, 95964 mixed
+hg words-full closed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 104620 bytes, 0.2423 B/key, magic BCL2
+hg words-full closed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 104507 bytes, 0.2420 B/key, magic BCL3
+hg words-full closed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 104210 bytes, 0.2413 B/key, magic BCL3
+hg words-full closed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 104325 bytes, 0.2416 B/key, magic BCL3
+row words-full closed hit 4x 1 16.89 17.68 ns [18.75 16.92 17.68 16.89 18.05]
+row words-full closed hit v5o 1 17.61 17.68 ns [17.68 17.82 17.61 17.75 17.62]
+row words-full closed hit hy 1 17.10 17.28 ns [17.14 17.28 18.12 17.29 17.10]
+row words-full closed hit hu 1 17.52 17.56 ns [17.56 17.75 18.16 17.52 17.53]
+row words-full closed hit hu 2 17.22 17.35 ns [17.35 17.43 17.73 17.22 17.35]
+row words-full closed hit hy 2 17.17 17.33 ns [17.17 19.99 17.35 17.33 17.17]
+row words-full closed hit v5o 2 17.41 17.54 ns [17.49 31.72 17.41 17.54 17.74]
+row words-full closed hit 4x 2 16.78 17.12 ns [16.78 17.80 16.86 18.17 17.12]
+row words-full closed hit hashmap ctl 96.75 97.27 ns [97.27 97.48 97.02 97.89 96.75]
+row words-full closed chain 4x 1 81.60 82.55 ns [82.65 83.30 82.45 81.60 82.55]
+row words-full closed chain v5o 1 83.18 83.65 ns [87.37 83.65 83.34 83.18 84.84]
+row words-full closed chain hy 1 82.05 82.82 ns [82.93 84.49 82.05 82.68 82.82]
+row words-full closed chain hu 1 81.31 82.12 ns [82.21 82.12 81.88 84.55 81.31]
+row words-full closed chain hu 2 80.13 80.97 ns [82.61 80.13 80.97 81.08 80.80]
+row words-full closed chain hy 2 81.54 81.82 ns [82.33 81.82 82.78 81.54 81.59]
+row words-full closed chain v5o 2 83.45 83.77 ns [83.77 83.84 84.08 83.45 83.76]
+row words-full closed chain 4x 2 81.14 81.76 ns [81.48 81.76 82.65 82.97 81.14]
+row words-full closed chain hashmap ctl 100.81 101.59 ns [100.99 101.77 100.81 102.61 101.59]
+row words-full closed batch 4x 1 7.22 7.24 ns [8.50 7.22 7.23 7.24 7.34]
+row words-full closed batch v5o 1 7.52 7.57 ns [8.46 7.52 7.57 7.64 7.53]
+row words-full closed batch hy 1 7.39 7.42 ns [7.39 7.42 7.41 7.46 7.43]
+row words-full closed batch hu 1 7.40 7.41 ns [7.41 7.40 7.40 7.43 7.41]
+row words-full closed batch hu 2 7.38 7.40 ns [7.38 7.40 7.40 7.41 7.40]
+row words-full closed batch hy 2 7.41 7.43 ns [7.41 7.41 7.45 7.43 7.45]
+row words-full closed batch v5o 2 7.54 7.58 ns [7.54 7.56 7.65 7.58 7.58]
+row words-full closed batch 4x 2 7.22 7.25 ns [7.22 7.26 7.25 7.30 7.25]
+## hash5/words-full/compact [16:20:30 66000mC busy=5 swap=0MiB governor=performance]
+# words-full compact: 431841 keys built, 47982 held out, 431841 hits, 47982 misses, 95964 mixed
+hg words-full compact 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 536465 bytes, 1.2423 B/key, magic BCH8
+hg words-full compact v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 536352 bytes, 1.2420 B/key, magic BCH9
+hg words-full compact hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 536055 bytes, 1.2413 B/key, magic BCH9
+hg words-full compact hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 536170 bytes, 1.2416 B/key, magic BCH9
+row words-full compact hit 4x 1 23.84 24.27 ns [26.65 24.02 24.30 23.84 24.27]
+row words-full compact hit v5o 1 24.84 25.08 ns [27.61 25.08 24.95 24.84 25.17]
+row words-full compact hit hy 1 23.94 24.19 ns [26.70 23.94 24.88 23.95 24.19]
+row words-full compact hit hu 1 24.64 24.65 ns [28.26 24.65 24.65 25.18 24.64]
+row words-full compact hit hu 2 24.69 24.86 ns [27.35 24.90 24.76 24.69 24.86]
+row words-full compact hit hy 2 24.22 24.69 ns [25.81 26.07 24.69 24.23 24.22]
+row words-full compact hit v5o 2 24.30 24.64 ns [24.30 24.81 24.35 24.91 24.64]
+row words-full compact hit 4x 2 23.32 23.39 ns [23.35 24.12 23.32 24.15 23.39]
+row words-full compact hit hashmap ctl 97.71 97.84 ns [98.04 97.75 97.84 99.34 97.71]
+row words-full compact miss 4x 1 15.36 15.45 ns [29.93 15.46 15.45 15.36 15.37]
+row words-full compact miss v5o 1 16.55 16.73 ns [25.95 16.66 16.73 16.55 16.79]
+row words-full compact miss hy 1 15.60 15.72 ns [21.31 15.72 15.60 15.66 15.86]
+row words-full compact miss hu 1 16.29 16.45 ns [19.68 16.31 16.29 16.45 16.52]
+row words-full compact miss hu 2 16.26 16.34 ns [18.32 16.26 16.36 16.34 16.31]
+row words-full compact miss hy 2 15.97 16.09 ns [17.18 16.09 16.01 15.97 16.20]
+row words-full compact miss v5o 2 16.29 16.45 ns [16.99 16.29 16.55 16.45 16.33]
+row words-full compact miss 4x 2 15.30 15.50 ns [15.74 15.36 15.52 15.50 15.30]
+row words-full compact miss hashmap ctl 36.78 37.67 ns [41.41 38.95 37.67 37.50 36.78]
+row words-full compact chain 4x 1 99.48 100.13 ns [99.50 101.06 105.76 99.48 100.13]
+row words-full compact chain v5o 1 100.34 101.09 ns [100.34 100.56 101.09 101.21 101.79]
+row words-full compact chain hy 1 98.52 99.21 ns [99.06 100.86 99.21 102.56 98.52]
+row words-full compact chain hu 1 94.70 95.40 ns [95.51 94.70 95.54 95.40 95.22]
+row words-full compact chain hu 2 99.09 100.30 ns [100.30 99.09 100.68 101.40 99.55]
+row words-full compact chain hy 2 95.15 96.05 ns [97.74 95.81 95.15 98.32 96.05]
+row words-full compact chain v5o 2 97.99 99.30 ns [98.43 99.30 100.00 97.99 101.10]
+row words-full compact chain 4x 2 98.25 98.66 ns [98.66 99.85 98.25 98.60 98.79]
+row words-full compact chain hashmap ctl 101.01 101.20 ns [102.27 101.20 101.13 101.01 101.25]
+row words-full compact batch 4x 1 23.74 23.88 ns [24.61 23.74 24.04 23.76 23.88]
+row words-full compact batch v5o 1 24.48 24.54 ns [25.27 24.48 24.54 24.54 24.48]
+row words-full compact batch hy 1 24.30 24.33 ns [25.09 24.33 24.34 24.33 24.30]
+row words-full compact batch hu 1 24.51 24.59 ns [25.63 24.54 24.51 24.59 24.62]
+row words-full compact batch hu 2 24.53 24.67 ns [24.62 24.67 24.67 24.72 24.53]
+row words-full compact batch hy 2 24.27 24.33 ns [24.32 24.27 24.74 24.37 24.33]
+row words-full compact batch v5o 2 24.38 24.43 ns [24.39 24.38 24.87 24.43 24.49]
+row words-full compact batch 4x 2 23.63 23.77 ns [23.63 23.77 23.79 23.77 23.76]
+## hash5/words-full/hashed [16:20:38 68000mC busy=2 swap=0MiB governor=performance]
+# words-full hashed: 431841 keys built, 47982 held out, 431841 hits, 47982 misses, 95964 mixed
+hg words-full hashed 4x mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# 4x blob 2713640 bytes, 6.2839 B/key, magic BHD1
+hg words-full hashed v5o mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# v5o blob 2713527 bytes, 6.2836 B/key, magic BHD2
+hg words-full hashed hy mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hy blob 2713230 bytes, 6.2829 B/key, magic BHD2
+hg words-full hashed hu mappings=0 rss_kb=0 huge_kb=0 coverage=0.0% thp_fault_alloc=+0 thp_fault_fallback=+0
+# hu blob 2713345 bytes, 6.2832 B/key, magic BHD2
+row words-full hashed hit 4x 1 33.07 33.27 ns [33.76 33.50 33.26 33.07 33.27]
+row words-full hashed hit v5o 1 35.26 35.45 ns [35.44 35.94 35.45 35.67 35.26]
+row words-full hashed hit hy 1 34.51 35.16 ns [34.76 35.87 35.29 34.51 35.16]
+row words-full hashed hit hu 1 34.45 34.63 ns [34.52 34.63 35.45 34.45 35.78]
+row words-full hashed hit hu 2 34.49 34.78 ns [34.49 35.43 34.78 34.65 34.79]
+row words-full hashed hit hy 2 34.39 34.47 ns [34.45 34.73 34.47 34.77 34.39]
+row words-full hashed hit v5o 2 35.23 35.31 ns [35.32 35.23 35.28 35.37 35.31]
+row words-full hashed hit 4x 2 33.20 33.40 ns [33.27 33.65 33.40 33.50 33.20]
+row words-full hashed hit hashmap ctl 100.98 101.13 ns [101.45 101.32 100.98 101.11 101.13]
+row words-full hashed miss 4x 1 18.92 18.98 ns [21.74 19.33 18.94 18.92 18.98]
+row words-full hashed miss v5o 1 20.71 20.76 ns [20.71 20.77 20.77 20.71 20.76]
+row words-full hashed miss hy 1 20.01 20.03 ns [20.06 20.02 20.01 20.03 20.15]
+row words-full hashed miss hu 1 19.89 19.96 ns [19.89 20.01 19.96 19.93 20.06]
+row words-full hashed miss hu 2 19.98 20.00 ns [19.99 20.38 20.06 20.00 19.98]
+row words-full hashed miss hy 2 19.89 20.07 ns [19.89 20.07 20.25 20.80 19.91]
+row words-full hashed miss v5o 2 20.61 20.80 ns [20.67 20.80 20.92 21.03 20.61]
+row words-full hashed miss 4x 2 18.74 18.93 ns [18.91 18.74 19.13 18.96 18.93]
+row words-full hashed miss hashmap ctl 34.88 35.09 ns [35.35 35.04 34.88 35.09 35.34]
+row words-full hashed chain 4x 1 109.35 109.79 ns [109.35 111.58 109.72 109.79 109.89]
+row words-full hashed chain v5o 1 110.99 111.78 ns [111.78 111.30 112.16 112.01 110.99]
+row words-full hashed chain hy 1 109.26 109.78 ns [109.26 109.78 110.83 110.00 109.44]
+row words-full hashed chain hu 1 109.94 110.29 ns [110.29 110.65 109.94 110.26 110.44]
+row words-full hashed chain hu 2 110.59 111.01 ns [111.01 110.92 110.59 111.82 111.66]
+row words-full hashed chain hy 2 110.01 110.57 ns [110.01 112.06 111.11 110.48 110.57]
+row words-full hashed chain v5o 2 111.16 111.47 ns [111.49 111.16 111.47 111.27 111.56]
+row words-full hashed chain 4x 2 109.65 109.88 ns [109.65 110.57 111.00 109.75 109.88]
+row words-full hashed chain hashmap ctl 100.69 100.77 ns [101.26 100.74 100.69 100.90 100.77]
+row words-full hashed batch 4x 1 28.86 28.90 ns [30.00 28.90 28.86 28.88 28.95]
+row words-full hashed batch v5o 1 29.55 29.64 ns [31.08 29.59 29.64 29.55 29.65]
+row words-full hashed batch hy 1 29.21 29.29 ns [30.21 29.28 29.29 29.21 29.42]
+row words-full hashed batch hu 1 29.28 29.33 ns [29.98 29.28 29.33 29.36 29.31]
+row words-full hashed batch hu 2 29.23 29.41 ns [29.77 29.23 29.41 29.24 29.47]
+row words-full hashed batch hy 2 29.18 29.28 ns [29.23 29.28 29.28 29.18 29.50]
+row words-full hashed batch v5o 2 29.51 29.59 ns [29.78 29.59 29.79 29.58 29.51]
+row words-full hashed batch 4x 2 28.79 28.93 ns [28.79 28.94 29.00 28.93 28.92]
+## hash5/words-full/perfect [16:20:48 69000mC busy=1 swap=0MiB governor=performance]
+# words-full perfect: 431841 keys built, 47982 held out, 431841 hits, 47982 misses, 95964 mixed
+hg words-full perfect 4x mappings=1 rss_kb=3836 huge_kb=2048 coverage=53.4% thp_fault_alloc=+1 thp_fault_fallback=+0
+# 4x blob 4032388 bytes, 9.3377 B/key, magic BMP8
+hg words-full perfect v5o mappings=2 rss_kb=7672 huge_kb=4096 coverage=53.4% thp_fault_alloc=+1 thp_fault_fallback=+0
+# v5o blob 4032274 bytes, 9.3374 B/key, magic BMP9
+hg words-full perfect hy mappings=1 rss_kb=3836 huge_kb=2048 coverage=53.4% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hy blob 4031977 bytes, 9.3367 B/key, magic BMP9
+hg words-full perfect hu mappings=2 rss_kb=7672 huge_kb=4096 coverage=53.4% thp_fault_alloc=+1 thp_fault_fallback=+0
+# hu blob 4032092 bytes, 9.3370 B/key, magic BMP9
+row words-full perfect hit 4x 1 49.60 49.84 ns [49.60 49.80 49.84 49.84 49.86]
+row words-full perfect hit v5o 1 51.25 51.46 ns [51.39 51.59 51.94 51.25 51.46]
+row words-full perfect hit hy 1 50.18 50.91 ns [50.18 50.95 50.91 50.89 50.99]
+row words-full perfect hit hu 1 50.92 51.28 ns [52.08 51.67 51.28 50.92 51.00]
+row words-full perfect hit hu 2 50.87 51.04 ns [50.91 51.73 51.04 50.87 51.29]
+row words-full perfect hit hy 2 50.35 50.38 ns [50.35 50.61 50.38 50.36 50.56]
+row words-full perfect hit v5o 2 51.20 51.37 ns [51.86 51.35 51.20 51.37 51.76]
+row words-full perfect hit 4x 2 49.75 49.94 ns [49.75 51.77 49.94 50.18 49.75]
+row words-full perfect hit hashmap ctl 100.75 100.89 ns [100.89 101.46 100.89 100.75 100.92]
+row words-full perfect miss 4x 1 20.52 20.74 ns [24.05 20.63 20.52 20.89 20.74]
+row words-full perfect miss v5o 1 21.54 21.79 ns [21.54 21.75 21.85 21.79 21.91]
+row words-full perfect miss hy 1 20.90 21.17 ns [21.14 21.19 20.90 21.17 21.32]
+row words-full perfect miss hu 1 21.13 21.25 ns [21.25 21.13 21.39 21.22 21.39]
+row words-full perfect miss hu 2 21.17 21.48 ns [21.17 21.48 21.50 21.37 21.62]
+row words-full perfect miss hy 2 20.87 20.97 ns [20.87 21.08 20.97 20.89 21.21]
+row words-full perfect miss v5o 2 21.52 21.86 ns [23.13 21.52 21.86 22.00 21.59]
+row words-full perfect miss 4x 2 19.52 20.47 ns [20.62 19.52 20.36 20.47 20.49]
+row words-full perfect miss hashmap ctl 35.22 35.32 ns [35.22 35.31 36.01 35.32 35.41]
+row words-full perfect chain 4x 1 115.31 115.69 ns [116.20 115.79 115.69 115.38 115.31]
+row words-full perfect chain v5o 1 116.46 116.78 ns [117.09 116.46 120.08 116.60 116.78]
+row words-full perfect chain hy 1 115.77 117.15 ns [117.15 115.77 118.82 116.29 118.44]
+row words-full perfect chain hu 1 114.74 115.30 ns [118.54 116.23 115.30 115.23 114.74]
+row words-full perfect chain hu 2 116.18 116.21 ns [116.28 116.18 116.18 116.21 116.60]
+row words-full perfect chain hy 2 115.12 115.45 ns [115.45 116.07 127.25 115.33 115.12]
+row words-full perfect chain v5o 2 114.06 114.54 ns [116.32 114.39 114.61 114.54 114.06]
+row words-full perfect chain 4x 2 114.93 116.24 ns [116.24 114.93 117.06 116.56 115.19]
+row words-full perfect chain hashmap ctl 100.71 100.94 ns [100.94 100.71 101.21 101.16 100.78]
+row words-full perfect batch 4x 1 38.00 44.95 ns [38.00 44.98 44.95 45.12 44.94]
+row words-full perfect batch v5o 1 45.30 45.43 ns [45.30 45.37 45.43 45.86 45.96]
+row words-full perfect batch hy 1 44.83 44.88 ns [44.88 44.83 45.46 44.88 44.89]
+row words-full perfect batch hu 1 45.33 45.49 ns [45.58 45.55 45.33 45.35 45.49]
+row words-full perfect batch hu 2 45.31 45.49 ns [45.31 45.49 45.58 45.50 45.33]
+row words-full perfect batch hy 2 44.86 44.86 ns [44.87 44.86 44.86 44.86 44.97]
+row words-full perfect batch v5o 2 45.33 45.39 ns [45.38 45.33 45.55 45.73 45.39]
+row words-full perfect batch 4x 2 44.91 44.97 ns [45.18 44.97 44.97 45.21 44.91]

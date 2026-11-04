@@ -1390,7 +1390,7 @@ fn every_golden_blob_inspects_from_its_header() {
             Some(0)
         )
     );
-    let i = inspect_file(data("golden-4.0.0-mphf.bin")).unwrap();
+    let i = inspect_file(data("golden-5.0.0-mphf.bin")).unwrap();
     assert_eq!(
         (i.kind, i.format.as_str(), i.keys, i.mph_bytes, i.bytes),
         (BlobKind::Mphf, "MPH3", Some(1000), Some(mph), mph)

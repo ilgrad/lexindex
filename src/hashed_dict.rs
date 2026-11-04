@@ -114,7 +114,7 @@ impl HashedDictIndex {
     /// while the perfect hash is built over the distinct hashes and the ranks are written at their
     /// slots. The same dictionary and width give the same blob, byte for byte, on any machine.
     /// Two keys that collide in the 64-bit key hash are served exactly, from a side table keyed by
-    /// the full second hash. Two keys colliding in both at once — `≈ 2^-127` a pair (see
+    /// the full second hash. Two keys colliding in both at once — `≈ 2^-124` a pair at worst (see
     /// [`CompactHashIndex::build_bits`](crate::CompactHashIndex::build_bits)) — would share a rank,
     /// so the build refuses them with [`IndexError::Build`].
     pub fn from_dict(dict: DictIndex, fingerprint_bits: u32) -> Result<Self, IndexError> {

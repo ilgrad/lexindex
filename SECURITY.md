@@ -93,10 +93,13 @@ deliberately re-checksummed.
 reloadable. Someone who chooses the keys or the queries can therefore search offline for collisions
 and for `CompactHashIndex` false positives. Neither is a memory-safety problem, and a collision in
 one of the two 64-bit hashes costs a side-table probe — but a collision in **both** at once costs
-correctness. Since 5.0 both hashes merge a 128-bit state on every path: a random pair shares them at
-≈ 2^-127, and no search for a chosen pair is known below the 2^64 steps of a birthday. That is not a
-proof, and the hash is not cryptographic: its rounds have algebra left in them, and a crafted *byte*
-query can still reach a zero factor, which buys a false positive. Through 4.x such a pair was cheap:
+correctness. Since 5.0 both hashes merge a 128-bit state on every path, so ordinary keys are not the
+worry: independent keys share them at ≈ 2^-127 a pair, keys that differ in one half of a 32-byte block
+at ≈ 2^-124. A chosen pair is. Up to 16 bytes no search is known below the 2^64 steps of a birthday.
+Above 16 bytes the hash does not try: a change to one product can be paid for by the other, so assume
+such a pair is cheap, though none has been built. None of this is a proof, the hash is not
+cryptographic, and a crafted *byte* query can still reach a zero factor, which buys a false positive.
+Through 4.x a pair was cheap at every length:
 a birthday search found two 16-byte keys equal in both in ~2^32 steps, minutes on one core, and keys
 of 97 bytes or more took a few dozen tries, so an index built under 4.x from a stranger's keys keeps
 that exposure until it is rebuilt. `CompactHashIndex` and `ClosedHashIndex` give such keys one id;
