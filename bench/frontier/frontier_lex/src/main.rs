@@ -117,6 +117,22 @@ impl<const M: usize> Probe for LabelledMicro<M> {
     }
 }
 
+/// `DictIndex` with `M` keys a microblock rather than the block's own choice.
+struct Micro<const M: usize>(DictIndex);
+
+impl<const M: usize> Probe for Micro<M> {
+    fn build(keys: &[String], block: usize) -> Self {
+        let layout = DictLayout::new(block).with_micro(M);
+        Self(DictIndex::build_with(keys, layout).expect("dict build"))
+    }
+    fn bytes(&self) -> usize {
+        self.0.serialized_len()
+    }
+    fn probe(&self, key: &str) -> u64 {
+        self.0.probe(key)
+    }
+}
+
 /// [`Routed`] with `M` keys a microblock rather than the block's own choice: more restart words for
 /// a shorter scan.
 struct RoutedMicro<const M: usize>(DictIndex, usize);
@@ -295,7 +311,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "usage: frontier_lex <keys.txt> <dict32|dict256|dict1024|routed32|routed256|routed1024|routed64m8|routed128m8|routed256m8|labels256|labels1024|labels1024m64|labels1024m128|string|hashed0|hashed8|hashed16|da|perfect>..."
+            "usage: frontier_lex <keys.txt> <dict32|dict128m8|dict256|dict1024|routed32|routed256|routed1024|routed64m8|routed128m8|routed256m8|labels256|labels1024|labels1024m64|labels1024m128|string|hashed0|hashed8|hashed16|da|perfect>..."
         );
         std::process::exit(2);
     }
@@ -319,6 +335,9 @@ fn main() {
         );
         match kind.as_str() {
             "dict32" => run::<DictIndex>(&keys, 32, "lexindex DictIndex block 32", chained),
+            "dict128m8" => {
+                run::<Micro<8>>(&keys, 128, "lexindex DictIndex block 128 micro 8", chained)
+            }
             "dict256" => run::<DictIndex>(&keys, 256, "lexindex DictIndex block 256", chained),
             "dict1024" => run::<DictIndex>(&keys, 1024, "lexindex DictIndex block 1024", chained),
             "routed32" => run::<Routed>(&keys, 32, "lexindex DictIndex block 32 routed", chained),

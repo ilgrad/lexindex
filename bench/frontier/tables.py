@@ -47,6 +47,7 @@ C2_CASES = {
 }
 LEXINDEX = {
     "dict32": "lexindex Dict 32",
+    "dict128m8": "lexindex Dict 128/8",
     "dict256": "lexindex Dict 256",
     "dict1024": "lexindex Dict 1024",
     "routed32": "lexindex Dict 32 routed",
@@ -82,6 +83,7 @@ SEARCH = {
     "XCDAT 15": "XCDAT 15",
     "lexindex Dict 256": "`Dict` 256",
     "lexindex Dict 32 routed": "32 routed",
+    "lexindex Dict 128/8 routed": "128/8 routed",
     "lexindex Dict 256 routed": "256 routed",
     "lexindex Dict 1024 routed": "1024 routed",
     "lexindex StringIndex": "`StringIndex`",

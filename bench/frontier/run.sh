@@ -158,7 +158,7 @@ log=bench/results/$table-$(date +%F)-$host-$commit.log
 
 # One process a structure, labelled as tables.py reads them.
 processes=()
-for kind in dict32 dict256 dict1024 routed32 routed256 routed1024 labels256 labels1024 string \
+for kind in dict32 dict128m8 dict256 dict1024 routed32 routed128m8 routed256 routed1024 labels256 labels1024 string \
   hashed0 hashed8 hashed16 da perfect; do
   processes+=("lexindex $kind")
 done
@@ -175,7 +175,7 @@ if [ -n "$only" ]; then
   # The labelled build's microblock widths and the micro-8 layouts answer one question each, so only
   # a run that names them times them.
   processes+=("lexindex labels1024m64" "lexindex labels1024m128")
-  processes+=("lexindex routed64m8" "lexindex routed128m8" "lexindex routed256m8")
+  processes+=("lexindex routed64m8" "lexindex routed256m8")
   mapfile -t processes < <(printf '%s\n' "${processes[@]}" | grep -E -- "$only" || true)
   if [ ${#processes[@]} -eq 0 ]; then
     echo "--only '$only' matches no process" >&2

@@ -39,9 +39,8 @@ import corpora
 import lexindex
 import sweep
 
-# `DictIndex` is a curve in the block, so both ends of 32..=1024 are measured rather than
-# interpolated from the middle.
-BLOCKS = (32, 128, 256, 1024)
+# The `DictIndex` layouts `plan` prices: `DictProfile`'s three, by block and microblock.
+LAYOUTS = ((128, 8), (256, None), (1024, None))
 SIZES = (100_000, 1_000_000, 10_000_000)
 SAMPLE = 100_000  # the plan's sample size; the model reads a smaller corpus as this many keys
 
@@ -241,9 +240,13 @@ def structures():
         ("CompactHashIndex fp=1", lambda k: lexindex.CompactHashIndex(k, 1), False),
         ("PerfectHashIndex", lexindex.PerfectHashIndex, True),
     ]
-    for block in BLOCKS:
+    for block, micro in LAYOUTS:
         lanes.append(
-            (f"DictIndex {block}", lambda k, b=block: lexindex.DictIndex(k, block=b), True)
+            (
+                f"DictIndex {block}",
+                lambda k, b=block, m=micro: lexindex.DictIndex(k, block=b, micro=m),
+                True,
+            )
         )
     lanes.append(("StringIndex", lexindex.StringIndex, True))
     # Measured beside the rest so that the constants a planner would price it by come from the same
