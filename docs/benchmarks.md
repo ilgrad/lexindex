@@ -56,7 +56,7 @@ timed. 4.5.3 changed wheels and no lookup, so 4.5.2's numbers stand for it.
 | `DictIndex`: the ordered dictionary against `StringIndex` | 4 | 2026-09-11 (2.1.0) | 2026-11-03 (main after 4.5.3) |
 | Prefix queries against the tries | 1 | 2026-11-03 (main after 4.5.3) | 2026-11-03 (main after 4.5.3) |
 | Common-prefix queries — the other direction | 10 | 2026-09-24 (4.4.2) | 2026-11-03 (main after 4.5.3) |
-| Hash quality | 3 | 2026-09-12 (2.1.0) | 2026-09-16 (3.0.0) |
+| Hash quality | 4 | 2026-09-12 (2.1.0) | 2026-11-04 (main after 4.5.3) |
 | Error bars, and where a lookup number comes from | 4 | 2026-09-19 (3.0.0) | 2026-11-03 (main after 4.5.3) |
 | The research frontier, cited | 0 | — | — |
 | The research frontier, measured | 9 | 2026-09-22 (4.1.0) | 2026-11-03 (main after 4.5.3) |
