@@ -158,6 +158,35 @@ struct Packed {
     escape: u64,
 }
 
+/// Whether every byte is below 0x80, by words that overlap at the end: no walk over the last bytes,
+/// so a stream of keys of one length class costs no branch miss and a longer key costs one, at the
+/// exit of the loop. `slice::is_ascii` on x86-64 walks everything past its last 64-byte chunk a byte
+/// at a time, which on a 125-byte path is more instructions than the UTF-8 validator it replaced.
+#[inline(always)]
+fn all_ascii(b: &[u8]) -> bool {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let n = b.len();
+    let word = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    let half = |i: usize| u64::from(u32::from_le_bytes(b[i..i + 4].try_into().unwrap()));
+    let any = if n >= 16 {
+        b.chunks_exact(16)
+            .fold(word(n - 16) | word(n - 8), |any, c| {
+                let (lo, hi) = c.split_at(8);
+                any | u64::from_le_bytes(lo.try_into().unwrap())
+                    | u64::from_le_bytes(hi.try_into().unwrap())
+            })
+    } else if n >= 8 {
+        word(0) | word(n - 8)
+    } else if n >= 4 {
+        half(0) | half(n - 4)
+    } else if n > 0 {
+        u64::from(b[0] | b[n / 2] | b[n - 1])
+    } else {
+        0
+    };
+    any & HIGH == 0
+}
+
 impl StringArena {
     /// Build from strings in index order (`items[i]` becomes key `i`), deriving the count and the
     /// total byte length from a first pass over the iterator — hence the `Clone` bound.
@@ -831,7 +860,7 @@ impl StringArena {
     #[inline(always)]
     pub(crate) fn str_at(&self, span: (usize, usize)) -> Option<&str> {
         let bytes = self.bytes_at(span)?;
-        if bytes.is_ascii() {
+        if all_ascii(bytes) {
             // SAFETY: every byte is below 0x80, and such a sequence is UTF-8.
             return Some(unsafe { std::str::from_utf8_unchecked(bytes) });
         }
