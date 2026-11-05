@@ -206,22 +206,22 @@ const TAIL_TRIES: u32 = 64;
 /// three or four; the bound is for input a level cannot spread.
 const MAX_LEVELS: usize = 16;
 
-/// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary
-/// between two costs about two hundred keys bumped, so they are few and large. 2¹⁹ against 2¹⁶ takes
-/// 0.007 bits a key off 10⁷ keys and 0.006 off 10⁸; a first level under four chunks is cut into
-/// [`PIECES`] no smaller than [`PIECE_FLOOR`] instead, so a table of 10⁶ keys keeps the eight
-/// pieces, the seven boundaries and the parallel build it had at 2¹⁶. Provisional: what fewer
-/// chunks over fewer threads cost a build of 10⁷ keys and up has not been measured.
-const CHUNK: u64 = 1 << 19;
+/// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary between
+/// two costs about two hundred keys bumped, so a larger chunk is a smaller table and a slower build.
+/// Measured at 2¹⁹ on 2026-11-05, against this size two days before: 0.008 bits a key less at 10⁷ keys
+/// and 0.006 at 10⁸, for 1.5× and 2.0× the time on 8 threads, 1.12× on one, and 1.6–2.4× the peak on
+/// 8 threads. Ten million keys were two whole chunks and eight pieces: threads cannot share a whole
+/// chunk, and one of 2.4 million keys is more than the cache holds of them. A first level under four
+/// chunks is cut into [`PIECES`] no smaller than [`PIECE_FLOOR`].
+const CHUNK: u64 = 1 << 16;
 
 /// Fewest buckets per chunk on a level after the first: about the window, so that a chunk's
 /// placement order is the level's.
 const MIN_CHUNK: u64 = 1 << 12;
 
-/// Fewest buckets per piece of a first level cut into [`PIECES`]: a boundary costs about two
-/// hundred keys whatever the level, and a level of 2¹⁴ buckets, about 74 000 keys, builds in
-/// milliseconds on one thread. A quarter of a 2¹⁶ chunk, and it does not follow [`CHUNK`]: at a
-/// quarter of 2¹⁹ a level of 10⁶ keys would be one piece, placed on one thread.
+/// Fewest buckets per piece of a first level cut into [`PIECES`]: a boundary costs about two hundred
+/// keys whatever the level, and a level of 2¹⁴ buckets, about 74 000 keys, builds in milliseconds on
+/// one thread. A quarter of a chunk.
 const PIECE_FLOOR: u64 = 1 << 14;
 
 /// Chunks a level too small for whole chunks is cut into; and the pieces the last two chunks'
