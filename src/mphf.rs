@@ -207,12 +207,13 @@ const TAIL_TRIES: u32 = 64;
 const MAX_LEVELS: usize = 16;
 
 /// Most buckets per chunk. Chunks are placed independently, in parallel, and every boundary between
-/// two costs about two hundred keys bumped, so a larger chunk is a smaller table and a slower build.
-/// Measured at 2¹⁹ on 2026-11-05, against this size two days before: 0.008 bits a key less at 10⁷ keys
-/// and 0.006 at 10⁸, for 1.5× and 2.0× the time on 8 threads, 1.12× on one, and 1.6–2.4× the peak on
-/// 8 threads. Ten million keys were two whole chunks and eight pieces: threads cannot share a whole
-/// chunk, and one of 2.4 million keys is more than the cache holds of them. A first level under four
-/// chunks is cut into [`PIECES`] no smaller than [`PIECE_FLOOR`].
+/// two costs about two hundred keys bumped, so a larger chunk is a smaller table and a slower
+/// build. Measured against 2¹⁹ on 2026-11-05, both on the same machine that day: 2¹⁹ took 0.008
+/// bits a key less at 10⁷ keys and 0.006 at 10⁸, for 1.35× and 1.82× the time on 8 threads,
+/// 1.11–1.13× on one, and 2.35× and 1.56× the peak on 8 threads. Ten million keys were two whole
+/// chunks and eight pieces: threads cannot share a whole chunk, and one of 2.4 million keys is more
+/// than the cache holds of them. A first level under four chunks is cut into [`PIECES`] no smaller
+/// than [`PIECE_FLOOR`].
 const CHUNK: u64 = 1 << 16;
 
 /// Fewest buckets per chunk on a level after the first: about the window, so that a chunk's
