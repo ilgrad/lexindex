@@ -1,0 +1,27 @@
+# versions arrow: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+## arrow/run [01:56:35 60000mC busy=3 swap=0MiB governor=performance]
+479823 probes (members, shuffled), 7 rounds, min ns/key
+== CompactHashIndex
+  ids_of (list)      117.1 ns/key   x1.00 of ids_of   x1.47 of ids_of_bytes
+  ids_of_bytes        79.7 ns/key   x0.68 of ids_of   x1.00 of ids_of_bytes
+  ids_into            86.0 ns/key   x0.73 of ids_of   x1.08 of ids_of_bytes
+  ids_of_arrow        35.1 ns/key   x0.30 of ids_of   x0.44 of ids_of_bytes
+  ids_into_arrow      34.0 ns/key   x0.29 of ids_of   x0.43 of ids_of_bytes
+== PerfectHashIndex
+  ids_of (list)      109.7 ns/key   x1.00 of ids_of   x1.37 of ids_of_bytes
+  ids_of_bytes        80.1 ns/key   x0.73 of ids_of   x1.00 of ids_of_bytes
+  ids_into            77.9 ns/key   x0.71 of ids_of   x0.97 of ids_of_bytes
+  ids_of_arrow        24.3 ns/key   x0.22 of ids_of   x0.30 of ids_of_bytes
+  ids_into_arrow      21.8 ns/key   x0.20 of ids_of   x0.27 of ids_of_bytes
+== ClosedHashIndex
+  ids_of (list)       89.2 ns/key   x1.00 of ids_of   x1.37 of ids_of_bytes
+  ids_of_bytes        65.3 ns/key   x0.73 of ids_of   x1.00 of ids_of_bytes
+  ids_into            60.2 ns/key   x0.68 of ids_of   x0.92 of ids_of_bytes
+  ids_of_arrow        11.7 ns/key   x0.13 of ids_of   x0.18 of ids_of_bytes
+  ids_into_arrow      11.0 ns/key   x0.12 of ids_of   x0.17 of ids_of_bytes
+== StringIndex
+  ids_of (list)      285.4 ns/key   x1.00 of ids_of   x1.11 of ids_of_bytes
+  ids_of_bytes       257.9 ns/key   x0.90 of ids_of   x1.00 of ids_of_bytes
+  ids_into           252.9 ns/key   x0.89 of ids_of   x0.98 of ids_of_bytes
+  ids_of_arrow       128.2 ns/key   x0.45 of ids_of   x0.50 of ids_of_bytes
+  ids_into_arrow     126.4 ns/key   x0.44 of ids_of   x0.49 of ids_of_bytes

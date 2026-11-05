@@ -1,0 +1,67 @@
+# versions common-prefix: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+## common-prefix/alternated/run-1 [01:56:45 62000mC busy=0 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2328             930 
+DictIndex 512                 2532            1012 
+StringIndex                    535             273 
+marisa-trie                   1108            1172 
+DoubleArrayIndex               673             224 
+dawg2, keys only               693             585 
+datrie                         958             437 
+datrie, keys only              286             199 
+## common-prefix/alternated/run-2 [01:56:53 67000mC busy=1 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2326             926 
+DictIndex 512                 2522            1008 
+StringIndex                    534             278 
+marisa-trie                   1133            1197 
+DoubleArrayIndex               685             327 
+dawg2, keys only               725             679 
+datrie                        1031             578 
+datrie, keys only              329             205 
+## common-prefix/alternated/run-3 [01:57:00 68000mC busy=4 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime alternated
+                      common_prefix  longest_prefix
+DictIndex 256                 2336             925 
+DictIndex 512                 2542            1011 
+StringIndex                    536             274 
+marisa-trie                   1129            1202 
+DoubleArrayIndex               658             235 
+dawg2, keys only               703             603 
+datrie                         976             443 
+datrie, keys only              305             205 
+## common-prefix/warm/run-1 [01:57:07 67000mC busy=1 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2322             927 
+DictIndex 512                 2525            1010 
+StringIndex                    493             273 
+marisa-trie                   1093            1202 
+DoubleArrayIndex               468             213 
+dawg2, keys only               544             590 
+datrie                         693             337 
+datrie, keys only              286             198 
+## common-prefix/warm/run-2 [01:57:17 67000mC busy=2 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2333             926 
+DictIndex 512                 2549            1020 
+StringIndex                    492             274 
+marisa-trie                   1089            1203 
+DoubleArrayIndex               575             216 
+dawg2, keys only               552             595 
+datrie                         709             345 
+datrie, keys only              290             201 
+## common-prefix/warm/run-3 [01:57:26 68000mC busy=3 swap=0MiB governor=performance]
+479823 keys, 20000 queries, 100% with a match, 3.94 prefixes each; regime warm
+                      common_prefix  longest_prefix
+DictIndex 256                 2310             928 
+DictIndex 512                 2516            1015 
+StringIndex                    491             277 
+marisa-trie                   1061            1180 
+DoubleArrayIndex               468             219 
+dawg2, keys only               548             591 
+datrie                         694             343 
+datrie, keys only              286             203 

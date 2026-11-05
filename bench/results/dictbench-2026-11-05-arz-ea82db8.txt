@@ -1,0 +1,234 @@
+## dict/run-1/unrouted [01:45:31 54000mC busy=1 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 104 ms
+DictIndex k=32       2.838 B/key  build 28 ms
+  id member   dict  259.7  string  175.5
+  id stranger dict  205.0  string  128.4
+  key_into    dict  139.8  key dict  190.3  string  453.3
+  lower_bound dict  203.0
+  prefix      dict    32325
+DictIndex k=64       2.710 B/key  build 27 ms
+  id member   dict  265.5  string  175.1
+  id stranger dict  207.1  string  128.0
+  key_into    dict  149.3  key dict  210.3  string  455.3
+  lower_bound dict  205.2
+  prefix      dict    32402
+DictIndex k=128      2.652 B/key  build 26 ms
+  id member   dict  272.6  string  181.1
+  id stranger dict  218.3  string  128.4
+  key_into    dict  166.8  key dict  233.2  string  456.8
+  lower_bound dict  216.6
+  prefix      dict    32337
+DictIndex k=256      2.622 B/key  build 26 ms
+  id member   dict  293.3  string  180.7
+  id stranger dict  240.6  string  128.4
+  key_into    dict  194.9  key dict  264.8  string  456.4
+  lower_bound dict  238.4
+  prefix      dict    32334
+DictIndex k=512      2.508 B/key  build 23 ms
+  id member   dict  320.2  string  176.7
+  id stranger dict  271.5  string  128.3
+  key_into    dict  255.8  key dict  325.7  string  455.7
+  lower_bound dict  269.2
+  prefix      dict    31742
+DictIndex k=1024     2.502 B/key  build 31 ms
+  id member   dict  354.8  string  181.0
+  id stranger dict  300.8  string  129.2
+  key_into    dict  300.7  key dict  371.6  string  456.3
+  lower_bound dict  299.0
+  prefix      dict    31824
+## dict/run-1/routed [01:46:08 68000mC busy=1 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 103 ms
+DictIndex k=32       2.838 B/key  build 28 ms  routed, words 0.500 B/key
+  id member   dict  231.7  string  176.3
+  id stranger dict  177.4  string  127.9
+  key_into    dict  140.3  key dict  190.6  string  462.4
+  lower_bound dict  174.5
+  prefix      dict    32738
+DictIndex k=64       2.710 B/key  build 27 ms  routed, words 0.500 B/key
+  id member   dict  230.5  string  182.6
+  id stranger dict  171.5  string  127.8
+  key_into    dict  149.1  key dict  208.3  string  462.2
+  lower_bound dict  169.1
+  prefix      dict    32321
+DictIndex k=128      2.652 B/key  build 26 ms  routed, words 0.500 B/key
+  id member   dict  221.9  string  181.5
+  id stranger dict  165.1  string  127.8
+  key_into    dict  166.5  key dict  231.8  string  463.0
+  lower_bound dict  162.6
+  prefix      dict    32208
+DictIndex k=256      2.622 B/key  build 26 ms  routed, words 0.500 B/key
+  id member   dict  219.9  string  182.2
+  id stranger dict  161.8  string  127.9
+  key_into    dict  195.8  key dict  263.8  string  464.5
+  lower_bound dict  159.4
+  prefix      dict    32221
+DictIndex k=512      2.508 B/key  build 23 ms  routed, words 0.250 B/key
+  id member   dict  248.6  string  181.4
+  id stranger dict  191.8  string  127.8
+  key_into    dict  257.0  key dict  324.7  string  465.3
+  lower_bound dict  190.0
+  prefix      dict    32006
+DictIndex k=1024     2.502 B/key  build 30 ms  routed, words 0.250 B/key
+  id member   dict  247.4  string  182.6
+  id stranger dict  190.1  string  127.7
+  key_into    dict  302.8  key dict  370.4  string  465.1
+  lower_bound dict  188.2
+  prefix      dict    32032
+## dict/run-2/routed [01:46:41 67000mC busy=1 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 102 ms
+DictIndex k=32       2.838 B/key  build 28 ms  routed, words 0.500 B/key
+  id member   dict  226.7  string  177.9
+  id stranger dict  179.4  string  127.9
+  key_into    dict  140.5  key dict  190.0  string  453.0
+  lower_bound dict  176.8
+  prefix      dict    32267
+DictIndex k=64       2.710 B/key  build 27 ms  routed, words 0.500 B/key
+  id member   dict  226.6  string  175.2
+  id stranger dict  172.5  string  128.1
+  key_into    dict  149.6  key dict  208.9  string  454.2
+  lower_bound dict  170.1
+  prefix      dict    32337
+DictIndex k=128      2.652 B/key  build 26 ms  routed, words 0.500 B/key
+  id member   dict  222.7  string  179.3
+  id stranger dict  165.4  string  127.9
+  key_into    dict  167.0  key dict  233.1  string  455.8
+  lower_bound dict  162.8
+  prefix      dict    32198
+DictIndex k=256      2.622 B/key  build 26 ms  routed, words 0.500 B/key
+  id member   dict  215.8  string  176.9
+  id stranger dict  160.4  string  126.0
+  key_into    dict  193.6  key dict  262.7  string  453.9
+  lower_bound dict  159.3
+  prefix      dict    32156
+DictIndex k=512      2.508 B/key  build 24 ms  routed, words 0.250 B/key
+  id member   dict  249.1  string  180.2
+  id stranger dict  192.8  string  128.0
+  key_into    dict  255.9  key dict  327.1  string  455.6
+  lower_bound dict  190.9
+  prefix      dict    31901
+DictIndex k=1024     2.502 B/key  build 30 ms  routed, words 0.250 B/key
+  id member   dict  247.6  string  182.1
+  id stranger dict  191.3  string  128.6
+  key_into    dict  302.5  key dict  373.0  string  455.0
+  lower_bound dict  189.1
+  prefix      dict    31756
+## dict/run-2/unrouted [01:47:15 67000mC busy=3 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 105 ms
+DictIndex k=32       2.838 B/key  build 29 ms
+  id member   dict  252.1  string  168.2
+  id stranger dict  205.5  string  125.8
+  key_into    dict  140.2  key dict  191.5  string  457.6
+  lower_bound dict  203.9
+  prefix      dict    32494
+DictIndex k=64       2.710 B/key  build 27 ms
+  id member   dict  257.4  string  168.6
+  id stranger dict  204.6  string  126.1
+  key_into    dict  150.2  key dict  211.6  string  457.5
+  lower_bound dict  203.0
+  prefix      dict    32351
+DictIndex k=128      2.652 B/key  build 26 ms
+  id member   dict  261.2  string  167.9
+  id stranger dict  219.9  string  126.1
+  key_into    dict  167.1  key dict  233.5  string  458.5
+  lower_bound dict  217.7
+  prefix      dict    32377
+DictIndex k=256      2.622 B/key  build 25 ms
+  id member   dict  280.5  string  168.0
+  id stranger dict  240.3  string  126.1
+  key_into    dict  194.1  key dict  263.3  string  458.6
+  lower_bound dict  238.3
+  prefix      dict    32282
+DictIndex k=512      2.508 B/key  build 24 ms
+  id member   dict  313.7  string  168.6
+  id stranger dict  272.9  string  126.1
+  key_into    dict  256.8  key dict  328.1  string  458.8
+  lower_bound dict  270.5
+  prefix      dict    31792
+DictIndex k=1024     2.502 B/key  build 31 ms
+  id member   dict  342.5  string  168.4
+  id stranger dict  301.4  string  126.2
+  key_into    dict  303.2  key dict  372.5  string  457.9
+  lower_bound dict  299.9
+  prefix      dict    31881
+## dict/run-3/unrouted [01:47:51 67000mC busy=1 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 105 ms
+DictIndex k=32       2.838 B/key  build 29 ms
+  id member   dict  252.7  string  168.4
+  id stranger dict  207.1  string  126.0
+  key_into    dict  140.1  key dict  192.2  string  465.5
+  lower_bound dict  204.6
+  prefix      dict    32446
+DictIndex k=64       2.710 B/key  build 28 ms
+  id member   dict  259.5  string  173.5
+  id stranger dict  205.0  string  126.0
+  key_into    dict  149.3  key dict  208.8  string  463.4
+  lower_bound dict  203.7
+  prefix      dict    32316
+DictIndex k=128      2.652 B/key  build 26 ms
+  id member   dict  259.7  string  168.2
+  id stranger dict  219.9  string  126.3
+  key_into    dict  167.2  key dict  233.0  string  464.8
+  lower_bound dict  218.1
+  prefix      dict    32151
+DictIndex k=256      2.622 B/key  build 24 ms
+  id member   dict  281.2  string  168.9
+  id stranger dict  240.5  string  125.9
+  key_into    dict  194.0  key dict  262.8  string  464.0
+  lower_bound dict  237.8
+  prefix      dict    32203
+DictIndex k=512      2.508 B/key  build 25 ms
+  id member   dict  312.9  string  171.7
+  id stranger dict  272.2  string  126.8
+  key_into    dict  254.9  key dict  325.4  string  463.9
+  lower_bound dict  269.6
+  prefix      dict    31621
+DictIndex k=1024     2.502 B/key  build 30 ms
+  id member   dict  344.4  string  169.2
+  id stranger dict  299.3  string  126.3
+  key_into    dict  302.4  key dict  371.2  string  465.2
+  lower_bound dict  298.7
+  prefix      dict    31830
+## dict/run-3/routed [01:48:28 68000mC busy=0 swap=0MiB governor=performance]
+/usr/share/dict/words: 479823 keys, mean 9.3 bytes, probes shuffled, min of 5 alternated rounds, ns per probe; 2000 prefixes of 3 bytes
+StringIndex   5.95 B/key  build 104 ms
+DictIndex k=32       2.838 B/key  build 29 ms  routed, words 0.500 B/key
+  id member   dict  233.9  string  169.5
+  id stranger dict  180.2  string  126.0
+  key_into    dict  140.5  key dict  192.4  string  457.2
+  lower_bound dict  177.5
+  prefix      dict    32882
+DictIndex k=64       2.710 B/key  build 27 ms  routed, words 0.500 B/key
+  id member   dict  226.5  string  170.5
+  id stranger dict  171.2  string  125.9
+  key_into    dict  149.3  key dict  208.3  string  456.8
+  lower_bound dict  169.5
+  prefix      dict    32434
+DictIndex k=128      2.652 B/key  build 25 ms  routed, words 0.500 B/key
+  id member   dict  229.1  string  177.0
+  id stranger dict  164.5  string  126.1
+  key_into    dict  167.3  key dict  233.5  string  457.8
+  lower_bound dict  162.8
+  prefix      dict    32240
+DictIndex k=256      2.622 B/key  build 26 ms  routed, words 0.500 B/key
+  id member   dict  229.7  string  176.8
+  id stranger dict  161.5  string  126.1
+  key_into    dict  194.0  key dict  264.0  string  458.0
+  lower_bound dict  159.6
+  prefix      dict    32593
+DictIndex k=512      2.508 B/key  build 24 ms  routed, words 0.250 B/key
+  id member   dict  257.4  string  183.5
+  id stranger dict  191.3  string  126.3
+  key_into    dict  256.2  key dict  326.0  string  458.4
+  lower_bound dict  190.1
+  prefix      dict    31943
+DictIndex k=1024     2.502 B/key  build 30 ms  routed, words 0.250 B/key
+  id member   dict  237.9  string  173.3
+  id stranger dict  189.8  string  126.2
+  key_into    dict  302.2  key dict  373.7  string  458.4
+  lower_bound dict  188.1
+  prefix      dict    31785

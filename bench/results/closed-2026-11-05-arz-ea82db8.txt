@@ -1,0 +1,36 @@
+## closed/run-1 [01:43:10 65000mC busy=5 swap=0MiB governor=performance]
+n 479823  closed 0.242 B/key (116093 B)  compact fp=1 1.242 B/key (595920 B)
+round 0: closed.id 24.4  compact.id_unchecked 22.7  compact.id 25.2  closed.ids_of 7.6  compact.ids_of 18.3
+round 1: closed.id 19.9  compact.id_unchecked 20.1  compact.id 29.6  closed.ids_of 15.7  compact.ids_of 26.5
+round 2: closed.id 24.8  compact.id_unchecked 20.0  compact.id 24.6  closed.ids_of 7.6  compact.ids_of 18.2
+round 3: closed.id 19.5  compact.id_unchecked 20.1  compact.id 29.7  closed.ids_of 15.4  compact.ids_of 26.2
+round 4: closed.id 24.1  compact.id_unchecked 19.7  compact.id 24.2  closed.ids_of 7.7  compact.ids_of 18.3
+round 5: closed.id 22.3  compact.id_unchecked 28.1  compact.id 32.3  closed.ids_of 15.7  compact.ids_of 26.3
+round 6: closed.id 25.8  compact.id_unchecked 22.1  compact.id 26.2  closed.ids_of 7.6  compact.ids_of 18.4
+round 7: closed.id 21.8  compact.id_unchecked 23.6  compact.id 32.3  closed.ids_of 15.5  compact.ids_of 26.4
+round 8: closed.id 26.0  compact.id_unchecked 22.9  compact.id 27.3  closed.ids_of 7.6  compact.ids_of 18.4
+min: closed.id 19.5 ns  compact.id_unchecked 19.7 ns  compact.id 24.2 ns  closed.ids_of 7.6 ns  compact.ids_of 18.2 ns
+## closed/run-2 [01:43:12 63000mC busy=2 swap=0MiB governor=performance]
+n 479823  closed 0.242 B/key (116093 B)  compact fp=1 1.242 B/key (595920 B)
+round 0: closed.id 24.5  compact.id_unchecked 21.7  compact.id 24.0  closed.ids_of 7.6  compact.ids_of 18.3
+round 1: closed.id 19.6  compact.id_unchecked 20.4  compact.id 29.7  closed.ids_of 15.4  compact.ids_of 26.4
+round 2: closed.id 25.6  compact.id_unchecked 20.0  compact.id 24.3  closed.ids_of 7.6  compact.ids_of 18.4
+round 3: closed.id 19.6  compact.id_unchecked 20.7  compact.id 30.7  closed.ids_of 15.4  compact.ids_of 26.3
+round 4: closed.id 25.0  compact.id_unchecked 19.9  compact.id 24.3  closed.ids_of 7.6  compact.ids_of 18.4
+round 5: closed.id 19.6  compact.id_unchecked 20.5  compact.id 30.9  closed.ids_of 15.4  compact.ids_of 26.3
+round 6: closed.id 25.1  compact.id_unchecked 19.8  compact.id 24.4  closed.ids_of 7.6  compact.ids_of 18.3
+round 7: closed.id 21.0  compact.id_unchecked 21.0  compact.id 32.2  closed.ids_of 15.5  compact.ids_of 27.3
+round 8: closed.id 27.0  compact.id_unchecked 20.9  compact.id 24.8  closed.ids_of 7.6  compact.ids_of 18.4
+min: closed.id 19.6 ns  compact.id_unchecked 19.8 ns  compact.id 24.0 ns  closed.ids_of 7.6 ns  compact.ids_of 18.3 ns
+## closed/run-3 [01:43:13 61000mC busy=2 swap=0MiB governor=performance]
+n 479823  closed 0.242 B/key (116093 B)  compact fp=1 1.242 B/key (595920 B)
+round 0: closed.id 23.9  compact.id_unchecked 19.7  compact.id 25.0  closed.ids_of 7.6  compact.ids_of 18.4
+round 1: closed.id 19.6  compact.id_unchecked 20.4  compact.id 31.3  closed.ids_of 15.5  compact.ids_of 26.3
+round 2: closed.id 25.1  compact.id_unchecked 20.3  compact.id 24.4  closed.ids_of 7.5  compact.ids_of 18.3
+round 3: closed.id 19.6  compact.id_unchecked 20.3  compact.id 30.9  closed.ids_of 15.4  compact.ids_of 26.3
+round 4: closed.id 25.2  compact.id_unchecked 20.1  compact.id 24.4  closed.ids_of 7.6  compact.ids_of 18.4
+round 5: closed.id 19.6  compact.id_unchecked 20.4  compact.id 30.9  closed.ids_of 15.4  compact.ids_of 26.3
+round 6: closed.id 25.1  compact.id_unchecked 20.1  compact.id 24.4  closed.ids_of 7.6  compact.ids_of 18.3
+round 7: closed.id 19.5  compact.id_unchecked 20.3  compact.id 30.8  closed.ids_of 15.5  compact.ids_of 26.3
+round 8: closed.id 25.0  compact.id_unchecked 20.2  compact.id 24.8  closed.ids_of 7.5  compact.ids_of 18.3
+min: closed.id 19.5 ns  compact.id_unchecked 19.7 ns  compact.id 24.4 ns  closed.ids_of 7.5 ns  compact.ids_of 18.3 ns

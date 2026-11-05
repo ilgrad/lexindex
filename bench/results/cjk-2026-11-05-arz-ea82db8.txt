@@ -1,0 +1,228 @@
+# versions cjk: cedarwood 0.6.1  daachorse 5.1.0  crawdad 0.4.1  yada 0.7.0  jieba-rs 0.11.0   darts-clone 87b71af; python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+## cjk/sizes [02:11:08 38000mC busy=2 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+lexindex StringIndex                  8.95 B/word own count (3124743 bytes)     15.26 B/word held by malloc
+cedarwood 0.6.1                       0.00 B/word own count (0 bytes)     60.57 B/word held by malloc
+darts-clone 0.32                     17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+yada 0.7.0                           17.75 B/word own count (6195200 bytes)     17.75 B/word held by malloc
+crawdad 0.4.1 Trie                   18.40 B/word own count (6422528 bytes)     24.80 B/word held by malloc
+crawdad 0.4.1 MpTrie                 22.17 B/word own count (7736696 bytes)     30.79 B/word held by malloc
+daachorse 5.1.0 charwise             47.95 B/word own count (16738312 bytes)     55.34 B/word held by malloc
+lexindex DoubleArrayIndex            15.62 B/word own count (5451278 bytes)     15.62 B/word held by malloc
+# prototype digit_bits None widest_first true: 1390205 slots (550115 used, 39.6 %), alphabet 12045, labels up to 12045, code table 40867 entries -> packed 5 B/slot, 14 label bits = 20.38 B/word (built in 3.09s)
+# prototype digit_bits None widest_first false: 1116631 slots (550115 used, 49.3 %), alphabet 12045, labels up to 12045, code table 40867 entries -> packed 5 B/slot, 14 label bits = 16.46 B/word (built in 1.85s)
+# prototype digit_bits Some(8) widest_first true: 990650 slots (745166 used, 75.2 %), alphabet 12045, labels up to 256, code table 40867 entries -> packed 4 B/slot, 9 label bits = 11.82 B/word (built in 661.73ms)
+# prototype digit_bits Some(8) widest_first false: 833267 slots (745166 used, 89.4 %), alphabet 12045, labels up to 256, code table 40867 entries -> packed 4 B/slot, 9 label bits = 10.02 B/word (built in 423.61ms)
+# prototype digit_bits Some(9) widest_first true: 1037462 slots (675105 used, 65.1 %), alphabet 12045, labels up to 512, code table 40867 entries -> packed 4 B/slot, 10 label bits = 12.36 B/word (built in 955.26ms)
+# prototype digit_bits Some(9) widest_first false: 818034 slots (675105 used, 82.5 %), alphabet 12045, labels up to 512, code table 40867 entries -> packed 4 B/slot, 10 label bits = 9.84 B/word (built in 669.03ms)
+# prototype digit_bits Some(10) widest_first true: 1130012 slots (615164 used, 54.4 %), alphabet 12045, labels up to 1024, code table 40867 entries -> packed 5 B/slot, 11 label bits = 16.66 B/word (built in 1.36s)
+# prototype digit_bits Some(10) widest_first false: 874817 slots (615164 used, 70.3 %), alphabet 12045, labels up to 1024, code table 40867 entries -> packed 5 B/slot, 11 label bits = 13.00 B/word (built in 1.04s)
+# prototype digit_bits Some(11) widest_first true: 1270041 slots (573358 used, 45.1 %), alphabet 12045, labels up to 2048, code table 40867 entries -> packed 5 B/slot, 12 label bits = 18.66 B/word (built in 1.91s)
+# prototype digit_bits Some(11) widest_first false: 1015162 slots (573358 used, 56.5 %), alphabet 12045, labels up to 2048, code table 40867 entries -> packed 5 B/slot, 12 label bits = 15.01 B/word (built in 1.82s)
+# prototype digit_bits Some(12) widest_first true: 1370626 slots (553835 used, 40.4 %), alphabet 12045, labels up to 4096, code table 40867 entries -> packed 5 B/slot, 13 label bits = 20.10 B/word (built in 2.45s)
+# prototype digit_bits Some(12) widest_first false: 1100155 slots (553835 used, 50.3 %), alphabet 12045, labels up to 4096, code table 40867 entries -> packed 5 B/slot, 13 label bits = 16.23 B/word (built in 2.32s)
+prototype, packed 5 B/slot, 14 label bits   20.38 B/word own count (7114501 bytes)     20.38 B/word held by malloc
+prototype, 6 B/slot: u16 label, u32 kind+payload   24.37 B/word own count (8504706 bytes)     24.37 B/word held by malloc
+prototype, 8 B/slot aligned          32.33 B/word own count (11285108 bytes)     32.33 B/word held by malloc
+## cjk/walk-1 [02:11:38 68000mC busy=1 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              33.9
+lexindex DoubleArrayIndex, in order                    13.0
+DoubleArrayIndex, mapped, in order                     13.7
+DoubleArrayIndex, occurrences, in order                10.6
+lexindex StringIndex, in order                         54.1
+flat, 8 B slots with the id, in order                  14.0
+cedarwood 0.6.1, in order                              28.8
+darts-clone 0.32, in order                             27.7
+yada 0.7.0, in order                                   26.8
+crawdad 0.4.1 Trie, in order                           15.6
+crawdad 0.4.1 MpTrie, in order                         17.9
+daachorse 5.1.0 (block scan), in order                 14.8
+lexindex DoubleArrayIndex, shuffled                    17.7
+DoubleArrayIndex, mapped, shuffled                     18.6
+DoubleArrayIndex, occurrences, shuffled                11.1
+lexindex StringIndex, shuffled                         65.4
+flat, 8 B slots with the id, shuffled                  19.2
+cedarwood 0.6.1, shuffled                              35.9
+darts-clone 0.32, shuffled                             34.1
+yada 0.7.0, shuffled                                   33.2
+crawdad 0.4.1 Trie, shuffled                           20.9
+crawdad 0.4.1 MpTrie, shuffled                         23.6
+daachorse 5.1.0 (block scan), shuffled                 15.8
+## cjk/walk-2 [02:12:05 68000mC busy=3 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              33.9
+lexindex DoubleArrayIndex, in order                    13.1
+DoubleArrayIndex, mapped, in order                     13.8
+DoubleArrayIndex, occurrences, in order                10.6
+lexindex StringIndex, in order                         54.0
+flat, 8 B slots with the id, in order                  14.1
+cedarwood 0.6.1, in order                              29.2
+darts-clone 0.32, in order                             27.5
+yada 0.7.0, in order                                   27.0
+crawdad 0.4.1 Trie, in order                           15.6
+crawdad 0.4.1 MpTrie, in order                         17.9
+daachorse 5.1.0 (block scan), in order                 15.0
+lexindex DoubleArrayIndex, shuffled                    17.9
+DoubleArrayIndex, mapped, shuffled                     18.8
+DoubleArrayIndex, occurrences, shuffled                11.2
+lexindex StringIndex, shuffled                         65.5
+flat, 8 B slots with the id, shuffled                  19.2
+cedarwood 0.6.1, shuffled                              36.3
+darts-clone 0.32, shuffled                             33.9
+yada 0.7.0, shuffled                                   33.3
+crawdad 0.4.1 Trie, shuffled                           21.0
+crawdad 0.4.1 MpTrie, shuffled                         23.7
+daachorse 5.1.0 (block scan), shuffled                 16.2
+## cjk/walk-3 [02:12:32 66000mC busy=1 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+# checked: 4997 sentences (195832 characters), 16736 blocks, 178338 positions, 237465 matches: the same set at every position from every structure, and every timed walk's tally in both lanes
+variant                                             ns/char   (178338 characters in blocks; min of 20 rounds, regime warm)
+control: jieba-rs 0.11.0 cut_all (blocks)              40.5
+lexindex DoubleArrayIndex, in order                    13.0
+DoubleArrayIndex, mapped, in order                     13.7
+DoubleArrayIndex, occurrences, in order                10.7
+lexindex StringIndex, in order                         54.3
+flat, 8 B slots with the id, in order                  14.2
+cedarwood 0.6.1, in order                              29.2
+darts-clone 0.32, in order                             27.8
+yada 0.7.0, in order                                   26.7
+crawdad 0.4.1 Trie, in order                           15.5
+crawdad 0.4.1 MpTrie, in order                         19.0
+daachorse 5.1.0 (block scan), in order                 16.9
+lexindex DoubleArrayIndex, shuffled                    17.7
+DoubleArrayIndex, mapped, shuffled                     18.6
+DoubleArrayIndex, occurrences, shuffled                11.2
+lexindex StringIndex, shuffled                         65.6
+flat, 8 B slots with the id, shuffled                  19.3
+cedarwood 0.6.1, shuffled                              35.7
+darts-clone 0.32, shuffled                             34.3
+yada 0.7.0, shuffled                                   33.2
+crawdad 0.4.1 Trie, shuffled                           21.1
+crawdad 0.4.1 MpTrie, shuffled                         24.5
+daachorse 5.1.0 (block scan), shuffled                 16.2
+## cjk/builds [02:13:00 67000mC busy=3 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+build                                      s   (349045 words; min of 7 rounds, shuffled order)
+lexindex DoubleArrayIndex              0.160
+lexindex StringIndex (sorted)          0.083
+cedarwood 0.6.1                        0.101
+darts-clone 0.32                       0.054
+yada 0.7.0                             0.328
+crawdad 0.4.1 Trie                     1.244
+crawdad 0.4.1 MpTrie                   1.583
+daachorse 5.1.0                        1.581
+## cjk/loads [02:13:40 68000mC busy=2 swap=0MiB governor=performance]
+# rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# lexindex: the tree under test, by path (its version is on the lock line); cedarwood 0.6.1, yada 0.7.0, crawdad 0.4.1, daachorse 5.1.0 (crates.io); jieba-rs 0.11.0 (control)
+# darts-clone 0.32 at 87b71afd6cf784953e3c08f24c64203397f3b724
+# C++: 16.2.1 20261029 (Red Hat 16.2.1-3) | c++ -O3 -ffunction-sections -fdata-sections -fPIC -g -gdwarf-4 -m64 -std=c++17 -I ../vendor/darts-clone/include -Wall -Wextra
+load                                                    ms    file bytes   (349045 words; min of 30 rounds, shuffled order; files in the page cache)
+lexindex DoubleArrayIndex load                       1.661       5451278   (probe checksum 54701)
+lexindex DoubleArrayIndex load_mmap                  0.370       5451278   (probe checksum 54701)
+lexindex StringIndex load + first walk               1.359       3124743   (probe checksum 54701)
+lexindex StringIndex load_mmap + first walk          0.407       3124743   (probe checksum 54701)
+darts-clone 0.32 open                                0.499       6195200   (probe checksum 54701)
+yada 0.7.0 read + new                                2.840       6195200   (probe checksum 54701)
+crawdad 0.4.1 Trie read + deserialize                0.999       6422540   (probe checksum 54673)
+crawdad 0.4.1 MpTrie read + deserialize              1.275       7736714   (probe checksum 13727)
+daachorse 5.1.0 read + deserialize                   5.614      16738335   (probe checksum 757002)
+daachorse 5.1.0 read + deserialize_unchecked         3.412      16738335   (probe checksum 757002)
+cedarwood 0.6.1 read + load_from_reader             38.596      21135962   (probe checksum 54697)
+## cjk/python-1 [02:13:52 67000mC busy=0 swap=0MiB governor=performance]
+# python 3.14.8 (/home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2/py/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.3, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.81
+# round 2/5 done, load 0.82
+# round 3/5 done, load 0.85
+# round 4/5 done, load 0.86
+# round 5/5 done, load 0.87
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            663         1472              1992
+lexindex StringIndex                        886         1391              1903
+lexindex StringIndex occurrences            532         1078              1582
+lexindex DoubleArrayIndex                   843         1363              1851
+lexindex DoubleArrayIndex occurrences          472         1017              1513
+lexindex DictIndex 256                     2006         2439              2961
+marisa-trie                                1391         1909              2452
+dawg2 (dag only)                            983           --                --
+## cjk/python-2 [02:14:37 69000mC busy=2 swap=0MiB governor=performance]
+# python 3.14.8 (/home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2/py/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.3, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.85
+# round 2/5 done, load 0.87
+# round 3/5 done, load 0.88
+# round 4/5 done, load 0.89
+# round 5/5 done, load 0.90
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            638         1463              1985
+lexindex StringIndex                        887         1389              1901
+lexindex StringIndex occurrences            540         1069              1579
+lexindex DoubleArrayIndex                   841         1357              1858
+lexindex DoubleArrayIndex occurrences          473         1019              1515
+lexindex DictIndex 256                     2013         2468              2997
+marisa-trie                                1399         1906              2473
+dawg2 (dag only)                            988           --                --
+## cjk/python-3 [02:15:24 68000mC busy=1 swap=0MiB governor=performance]
+# python 3.14.8 (/home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2/py/bin/python, GIL on, Py_GIL_DISABLED=0); lexindex 4.5.3, marisa-trie 1.4.1, dawg2 0.13.3, jieba 0.42.1
+ok   lexindex StringIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex StringIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DoubleArrayIndex occurrences: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   lexindex DictIndex 256: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   marisa-trie: DAG on 16736 blocks, lcut(HMM=False) and lcut(HMM=True) on 4997 sentences; its FREQ.get answered 286 runs as words and 10804 as not
+ok   dawg2 (dag only): DAG on 16736 blocks
+#    HMM=True cuts 2639 of the 4997 sentences differently from HMM=False
+# checked: 4997 sentences (195832 characters), 16736 blocks (178338)
+# round 1/5 done, load 0.87
+# round 2/5 done, load 0.88
+# round 3/5 done, load 0.89
+# round 4/5 done, load 0.91
+# round 5/5 done, load 0.92
+
+variant                             dag ns/char  cut ns/char  cut(HMM) ns/char   (178338 characters in blocks, 195832 in text; min of 5 rounds)
+jieba (own dict)                            644         1486              2034
+lexindex StringIndex                        910         1399              1909
+lexindex StringIndex occurrences            545         1084              1596
+lexindex DoubleArrayIndex                   864         1364              1879
+lexindex DoubleArrayIndex occurrences          484         1022              1520
+lexindex DictIndex 256                     2018         2444              2994
+marisa-trie                                1409         1918              2477
+dawg2 (dag only)                            988           --                --

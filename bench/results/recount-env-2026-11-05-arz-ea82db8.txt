@@ -1,0 +1,42 @@
+# run started 2026-11-05T00:50:23+02:00
+# AMD Ryzen 7 5800HS with Radeon Graphics, Linux 7.2.15-200.fc44.x86_64, rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# DIMMs not re-read (needs root): channel A 8 GiB rank 1, channel B 32 GiB rank 2, DDR4-3200, read 2026-09-21
+# governor performance, driver amd-pstate-epp, EPP performance, boost 1, THP always [madvise] never
+# uptime 802.11 s, swap 0 MiB, hottest 41000 mC, load 0.30 0.35 0.22
+main ea82db8b062acbae06e82b8c4a4bb046ff72b3f7
+wt w2-main ea82db8b062acbae06e82b8c4a4bb046ff72b3f7
+wt w2-453 b1e62000f479e455fe8650c66eff711d542b6437
+wheel 9980fa036779bb507915a5706d47d3f0fbc002adb73e0f934992e7dbeec14d20  /home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2/dist/lexindex-4.5.3-cp311-abi3-manylinux_2_34_x86_64.whl
+rel-1m: lexindex ea82db8b062acbae06e82b8c4a4bb046ff72b3f7 against v4.5.3
+rel-build: lexindex ea82db8b062acbae06e82b8c4a4bb046ff72b3f7 against v4.5.3
+rel-sentinels: lexindex ea82db8b062acbae06e82b8c4a4bb046ff72b3f7 against v4.5.3
+rel-scale: lexindex ea82db8b062acbae06e82b8c4a4bb046ff72b3f7 against v4.5.3
+py: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+compare: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+lookup-fairness: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+prefix: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+common-prefix: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+sweep: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+scale: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+limit: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+arrow: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+latency-model: python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+rsmarisa: rsmarisa 0.4.2  
+cjk: cedarwood 0.6.1  daachorse 5.1.0  crawdad 0.4.1  yada 0.7.0  jieba-rs 0.11.0   darts-clone 87b71af; python 3.14.8 lexindex 4.5.3 marisa-trie 1.4.1 dawg2 0.13.3 datrie 0.8.3 jieba 0.42.1 matplotlib 3.11.2 pyarrow 26.0.1
+mphf: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+mphf-strings: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+mphf-misses: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+mphf-1b: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+mphf-lanes-1b: ptr_hash 2.1.3  rayon 1.12.0  
+mphf-consensus: ConsensusRecSplit 11deea6
+frontier-1m: the pins in bench/frontier/pins.sh, in the artifact's own header
+labels-micro: lexindex rows only, at ea82db8b062acbae06e82b8c4a4bb046ff72b3f7
+frontier-10m: the pins in bench/frontier/pins.sh, in the artifact's own header
+# run ended 2026-11-05T12:03:28+02:00, swap 170 MiB, hottest 60000 mC, governor performance
+# artifacts that landed in bench/results, moved by nobody:
+?? bench/results/frontier-10m-2026-11-05-arz-ea82db8.json
+?? bench/results/frontier-10m-2026-11-05-arz-ea82db8.log
+?? bench/results/frontier-1m-2026-11-05-arz-ea82db8.json
+?? bench/results/frontier-1m-2026-11-05-arz-ea82db8.log
+?? bench/results/frontier-named-subset-2026-11-05-arz-ea82db8.json
+?? bench/results/frontier-named-subset-2026-11-05-arz-ea82db8.log

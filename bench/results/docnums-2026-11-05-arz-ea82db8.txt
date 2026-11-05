@@ -1,0 +1,45 @@
+## docnums/run [01:45:00 40000mC busy=3 swap=0MiB governor=performance]
+StringIndex over 479823 words, 2856332 bytes
+from_bytes                               min      0.646 ms  median      0.654 ms  of 15
+from_untrusted_bytes                     min     23.141 ms  median     23.194 ms  of 15
+DictIndex over 1000000 paths, default block
+load_mmap                                min    175.099 us  median    185.608 us  of 300
+the key hash over the same 479823 words, shuffled
+this version                             min     14.334 ns  median     14.449 ns  of 15
+2.0-3.x                                  min     14.329 ns  median     14.461 ns  of 15
+## docnums/cli-1/auto [01:45:05 68000mC busy=4 swap=0MiB governor=performance]
+wall 533 ms
+## docnums/cli-1/dict [01:45:06 67000mC busy=3 swap=0MiB governor=performance]
+wall 87 ms
+## docnums/cli-2/auto [01:45:07 64000mC busy=1 swap=0MiB governor=performance]
+wall 532 ms
+## docnums/cli-2/dict [01:45:09 62000mC busy=2 swap=0MiB governor=performance]
+wall 88 ms
+## docnums/cli-3/auto [01:45:10 60000mC busy=5 swap=0MiB governor=performance]
+wall 532 ms
+## docnums/cli-3/dict [01:45:12 60000mC busy=0 swap=0MiB governor=performance]
+wall 87 ms
+## docnums/cli-4/auto [01:45:13 59000mC busy=1 swap=0MiB governor=performance]
+wall 530 ms
+## docnums/cli-4/dict [01:45:14 60000mC busy=3 swap=0MiB governor=performance]
+wall 89 ms
+## docnums/cli-5/auto [01:45:16 59000mC busy=1 swap=0MiB governor=performance]
+wall 531 ms
+## docnums/cli-5/dict [01:45:17 60000mC busy=1 swap=0MiB governor=performance]
+wall 89 ms
+## docnums/cli-6/auto [01:45:18 58000mC busy=2 swap=0MiB governor=performance]
+wall 531 ms
+## docnums/cli-6/dict [01:45:20 59000mC busy=2 swap=0MiB governor=performance]
+wall 86 ms
+## docnums/cli-7/auto [01:45:21 57000mC busy=1 swap=0MiB governor=performance]
+wall 533 ms
+## docnums/cli-7/dict [01:45:22 61000mC busy=2 swap=0MiB governor=performance]
+wall 87 ms
+## docnums/cli-8/auto [01:45:24 59000mC busy=1 swap=0MiB governor=performance]
+wall 529 ms
+## docnums/cli-8/dict [01:45:25 60000mC busy=1 swap=0MiB governor=performance]
+wall 88 ms
+## docnums/cli-9/auto [01:45:26 59000mC busy=2 swap=0MiB governor=performance]
+wall 533 ms
+## docnums/cli-9/dict [01:45:28 59000mC busy=3 swap=0MiB governor=performance]
+wall 88 ms

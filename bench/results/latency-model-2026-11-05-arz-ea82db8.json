@@ -1,0 +1,5522 @@
+{
+  "table": "latency-model",
+  "environment": {
+    "date": "2026-11-05",
+    "host": "arz",
+    "commit": "ea82db8",
+    "cpu": "AMD Ryzen 7 5800HS with Radeon Graphics",
+    "cpus": 16,
+    "kernel": "Linux 7.2.15-200.fc44.x86_64",
+    "python": "3.14.8",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "lexindex": "4.5.3",
+    "loadavg_start": [
+      0.37,
+      1.67,
+      2.9
+    ],
+    "loadavg_end": [
+      1.82,
+      2.15,
+      2.6
+    ]
+  },
+  "corpora": "/home/ilgrad/Documents/projects/betula/repos/lexindex/local/corpora",
+  "build_repeats": 1,
+  "probes": 20000,
+  "common_prefix_probes": 5000,
+  "batches": [
+    16,
+    1024
+  ],
+  "rounds": 10,
+  "cells": [
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24245,
+      "build_ms": 8.178104000762687,
+      "ops": {
+        "mixed": 45.12025,
+        "hit": 46.057,
+        "miss": 42.83045,
+        "batch16": 32.5742,
+        "batch1024": 29.8541
+      },
+      "lookup_ns": 45.12025
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24249,
+      "build_ms": 8.109705000606482,
+      "ops": {
+        "mixed": 54.3581,
+        "hit": 50.52945,
+        "miss": 37.9378,
+        "batch16": 39.106,
+        "batch1024": 32.5687
+      },
+      "lookup_ns": 54.3581
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 19.04606,
+      "build_ms": 44.47518199958722,
+      "ops": {
+        "mixed": 93.06935,
+        "hit": 81.9424,
+        "miss": 69.10885,
+        "batch16": 58.85605,
+        "batch1024": 44.41845,
+        "key": 73.71045
+      },
+      "lookup_ns": 93.06935
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 5.02034,
+      "build_ms": 29.085850999763352,
+      "ops": {
+        "mixed": 220.78475,
+        "hit": 220.02485,
+        "miss": 220.631,
+        "batch16": 253.3905,
+        "batch1024": 240.67315,
+        "key": 216.29235,
+        "prefix_count": 256.4077,
+        "common_prefix": 2664.171,
+        "longest_prefix": 519.2254
+      },
+      "lookup_ns": 220.78475
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 4.79083,
+      "build_ms": 28.324611001153244,
+      "ops": {
+        "mixed": 242.13035,
+        "hit": 241.5007,
+        "miss": 238.77155,
+        "batch16": 269.80035,
+        "batch1024": 255.3978,
+        "key": 247.65275,
+        "prefix_count": 267.3452,
+        "common_prefix": 2803.3244,
+        "longest_prefix": 550.7788
+      },
+      "lookup_ns": 242.13035
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 4.65007,
+      "build_ms": 39.17051700045704,
+      "ops": {
+        "mixed": 280.38275,
+        "hit": 279.2371,
+        "miss": 275.88225,
+        "batch16": 302.53585,
+        "batch1024": 289.6897,
+        "key": 324.991,
+        "prefix_count": 314.5514,
+        "common_prefix": 3271.3396,
+        "longest_prefix": 626.7034
+      },
+      "lookup_ns": 280.38275
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 19.57737,
+      "build_ms": 115.95324299923959,
+      "ops": {
+        "mixed": 239.46285,
+        "hit": 240.93715,
+        "miss": 223.4092,
+        "batch16": 234.18795,
+        "batch1024": 231.42475,
+        "key": 762.5971,
+        "prefix_count": 1398.45915,
+        "common_prefix": 307.9706,
+        "longest_prefix": 267.144
+      },
+      "lookup_ns": 239.46285
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 8.1584,
+      "build_ms": 40.40649899980053,
+      "ops": {
+        "mixed": 63.31145,
+        "hit": 56.6479,
+        "miss": 44.25065,
+        "batch16": 42.22135,
+        "batch1024": 33.43485
+      },
+      "lookup_ns": 63.31145
+    },
+    {
+      "corpus": "dna",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 7.1584,
+      "build_ms": 39.186416999655194,
+      "ops": {
+        "mixed": 58.8601,
+        "hit": 53.40035,
+        "miss": 49.86765
+      },
+      "lookup_ns": 58.8601
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240532,
+      "build_ms": 41.75886900156911,
+      "ops": {
+        "mixed": 57.0126,
+        "hit": 58.3406,
+        "miss": 56.03575,
+        "batch16": 36.33475,
+        "batch1024": 33.246
+      },
+      "lookup_ns": 57.0126
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240536,
+      "build_ms": 42.45938500025659,
+      "ops": {
+        "mixed": 103.89565,
+        "hit": 101.71105,
+        "miss": 89.0197,
+        "batch16": 50.39315,
+        "batch1024": 39.2407
+      },
+      "lookup_ns": 103.89565
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 17.755116,
+      "build_ms": 744.7460670009605,
+      "ops": {
+        "mixed": 218.21595,
+        "hit": 208.6951,
+        "miss": 203.5619,
+        "batch16": 89.9855,
+        "batch1024": 56.3699,
+        "key": 180.63585
+      },
+      "lookup_ns": 218.21595
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 4.598728,
+      "build_ms": 138.76574900132255,
+      "ops": {
+        "mixed": 290.5689,
+        "hit": 326.1983,
+        "miss": 329.9383,
+        "batch16": 316.81715,
+        "batch1024": 307.41305,
+        "key": 259.48545,
+        "prefix_count": 289.08055,
+        "common_prefix": 2935.9716,
+        "longest_prefix": 605.5896
+      },
+      "lookup_ns": 290.5689
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 4.374995,
+      "build_ms": 134.03897900025186,
+      "ops": {
+        "mixed": 298.38255,
+        "hit": 327.38405,
+        "miss": 326.72275,
+        "batch16": 328.4851,
+        "batch1024": 319.62845,
+        "key": 272.07865,
+        "prefix_count": 290.64,
+        "common_prefix": 3032.5552,
+        "longest_prefix": 623.0766
+      },
+      "lookup_ns": 298.38255
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 4.230538,
+      "build_ms": 141.52371899945138,
+      "ops": {
+        "mixed": 320.6038,
+        "hit": 345.0953,
+        "miss": 342.0546,
+        "batch16": 370.482,
+        "batch1024": 356.97315,
+        "key": 360.4742,
+        "prefix_count": 333.58165,
+        "common_prefix": 3417.4,
+        "longest_prefix": 680.5546
+      },
+      "lookup_ns": 320.6038
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 17.74149,
+      "build_ms": 1382.2571400014567,
+      "ops": {
+        "mixed": 459.84185,
+        "hit": 502.5987,
+        "miss": 490.7334,
+        "batch16": 501.19205,
+        "batch1024": 502.0191,
+        "key": 967.6744,
+        "prefix_count": 1557.52,
+        "common_prefix": 480.633,
+        "longest_prefix": 456.672
+      },
+      "lookup_ns": 459.84185
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 8.115539,
+      "build_ms": 223.75915900011023,
+      "ops": {
+        "mixed": 135.76455,
+        "hit": 133.2258,
+        "miss": 120.17125,
+        "batch16": 63.1281,
+        "batch1024": 43.366
+      },
+      "lookup_ns": 135.76455
+    },
+    {
+      "corpus": "dna",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 7.115539,
+      "build_ms": 216.61106099963945,
+      "ops": {
+        "mixed": 118.46505,
+        "hit": 123.7645,
+        "miss": 114.7636
+      },
+      "lookup_ns": 118.46505
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2383212,
+      "build_ms": 516.1129910011368,
+      "ops": {
+        "mixed": 111.2495,
+        "hit": 110.6048,
+        "miss": 111.25305,
+        "batch16": 44.10185,
+        "batch1024": 35.35695
+      },
+      "lookup_ns": 111.2495
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2383216,
+      "build_ms": 527.351965998605,
+      "ops": {
+        "mixed": 199.31345,
+        "hit": 193.47245,
+        "miss": 183.35295,
+        "batch16": 61.0492,
+        "batch1024": 43.03135
+      },
+      "lookup_ns": 199.31345
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.4728569,
+      "build_ms": 11966.582662000292,
+      "ops": {
+        "mixed": 298.97365,
+        "hit": 288.49345,
+        "miss": 281.83995,
+        "batch16": 100.89755,
+        "batch1024": 59.73525,
+        "key": 222.65275
+      },
+      "lookup_ns": 298.97365
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 4.1737412,
+      "build_ms": 1707.5294540009054,
+      "ops": {
+        "mixed": 525.6445,
+        "hit": 563.5377,
+        "miss": 566.27785,
+        "batch16": 524.2609,
+        "batch1024": 509.25925,
+        "key": 418.1606,
+        "prefix_count": 335.60195,
+        "common_prefix": 3779.853,
+        "longest_prefix": 849.0672
+      },
+      "lookup_ns": 525.6445
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 3.947911,
+      "build_ms": 1666.8161079996935,
+      "ops": {
+        "mixed": 491.42775,
+        "hit": 521.3274,
+        "miss": 514.08175,
+        "batch16": 505.02675,
+        "batch1024": 492.3394,
+        "key": 419.91585,
+        "prefix_count": 338.78495,
+        "common_prefix": 3697.2838,
+        "longest_prefix": 820.0266
+      },
+      "lookup_ns": 491.42775
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 3.8127206,
+      "build_ms": 1675.2188539994677,
+      "ops": {
+        "mixed": 443.06985,
+        "hit": 475.80185,
+        "miss": 475.53935,
+        "batch16": 491.83695,
+        "batch1024": 478.2885,
+        "key": 481.06075,
+        "prefix_count": 368.0825,
+        "common_prefix": 3868.3872,
+        "longest_prefix": 818.093
+      },
+      "lookup_ns": 443.06985
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 15.9825875,
+      "build_ms": 14888.605229998575,
+      "ops": {
+        "mixed": 736.09135,
+        "hit": 765.21155,
+        "miss": 753.4169,
+        "batch16": 760.0699,
+        "batch1024": 757.82865,
+        "key": 1268.49,
+        "prefix_count": 1469.65645,
+        "common_prefix": 668.1112,
+        "longest_prefix": 666.7004
+      },
+      "lookup_ns": 736.09135
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 8.1862334,
+      "build_ms": 2653.585837000719,
+      "ops": {
+        "mixed": 202.93725,
+        "hit": 196.17705,
+        "miss": 185.3988,
+        "batch16": 71.00435,
+        "batch1024": 45.4113
+      },
+      "lookup_ns": 202.93725
+    },
+    {
+      "corpus": "dna",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 24.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 7.1862334,
+      "build_ms": 2654.10227600114,
+      "ops": {
+        "mixed": 194.7228,
+        "hit": 194.0315,
+        "miss": 194.68625
+      },
+      "lookup_ns": 194.7228
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2433,
+      "build_ms": 8.186860000932938,
+      "ops": {
+        "mixed": 47.377,
+        "hit": 48.26065,
+        "miss": 45.32615,
+        "batch16": 33.9062,
+        "batch1024": 31.5167
+      },
+      "lookup_ns": 47.377
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24334,
+      "build_ms": 7.765529000607785,
+      "ops": {
+        "mixed": 56.96,
+        "hit": 52.4801,
+        "miss": 40.2451,
+        "batch16": 41.29405,
+        "batch1024": 34.77835
+      },
+      "lookup_ns": 56.96
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 15.44258,
+      "build_ms": 46.01003500101797,
+      "ops": {
+        "mixed": 73.27065,
+        "hit": 75.8961,
+        "miss": 47.73865,
+        "batch16": 54.2088,
+        "batch1024": 42.9767,
+        "key": 70.256
+      },
+      "lookup_ns": 73.27065
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 6.07723,
+      "build_ms": 28.692772999420413,
+      "ops": {
+        "mixed": 243.2976,
+        "hit": 240.31295,
+        "miss": 239.51145,
+        "batch16": 271.3022,
+        "batch1024": 257.39055,
+        "key": 297.1447,
+        "prefix_count": 332.2146,
+        "common_prefix": 2182.959,
+        "longest_prefix": 589.4694
+      },
+      "lookup_ns": 243.2976
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.8184,
+      "build_ms": 30.033551000087755,
+      "ops": {
+        "mixed": 270.85485,
+        "hit": 269.51635,
+        "miss": 266.54675,
+        "batch16": 297.92015,
+        "batch1024": 282.48265,
+        "key": 336.68405,
+        "prefix_count": 371.15325,
+        "common_prefix": 2368.8822,
+        "longest_prefix": 642.7416
+      },
+      "lookup_ns": 270.85485
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.68559,
+      "build_ms": 41.45463799977733,
+      "ops": {
+        "mixed": 322.87255,
+        "hit": 322.2519,
+        "miss": 318.1001,
+        "batch16": 346.87765,
+        "batch1024": 331.6005,
+        "key": 415.93685,
+        "prefix_count": 452.9164,
+        "common_prefix": 2808.5062,
+        "longest_prefix": 749.6062
+      },
+      "lookup_ns": 322.87255
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 11.69354,
+      "build_ms": 63.98018399886496,
+      "ops": {
+        "mixed": 163.421,
+        "hit": 166.89655,
+        "miss": 150.5679,
+        "batch16": 157.311,
+        "batch1024": 154.1641,
+        "key": 542.8518,
+        "prefix_count": 852.0036,
+        "common_prefix": 256.8906,
+        "longest_prefix": 221.0612
+      },
+      "lookup_ns": 163.421
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 9.18682,
+      "build_ms": 42.80819000086922,
+      "ops": {
+        "mixed": 61.45295,
+        "hit": 56.45555,
+        "miss": 44.2506,
+        "batch16": 43.02585,
+        "batch1024": 35.32635
+      },
+      "lookup_ns": 61.45295
+    },
+    {
+      "corpus": "domains",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.77305,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 8.18682,
+      "build_ms": 40.826005999406334,
+      "ops": {
+        "mixed": 59.4953,
+        "hit": 55.26535,
+        "miss": 52.0688
+      },
+      "lookup_ns": 59.4953
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.241165,
+      "build_ms": 39.03394999906595,
+      "ops": {
+        "mixed": 60.0428,
+        "hit": 60.5062,
+        "miss": 58.10865,
+        "batch16": 38.9767,
+        "batch1024": 35.54025
+      },
+      "lookup_ns": 60.0428
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.241169,
+      "build_ms": 42.57535299984738,
+      "ops": {
+        "mixed": 105.4952,
+        "hit": 101.86085,
+        "miss": 89.19705,
+        "batch16": 53.229,
+        "batch1024": 42.073
+      },
+      "lookup_ns": 105.4952
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 15.451258,
+      "build_ms": 501.3748940000369,
+      "ops": {
+        "mixed": 167.0478,
+        "hit": 201.8903,
+        "miss": 109.35795,
+        "batch16": 79.0986,
+        "batch1024": 55.36,
+        "key": 161.2409
+      },
+      "lookup_ns": 167.0478
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 4.725643,
+      "build_ms": 207.4822509985097,
+      "ops": {
+        "mixed": 344.90245,
+        "hit": 368.22075,
+        "miss": 374.3187,
+        "batch16": 361.08335,
+        "batch1024": 351.6366,
+        "key": 378.2872,
+        "prefix_count": 399.8687,
+        "common_prefix": 2550.0104,
+        "longest_prefix": 722.9242
+      },
+      "lookup_ns": 344.90245
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 4.482755,
+      "build_ms": 201.5564789999189,
+      "ops": {
+        "mixed": 362.63725,
+        "hit": 385.26275,
+        "miss": 382.76305,
+        "batch16": 384.6807,
+        "batch1024": 374.4164,
+        "key": 406.1415,
+        "prefix_count": 418.97005,
+        "common_prefix": 2749.7618,
+        "longest_prefix": 769.5798
+      },
+      "lookup_ns": 362.63725
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 4.34493,
+      "build_ms": 220.42022599998745,
+      "ops": {
+        "mixed": 407.8096,
+        "hit": 427.84775,
+        "miss": 422.67705,
+        "batch16": 453.2129,
+        "batch1024": 435.8513,
+        "key": 505.29975,
+        "prefix_count": 490.263,
+        "common_prefix": 3253.5322,
+        "longest_prefix": 874.4388
+      },
+      "lookup_ns": 407.8096
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 10.503601,
+      "build_ms": 863.9839900006336,
+      "ops": {
+        "mixed": 326.84,
+        "hit": 369.2096,
+        "miss": 344.2507,
+        "batch16": 363.6787,
+        "batch1024": 356.60795,
+        "key": 695.64235,
+        "prefix_count": 892.58935,
+        "common_prefix": 406.9186,
+        "longest_prefix": 371.6704
+      },
+      "lookup_ns": 326.84
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 8.223932,
+      "build_ms": 292.1432060011284,
+      "ops": {
+        "mixed": 137.13715,
+        "hit": 131.9354,
+        "miss": 121.01685,
+        "batch16": 65.1409,
+        "batch1024": 45.8456
+      },
+      "lookup_ns": 137.13715
+    },
+    {
+      "corpus": "domains",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 13.782044,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 7.223932,
+      "build_ms": 291.2941119993775,
+      "ops": {
+        "mixed": 124.07205,
+        "hit": 126.66145,
+        "miss": 121.45415
+      },
+      "lookup_ns": 124.07205
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24449,
+      "build_ms": 8.255989998360747,
+      "ops": {
+        "mixed": 49.1288,
+        "hit": 49.9423,
+        "miss": 47.6225,
+        "batch16": 36.8938,
+        "batch1024": 34.09055
+      },
+      "lookup_ns": 49.1288
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24453,
+      "build_ms": 7.702539998717839,
+      "ops": {
+        "mixed": 58.63965,
+        "hit": 54.1983,
+        "miss": 42.2784,
+        "batch16": 44.7165,
+        "batch1024": 37.0361
+      },
+      "lookup_ns": 58.63965
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 18.48033,
+      "build_ms": 58.82018000011158,
+      "ops": {
+        "mixed": 75.847,
+        "hit": 76.79275,
+        "miss": 47.2954,
+        "batch16": 56.9224,
+        "batch1024": 45.54505,
+        "key": 80.19565
+      },
+      "lookup_ns": 75.847
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 8.33369,
+      "build_ms": 84.98740899995028,
+      "ops": {
+        "mixed": 276.97685,
+        "hit": 270.60685,
+        "miss": 275.6844,
+        "batch16": 311.84435,
+        "batch1024": 293.05955,
+        "key": 361.17755,
+        "prefix_count": 359.3972,
+        "common_prefix": 2860.9386,
+        "longest_prefix": 653.2372
+      },
+      "lookup_ns": 276.97685
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 8.04104,
+      "build_ms": 86.53437599969038,
+      "ops": {
+        "mixed": 300.75,
+        "hit": 298.26835,
+        "miss": 297.62565,
+        "batch16": 334.7278,
+        "batch1024": 318.9537,
+        "key": 391.5075,
+        "prefix_count": 393.5188,
+        "common_prefix": 3077.7498,
+        "longest_prefix": 698.0974
+      },
+      "lookup_ns": 300.75
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 7.89441,
+      "build_ms": 124.65996900027676,
+      "ops": {
+        "mixed": 360.9516,
+        "hit": 359.64765,
+        "miss": 357.95545,
+        "batch16": 394.9725,
+        "batch1024": 379.9473,
+        "key": 481.461,
+        "prefix_count": 476.16905,
+        "common_prefix": 3676.082,
+        "longest_prefix": 824.4488
+      },
+      "lookup_ns": 360.9516
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 15.01946,
+      "build_ms": 80.96473299883655,
+      "ops": {
+        "mixed": 178.5339,
+        "hit": 181.23245,
+        "miss": 165.8626,
+        "batch16": 175.01825,
+        "batch1024": 170.867,
+        "key": 634.4128,
+        "prefix_count": 961.36255,
+        "common_prefix": 284.1196,
+        "longest_prefix": 238.0112
+      },
+      "lookup_ns": 178.5339
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 11.41065,
+      "build_ms": 97.24112000003515,
+      "ops": {
+        "mixed": 63.16815,
+        "hit": 57.40135,
+        "miss": 45.74645,
+        "batch16": 46.9948,
+        "batch1024": 37.70285
+      },
+      "lookup_ns": 63.16815
+    },
+    {
+      "corpus": "idents",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 17.30746,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 10.41065,
+      "build_ms": 98.24132900030236,
+      "ops": {
+        "mixed": 61.38735,
+        "hit": 56.12745,
+        "miss": 53.8076
+      },
+      "lookup_ns": 61.38735
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240384,
+      "build_ms": 42.36815399963234,
+      "ops": {
+        "mixed": 60.28875,
+        "hit": 60.6329,
+        "miss": 59.5183,
+        "batch16": 39.5007,
+        "batch1024": 36.8227
+      },
+      "lookup_ns": 60.28875
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240388,
+      "build_ms": 44.47515200081398,
+      "ops": {
+        "mixed": 106.717,
+        "hit": 103.06015,
+        "miss": 90.5852,
+        "batch16": 54.75385,
+        "batch1024": 43.19965
+      },
+      "lookup_ns": 106.717
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.604743,
+      "build_ms": 683.7766280004871,
+      "ops": {
+        "mixed": 182.2118,
+        "hit": 218.8882,
+        "miss": 124.2945,
+        "batch16": 86.94585,
+        "batch1024": 56.27275,
+        "key": 190.7649
+      },
+      "lookup_ns": 182.2118
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 5.483986,
+      "build_ms": 230.19753400149057,
+      "ops": {
+        "mixed": 378.8938,
+        "hit": 404.2785,
+        "miss": 405.60295,
+        "batch16": 405.12605,
+        "batch1024": 392.2915,
+        "key": 430.881,
+        "prefix_count": 406.11895,
+        "common_prefix": 3197.3806,
+        "longest_prefix": 784.019
+      },
+      "lookup_ns": 378.8938
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.219519,
+      "build_ms": 227.68908199941507,
+      "ops": {
+        "mixed": 394.6043,
+        "hit": 421.71425,
+        "miss": 420.15335,
+        "batch16": 429.5595,
+        "batch1024": 415.8302,
+        "key": 451.48615,
+        "prefix_count": 426.99365,
+        "common_prefix": 3357.9002,
+        "longest_prefix": 817.2292
+      },
+      "lookup_ns": 394.6043
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.055044,
+      "build_ms": 252.02539100064314,
+      "ops": {
+        "mixed": 454.72425,
+        "hit": 475.44265,
+        "miss": 469.3457,
+        "batch16": 503.95325,
+        "batch1024": 485.52415,
+        "key": 566.35395,
+        "prefix_count": 509.8613,
+        "common_prefix": 3939.2944,
+        "longest_prefix": 938.964
+      },
+      "lookup_ns": 454.72425
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 10.551839,
+      "build_ms": 926.1754139988625,
+      "ops": {
+        "mixed": 339.3946,
+        "hit": 380.90555,
+        "miss": 360.905,
+        "batch16": 374.03665,
+        "batch1024": 366.86115,
+        "key": 786.7455,
+        "prefix_count": 634.9368,
+        "common_prefix": 530.8292,
+        "longest_prefix": 405.6582
+      },
+      "lookup_ns": 339.3946
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 8.959915,
+      "build_ms": 319.20419500056596,
+      "ops": {
+        "mixed": 136.5761,
+        "hit": 129.7718,
+        "miss": 118.3443,
+        "batch16": 65.88075,
+        "batch1024": 47.4186
+      },
+      "lookup_ns": 136.5761
+    },
+    {
+      "corpus": "idents",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 17.283976,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 7.959915,
+      "build_ms": 317.9785320007795,
+      "ops": {
+        "mixed": 124.96075,
+        "hit": 125.3009,
+        "miss": 124.15725
+      },
+      "lookup_ns": 124.96075
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24298,
+      "build_ms": 9.894467999401968,
+      "ops": {
+        "mixed": 46.9978,
+        "hit": 46.55345,
+        "miss": 44.957,
+        "batch16": 35.7221,
+        "batch1024": 30.53435
+      },
+      "lookup_ns": 46.9978
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24302,
+      "build_ms": 7.717819000390591,
+      "ops": {
+        "mixed": 57.33175,
+        "hit": 51.6676,
+        "miss": 40.717,
+        "batch16": 46.0535,
+        "batch1024": 34.2058
+      },
+      "lookup_ns": 57.33175
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 9.51741,
+      "build_ms": 35.19942700040701,
+      "ops": {
+        "mixed": 72.5583,
+        "hit": 70.7524,
+        "miss": 54.74885,
+        "batch16": 57.24355,
+        "batch1024": 43.34945,
+        "key": 103.9598
+      },
+      "lookup_ns": 72.5583
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 3.67962,
+      "build_ms": 18.090765999659197,
+      "ops": {
+        "mixed": 249.395,
+        "hit": 248.92165,
+        "miss": 242.8167,
+        "batch16": 309.34365,
+        "batch1024": 280.33165,
+        "key": 310.4307,
+        "prefix_count": 435.89235,
+        "common_prefix": 1137.6392,
+        "longest_prefix": 802.6158
+      },
+      "lookup_ns": 249.395
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 3.49232,
+      "build_ms": 22.93990600082907,
+      "ops": {
+        "mixed": 264.7729,
+        "hit": 267.86375,
+        "miss": 256.90265,
+        "batch16": 316.445,
+        "batch1024": 287.3398,
+        "key": 306.37755,
+        "prefix_count": 466.33455,
+        "common_prefix": 1137.1962,
+        "longest_prefix": 799.6784
+      },
+      "lookup_ns": 264.7729
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 3.38599,
+      "build_ms": 31.407032000061008,
+      "ops": {
+        "mixed": 327.92605,
+        "hit": 329.69885,
+        "miss": 318.27445,
+        "batch16": 374.5371,
+        "batch1024": 346.0491,
+        "key": 381.9971,
+        "prefix_count": 572.1098,
+        "common_prefix": 1316.399,
+        "longest_prefix": 933.3514
+      },
+      "lookup_ns": 327.92605
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 10.25331,
+      "build_ms": 39.12429000047268,
+      "ops": {
+        "mixed": 140.54255,
+        "hit": 146.9826,
+        "miss": 124.95175,
+        "batch16": 136.1052,
+        "batch1024": 127.4865,
+        "key": 458.75685,
+        "prefix_count": 861.51045,
+        "common_prefix": 302.5002,
+        "longest_prefix": 238.0894
+      },
+      "lookup_ns": 140.54255
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 6.86042,
+      "build_ms": 35.16034300082538,
+      "ops": {
+        "mixed": 61.34125,
+        "hit": 55.3385,
+        "miss": 44.8893,
+        "batch16": 46.5685,
+        "batch1024": 34.40415
+      },
+      "lookup_ns": 61.34125
+    },
+    {
+      "corpus": "jieba-dict",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 8.74778,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 5.86042,
+      "build_ms": 34.733119999145856,
+      "ops": {
+        "mixed": 60.18105,
+        "hit": 54.3486,
+        "miss": 53.0026
+      },
+      "lookup_ns": 60.18105
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24462,
+      "build_ms": 8.356909000212909,
+      "ops": {
+        "mixed": 44.82725,
+        "hit": 44.9149,
+        "miss": 42.753437671883596,
+        "batch16": 32.54315,
+        "batch1024": 30.9331
+      },
+      "lookup_ns": 44.82725
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24466,
+      "build_ms": 7.873019998442032,
+      "ops": {
+        "mixed": 54.09715,
+        "hit": 49.95235,
+        "miss": 38.00430021501075,
+        "batch16": 39.04785,
+        "batch1024": 33.74235
+      },
+      "lookup_ns": 54.09715
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 3.74491,
+      "build_ms": 29.793970999890007,
+      "ops": {
+        "mixed": 64.97455,
+        "hit": 65.5617,
+        "miss": 43.89664483224161,
+        "batch16": 50.05555,
+        "batch1024": 40.7045,
+        "key": 59.13405
+      },
+      "lookup_ns": 64.97455
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 1.11949,
+      "build_ms": 10.867977000089013,
+      "ops": {
+        "mixed": 270.9961,
+        "hit": 264.8065,
+        "miss": 266.03610180509025,
+        "batch16": 301.95375,
+        "batch1024": 288.3447,
+        "key": 211.5284,
+        "prefix_count": 287.33275,
+        "common_prefix": 1338.8552,
+        "longest_prefix": 635.9206
+      },
+      "lookup_ns": 270.9961
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 1.01273,
+      "build_ms": 10.348470999815618,
+      "ops": {
+        "mixed": 257.8835,
+        "hit": 252.85305,
+        "miss": 250.58427921396068,
+        "batch16": 285.89055,
+        "batch1024": 271.7976,
+        "key": 203.4783,
+        "prefix_count": 307.1971,
+        "common_prefix": 1330.4776,
+        "longest_prefix": 606.305
+      },
+      "lookup_ns": 257.8835
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 0.91741,
+      "build_ms": 17.45140399907541,
+      "ops": {
+        "mixed": 280.4258,
+        "hit": 276.7484,
+        "miss": 271.29471473573676,
+        "batch16": 303.8423,
+        "batch1024": 291.1189,
+        "key": 252.4222,
+        "prefix_count": 370.8517,
+        "common_prefix": 1457.51,
+        "longest_prefix": 654.203
+      },
+      "lookup_ns": 280.4258
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 0.00246,
+      "build_ms": 17.71348700094677,
+      "ops": {
+        "mixed": 81.94545,
+        "hit": 84.18765,
+        "miss": 72.92614630731536,
+        "batch16": 75.0044,
+        "batch1024": 70.08715,
+        "key": 264.8546,
+        "prefix_count": 309.31005,
+        "common_prefix": 384.4482,
+        "longest_prefix": 150.9456
+      },
+      "lookup_ns": 81.94545
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 4.38247,
+      "build_ms": 21.347203000914305,
+      "ops": {
+        "mixed": 57.74295,
+        "hit": 53.8767,
+        "miss": 42.294064703235165,
+        "batch16": 40.3388,
+        "batch1024": 34.4472
+      },
+      "lookup_ns": 57.74295
+    },
+    {
+      "corpus": "numeric",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 4.8889,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 3.38247,
+      "build_ms": 20.734101000925875,
+      "ops": {
+        "mixed": 53.03315,
+        "hit": 52.176,
+        "miss": 48.92739636981849
+      },
+      "lookup_ns": 53.03315
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240885,
+      "build_ms": 37.84144999917771,
+      "ops": {
+        "mixed": 52.84925,
+        "hit": 50.3586,
+        "miss": 47.31171558577929,
+        "batch16": 32.716,
+        "batch1024": 31.8283
+      },
+      "lookup_ns": 52.84925
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240889,
+      "build_ms": 40.88469700036512,
+      "ops": {
+        "mixed": 89.9199,
+        "hit": 71.2844,
+        "miss": 56.93979698984949,
+        "batch16": 43.7642,
+        "batch1024": 36.1955
+      },
+      "lookup_ns": 89.9199
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 4.115914,
+      "build_ms": 588.6281910006801,
+      "ops": {
+        "mixed": 117.8494,
+        "hit": 116.32555,
+        "miss": 75.32576628831441,
+        "batch16": 67.21375,
+        "batch1024": 45.8231,
+        "key": 89.2226
+      },
+      "lookup_ns": 117.8494
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 1.156728,
+      "build_ms": 111.44943200088164,
+      "ops": {
+        "mixed": 312.6328,
+        "hit": 308.2105,
+        "miss": 308.5114755737787,
+        "batch16": 340.86135,
+        "batch1024": 328.6379,
+        "key": 230.11225,
+        "prefix_count": 328.7546,
+        "common_prefix": 1572.877,
+        "longest_prefix": 689.876
+      },
+      "lookup_ns": 312.6328
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 1.010907,
+      "build_ms": 106.095983999694,
+      "ops": {
+        "mixed": 309.66225,
+        "hit": 305.51795,
+        "miss": 303.58897944897245,
+        "batch16": 325.55005,
+        "batch1024": 310.4873,
+        "key": 226.36075,
+        "prefix_count": 339.40055,
+        "common_prefix": 1609.5176,
+        "longest_prefix": 689.9002
+      },
+      "lookup_ns": 309.66225
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 0.917975,
+      "build_ms": 105.1298290003615,
+      "ops": {
+        "mixed": 315.11745,
+        "hit": 312.5892,
+        "miss": 310.020401020051,
+        "batch16": 346.7349,
+        "batch1024": 331.4111,
+        "key": 267.1824,
+        "prefix_count": 369.72155,
+        "common_prefix": 1670.881,
+        "longest_prefix": 695.9836
+      },
+      "lookup_ns": 315.11745
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 0.000301,
+      "build_ms": 487.33828500007803,
+      "ops": {
+        "mixed": 90.6127,
+        "hit": 93.34635,
+        "miss": 81.26671333566678,
+        "batch16": 83.7899,
+        "batch1024": 79.4087,
+        "key": 311.3925,
+        "prefix_count": 320.3413,
+        "common_prefix": 427.3206,
+        "longest_prefix": 158.8726
+      },
+      "lookup_ns": 90.6127
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 4.751804,
+      "build_ms": 177.42192900004738,
+      "ops": {
+        "mixed": 114.6684,
+        "hit": 107.49745,
+        "miss": 82.8292414620731,
+        "batch16": 55.86745,
+        "batch1024": 39.58135
+      },
+      "lookup_ns": 114.6684
+    },
+    {
+      "corpus": "numeric",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 5.88889,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 3.751804,
+      "build_ms": 174.82584100071108,
+      "ops": {
+        "mixed": 117.71865,
+        "hit": 95.14925,
+        "miss": 81.15950797539877
+      },
+      "lookup_ns": 117.71865
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.238407,
+      "build_ms": 505.23705999876256,
+      "ops": {
+        "mixed": 103.2359,
+        "hit": 100.43365,
+        "miss": 101.36858685868587,
+        "batch16": 43.57385,
+        "batch1024": 35.4716
+      },
+      "lookup_ns": 103.2359
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2384074,
+      "build_ms": 526.6926959993725,
+      "ops": {
+        "mixed": 187.06595,
+        "hit": 177.7439,
+        "miss": 169.24437443744375,
+        "batch16": 61.3112,
+        "batch1024": 44.11135
+      },
+      "lookup_ns": 187.06595
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 4.6134099,
+      "build_ms": 10201.241963997745,
+      "ops": {
+        "mixed": 232.58895,
+        "hit": 268.03755,
+        "miss": 175.23267326732673,
+        "batch16": 90.50355,
+        "batch1024": 54.85355,
+        "key": 201.34625
+      },
+      "lookup_ns": 232.58895
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 1.163669,
+      "build_ms": 1492.5957139967068,
+      "ops": {
+        "mixed": 438.7728,
+        "hit": 470.47985,
+        "miss": 467.16126612661265,
+        "batch16": 442.053,
+        "batch1024": 432.8587,
+        "key": 311.2442,
+        "prefix_count": 408.0601,
+        "common_prefix": 1960.9778,
+        "longest_prefix": 794.9694
+      },
+      "lookup_ns": 438.7728
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 1.01555,
+      "build_ms": 1465.8660700006294,
+      "ops": {
+        "mixed": 420.58015,
+        "hit": 450.14865,
+        "miss": 445.84808480848085,
+        "batch16": 414.30685,
+        "batch1024": 407.2626,
+        "key": 309.33415,
+        "prefix_count": 399.15835,
+        "common_prefix": 1929.8876,
+        "longest_prefix": 766.1072
+      },
+      "lookup_ns": 420.58015
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 0.9187955,
+      "build_ms": 1454.9750389996916,
+      "ops": {
+        "mixed": 421.05,
+        "hit": 453.28355,
+        "miss": 450.5920092009201,
+        "batch16": 440.9043,
+        "batch1024": 434.2037,
+        "key": 337.93085,
+        "prefix_count": 416.2865,
+        "common_prefix": 2025.0444,
+        "longest_prefix": 797.5704
+      },
+      "lookup_ns": 421.05
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 3.56e-05,
+      "build_ms": 6944.868786998995,
+      "ops": {
+        "mixed": 100.5885,
+        "hit": 100.6416,
+        "miss": 90.64431443144315,
+        "batch16": 93.03125,
+        "batch1024": 88.1506,
+        "key": 356.5949,
+        "prefix_count": 315.40105,
+        "common_prefix": 466.6646,
+        "longest_prefix": 165.8236
+      },
+      "lookup_ns": 100.5885
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 5.2539582,
+      "build_ms": 2319.944850001775,
+      "ops": {
+        "mixed": 199.0229,
+        "hit": 190.3922,
+        "miss": 140.75752575257525,
+        "batch16": 71.1041,
+        "batch1024": 46.27745
+      },
+      "lookup_ns": 199.0229
+    },
+    {
+      "corpus": "numeric",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 6.888889,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 4.2539582,
+      "build_ms": 2334.877083001629,
+      "ops": {
+        "mixed": 184.2942,
+        "hit": 180.80615,
+        "miss": 182.13836383638363
+      },
+      "lookup_ns": 184.2942
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24163,
+      "build_ms": 8.218710001528962,
+      "ops": {
+        "mixed": 45.79605,
+        "hit": 46.586,
+        "miss": 43.4476,
+        "batch16": 32.1985,
+        "batch1024": 31.00725
+      },
+      "lookup_ns": 45.79605
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24167,
+      "build_ms": 8.325490001880098,
+      "ops": {
+        "mixed": 55.6876,
+        "hit": 50.96525,
+        "miss": 38.7703,
+        "batch16": 43.0669,
+        "batch1024": 33.55705
+      },
+      "lookup_ns": 55.6876
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.69297,
+      "build_ms": 36.40672500114306,
+      "ops": {
+        "mixed": 85.66295,
+        "hit": 75.72875,
+        "miss": 63.88455,
+        "batch16": 56.86335,
+        "batch1024": 44.5387,
+        "key": 66.92425
+      },
+      "lookup_ns": 85.66295
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 11.02583,
+      "build_ms": 28.408738999132765,
+      "ops": {
+        "mixed": 217.83875,
+        "hit": 214.9698,
+        "miss": 215.3245,
+        "batch16": 249.4496,
+        "batch1024": 235.2184,
+        "key": 191.4351,
+        "prefix_count": 358.80655,
+        "common_prefix": 2184.8104,
+        "longest_prefix": 551.482
+      },
+      "lookup_ns": 217.83875
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 10.8666,
+      "build_ms": 26.869016997807194,
+      "ops": {
+        "mixed": 241.3539,
+        "hit": 239.04905,
+        "miss": 236.7232,
+        "batch16": 271.4545,
+        "batch1024": 258.67595,
+        "key": 212.917,
+        "prefix_count": 405.5003,
+        "common_prefix": 2387.1324,
+        "longest_prefix": 603.7602
+      },
+      "lookup_ns": 241.3539
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 10.77039,
+      "build_ms": 42.74053300105152,
+      "ops": {
+        "mixed": 291.68845,
+        "hit": 290.61845,
+        "miss": 285.9001,
+        "batch16": 317.5315,
+        "batch1024": 304.09125,
+        "key": 256.37915,
+        "prefix_count": 508.1947,
+        "common_prefix": 3081.497,
+        "longest_prefix": 750.6782
+      },
+      "lookup_ns": 291.68845
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 21.55889,
+      "build_ms": 98.71927600033814,
+      "ops": {
+        "mixed": 133.09605,
+        "hit": 131.5246,
+        "miss": 116.60555,
+        "batch16": 126.08985,
+        "batch1024": 125.9942,
+        "key": 508.54285,
+        "prefix_count": 1008.93145,
+        "common_prefix": 220.5422,
+        "longest_prefix": 184.655
+      },
+      "lookup_ns": 133.09605
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 14.23335,
+      "build_ms": 39.6681019992684,
+      "ops": {
+        "mixed": 62.52995,
+        "hit": 55.70665,
+        "miss": 43.73615,
+        "batch16": 43.88845,
+        "batch1024": 34.29845
+      },
+      "lookup_ns": 62.52995
+    },
+    {
+      "corpus": "opaque",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 13.23335,
+      "build_ms": 38.62681499958853,
+      "ops": {
+        "mixed": 60.0308,
+        "hit": 54.1117,
+        "miss": 51.02935
+      },
+      "lookup_ns": 60.0308
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240098,
+      "build_ms": 39.82354400068289,
+      "ops": {
+        "mixed": 58.7464,
+        "hit": 59.6661,
+        "miss": 57.3813,
+        "batch16": 36.5246,
+        "batch1024": 33.62615
+      },
+      "lookup_ns": 58.7464
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240102,
+      "build_ms": 41.10048299844493,
+      "ops": {
+        "mixed": 106.0858,
+        "hit": 103.94475,
+        "miss": 90.88975,
+        "batch16": 51.69565,
+        "batch1024": 40.476
+      },
+      "lookup_ns": 106.0858
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.49216,
+      "build_ms": 591.9239619979635,
+      "ops": {
+        "mixed": 223.2975,
+        "hit": 213.47805,
+        "miss": 204.3554,
+        "batch16": 89.1655,
+        "batch1024": 56.4851,
+        "key": 183.76925
+      },
+      "lookup_ns": 223.2975
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 10.563887,
+      "build_ms": 133.24798299800023,
+      "ops": {
+        "mixed": 309.83905,
+        "hit": 333.56915,
+        "miss": 337.6032,
+        "batch16": 335.70215,
+        "batch1024": 327.72165,
+        "key": 264.1828,
+        "prefix_count": 408.9282,
+        "common_prefix": 2413.4458,
+        "longest_prefix": 667.8528
+      },
+      "lookup_ns": 309.83905
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 10.398695,
+      "build_ms": 131.4907209998637,
+      "ops": {
+        "mixed": 317.61015,
+        "hit": 338.0931,
+        "miss": 336.53825,
+        "batch16": 352.9501,
+        "batch1024": 340.11695,
+        "key": 288.31565,
+        "prefix_count": 435.93095,
+        "common_prefix": 2487.994,
+        "longest_prefix": 680.4904
+      },
+      "lookup_ns": 317.61015
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 10.290593,
+      "build_ms": 137.31114600159344,
+      "ops": {
+        "mixed": 355.05855,
+        "hit": 370.5942,
+        "miss": 366.1118,
+        "batch16": 402.19155,
+        "batch1024": 386.70745,
+        "key": 355.9407,
+        "prefix_count": 532.66915,
+        "common_prefix": 2852.064,
+        "longest_prefix": 768.2012
+      },
+      "lookup_ns": 355.05855
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 21.435828,
+      "build_ms": 1262.320694000664,
+      "ops": {
+        "mixed": 343.20125,
+        "hit": 372.0835,
+        "miss": 353.5071,
+        "batch16": 365.7361,
+        "batch1024": 360.2743,
+        "key": 679.8176,
+        "prefix_count": 1172.9726,
+        "common_prefix": 404.9288,
+        "longest_prefix": 385.394
+      },
+      "lookup_ns": 343.20125
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 14.138805,
+      "build_ms": 211.97881800253526,
+      "ops": {
+        "mixed": 136.31005,
+        "hit": 130.1841,
+        "miss": 117.9155,
+        "batch16": 62.58555,
+        "batch1024": 45.00705
+      },
+      "lookup_ns": 136.31005
+    },
+    {
+      "corpus": "opaque",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 13.138805,
+      "build_ms": 209.04305300064152,
+      "ops": {
+        "mixed": 123.5571,
+        "hit": 124.12265,
+        "miss": 121.9376
+      },
+      "lookup_ns": 123.5571
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2385714,
+      "build_ms": 498.83413100178586,
+      "ops": {
+        "mixed": 102.74655,
+        "hit": 103.44935,
+        "miss": 102.9364,
+        "batch16": 42.39915,
+        "batch1024": 34.99475
+      },
+      "lookup_ns": 102.74655
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2385718,
+      "build_ms": 515.6122910011618,
+      "ops": {
+        "mixed": 186.299,
+        "hit": 181.1859,
+        "miss": 170.09805,
+        "batch16": 60.6905,
+        "batch1024": 44.30425
+      },
+      "lookup_ns": 186.299
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.3249839,
+      "build_ms": 10652.446916999907,
+      "ops": {
+        "mixed": 288.47045,
+        "hit": 278.87085,
+        "miss": 272.06205,
+        "batch16": 99.1658,
+        "batch1024": 58.9237,
+        "key": 218.80255
+      },
+      "lookup_ns": 288.47045
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 10.215385,
+      "build_ms": 1624.7589489976235,
+      "ops": {
+        "mixed": 507.0551,
+        "hit": 529.3264,
+        "miss": 535.20995,
+        "batch16": 491.8134,
+        "batch1024": 477.54665,
+        "key": 434.10155,
+        "prefix_count": 615.42765,
+        "common_prefix": 2823.2198,
+        "longest_prefix": 870.6576
+      },
+      "lookup_ns": 507.0551
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 10.0462617,
+      "build_ms": 1611.7324869992444,
+      "ops": {
+        "mixed": 506.0622,
+        "hit": 522.1063,
+        "miss": 517.67105,
+        "batch16": 500.8454,
+        "batch1024": 484.8238,
+        "key": 426.50025,
+        "prefix_count": 595.9691,
+        "common_prefix": 2942.1652,
+        "longest_prefix": 898.6842
+      },
+      "lookup_ns": 506.0622
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 9.9534713,
+      "build_ms": 1600.136132001353,
+      "ops": {
+        "mixed": 526.52115,
+        "hit": 545.58595,
+        "miss": 535.67085,
+        "batch16": 548.94925,
+        "batch1024": 533.7397,
+        "key": 520.2694,
+        "prefix_count": 657.7802,
+        "common_prefix": 3583.5462,
+        "longest_prefix": 1025.9574
+      },
+      "lookup_ns": 526.52115
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 21.4688183,
+      "build_ms": 14945.824111997354,
+      "ops": {
+        "mixed": 549.16015,
+        "hit": 566.2683,
+        "miss": 545.16265,
+        "batch16": 544.84405,
+        "batch1024": 538.96605,
+        "key": 899.73025,
+        "prefix_count": 1462.8066,
+        "common_prefix": 611.2404,
+        "longest_prefix": 571.4696
+      },
+      "lookup_ns": 549.16015
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 14.2848343,
+      "build_ms": 2555.265489001613,
+      "ops": {
+        "mixed": 201.474,
+        "hit": 195.4051,
+        "miss": 184.98655,
+        "batch16": 70.43735,
+        "batch1024": 46.3726
+      },
+      "lookup_ns": 201.474
+    },
+    {
+      "corpus": "opaque",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 16.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 13.2848343,
+      "build_ms": 2542.3768059990834,
+      "ops": {
+        "mixed": 183.3164,
+        "hit": 183.9676,
+        "miss": 183.2658
+      },
+      "lookup_ns": 183.3164
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24257,
+      "build_ms": 9.480590000748634,
+      "ops": {
+        "mixed": 54.6592,
+        "hit": 54.20085,
+        "miss": 53.223,
+        "batch16": 41.8401,
+        "batch1024": 39.0208
+      },
+      "lookup_ns": 54.6592
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24261,
+      "build_ms": 9.728206001454964,
+      "ops": {
+        "mixed": 68.77775,
+        "hit": 62.63865,
+        "miss": 51.6846,
+        "batch16": 49.6403,
+        "batch1024": 42.6381
+      },
+      "lookup_ns": 68.77775
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 127.13517,
+      "build_ms": 104.43098699761322,
+      "ops": {
+        "mixed": 126.3719,
+        "hit": 176.8082,
+        "miss": 56.96805,
+        "batch16": 78.70885,
+        "batch1024": 62.14825,
+        "key": 148.6708
+      },
+      "lookup_ns": 126.3719
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 17.81045,
+      "build_ms": 181.87473400030285,
+      "ops": {
+        "mixed": 494.69835,
+        "hit": 496.63,
+        "miss": 499.25745,
+        "batch16": 499.031,
+        "batch1024": 484.8293,
+        "key": 508.613,
+        "prefix_count": 150.1496,
+        "common_prefix": 21801.8816,
+        "longest_prefix": 964.524
+      },
+      "lookup_ns": 494.69835
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 16.88333,
+      "build_ms": 178.9335889989161,
+      "ops": {
+        "mixed": 513.27125,
+        "hit": 515.66025,
+        "miss": 513.415,
+        "batch16": 522.13945,
+        "batch1024": 509.33435,
+        "key": 552.32815,
+        "prefix_count": 156.6598,
+        "common_prefix": 22226.7676,
+        "longest_prefix": 1010.1658
+      },
+      "lookup_ns": 513.27125
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 16.33495,
+      "build_ms": 273.75531300276634,
+      "ops": {
+        "mixed": 565.859,
+        "hit": 568.77405,
+        "miss": 563.86375,
+        "batch16": 590.0665,
+        "batch1024": 576.1103,
+        "key": 688.87415,
+        "prefix_count": 177.97785,
+        "common_prefix": 23374.3658,
+        "longest_prefix": 1115.9244
+      },
+      "lookup_ns": 565.859
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 28.03157,
+      "build_ms": 208.83073399818386,
+      "ops": {
+        "mixed": 587.2337,
+        "hit": 602.7388,
+        "miss": 581.13875,
+        "batch16": 593.8361,
+        "batch1024": 603.22875,
+        "key": 2806.1472,
+        "prefix_count": 903.29095,
+        "common_prefix": 674.333,
+        "longest_prefix": 584.9068
+      },
+      "lookup_ns": 587.2337
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 20.25102,
+      "build_ms": 199.5134809985757,
+      "ops": {
+        "mixed": 81.35385,
+        "hit": 73.0237,
+        "miss": 60.0538,
+        "batch16": 54.69925,
+        "batch1024": 44.8127
+      },
+      "lookup_ns": 81.35385
+    },
+    {
+      "corpus": "paths",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 124.86713,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 19.25102,
+      "build_ms": 200.62746400071774,
+      "ops": {
+        "mixed": 71.9241,
+        "hit": 68.86435,
+        "miss": 65.12785
+      },
+      "lookup_ns": 71.9241
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240608,
+      "build_ms": 59.675958000298124,
+      "ops": {
+        "mixed": 68.7396,
+        "hit": 67.18325,
+        "miss": 68.14755,
+        "batch16": 47.72815,
+        "batch1024": 44.2035
+      },
+      "lookup_ns": 68.7396
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240612,
+      "build_ms": 61.96588099919609,
+      "ops": {
+        "mixed": 119.59065,
+        "hit": 112.57745,
+        "miss": 102.29965,
+        "batch16": 62.277,
+        "batch1024": 50.69375
+      },
+      "lookup_ns": 119.59065
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 123.564136,
+      "build_ms": 938.1394099982572,
+      "ops": {
+        "mixed": 215.23435,
+        "hit": 271.9173,
+        "miss": 141.9862,
+        "batch16": 102.56565,
+        "batch1024": 72.5949,
+        "key": 238.24055
+      },
+      "lookup_ns": 215.23435
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 10.632134,
+      "build_ms": 463.5240969982988,
+      "ops": {
+        "mixed": 672.22635,
+        "hit": 682.7441,
+        "miss": 692.6377,
+        "batch16": 650.8036,
+        "batch1024": 641.9079,
+        "key": 613.3262,
+        "prefix_count": 168.7951,
+        "common_prefix": 23733.2938,
+        "longest_prefix": 1147.618
+      },
+      "lookup_ns": 672.22635
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 9.829039,
+      "build_ms": 457.5951189981424,
+      "ops": {
+        "mixed": 694.00375,
+        "hit": 690.7086,
+        "miss": 690.96655,
+        "batch16": 664.035,
+        "batch1024": 652.41915,
+        "key": 627.49985,
+        "prefix_count": 168.22305,
+        "common_prefix": 23991.8196,
+        "longest_prefix": 1149.9984
+      },
+      "lookup_ns": 694.00375
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 9.276826,
+      "build_ms": 510.9319080002024,
+      "ops": {
+        "mixed": 740.57675,
+        "hit": 739.92055,
+        "miss": 735.62395,
+        "batch16": 734.848,
+        "batch1024": 714.7798,
+        "key": 774.1844,
+        "prefix_count": 189.32915,
+        "common_prefix": 25368.7544,
+        "longest_prefix": 1272.5726
+      },
+      "lookup_ns": 740.57675
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 17.483375,
+      "build_ms": 1815.8407089977118,
+      "ops": {
+        "mixed": 849.8085,
+        "hit": 856.1118,
+        "miss": 842.71615,
+        "batch16": 854.32545,
+        "batch1024": 852.41735,
+        "key": 3052.61375,
+        "prefix_count": 975.58225,
+        "common_prefix": 968.4374,
+        "longest_prefix": 843.9916
+      },
+      "lookup_ns": 849.8085
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 13.569659,
+      "build_ms": 622.3888530003023,
+      "ops": {
+        "mixed": 150.4887,
+        "hit": 146.87595,
+        "miss": 133.5684,
+        "batch16": 73.97695,
+        "batch1024": 56.02875
+      },
+      "lookup_ns": 150.4887
+    },
+    {
+      "corpus": "paths",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 124.978312,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 12.569659,
+      "build_ms": 626.6635640022287,
+      "ops": {
+        "mixed": 138.15655,
+        "hit": 135.8492,
+        "miss": 134.4616
+      },
+      "lookup_ns": 138.15655
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24331,
+      "build_ms": 8.307105999847408,
+      "ops": {
+        "mixed": 47.29235,
+        "hit": 47.8584,
+        "miss": 45.65675,
+        "batch16": 35.3544,
+        "batch1024": 31.97505
+      },
+      "lookup_ns": 47.29235
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24335,
+      "build_ms": 8.094355998764513,
+      "ops": {
+        "mixed": 56.27625,
+        "hit": 52.85375,
+        "miss": 40.46155,
+        "batch16": 42.89305,
+        "batch1024": 35.2973
+      },
+      "lookup_ns": 56.27625
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 13.86888,
+      "build_ms": 45.63422900173464,
+      "ops": {
+        "mixed": 72.6655,
+        "hit": 77.65385,
+        "miss": 47.89445,
+        "batch16": 54.58555,
+        "batch1024": 43.2678,
+        "key": 79.2088
+      },
+      "lookup_ns": 72.6655
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 6.04791,
+      "build_ms": 29.625936000229558,
+      "ops": {
+        "mixed": 255.86565,
+        "hit": 252.6136,
+        "miss": 254.57575,
+        "batch16": 287.6158,
+        "batch1024": 271.5096,
+        "key": 323.39455,
+        "prefix_count": 335.11455,
+        "common_prefix": 2258.7794,
+        "longest_prefix": 639.1728
+      },
+      "lookup_ns": 255.86565
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.80543,
+      "build_ms": 30.446558001131052,
+      "ops": {
+        "mixed": 271.3753,
+        "hit": 268.67275,
+        "miss": 266.2176,
+        "batch16": 302.7172,
+        "batch1024": 286.7146,
+        "key": 348.38295,
+        "prefix_count": 352.1856,
+        "common_prefix": 2365.4838,
+        "longest_prefix": 662.16
+      },
+      "lookup_ns": 271.3753
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.65593,
+      "build_ms": 43.1834249975509,
+      "ops": {
+        "mixed": 327.99565,
+        "hit": 326.831,
+        "miss": 322.22185,
+        "batch16": 356.9606,
+        "batch1024": 342.10415,
+        "key": 432.1283,
+        "prefix_count": 433.4568,
+        "common_prefix": 2807.0092,
+        "longest_prefix": 777.0158
+      },
+      "lookup_ns": 327.99565
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 11.90614,
+      "build_ms": 61.19348900028854,
+      "ops": {
+        "mixed": 162.53135,
+        "hit": 166.8034,
+        "miss": 151.19455,
+        "batch16": 157.8656,
+        "batch1024": 154.76475,
+        "key": 553.40515,
+        "prefix_count": 766.521,
+        "common_prefix": 293.5516,
+        "longest_prefix": 229.469
+      },
+      "lookup_ns": 162.53135
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 9.17386,
+      "build_ms": 42.8240809997078,
+      "ops": {
+        "mixed": 62.4709,
+        "hit": 57.6819,
+        "miss": 45.7064,
+        "batch16": 44.9294,
+        "batch1024": 35.85835
+      },
+      "lookup_ns": 62.4709
+    },
+    {
+      "corpus": "pypi",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 13.34169,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 8.17386,
+      "build_ms": 41.7823630014027,
+      "ops": {
+        "mixed": 59.17115,
+        "hit": 54.73385,
+        "miss": 51.7828
+      },
+      "lookup_ns": 59.17115
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24395,
+      "build_ms": 9.102780000830535,
+      "ops": {
+        "mixed": 54.0601,
+        "hit": 49.79255,
+        "miss": 49.48145,
+        "batch16": 45.52955,
+        "batch1024": 39.2793
+      },
+      "lookup_ns": 54.0601
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24399,
+      "build_ms": 8.319348999066278,
+      "ops": {
+        "mixed": 59.23325,
+        "hit": 54.39115,
+        "miss": 45.776,
+        "batch16": 55.01735,
+        "batch1024": 42.9607
+      },
+      "lookup_ns": 59.23325
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 23.25984,
+      "build_ms": 53.9770130017132,
+      "ops": {
+        "mixed": 90.0582,
+        "hit": 98.49605,
+        "miss": 52.3594,
+        "batch16": 71.56745,
+        "batch1024": 53.64275,
+        "key": 103.0666
+      },
+      "lookup_ns": 90.0582
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 10.07378,
+      "build_ms": 104.00806200050283,
+      "ops": {
+        "mixed": 281.10455,
+        "hit": 273.3866,
+        "miss": 275.4129,
+        "batch16": 310.65315,
+        "batch1024": 295.64135,
+        "key": 389.72365,
+        "prefix_count": 349.06125,
+        "common_prefix": 3316.5606,
+        "longest_prefix": 704.8162
+      },
+      "lookup_ns": 281.10455
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 9.83595,
+      "build_ms": 102.69520499787177,
+      "ops": {
+        "mixed": 295.0112,
+        "hit": 289.81745,
+        "miss": 286.8479,
+        "batch16": 329.0752,
+        "batch1024": 311.5448,
+        "key": 412.4959,
+        "prefix_count": 370.216,
+        "common_prefix": 3536.614,
+        "longest_prefix": 740.5854
+      },
+      "lookup_ns": 295.0112
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 9.69718,
+      "build_ms": 161.96001100252033,
+      "ops": {
+        "mixed": 354.518,
+        "hit": 349.90735,
+        "miss": 344.2913,
+        "batch16": 383.33765,
+        "batch1024": 368.19365,
+        "key": 508.1466,
+        "prefix_count": 457.80505,
+        "common_prefix": 4250.1144,
+        "longest_prefix": 864.9428
+      },
+      "lookup_ns": 354.518
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 20.32207,
+      "build_ms": 104.38596200037864,
+      "ops": {
+        "mixed": 214.4103,
+        "hit": 211.44375,
+        "miss": 200.0012,
+        "batch16": 209.9434,
+        "batch1024": 211.314,
+        "key": 749.02465,
+        "prefix_count": 1178.6472,
+        "common_prefix": 345.9658,
+        "longest_prefix": 278.5712
+      },
+      "lookup_ns": 214.4103
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 13.20502,
+      "build_ms": 116.44588800118072,
+      "ops": {
+        "mixed": 69.00015,
+        "hit": 59.615,
+        "miss": 51.81285,
+        "batch16": 57.3232,
+        "batch1024": 43.20915
+      },
+      "lookup_ns": 69.00015
+    },
+    {
+      "corpus": "titles-en",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 21.0062,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 12.20502,
+      "build_ms": 116.231254000013,
+      "ops": {
+        "mixed": 70.40675,
+        "hit": 56.7937,
+        "miss": 58.05105
+      },
+      "lookup_ns": 70.40675
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240753,
+      "build_ms": 49.71945400029654,
+      "ops": {
+        "mixed": 66.35415,
+        "hit": 61.69135,
+        "miss": 62.61665,
+        "batch16": 47.57635,
+        "batch1024": 42.56945
+      },
+      "lookup_ns": 66.35415
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240757,
+      "build_ms": 46.9418360007694,
+      "ops": {
+        "mixed": 106.5176,
+        "hit": 104.79485,
+        "miss": 96.65355,
+        "batch16": 61.7996,
+        "batch1024": 49.58865
+      },
+      "lookup_ns": 106.5176
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 22.850414,
+      "build_ms": 636.4448500025901,
+      "ops": {
+        "mixed": 183.54985,
+        "hit": 224.65155,
+        "miss": 129.70465,
+        "batch16": 94.73845,
+        "batch1024": 63.64255,
+        "key": 203.94515
+      },
+      "lookup_ns": 183.54985
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 7.569299,
+      "build_ms": 341.60066900221864,
+      "ops": {
+        "mixed": 400.3957,
+        "hit": 417.84295,
+        "miss": 424.28405,
+        "batch16": 424.42535,
+        "batch1024": 413.8254,
+        "key": 482.23695,
+        "prefix_count": 396.4543,
+        "common_prefix": 3626.11,
+        "longest_prefix": 865.616
+      },
+      "lookup_ns": 400.3957
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 7.325045,
+      "build_ms": 345.5159640034253,
+      "ops": {
+        "mixed": 416.55855,
+        "hit": 427.5457,
+        "miss": 429.3125,
+        "batch16": 442.21875,
+        "batch1024": 428.01005,
+        "key": 475.9757,
+        "prefix_count": 410.8398,
+        "common_prefix": 3807.9416,
+        "longest_prefix": 902.4032
+      },
+      "lookup_ns": 416.55855
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 7.17756,
+      "build_ms": 375.00014399847714,
+      "ops": {
+        "mixed": 467.67155,
+        "hit": 477.8702,
+        "miss": 465.5411,
+        "batch16": 508.90655,
+        "batch1024": 489.79465,
+        "key": 594.587,
+        "prefix_count": 480.36995,
+        "common_prefix": 4444.4616,
+        "longest_prefix": 1009.0838
+      },
+      "lookup_ns": 467.67155
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 17.282957,
+      "build_ms": 1197.7280190003512,
+      "ops": {
+        "mixed": 453.6733,
+        "hit": 474.62315,
+        "miss": 460.159,
+        "batch16": 475.83495,
+        "batch1024": 467.0003,
+        "key": 959.5987,
+        "prefix_count": 1093.9381,
+        "common_prefix": 572.676,
+        "longest_prefix": 511.9078
+      },
+      "lookup_ns": 453.6733
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 11.06581,
+      "build_ms": 461.99391200207174,
+      "ops": {
+        "mixed": 130.9565,
+        "hit": 130.2061,
+        "miss": 121.1676,
+        "batch16": 72.36195,
+        "batch1024": 52.976
+      },
+      "lookup_ns": 130.9565
+    },
+    {
+      "corpus": "titles-en",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 20.984647,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 10.06581,
+      "build_ms": 443.9382119999209,
+      "ops": {
+        "mixed": 130.4881,
+        "hit": 123.6453,
+        "miss": 126.23615
+      },
+      "lookup_ns": 130.4881
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2383893,
+      "build_ms": 602.0654839994677,
+      "ops": {
+        "mixed": 119.57165,
+        "hit": 114.77465,
+        "miss": 116.16230680738258,
+        "batch16": 53.86215,
+        "batch1024": 43.68105
+      },
+      "lookup_ns": 119.57165
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2383897,
+      "build_ms": 570.6852419971256,
+      "ops": {
+        "mixed": 199.0885,
+        "hit": 198.8836,
+        "miss": 188.77157004951732,
+        "batch16": 72.6064,
+        "batch1024": 52.29875
+      },
+      "lookup_ns": 199.0885
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 21.590849,
+      "build_ms": 9191.986272002396,
+      "ops": {
+        "mixed": 260.07205,
+        "hit": 303.0383,
+        "miss": 200.6815885559946,
+        "batch16": 105.53025,
+        "batch1024": 66.69275,
+        "key": 241.21315
+      },
+      "lookup_ns": 260.07205
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 5.7975033,
+      "build_ms": 3039.884093999717,
+      "ops": {
+        "mixed": 691.6063,
+        "hit": 723.55075,
+        "miss": 730.0339618866603,
+        "batch16": 675.2776,
+        "batch1024": 656.61705,
+        "key": 668.1858,
+        "prefix_count": 539.82265,
+        "common_prefix": 4634.4986,
+        "longest_prefix": 1161.997
+      },
+      "lookup_ns": 691.6063
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.5337972,
+      "build_ms": 2869.191456997214,
+      "ops": {
+        "mixed": 693.6135,
+        "hit": 719.3028,
+        "miss": 720.69869454309,
+        "batch16": 700.54705,
+        "batch1024": 678.7,
+        "key": 676.8966,
+        "prefix_count": 504.7382,
+        "common_prefix": 4766.4684,
+        "longest_prefix": 1184.914
+      },
+      "lookup_ns": 693.6135
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.3664404,
+      "build_ms": 2848.2469610025873,
+      "ops": {
+        "mixed": 725.97085,
+        "hit": 751.4983,
+        "miss": 747.6807882758966,
+        "batch16": 756.52475,
+        "batch1024": 732.51515,
+        "key": 772.2999,
+        "prefix_count": 541.8244,
+        "common_prefix": 5395.963,
+        "longest_prefix": 1305.9754
+      },
+      "lookup_ns": 725.97085
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 13.2492128,
+      "build_ms": 12626.054591000866,
+      "ops": {
+        "mixed": 744.86335,
+        "hit": 763.9246,
+        "miss": 745.8026309208223,
+        "batch16": 762.28355,
+        "batch1024": 746.04255,
+        "key": 1333.59835,
+        "prefix_count": 805.106,
+        "common_prefix": 996.2956,
+        "longest_prefix": 788.5052
+      },
+      "lookup_ns": 744.86335
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 9.7721877,
+      "build_ms": 3987.1308139991015,
+      "ops": {
+        "mixed": 202.1568,
+        "hit": 201.20195,
+        "miss": 191.94062922022707,
+        "batch16": 81.31875,
+        "batch1024": 54.00895
+      },
+      "lookup_ns": 202.1568
+    },
+    {
+      "corpus": "titles-en",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 20.9718589,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 8.7721877,
+      "build_ms": 4042.7039040005184,
+      "ops": {
+        "mixed": 205.0587,
+        "hit": 198.52645,
+        "miss": 199.41029360276096
+      },
+      "lookup_ns": 205.0587
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24449,
+      "build_ms": 13.97070600069128,
+      "ops": {
+        "mixed": 53.0096,
+        "hit": 52.6514,
+        "miss": 50.2143,
+        "batch16": 39.72615,
+        "batch1024": 36.20405
+      },
+      "lookup_ns": 53.0096
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24453,
+      "build_ms": 9.036887000547722,
+      "ops": {
+        "mixed": 65.50355,
+        "hit": 59.68065,
+        "miss": 47.4321,
+        "batch16": 50.80045,
+        "batch1024": 40.2857
+      },
+      "lookup_ns": 65.50355
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 36.24823,
+      "build_ms": 73.18490699981339,
+      "ops": {
+        "mixed": 113.10295,
+        "hit": 141.1447,
+        "miss": 54.94225,
+        "batch16": 71.07505,
+        "batch1024": 53.492,
+        "key": 228.9847
+      },
+      "lookup_ns": 113.10295
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 9.94713,
+      "build_ms": 98.42797900273581,
+      "ops": {
+        "mixed": 336.5723,
+        "hit": 334.52845,
+        "miss": 337.99695,
+        "batch16": 389.2698,
+        "batch1024": 353.74305,
+        "key": 516.071,
+        "prefix_count": 367.8646,
+        "common_prefix": 3546.2762,
+        "longest_prefix": 1030.3296
+      },
+      "lookup_ns": 336.5723
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 9.69374,
+      "build_ms": 99.23195900046267,
+      "ops": {
+        "mixed": 355.33655,
+        "hit": 354.43485,
+        "miss": 353.20455,
+        "batch16": 408.004,
+        "batch1024": 375.9603,
+        "key": 542.6835,
+        "prefix_count": 392.97075,
+        "common_prefix": 3751.688,
+        "longest_prefix": 1062.983
+      },
+      "lookup_ns": 355.33655
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 9.54993,
+      "build_ms": 162.83651800040388,
+      "ops": {
+        "mixed": 411.32425,
+        "hit": 412.24895,
+        "miss": 406.421,
+        "batch16": 463.1721,
+        "batch1024": 433.73635,
+        "key": 656.09855,
+        "prefix_count": 473.26605,
+        "common_prefix": 4385.4166,
+        "longest_prefix": 1187.7174
+      },
+      "lookup_ns": 411.32425
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 41.65009,
+      "build_ms": 167.3343879992899,
+      "ops": {
+        "mixed": 320.5367,
+        "hit": 333.4785,
+        "miss": 304.1624,
+        "batch16": 323.7607,
+        "batch1024": 326.79495,
+        "key": 1223.3532,
+        "prefix_count": 1760.3921,
+        "common_prefix": 458.5154,
+        "longest_prefix": 412.1904
+      },
+      "lookup_ns": 320.5367
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 13.06335,
+      "build_ms": 118.68656699880376,
+      "ops": {
+        "mixed": 75.5159,
+        "hit": 64.90145,
+        "miss": 51.76075,
+        "batch16": 54.69925,
+        "batch1024": 40.89535
+      },
+      "lookup_ns": 75.5159
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 35.87743,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 12.06335,
+      "build_ms": 119.99090700192028,
+      "ops": {
+        "mixed": 69.5111,
+        "hit": 63.20025,
+        "miss": 60.75165
+      },
+      "lookup_ns": 69.5111
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240365,
+      "build_ms": 113.90029600079288,
+      "ops": {
+        "mixed": 65.492,
+        "hit": 64.24515,
+        "miss": 62.48635,
+        "batch16": 43.90495,
+        "batch1024": 39.8258
+      },
+      "lookup_ns": 65.492
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240369,
+      "build_ms": 53.02539400145179,
+      "ops": {
+        "mixed": 111.5059,
+        "hit": 107.04105,
+        "miss": 94.97135,
+        "batch16": 59.0559,
+        "batch1024": 46.08755
+      },
+      "lookup_ns": 111.5059
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 33.807442,
+      "build_ms": 725.0039690006815,
+      "ops": {
+        "mixed": 194.25435,
+        "hit": 233.3257,
+        "miss": 129.52075,
+        "batch16": 92.4842,
+        "batch1024": 61.31065,
+        "key": 326.7056
+      },
+      "lookup_ns": 194.25435
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 7.080107,
+      "build_ms": 306.28327099839225,
+      "ops": {
+        "mixed": 450.77685,
+        "hit": 468.9257,
+        "miss": 476.11295,
+        "batch16": 492.8589,
+        "batch1024": 459.57685,
+        "key": 622.94495,
+        "prefix_count": 417.2241,
+        "common_prefix": 3965.181,
+        "longest_prefix": 1187.328
+      },
+      "lookup_ns": 450.77685
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 6.841283,
+      "build_ms": 303.8632850002614,
+      "ops": {
+        "mixed": 466.7972,
+        "hit": 478.0556,
+        "miss": 477.95265,
+        "batch16": 511.2369,
+        "batch1024": 477.68665,
+        "key": 610.68395,
+        "prefix_count": 427.3531,
+        "common_prefix": 4133.3168,
+        "longest_prefix": 1230.8396
+      },
+      "lookup_ns": 466.7972
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 6.673189,
+      "build_ms": 322.74372300162213,
+      "ops": {
+        "mixed": 516.01415,
+        "hit": 524.05125,
+        "miss": 521.0526,
+        "batch16": 573.15145,
+        "batch1024": 534.0483,
+        "key": 728.6495,
+        "prefix_count": 500.26155,
+        "common_prefix": 4744.0338,
+        "longest_prefix": 1337.0632
+      },
+      "lookup_ns": 516.01415
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 31.74619,
+      "build_ms": 1683.7988420011243,
+      "ops": {
+        "mixed": 618.6519,
+        "hit": 648.0391,
+        "miss": 626.5372,
+        "batch16": 641.95115,
+        "batch1024": 629.34045,
+        "key": 1512.1029,
+        "prefix_count": 1507.5353,
+        "common_prefix": 832.149,
+        "longest_prefix": 694.5064
+      },
+      "lookup_ns": 618.6519
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 10.58166,
+      "build_ms": 465.23260600224603,
+      "ops": {
+        "mixed": 139.8226,
+        "hit": 138.2792,
+        "miss": 122.94945,
+        "batch16": 69.53005,
+        "batch1024": 50.2915
+      },
+      "lookup_ns": 139.8226
+    },
+    {
+      "corpus": "titles-ru",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 35.819661,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 9.58166,
+      "build_ms": 472.71161599928746,
+      "ops": {
+        "mixed": 129.1866,
+        "hit": 130.2346,
+        "miss": 122.96145
+      },
+      "lookup_ns": 129.1866
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2432,
+      "build_ms": 10.827485002664616,
+      "ops": {
+        "mixed": 50.7824,
+        "hit": 50.8084,
+        "miss": 48.4024,
+        "batch16": 38.52085,
+        "batch1024": 35.28825
+      },
+      "lookup_ns": 50.7824
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24324,
+      "build_ms": 8.30099000086193,
+      "ops": {
+        "mixed": 61.42135,
+        "hit": 55.75925,
+        "miss": 44.13085,
+        "batch16": 48.73705,
+        "batch1024": 38.4472
+      },
+      "lookup_ns": 61.42135
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 18.87923,
+      "build_ms": 51.916194999648724,
+      "ops": {
+        "mixed": 91.23235,
+        "hit": 97.1144,
+        "miss": 51.92305,
+        "batch16": 63.58595,
+        "batch1024": 47.9075,
+        "key": 137.2207
+      },
+      "lookup_ns": 91.23235
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 8.30127,
+      "build_ms": 33.858760998555226,
+      "ops": {
+        "mixed": 294.2802,
+        "hit": 292.1968,
+        "miss": 292.4102,
+        "batch16": 345.69325,
+        "batch1024": 312.36565,
+        "key": 410.0917,
+        "prefix_count": 437.1876,
+        "common_prefix": 1772.2426,
+        "longest_prefix": 899.7778
+      },
+      "lookup_ns": 294.2802
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 8.10109,
+      "build_ms": 34.85796799941454,
+      "ops": {
+        "mixed": 314.8523,
+        "hit": 314.0097,
+        "miss": 309.50225,
+        "batch16": 368.2882,
+        "batch1024": 334.2227,
+        "key": 439.9433,
+        "prefix_count": 463.7064,
+        "common_prefix": 1887.0902,
+        "longest_prefix": 952.625
+      },
+      "lookup_ns": 314.8523
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 7.9515,
+      "build_ms": 52.97255799814593,
+      "ops": {
+        "mixed": 369.60065,
+        "hit": 369.1999,
+        "miss": 363.408,
+        "batch16": 423.68775,
+        "batch1024": 390.47785,
+        "key": 514.9166,
+        "prefix_count": 555.8314,
+        "common_prefix": 2232.8416,
+        "longest_prefix": 1079.8462
+      },
+      "lookup_ns": 369.60065
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 22.08749,
+      "build_ms": 83.79522699760855,
+      "ops": {
+        "mixed": 181.90565,
+        "hit": 188.5917,
+        "miss": 166.1631,
+        "batch16": 177.27945,
+        "batch1024": 176.33365,
+        "key": 691.34445,
+        "prefix_count": 1224.0574,
+        "common_prefix": 315.7288,
+        "longest_prefix": 268.909
+      },
+      "lookup_ns": 181.90565
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 11.46941,
+      "build_ms": 50.159806000010576,
+      "ops": {
+        "mixed": 70.89065,
+        "hit": 61.33615,
+        "miss": 49.6943,
+        "batch16": 49.65975,
+        "batch1024": 38.9381
+      },
+      "lookup_ns": 70.89065
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 16.85445,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 10.46941,
+      "build_ms": 48.85128800015082,
+      "ops": {
+        "mixed": 66.0305,
+        "hit": 58.5239,
+        "miss": 55.82435
+      },
+      "lookup_ns": 66.0305
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240742,
+      "build_ms": 80.7916359990486,
+      "ops": {
+        "mixed": 63.367,
+        "hit": 63.1541,
+        "miss": 61.7109,
+        "batch16": 41.8396,
+        "batch1024": 38.4522
+      },
+      "lookup_ns": 63.367
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240746,
+      "build_ms": 49.341207999532344,
+      "ops": {
+        "mixed": 108.77475,
+        "hit": 105.3328,
+        "miss": 90.58715,
+        "batch16": 56.78815,
+        "batch1024": 44.70895
+      },
+      "lookup_ns": 108.77475
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 18.23675,
+      "build_ms": 605.0960300017323,
+      "ops": {
+        "mixed": 186.33795,
+        "hit": 222.042,
+        "miss": 130.5587,
+        "batch16": 89.69245,
+        "batch1024": 58.0776,
+        "key": 261.80115
+      },
+      "lookup_ns": 186.33795
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 6.0823,
+      "build_ms": 229.85269000128028,
+      "ops": {
+        "mixed": 397.1744,
+        "hit": 415.02595,
+        "miss": 420.6706,
+        "batch16": 446.20555,
+        "batch1024": 413.63135,
+        "key": 519.62745,
+        "prefix_count": 527.84135,
+        "common_prefix": 2100.8638,
+        "longest_prefix": 1049.3808
+      },
+      "lookup_ns": 397.1744
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.83091,
+      "build_ms": 226.93155299930368,
+      "ops": {
+        "mixed": 412.46515,
+        "hit": 434.16945,
+        "miss": 431.8681,
+        "batch16": 470.6399,
+        "batch1024": 439.6412,
+        "key": 522.44625,
+        "prefix_count": 556.9796,
+        "common_prefix": 2228.782,
+        "longest_prefix": 1092.3494
+      },
+      "lookup_ns": 412.46515
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.66678,
+      "build_ms": 246.14198299968848,
+      "ops": {
+        "mixed": 476.5335,
+        "hit": 494.99315,
+        "miss": 494.3785,
+        "batch16": 546.2469,
+        "batch1024": 508.03165,
+        "key": 609.15955,
+        "prefix_count": 658.24475,
+        "common_prefix": 2564.855,
+        "longest_prefix": 1248.1202
+      },
+      "lookup_ns": 476.5335
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 17.523388,
+      "build_ms": 993.9590890026011,
+      "ops": {
+        "mixed": 385.78455,
+        "hit": 434.8432,
+        "miss": 385.78305,
+        "batch16": 412.7557,
+        "batch1024": 406.11325,
+        "key": 898.84715,
+        "prefix_count": 1313.4303,
+        "common_prefix": 558.7454,
+        "longest_prefix": 479.24
+      },
+      "lookup_ns": 385.78455
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 9.571664,
+      "build_ms": 345.7879800007504,
+      "ops": {
+        "mixed": 138.02225,
+        "hit": 133.51325,
+        "miss": 121.5773,
+        "batch16": 68.163,
+        "batch1024": 48.92635
+      },
+      "lookup_ns": 138.02225
+    },
+    {
+      "corpus": "titles-zh",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 16.871822,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 8.571664,
+      "build_ms": 346.9962189992657,
+      "ops": {
+        "mixed": 126.2792,
+        "hit": 126.97445,
+        "miss": 122.5742
+      },
+      "lookup_ns": 126.2792
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24279,
+      "build_ms": 8.105993998469785,
+      "ops": {
+        "mixed": 48.27865,
+        "hit": 48.35985,
+        "miss": 46.0981,
+        "batch16": 34.2523,
+        "batch1024": 32.04015
+      },
+      "lookup_ns": 48.27865
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24283,
+      "build_ms": 7.982993000041461,
+      "ops": {
+        "mixed": 59.56985,
+        "hit": 53.5531,
+        "miss": 40.3999,
+        "batch16": 42.0069,
+        "batch1024": 35.43455
+      },
+      "lookup_ns": 59.56985
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 54.62715,
+      "build_ms": 64.93877200045972,
+      "ops": {
+        "mixed": 104.10305,
+        "hit": 135.3337,
+        "miss": 47.0739,
+        "batch16": 61.9914,
+        "batch1024": 47.896,
+        "key": 120.07855
+      },
+      "lookup_ns": 104.10305
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 10.3794,
+      "build_ms": 110.01484000007622,
+      "ops": {
+        "mixed": 287.6437,
+        "hit": 282.70695,
+        "miss": 286.9895,
+        "batch16": 315.43445,
+        "batch1024": 299.09675,
+        "key": 378.86605,
+        "prefix_count": 123.72085,
+        "common_prefix": 3519.574,
+        "longest_prefix": 607.9318
+      },
+      "lookup_ns": 287.6437
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 10.03611,
+      "build_ms": 109.41143800300779,
+      "ops": {
+        "mixed": 306.5392,
+        "hit": 304.8866,
+        "miss": 302.56225,
+        "batch16": 336.21895,
+        "batch1024": 322.36395,
+        "key": 406.27905,
+        "prefix_count": 144.2945,
+        "common_prefix": 3705.7218,
+        "longest_prefix": 645.24
+      },
+      "lookup_ns": 306.5392
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 9.77615,
+      "build_ms": 173.5445369995432,
+      "ops": {
+        "mixed": 358.0865,
+        "hit": 357.3346,
+        "miss": 352.751,
+        "batch16": 386.5785,
+        "batch1024": 372.7471,
+        "key": 501.5099,
+        "prefix_count": 176.94585,
+        "common_prefix": 4399.9516,
+        "longest_prefix": 751.8542
+      },
+      "lookup_ns": 358.0865
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 19.67873,
+      "build_ms": 126.65373999698204,
+      "ops": {
+        "mixed": 281.36445,
+        "hit": 283.61315,
+        "miss": 266.6568,
+        "batch16": 274.1559,
+        "batch1024": 275.24995,
+        "key": 1320.1419,
+        "prefix_count": 1727.1723,
+        "common_prefix": 367.6304,
+        "longest_prefix": 320.9968
+      },
+      "lookup_ns": 281.36445
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 13.40402,
+      "build_ms": 124.73908500032849,
+      "ops": {
+        "mixed": 68.5928,
+        "hit": 57.2961,
+        "miss": 45.38925,
+        "batch16": 44.58025,
+        "batch1024": 36.67735
+      },
+      "lookup_ns": 68.5928
+    },
+    {
+      "corpus": "urls",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 52.35889,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 12.40402,
+      "build_ms": 124.56477699743118,
+      "ops": {
+        "mixed": 64.92945,
+        "hit": 56.46205,
+        "miss": 52.8788
+      },
+      "lookup_ns": 64.92945
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.241062,
+      "build_ms": 43.47734499970102,
+      "ops": {
+        "mixed": 60.5963,
+        "hit": 60.3879,
+        "miss": 58.62815,
+        "batch16": 39.49615,
+        "batch1024": 35.74815
+      },
+      "lookup_ns": 60.5963
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.241066,
+      "build_ms": 44.069466999644646,
+      "ops": {
+        "mixed": 106.7595,
+        "hit": 102.8767,
+        "miss": 89.7841,
+        "batch16": 54.038,
+        "batch1024": 41.8461
+      },
+      "lookup_ns": 106.7595
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 54.626078,
+      "build_ms": 566.6905399993993,
+      "ops": {
+        "mixed": 185.81395,
+        "hit": 236.15955,
+        "miss": 115.83805,
+        "batch16": 82.48895,
+        "batch1024": 59.1346,
+        "key": 195.2417
+      },
+      "lookup_ns": 185.81395
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 7.866384,
+      "build_ms": 383.4885159994883,
+      "ops": {
+        "mixed": 414.6758,
+        "hit": 433.22815,
+        "miss": 441.21915,
+        "batch16": 435.4654,
+        "batch1024": 426.45795,
+        "key": 485.322,
+        "prefix_count": 128.8144,
+        "common_prefix": 3922.8194,
+        "longest_prefix": 745.3378
+      },
+      "lookup_ns": 414.6758
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 7.487572,
+      "build_ms": 379.73097799840616,
+      "ops": {
+        "mixed": 426.46845,
+        "hit": 441.3875,
+        "miss": 441.29025,
+        "batch16": 452.00845,
+        "batch1024": 438.4675,
+        "key": 475.18995,
+        "prefix_count": 134.15945,
+        "common_prefix": 4000.9282,
+        "longest_prefix": 771.024
+      },
+      "lookup_ns": 426.46845
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 7.24273,
+      "build_ms": 413.7997739999264,
+      "ops": {
+        "mixed": 477.51785,
+        "hit": 490.907,
+        "miss": 484.9378,
+        "batch16": 517.30855,
+        "batch1024": 503.3388,
+        "key": 590.0512,
+        "prefix_count": 170.3695,
+        "common_prefix": 4726.006,
+        "longest_prefix": 861.8988
+      },
+      "lookup_ns": 477.51785
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 16.881383,
+      "build_ms": 1378.3043250004994,
+      "ops": {
+        "mixed": 507.17455,
+        "hit": 542.0946,
+        "miss": 519.75015,
+        "batch16": 541.6207,
+        "batch1024": 534.33455,
+        "key": 1549.78515,
+        "prefix_count": 1740.12565,
+        "common_prefix": 565.6504,
+        "longest_prefix": 543.4106
+      },
+      "lookup_ns": 507.17455
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 11.228646,
+      "build_ms": 490.4503920006391,
+      "ops": {
+        "mixed": 137.0088,
+        "hit": 135.2615,
+        "miss": 120.2453,
+        "batch16": 65.94685,
+        "batch1024": 46.81895
+      },
+      "lookup_ns": 137.0088
+    },
+    {
+      "corpus": "urls",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 52.361181,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 10.228646,
+      "build_ms": 495.5662510001275,
+      "ops": {
+        "mixed": 123.12675,
+        "hit": 126.5056,
+        "miss": 118.1354
+      },
+      "lookup_ns": 123.12675
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2383542,
+      "build_ms": 537.1316650016524,
+      "ops": {
+        "mixed": 104.2017,
+        "hit": 103.8816,
+        "miss": 103.16625,
+        "batch16": 46.12865,
+        "batch1024": 37.005
+      },
+      "lookup_ns": 104.2017
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2383546,
+      "build_ms": 541.2569029977021,
+      "ops": {
+        "mixed": 185.2429,
+        "hit": 176.76595,
+        "miss": 165.9116,
+        "batch16": 63.6465,
+        "batch1024": 45.2705
+      },
+      "lookup_ns": 185.2429
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 52.8893155,
+      "build_ms": 9202.002792000712,
+      "ops": {
+        "mixed": 254.9413,
+        "hit": 297.4757,
+        "miss": 191.22415,
+        "batch16": 100.50025,
+        "batch1024": 63.08395,
+        "key": 235.599
+      },
+      "lookup_ns": 254.9413
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 6.0685642,
+      "build_ms": 3204.425780000747,
+      "ops": {
+        "mixed": 692.75555,
+        "hit": 719.6025,
+        "miss": 732.5864,
+        "batch16": 690.9472,
+        "batch1024": 673.8145,
+        "key": 667.08985,
+        "prefix_count": 154.414,
+        "common_prefix": 4864.9108,
+        "longest_prefix": 1041.1334
+      },
+      "lookup_ns": 692.75555
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 5.6763317,
+      "build_ms": 3159.1265429997293,
+      "ops": {
+        "mixed": 708.85285,
+        "hit": 718.3797,
+        "miss": 720.14,
+        "batch16": 702.6226,
+        "batch1024": 684.49805,
+        "key": 677.11915,
+        "prefix_count": 144.86755,
+        "common_prefix": 4998.3214,
+        "longest_prefix": 1052.0738
+      },
+      "lookup_ns": 708.85285
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 5.4220457,
+      "build_ms": 3130.082865998702,
+      "ops": {
+        "mixed": 745.69805,
+        "hit": 758.03365,
+        "miss": 753.3579,
+        "batch16": 761.28375,
+        "batch1024": 739.10415,
+        "key": 768.3881,
+        "prefix_count": 181.79795,
+        "common_prefix": 5659.3648,
+        "longest_prefix": 1152.6008
+      },
+      "lookup_ns": 745.69805
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 13.0989955,
+      "build_ms": 14377.431241999147,
+      "ops": {
+        "mixed": 807.5632,
+        "hit": 833.09315,
+        "miss": 809.9998,
+        "batch16": 832.13885,
+        "batch1024": 815.09285,
+        "key": 1938.40655,
+        "prefix_count": 988.73145,
+        "common_prefix": 963.255,
+        "longest_prefix": 805.4728
+      },
+      "lookup_ns": 807.5632
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 9.9146871,
+      "build_ms": 4417.92580299807,
+      "ops": {
+        "mixed": 196.0858,
+        "hit": 188.6989,
+        "miss": 177.6456,
+        "batch16": 74.56105,
+        "batch1024": 47.99565
+      },
+      "lookup_ns": 196.0858
+    },
+    {
+      "corpus": "urls",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 52.3677969,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 8.9146871,
+      "build_ms": 4434.050267002021,
+      "ops": {
+        "mixed": 187.89585,
+        "hit": 187.2722,
+        "miss": 187.9455
+      },
+      "lookup_ns": 187.89585
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.24257,
+      "build_ms": 7.445423001627205,
+      "ops": {
+        "mixed": 48.0207,
+        "hit": 48.5677,
+        "miss": 45.86265,
+        "batch16": 35.26825,
+        "batch1024": 32.2245
+      },
+      "lookup_ns": 48.0207
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24261,
+      "build_ms": 7.731019999482669,
+      "ops": {
+        "mixed": 59.00735,
+        "hit": 53.1949,
+        "miss": 40.5326,
+        "batch16": 43.16355,
+        "batch1024": 34.78985
+      },
+      "lookup_ns": 59.00735
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 35.4301,
+      "build_ms": 48.045734998595435,
+      "ops": {
+        "mixed": 134.981,
+        "hit": 127.06865,
+        "miss": 103.62515,
+        "batch16": 68.99055,
+        "batch1024": 49.507,
+        "key": 103.0796
+      },
+      "lookup_ns": 134.981
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 18.70444,
+      "build_ms": 49.107310002000304,
+      "ops": {
+        "mixed": 254.28505,
+        "hit": 255.9993,
+        "miss": 256.4752,
+        "batch16": 289.6645,
+        "batch1024": 278.93235,
+        "key": 301.4111,
+        "prefix_count": 313.61,
+        "common_prefix": 4314.6776,
+        "longest_prefix": 605.6734
+      },
+      "lookup_ns": 254.28505
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 18.49106,
+      "build_ms": 48.469831999682356,
+      "ops": {
+        "mixed": 281.3564,
+        "hit": 281.80275,
+        "miss": 278.86375,
+        "batch16": 313.59495,
+        "batch1024": 301.61795,
+        "key": 329.2303,
+        "prefix_count": 344.8517,
+        "common_prefix": 4840.5272,
+        "longest_prefix": 652.7138
+      },
+      "lookup_ns": 281.3564
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 18.34787,
+      "build_ms": 65.55157299953862,
+      "ops": {
+        "mixed": 315.6308,
+        "hit": 314.87435,
+        "miss": 310.81575,
+        "batch16": 342.1506,
+        "batch1024": 329.583,
+        "key": 396.43005,
+        "prefix_count": 387.39255,
+        "common_prefix": 5536.2378,
+        "longest_prefix": 734.317
+      },
+      "lookup_ns": 315.6308
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 37.94324,
+      "build_ms": 220.4462629997579,
+      "ops": {
+        "mixed": 233.2791,
+        "hit": 240.28175,
+        "miss": 224.5407,
+        "batch16": 240.97055,
+        "batch1024": 240.21965,
+        "key": 964.48495,
+        "prefix_count": 2032.6055,
+        "common_prefix": 309.9882,
+        "longest_prefix": 268.1016
+      },
+      "lookup_ns": 233.2791
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 21.85875,
+      "build_ms": 62.52303499786649,
+      "ops": {
+        "mixed": 71.84895,
+        "hit": 61.92075,
+        "miss": 48.63685,
+        "batch16": 47.9826,
+        "batch1024": 37.1878
+      },
+      "lookup_ns": 71.84895
+    },
+    {
+      "corpus": "uuid",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 20.85875,
+      "build_ms": 61.77292699794634,
+      "ops": {
+        "mixed": 62.5029,
+        "hit": 58.32305,
+        "miss": 54.9472
+      },
+      "lookup_ns": 62.5029
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.240907,
+      "build_ms": 39.94156499902601,
+      "ops": {
+        "mixed": 58.5014,
+        "hit": 59.92805,
+        "miss": 56.89935,
+        "batch16": 38.1637,
+        "batch1024": 34.72925
+      },
+      "lookup_ns": 58.5014
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.240911,
+      "build_ms": 43.11119799967855,
+      "ops": {
+        "mixed": 104.08195,
+        "hit": 101.8598,
+        "miss": 87.56645,
+        "batch16": 52.464,
+        "batch1024": 41.1663
+      },
+      "lookup_ns": 104.08195
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 34.971745,
+      "build_ms": 708.4779430006165,
+      "ops": {
+        "mixed": 227.69765,
+        "hit": 219.50025,
+        "miss": 211.18765,
+        "batch16": 91.82045,
+        "batch1024": 57.19695,
+        "key": 194.3565
+      },
+      "lookup_ns": 227.69765
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 18.254771,
+      "build_ms": 201.34004999999888,
+      "ops": {
+        "mixed": 381.85165,
+        "hit": 399.2864,
+        "miss": 401.735,
+        "batch16": 403.60355,
+        "batch1024": 392.73565,
+        "key": 424.6135,
+        "prefix_count": 342.83335,
+        "common_prefix": 4764.2176,
+        "longest_prefix": 758.3904
+      },
+      "lookup_ns": 381.85165
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 18.040375,
+      "build_ms": 196.38750800004345,
+      "ops": {
+        "mixed": 379.2723,
+        "hit": 390.79645,
+        "miss": 387.5829,
+        "batch16": 406.61815,
+        "batch1024": 390.4473,
+        "key": 420.61545,
+        "prefix_count": 338.9571,
+        "common_prefix": 5075.795,
+        "longest_prefix": 772.0218
+      },
+      "lookup_ns": 379.2723
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 17.893932,
+      "build_ms": 200.07791000170982,
+      "ops": {
+        "mixed": 402.9864,
+        "hit": 412.7607,
+        "miss": 403.852,
+        "batch16": 439.60515,
+        "batch1024": 424.21825,
+        "key": 525.87765,
+        "prefix_count": 401.93635,
+        "common_prefix": 5647.8032,
+        "longest_prefix": 824.4446
+      },
+      "lookup_ns": 402.9864
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 37.108466,
+      "build_ms": 2538.472123000247,
+      "ops": {
+        "mixed": 450.1194,
+        "hit": 460.301,
+        "miss": 444.29545,
+        "batch16": 456.6296,
+        "batch1024": 454.68895,
+        "key": 1174.1136,
+        "prefix_count": 2100.57865,
+        "common_prefix": 504.0206,
+        "longest_prefix": 455.8182
+      },
+      "lookup_ns": 450.1194
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 21.781294,
+      "build_ms": 295.0536339994869,
+      "ops": {
+        "mixed": 134.41345,
+        "hit": 130.68095,
+        "miss": 118.12635,
+        "batch16": 64.41,
+        "batch1024": 44.8673
+      },
+      "lookup_ns": 134.41345
+    },
+    {
+      "corpus": "uuid",
+      "size": 1000000,
+      "keys": 1000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 20.781294,
+      "build_ms": 290.7790159988508,
+      "ops": {
+        "mixed": 120.851,
+        "hit": 124.06655,
+        "miss": 116.1847
+      },
+      "lookup_ns": 120.851
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2384758,
+      "build_ms": 523.4860070013383,
+      "ops": {
+        "mixed": 101.88885,
+        "hit": 103.17575,
+        "miss": 100.6911,
+        "batch16": 44.3578,
+        "batch1024": 36.3949
+      },
+      "lookup_ns": 101.88885
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.2384762,
+      "build_ms": 539.6666759988875,
+      "ops": {
+        "mixed": 182.8264,
+        "hit": 177.3611,
+        "miss": 167.1685,
+        "batch16": 62.16125,
+        "batch1024": 44.1614
+      },
+      "lookup_ns": 182.8264
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 34.6427241,
+      "build_ms": 11408.012119998602,
+      "ops": {
+        "mixed": 294.14545,
+        "hit": 287.29105,
+        "miss": 277.53325,
+        "batch16": 99.6697,
+        "batch1024": 59.13405,
+        "key": 223.70515
+      },
+      "lookup_ns": 294.14545
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 17.7946769,
+      "build_ms": 1978.44711200014,
+      "ops": {
+        "mixed": 594.2185,
+        "hit": 618.26015,
+        "miss": 617.73015,
+        "batch16": 576.3339,
+        "batch1024": 556.86335,
+        "key": 607.03305,
+        "prefix_count": 474.17155,
+        "common_prefix": 5363.7058,
+        "longest_prefix": 1021.214
+      },
+      "lookup_ns": 594.2185
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 17.5595917,
+      "build_ms": 1943.5486479997053,
+      "ops": {
+        "mixed": 592.41965,
+        "hit": 603.94025,
+        "miss": 597.58035,
+        "batch16": 575.54745,
+        "batch1024": 555.1992,
+        "key": 607.54055,
+        "prefix_count": 457.38505,
+        "common_prefix": 5423.3738,
+        "longest_prefix": 999.7596
+      },
+      "lookup_ns": 592.41965
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 17.4170565,
+      "build_ms": 1934.4058870010485,
+      "ops": {
+        "mixed": 609.67405,
+        "hit": 619.3467,
+        "miss": 597.0388,
+        "batch16": 605.2277,
+        "batch1024": 586.1328,
+        "key": 761.32935,
+        "prefix_count": 463.3783,
+        "common_prefix": 6043.2018,
+        "longest_prefix": 1054.8292
+      },
+      "lookup_ns": 609.67405
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 36.0672008,
+      "build_ms": 27322.026241999993,
+      "ops": {
+        "mixed": 611.65775,
+        "hit": 619.9769,
+        "miss": 597.58135,
+        "batch16": 610.6293,
+        "batch1024": 602.8883,
+        "key": 1343.8068,
+        "prefix_count": 2112.9213,
+        "common_prefix": 635.9324,
+        "longest_prefix": 591.2464
+      },
+      "lookup_ns": 611.65775
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 21.7980687,
+      "build_ms": 3056.962817998283,
+      "ops": {
+        "mixed": 190.17665,
+        "hit": 183.5918,
+        "miss": 172.45485,
+        "batch16": 71.69915,
+        "batch1024": 47.08445
+      },
+      "lookup_ns": 190.17665
+    },
+    {
+      "corpus": "uuid",
+      "size": 10000000,
+      "keys": 10000000,
+      "raw_bytes_per_key": 36.0,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 20.7980687,
+      "build_ms": 3090.9728429978713,
+      "ops": {
+        "mixed": 183.2602,
+        "hit": 183.73405,
+        "miss": 183.5402
+      },
+      "lookup_ns": 183.2602
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "ClosedHashIndex",
+      "keeps_keys": false,
+      "bytes_per_key": 0.2428,
+      "build_ms": 8.11084399902029,
+      "ops": {
+        "mixed": 45.01505,
+        "hit": 45.9258,
+        "miss": 43.45415,
+        "batch16": 33.36415,
+        "batch1024": 30.34095
+      },
+      "lookup_ns": 45.01505
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "CompactHashIndex fp=1",
+      "keeps_keys": false,
+      "bytes_per_key": 1.24284,
+      "build_ms": 8.387462999962736,
+      "ops": {
+        "mixed": 54.4047,
+        "hit": 50.6556,
+        "miss": 38.2869,
+        "batch16": 41.1448,
+        "batch1024": 34.35005
+      },
+      "lookup_ns": 54.4047
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "PerfectHashIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 10.19203,
+      "build_ms": 37.303460001567146,
+      "ops": {
+        "mixed": 68.40395,
+        "hit": 69.75355,
+        "miss": 45.61265,
+        "batch16": 51.107,
+        "batch1024": 41.83005,
+        "key": 67.92605
+      },
+      "lookup_ns": 68.40395
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "DictIndex 128",
+      "keeps_keys": true,
+      "bytes_per_key": 3.52983,
+      "build_ms": 23.45009200143977,
+      "ops": {
+        "mixed": 239.56495,
+        "hit": 234.2379,
+        "miss": 231.65305,
+        "batch16": 275.6542,
+        "batch1024": 261.87785,
+        "key": 284.4938,
+        "prefix_count": 304.65215,
+        "common_prefix": 1693.671,
+        "longest_prefix": 600.584
+      },
+      "lookup_ns": 239.56495
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "DictIndex 256",
+      "keeps_keys": true,
+      "bytes_per_key": 3.32539,
+      "build_ms": 22.11544600140769,
+      "ops": {
+        "mixed": 258.7194,
+        "hit": 256.7041,
+        "miss": 249.11085,
+        "batch16": 288.76535,
+        "batch1024": 273.49165,
+        "key": 317.3375,
+        "prefix_count": 330.2247,
+        "common_prefix": 1805.2284,
+        "longest_prefix": 638.6396
+      },
+      "lookup_ns": 258.7194
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "DictIndex 1024",
+      "keeps_keys": true,
+      "bytes_per_key": 3.20087,
+      "build_ms": 31.781008998223115,
+      "ops": {
+        "mixed": 311.03365,
+        "hit": 310.88335,
+        "miss": 302.40145,
+        "batch16": 336.7329,
+        "batch1024": 321.9216,
+        "key": 416.79125,
+        "prefix_count": 401.59875,
+        "common_prefix": 2139.408,
+        "longest_prefix": 755.8816
+      },
+      "lookup_ns": 311.03365
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "StringIndex",
+      "keeps_keys": true,
+      "bytes_per_key": 8.17328,
+      "build_ms": 38.194704000488855,
+      "ops": {
+        "mixed": 149.4076,
+        "hit": 154.4611,
+        "miss": 138.1059,
+        "batch16": 143.63175,
+        "batch1024": 140.025,
+        "key": 438.27365,
+        "prefix_count": 623.225,
+        "common_prefix": 295.6552,
+        "longest_prefix": 217.4964
+      },
+      "lookup_ns": 149.4076
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "HashedDictIndex 256 fp=8",
+      "keeps_keys": true,
+      "bytes_per_key": 6.69331,
+      "build_ms": 35.202344002755126,
+      "ops": {
+        "mixed": 58.5635,
+        "hit": 54.82245,
+        "miss": 43.144,
+        "batch16": 42.1762,
+        "batch1024": 34.6621
+      },
+      "lookup_ns": 58.5635
+    },
+    {
+      "corpus": "words",
+      "size": 100000,
+      "keys": 100000,
+      "raw_bytes_per_key": 9.3461,
+      "structure": "HashedDictIndex 256 unchecked",
+      "keeps_keys": true,
+      "bytes_per_key": 5.69331,
+      "build_ms": 33.457737998105586,
+      "ops": {
+        "mixed": 55.7467,
+        "hit": 53.3176,
+        "miss": 50.38215
+      },
+      "lookup_ns": 55.7467
+    }
+  ]
+}

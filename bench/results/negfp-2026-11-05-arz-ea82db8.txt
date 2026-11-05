@@ -1,0 +1,85 @@
+## negfp/warm-1/absent-fp [01:43:17 58000mC busy=1 swap=0MiB governor=performance]
+absent-fp: 32.1 ns/probe over 10 rounds
+## negfp/warm-1/member-fp [01:43:19 63000mC busy=1 swap=0MiB governor=performance]
+member-fp: 50.6 ns/probe over 10 rounds
+## negfp/warm-2/absent-fp [01:43:21 66000mC busy=3 swap=0MiB governor=performance]
+absent-fp: 31.3 ns/probe over 10 rounds
+## negfp/warm-2/member-fp [01:43:23 67000mC busy=2 swap=0MiB governor=performance]
+member-fp: 50.2 ns/probe over 10 rounds
+## negfp/warm-3/absent-fp [01:43:25 68000mC busy=2 swap=0MiB governor=performance]
+absent-fp: 30.5 ns/probe over 10 rounds
+## negfp/warm-3/member-fp [01:43:27 68000mC busy=0 swap=0MiB governor=performance]
+member-fp: 52.7 ns/probe over 10 rounds
+## negfp/round-1/member-plain [01:43:29 68000mC busy=2 swap=0MiB governor=performance]
+member-plain: 46.7 ns/probe over 10 rounds
+## negfp/round-1/member-fp [01:43:31 69000mC busy=0 swap=0MiB governor=performance]
+member-fp: 51.4 ns/probe over 10 rounds
+## negfp/round-1/absent-plain [01:43:33 66000mC busy=1 swap=0MiB governor=performance]
+absent-plain: 39.3 ns/probe over 10 rounds
+## negfp/round-1/absent-fp [01:43:35 66000mC busy=4 swap=0MiB governor=performance]
+absent-fp: 30.2 ns/probe over 10 rounds
+## negfp/round-1/control [01:43:37 69000mC busy=2 swap=0MiB governor=performance]
+control: 23.4 ns/probe over 10 rounds
+## negfp/round-2/control [01:43:39 69000mC busy=0 swap=0MiB governor=performance]
+control: 23.2 ns/probe over 10 rounds
+## negfp/round-2/absent-fp [01:43:41 69000mC busy=0 swap=0MiB governor=performance]
+absent-fp: 31.8 ns/probe over 10 rounds
+## negfp/round-2/absent-plain [01:43:43 69000mC busy=1 swap=0MiB governor=performance]
+absent-plain: 38.9 ns/probe over 10 rounds
+## negfp/round-2/member-fp [01:43:45 69000mC busy=4 swap=0MiB governor=performance]
+member-fp: 50.1 ns/probe over 10 rounds
+## negfp/round-2/member-plain [01:43:47 69000mC busy=2 swap=0MiB governor=performance]
+member-plain: 50.3 ns/probe over 10 rounds
+## negfp/round-3/member-plain [01:43:49 69000mC busy=1 swap=0MiB governor=performance]
+member-plain: 46.8 ns/probe over 10 rounds
+## negfp/round-3/member-fp [01:43:51 69000mC busy=1 swap=0MiB governor=performance]
+member-fp: 50.9 ns/probe over 10 rounds
+## negfp/round-3/absent-plain [01:43:54 67000mC busy=0 swap=0MiB governor=performance]
+absent-plain: 38.6 ns/probe over 10 rounds
+## negfp/round-3/absent-fp [01:43:56 68000mC busy=2 swap=0MiB governor=performance]
+absent-fp: 30.9 ns/probe over 10 rounds
+## negfp/round-3/control [01:43:58 69000mC busy=0 swap=0MiB governor=performance]
+control: 23.8 ns/probe over 10 rounds
+## negfp/round-4/control [01:44:00 69000mC busy=6 swap=0MiB governor=performance]
+control: 22.3 ns/probe over 10 rounds
+## negfp/round-4/absent-fp [01:44:02 69000mC busy=2 swap=0MiB governor=performance]
+absent-fp: 30.0 ns/probe over 10 rounds
+## negfp/round-4/absent-plain [01:44:04 69000mC busy=0 swap=0MiB governor=performance]
+absent-plain: 38.7 ns/probe over 10 rounds
+## negfp/round-4/member-fp [01:44:06 69000mC busy=1 swap=0MiB governor=performance]
+member-fp: 50.3 ns/probe over 10 rounds
+## negfp/round-4/member-plain [01:44:08 69000mC busy=1 swap=0MiB governor=performance]
+member-plain: 46.2 ns/probe over 10 rounds
+## negfp/round-5/member-plain [01:44:10 69000mC busy=3 swap=0MiB governor=performance]
+member-plain: 47.2 ns/probe over 10 rounds
+## negfp/round-5/member-fp [01:44:12 69000mC busy=1 swap=0MiB governor=performance]
+member-fp: 51.1 ns/probe over 10 rounds
+## negfp/round-5/absent-plain [01:44:14 69000mC busy=3 swap=0MiB governor=performance]
+absent-plain: 39.0 ns/probe over 10 rounds
+## negfp/round-5/absent-fp [01:44:16 69000mC busy=0 swap=0MiB governor=performance]
+absent-fp: 29.9 ns/probe over 10 rounds
+## negfp/round-5/control [01:44:18 69000mC busy=1 swap=0MiB governor=performance]
+control: 23.5 ns/probe over 10 rounds
+## negfp/round-6/control [01:44:20 69000mC busy=2 swap=0MiB governor=performance]
+control: 22.8 ns/probe over 10 rounds
+## negfp/round-6/absent-fp [01:44:22 69000mC busy=0 swap=0MiB governor=performance]
+absent-fp: 32.7 ns/probe over 10 rounds
+## negfp/round-6/absent-plain [01:44:24 69000mC busy=2 swap=0MiB governor=performance]
+absent-plain: 39.4 ns/probe over 10 rounds
+## negfp/round-6/member-fp [01:44:26 68000mC busy=0 swap=0MiB governor=performance]
+member-fp: 50.6 ns/probe over 10 rounds
+## negfp/round-6/member-plain [01:44:28 69000mC busy=1 swap=0MiB governor=performance]
+member-plain: 47.0 ns/probe over 10 rounds
+## negfp/in-process [01:44:30 69000mC busy=2 swap=0MiB governor=performance]
+n 479823  plain 9.251 B/key  fp 10.251 B/key  delta 1.000 B/key
+  member plain                 49.9 ns  (max +1%)
+  member fp                    55.1 ns  (max +2%)
+  absent plain                 46.1 ns  (max +1%)
+  absent fp                    33.5 ns  (max +1%)
+  mixed plain                  52.1 ns  (max +1%)
+  mixed fp                     52.3 ns  (max +1%)
+  ids_of absent plain          44.3 ns  (max +2%)
+  ids_of absent fp             32.4 ns  (max +27%)
+  ids_of member plain          48.0 ns  (max +1%)
+  ids_of member fp             50.0 ns  (max +2%)
+  control chi.id_unchecked     28.1 ns  (max +1%)

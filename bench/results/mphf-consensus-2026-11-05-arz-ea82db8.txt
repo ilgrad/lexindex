@@ -1,0 +1,144 @@
+# versions mphf-consensus: ConsensusRecSplit 11deea6
+## mphf-consensus/-n_1000000_-q_1000000_-k_256_-e_0.1 [03:44:54 39000mC busy=2 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843094600)
+Constructing
+Level 0 (256 keys each): 15 ms, 0 us per output bit
+Level 1 (128 keys each): 13 ms, 0 us per output bit
+Level 2 (64 keys each): 12 ms, 0 us per output bit
+Level 3 (32 keys each): 14 ms, 0 us per output bit
+Level 4 (16 keys each): 17 ms, 0 us per output bit
+Level 5 (8 keys each): 23 ms, 0 us per output bit
+Level 6 (4 keys each): 45 ms, 0 us per output bit
+Level 7 (2 keys each): 69 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=51 constructionTimeMilliseconds=271 bitsPerElement=1.58285
+## mphf-consensus/-n_1000000_-q_1000000_-k_256_-e_0.01 [03:44:58 46000mC busy=3 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843098023)
+Constructing
+Level 0 (256 keys each): 49 ms, 2 us per output bit
+Level 1 (128 keys each): 46 ms, 1 us per output bit
+Level 2 (64 keys each): 52 ms, 0 us per output bit
+Level 3 (32 keys each): 74 ms, 0 us per output bit
+Level 4 (16 keys each): 111 ms, 0 us per output bit
+Level 5 (8 keys each): 169 ms, 0 us per output bit
+Level 6 (4 keys each): 405 ms, 1 us per output bit
+Level 7 (2 keys each): 663 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=51 constructionTimeMilliseconds=1631 bitsPerElement=1.47958
+## mphf-consensus/-n_1000000_-q_1000000_-k_32768_-e_0.1 [03:45:02 63000mC busy=3 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843102804)
+Constructing
+Level 0 (32768 keys each): 114 ms, 47 us per output bit
+Level 1 (16384 keys each): 82 ms, 27 us per output bit
+Level 2 (8192 keys each): 54 ms, 13 us per output bit
+Level 3 (4096 keys each): 38 ms, 7 us per output bit
+Level 4 (2048 keys each): 31 ms, 4 us per output bit
+Level 5 (1024 keys each): 22 ms, 2 us per output bit
+Level 6 (512 keys each): 17 ms, 1 us per output bit
+Level 7 (256 keys each): 14 ms, 0 us per output bit
+Level 8 (128 keys each): 12 ms, 0 us per output bit
+Level 9 (64 keys each): 12 ms, 0 us per output bit
+Level 10 (32 keys each): 13 ms, 0 us per output bit
+Level 11 (16 keys each): 16 ms, 0 us per output bit
+Level 12 (8 keys each): 22 ms, 0 us per output bit
+Level 13 (4 keys each): 42 ms, 0 us per output bit
+Level 14 (2 keys each): 63 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=95 constructionTimeMilliseconds=614 bitsPerElement=1.61898
+## mphf-consensus/-n_1000000_-q_1000000_-k_32768_-e_0.01 [03:45:06 60000mC busy=0 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843106671)
+Constructing
+Level 0 (32768 keys each): 134 ms, 298 us per output bit
+Level 1 (16384 keys each): 85 ms, 122 us per output bit
+Level 2 (8192 keys each): 60 ms, 53 us per output bit
+Level 3 (4096 keys each): 42 ms, 22 us per output bit
+Level 4 (2048 keys each): 34 ms, 10 us per output bit
+Level 5 (1024 keys each): 38 ms, 6 us per output bit
+Level 6 (512 keys each): 39 ms, 3 us per output bit
+Level 7 (256 keys each): 44 ms, 2 us per output bit
+Level 8 (128 keys each): 49 ms, 1 us per output bit
+Level 9 (64 keys each): 58 ms, 1 us per output bit
+Level 10 (32 keys each): 77 ms, 0 us per output bit
+Level 11 (16 keys each): 104 ms, 0 us per output bit
+Level 12 (8 keys each): 165 ms, 0 us per output bit
+Level 13 (4 keys each): 369 ms, 1 us per output bit
+Level 14 (2 keys each): 634 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=94 constructionTimeMilliseconds=1995 bitsPerElement=1.49213
+## mphf-consensus/-n_1000000_-q_1000000_-k_256_-e_0.1_-o [03:45:11 67000mC busy=1 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843111900)
+Constructing
+Tree space per bucket: 393
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.1 k=256 N=1000000 numQueries=1000000 queryTimeMilliseconds=68 constructionTimeMilliseconds=383 bitsPerElement=1.57892
+## mphf-consensus/-n_1000000_-q_1000000_-k_32768_-e_0.01_-o [03:45:15 65000mC busy=5 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843115461)
+Constructing
+Tree space per bucket: 47736
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.01 k=32768 N=1000000 numQueries=1000000 queryTimeMilliseconds=118 constructionTimeMilliseconds=3046 bitsPerElement=1.49091
+## mphf-consensus/-n_10000000_-q_10000000_-k_256_-e_0.1 [03:45:22 68000mC busy=2 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843122794)
+Constructing
+Level 0 (256 keys each): 148 ms, 0 us per output bit
+Level 1 (128 keys each): 131 ms, 0 us per output bit
+Level 2 (64 keys each): 131 ms, 0 us per output bit
+Level 3 (32 keys each): 135 ms, 0 us per output bit
+Level 4 (16 keys each): 163 ms, 0 us per output bit
+Level 5 (8 keys each): 223 ms, 0 us per output bit
+Level 6 (4 keys each): 425 ms, 0 us per output bit
+Level 7 (2 keys each): 656 ms, 0 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.1 k=256 N=10000000 numQueries=10000000 queryTimeMilliseconds=876 constructionTimeMilliseconds=2670 bitsPerElement=1.57863
+## mphf-consensus/-n_10000000_-q_10000000_-k_32768_-e_0.01 [03:45:30 65000mC busy=4 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843130546)
+Constructing
+Level 0 (32768 keys each): 1115 ms, 243 us per output bit
+Level 1 (16384 keys each): 794 ms, 112 us per output bit
+Level 2 (8192 keys each): 539 ms, 47 us per output bit
+Level 3 (4096 keys each): 454 ms, 23 us per output bit
+Level 4 (2048 keys each): 431 ms, 13 us per output bit
+Level 5 (1024 keys each): 403 ms, 7 us per output bit
+Level 6 (512 keys each): 423 ms, 4 us per output bit
+Level 7 (256 keys each): 452 ms, 2 us per output bit
+Level 8 (128 keys each): 502 ms, 1 us per output bit
+Level 9 (64 keys each): 612 ms, 1 us per output bit
+Level 10 (32 keys each): 736 ms, 0 us per output bit
+Level 11 (16 keys each): 1046 ms, 0 us per output bit
+Level 12 (8 keys each): 1737 ms, 0 us per output bit
+Level 13 (4 keys each): 3748 ms, 1 us per output bit
+Level 14 (2 keys each): 6145 ms, 1 us per output bit
+Testing
+Preparing query plan
+Querying
+RESULT method=Consensus overhead=0.01 k=32768 N=10000000 numQueries=10000000 queryTimeMilliseconds=1413 constructionTimeMilliseconds=19773 bitsPerElement=1.45885
+## mphf-consensus/-n_10000000_-q_10000000_-k_256_-e_0.1_-o [03:45:56 66000mC busy=1 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843156759)
+Constructing
+Tree space per bucket: 393
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.1 k=256 N=10000000 numQueries=10000000 queryTimeMilliseconds=775 constructionTimeMilliseconds=3918 bitsPerElement=1.57537
+## mphf-consensus/-n_10000000_-q_10000000_-k_32768_-e_0.01_-o [03:46:07 69000mC busy=1 swap=0MiB governor=performance]
+Generating input data (Seed: 1793843167530)
+Constructing
+Tree space per bucket: 47736
+Testing
+Preparing query plan
+Querying
+RESULT method=ConsensusQueryOptimized overhead=0.01 k=32768 N=10000000 numQueries=10000000 queryTimeMilliseconds=1313 constructionTimeMilliseconds=30655 bitsPerElement=1.45869
