@@ -1,0 +1,641 @@
+# versions rel-build: lexindex 7b65814f182d6ea7c6db34cf22c5eccf464c92d6 against v4.5.3
+## rel-build/words-full/dict256/ONE/1-4.5.3 [15:25:20 41000mC busy=3 swap=0MiB governor=performance]
+build words-full dict256 4.5.3 cpus=1 n=479823 ms=109.8 base_kb=29444 peak_kb=48008 bytes=1264362 magic=BDX3
+## rel-build/words-full/dict256/ONE/2-main [15:25:22 46000mC busy=2 swap=0MiB governor=performance]
+build words-full dict256 main cpus=1 n=479823 ms=107.4 base_kb=29508 peak_kb=47704 bytes=1258086 magic=BDX3
+## rel-build/words-full/dict256/ONE/3-main [15:25:23 49000mC busy=1 swap=0MiB governor=performance]
+build words-full dict256 main cpus=1 n=479823 ms=106.4 base_kb=29316 peak_kb=47812 bytes=1258086 magic=BDX3
+## rel-build/words-full/dict256/ONE/4-4.5.3 [15:25:24 53000mC busy=3 swap=0MiB governor=performance]
+build words-full dict256 4.5.3 cpus=1 n=479823 ms=108.0 base_kb=29632 peak_kb=48192 bytes=1264362 magic=BDX3
+## rel-build/words-full/dict256/EIGHT/1-4.5.3 [15:25:25 55000mC busy=1 swap=0MiB governor=performance]
+build words-full dict256 4.5.3 cpus=8 n=479823 ms=40.0 base_kb=29620 peak_kb=76296 bytes=1264362 magic=BDX3
+## rel-build/words-full/dict256/EIGHT/2-main [15:25:27 55000mC busy=1 swap=0MiB governor=performance]
+build words-full dict256 main cpus=8 n=479823 ms=38.0 base_kb=29096 peak_kb=76360 bytes=1258086 magic=BDX3
+## rel-build/words-full/dict256/EIGHT/3-main [15:25:28 56000mC busy=2 swap=0MiB governor=performance]
+build words-full dict256 main cpus=8 n=479823 ms=37.1 base_kb=29600 peak_kb=76876 bytes=1258086 magic=BDX3
+## rel-build/words-full/dict256/EIGHT/4-4.5.3 [15:25:29 54000mC busy=3 swap=0MiB governor=performance]
+build words-full dict256 4.5.3 cpus=8 n=479823 ms=39.8 base_kb=29696 peak_kb=75696 bytes=1264362 magic=BDX3
+## rel-build/words-full/perfect/ONE/1-4.5.3 [15:25:30 55000mC busy=1 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=1 n=479823 ms=77.9 base_kb=29492 peak_kb=48964 bytes=5219596 magic=BMP8
+## rel-build/words-full/perfect/ONE/2-main [15:25:31 56000mC busy=0 swap=0MiB governor=performance]
+build words-full perfect main cpus=1 n=479823 ms=213.5 base_kb=29456 peak_kb=88472 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/ONE/3-main [15:25:33 59000mC busy=3 swap=0MiB governor=performance]
+build words-full perfect main cpus=1 n=479823 ms=214.7 base_kb=29648 peak_kb=88592 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/ONE/4-4.5.3 [15:25:34 59000mC busy=3 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=1 n=479823 ms=78.8 base_kb=29176 peak_kb=48752 bytes=5219596 magic=BMP8
+## rel-build/words-full/perfect/EIGHT/1-4.5.3 [15:25:35 59000mC busy=1 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=8 n=479823 ms=71.6 base_kb=29424 peak_kb=49220 bytes=5219596 magic=BMP8
+## rel-build/words-full/perfect/EIGHT/2-main [15:25:37 58000mC busy=2 swap=0MiB governor=performance]
+build words-full perfect main cpus=8 n=479823 ms=150.8 base_kb=29428 peak_kb=87776 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/EIGHT/3-main [15:25:38 59000mC busy=1 swap=0MiB governor=performance]
+build words-full perfect main cpus=8 n=479823 ms=149.3 base_kb=29604 peak_kb=88008 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/EIGHT/4-4.5.3 [15:25:39 58000mC busy=2 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=8 n=479823 ms=71.9 base_kb=29572 peak_kb=49432 bytes=5219596 magic=BMP8
+## rel-build/words-full/perfect/ALL/1-4.5.3 [15:25:40 57000mC busy=0 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=16 n=479823 ms=72.9 base_kb=29592 peak_kb=49324 bytes=5219596 magic=BMP8
+## rel-build/words-full/perfect/ALL/2-main [15:25:42 57000mC busy=1 swap=0MiB governor=performance]
+build words-full perfect main cpus=16 n=479823 ms=153.7 base_kb=29440 peak_kb=88908 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/ALL/3-main [15:25:43 57000mC busy=2 swap=0MiB governor=performance]
+build words-full perfect main cpus=16 n=479823 ms=147.7 base_kb=29296 peak_kb=88360 bytes=4438803 magic=BMP9
+## rel-build/words-full/perfect/ALL/4-4.5.3 [15:25:44 56000mC busy=3 swap=0MiB governor=performance]
+build words-full perfect 4.5.3 cpus=16 n=479823 ms=71.4 base_kb=29248 peak_kb=49412 bytes=5219596 magic=BMP8
+## rel-build/bigrams-1m/dict256/ONE/1-4.5.3 [15:25:45 56000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m dict256 4.5.3 cpus=1 n=1000000 ms=237.7 base_kb=58060 peak_kb=93648 bytes=1931132 magic=BDX3
+## rel-build/bigrams-1m/dict256/ONE/2-main [15:25:47 62000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m dict256 main cpus=1 n=1000000 ms=226.1 base_kb=57952 peak_kb=94452 bytes=1933345 magic=BDX3
+## rel-build/bigrams-1m/dict256/ONE/3-main [15:25:48 64000mC busy=4 swap=0MiB governor=performance]
+build bigrams-1m dict256 main cpus=1 n=1000000 ms=229.8 base_kb=57976 peak_kb=94408 bytes=1933345 magic=BDX3
+## rel-build/bigrams-1m/dict256/ONE/4-4.5.3 [15:25:50 68000mC busy=3 swap=0MiB governor=performance]
+build bigrams-1m dict256 4.5.3 cpus=1 n=1000000 ms=239.9 base_kb=58068 peak_kb=93516 bytes=1931132 magic=BDX3
+## rel-build/bigrams-1m/dict256/EIGHT/1-4.5.3 [15:25:51 67000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m dict256 4.5.3 cpus=8 n=1000000 ms=84.8 base_kb=57868 peak_kb=142728 bytes=1931132 magic=BDX3
+## rel-build/bigrams-1m/dict256/EIGHT/2-main [15:25:52 66000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m dict256 main cpus=8 n=1000000 ms=72.2 base_kb=58088 peak_kb=145520 bytes=1933345 magic=BDX3
+## rel-build/bigrams-1m/dict256/EIGHT/3-main [15:25:54 66000mC busy=3 swap=0MiB governor=performance]
+build bigrams-1m dict256 main cpus=8 n=1000000 ms=71.8 base_kb=58016 peak_kb=144872 bytes=1933345 magic=BDX3
+## rel-build/bigrams-1m/dict256/EIGHT/4-4.5.3 [15:25:55 66000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m dict256 4.5.3 cpus=8 n=1000000 ms=74.3 base_kb=57980 peak_kb=142936 bytes=1931132 magic=BDX3
+## rel-build/bigrams-1m/perfect/ONE/1-4.5.3 [15:25:56 64000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=1 n=1000000 ms=159.9 base_kb=57724 peak_kb=102752 bytes=12494657 magic=BMP8
+## rel-build/bigrams-1m/perfect/ONE/2-main [15:25:58 65000mC busy=2 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=1 n=1000000 ms=359.7 base_kb=57924 peak_kb=167184 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/ONE/3-main [15:25:59 65000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=1 n=1000000 ms=360.8 base_kb=58048 peak_kb=167292 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/ONE/4-4.5.3 [15:26:01 67000mC busy=2 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=1 n=1000000 ms=160.3 base_kb=58052 peak_kb=102832 bytes=12494657 magic=BMP8
+## rel-build/bigrams-1m/perfect/EIGHT/1-4.5.3 [15:26:02 67000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=8 n=1000000 ms=142.4 base_kb=57584 peak_kb=103812 bytes=12494657 magic=BMP8
+## rel-build/bigrams-1m/perfect/EIGHT/2-main [15:26:03 65000mC busy=3 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=8 n=1000000 ms=242.7 base_kb=57704 peak_kb=170008 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/EIGHT/3-main [15:26:05 66000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=8 n=1000000 ms=242.5 base_kb=58072 peak_kb=168564 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/EIGHT/4-4.5.3 [15:26:06 64000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=8 n=1000000 ms=143.2 base_kb=57936 peak_kb=103924 bytes=12494657 magic=BMP8
+## rel-build/bigrams-1m/perfect/ALL/1-4.5.3 [15:26:08 64000mC busy=0 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=16 n=1000000 ms=144.9 base_kb=58084 peak_kb=103852 bytes=12494657 magic=BMP8
+## rel-build/bigrams-1m/perfect/ALL/2-main [15:26:09 65000mC busy=4 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=16 n=1000000 ms=242.8 base_kb=57764 peak_kb=168956 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/ALL/3-main [15:26:10 64000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m perfect main cpus=16 n=1000000 ms=240.4 base_kb=57840 peak_kb=169104 bytes=9124576 magic=BMP9
+## rel-build/bigrams-1m/perfect/ALL/4-4.5.3 [15:26:12 65000mC busy=1 swap=0MiB governor=performance]
+build bigrams-1m perfect 4.5.3 cpus=16 n=1000000 ms=144.6 base_kb=57872 peak_kb=103652 bytes=12494657 magic=BMP8
+## rel-build/dna-1000000/dict256/ONE/1-4.5.3 [15:26:13 63000mC busy=3 swap=0MiB governor=performance]
+build dna-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=324.8 base_kb=57800 peak_kb=99616 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/ONE/2-main [15:26:15 66000mC busy=0 swap=0MiB governor=performance]
+build dna-1000000 dict256 main cpus=1 n=1000000 ms=343.1 base_kb=57604 peak_kb=100848 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/ONE/3-main [15:26:17 66000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 dict256 main cpus=1 n=1000000 ms=343.7 base_kb=57828 peak_kb=101192 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/ONE/4-4.5.3 [15:26:18 65000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=324.4 base_kb=57904 peak_kb=99788 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/EIGHT/1-4.5.3 [15:26:20 67000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=80.3 base_kb=57688 peak_kb=138652 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/EIGHT/2-main [15:26:21 63000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 dict256 main cpus=8 n=1000000 ms=84.3 base_kb=57964 peak_kb=140472 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/EIGHT/3-main [15:26:23 63000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 dict256 main cpus=8 n=1000000 ms=85.7 base_kb=58108 peak_kb=141280 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/dict256/EIGHT/4-4.5.3 [15:26:24 61000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=80.7 base_kb=58128 peak_kb=139404 bytes=4374995 magic=BDX3
+## rel-build/dna-1000000/perfect/ONE/1-4.5.3 [15:26:26 61000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=221.6 base_kb=57840 peak_kb=138048 bytes=26264044 magic=BMP8
+## rel-build/dna-1000000/perfect/ONE/2-main [15:26:27 60000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=1 n=1000000 ms=1016.7 base_kb=58016 peak_kb=249844 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/ONE/3-main [15:26:30 65000mC busy=0 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=1 n=1000000 ms=1044.9 base_kb=57748 peak_kb=249888 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/ONE/4-4.5.3 [15:26:32 67000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=222.3 base_kb=58044 peak_kb=138044 bytes=26264044 magic=BMP8
+## rel-build/dna-1000000/perfect/EIGHT/1-4.5.3 [15:26:34 65000mC busy=3 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=204.8 base_kb=57904 peak_kb=138940 bytes=26264044 magic=BMP8
+## rel-build/dna-1000000/perfect/EIGHT/2-main [15:26:35 64000mC busy=3 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=8 n=1000000 ms=482.6 base_kb=57804 peak_kb=250836 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/EIGHT/3-main [15:26:37 64000mC busy=3 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=8 n=1000000 ms=476.9 base_kb=57968 peak_kb=251036 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/EIGHT/4-4.5.3 [15:26:39 63000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=204.8 base_kb=57904 peak_kb=139192 bytes=26264044 magic=BMP8
+## rel-build/dna-1000000/perfect/ALL/1-4.5.3 [15:26:40 62000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=205.5 base_kb=58072 peak_kb=138880 bytes=26264044 magic=BMP8
+## rel-build/dna-1000000/perfect/ALL/2-main [15:26:42 62000mC busy=1 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=16 n=1000000 ms=464.7 base_kb=57804 peak_kb=250448 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/ALL/3-main [15:26:44 62000mC busy=5 swap=0MiB governor=performance]
+build dna-1000000 perfect main cpus=16 n=1000000 ms=467.4 base_kb=57796 peak_kb=250804 bytes=17755116 magic=BMP9
+## rel-build/dna-1000000/perfect/ALL/4-4.5.3 [15:26:45 62000mC busy=2 swap=0MiB governor=performance]
+build dna-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=209.4 base_kb=57824 peak_kb=139300 bytes=26264044 magic=BMP8
+## rel-build/domains-1000000/dict256/ONE/1-4.5.3 [15:26:47 63000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=852.3 base_kb=58284 peak_kb=125592 bytes=4499605 magic=BDX3
+## rel-build/domains-1000000/dict256/ONE/2-main [15:26:50 68000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 dict256 main cpus=1 n=1000000 ms=858.3 base_kb=58040 peak_kb=125828 bytes=4482755 magic=BDX3
+## rel-build/domains-1000000/dict256/ONE/3-main [15:26:53 67000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 dict256 main cpus=1 n=1000000 ms=855.7 base_kb=58244 peak_kb=126096 bytes=4482755 magic=BDX3
+## rel-build/domains-1000000/dict256/ONE/4-4.5.3 [15:26:57 68000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=853.8 base_kb=58236 peak_kb=125484 bytes=4499605 magic=BDX3
+## rel-build/domains-1000000/dict256/EIGHT/1-4.5.3 [15:27:00 68000mC busy=3 swap=0MiB governor=performance]
+build domains-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=191.5 base_kb=58276 peak_kb=163048 bytes=4499605 magic=BDX3
+## rel-build/domains-1000000/dict256/EIGHT/2-main [15:27:01 66000mC busy=0 swap=0MiB governor=performance]
+build domains-1000000 dict256 main cpus=8 n=1000000 ms=187.5 base_kb=58184 peak_kb=165332 bytes=4482755 magic=BDX3
+## rel-build/domains-1000000/dict256/EIGHT/3-main [15:27:03 67000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 dict256 main cpus=8 n=1000000 ms=189.3 base_kb=58360 peak_kb=165052 bytes=4482755 magic=BDX3
+## rel-build/domains-1000000/dict256/EIGHT/4-4.5.3 [15:27:04 65000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=189.8 base_kb=57896 peak_kb=162876 bytes=4499605 magic=BDX3
+## rel-build/domains-1000000/perfect/ONE/1-4.5.3 [15:27:06 65000mC busy=0 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=194.4 base_kb=58436 peak_kb=120908 bytes=15453880 magic=BMP8
+## rel-build/domains-1000000/perfect/ONE/2-main [15:27:07 64000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=1 n=1000000 ms=315.2 base_kb=58192 peak_kb=141676 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/ONE/3-main [15:27:09 66000mC busy=3 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=1 n=1000000 ms=313.8 base_kb=58160 peak_kb=141648 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/ONE/4-4.5.3 [15:27:11 65000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=195.3 base_kb=58344 peak_kb=120956 bytes=15453880 magic=BMP8
+## rel-build/domains-1000000/perfect/EIGHT/1-4.5.3 [15:27:12 64000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=177.4 base_kb=58260 peak_kb=121832 bytes=15453880 magic=BMP8
+## rel-build/domains-1000000/perfect/EIGHT/2-main [15:27:14 64000mC busy=3 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=8 n=1000000 ms=249.6 base_kb=58372 peak_kb=142724 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/EIGHT/3-main [15:27:15 63000mC busy=1 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=8 n=1000000 ms=249.0 base_kb=58268 peak_kb=142068 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/EIGHT/4-4.5.3 [15:27:17 64000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=177.1 base_kb=58384 peak_kb=121908 bytes=15453880 magic=BMP8
+## rel-build/domains-1000000/perfect/ALL/1-4.5.3 [15:27:19 62000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=179.6 base_kb=58340 peak_kb=121868 bytes=15453880 magic=BMP8
+## rel-build/domains-1000000/perfect/ALL/2-main [15:27:20 64000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=16 n=1000000 ms=253.4 base_kb=57908 peak_kb=142092 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/ALL/3-main [15:27:22 62000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 perfect main cpus=16 n=1000000 ms=251.9 base_kb=58300 peak_kb=142220 bytes=15451258 magic=BMP9
+## rel-build/domains-1000000/perfect/ALL/4-4.5.3 [15:27:23 63000mC busy=2 swap=0MiB governor=performance]
+build domains-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=182.2 base_kb=58076 peak_kb=121816 bytes=15453880 magic=BMP8
+## rel-build/idents-1000000/dict256/ONE/1-4.5.3 [15:27:25 61000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=928.6 base_kb=61548 peak_kb=149032 bytes=5027295 magic=BDX3
+## rel-build/idents-1000000/dict256/ONE/2-main [15:27:28 67000mC busy=3 swap=0MiB governor=performance]
+build idents-1000000 dict256 main cpus=1 n=1000000 ms=923.9 base_kb=61516 peak_kb=149288 bytes=5009757 magic=BDX3
+## rel-build/idents-1000000/dict256/ONE/3-main [15:27:31 69000mC busy=2 swap=0MiB governor=performance]
+build idents-1000000 dict256 main cpus=1 n=1000000 ms=932.8 base_kb=61572 peak_kb=149308 bytes=5009757 magic=BDX3
+## rel-build/idents-1000000/dict256/ONE/4-4.5.3 [15:27:35 68000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=926.1 base_kb=61624 peak_kb=149044 bytes=5027295 magic=BDX3
+## rel-build/idents-1000000/dict256/EIGHT/1-4.5.3 [15:27:38 69000mC busy=0 swap=0MiB governor=performance]
+build idents-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=230.7 base_kb=61376 peak_kb=169520 bytes=5027295 magic=BDX3
+## rel-build/idents-1000000/dict256/EIGHT/2-main [15:27:40 66000mC busy=2 swap=0MiB governor=performance]
+build idents-1000000 dict256 main cpus=8 n=1000000 ms=232.5 base_kb=61656 peak_kb=171960 bytes=5009757 magic=BDX3
+## rel-build/idents-1000000/dict256/EIGHT/3-main [15:27:41 67000mC busy=0 swap=0MiB governor=performance]
+build idents-1000000 dict256 main cpus=8 n=1000000 ms=228.9 base_kb=61540 peak_kb=171600 bytes=5009757 magic=BDX3
+## rel-build/idents-1000000/dict256/EIGHT/4-4.5.3 [15:27:43 65000mC busy=0 swap=0MiB governor=performance]
+build idents-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=231.8 base_kb=61692 peak_kb=169520 bytes=5027295 magic=BDX3
+## rel-build/idents-1000000/perfect/ONE/1-4.5.3 [15:27:44 67000mC busy=0 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=201.1 base_kb=61636 peak_kb=126840 bytes=18834326 magic=BMP8
+## rel-build/idents-1000000/perfect/ONE/2-main [15:27:46 65000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=1 n=1000000 ms=897.7 base_kb=61576 peak_kb=217764 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/ONE/3-main [15:27:48 68000mC busy=2 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=1 n=1000000 ms=891.6 base_kb=61372 peak_kb=217648 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/ONE/4-4.5.3 [15:27:50 69000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=201.4 base_kb=61652 peak_kb=126792 bytes=18834326 magic=BMP8
+## rel-build/idents-1000000/perfect/EIGHT/1-4.5.3 [15:27:52 67000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=183.9 base_kb=61616 peak_kb=127728 bytes=18834326 magic=BMP8
+## rel-build/idents-1000000/perfect/EIGHT/2-main [15:27:53 64000mC busy=2 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=8 n=1000000 ms=597.7 base_kb=61592 peak_kb=216228 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/EIGHT/3-main [15:27:55 67000mC busy=0 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=8 n=1000000 ms=594.7 base_kb=61640 peak_kb=212916 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/EIGHT/4-4.5.3 [15:27:57 66000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=185.9 base_kb=61424 peak_kb=127772 bytes=18834326 magic=BMP8
+## rel-build/idents-1000000/perfect/ALL/1-4.5.3 [15:27:59 64000mC busy=3 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=185.8 base_kb=61640 peak_kb=127852 bytes=18834326 magic=BMP8
+## rel-build/idents-1000000/perfect/ALL/2-main [15:28:01 62000mC busy=3 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=16 n=1000000 ms=590.1 base_kb=61624 peak_kb=212780 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/ALL/3-main [15:28:02 64000mC busy=2 swap=0MiB governor=performance]
+build idents-1000000 perfect main cpus=16 n=1000000 ms=593.9 base_kb=61332 peak_kb=212660 bytes=15917371 magic=BMP9
+## rel-build/idents-1000000/perfect/ALL/4-4.5.3 [15:28:04 65000mC busy=1 swap=0MiB governor=performance]
+build idents-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=185.8 base_kb=61680 peak_kb=127636 bytes=18834326 magic=BMP8
+## rel-build/numeric-1000000/dict256/ONE/1-4.5.3 [15:28:06 64000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=161.1 base_kb=57832 peak_kb=87212 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/ONE/2-main [15:28:07 65000mC busy=0 swap=0MiB governor=performance]
+build numeric-1000000 dict256 main cpus=1 n=1000000 ms=161.4 base_kb=57992 peak_kb=88028 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/ONE/3-main [15:28:09 63000mC busy=3 swap=0MiB governor=performance]
+build numeric-1000000 dict256 main cpus=1 n=1000000 ms=163.7 base_kb=57852 peak_kb=87808 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/ONE/4-4.5.3 [15:28:10 64000mC busy=3 swap=0MiB governor=performance]
+build numeric-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=160.0 base_kb=57792 peak_kb=87236 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/EIGHT/1-4.5.3 [15:28:12 63000mC busy=0 swap=0MiB governor=performance]
+build numeric-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=53.9 base_kb=58036 peak_kb=115400 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/EIGHT/2-main [15:28:13 63000mC busy=2 swap=0MiB governor=performance]
+build numeric-1000000 dict256 main cpus=8 n=1000000 ms=52.6 base_kb=57732 peak_kb=117292 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/EIGHT/3-main [15:28:15 61000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 dict256 main cpus=8 n=1000000 ms=52.5 base_kb=58052 peak_kb=117664 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/dict256/EIGHT/4-4.5.3 [15:28:16 62000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=53.6 base_kb=57800 peak_kb=115364 bytes=1010907 magic=BDX3
+## rel-build/numeric-1000000/perfect/ONE/1-4.5.3 [15:28:17 61000mC busy=0 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=193.7 base_kb=58052 peak_kb=89140 bytes=7442243 magic=BMP8
+## rel-build/numeric-1000000/perfect/ONE/2-main [15:28:19 61000mC busy=3 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=1 n=1000000 ms=412.2 base_kb=57856 peak_kb=146464 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/ONE/3-main [15:28:21 62000mC busy=0 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=1 n=1000000 ms=411.0 base_kb=58152 peak_kb=146648 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/ONE/4-4.5.3 [15:28:22 64000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=193.3 base_kb=58140 peak_kb=89288 bytes=7442243 magic=BMP8
+## rel-build/numeric-1000000/perfect/EIGHT/1-4.5.3 [15:28:24 63000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=175.0 base_kb=57984 peak_kb=90256 bytes=7442243 magic=BMP8
+## rel-build/numeric-1000000/perfect/EIGHT/2-main [15:28:25 63000mC busy=2 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=8 n=1000000 ms=336.0 base_kb=57980 peak_kb=147844 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/EIGHT/3-main [15:28:27 62000mC busy=0 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=8 n=1000000 ms=331.8 base_kb=58000 peak_kb=147896 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/EIGHT/4-4.5.3 [15:28:29 61000mC busy=3 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=176.8 base_kb=57688 peak_kb=90348 bytes=7442243 magic=BMP8
+## rel-build/numeric-1000000/perfect/ALL/1-4.5.3 [15:28:30 61000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=175.8 base_kb=58076 peak_kb=90256 bytes=7442243 magic=BMP8
+## rel-build/numeric-1000000/perfect/ALL/2-main [15:28:32 61000mC busy=1 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=16 n=1000000 ms=333.5 base_kb=58092 peak_kb=147092 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/ALL/3-main [15:28:33 62000mC busy=4 swap=0MiB governor=performance]
+build numeric-1000000 perfect main cpus=16 n=1000000 ms=331.6 base_kb=58132 peak_kb=147212 bytes=4115914 magic=BMP9
+## rel-build/numeric-1000000/perfect/ALL/4-4.5.3 [15:28:35 62000mC busy=2 swap=0MiB governor=performance]
+build numeric-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=172.8 base_kb=57988 peak_kb=90180 bytes=7442243 magic=BMP8
+## rel-build/opaque-1000000/dict256/ONE/1-4.5.3 [15:28:36 63000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=396.6 base_kb=58100 peak_kb=118480 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/ONE/2-main [15:28:38 65000mC busy=3 swap=0MiB governor=performance]
+build opaque-1000000 dict256 main cpus=1 n=1000000 ms=397.1 base_kb=58016 peak_kb=118676 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/ONE/3-main [15:28:40 66000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 dict256 main cpus=1 n=1000000 ms=396.7 base_kb=57912 peak_kb=118620 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/ONE/4-4.5.3 [15:28:42 68000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=400.1 base_kb=58072 peak_kb=118500 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/EIGHT/1-4.5.3 [15:28:43 68000mC busy=4 swap=0MiB governor=performance]
+build opaque-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=104.7 base_kb=57812 peak_kb=159700 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/EIGHT/2-main [15:28:45 64000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 dict256 main cpus=8 n=1000000 ms=103.9 base_kb=58072 peak_kb=160972 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/EIGHT/3-main [15:28:46 64000mC busy=2 swap=0MiB governor=performance]
+build opaque-1000000 dict256 main cpus=8 n=1000000 ms=103.9 base_kb=58064 peak_kb=161236 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/dict256/EIGHT/4-4.5.3 [15:28:48 62000mC busy=3 swap=0MiB governor=performance]
+build opaque-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=105.3 base_kb=57836 peak_kb=159952 bytes=10398695 magic=BDX3
+## rel-build/opaque-1000000/perfect/ONE/1-4.5.3 [15:28:49 63000mC busy=5 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=208.2 base_kb=57988 peak_kb=122036 bytes=18264035 magic=BMP8
+## rel-build/opaque-1000000/perfect/ONE/2-main [15:28:51 64000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=1 n=1000000 ms=783.1 base_kb=57812 peak_kb=226476 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/ONE/3-main [15:28:53 65000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=1 n=1000000 ms=782.3 base_kb=57872 peak_kb=226532 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/ONE/4-4.5.3 [15:28:55 66000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=207.6 base_kb=57884 peak_kb=121936 bytes=18264035 magic=BMP8
+## rel-build/opaque-1000000/perfect/EIGHT/1-4.5.3 [15:28:56 66000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=189.5 base_kb=57868 peak_kb=123208 bytes=18264035 magic=BMP8
+## rel-build/opaque-1000000/perfect/EIGHT/2-main [15:28:58 63000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=8 n=1000000 ms=393.3 base_kb=57804 peak_kb=227600 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/EIGHT/3-main [15:29:00 64000mC busy=2 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=8 n=1000000 ms=395.0 base_kb=57808 peak_kb=227756 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/EIGHT/4-4.5.3 [15:29:01 64000mC busy=3 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=190.3 base_kb=58052 peak_kb=123024 bytes=18264035 magic=BMP8
+## rel-build/opaque-1000000/perfect/ALL/1-4.5.3 [15:29:03 62000mC busy=0 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=190.1 base_kb=58076 peak_kb=123172 bytes=18264035 magic=BMP8
+## rel-build/opaque-1000000/perfect/ALL/2-main [15:29:04 63000mC busy=0 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=16 n=1000000 ms=397.1 base_kb=58060 peak_kb=227284 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/ALL/3-main [15:29:06 62000mC busy=2 swap=0MiB governor=performance]
+build opaque-1000000 perfect main cpus=16 n=1000000 ms=393.8 base_kb=57868 peak_kb=227144 bytes=16492160 magic=BMP9
+## rel-build/opaque-1000000/perfect/ALL/4-4.5.3 [15:29:08 61000mC busy=1 swap=0MiB governor=performance]
+build opaque-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=192.9 base_kb=57804 peak_kb=123048 bytes=18264035 magic=BMP8
+## rel-build/paths-1000000/dict256/ONE/1-4.5.3 [15:29:09 61000mC busy=3 swap=0MiB governor=performance]
+build paths-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1246.6 base_kb=98648 peak_kb=196324 bytes=6853701 magic=BDX3
+## rel-build/paths-1000000/dict256/ONE/2-main [15:29:13 68000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 dict256 main cpus=1 n=1000000 ms=1251.6 base_kb=98636 peak_kb=196792 bytes=6810547 magic=BDX3
+## rel-build/paths-1000000/dict256/ONE/3-main [15:29:17 69000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 dict256 main cpus=1 n=1000000 ms=1241.0 base_kb=98968 peak_kb=197000 bytes=6810547 magic=BDX3
+## rel-build/paths-1000000/dict256/ONE/4-4.5.3 [15:29:22 68000mC busy=0 swap=0MiB governor=performance]
+build paths-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1249.7 base_kb=98760 peak_kb=196244 bytes=6853701 magic=BDX3
+## rel-build/paths-1000000/dict256/EIGHT/1-4.5.3 [15:29:26 67000mC busy=0 swap=0MiB governor=performance]
+build paths-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=305.5 base_kb=98900 peak_kb=197276 bytes=6853701 magic=BDX3
+## rel-build/paths-1000000/dict256/EIGHT/2-main [15:29:28 67000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 dict256 main cpus=8 n=1000000 ms=308.5 base_kb=98504 peak_kb=200180 bytes=6810547 magic=BDX3
+## rel-build/paths-1000000/dict256/EIGHT/3-main [15:29:30 66000mC busy=0 swap=0MiB governor=performance]
+build paths-1000000 dict256 main cpus=8 n=1000000 ms=305.0 base_kb=98960 peak_kb=200948 bytes=6810547 magic=BDX3
+## rel-build/paths-1000000/dict256/EIGHT/4-4.5.3 [15:29:32 68000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=303.0 base_kb=99004 peak_kb=197276 bytes=6853701 magic=BDX3
+## rel-build/paths-1000000/perfect/ONE/1-4.5.3 [15:29:34 67000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=287.6 base_kb=98768 peak_kb=233780 bytes=60622083 magic=BMP8
+## rel-build/paths-1000000/perfect/ONE/2-main [15:29:35 66000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=1 n=1000000 ms=341.9 base_kb=98700 peak_kb=242656 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/ONE/3-main [15:29:37 65000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=1 n=1000000 ms=342.1 base_kb=98756 peak_kb=242680 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/ONE/4-4.5.3 [15:29:39 64000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=290.2 base_kb=98720 peak_kb=233792 bytes=60622083 magic=BMP8
+## rel-build/paths-1000000/perfect/EIGHT/1-4.5.3 [15:29:41 66000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=272.3 base_kb=98784 peak_kb=234544 bytes=60622083 magic=BMP8
+## rel-build/paths-1000000/perfect/EIGHT/2-main [15:29:42 64000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=8 n=1000000 ms=321.3 base_kb=98780 peak_kb=243020 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/EIGHT/3-main [15:29:44 62000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=8 n=1000000 ms=320.2 base_kb=98992 peak_kb=243352 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/EIGHT/4-4.5.3 [15:29:46 61000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=272.9 base_kb=98504 peak_kb=234280 bytes=60622083 magic=BMP8
+## rel-build/paths-1000000/perfect/ALL/1-4.5.3 [15:29:48 62000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=267.0 base_kb=98768 peak_kb=234040 bytes=60622083 magic=BMP8
+## rel-build/paths-1000000/perfect/ALL/2-main [15:29:50 63000mC busy=2 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=16 n=1000000 ms=321.3 base_kb=98988 peak_kb=242884 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/ALL/3-main [15:29:51 61000mC busy=1 swap=0MiB governor=performance]
+build paths-1000000 perfect main cpus=16 n=1000000 ms=319.5 base_kb=98808 peak_kb=242780 bytes=60622434 magic=BMP9
+## rel-build/paths-1000000/perfect/ALL/4-4.5.3 [15:29:53 60000mC busy=3 swap=0MiB governor=performance]
+build paths-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=270.2 base_kb=98912 peak_kb=234340 bytes=60622083 magic=BMP8
+## rel-build/pypi-full/dict256/ONE/1-4.5.3 [15:29:55 60000mC busy=1 swap=0MiB governor=performance]
+build pypi-full dict256 4.5.3 cpus=1 n=895600 ms=688.1 base_kb=53544 peak_kb=111552 bytes=3728584 magic=BDX3
+## rel-build/pypi-full/dict256/ONE/2-main [15:29:57 66000mC busy=2 swap=0MiB governor=performance]
+build pypi-full dict256 main cpus=1 n=895600 ms=667.7 base_kb=53700 peak_kb=115388 bytes=3706497 magic=BDX3
+## rel-build/pypi-full/dict256/ONE/3-main [15:29:59 69000mC busy=3 swap=0MiB governor=performance]
+build pypi-full dict256 main cpus=1 n=895600 ms=662.1 base_kb=53620 peak_kb=115284 bytes=3706497 magic=BDX3
+## rel-build/pypi-full/dict256/ONE/4-4.5.3 [15:30:03 64000mC busy=1 swap=0MiB governor=performance]
+build pypi-full dict256 4.5.3 cpus=1 n=895600 ms=699.7 base_kb=53384 peak_kb=111588 bytes=3728584 magic=BDX3
+## rel-build/pypi-full/dict256/EIGHT/1-4.5.3 [15:30:06 65000mC busy=2 swap=0MiB governor=performance]
+build pypi-full dict256 4.5.3 cpus=8 n=895600 ms=168.3 base_kb=53584 peak_kb=145564 bytes=3728584 magic=BDX3
+## rel-build/pypi-full/dict256/EIGHT/2-main [15:30:07 65000mC busy=1 swap=0MiB governor=performance]
+build pypi-full dict256 main cpus=8 n=895600 ms=164.2 base_kb=53624 peak_kb=148536 bytes=3706497 magic=BDX3
+## rel-build/pypi-full/dict256/EIGHT/3-main [15:30:09 66000mC busy=4 swap=0MiB governor=performance]
+build pypi-full dict256 main cpus=8 n=895600 ms=162.8 base_kb=53572 peak_kb=146676 bytes=3706497 magic=BDX3
+## rel-build/pypi-full/dict256/EIGHT/4-4.5.3 [15:30:10 64000mC busy=1 swap=0MiB governor=performance]
+build pypi-full dict256 4.5.3 cpus=8 n=895600 ms=167.4 base_kb=53668 peak_kb=145172 bytes=3728584 magic=BDX3
+## rel-build/pypi-full/perfect/ONE/1-4.5.3 [15:30:12 65000mC busy=1 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=1 n=895600 ms=177.2 base_kb=53572 peak_kb=109368 bytes=13690761 magic=BMP8
+## rel-build/pypi-full/perfect/ONE/2-main [15:30:13 64000mC busy=4 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=1 n=895600 ms=635.0 base_kb=53588 peak_kb=187272 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/ONE/3-main [15:30:15 65000mC busy=1 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=1 n=895600 ms=630.8 base_kb=53660 peak_kb=187324 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/ONE/4-4.5.3 [15:30:17 66000mC busy=0 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=1 n=895600 ms=177.2 base_kb=53728 peak_kb=109464 bytes=13690761 magic=BMP8
+## rel-build/pypi-full/perfect/EIGHT/1-4.5.3 [15:30:19 66000mC busy=3 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=8 n=895600 ms=161.1 base_kb=53628 peak_kb=110192 bytes=13690761 magic=BMP8
+## rel-build/pypi-full/perfect/EIGHT/2-main [15:30:20 63000mC busy=2 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=8 n=895600 ms=378.2 base_kb=53640 peak_kb=188008 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/EIGHT/3-main [15:30:22 64000mC busy=2 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=8 n=895600 ms=376.9 base_kb=53208 peak_kb=187768 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/EIGHT/4-4.5.3 [15:30:23 63000mC busy=2 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=8 n=895600 ms=162.4 base_kb=53740 peak_kb=110572 bytes=13690761 magic=BMP8
+## rel-build/pypi-full/perfect/ALL/1-4.5.3 [15:30:25 63000mC busy=0 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=16 n=895600 ms=164.4 base_kb=53580 peak_kb=110292 bytes=13690761 magic=BMP8
+## rel-build/pypi-full/perfect/ALL/2-main [15:30:26 61000mC busy=3 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=16 n=895600 ms=368.9 base_kb=53560 peak_kb=185620 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/ALL/3-main [15:30:28 62000mC busy=1 swap=0MiB governor=performance]
+build pypi-full perfect main cpus=16 n=895600 ms=373.5 base_kb=53656 peak_kb=185100 bytes=11682875 magic=BMP9
+## rel-build/pypi-full/perfect/ALL/4-4.5.3 [15:30:30 63000mC busy=2 swap=0MiB governor=performance]
+build pypi-full perfect 4.5.3 cpus=16 n=895600 ms=160.7 base_kb=53456 peak_kb=110056 bytes=13690761 magic=BMP8
+## rel-build/titles-en-1000000/dict256/ONE/1-4.5.3 [15:30:31 62000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1533.8 base_kb=64056 peak_kb=202092 bytes=7370097 magic=BDX3
+## rel-build/titles-en-1000000/dict256/ONE/2-main [15:30:35 68000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 main cpus=1 n=1000000 ms=1530.9 base_kb=64016 peak_kb=204460 bytes=7325045 magic=BDX3
+## rel-build/titles-en-1000000/dict256/ONE/3-main [15:30:40 67000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 main cpus=1 n=1000000 ms=1535.5 base_kb=64044 peak_kb=204736 bytes=7325045 magic=BDX3
+## rel-build/titles-en-1000000/dict256/ONE/4-4.5.3 [15:30:45 69000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1527.2 base_kb=63788 peak_kb=201896 bytes=7370097 magic=BDX3
+## rel-build/titles-en-1000000/dict256/EIGHT/1-4.5.3 [15:30:50 69000mC busy=0 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=366.2 base_kb=63908 peak_kb=207048 bytes=7370097 magic=BDX3
+## rel-build/titles-en-1000000/dict256/EIGHT/2-main [15:30:52 68000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 main cpus=8 n=1000000 ms=365.9 base_kb=63660 peak_kb=202772 bytes=7325045 magic=BDX3
+## rel-build/titles-en-1000000/dict256/EIGHT/3-main [15:30:53 67000mC busy=4 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 main cpus=8 n=1000000 ms=364.3 base_kb=63972 peak_kb=203136 bytes=7325045 magic=BDX3
+## rel-build/titles-en-1000000/dict256/EIGHT/4-4.5.3 [15:30:55 66000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=365.6 base_kb=63892 peak_kb=205544 bytes=7370097 magic=BDX3
+## rel-build/titles-en-1000000/perfect/ONE/1-4.5.3 [15:30:57 68000mC busy=3 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=203.6 base_kb=63868 peak_kb=137724 bytes=23248776 magic=BMP8
+## rel-build/titles-en-1000000/perfect/ONE/2-main [15:30:58 66000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=1 n=1000000 ms=744.2 base_kb=63708 peak_kb=246308 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/ONE/3-main [15:31:01 68000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=1 n=1000000 ms=754.1 base_kb=63780 peak_kb=246440 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/ONE/4-4.5.3 [15:31:03 69000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=202.6 base_kb=63712 peak_kb=137784 bytes=23248776 magic=BMP8
+## rel-build/titles-en-1000000/perfect/EIGHT/1-4.5.3 [15:31:04 66000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=185.3 base_kb=63636 peak_kb=138616 bytes=23248776 magic=BMP8
+## rel-build/titles-en-1000000/perfect/EIGHT/2-main [15:31:06 66000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=8 n=1000000 ms=411.9 base_kb=63680 peak_kb=247516 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/EIGHT/3-main [15:31:08 64000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=8 n=1000000 ms=415.2 base_kb=63760 peak_kb=247224 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/EIGHT/4-4.5.3 [15:31:09 64000mC busy=3 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=188.8 base_kb=63896 peak_kb=138604 bytes=23248776 magic=BMP8
+## rel-build/titles-en-1000000/perfect/ALL/1-4.5.3 [15:31:11 64000mC busy=0 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=185.5 base_kb=63976 peak_kb=138792 bytes=23248776 magic=BMP8
+## rel-build/titles-en-1000000/perfect/ALL/2-main [15:31:13 63000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=16 n=1000000 ms=420.1 base_kb=63748 peak_kb=247004 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/ALL/3-main [15:31:14 62000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 perfect main cpus=16 n=1000000 ms=412.5 base_kb=63944 peak_kb=247152 bytes=22850414 magic=BMP9
+## rel-build/titles-en-1000000/perfect/ALL/4-4.5.3 [15:31:16 65000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=188.0 base_kb=63888 peak_kb=138552 bytes=23248776 magic=BMP8
+## rel-build/titles-ru-1000000/dict256/ONE/1-4.5.3 [15:31:18 64000mC busy=1 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1369.6 base_kb=77188 peak_kb=246272 bytes=6861688 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/ONE/2-main [15:31:23 68000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 main cpus=1 n=1000000 ms=1361.8 base_kb=77476 peak_kb=247052 bytes=6841283 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/ONE/3-main [15:31:27 68000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 main cpus=1 n=1000000 ms=1369.7 base_kb=77172 peak_kb=246864 bytes=6841283 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/ONE/4-4.5.3 [15:31:33 68000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1369.3 base_kb=77336 peak_kb=246328 bytes=6861688 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/EIGHT/1-4.5.3 [15:31:38 69000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=319.1 base_kb=77032 peak_kb=224800 bytes=6861688 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/EIGHT/2-main [15:31:40 68000mC busy=1 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 main cpus=8 n=1000000 ms=311.2 base_kb=77500 peak_kb=230448 bytes=6841283 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/EIGHT/3-main [15:31:42 68000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 main cpus=8 n=1000000 ms=314.9 base_kb=77492 peak_kb=229692 bytes=6841283 magic=BDX4
+## rel-build/titles-ru-1000000/dict256/EIGHT/4-4.5.3 [15:31:43 67000mC busy=3 swap=0MiB governor=performance]
+build titles-ru-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=315.7 base_kb=77356 peak_kb=232740 bytes=6861688 magic=BDX4
+## rel-build/titles-ru-1000000/perfect/ONE/1-4.5.3 [15:31:45 68000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=245.9 base_kb=77336 peak_kb=168320 bytes=38083935 magic=BMP8
+## rel-build/titles-ru-1000000/perfect/ONE/2-main [15:31:47 67000mC busy=0 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=1 n=1000000 ms=984.8 base_kb=77528 peak_kb=308784 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/ONE/3-main [15:31:49 67000mC busy=1 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=1 n=1000000 ms=985.1 base_kb=77224 peak_kb=308928 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/ONE/4-4.5.3 [15:31:52 69000mC busy=0 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=245.7 base_kb=77320 peak_kb=168236 bytes=38083935 magic=BMP8
+## rel-build/titles-ru-1000000/perfect/EIGHT/1-4.5.3 [15:31:53 67000mC busy=3 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=225.4 base_kb=77400 peak_kb=169076 bytes=38083935 magic=BMP8
+## rel-build/titles-ru-1000000/perfect/EIGHT/2-main [15:31:55 68000mC busy=1 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=8 n=1000000 ms=522.3 base_kb=77232 peak_kb=309144 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/EIGHT/3-main [15:31:57 67000mC busy=0 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=8 n=1000000 ms=526.3 base_kb=77284 peak_kb=309428 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/EIGHT/4-4.5.3 [15:31:59 67000mC busy=4 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=227.4 base_kb=77504 peak_kb=168952 bytes=38083935 magic=BMP8
+## rel-build/titles-ru-1000000/perfect/ALL/1-4.5.3 [15:32:01 65000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=227.2 base_kb=77304 peak_kb=168748 bytes=38083935 magic=BMP8
+## rel-build/titles-ru-1000000/perfect/ALL/2-main [15:32:02 64000mC busy=0 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=16 n=1000000 ms=515.5 base_kb=77240 peak_kb=309196 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/ALL/3-main [15:32:04 65000mC busy=2 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect main cpus=16 n=1000000 ms=517.3 base_kb=77396 peak_kb=309156 bytes=33807442 magic=BMP9
+## rel-build/titles-ru-1000000/perfect/ALL/4-4.5.3 [15:32:06 64000mC busy=1 swap=0MiB governor=performance]
+build titles-ru-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=227.5 base_kb=77256 peak_kb=168796 bytes=38083935 magic=BMP8
+## rel-build/titles-zh-1000000/dict256/ONE/1-4.5.3 [15:32:08 65000mC busy=0 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=902.0 base_kb=61028 peak_kb=198444 bytes=5851205 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/ONE/2-main [15:32:11 68000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 main cpus=1 n=1000000 ms=897.3 base_kb=61024 peak_kb=199148 bytes=5830910 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/ONE/3-main [15:32:16 67000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 main cpus=1 n=1000000 ms=897.2 base_kb=61204 peak_kb=199160 bytes=5830910 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/ONE/4-4.5.3 [15:32:20 68000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=899.8 base_kb=60896 peak_kb=198444 bytes=5851205 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/EIGHT/1-4.5.3 [15:32:24 68000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=231.2 base_kb=61144 peak_kb=198712 bytes=5851205 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/EIGHT/2-main [15:32:26 66000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 main cpus=8 n=1000000 ms=230.5 base_kb=60968 peak_kb=199912 bytes=5830910 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/EIGHT/3-main [15:32:28 65000mC busy=0 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 main cpus=8 n=1000000 ms=227.7 base_kb=61088 peak_kb=200136 bytes=5830910 magic=BDX4
+## rel-build/titles-zh-1000000/dict256/EIGHT/4-4.5.3 [15:32:29 66000mC busy=3 swap=0MiB governor=performance]
+build titles-zh-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=231.7 base_kb=61044 peak_kb=199176 bytes=5851205 magic=BDX4
+## rel-build/titles-zh-1000000/perfect/ONE/1-4.5.3 [15:32:31 64000mC busy=3 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=203.5 base_kb=61152 peak_kb=127072 bytes=19136106 magic=BMP8
+## rel-build/titles-zh-1000000/perfect/ONE/2-main [15:32:32 66000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=1 n=1000000 ms=718.1 base_kb=61272 peak_kb=229548 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/ONE/3-main [15:32:34 68000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=1 n=1000000 ms=727.0 base_kb=61092 peak_kb=229492 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/ONE/4-4.5.3 [15:32:37 67000mC busy=0 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=200.1 base_kb=60804 peak_kb=126820 bytes=19136106 magic=BMP8
+## rel-build/titles-zh-1000000/perfect/EIGHT/1-4.5.3 [15:32:38 67000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=181.3 base_kb=61116 peak_kb=127864 bytes=19136106 magic=BMP8
+## rel-build/titles-zh-1000000/perfect/EIGHT/2-main [15:32:40 65000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=8 n=1000000 ms=413.5 base_kb=61264 peak_kb=230604 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/EIGHT/3-main [15:32:41 67000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=8 n=1000000 ms=415.3 base_kb=61104 peak_kb=230636 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/EIGHT/4-4.5.3 [15:32:43 65000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=180.7 base_kb=61136 peak_kb=127980 bytes=19136106 magic=BMP8
+## rel-build/titles-zh-1000000/perfect/ALL/1-4.5.3 [15:32:45 64000mC busy=0 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=185.1 base_kb=61132 peak_kb=128020 bytes=19136106 magic=BMP8
+## rel-build/titles-zh-1000000/perfect/ALL/2-main [15:32:46 65000mC busy=2 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=16 n=1000000 ms=409.3 base_kb=61120 peak_kb=230032 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/ALL/3-main [15:32:48 64000mC busy=1 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect main cpus=16 n=1000000 ms=408.8 base_kb=60940 peak_kb=230380 bytes=18236750 magic=BMP9
+## rel-build/titles-zh-1000000/perfect/ALL/4-4.5.3 [15:32:50 64000mC busy=0 swap=0MiB governor=performance]
+build titles-zh-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=182.7 base_kb=60948 peak_kb=127800 bytes=19136106 magic=BMP8
+## rel-build/urls-1000000/dict256/ONE/1-4.5.3 [15:32:51 65000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1662.3 base_kb=93484 peak_kb=234640 bytes=7511038 magic=BDX3
+## rel-build/urls-1000000/dict256/ONE/2-main [15:32:56 69000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 dict256 main cpus=1 n=1000000 ms=1663.8 base_kb=92960 peak_kb=234848 bytes=7487572 magic=BDX3
+## rel-build/urls-1000000/dict256/ONE/3-main [15:33:01 68000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 dict256 main cpus=1 n=1000000 ms=1653.4 base_kb=93204 peak_kb=234808 bytes=7487572 magic=BDX3
+## rel-build/urls-1000000/dict256/ONE/4-4.5.3 [15:33:06 68000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=1673.8 base_kb=93376 peak_kb=234596 bytes=7511038 magic=BDX3
+## rel-build/urls-1000000/dict256/EIGHT/1-4.5.3 [15:33:11 68000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=403.9 base_kb=93300 peak_kb=212220 bytes=7511038 magic=BDX3
+## rel-build/urls-1000000/dict256/EIGHT/2-main [15:33:13 68000mC busy=3 swap=0MiB governor=performance]
+build urls-1000000 dict256 main cpus=8 n=1000000 ms=399.4 base_kb=93496 peak_kb=212420 bytes=7487572 magic=BDX3
+## rel-build/urls-1000000/dict256/EIGHT/3-main [15:33:15 67000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 dict256 main cpus=8 n=1000000 ms=402.5 base_kb=93476 peak_kb=214508 bytes=7487572 magic=BDX3
+## rel-build/urls-1000000/dict256/EIGHT/4-4.5.3 [15:33:17 66000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=406.8 base_kb=93196 peak_kb=207856 bytes=7511038 magic=BDX3
+## rel-build/urls-1000000/perfect/ONE/1-4.5.3 [15:33:19 68000mC busy=3 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=272.8 base_kb=93248 peak_kb=216520 bytes=54625465 magic=BMP8
+## rel-build/urls-1000000/perfect/ONE/2-main [15:33:20 67000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=1 n=1000000 ms=323.7 base_kb=93420 peak_kb=224008 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/ONE/3-main [15:33:22 66000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=1 n=1000000 ms=326.7 base_kb=93316 peak_kb=223996 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/ONE/4-4.5.3 [15:33:24 65000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=272.8 base_kb=93360 peak_kb=216788 bytes=54625465 magic=BMP8
+## rel-build/urls-1000000/perfect/EIGHT/1-4.5.3 [15:33:26 65000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=254.4 base_kb=93348 peak_kb=217028 bytes=54625465 magic=BMP8
+## rel-build/urls-1000000/perfect/EIGHT/2-main [15:33:27 66000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=8 n=1000000 ms=306.8 base_kb=93300 peak_kb=224420 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/EIGHT/3-main [15:33:29 65000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=8 n=1000000 ms=306.1 base_kb=93200 peak_kb=224176 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/EIGHT/4-4.5.3 [15:33:31 63000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=252.7 base_kb=93404 peak_kb=217344 bytes=54625465 magic=BMP8
+## rel-build/urls-1000000/perfect/ALL/1-4.5.3 [15:33:33 65000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=258.1 base_kb=93172 peak_kb=216828 bytes=54625465 magic=BMP8
+## rel-build/urls-1000000/perfect/ALL/2-main [15:33:34 63000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=16 n=1000000 ms=308.6 base_kb=93368 peak_kb=224148 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/ALL/3-main [15:33:36 62000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 perfect main cpus=16 n=1000000 ms=312.3 base_kb=93352 peak_kb=223808 bytes=54626078 magic=BMP9
+## rel-build/urls-1000000/perfect/ALL/4-4.5.3 [15:33:38 62000mC busy=3 swap=0MiB governor=performance]
+build urls-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=255.9 base_kb=93440 peak_kb=217064 bytes=54625465 magic=BMP8
+## rel-build/uuid-1000000/dict256/ONE/1-4.5.3 [15:33:40 63000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=563.4 base_kb=73368 peak_kb=145488 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/ONE/2-main [15:33:42 67000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 dict256 main cpus=1 n=1000000 ms=549.6 base_kb=73512 peak_kb=138480 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/ONE/3-main [15:33:44 69000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 dict256 main cpus=1 n=1000000 ms=549.2 base_kb=73724 peak_kb=138712 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/ONE/4-4.5.3 [15:33:46 67000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 dict256 4.5.3 cpus=1 n=1000000 ms=558.8 base_kb=73456 peak_kb=145256 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/EIGHT/1-4.5.3 [15:33:48 68000mC busy=3 swap=0MiB governor=performance]
+build uuid-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=190.3 base_kb=73692 peak_kb=200792 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/EIGHT/2-main [15:33:50 65000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 dict256 main cpus=8 n=1000000 ms=188.7 base_kb=73476 peak_kb=201716 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/EIGHT/3-main [15:33:52 65000mC busy=2 swap=0MiB governor=performance]
+build uuid-1000000 dict256 main cpus=8 n=1000000 ms=189.9 base_kb=73596 peak_kb=202064 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/dict256/EIGHT/4-4.5.3 [15:33:53 63000mC busy=2 swap=0MiB governor=performance]
+build uuid-1000000 dict256 4.5.3 cpus=8 n=1000000 ms=191.6 base_kb=73372 peak_kb=201012 bytes=18040375 magic=BDX3
+## rel-build/uuid-1000000/perfect/ONE/1-4.5.3 [15:33:55 61000mC busy=2 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=252.7 base_kb=73228 peak_kb=164924 bytes=38264638 magic=BMP8
+## rel-build/uuid-1000000/perfect/ONE/2-main [15:33:56 63000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=1 n=1000000 ms=1011.2 base_kb=73556 peak_kb=366688 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/ONE/3-main [15:33:59 67000mC busy=3 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=1 n=1000000 ms=1015.8 base_kb=73488 peak_kb=366692 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/ONE/4-4.5.3 [15:34:02 67000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=1 n=1000000 ms=247.6 base_kb=73296 peak_kb=164824 bytes=38264638 magic=BMP8
+## rel-build/uuid-1000000/perfect/EIGHT/1-4.5.3 [15:34:04 65000mC busy=6 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=232.6 base_kb=73476 peak_kb=165560 bytes=38264638 magic=BMP8
+## rel-build/uuid-1000000/perfect/EIGHT/2-main [15:34:05 65000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=8 n=1000000 ms=523.7 base_kb=73692 peak_kb=367480 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/EIGHT/3-main [15:34:07 65000mC busy=0 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=8 n=1000000 ms=521.4 base_kb=73520 peak_kb=367292 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/EIGHT/4-4.5.3 [15:34:09 64000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=8 n=1000000 ms=230.4 base_kb=73512 peak_kb=165348 bytes=38264638 magic=BMP8
+## rel-build/uuid-1000000/perfect/ALL/1-4.5.3 [15:34:11 62000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=228.9 base_kb=73488 peak_kb=165296 bytes=38264638 magic=BMP8
+## rel-build/uuid-1000000/perfect/ALL/2-main [15:34:13 63000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=16 n=1000000 ms=530.4 base_kb=73504 peak_kb=372904 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/ALL/3-main [15:34:14 63000mC busy=1 swap=0MiB governor=performance]
+build uuid-1000000 perfect main cpus=16 n=1000000 ms=503.0 base_kb=73668 peak_kb=367212 bytes=34971745 magic=BMP9
+## rel-build/uuid-1000000/perfect/ALL/4-4.5.3 [15:34:16 64000mC busy=0 swap=0MiB governor=performance]
+build uuid-1000000 perfect 4.5.3 cpus=16 n=1000000 ms=231.0 base_kb=73676 peak_kb=165360 bytes=38264638 magic=BMP8
+## rel-build/words-full/string/ONE/1-4.5.3 [15:34:18 62000mC busy=2 swap=0MiB governor=performance]
+build words-full string 4.5.3 cpus=1 n=479823 ms=140.1 base_kb=29744 peak_kb=46516 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/ONE/2-main [15:34:19 62000mC busy=3 swap=0MiB governor=performance]
+build words-full string main cpus=1 n=479823 ms=135.3 base_kb=29360 peak_kb=45892 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/ONE/3-main [15:34:21 63000mC busy=1 swap=0MiB governor=performance]
+build words-full string main cpus=1 n=479823 ms=134.6 base_kb=29568 peak_kb=46488 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/ONE/4-4.5.3 [15:34:22 64000mC busy=2 swap=0MiB governor=performance]
+build words-full string 4.5.3 cpus=1 n=479823 ms=134.5 base_kb=29608 peak_kb=46636 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/EIGHT/1-4.5.3 [15:34:23 62000mC busy=2 swap=0MiB governor=performance]
+build words-full string 4.5.3 cpus=8 n=479823 ms=141.0 base_kb=29508 peak_kb=46548 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/EIGHT/2-main [15:34:24 63000mC busy=1 swap=0MiB governor=performance]
+build words-full string main cpus=8 n=479823 ms=134.0 base_kb=29644 peak_kb=46396 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/EIGHT/3-main [15:34:26 62000mC busy=1 swap=0MiB governor=performance]
+build words-full string main cpus=8 n=479823 ms=134.7 base_kb=29444 peak_kb=45792 bytes=2856332 magic=BIX4
+## rel-build/words-full/string/EIGHT/4-4.5.3 [15:34:27 61000mC busy=1 swap=0MiB governor=performance]
+build words-full string 4.5.3 cpus=8 n=479823 ms=134.6 base_kb=29140 peak_kb=45668 bytes=2856332 magic=BIX4
+## rel-build/titles-en-1000000/string/ONE/1-4.5.3 [15:34:28 62000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 string 4.5.3 cpus=1 n=1000000 ms=916.9 base_kb=63792 peak_kb=123564 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/ONE/2-main [15:34:30 69000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 string main cpus=1 n=1000000 ms=902.0 base_kb=63952 peak_kb=123852 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/ONE/3-main [15:34:34 69000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 string main cpus=1 n=1000000 ms=909.2 base_kb=64016 peak_kb=123980 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/ONE/4-4.5.3 [15:34:37 67000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 string 4.5.3 cpus=1 n=1000000 ms=920.8 base_kb=63780 peak_kb=123488 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/EIGHT/1-4.5.3 [15:34:40 68000mC busy=1 swap=0MiB governor=performance]
+build titles-en-1000000 string 4.5.3 cpus=8 n=1000000 ms=921.6 base_kb=63876 peak_kb=123648 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/EIGHT/2-main [15:34:43 67000mC busy=0 swap=0MiB governor=performance]
+build titles-en-1000000 string main cpus=8 n=1000000 ms=1153.2 base_kb=63840 peak_kb=123852 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/EIGHT/3-main [15:34:45 68000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 string main cpus=8 n=1000000 ms=910.4 base_kb=63900 peak_kb=123752 bytes=17282957 magic=BIX4
+## rel-build/titles-en-1000000/string/EIGHT/4-4.5.3 [15:34:48 68000mC busy=2 swap=0MiB governor=performance]
+build titles-en-1000000 string 4.5.3 cpus=8 n=1000000 ms=919.3 base_kb=63816 peak_kb=123588 bytes=17282957 magic=BIX4
+## rel-build/urls-1000000/string/ONE/1-4.5.3 [15:34:52 68000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 string 4.5.3 cpus=1 n=1000000 ms=1052.7 base_kb=93204 peak_kb=142480 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/ONE/2-main [15:34:55 68000mC busy=0 swap=0MiB governor=performance]
+build urls-1000000 string main cpus=1 n=1000000 ms=1042.7 base_kb=93256 peak_kb=142904 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/ONE/3-main [15:34:59 69000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 string main cpus=1 n=1000000 ms=1053.0 base_kb=93420 peak_kb=142884 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/ONE/4-4.5.3 [15:35:02 68000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 string 4.5.3 cpus=1 n=1000000 ms=1054.8 base_kb=93276 peak_kb=142500 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/EIGHT/1-4.5.3 [15:35:06 69000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 string 4.5.3 cpus=8 n=1000000 ms=1050.9 base_kb=93160 peak_kb=142288 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/EIGHT/2-main [15:35:09 68000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 string main cpus=8 n=1000000 ms=1051.3 base_kb=93136 peak_kb=142444 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/EIGHT/3-main [15:35:13 69000mC busy=2 swap=0MiB governor=performance]
+build urls-1000000 string main cpus=8 n=1000000 ms=1049.1 base_kb=93164 peak_kb=142528 bytes=16881383 magic=BIX4
+## rel-build/urls-1000000/string/EIGHT/4-4.5.3 [15:35:16 68000mC busy=1 swap=0MiB governor=performance]
+build urls-1000000 string 4.5.3 cpus=8 n=1000000 ms=1056.1 base_kb=93148 peak_kb=142672 bytes=16881383 magic=BIX4
+## rel-build/titles-en-10000000/dict256/EIGHT/1-4.5.3 [15:35:19 68000mC busy=3 swap=0MiB governor=performance]
+build titles-en-10000000 dict256 4.5.3 cpus=8 n=10000000 ms=2409.1 base_kb=609112 peak_kb=1086636 bytes=56509028 magic=BDX3
+## rel-build/titles-en-10000000/dict256/EIGHT/2-main [15:35:28 69000mC busy=2 swap=0MiB governor=performance]
+build titles-en-10000000 dict256 main cpus=8 n=10000000 ms=2677.5 base_kb=609268 peak_kb=1104664 bytes=55337972 magic=BDX3
+## rel-build/titles-en-10000000/dict256/EIGHT/3-main [15:35:38 69000mC busy=4 swap=0MiB governor=performance]
+build titles-en-10000000 dict256 main cpus=8 n=10000000 ms=2670.2 base_kb=608928 peak_kb=1107480 bytes=55337972 magic=BDX3
+## rel-build/titles-en-10000000/dict256/EIGHT/4-4.5.3 [15:35:50 69000mC busy=0 swap=0MiB governor=performance]
+build titles-en-10000000 dict256 4.5.3 cpus=8 n=10000000 ms=2393.4 base_kb=609008 peak_kb=1087820 bytes=56509028 magic=BDX3
+## rel-build/titles-en-10000000/perfect/EIGHT/1-4.5.3 [15:36:01 67000mC busy=3 swap=0MiB governor=performance]
+build titles-en-10000000 perfect 4.5.3 cpus=8 n=10000000 ms=2329.1 base_kb=609124 peak_kb=1180952 bytes=232345184 magic=BMP8
+## rel-build/titles-en-10000000/perfect/EIGHT/2-main [15:36:09 68000mC busy=2 swap=0MiB governor=performance]
+build titles-en-10000000 perfect main cpus=8 n=10000000 ms=5125.3 base_kb=608904 peak_kb=2229248 bytes=215916765 magic=BMP9
+## rel-build/titles-en-10000000/perfect/EIGHT/3-main [15:36:21 68000mC busy=3 swap=0MiB governor=performance]
+build titles-en-10000000 perfect main cpus=8 n=10000000 ms=5121.6 base_kb=608976 peak_kb=2231688 bytes=215916765 magic=BMP9
+## rel-build/titles-en-10000000/perfect/EIGHT/4-4.5.3 [15:36:33 67000mC busy=0 swap=0MiB governor=performance]
+build titles-en-10000000 perfect 4.5.3 cpus=8 n=10000000 ms=2339.5 base_kb=609216 peak_kb=1180996 bytes=232345184 magic=BMP8
+## rel-build/urls-10000000/dict256/EIGHT/1-4.5.3 [15:36:42 68000mC busy=1 swap=0MiB governor=performance]
+build urls-10000000 dict256 4.5.3 cpus=8 n=10000000 ms=2535.9 base_kb=903684 peak_kb=1379700 bytes=57841241 magic=BDX3
+## rel-build/urls-10000000/dict256/EIGHT/2-main [15:36:54 68000mC busy=2 swap=0MiB governor=performance]
+build urls-10000000 dict256 main cpus=8 n=10000000 ms=2849.4 base_kb=903624 peak_kb=1397860 bytes=56763317 magic=BDX3
+## rel-build/urls-10000000/dict256/EIGHT/3-main [15:37:07 68000mC busy=2 swap=0MiB governor=performance]
+build urls-10000000 dict256 main cpus=8 n=10000000 ms=2856.6 base_kb=903444 peak_kb=1394012 bytes=56763317 magic=BDX3
+## rel-build/urls-10000000/dict256/EIGHT/4-4.5.3 [15:37:19 69000mC busy=3 swap=0MiB governor=performance]
+build urls-10000000 dict256 4.5.3 cpus=8 n=10000000 ms=2540.6 base_kb=903664 peak_kb=1376980 bytes=57841241 magic=BDX3
+## rel-build/urls-10000000/perfect/EIGHT/1-4.5.3 [15:37:32 67000mC busy=2 swap=0MiB governor=performance]
+build urls-10000000 perfect 4.5.3 cpus=8 n=10000000 ms=2873.8 base_kb=903628 peak_kb=2088468 bytes=546307098 magic=BMP8
+## rel-build/urls-10000000/perfect/EIGHT/2-main [15:37:42 69000mC busy=1 swap=0MiB governor=performance]
+build urls-10000000 perfect main cpus=8 n=10000000 ms=4639.4 base_kb=903664 peak_kb=2538952 bytes=528901845 magic=BMP9
+## rel-build/urls-10000000/perfect/EIGHT/3-main [15:37:54 68000mC busy=1 swap=0MiB governor=performance]
+build urls-10000000 perfect main cpus=8 n=10000000 ms=4655.8 base_kb=903504 peak_kb=2538600 bytes=528901845 magic=BMP9
+## rel-build/urls-10000000/perfect/EIGHT/4-4.5.3 [15:38:07 67000mC busy=2 swap=0MiB governor=performance]
+build urls-10000000 perfect 4.5.3 cpus=8 n=10000000 ms=2895.5 base_kb=903692 peak_kb=2088692 bytes=546307098 magic=BMP8

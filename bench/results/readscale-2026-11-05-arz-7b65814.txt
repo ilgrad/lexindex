@@ -1,0 +1,156 @@
+## readscale/titles-en-10000000/process-1 [15:56:10 40000mC busy=1 swap=0MiB governor=performance]
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.60 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       523.0           1.9      1.00
+       2       268.0           3.7      1.95
+       4       135.3           7.4      3.87
+       8        69.6          14.4      7.51
+      16        42.9          23.3     12.21
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        24.3          41.2      1.00
+       2        11.6          86.3      2.09
+       4         6.6         151.6      3.68
+       8         3.9         255.5      6.20
+      16         3.7         272.1      6.60
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       643.5           1.6      1.00
+       2       317.6           3.1      2.03
+       4       160.6           6.2      4.01
+       8        84.0          11.9      7.66
+      16        49.6          20.2     12.97
+## readscale/titles-en-10000000/process-2 [15:57:28 65000mC busy=3 swap=0MiB governor=performance]
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.60 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       517.6           1.9      1.00
+       2       265.0           3.8      1.95
+       4       134.2           7.5      3.86
+       8        69.1          14.5      7.49
+      16        42.0          23.8     12.31
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        17.1          58.5      1.00
+       2        11.4          87.8      1.50
+       4         6.3         158.3      2.71
+       8         3.8         260.0      4.45
+      16         3.6         274.6      4.69
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       594.3           1.7      1.00
+       2       301.2           3.3      1.97
+       4       151.9           6.6      3.91
+       8        81.1          12.3      7.33
+      16        48.0          20.8     12.38
+## readscale/titles-en-10000000/process-3 [15:58:44 68000mC busy=1 swap=0MiB governor=performance]
+titles-en-10000000: 10000000 keys, 16 hardware threads
+
+DictIndex 128  (5.60 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       520.0           1.9      1.00
+       2       263.5           3.8      1.97
+       4       134.8           7.4      3.86
+       8        69.3          14.4      7.50
+      16        42.3          23.6     12.29
+
+CompactHashIndex  (1.24 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        24.7          40.5      1.00
+       2        13.1          76.2      1.88
+       4         7.2         139.7      3.45
+       8         4.2         235.6      5.81
+      16         3.8         262.5      6.48
+
+StringIndex  (13.25 B/key over 10000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       594.6           1.7      1.00
+       2       297.2           3.4      2.00
+       4       150.5           6.6      3.95
+       8        79.6          12.6      7.47
+      16        46.8          21.4     12.70
+## readscale/titles-en-1000000/process-1 [16:00:01 68000mC busy=2 swap=0MiB governor=performance]
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.40 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       283.5           3.5      1.00
+       2       150.2           6.7      1.89
+       4        77.1          13.0      3.67
+       8        39.8          25.2      7.13
+      16        27.0          37.1     10.51
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        13.7          73.1      1.00
+       2         7.2         139.5      1.91
+       4         3.7         267.8      3.66
+       8         2.7         370.4      5.07
+      16         2.8         357.5      4.89
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       238.1           4.2      1.00
+       2       124.6           8.0      1.91
+       4        63.2          15.8      3.77
+       8        32.5          30.7      7.32
+      16        18.9          52.8     12.58
+## readscale/titles-en-1000000/process-2 [16:00:37 69000mC busy=1 swap=0MiB governor=performance]
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.40 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       284.5           3.5      1.00
+       2       151.1           6.6      1.88
+       4        77.6          12.9      3.67
+       8        39.8          25.1      7.14
+      16        27.0          37.1     10.54
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        13.4          74.5      1.00
+       2         7.0         142.9      1.92
+       4         3.7         269.9      3.62
+       8         2.7         370.9      4.98
+      16         2.8         357.3      4.80
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       246.1           4.1      1.00
+       2       128.5           7.8      1.92
+       4        65.0          15.4      3.79
+       8        33.3          30.0      7.38
+      16        19.5          51.3     12.63
+## readscale/titles-en-1000000/process-3 [16:01:14 67000mC busy=3 swap=0MiB governor=performance]
+titles-en-1000000: 1000000 keys, 16 hardware threads
+
+DictIndex 128  (7.40 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       286.1           3.5      1.00
+       2       151.5           6.6      1.89
+       4        77.4          12.9      3.70
+       8        39.8          25.1      7.19
+      16        27.1          36.9     10.57
+
+CompactHashIndex  (1.24 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1        13.6          73.3      1.00
+       2         7.1         140.6      1.92
+       4         3.7         267.9      3.66
+       8         2.7         370.0      5.05
+      16         2.8         358.0      4.88
+
+StringIndex  (17.28 B/key over 1000000 keys)
+ threads   ns/lookup   M lookups/s   speedup
+       1       240.8           4.2      1.00
+       2       123.4           8.1      1.95
+       4        63.8          15.7      3.78
+       8        32.7          30.6      7.36
+      16        19.1          52.3     12.59

@@ -1,0 +1,117 @@
+[15:06] waiting for the machine to settle before latency (up to 30 min)
+[15:08] stage latency
+[15:13] waiting for the machine to settle before sweep (up to 30 min)
+[15:14] stage sweep
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2b/out/pybench/sweep.py:46: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  ("CompactHashIndex fp=1", lambda keys: lexindex.CompactHashIndex(keys, 1), False),
+[15:24] waiting for the machine to settle before rel-build (up to 30 min)
+[15:25] stage rel-build
+[15:38] waiting for the machine to settle before rel-scale (up to 30 min)
+[15:39] stage rel-scale
+[15:55] waiting for the machine to settle before readscale (up to 30 min)
+[15:56] stage readscale
+[16:01] waiting for the machine to settle before coldmmap (up to 30 min)
+[16:04] stage coldmmap
+[16:05] waiting for the machine to settle before scale (up to 30 min)
+[16:05] stage scale
+[16:08] waiting for the machine to settle before mphf (up to 30 min)
+[16:09] stage mphf
+[16:27] waiting for the machine to settle before mphf-strings (up to 30 min)
+[16:29] stage mphf-strings
+[16:36] waiting for the machine to settle before uops-pad (up to 30 min)
+[16:38] stage uops-pad
+[16:51] waiting for the machine to settle before mphf-misses (up to 30 min)
+[16:52] stage mphf-misses
+[16:58] waiting for the machine to settle before mphf-lanes-1b (up to 30 min)
+[17:00] stage mphf-lanes-1b
+mph built 7.6 s
+compact built 48.0 s
+fast built 0.0 s
+mphb8 round 0: wall 4.13, per thread min 32.62 mean 32.78 max 32.88 (x8 = 4.08 / 4.10 / 4.11)
+cmpb8 round 0: wall 3.37, per thread min 26.55 mean 26.63 max 26.83 (x8 = 3.32 / 3.33 / 3.35)
+mph8 round 0: wall 4.28, per thread min 33.25 mean 33.67 max 34.03 (x8 = 4.16 / 4.21 / 4.25)
+cmp8 round 0: wall 4.62, per thread min 36.42 mean 36.63 max 36.86 (x8 = 4.55 / 4.58 / 4.61)
+cmp8 round 1: wall 4.63, per thread min 36.37 mean 36.60 max 36.82 (x8 = 4.55 / 4.58 / 4.60)
+mph8 round 1: wall 4.28, per thread min 32.92 mean 33.63 max 34.11 (x8 = 4.11 / 4.20 / 4.26)
+cmpb8 round 1: wall 3.36, per thread min 26.44 mean 26.56 max 26.79 (x8 = 3.31 / 3.32 / 3.35)
+mphb8 round 1: wall 4.13, per thread min 32.68 mean 32.77 max 32.89 (x8 = 4.09 / 4.10 / 4.11)
+mphb8 round 2: wall 4.13, per thread min 32.65 mean 32.75 max 32.89 (x8 = 4.08 / 4.09 / 4.11)
+cmpb8 round 2: wall 3.36, per thread min 25.80 mean 26.08 max 26.78 (x8 = 3.23 / 3.26 / 3.35)
+mph8 round 2: wall 4.29, per thread min 33.36 mean 33.62 max 34.19 (x8 = 4.17 / 4.20 / 4.27)
+cmp8 round 2: wall 4.61, per thread min 36.19 mean 36.41 max 36.74 (x8 = 4.52 / 4.55 / 4.59)
+cmp8 round 3: wall 4.64, per thread min 36.32 mean 36.57 max 36.91 (x8 = 4.54 / 4.57 / 4.61)
+mph8 round 3: wall 4.29, per thread min 33.14 mean 33.71 max 34.16 (x8 = 4.14 / 4.21 / 4.27)
+cmpb8 round 3: wall 3.35, per thread min 26.49 mean 26.54 max 26.57 (x8 = 3.31 / 3.32 / 3.32)
+mphb8 round 3: wall 4.13, per thread min 32.56 mean 32.71 max 32.84 (x8 = 4.07 / 4.09 / 4.11)
+mphb8 round 4: wall 4.13, per thread min 32.64 mean 32.73 max 32.87 (x8 = 4.08 / 4.09 / 4.11)
+cmpb8 round 4: wall 3.35, per thread min 26.37 mean 26.46 max 26.65 (x8 = 3.30 / 3.31 / 3.33)
+mph8 round 4: wall 4.28, per thread min 33.28 mean 33.74 max 34.06 (x8 = 4.16 / 4.22 / 4.26)
+cmp8 round 4: wall 4.60, per thread min 36.27 mean 36.47 max 36.64 (x8 = 4.53 / 4.56 / 4.58)
+cmp8 round 5: wall 4.63, per thread min 36.33 mean 36.63 max 36.85 (x8 = 4.54 / 4.58 / 4.61)
+mph8 round 5: wall 4.28, per thread min 33.20 mean 33.76 max 34.08 (x8 = 4.15 / 4.22 / 4.26)
+cmpb8 round 5: wall 3.35, per thread min 26.54 mean 26.58 max 26.62 (x8 = 3.32 / 3.32 / 3.33)
+mphb8 round 5: wall 4.12, per thread min 32.67 mean 32.77 max 32.84 (x8 = 4.08 / 4.10 / 4.10)
+transparent huge pages off
+mph built 8.0 s
+compact built 47.9 s
+fast built 0.0 s
+mphb8 round 0: wall 3.81, per thread min 29.99 mean 30.11 max 30.31 (x8 = 3.75 / 3.76 / 3.79)
+cmpb8 round 0: wall 3.09, per thread min 24.02 mean 24.15 max 24.50 (x8 = 3.00 / 3.02 / 3.06)
+mph8 round 0: wall 4.08, per thread min 31.51 mean 31.79 max 32.44 (x8 = 3.94 / 3.97 / 4.05)
+cmp8 round 0: wall 4.34, per thread min 34.08 mean 34.27 max 34.56 (x8 = 4.26 / 4.28 / 4.32)
+cmp8 round 1: wall 4.38, per thread min 34.37 mean 34.67 max 34.83 (x8 = 4.30 / 4.33 / 4.35)
+mph8 round 1: wall 4.07, per thread min 31.41 mean 31.82 max 32.35 (x8 = 3.93 / 3.98 / 4.04)
+cmpb8 round 1: wall 3.01, per thread min 23.79 mean 23.87 max 23.92 (x8 = 2.97 / 2.98 / 2.99)
+mphb8 round 1: wall 3.79, per thread min 29.91 mean 30.05 max 30.11 (x8 = 3.74 / 3.76 / 3.76)
+mphb8 round 2: wall 3.78, per thread min 29.93 mean 30.03 max 30.12 (x8 = 3.74 / 3.75 / 3.76)
+cmpb8 round 2: wall 2.99, per thread min 23.64 mean 23.71 max 23.77 (x8 = 2.96 / 2.96 / 2.97)
+mph8 round 2: wall 4.03, per thread min 31.41 mean 31.63 max 32.10 (x8 = 3.93 / 3.95 / 4.01)
+cmp8 round 2: wall 4.32, per thread min 33.99 mean 34.23 max 34.37 (x8 = 4.25 / 4.28 / 4.30)
+cmp8 round 3: wall 4.38, per thread min 34.33 mean 34.59 max 34.87 (x8 = 4.29 / 4.32 / 4.36)
+mph8 round 3: wall 4.05, per thread min 31.36 mean 31.82 max 32.31 (x8 = 3.92 / 3.98 / 4.04)
+cmpb8 round 3: wall 3.03, per thread min 23.97 mean 24.00 max 24.06 (x8 = 3.00 / 3.00 / 3.01)
+mphb8 round 3: wall 3.79, per thread min 29.91 mean 30.04 max 30.12 (x8 = 3.74 / 3.75 / 3.77)
+mphb8 round 4: wall 3.78, per thread min 29.79 mean 30.00 max 30.08 (x8 = 3.72 / 3.75 / 3.76)
+cmpb8 round 4: wall 2.98, per thread min 23.51 mean 23.63 max 23.70 (x8 = 2.94 / 2.95 / 2.96)
+mph8 round 4: wall 4.01, per thread min 31.39 mean 31.64 max 31.97 (x8 = 3.92 / 3.96 / 4.00)
+cmp8 round 4: wall 4.33, per thread min 34.00 mean 34.22 max 34.48 (x8 = 4.25 / 4.28 / 4.31)
+cmp8 round 5: wall 4.38, per thread min 34.26 mean 34.59 max 34.82 (x8 = 4.28 / 4.32 / 4.35)
+mph8 round 5: wall 4.04, per thread min 31.50 mean 31.79 max 32.11 (x8 = 3.94 / 3.97 / 4.01)
+cmpb8 round 5: wall 3.02, per thread min 23.86 mean 23.91 max 23.93 (x8 = 2.98 / 2.99 / 2.99)
+mphb8 round 5: wall 3.78, per thread min 29.86 mean 30.00 max 30.06 (x8 = 3.73 / 3.75 / 3.76)
+mph built 7.8 s
+compact built 46.6 s
+fast built 0.0 s
+mphb8 round 0: wall 3.17, per thread min 24.95 mean 25.08 max 25.19 (x8 = 3.12 / 3.13 / 3.15)
+cmpb8 round 0: wall 2.50, per thread min 19.60 mean 19.71 max 19.78 (x8 = 2.45 / 2.46 / 2.47)
+mph8 round 0: wall 3.22, per thread min 25.08 mean 25.32 max 25.60 (x8 = 3.14 / 3.16 / 3.20)
+cmp8 round 0: wall 4.00, per thread min 31.45 mean 31.63 max 31.82 (x8 = 3.93 / 3.95 / 3.98)
+cmp8 round 1: wall 4.32, per thread min 32.49 mean 32.91 max 34.28 (x8 = 4.06 / 4.11 / 4.29)
+mph8 round 1: wall 3.20, per thread min 25.18 mean 25.27 max 25.48 (x8 = 3.15 / 3.16 / 3.19)
+cmpb8 round 1: wall 2.46, per thread min 19.36 mean 19.43 max 19.48 (x8 = 2.42 / 2.43 / 2.44)
+mphb8 round 1: wall 3.15, per thread min 24.77 mean 24.91 max 25.00 (x8 = 3.10 / 3.11 / 3.12)
+mphb8 round 2: wall 3.14, per thread min 24.70 mean 24.87 max 24.96 (x8 = 3.09 / 3.11 / 3.12)
+cmpb8 round 2: wall 2.40, per thread min 18.64 mean 18.95 max 19.09 (x8 = 2.33 / 2.37 / 2.39)
+mph8 round 2: wall 3.17, per thread min 24.85 mean 25.12 max 25.23 (x8 = 3.11 / 3.14 / 3.15)
+cmp8 round 2: wall 3.93, per thread min 31.07 mean 31.20 max 31.26 (x8 = 3.88 / 3.90 / 3.91)
+cmp8 round 3: wall 4.04, per thread min 31.56 mean 31.91 max 32.14 (x8 = 3.95 / 3.99 / 4.02)
+mph8 round 3: wall 3.22, per thread min 25.05 mean 25.35 max 25.60 (x8 = 3.13 / 3.17 / 3.20)
+cmpb8 round 3: wall 2.48, per thread min 19.43 mean 19.59 max 19.69 (x8 = 2.43 / 2.45 / 2.46)
+mphb8 round 3: wall 3.15, per thread min 24.88 mean 24.97 max 25.11 (x8 = 3.11 / 3.12 / 3.14)
+mphb8 round 4: wall 3.15, per thread min 24.85 mean 24.94 max 25.01 (x8 = 3.11 / 3.12 / 3.13)
+cmpb8 round 4: wall 2.41, per thread min 18.70 mean 18.98 max 19.10 (x8 = 2.34 / 2.37 / 2.39)
+mph8 round 4: wall 3.20, per thread min 24.92 mean 25.09 max 25.41 (x8 = 3.12 / 3.14 / 3.18)
+cmp8 round 4: wall 3.94, per thread min 31.12 mean 31.28 max 31.42 (x8 = 3.89 / 3.91 / 3.93)
+cmp8 round 5: wall 4.05, per thread min 31.65 mean 31.96 max 32.16 (x8 = 3.96 / 3.99 / 4.02)
+mph8 round 5: wall 3.22, per thread min 25.13 mean 25.37 max 25.59 (x8 = 3.14 / 3.17 / 3.20)
+cmpb8 round 5: wall 2.49, per thread min 19.54 mean 19.66 max 19.79 (x8 = 2.44 / 2.46 / 2.47)
+mphb8 round 5: wall 3.16, per thread min 24.93 mean 25.01 max 25.10 (x8 = 3.12 / 3.13 / 3.14)
+[17:03] waiting for the machine to settle before mphf-1b (up to 30 min)
+[17:06] stage mphf-1b
+[17:55] waiting for the machine to settle before latency-model (up to 30 min)
+[17:57] stage latency-model
+/home/ilgrad/Documents/projects/betula/repos/lexindex/local/w2b/out/pybench/latency_model.py:253: DeprecationWarning: fingerprint_bytes is deprecated: pass fingerprint_bits, at eight times the width
+  ("CompactHashIndex fp=1", lambda k: lexindex.CompactHashIndex(k, 1), False),
+[18:08] waiting for the machine to settle before frontier-10m (up to 30 min)
+[18:09] stage frontier-10m
+[23:26] all done. Reopen Zed and say so.

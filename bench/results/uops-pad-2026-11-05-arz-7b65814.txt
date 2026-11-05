@@ -1,0 +1,32 @@
+## uops-pad/100m-a [16:38:28 39000mC busy=2 swap=0MiB governor=performance]
+n 100000000, shuffled probe order, 1.911 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop        8.97    10.50    11.39    13.69    15.87    21.86    28.84      0.1091
+alu        8.96    14.43    16.80    20.14    28.16    30.99    48.15      0.2681
+dep       10.14    12.51    14.15    17.84    24.12    33.52    66.38      0.5134
+load      10.15    14.43    18.96    28.03    43.12    76.93   172.33      1.4907
+one dependent load over 22.8 MB: 43.4 ns; window = latency / nop slope = 398 instructions
+## uops-pad/100m-b [16:42:44 52000mC busy=3 swap=0MiB governor=performance]
+n 100000000, shuffled probe order, 1.911 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop        9.00    10.51    11.38    13.72    15.89    21.88    28.86      0.1090
+alu        8.99    14.46    16.84    20.22    28.22    30.98    48.12      0.2679
+dep       10.15    12.53    14.17    17.85    24.14    33.51    66.45      0.5147
+load      10.17    14.47    19.03    28.03    43.13    77.06   172.40      1.4896
+one dependent load over 22.8 MB: 43.5 ns; window = latency / nop slope = 399 instructions
+## uops-pad/10m [16:46:59 52000mC busy=1 swap=0MiB governor=performance]
+n 10000000, shuffled probe order, 1.915 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop        2.47     2.86     3.04     3.60     4.45     6.45     9.63      0.0498
+alu        2.46     4.29     4.97     6.25     9.24    11.67    21.32      0.1508
+dep        2.67     3.47     4.09     5.41     8.11    14.02    41.85      0.4349
+load       2.67     4.37     6.11    10.88    22.59    51.97   141.38      1.3971
+one dependent load over 2.3 MB: 10.6 ns; window = latency / nop slope = 213 instructions
+## uops-pad/100m-seq [16:47:14 61000mC busy=4 swap=0MiB governor=performance]
+n 100000000, sequential probe order, 1.911 bits/key, min of 3 rounds, ns a lookup
+pad           0        4        8       16       32       64      128     ns/step
+nop        8.96    10.48    11.36    13.69    15.86    21.85    28.79      0.1083
+alu        8.95    14.43    16.79    20.10    28.28    30.87    48.07      0.2688
+dep       10.15    12.49    14.13    17.86    24.15    33.55    66.43      0.5138
+load      10.16    14.43    18.97    28.10    43.15    76.92   172.48      1.4931
+one dependent load over 22.8 MB: 43.1 ns; window = latency / nop slope = 397 instructions

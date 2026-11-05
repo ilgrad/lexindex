@@ -1,0 +1,43 @@
+# versions mphf-misses: ptr_hash 2.1.3  ph 0.11.0  sux 0.10.3  sux 0.15.3  
+## mphf-misses/10m [16:52:29 39000mC busy=2 swap=0MiB governor=performance]
+n 10000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns  LLC miss/lookup build peak MB  huge MB
+lexindex MPH3                            1.915     10.4   +0.0%      2.4   +1.5%      2.5   +0.9%    0.864   +0.1%          48.6      2.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.149     15.4   +0.0%      5.3   +6.1%        -            0.979   +0.1%         101.6      2.0
+ph 0.11 PHast (SeedOnly)                 1.925     89.0   +0.0%      4.1   +1.0%        -            0.861   +0.1%          77.7      2.0
+ptr_hash 2.1.3 compact                   2.143     43.7   +0.0%      5.1   +3.7%      4.5   +0.3%    0.714   +0.3%         156.3      2.0
+ptr_hash 2.1.3 balanced                  2.378     28.1   +0.0%      5.1   +0.1%      4.5   +0.2%    0.734   +0.5%         151.7      2.0
+ptr_hash 2.1.3 fast                      2.990    132.7   +0.0%      2.8   +2.2%      2.8   +0.4%    0.880   +0.2%         151.4      2.0
+sux 0.15 PHastR (8-bit, 4.25)            1.946     10.8   +0.0%      4.4   +0.1%        -            0.838   +0.1%          79.6      2.0
+sux 0.15 PHastR (8-bit, 4.5)             1.906     11.2   +0.0%      4.9   +1.9%        -            0.853   +0.1%          79.1      2.0
+sux 0.15 PHastR (8-bit, 4.75)            1.901     11.8   +0.0%      5.6   +0.5%        -            0.885   +0.1%          78.8      2.0
+sux 0.15 PHastR (10-bit, 5.75)           1.828     19.8   +0.0%      5.8   +1.4%        -            0.978   +0.0%          81.1      2.0
+sux 0.15 PHastR (10-bit, 6)              1.827     17.5   +0.0%      6.4   +0.1%        -            1.005   +0.0%          81.1      2.0
+## mphf-misses/100m [16:52:38 69000mC busy=2 swap=0MiB governor=performance]
+n 100000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns  LLC miss/lookup build peak MB  huge MB
+lexindex MPH3                            1.911      8.8   +0.0%      8.6   +0.5%      3.5   +0.3%    1.058   +0.1%         280.8     20.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.147     17.6   +0.0%     17.0   +0.1%        -            1.254   +0.0%         967.7     20.0
+ph 0.11 PHast (SeedOnly)                 1.921     90.6   +0.0%     12.9   +0.9%        -            1.096   +0.2%         954.0     20.0
+ptr_hash 2.1.3 compact                   2.143     43.8   +0.0%     15.8   +0.8%      5.9   +0.5%    1.039   +1.3%        1126.3     20.0
+ptr_hash 2.1.3 balanced                  2.378     26.5   +0.0%     16.7   +0.2%      6.0   +0.3%    1.041   +0.2%         931.8     20.0
+ptr_hash 2.1.3 fast                      2.990    191.8   +0.0%     10.5   +0.8%      4.9   +0.4%    1.045   +0.1%        1347.3     20.0
+sux 0.15 PHastR (8-bit, 4.25)            1.943     11.0   +0.0%     15.3   +1.0%        -            1.048   +0.0%         965.6     20.0
+sux 0.15 PHastR (8-bit, 4.5)             1.903     10.8   +0.0%     16.1   +1.0%        -            1.077   +0.3%         937.9     20.0
+sux 0.15 PHastR (8-bit, 4.75)            1.898     11.2   +0.0%     17.6   +1.2%        -            1.133   +0.0%         930.4     20.0
+sux 0.15 PHastR (10-bit, 5.75)           1.821     17.7   +0.0%     18.1   +0.3%        -            1.237   +0.1%         932.0     20.0
+sux 0.15 PHastR (10-bit, 6)              1.820     17.5   +0.0%     18.8   +1.3%        -            1.289   +0.5%         916.6     20.0
+## mphf-misses/300m [16:54:24 58000mC busy=0 swap=0MiB governor=performance]
+n 300000000, 8 thread(s), builds min of 1 rounds, lookups over one shuffled probe order of 100000000 keys drawn at random, min of 3 passes, the rows in turn; spread = slowest over fastest; batch = index_all / index_stream in chunks of 4096
+                                      bits/key     build ns/key        lookup ns         batch ns  LLC miss/lookup build peak MB  huge MB
+lexindex MPH3                            1.911      8.6   +0.0%     11.1   +0.4%      5.8   +0.4%    1.073   +0.1%         797.8     64.0
+ph 0.11 PHast+ (ShiftOnlyWrapped)        2.146     20.5   +0.0%     23.1   +2.0%        -            1.435   +0.8%        2913.5     64.0
+ph 0.11 PHast (SeedOnly)                 1.921     94.1   +0.0%     16.8   +0.9%        -            1.234   +0.0%        2897.3     64.0
+ptr_hash 2.1.3 compact                   2.143     46.1   +0.0%     21.0   +0.1%      6.9   +0.2%    1.239   +0.0%        2794.2     64.0
+ptr_hash 2.1.3 balanced                  2.378     28.0   +0.0%     21.3   +0.0%      7.0   +0.4%    1.296   +0.0%        2461.9     64.0
+ptr_hash 2.1.3 fast                      2.990    371.4   +0.0%     12.4   +0.0%      7.0   +0.0%    1.245   +0.0%        4288.6     64.0
+sux 0.15 PHastR (8-bit, 4.25)            1.942     11.0   +0.0%     19.4   +0.1%        -            1.173   +0.0%        3176.9     64.0
+sux 0.15 PHastR (8-bit, 4.5)             1.902     11.1   +0.0%     21.2   +0.1%        -            1.227   +0.4%        2801.8     64.0
+sux 0.15 PHastR (8-bit, 4.75)            1.898     11.2   +0.0%     23.7   +0.1%        -            1.295   +0.0%        2805.2     64.0
+sux 0.15 PHastR (10-bit, 5.75)           1.820     18.1   +0.0%     23.8   +0.2%        -            1.394   +0.1%        2852.7     64.0
+sux 0.15 PHastR (10-bit, 6)              1.819     17.5   +0.0%     25.4   +0.2%        -            1.434   +0.1%        2808.5     64.0
