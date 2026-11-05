@@ -1455,14 +1455,24 @@ mod tests {
     #[test]
     fn auto_can_pick_a_hashed_dictionary_and_a_double_array() {
         let dir = tmpdir();
-        let keys = keys_file(&dir, &corpus(2_000));
-        let asked: [(&str, &[&str]); 2] = [
+        let words = keys_file(&dir, &corpus(2_000));
+        // A double array's walk beats the transducer on short keys only, as on the `numeric`
+        // corpus: six-digit ids.
+        let ids = dir.join("ids.txt");
+        let text: String = (0..2_000)
+            .map(|i| format!("{}\n", 100_000 + 2 * i))
+            .collect();
+        std::fs::write(&ids, text).unwrap();
+        let ids = ids.to_str().unwrap().to_string();
+        let asked: [(&str, &str, &[&str]); 2] = [
             (
                 "DoubleArrayIndex",
+                &ids,
                 &["--common-prefix", "--objective", "latency"],
             ),
             (
                 "HashedDictIndex",
+                &words,
                 &[
                     "--closed-vocabulary",
                     "--reverse",
@@ -1472,12 +1482,12 @@ mod tests {
                 ],
             ),
         ];
-        for (name, needs) in asked {
+        for (name, keys, needs) in asked {
             if name == "HashedDictIndex" && !cfg!(feature = "mph") {
                 continue;
             }
             let blob = dir.join(format!("{name}.bin"));
-            let mut args = vec!["build", keys.as_str(), blob.to_str().unwrap()];
+            let mut args = vec!["build", keys, blob.to_str().unwrap()];
             args.extend_from_slice(needs);
             let (code, _, err) = go(&args, "");
             assert_eq!(code, 0, "{err}");
