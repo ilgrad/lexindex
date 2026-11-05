@@ -75,7 +75,7 @@ fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.907 bits/key at
+Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.915 bits/key at
 10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.3 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.74 B/key at 4 bits
 (6.25% false positives), 1.24 at the 8-bit default (0.39%), 2.24 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
@@ -145,8 +145,8 @@ ids in `[0, n)` and lets through a share `ε` of other keys needs, for almost ev
 least `log₂e + log₂(1/ε)` bits a key, less `O(log n)` bits in all. Such a structure accepts at most
 `n + ε·u` of the `u` possible keys, and among them it can pick out at most `((n + ε·u)/n)ⁿ` member
 sets — one accepted key for each id — of the `C(u, n)` it has to tell apart. At `ε = 2⁻⁸` that is
-9.443 bits a key (9.4427 at 10 M keys and `u = 2⁶⁴`). The 8-bit default stores 9.907, the perfect
-hash's 1.907 and the fingerprint's 8: 0.464 bits, 4.9 %, above the floor, and all of it is the
+9.443 bits a key (9.4427 at 10 M keys and `u = 2⁶⁴`). The 8-bit default stores 9.915, the perfect
+hash's 1.915 and the fingerprint's 8: 0.472 bits, 5.0 %, above the floor, and all of it is the
 perfect hash's. Given the slots, the fingerprints already sit at `log₂(1/ε)`, so moving them into
 any other structure, a retrieval table or a ribbon, cannot save a bit; only a smaller perfect hash
 can, down to `log₂e` = 1.443.
@@ -236,8 +236,8 @@ Measured on the 10 M bigram hashes (`mphf::spike::partitioned` under `bench-mphf
 flat layout — one seeds array and one slot space with per-part offsets — would win most of the
 lookup back at the price of a new format for all three hash indexes, and the memory it saves is not
 the binding constraint at the scale that would need it: at 10⁹ keys the MPHF's construction peak was
-0.94 GB on 2026-09-10, the harness now reads 2.75 GB on eight threads
-([`bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt)),
+0.94 GB on 2026-09-10, the harness now reads 2.60 GB on eight threads
+([`bench/results/mphf-vs-1b-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-11-05-arz-7b65814.txt)),
 and the sort scratch was 44 GB of disk.
 
 ## `ClosedHashIndex`
@@ -404,8 +404,8 @@ in one process and in two builds of the harness
 `id` takes 19–31 % less time on the twelve at a million keys and 13–22 % on six corpora at ten
 million; `paths` does not move. At 32 keys a block the restart run is a single restart, and the
 words saved at most 15 % — and cost `numeric` at ten million 3–10 %. The frontier's separate passes
-on 2026-11-05 read 15–32 % on the twelve, 4 % on `paths` and 12–20 % at ten million; at 32 keys a
-block, from 15 % saved on `numeric` to 1.2 % lost on `opaque` at ten million.
+on 2026-11-05 read 15–32 % on the twelve, 4 % on `paths` and 12–22 % at ten million; at 32 keys a
+block, from 15 % saved on `numeric` to none on `opaque` at ten million.
 
 It is a method rather than the default because it is paid for twice. The words take `8 / micro`
 bytes a key — 0.5 at the default block, 0.25 at 1024 — in memory and in no blob. The size in every

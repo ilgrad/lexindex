@@ -37,11 +37,11 @@ the cheapest first:
 ```console
 $ lexindex plan keys.txt --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
-+ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
-+ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
-  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+* DictIndex              1186914 bytes   2.47 B/key    337 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    295 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    283 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    320 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    206 ns   6.01 B/key resident     94.8 ms build  estimated
 the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 ```
@@ -56,11 +56,11 @@ not as a promise.
 ```console
 $ lexindex build keys.txt words.bdx --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
-+ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
-+ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
-  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+* DictIndex              1186914 bytes   2.47 B/key    337 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    295 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    283 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    320 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    206 ns   6.01 B/key resident     94.8 ms build  estimated
 the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 wrote words.bdx: DictIndex over 479823 keys, 1200371 bytes (2.50 B/key)

@@ -25,10 +25,10 @@ The figure is the size axis: lexindex's smallest index wins it on all thirteen b
 `paths`, where the opt-in `labels=True` build takes it, and on all thirteen once both are mapped, by
 2.9 % there; a mapped `DictIndex` also holds the 0.02–0.29 bytes a key of tables it derives at load,
 [counted beside MARISA's](https://ilgrad.github.io/lexindex/benchmarks/#marisa-at-its-smallest). On an exact lookup XCDAT is still ahead on six of the thirteen at a million keys: lexindex's fastest exact search there — `DictIndex` at `DictProfile::Fast` after `route_microblocks()`, which holds a byte a key more in memory, `StringIndex`, or `DoubleArrayIndex` where its trie is small — beats XCDAT 15 on `numeric`, `dna` and `urls`, is level on `words`, `paths`, `uuid` and `titles-ru`, within 3 %, and trails it by 1.20× to 1.41× on the other six.
-At ten million keys it is ahead on five, 0.31× to 0.90×, and 1.31× behind on `opaque`. **`HashedDictIndex` (4.1) wins the latency axis outright:** the same
-dictionary with its `id` answered by a perfect hash is 4.0× to 8.7× faster than XCDAT 15 in a free
-loop, 1.7× to 3.8× when each lookup waits on the last, and 1.4× to 3.2× smaller, on all thirteen
-corpora at a million keys and all six at ten million — and 2.9× to 7.0× faster (1.7× to 3.6×
+At ten million keys it is ahead on five, 0.32× to 0.93×, and 1.35× behind on `opaque`. **`HashedDictIndex` (4.1) wins the latency axis outright:** the same
+dictionary with its `id` answered by a perfect hash is 4.0× to 8.6× faster than XCDAT 15 in a free
+loop, 1.7× to 3.7× when each lookup waits on the last, and 1.4× to 3.2× smaller, on all thirteen
+corpora at a million keys and all six at ten million — and 2.9× to 7.0× faster (1.6× to 3.6×
 chained) and 1.2× to 2.8× smaller with an 8-bit fingerprint that turns away all but one stranger in
 256; an exact answer for a stranger is the dictionary's search above. Every column is in
 [the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#hasheddictindex-against-xcdat), and
@@ -85,9 +85,9 @@ of them turns an id back into its key.</sub>
   it a minimal perfect hash and a table holding each key's **rank** at its slot, so `id` is a hash
   and a read where the dictionary searches, while `key(id)`, prefix, range and iteration are the
   dictionary's own, on the same ids. Against XCDAT, the fastest trie measured, over thirteen corpora
-  at a million keys and six at ten million: **4.0–8.7× faster in a free loop, 1.7–3.8× when each
+  at a million keys and six at ten million: **4.0–8.6× faster in a free loop, 1.7–3.7× when each
   lookup waits on the last, and 1.4–3.2× smaller** through `id_unchecked`, for 2.62 bytes a key over
-  the dictionary on real words, and 2.9–7.0× faster (1.7–3.6× chained) and 1.2–2.8× smaller through
+  the dictionary on real words, and 2.9–7.0× faster (1.6–3.6× chained) and 1.2–2.8× smaller through
   `id` with an 8-bit fingerprint — a byte a key more — that turns away all
   but one stranger in 256. The dictionary's queries, and a hash's `id`.
 - **`CompactHashIndex`** — the **smallest** `string → dense id` map that can reject a non-member:
@@ -562,8 +562,8 @@ Until 1.0 the perfect hash **was** `ptr_hash`. Its pilot table was serialised be
 so a blob holding one could not be validated from outside the crate that owned it, and `from_bytes`
 and `load_mmap` had to be `unsafe fn` on both hash indexes; an MPH whose every array length is
 written and checked here makes those loaders safe, and that is the whole of the trade. The
-`MPH3` table builds 10 M keys in **38.8 ns/key on one thread** (14.2 ns/key on eight) at
-**1.91 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and answers a lookup in 2.3 ns,
+`MPH3` table builds 10 M keys in **34.3 ns/key on one thread** (10.5 ns/key on eight) at
+**1.91 bits/key**, against 280 ns/key and 2.39 bits for 1.0's, and answers a lookup in 2.4 ns,
 2.4 in a batch; the same-process comparison with `ptr_hash` and the PHast authors'
 `ph` crate is [in the benchmarks](https://ilgrad.github.io/lexindex/benchmarks/#the-perfect-hash-against-ptrhash-and-phast).
 

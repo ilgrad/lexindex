@@ -1058,21 +1058,21 @@ own key iterators, and computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
-+ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
-+ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
-  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+* DictIndex              1186914 bytes   2.47 B/key    337 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    295 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    283 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    320 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    206 ns   6.01 B/key resident     94.8 ms build  estimated
 the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
-+ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
-+ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
-  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+* DictIndex              1186914 bytes   2.47 B/key    337 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    295 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    283 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    320 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    206 ns   6.01 B/key resident     94.8 ms build  estimated
 the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 wrote words.bin: DictIndex over 479823 keys, 1200371 bytes (2.50 B/key)
@@ -1179,13 +1179,13 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
-+ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
-+ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
-  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
-+ PerfectHashIndex       4448327 bytes   9.27 B/key    121 ns   9.51 B/key resident    127.2 ms build  estimated
-+ DoubleArrayIndex      11708630 bytes  24.40 B/key     85 ns  24.40 B/key resident    141.2 ms build  estimated
+* DictIndex              1186914 bytes   2.47 B/key    337 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    295 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    283 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    320 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    206 ns   6.01 B/key resident     94.8 ms build  estimated
++ PerfectHashIndex       4448327 bytes   9.27 B/key    137 ns   9.51 B/key resident    127.2 ms build  estimated
+  DoubleArrayIndex      11708630 bytes  24.40 B/key    220 ns  24.40 B/key resident    141.2 ms build  estimated
 the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
@@ -1212,14 +1212,10 @@ naming the index is how not to.
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at block 1024 and 2.47 B/key, `latency` answers `DoubleArrayIndex`, ten times
-the size and a quarter of the wait, and `balanced` answers `StringIndex` -- 39 % faster for 2.4 times
-the space. The block is a candidate of its own, so an objective picks one of those too. The `latency`
-answer is the model's, and the `DoubleArrayIndex` row is the one it sets by hand: the Rust harness, on
-nine tenths of this word list, reads a hit at 56 ns for `PerfectHashIndex`
-([`rel-1m-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-1m-2026-11-05-arz-ea82db8.txt))
-and at 112 for `DoubleArrayIndex`
-([`rel-sentinels-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-sentinels-2026-11-05-arz-ea82db8.txt)).
+answers `DictIndex` at block 1024 and 2.47 B/key, `latency` answers `PerfectHashIndex`, 3.7 times
+the size and 40 % of the wait, and `balanced` answers `DictIndex` at block 128 in microblocks of 8 --
+16 % faster for 1.16 times the space. The block is a candidate of its own, so an objective picks one
+of those too.
 
 `--objective` also takes a workload: `op=weight` pairs between commas, ranked by the workload's mean
 operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stranger), `reverse`
@@ -1228,10 +1224,10 @@ operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stran
 read off a log serve as they are. An op is also a question the index has to answer: `reverse` rules
 out the two indexes that store no keys and a prefix query asks for an ordered one, whatever the
 flags said. The ordered pair is where this decides something. On the same word list
-`--objective common_prefix=9,hits=1` answers `DoubleArrayIndex` at 274 ns against `StringIndex`'s 301
-and 1630 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 128 in microblocks
-of 8 -- 242 ns against `StringIndex`'s 858 -- and `hits=9,misses=1,batch=1024` leaves
-`PerfectHashIndex` first at 50 ns a key.
+`--objective common_prefix=9,hits=1` answers `StringIndex` at 293 ns against `DoubleArrayIndex`'s 383
+and 1635 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 128 in microblocks
+of 8 -- 243 ns against `StringIndex`'s 868 -- and `hits=9,misses=1,batch=1024` leaves
+`PerfectHashIndex` first at 54 ns a key.
 
 **Beside the winner, the front.** `pareto()` in Rust, `p["pareto"]` in Python and the `+` on the
 ladder are the rows no other row beats on both size and speed, smallest first: the whole trade this
@@ -1244,27 +1240,26 @@ Chinese ones: a few per cent of `resident_bytes`, since that heap is a small sha
 **The nanoseconds are modelled, and of one machine, as are the build times.** `a + b·s + c·len + d·s·len` per structure,
 operation and `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the blob
 over 64 KiB -- what a lookup waits on is how far its bytes are from the CPU, which the key count
-alone does not say. The constants are fitted to 217 cells timed on this crate's own hardware -- a
+alone does not say. The constants are fitted to 235 cells timed on this crate's own hardware -- a
 Ryzen 7 5800HS with 16 MB of L3 -- by `bench/latency_model.py`, whose `fit` re-derives the tables in
 `src/estimate.rs` from the artifact under `bench/results/`, leaving out the blobs under 4 KiB, whose
-lookups read nothing from memory. The `DoubleArrayIndex` row is not fitted: that harness holds no
-double array, so the row is set by hand. Mean absolute error is 6-13 % on
-`id(key)`; on `prefix_count` it is 40-41 %, because that operation's cost is dominated by how many
+lookups read nothing from memory. Mean absolute error is 6-15 % on `id(key)`, 24 % on a
+`PerfectHashIndex` miss and 21-31 % on every `DoubleArrayIndex` lane; on `prefix_count` it is 39-41 %, because that operation's cost is dominated by how many
 keys the prefix actually matches and the model has no term for it. Two things follow. It is an
 *ordering*: fitted with a corpus left out, it names the fastest index on that corpus in 30 of 31
-corpus-size cells for `id(key)`, in 30 for nine hits to a miss and for `key(id)`, and in all 31 for
-batches of 1 024 and for a `common_prefix`-heavy workload; over ten workloads the mean pick costs
-1.000-1.021× the fastest. Against the published sweep, which it was not fitted to and whose block 128
+corpus-size cells for `id(key)`, for batches of 1 024 and for `key(id)`, in 29 for nine hits to a
+miss and for a `common_prefix`-heavy workload; over ten workloads the mean pick costs 1.001-1.023×
+the fastest. Against the published sweep, which it was not fitted to and whose block 128
 has microblocks of 16 where the plan's has 8, it names the fastest of every lane in 30 of 31 cells,
 never more than 1.13× slower, the faster of `DictIndex` and `StringIndex` in 27, never more than
-1.11× slower, and the fastest `DictIndex` block in 21, never more than 1.19× slower. **What it gets wrong is a choice between ordered
+1.10× slower, and the fastest `DictIndex` block in 21, never more than 1.19× slower. **What it gets wrong is a choice between ordered
 indexes**, because there the candidates are close: the transducer is the faster at 100 000 keys on
-twelve corpora of fourteen, and the blocks of one dictionary are often within a few per cent of each
-other. Held out, it names the fastest ordered `id(key)` in 25 of 31 cells and one within 5 % of it
-in 28, never one more than 1.19× slower -- and 5 % is about what placement in physical memory moves
-a single-threaded probe on this machine. Nine prefix counts to a hit is the weakest workload: 24 and
-28 of 31, and 1.41× slower on ten million `numeric` ids. And it is *high*: the cells were timed through the Python
-binding, so every number carries that call, and the model reads 203 ns for `StringIndex` on the
+eleven corpora of fourteen, and the blocks of one dictionary are often within a few per cent of each
+other. Held out, it names the fastest ordered `id(key)` in 21 of 31 cells and one within 5 % of it
+in 29, never one more than 1.16× slower -- and 5 % is about what placement in physical memory moves
+a single-threaded probe on this machine. Nine prefix counts to a hit is the weakest workload: 22 and
+27 of 31, and 1.42× slower on ten million `numeric` ids. And it is *high*: the cells were timed through the Python
+binding, so every number carries that call, and the model reads 206 ns for `StringIndex` on the
 word list where the Rust harness in `docs/benchmarks.md` measures 168-181. The overhead falls on
 every candidate, so it moves the numbers and not the ranking -- but do not quote them as your own.
 

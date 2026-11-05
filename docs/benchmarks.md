@@ -15,7 +15,11 @@ whether your machine is comparable to the one in the tables at all.
 
 > **This page was recounted on 2026-11-05, at `ea82db8`, on the 5.0 candidate.** One window of 11 h 13
 > ran 615 cells on one kernel and one compiler, every CPU on the **`performance`** governor, with at
-> most 2 MiB of swap in use when a cell started ([`recount-env-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-env-2026-11-05-arz-ea82db8.txt), [`recount-campaign-2026-11-05-arz-ea82db8.log`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-campaign-2026-11-05-arz-ea82db8.log)). **The older
+> most 2 MiB of swap in use when a cell started ([`recount-env-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-env-2026-11-05-arz-ea82db8.txt), [`recount-campaign-2026-11-05-arz-ea82db8.log`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-campaign-2026-11-05-arz-ea82db8.log)).
+> Every table that reads the perfect hash past about 1.18 M keys was measured again that day at
+> `7b65814`, after the hash's chunk of buckets went back from 2¹⁹ to 2¹⁶, in a second window of 8 h 20
+> ([`recount-env-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-env-2026-11-05-arz-7b65814.txt), [`recount-campaign-2026-11-05-arz-7b65814.log`](https://github.com/ilgrad/lexindex/blob/main/bench/results/recount-campaign-2026-11-05-arz-7b65814.log));
+> its competitor rows at ten million keys read 0.89–1.04 of the first window's, median 0.99. **The older
 > dated rows ran on `powersave`, as every September artifact that names a governor records.** Do not subtract the one from the other: at an unchanged version,
 > the competitors' medians read 0.95–0.99× of 2026-09-25 and MARISA's 1.02×, so a gap of that
 > size across the two proves nothing about a library. Each table names its run.
@@ -313,22 +317,24 @@ Every loss measured so far, in one place; each line links to the section that me
 - **Exact `id` against XCDAT 15.** At a million keys lexindex's fastest exact search over sorted ids
   is behind on six corpora of thirteen, by 1.20–1.41×. It is within 3 % either way on `words`, `paths`,
   `uuid` and `titles-ru`, and ahead on `numeric`, `dna` and `urls`
-  ([measured](#the-research-frontier-measured)). At ten million keys `opaque` is 1.31× behind, 420 ns
-  against 321, and the other five corpora are ahead. `HashedDictIndex` is 4.0–8.7× faster than XCDAT in a free loop and
-  1.7–3.8× when each lookup waits on the last, through `id_unchecked`, which takes a key's membership
+  ([measured](#the-research-frontier-measured)). At ten million keys `opaque` is 1.35× behind, 425 ns
+  against 316, and the other five corpora are ahead. `HashedDictIndex` is 4.0–8.6× faster than XCDAT in a free loop and
+  1.7–3.7× when each lookup waits on the last, through `id_unchecked`, which takes a key's membership
   on trust, so it is not an exact search ([against XCDAT](#hasheddictindex-against-xcdat)).
 - **Size on `paths` without labels.** MARISA at its smallest, 8.81 bytes a key at 23 tries under the
   tiny cache, beats a plain `DictIndex` block 1024's 9.28 there; only the opt-in `labels=True` build
   takes the corpus. And at lexindex 4.5.2, at ten million keys and at 19.2 million, mapped MARISA was
   0.4–1.8 % smaller on `titles-en` and `urls`, where `DictIndex` is the smaller by file
   ([MARISA at its smallest](#marisa-at-its-smallest)).
-- **Bits against PHastR built on one thread.** `MPH3` takes 1.925 / 1.907 / 1.905 bits a key at
+- **Bits against PHastR built on one thread.** `MPH3` takes 1.925 / 1.915 / 1.911 bits a key at
   1 M / 10 M / 100 M, PHastR 1.919 / 1.904 / 1.902 at bucket size 4.5 and 1.850 / 1.823 / 1.819
   with 10-bit seeds ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
-- **The eight-thread build against PHastR.** `MPH3` reads 12.3 / 14.2 / 15.8 ns a key at 1 M / 10 M /
-  100 M against PHastR's 10.3 / 9.9 / 10.3, which takes higher bits than `MPH3` at 1 M and lower ones above it ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
-- **The eight-thread batch at a billion keys.** `MPH3`'s batch is 15 % behind PtrHash compact on
-  the same memory: it fetches 0.87 lines a key from DRAM against compact's 0.84
+- **The eight-thread build against PHastR at 1 M and 10 M.** `MPH3` reads 13.6 / 10.5 ns a key
+  against PHastR's 10.4 / 10.1, which takes higher bits than `MPH3` at 1 M and lower ones at 10 M;
+  at 100 M `MPH3` leads, 8.7 against 10.8 ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
+- **Eight lookup threads at a billion keys.** `MPH3`'s batch is 17 % behind PtrHash compact on
+  the same memory: it fetches 0.98 lines a key from DRAM against compact's 0.82. With huge pages on,
+  its single lookup is 5 % behind PtrHash fast's, 3.6 ns against 3.4; with them off the two are level
   ([the perfect hash](#the-perfect-hash-against-ptrhash-and-phast)).
 - **The double array's build.** 0.160 s on the jieba dictionary, 3.0× darts-clone's time and 1.6×
   cedar's ([on Chinese running text](#on-chinese-running-text-from-rust-and-from-python)).
@@ -543,15 +549,15 @@ and those are the symbol table's business, not the block's — which is why the 
 runs of a constant length and per shard. With whole-block training over one table a bigger block
 bought fewer neighbourhoods to train on, and `titles-en` at 1024 came out above its own 256.
 
-<sub>Measured 2026-11-05 at `ea82db8`
-([`bench/results/sweep10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-11-05-arz-ea82db8.json)),
+<sub>Measured 2026-11-05 at `7b65814`
+([`bench/results/sweep10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-11-05-arz-7b65814.json)),
 `marisa-trie` 1.4.1, one build per cell at this size and three rounds of 20 000 lookups. **Sizes
 only**: this table has no timed column. Every marisa cell reads to the hundredth what the runs of
 2026-09-13, 09-19 and 09-23 read: a size is exact, so runs agree wherever the builder did not move.
 Against the 4.3.0 run
 ([`sweep10m-2026-09-23-arz-4f2a0e9.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/sweep10m-2026-09-23-arz-4f2a0e9.json)),
 48 of the 66 cells read the same to the byte. Of the eighteen that moved, six are the three `DictIndex`
-blocks on `titles-en` and `urls`, by −1.86 % to −2.07 %, and twelve are the keyless rows, by −0.06 % to −0.46 %.</sub>
+blocks on `titles-en` and `urls`, by −1.86 % to −2.07 %, and twelve are the keyless rows, by −0.09 % to +0.01 %.</sub>
 
 ### A cold mapping, and what is actually resident
 
@@ -565,16 +571,16 @@ Ten million English Wikipedia titles, bytes per key except the latencies:
 
 | structure | file | mapped | after 1 k | after 1 M | cold ns | warm ns |
 |---|---:|---:|---:|---:|---:|---:|
-| `DictIndex` 32 | 6.01 | 0.75 | 4.64 | 6.01 | 28 344 | 545 |
-| `DictIndex` 32, `MADV_RANDOM` | 6.01 | 0.75 | **1.82** | 6.01 | 60 759 | 1 246 |
-| `DictIndex` 256 | 5.53 | 0.12 | 4.15 | 5.53 | 28 547 | 547 |
-| `DictIndex` 256, `MADV_RANDOM` | 5.53 | 0.12 | **1.05** | 5.53 | 73 260 | 1 305 |
-| `DictIndex` 1024 | 5.37 | 0.06 | 3.97 | 5.37 | 27 606 | 582 |
-| `DictIndex` 1024, `MADV_RANDOM` | 5.37 | 0.06 | **1.16** | 5.37 | 98 366 | 1 296 |
-| `CompactHashIndex` | 1.24 | 0.24 | 1.24 | 1.24 | **5 570** | **29** |
-| `CompactHashIndex`, `MADV_RANDOM` | 1.24 | 0.24 | 0.70 | 1.24 | 48 251 | 124 |
-| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 87 552 | 644 |
-| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 331 729 | 2 613 |
+| `DictIndex` 32 | 6.01 | 0.75 | 4.64 | 6.01 | 30 282 | 546 |
+| `DictIndex` 32, `MADV_RANDOM` | 6.01 | 0.75 | **1.82** | 6.01 | 81 198 | 1 455 |
+| `DictIndex` 256 | 5.53 | 0.12 | 4.15 | 5.53 | 29 346 | 539 |
+| `DictIndex` 256, `MADV_RANDOM` | 5.53 | 0.12 | **1.05** | 5.53 | 93 819 | 1 519 |
+| `DictIndex` 1024 | 5.37 | 0.06 | 3.97 | 5.37 | 29 737 | 576 |
+| `DictIndex` 1024, `MADV_RANDOM` | 5.37 | 0.06 | **1.16** | 5.37 | 125 404 | 1 492 |
+| `CompactHashIndex` | 1.24 | 0.24 | 1.23 | 1.24 | **6 039** | **27** |
+| `CompactHashIndex`, `MADV_RANDOM` | 1.24 | 0.24 | 0.70 | 1.24 | 62 728 | 149 |
+| `StringIndex` | 13.25 | 0.01 | 10.10 | 13.25 | 88 172 | 645 |
+| `StringIndex`, `MADV_RANDOM` | 13.25 | 0.01 | 2.27 | 13.25 | 418 978 | 3 128 |
 
 **`load_mmap` really is lazy**, which the `mapped` column exists to prove: 0.01 to 0.75 bytes a key
 resident before the first query, which is the header and the little the loader validates. Nothing
@@ -585,15 +591,15 @@ block means more per-block arrays, and `BDX3` validates their framing at load.
 4.15 of its 5.53 bytes a key resident — 75 % of an index nobody has finished reading — while the
 same thousand queries under `MADV_RANDOM` leave **1.05**, which is what they actually touch: about
 two pages a lookup, the sample array and the block. The 4.0× between those two numbers is the
-kernel's readahead, and it is buying latency with memory: turning it off costs 2.6× on the cold
-lookups and **2.4× on the warm ones**, because the advice outlives the warm-up. The warm column is
-also where the microblock shows on ten million keys: 1024 a block answers in 582 ns where the
+kernel's readahead, and it is buying latency with memory: turning it off costs 3.2× on the cold
+lookups and **2.8× on the warm ones**, because the advice outlives the warm-up. The warm column is
+also where the microblock shows on ten million keys: 1024 a block answers in 576 ns where the
 one-level format took 2 108. Readahead is the right default here; `MADV_RANDOM` is for the case where
 a container limit, and not a latency budget, is what binds.
 
 **Cold start is where the smallest structure wins outright, and the mechanism is pages.**
-`CompactHashIndex` answers its first thousand queries at **5.6 µs** against `DictIndex`'s 28.5 and
-`StringIndex`'s 87.6 — 5.1× and 16× — because its whole file is 12.4 MB and a fault brings in a
+`CompactHashIndex` answers its first thousand queries at **6.0 µs** against `DictIndex`'s 29.3 and
+`StringIndex`'s 88.2 — 4.9× and 15× — because its whole file is 12.4 MB and a fault brings in a
 useful fraction of it. On `uuid`, not re-run in the recount, where its 1.24 bytes a key sit against
 `DictIndex`'s 17.56 and `StringIndex`'s 36.07, the `powersave` run of 2026-09-22 read 19× and 46×
 (5.2 µs against 99.9 and 240.4). A structure that stores no keys has no keys to fault in.
@@ -603,16 +609,16 @@ distinctive answer to "how much memory does this index need" only exists during 
 against a workload that touches every key, the resident set *is* the file, and the size table above
 is the steady-state RSS.
 
-<sub>Measured 2026-11-05 at `ea82db8`, on `performance`, NVMe under LUKS on btrfs, 38 GB RAM — so
+<sub>Measured 2026-11-05 at `7b65814`, on `performance`, NVMe under LUKS on btrfs, 38 GB RAM — so
 "cold" means this file's page cache was dropped and not that the machine was short of memory
-([`bench/results/coldmmap-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-11-05-arz-ea82db8.txt); the `uuid` run is in
+([`bench/results/coldmmap-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-11-05-arz-7b65814.txt); the `uuid` run is in
 [`coldmmap-2026-09-22-arz-41478d0.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/coldmmap-2026-09-22-arz-41478d0.txt)).
 `StringIndex` is the control: its resident columns are identical to the 2026-09-22 run's to the
-hundredth (0.01 mapped, 10.10 after a thousand, 13.25 after a million), and its latencies read 0.5 %
-quicker cold and 23 % warm; this run cannot separate the governor from later work on its reader.
+hundredth (0.01 mapped, 10.10 after a thousand, 13.25 after a million), and its latencies read 0.2 %
+slower cold and 23 % quicker warm; this run cannot separate the governor from later work on its reader.
 `DictIndex` moved its bytes for a reason: at 256, 5.65 → 5.53 on disk
-and 4.17 → 4.15 resident after a thousand queries. `CompactHashIndex`'s cold column read 4 %
-slower, 5 336 → 5 570 ns, and its warm one 28 → 29, with the key hash of 5.0 between the two runs. `MADV_RANDOM` is applied by the harness through `/proc/self/maps`;
+and 4.17 → 4.15 resident after a thousand queries. `CompactHashIndex`'s cold column read 13 %
+slower, 5 336 → 6 039 ns, and its warm one 28 → 27, with the key hash of 5.0 between the two runs. `MADV_RANDOM` is applied by the harness through `/proc/self/maps`;
 `load_mmap` does not set it, and on this evidence should not.</sub>
 
 ### One mapping, many readers
@@ -627,40 +633,40 @@ Ten million English Wikipedia titles, nanoseconds a lookup with the speedup over
 
 | threads | `DictIndex` 128 | `CompactHashIndex` | `StringIndex` |
 |---|---:|---:|---:|
-| 1 | 520 | 17.5 | 613 |
-| 2 | 269 (1.94×) | 9.6 (1.82×) | 302 (2.03×) |
-| 4 | 137 (3.80×) | 5.7 (3.07×) | 154 (3.99×) |
-| 8 | 70 (7.44×) | 3.4 (5.15×) | 80 (7.61×) |
-| 16 | 43 (12.09×) | 2.8 (6.25×) | 47 (13.13×) |
-| **M lookups/s at 16** | **23.3** | **358** | **21.4** |
+| 1 | 518 | 17.1 | 594 |
+| 2 | 264 (1.96×) | 11.4 (1.50×) | 297 (2.00×) |
+| 4 | 134 (3.86×) | 6.3 (2.71×) | 150 (3.95×) |
+| 8 | 69 (7.49×) | 3.8 (4.50×) | 80 (7.47×) |
+| 16 | 42 (12.32×) | 3.6 (4.75×) | 47 (12.70×) |
+| **M lookups/s at 16** | **23.8** | **275** | **21.4** |
 
-**Eight cores give 5.2–7.6×**, 64–95 % of them, on a mobile part whose clock falls as cores light
+**Eight cores give 4.5–7.5×**, 56–94 % of them, on a mobile part whose clock falls as cores light
 up — the number already carries that, so a machine with a flatter boost curve can only do better.
 
-**The sixteen-thread row is SMT and it is worth having.** 12.1× and 13.1× over one thread for the
+**The sixteen-thread row is SMT and it is worth having.** 12.3× and 12.7× over one thread for the
 two structures that answer out of DRAM, well past the eight physical cores, because a point lookup
 is a chain of dependent loads and a core spends most of it waiting. A second thread on the same core
 fills those stalls with someone else's work.
 
-**`StringIndex` and `DictIndex` scale alike** — 2.03× and 1.94× on two threads, 13.13× and 12.09×
+**`StringIndex` and `DictIndex` scale alike** — 2.00× and 1.96× on two threads, 12.70× and 12.32×
 on sixteen. Both walks are dependent misses, and two cores keep twice as many of them in flight as
 one. At a million keys, where the 17 MB transducer and the 7.4 MB dictionary sit mostly in cache,
-there is less to overlap: 1.90× and 1.90× on two, 12.45× and 10.58× on sixteen.
+there is less to overlap: 1.93× and 1.89× on two, 12.60× and 10.50× on sixteen.
 
-**`CompactHashIndex` saturates first**, at 6.25×, and it is the one structure that has run out of
-something other than cores: 358 M lookups a second over a 12.4 MB index that fits this machine's
-16 MB L3, at 2.8 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
-this one does not. It saturates **earlier** than it did on 3.0.0 — 9.43× then, 6.25× now — for the
+**`CompactHashIndex` saturates first**, at 4.75×, and it is the one structure that has run out of
+something other than cores: 275 M lookups a second over a 12.4 MB index that fits this machine's
+16 MB L3, at 3.6 ns a lookup. The others are answering out of DRAM and have latency left to overlap;
+this one does not. It saturates **earlier** than it did on 3.0.0 — 9.43× then, 4.75× now — for the
 good reason that its single-thread lane got about 50 % quicker while its sixteen-thread lane, already
-bandwidth-bound, moved 3.7 → 2.8 ns.
+bandwidth-bound, moved 3.7 → 3.6 ns.
 
-<sub>Measured 2026-11-05 at `ea82db8`, on `performance`
-([`bench/results/readscale-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-11-05-arz-ea82db8.txt),
+<sub>Measured 2026-11-05 at `7b65814`, on `performance`
+([`bench/results/readscale-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-11-05-arz-7b65814.txt),
 which carries the million-key ladder as well), Ryzen 7 5800HS, 8 cores and 16 hardware threads.
 Shared by `&index` across `std::thread::scope`; no index is cloned and none is rebuilt per thread.
 Three processes and the minimum per cell; `CompactHashIndex` at ten million is the column that
-needed them, reading 18.9 / 17.5 / 21.8 ns on one thread and 2.8 / 2.8 / 3.1 on sixteen across the
-three, where `StringIndex` spread 4–8 % and `DictIndex` at most 3 %. The `powersave` run of 2026-09-23
+needed them, reading 24.3 / 17.1 / 24.7 ns on one thread and 3.7 / 3.6 / 3.8 on sixteen across the
+three, where `StringIndex` spread 6–8 % and `DictIndex` at most 2 %. The `powersave` run of 2026-09-23
 ([`readscale-2026-09-23-arz-fdc28bc.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/readscale-2026-09-23-arz-fdc28bc.txt)) read
 `DictIndex` 128 at 605 ns over 5.71 bytes a key, `StringIndex` at 803 and `CompactHashIndex` at 15.9
 on one thread.</sub>
@@ -852,21 +858,21 @@ same check and the keys kept, in order.
 
 **Two things the table above cannot show, both from an independent harness (`local/latency/`, one
 process, all forms alternated per round, min of 12,
-[`latency-forms-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-forms-2026-11-05-arz-ea82db8.txt)):**
+[`latency-forms-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/latency-forms-2026-11-05-arz-7b65814.txt)):**
 
-- **26–42 ns of every number in it is reaching the probe key, not looking it up.** The bench
+- **25–36 ns of every number in it is reaching the probe key, not looking it up.** The bench
   probes `keys[i * STEP % n]` — the original allocations in strided order, which is what a
   long-lived key list looks like. Hand the same index a probe list allocated in probe order and
-  `PerfectHashIndex::id_unchecked` falls from 33.5 to **7.0 ns/op** at 1 M, `CompactHashIndex::id`
-  from 40.1 to 11.8, and `PerfectHashIndex::id`, which fetches a stored key either way, from 71.9 to
-  29.6. The batched `ids_of` is the layout-insensitive one at 10 M, 29.2 scattered against 25.6
+  `PerfectHashIndex::id_unchecked` falls from 32.2 to **6.9 ns/op** at 1 M, `CompactHashIndex::id`
+  from 38.7 to 11.9, and `PerfectHashIndex::id`, which fetches a stored key either way, from 69.4 to
+  33.1. The batched `ids_of` is the layout-insensitive one at 10 M, 29.8 scattered against 26.2
   contiguous on `CompactHashIndex`, because its software prefetch does for scattered keys what the
-  hardware does for contiguous ones; at 1 M its two cells carry a spread of 17 % and 56 %. So read any sub-100
+  hardware does for contiguous ones; at 1 M its two cells carry a spread of 16 % and 58 %. So read any sub-100
   ns lookup figure, here or anywhere, as a statement about the caller's key layout as much as about
   the index.
 - **On a miss-heavy workload `std::HashMap` no longer wins.** An absent key costs the SipHash map
-  32.3 ns at 1 M against `CompactHashIndex::id`'s 11.6 and `PerfectHashIndex::id`'s 17.2; at 10 M,
-  60.5 against 14.4 and 49.8. On 0.11 this read the other way at 1 M, 32 ns against 41: the map fails
+  33.2 ns at 1 M against `CompactHashIndex::id`'s 11.8 and `PerfectHashIndex::id`'s 18.8; at 10 M,
+  61.0 against 14.5 and 48.4. On 0.11 this read the other way at 1 M, 32 ns against 41: the map fails
   on an empty bucket after one cache line, where a fingerprint index runs the whole perfect hash and
   reads a fingerprint before it can say no, and that whole path has since become cheaper than the
   SipHash of the key.
@@ -909,94 +915,94 @@ sets, and `sux` 0.15.3 is PHastR at five settings. Bits and lookups are the 1-th
 
 | function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | 1.925 | **36.6 ns/key** | 12.3 ns/key | **1.6 ns** | **1.9 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.160 | 54.3 | 17.2 | 3.4 | — |
-| `ph` PHast (`SeedOnly`) | 1.933 | 572.2 | 98.5 | 2.8 | — |
-| `ptr_hash` compact | 2.144 | 145.3 | 78.0 | 3.7 | 4.2 |
-| `ptr_hash` balanced | 2.378 | 89.5 | 46.6 | 3.7 | 4.2 |
-| `ptr_hash` fast | 2.990 | 70.0 | 62.3 | 1.8 | 2.5 |
-| `sux` PHastR (8-bit, 4.25) | 1.960 | 53.4 | **10.3** | 3.1 | — |
-| `sux` PHastR (8-bit, 4.5) | 1.919 | 49.4 | **10.3** | 3.4 | — |
-| `sux` PHastR (8-bit, 4.75) | 1.915 | 47.7 | 10.9 | 3.8 | — |
-| `sux` PHastR (10-bit, 5.75) | **1.850** | 98.8 | 20.7 | 3.7 | — |
-| `sux` PHastR (10-bit, 6) | 1.852 | 94.3 | 20.9 | 4.1 | — |
+| **lexindex `MPH3`** | 1.925 | **37.2 ns/key** | 13.6 ns/key | **1.6 ns** | **1.8 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.160 | 54.5 | 17.2 | 3.4 | — |
+| `ph` PHast (`SeedOnly`) | 1.933 | 573.6 | 98.5 | 2.8 | — |
+| `ptr_hash` compact | 2.144 | 145.7 | 81.2 | 3.5 | 4.2 |
+| `ptr_hash` balanced | 2.378 | 90.0 | 46.5 | 3.7 | 4.2 |
+| `ptr_hash` fast | 2.990 | 70.7 | 62.2 | 1.8 | 2.6 |
+| `sux` PHastR (8-bit, 4.25) | 1.960 | 53.4 | 10.8 | 3.1 | — |
+| `sux` PHastR (8-bit, 4.5) | 1.919 | 49.3 | **10.4** | 3.3 | — |
+| `sux` PHastR (8-bit, 4.75) | 1.915 | 47.8 | 11.0 | 3.8 | — |
+| `sux` PHastR (10-bit, 5.75) | **1.850** | 99.0 | 20.9 | 3.7 | — |
+| `sux` PHastR (10-bit, 6) | 1.852 | 94.1 | 20.9 | 4.1 | — |
 
 **10 M keys** — 2.4 MB, inside the 16 MB L3:
 
 | function | bits/key | build, 1 thread | build, 8 threads | lookup | batch |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | 1.907 | **38.8 ns/key** | 14.2 ns/key | **2.3 ns** | **2.4 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.147 | 57.2 | 14.0 | 5.0 | — |
-| `ph` PHast (`SeedOnly`) | 1.921 | 576.0 | 88.5 | 4.1 | — |
-| `ptr_hash` compact | 2.143 | 158.7 | 41.6 | 5.1 | 4.5 |
-| `ptr_hash` balanced | 2.378 | 99.9 | 25.6 | 5.1 | 4.5 |
-| `ptr_hash` fast | 2.990 | 144.0 | 131.5 | 2.8 | 2.8 |
-| `sux` PHastR (8-bit, 4.25) | 1.943 | 58.5 | 10.4 | 4.4 | — |
-| `sux` PHastR (8-bit, 4.5) | 1.904 | 54.1 | 10.2 | 4.9 | — |
-| `sux` PHastR (8-bit, 4.75) | 1.899 | 52.4 | **9.9** | 5.6 | — |
-| `sux` PHastR (10-bit, 5.75) | **1.823** | 104.1 | 17.8 | 5.7 | — |
-| `sux` PHastR (10-bit, 6) | **1.823** | 99.1 | 17.4 | 6.3 | — |
+| **lexindex `MPH3`** | 1.915 | **34.3 ns/key** | 10.5 ns/key | **2.4 ns** | **2.4 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.147 | 60.8 | 15.5 | 4.9 | — |
+| `ph` PHast (`SeedOnly`) | 1.921 | 580.4 | 89.9 | 3.6 | — |
+| `ptr_hash` compact | 2.143 | 157.6 | 44.1 | 5.1 | 4.5 |
+| `ptr_hash` balanced | 2.378 | 101.1 | 27.9 | 5.1 | 4.5 |
+| `ptr_hash` fast | 2.990 | 144.9 | 132.8 | 2.8 | 2.8 |
+| `sux` PHastR (8-bit, 4.25) | 1.943 | 58.3 | 10.6 | 4.4 | — |
+| `sux` PHastR (8-bit, 4.5) | 1.904 | 54.2 | 10.6 | 4.9 | — |
+| `sux` PHastR (8-bit, 4.75) | 1.899 | 52.8 | **10.1** | 5.6 | — |
+| `sux` PHastR (10-bit, 5.75) | **1.823** | 104.2 | 18.5 | 5.7 | — |
+| `sux` PHastR (10-bit, 6) | **1.823** | 99.5 | 17.8 | 6.3 | — |
 
 **100 M keys** — 24 MB, every scalar lookup a DRAM miss:
 
 | function | bits/key | build, 1 thread | build, 8 threads | build peak | lookup | batch |
 |---|---:|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | 1.905 | **39.1 ns/key** | 15.8 ns/key | **288 MB** | **8.7 ns** | **3.6 ns** |
-| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.146 | 66.1 | 16.7 | 1 526 | 16.5 | — |
-| `ph` PHast (`SeedOnly`) | 1.920 | 588.4 | 89.9 | 1 526 | 13.8 | — |
-| `ptr_hash` compact | 2.143 | 159.6 | 42.2 | 906 | 16.6 | 5.9 |
-| `ptr_hash` balanced | 2.378 | 101.3 | 24.7 | 870 | 17.3 | 5.9 |
-| `ptr_hash` fast | 2.990 | 200.2 | 228.5 | 1 434 | 10.7 | 5.1 |
-| `sux` PHastR (8-bit, 4.25) | 1.942 | 61.8 | 10.5 | 917 | 15.8 | — |
-| `sux` PHastR (8-bit, 4.5) | 1.902 | 58.0 | **10.3** | 924 | 16.5 | — |
-| `sux` PHastR (8-bit, 4.75) | 1.897 | 56.5 | 10.6 | 931 | 17.9 | — |
-| `sux` PHastR (10-bit, 5.75) | **1.819** | 108.2 | 17.6 | 900 | 18.4 | — |
-| `sux` PHastR (10-bit, 6) | **1.819** | 101.5 | 17.1 | 911 | 19.1 | — |
+| **lexindex `MPH3`** | 1.911 | **35.2 ns/key** | **8.7 ns/key** | **262 MB** | **8.5 ns** | **3.5 ns** |
+| `ph` PHast+ (`ShiftOnlyWrapped`) | 2.146 | 70.8 | 17.4 | 1 526 | 15.8 | — |
+| `ph` PHast (`SeedOnly`) | 1.920 | 591.0 | 90.9 | 1 526 | 13.0 | — |
+| `ptr_hash` compact | 2.143 | 160.3 | 43.4 | 906 | 15.9 | 5.9 |
+| `ptr_hash` balanced | 2.378 | 102.2 | 26.1 | 886 | 16.4 | 5.9 |
+| `ptr_hash` fast | 2.990 | 222.1 | 183.0 | 1 408 | 10.5 | 4.9 |
+| `sux` PHastR (8-bit, 4.25) | 1.942 | 61.4 | 11.1 | 918 | 15.3 | — |
+| `sux` PHastR (8-bit, 4.5) | 1.902 | 57.6 | 10.8 | 924 | 16.0 | — |
+| `sux` PHastR (8-bit, 4.75) | 1.897 | 56.2 | 11.1 | 925 | 17.2 | — |
+| `sux` PHastR (10-bit, 5.75) | **1.819** | 108.0 | 17.9 | 906 | 17.6 | — |
+| `sux` PHastR (10-bit, 6) | **1.819** | 101.7 | 17.5 | 909 | 18.3 | — |
 
 `MPH3` is **not** the smallest function in these tables. `sux` 0.15's PHastR (Vigna,
 [arXiv:2610.17833](https://arxiv.org/abs/2610.17833)), built on one thread over the same keys in
 the same process and hashing each with its own `ToSig` for `u64` (xxh3), takes fewer bits at
 1 M / 10 M / 100 M keys: 1.919 / 1.904 / 1.902 at expected bucket size 4.5 and 1.915 / 1.899 /
-1.897 at 4.75, against `MPH3`'s 1.925 / 1.907 / 1.905, and 1.850 / 1.823 / 1.819
+1.897 at 4.75, against `MPH3`'s 1.925 / 1.915 / 1.911, and 1.850 / 1.823 / 1.819
 with 10-bit seeds. Only its default bucket size, 4.25, is the larger: 1.960 / 1.943 / 1.942. Regular
 PHast is the larger too, 1.933 / 1.921 / 1.920. What those bits cost is the time: at bucket size 4.5
-PHastR answers in 3.4 / 4.9 / 16.5 ns against 1.6 / 2.3 / 8.7, and with 10-bit seeds in 3.7–4.1 /
-5.7–6.3 / 18.4–19.1, and builds on one thread in 49.4 / 54.1 / 58.0 ns/key against 36.6 / 38.8 /
-39.1, at 94–108 with 10-bit seeds. Built on eight threads, PHastR cuts its levels into more chunks
+PHastR answers in 3.3 / 4.9 / 16.0 ns against 1.6 / 2.4 / 8.5, and with 10-bit seeds in 3.7–4.1 /
+5.7–6.3 / 17.6–18.3, and builds on one thread in 49.3 / 54.2 / 57.6 ns/key against 37.2 / 34.3 /
+35.2, at 94–108 with 10-bit seeds. Built on eight threads, PHastR cuts its levels into more chunks
 than `MPH3` does, and each chunk costs bits: at 1 M it reads 1.943 at bucket size 4.5 and 1.935 at
 4.75, above `MPH3`'s 1.925, and 1.879–1.886 with 10-bit seeds, still under it; at 10 M and 100 M it
-stays under `MPH3` at 4.5 and 4.75 by 0.001–0.007 bits
-([`mphf-vs-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-11-05-arz-ea82db8.txt)).
+stays under `MPH3` at 4.5 and 4.75 by 0.008–0.014 bits
+([`mphf-vs-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-11-05-arz-7b65814.txt)).
 
-`MPH3`'s lookups lead at every size, single and batch: 1.6 / 2.3 / 8.7 ns against PtrHash's fast
-set's 1.8 / 2.8 / 10.7, and 1.9 / 2.4 / 3.6 in a batch against its 2.5 / 2.8 / 5.1. That set is the
+`MPH3`'s lookups lead at every size, single and batch: 1.6 / 2.4 / 8.5 ns against PtrHash's fast
+set's 1.8 / 2.8 / 10.5, and 1.8 / 2.4 / 3.5 in a batch against its 2.6 / 2.8 / 4.9. That set is the
 one that comes near, on 3 bits a key, a table half again as large whose one probe is a seed byte
 with no bumped keys' chain behind it. 4.5.1 took the single lookup ahead: in a cool A/B of these two
 rows alone on 2026-09-25, on `powersave`, one lookup thread, six processes a commit
 ([`bench/results/mphf-cool-ab-2026-09-25-arz-e523ecd.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-cool-ab-2026-09-25-arz-e523ecd.txt)),
 `MPH3`'s went 1.8 → 1.65 ns at 1 M against fast's 1.8, and 2.5 → 2.4 at 10 M against 2.9, and its
 batch 2.0 → 1.9 and 2.5 → 2.45 against 2.4 and 2.8. Among the rows near 2 bits `MPH3`'s lookups are the fastest at every size — PtrHash
-compact's 3.7 / 5.1 / 16.6 ns single and 4.2 / 4.5 / 5.9 in a batch, PHast+'s 3.4 / 5.0 / 16.5,
-and regular PHast's 2.8 / 4.1 / 13.8 at about fifteen times the build and without a batch
+compact's 3.5 / 5.1 / 15.9 ns single and 4.2 / 4.5 / 5.9 in a batch, PHast+'s 3.4 / 4.9 / 15.8,
+and regular PHast's 2.8 / 3.6 / 13.0 at fifteen to seventeen times the build and without a batch
 form. The bits column is the serialised table, which `MPH3` loads as it is — the rank and select
 counts `MPH2` derived in memory, 0.023 bits/key, went with its remap.
 
-`MPH3`'s build is the fastest on one thread at every size: 36.6 / 38.8 / 39.1 ns/key against
-PHastR's 47.7 / 52.4 / 56.5 at its quickest, PHast+'s 54.3 / 57.2 / 66.1 and PtrHash fast's 70.0 at
-1 M. On eight threads it reads 12.3 / 14.2 / 15.8 against PHast+'s 17.2 / 14.0 / 16.7 and PHastR's
-10.3 / 9.9 / 10.3: **PHastR builds faster at every size**, at higher bits than `MPH3` at 1 M and at
-lower bits at 10 M and 100 M, with a spread at 1 M of up to 35 % against `MPH3`'s 17 %, and PHast+ is
-level at 10 M. Against PtrHash's compact set `MPH3` builds
-4.0–4.1× faster on one thread and 2.7–6.3× on eight. The run before, at `e147b05`, had PHast+ ahead on one
+`MPH3`'s build is the fastest on one thread at every size: 37.2 / 34.3 / 35.2 ns/key against
+PHastR's 47.8 / 52.8 / 56.2 at its quickest, PHast+'s 54.5 / 60.8 / 70.8 and PtrHash fast's 70.7 at
+1 M. On eight threads it reads 13.6 / 10.5 / 8.7 against PHast+'s 17.2 / 15.5 / 17.4 and PHastR's
+10.4 / 10.1 / 10.8: **PHastR builds faster at 1 M and 10 M**, at higher bits than `MPH3` at 1 M and at
+lower bits at 10 M, with a spread at 1 M of up to 26 % against `MPH3`'s 13 %, **and `MPH3` at 100 M**.
+Against PtrHash's compact set `MPH3` builds
+3.9–4.6× faster on one thread and 4.2–6.0× on eight. The run before, at `e147b05`, had PHast+ ahead on one
 thread at every size, 57 / 57 / 68 ns against 75 / 71 / 70, over the same tables: since then a
 bucket's seed is searched over fixed lanes, one function a bucket width from 1 to 16 keys with every
 loop's count known to the compiler, a mode's keys that could meet are found by their residues modulo
 the slice, and the buckets wait for placement in a bitmap of priority slots taken from its lowest
-set bit, not in a queue a size class under a heap. On one thread the construction peak is the column apart: 65 MB
-at 10 M and 288 MB at 100 M above the keys, against 77–156 MB and 870–1 526 MB — the table is built
+set bit, not in a queue a size class under a heap. On one thread the construction peak is the column apart: 31 MB
+at 10 M and 262 MB at 100 M above the keys, against 77–156 MB and 886–1 526 MB — the table is built
 a chunk of buckets at a time, the keys of a quarter of the chunks copied out at once, and nothing
-the size of the key set is ever held beside it. On eight threads at 10 M it is not: `MPH3`'s 116 MB
-reads above PHast's 78 and PHastR's 79–81. Every table here before 2026-09-17 timed the builds
+the size of the key set is ever held beside it. On eight threads it is too: `MPH3`'s 49 MB at 10 M
+reads under PHast's 78 and PHastR's 79–82, and its 281 MB at 100 M under 901–1 428. Every table here before 2026-09-17 timed the builds
 over keys the harness had sorted for its dedup: `MPH3` skips its own sort on sorted hashes, and the
 other rows bucket their keys whatever the order (PtrHash's compact and fast sets read within 3 %
 either way, alternated), so those tables read `MPH3`'s build at 55–58 ns/key on one thread and 9–11
@@ -1026,36 +1032,36 @@ sweep over the first 2^20 probe keys, so that a machine warming through a round 
 alike and no row holds the caches to itself for a turn of its own. Every key is looked up once in a
 shuffled order with the key read from the corpus, the minimum of nine passes; batch is `ids_of`
 against `index_stream` in chunks of 4096; ×8 is the wall time a key with eight lookup threads. Each
-cell is lookup / batch / ×8 in ns. Measured 2026-11-05 at `ea82db8`, on `performance`.
+cell is lookup / batch / ×8 in ns. Measured 2026-11-05 at `7b65814`, on `performance`.
 
 | corpus, keys (mean bytes) | **lexindex `ClosedHashIndex`** | `ptr_hash` fast, the same hash | `ptr_hash` fast, xxh3 |
 |---|---:|---:|---:|
-| words, 480 k (9) | **8.8** / **6.1** / 1.7 | 9.0 / 7.6 / 1.7 | 24.1 / 19.1 / 3.8 |
-| URLs, 1 M (52) | **48.5** / **12.2** / **7.5** | 49.4 / 38.2 / 7.7 | 71.5 / 74.7 / 9.8 |
-| UUIDs, 1 M (36) | **43.1** / **10.6** / **6.5** | 44.1 / 35.2 / 6.8 | 64.4 / 60.1 / 8.8 |
-| titles, 1 M (21) | **27.5** / **10.4** / 4.2 | 27.8 / 23.1 / 4.2 | 51.6 / 48.3 / 7.2 |
-| paths, 1 M (125) | **73.8** / **47.8** / 12.7 | 74.1 / 66.0 / **12.4** | 123.0 / 132.2 / 16.4 |
-| URLs, 10 M (52) | **56.6** / **13.9** / **8.4** | 57.3 / 42.3 / 8.5 | 80.8 / 83.7 / 10.9 |
-| UUIDs, 10 M (36) | **55.2** / **12.7** / **8.1** | 56.3 / 41.1 / 8.2 | 76.6 / 71.1 / 10.3 |
-| titles, 10 M (21) | **39.4** / **11.7** / **6.3** | 43.1 / 30.3 / 6.7 | 75.2 / 70.2 / 10.0 |
+| words, 480 k (9) | **8.8** / **6.1** / 1.7 | 9.0 / 7.5 / 1.7 | 24.1 / 19.1 / 3.9 |
+| URLs, 1 M (52) | **46.9** / **12.6** / 8.2 | 47.7 / 37.2 / **7.9** | 68.1 / 70.8 / 10.0 |
+| UUIDs, 1 M (36) | **41.7** / **10.7** / 7.2 | 42.5 / 34.4 / **7.1** | 61.4 / 57.5 / 9.0 |
+| titles, 1 M (21) | **26.3** / **10.4** / 4.3 | 26.6 / 22.3 / 4.3 | 50.2 / 46.5 / 6.9 |
+| paths, 1 M (125) | **70.9** / **47.8** / 14.8 | 72.1 / 66.1 / 14.8 | 114.6 / 122.5 / 17.8 |
+| URLs, 10 M (52) | **55.2** / **14.3** / 8.9 | 55.9 / 41.5 / 8.9 | 78.2 / 80.9 / 11.1 |
+| UUIDs, 10 M (36) | **53.6** / **13.0** / 8.5 | 54.6 / 40.2 / 8.5 | 73.3 / 67.7 / 10.6 |
+| titles, 10 M (21) | **38.5** / **11.9** / **6.7** | 41.9 / 29.5 / 6.9 | 72.1 / 66.7 / 10.2 |
 
 With the key read from memory the hash is most of the cost, and the same hash under both perfect
 hashes is what the middle column holds fixed: `ClosedHashIndex` leads the fast set on all eight
-corpora, by 0.2 to 1.1 ns on seven and by 3.7 ns on 10 M titles. The hash decides the rest: the same
-set over xxh3 is 15 to 49 ns behind. The batch column is the crate's alone: `ids_of` hashes the next keys and pulls in both ends
-of each key while the current ones' lines arrive, 12.2 / 10.6 / 10.4 ns on 1 M URLs / UUIDs / titles
-against `index_stream`'s 38.2 / 35.2 / 23.1 over the same hash and 74.7 / 60.1 / 48.3 over xxh3,
-which does not overlap the hashing — 2.2 to 3.3× on every corpus but the word list, whose keys are
+corpora, by 0.2 to 1.2 ns on seven and by 3.4 ns on 10 M titles. The hash decides the rest: the same
+set over xxh3 is 15 to 44 ns behind. The batch column is the crate's alone: `ids_of` hashes the next keys and pulls in both ends
+of each key while the current ones' lines arrive, 12.6 / 10.7 / 10.4 ns on 1 M URLs / UUIDs / titles
+against `index_stream`'s 37.2 / 34.4 / 22.3 over the same hash and 70.8 / 57.5 / 46.5 over xxh3,
+which does not overlap the hashing — 2.1 to 3.2× on every corpus but the word list, whose keys are
 9 bytes, and the 125-byte paths. The `CompactHashIndex` row's single lookup is `id_unchecked`, the
-same perfect-hash probe without the fingerprint compare, within 7.2 ns of `ClosedHashIndex` on every
+same perfect-hash probe without the fingerprint compare, within 6.9 ns of `ClosedHashIndex` on every
 corpus and below it on seven of the eight; its batch is `ids_of`, which does compare, and pays the
-fingerprint line's miss, 4.1 to 6.1 ns above it.
+fingerprint line's miss, 4.1 to 5.7 ns above it.
 
 **The xxh3 column moved and nothing here explains it.** Against the `powersave` run of 2026-09-17
 ([`mphf-strings-2026-09-17-arz-2a9acef.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-17-arz-2a9acef.txt)) the fast
-set over xxh3 reads 24–53 % slower on the single lookup, 1 M URLs 51.5 → 71.5 ns and 10 M titles
-49.3 → 75.2. No code of this crate is in that path, and the cause is not traced. The same set over
-lexindex's hash reads 4–18 % slower, 1 M URLs 45.7 → 49.4, and is no control: the key hash of 5.0
+set over xxh3 reads 15–46 % slower on the single lookup, 1 M URLs 51.5 → 68.1 ns and 10 M titles
+49.3 → 72.1. No code of this crate is in that path, and the cause is not traced. The same set over
+lexindex's hash reads 2–18 % slower, 1 M URLs 45.7 → 47.7, and is no control: the key hash of 5.0
 lies between the two runs. So do not read the
 wider gap to xxh3 as a gain of this crate: the smaller gaps of September are as good a reading of
 what a general-purpose string hash costs.
@@ -1070,14 +1076,14 @@ against the `b4544db` file over the hash 2.0–3.x shipped, in the protocol both
 every lexindex row was 10–30 % quicker — 1 M URLs 54.5 → 43.0 ns, paths 92 → 65, titles 32 → 28,
 UUIDs 46 → 39 — while the xxh3 rows, the same code in both, read 3–15 % slower in the newer one, so
 that gain too is at least the difference shown. Results files:
-[`bench/results/mphf-strings-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-11-05-arz-ea82db8.txt),
+[`bench/results/mphf-strings-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-11-05-arz-7b65814.txt),
 [`bench/results/mphf-strings-2026-09-17-arz-2a9acef.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-17-arz-2a9acef.txt),
 [`bench/results/mphf-strings-2026-09-16-arz-7215616.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-strings-2026-09-16-arz-7215616.txt).
 
 The lexindex row ran once more at each size in a process with transparent huge pages turned off
 (`prctl(PR_SET_THP_DISABLE)`), the control for the `MADV_HUGEPAGE` its tables ask for from 2 MiB
-up: 1.6 / 1.9 ns at 1 M, as with them (nothing to get below one huge page), and 2.6 / 2.6 against
-2.3 / 2.4 at 10 M, 13 % and 8 %. The recount has no such process at 100 M: on 2026-09-17, on
+up: 1.6 / 1.9 ns at 1 M against 1.6 / 1.8 with them (nothing to get below one huge page), and 2.6 / 2.6 against
+2.4 / 2.4 at 10 M, 8 % and 8 %. The recount has no such process at 100 M: on 2026-09-17, on
 `powersave`, it read 10.8 / 4.1 against 10.0 / 3.5, 8 % and 17 %, with the results file's `huge MB`
 column showing the pages the process holds after the build, 40 MB at 100 M against none without them.
 
@@ -1110,7 +1116,7 @@ and 4.0 → 3.6.
 the space record at 1.444 + ε bits, is C++20 under the GPL, so it ran in its own process on the
 authors' harness at their commit `11deea6`: XorShift64 keys, one construction timed in
 milliseconds, the queries drawn with replacement into a plan array (as above, no key fetch inside
-the query), single-threaded, one run per configuration, on the same machine in the same window as
+the query), single-threaded, one run per configuration, on the same machine on the same day as
 the tables above ([`mphf-consensus-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-consensus-2026-11-05-arz-ea82db8.txt)). `k` is the bucket size, ε the overhead over the bound, `-o` the query-optimised variant.
 
 | function | 1 M: bits/key | build | lookup | 10 M: bits/key | build | lookup |
@@ -1121,43 +1127,44 @@ the tables above ([`mphf-consensus-2026-11-05-arz-ea82db8.txt`](https://github.c
 | … k = 32 768, ε = 0.1 | 1.619 | 614 | 95 | — | — | — |
 | … k = 32 768, ε = 0.01 | 1.492 | 1 995 | 94 | **1.459** | 1 977 | 141 |
 | … k = 32 768, ε = 0.01, `-o` | 1.491 | 3 046 | 118 | **1.459** | 3 066 | 131 |
-| **lexindex `MPH3`**, one thread | 1.925 | **36.6** | **1.6** | 1.907 | **38.8** | **2.3** |
+| **lexindex `MPH3`**, one thread | 1.925 | **37.2** | **1.6** | 1.915 | **34.3** | **2.4** |
 
 The last row is the tables' own `MPH3`; the `MPH2` row this table carried went with its format, gone
-since 4.0. The trade is 0.45 bits
-a key — on a `CompactHashIndex` at 1.24 bytes a key, 5 % of the index — for 7–79× the build and
-34–61× the lookup at 10 M. That is the right answer for an archive written once and read rarely;
+since 4.0. The trade is 0.46 bits
+a key — on a `CompactHashIndex` at 1.24 bytes a key, 5 % of the index — for 8–89× the build and
+33–59× the lookup at 10 M. That is the right answer for an archive written once and read rarely;
 this crate's tables are read on every `id`, and 1.91 bits is where its lookup stays first.
 
 What this campaign does not have. A second CPU: one Ryzen 7 5800HS, a mobile part with 16 MB of L3,
 and the 100 M rows are where its memory system shows — a server part with a larger cache and more
 channels moves every row there. A 1 B row in the tables — it has runs of its own, eight build and
 eight lookup threads with the probe order sampled to 10 M keys, because the full one is another 8 GB
-beside a 14 GB construction peak. The recount, on 2026-11-05 at `ea82db8` on `performance`, is three
+beside a 14 GB construction peak. The recount, on 2026-11-05 at `7b65814` on `performance`, is three
 processes with four copies of each table and where each copy landed read beside it, and a fourth
 with huge pages off
-([`bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt)):
-`MPH3` builds over 10⁹ keys in 11.7 s at 1.905 bits and **2.7 GB above the keys**, against 26–419 s and
-8.0–14.4 GB for PtrHash's three sets. Its single lookup is the fastest of the four rows there, 12.4 ns
-against PtrHash fast's 13.7 and compact's 24.1, and so is its batch, 6.7 against 7.7 and 8.0 (medians
+([`bench/results/mphf-vs-1b-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-11-05-arz-7b65814.txt)):
+`MPH3` builds over 10⁹ keys in 7.5 s at 1.911 bits and **2.6 GB above the keys**, against 25–417 s and
+8.0–14.4 GB for PtrHash's three sets. Its single lookup is the fastest of the four rows there, 12.6 ns
+against PtrHash fast's 13.7 and compact's 24.2, and so is its batch, 6.8 against 7.7 and 8.0 (medians
 over twelve copies). With eight lookup threads every row waits on how fast the memory under its table
 answers random loads, and on this machine — two unequal modules, the top 16 GiB of memory interleaved
 across both channels — that can be where the table lands. On 2026-09-26, on `powersave`
 ([`bench/results/mphf-vs-1b-2026-09-26-arz-8537f35.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-26-arz-8537f35.txt)),
 `MPH3`'s tables, on the huge pages they ask for, landed on memory 21–23 % slower for random loads than
-PtrHash's on small pages. Here they did not: all four rows read 2.60–2.75 ns a load, `MPH3` 2.60. So
-with eight threads its lookup reads 3.0 ns against fast's 3.1 and compact's 4.1, and its batch 2.9
-against compact's 2.6, balanced's 2.7 and fast's 3.0. With huge pages off the rows land within 2 % of
-each other, 2.70–2.74, and the lookup reads 3.11 against fast's 3.09 — level — but the batch 3.01
-against compact's 2.61 and balanced's 2.59: **the eight-thread batch is where `MPH3` loses at a billion
-keys, 15 % behind PtrHash compact on the same memory.** Hardware counters over the two batches in a
+PtrHash's on small pages. Here they did not: all four rows read 3.27–3.34 ns a load, `MPH3` 3.34. So
+with eight threads its lookup reads 3.6 ns against fast's 3.4 and compact's 4.2, and its batch 3.3
+against compact's 2.8, balanced's 2.7 and fast's 3.2. With huge pages off the rows land within 3 % of
+each other, 3.09–3.17, and the lookup reads 3.33 against fast's 3.33 — level — but the batch 3.04
+against compact's 2.60 and balanced's 2.63: **the eight-thread batch is where `MPH3` loses at a billion
+keys, 17 % behind PtrHash compact on the same memory**, and with huge pages on its single lookup is
+5 % behind fast's. Hardware counters over the two batches in a
 separate harness say what that is made of
-([`bench/results/mphf-lanes-1b-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-lanes-1b-2026-11-05-arz-ea82db8.txt)):
-with huge pages off, compact's batch fetches 0.84 lines a key from DRAM against `MPH3`'s 0.87 and
-finds 0.20 in the L3 against 0.08. Its bucket function is skewed, so the pilots of its dense buckets
+([`bench/results/mphf-lanes-1b-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-lanes-1b-2026-11-05-arz-7b65814.txt)):
+with huge pages off, compact's batch fetches 0.82 lines a key from DRAM against `MPH3`'s 0.98 and
+finds 0.20 in the L3 against 0.10. Its bucket function is skewed, so the pilots of its dense buckets
 answer a large share of the keys and stay in the 16 MB cache; `MPH3`'s buckets are uniform, and over
 its 240 MB about one line in fifteen can be cached. Without huge pages its one-thread batch also
-reads 7 % faster here and its single lookup 11 % slower; a machine with matched modules has no
+reads 3 % faster here and its single lookup 13 % slower; a machine with matched modules has no
 slower part for huge pages to land in, and this campaign has none to measure that on. On 2026-09-17
 ([`bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-09-17-arz-08094a1.txt))
 the eight-thread columns moved by up to 58 % between processes over the same code, and that is the
@@ -1166,14 +1173,14 @@ built and its clones in a run that read the sequential rate only. That run also 
 21–100 s and 9.7 GB to build, whose PHast answered a lookup in 19.6 ns. The 1 B run before the harness
 corrections above, on a hot machine, read 30.0 and 9.9 ns for `MPH3`'s single and batch lookups over
 sorted keys, behind every PtrHash set. [The `mphf-lanes-1b` file of 2026-09-26](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-lanes-1b-2026-09-26-arz-6969644.txt) read compact's batch at 0.83 lines on `powersave`. Confidence intervals: in their place, every cell's minimum with the spread of its repeats, in the
-results file — builds repeat within 8 % on one thread, and
-within 10 % on eight but for `MPH3` (17 %) and PHastR (up to 35 %), both at 1 M; lookups within
-17 % at 1 M, 11 % at 10 M and 10 % at 100 M; batches within 12 % at 1 M (passes of about 2 ms),
+results file — builds repeat within 9 % on one thread but for PHast+ with huge pages off (15 %), and
+within 13 % on eight but for PHastR (up to 26 %), both at 1 M; lookups within
+12 % at 1 M, 14 % at 10 M and 9 % at 100 M; batches within 8 % at 1 M (passes of about 2 ms),
 9 % at 10 M and 2 % at 100 M.
 
-<sub>The three tables were measured 2026-11-05 at `ea82db8`
-([`bench/results/mphf-vs-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-11-05-arz-ea82db8.txt)),
-on `performance`, in one window with no editor open, 39 °C at the start. The run before, on
+<sub>The three tables were measured 2026-11-05 at `7b65814`
+([`bench/results/mphf-vs-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-11-05-arz-7b65814.txt)),
+on `performance`, in one window with no editor open, 40 °C at the start. The run before, on
 `powersave`, is 2026-09-17 at `08094a1`
 ([`bench/results/mphf-vs-2026-09-17-arz-08094a1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-2026-09-17-arz-08094a1.txt)),
 on mains with an editor open, after a wait for Tctl under 60 °C and a load under 0.7 (49.0 °C and
@@ -1236,19 +1243,19 @@ is the key fetch, not the function**. Net of it, over 300 million keys, where no
 
 | function | bits/key | LLC misses a lookup | net of the key fetch | lookup ns | batch ns |
 |---|---:|---:|---:|---:|---:|
-| **lexindex `MPH3`** | 1.905 | **1.070** | **0.945** | **11.4** | **6.0** |
-| `ptr_hash` 2.1.3 compact | 2.143 | 1.225 | 1.100 | 21.8 | 6.9 |
-| `ph` 0.11 PHast (SeedOnly) | 1.921 | 1.225 | 1.100 | 17.2 | — |
-| `sux` 0.15 PHastR (8-bit, 4.25) | 1.942 | 1.225 | 1.100 | 19.7 | — |
-| `sux` 0.15 PHastR (8-bit, 4.5) | 1.902 | 1.235 | 1.110 | 21.3 | — |
-| `ptr_hash` 2.1.3 fast | 2.990 | 1.247 | 1.122 | 12.5 | 7.1 |
-| `ptr_hash` 2.1.3 balanced | 2.378 | 1.252 | 1.127 | 22.0 | 7.0 |
-| `sux` 0.15 PHastR (8-bit, 4.75) | 1.898 | 1.322 | 1.197 | 24.0 | — |
-| `sux` 0.15 PHastR (10-bit, 5.75) | 1.820 | 1.399 | 1.274 | 24.0 | — |
-| `ph` 0.11 PHast+ (ShiftOnlyWrapped) | 2.146 | 1.441 | 1.316 | 24.1 | — |
-| `sux` 0.15 PHastR (10-bit, 6) | **1.819** | 1.466 | 1.341 | 26.2 | — |
+| **lexindex `MPH3`** | 1.911 | **1.073** | **0.948** | **11.1** | **5.8** |
+| `sux` 0.15 PHastR (8-bit, 4.25) | 1.942 | 1.173 | 1.048 | 19.4 | — |
+| `sux` 0.15 PHastR (8-bit, 4.5) | 1.902 | 1.227 | 1.102 | 21.2 | — |
+| `ph` 0.11 PHast (SeedOnly) | 1.921 | 1.234 | 1.109 | 16.8 | — |
+| `ptr_hash` 2.1.3 compact | 2.143 | 1.239 | 1.114 | 21.0 | 6.9 |
+| `ptr_hash` 2.1.3 fast | 2.990 | 1.245 | 1.120 | 12.4 | 7.0 |
+| `sux` 0.15 PHastR (8-bit, 4.75) | 1.898 | 1.295 | 1.170 | 23.7 | — |
+| `ptr_hash` 2.1.3 balanced | 2.378 | 1.296 | 1.171 | 21.3 | 7.0 |
+| `sux` 0.15 PHastR (10-bit, 5.75) | 1.820 | 1.394 | 1.269 | 23.8 | — |
+| `sux` 0.15 PHastR (10-bit, 6) | **1.819** | 1.434 | 1.309 | 25.4 | — |
+| `ph` 0.11 PHast+ (ShiftOnlyWrapped) | 2.146 | 1.435 | 1.310 | 23.1 | — |
 
-<sub>[`mphf-misses-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-misses-2026-11-05-arz-ea82db8.txt)
+<sub>[`mphf-misses-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-misses-2026-11-05-arz-7b65814.txt)
 — the same three sizes in one file, 10 M, 100 M and 300 M, one process each, eight build threads and
 one round; the cell is the fastest of three passes. The
 nanoseconds in this table are taken with the counter running and are not the ones the tables above
@@ -1256,11 +1263,11 @@ publish.</sub>
 
 The survey's figures for the same quantity are PtrHash 1.0 lines a query and PHast 1.1, and these
 agree with them. **`MPH3` is the only row under one line**, and that is the reading of its
-single-lookup lead over `ptr_hash` fast at this size — 11.4 ns against 12.5, on 16 % fewer misses,
-36 % fewer bits and a build 24 times faster. On the same two rows the `powersave` run of 2026-09-20
+single-lookup lead over `ptr_hash` fast at this size — 11.1 ns against 12.4, on 15 % fewer misses,
+36 % fewer bits and a build 43 times faster. On the same two rows the `powersave` run of 2026-09-20
 ([`mphf-misses-2026-09-20-arz-1a9003e.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-misses-2026-09-20-arz-1a9003e.txt)) read a tie,
 16.3 against 16.2. At 100 million keys the tables are 24–37 MB against a 16 MB L3 and
-partly resident, and `MPH3`, PtrHash's sets, PHast and PHastR's 8-bit rows at 4.25 and 4.5 sit between 1.029 and 1.105 — the ordering
+partly resident, and `MPH3`, PtrHash's sets, PHast and PHastR's 8-bit rows at 4.25 and 4.5 sit between 1.039 and 1.096 — the ordering
 there says nothing, and the gap only opens once nothing is resident.
 
 ### What an instruction costs inside the miss
@@ -1274,22 +1281,22 @@ never leave L1.
 
 | n | table | 0 | 4 | 16 | 64 | 128 | ns an instruction |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 100 M | 22.7 MB | 9.15 | 10.69 | 13.99 | 22.49 | 29.73 | **0.11** (`nop`) |
-| 100 M | 22.7 MB | 9.15 | 14.74 | 20.62 | 31.76 | 48.26 | 0.26 (independent `add`) |
-| 100 M | 22.7 MB | 10.38 | 12.76 | 18.26 | 34.28 | 68.17 | 0.53 (a chain) |
-| 10 M | 2.3 MB | 2.44 | 2.81 | 3.57 | 6.41 | 9.59 | **0.050** (`nop`) |
+| 100 M | 22.8 MB | 8.97 | 10.50 | 13.69 | 21.86 | 28.84 | **0.11** (`nop`) |
+| 100 M | 22.8 MB | 8.96 | 14.43 | 20.14 | 30.99 | 48.15 | 0.27 (independent `add`) |
+| 100 M | 22.8 MB | 10.14 | 12.51 | 17.84 | 33.52 | 66.38 | 0.51 (a chain) |
+| 10 M | 2.3 MB | 2.47 | 2.86 | 3.60 | 6.45 | 9.63 | **0.050** (`nop`) |
 
-<sub>[`uops-pad-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/uops-pad-2026-11-05-arz-ea82db8.txt)
+<sub>[`uops-pad-2026-11-05-arz-7b65814.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/uops-pad-2026-11-05-arz-7b65814.txt)
 — ns a lookup, the minimum of three rounds taken A-B-A-B over the pad counts, and the slope over
-the last two. Three 100 M runs read the `nop` slope at 0.1132, 0.1183 and 0.1139: ±2.2 %. The
+the last two. Three 100 M runs read the `nop` slope at 0.1091, 0.1090 and 0.1083: ±0.4 %. The
 control is the probe order: the third of those is the generation order rather than shuffled, so the
 loop waits on the table and not on the probe array, which is read sequentially either way.</sub>
 
 The loop is not paying for the instruction's execution. It is paying because the instruction
 displaces another query from the window, and the window is what buys the memory-level parallelism:
-one dependent load at a time over a region the size of the table takes **45.6 ns** at 22.7 MB and
-10.6 at 2.3 MB, while the loop answers a key in 9.15 ns, so it keeps **5.0 misses in flight**.
-Latency over the slope reads 382–403 instructions at 100 M — above Zen 3's 256-entry reorder
+one dependent load at a time over a region the size of the table takes **43.4 ns** at 22.8 MB and
+10.6 at 2.3 MB, while the loop answers a key in 8.97 ns, so it keeps **4.8 misses in flight**.
+Latency over the slope reads 397–399 instructions at 100 M — above Zen 3's 256-entry reorder
 buffer, so take it as an upper bound on the window rather than a reading of it, since some nops are
 eliminated at rename. At 10 M the same arithmetic gives 213 and means nothing: that loop is
 throughput-bound, not window-bound, which is exactly why its slope is under half the other's.
@@ -1299,12 +1306,12 @@ The `powersave` run of 2026-09-20
 about twice this, 0.23 ns a `nop` and 85.3 ns a dependent load, on the same table at 15.0 ns a key.
 The two runs differ in governor, kernel and compiler, and this harness does not separate them.
 
-Two things follow. A **dependent** instruction costs 0.53 ns a step against an independent one's
-0.26 and a `nop`'s 0.11, so a chain welded onto a lookup path costs what two independent
+Two things follow. A **dependent** instruction costs 0.51 ns a step against an independent one's
+0.27 and a `nop`'s 0.11, so a chain welded onto a lookup path costs what two independent
 instructions or about five `nop`s do — which is the argument against trading a table load for a longer
 arithmetic chain, not for it. And **0.11 ns an instruction is the exchange rate for the last of the
-lookup column**: at 300 million keys `MPH3` answers in 11.4 ns against `ptr_hash` fast's 12.5 with the
-counter running, so that gap is worth about ten instructions, and `MPH3` reaches it on 16 % fewer
+lookup column**: at 300 million keys `MPH3` answers in 11.1 ns against `ptr_hash` fast's 12.4 with the
+counter running, so that gap is worth about twelve instructions, and `MPH3` reaches it on 15 % fewer
 misses.
 
 ## A fingerprinted `PerfectHashIndex` on mostly-absent keys
@@ -2071,7 +2078,7 @@ memory, which costs the size lead where it was thinnest — block 256 routed is 
 costs instead is [measured against XCDAT below](#hasheddictindex-against-xcdat).
 
 The bill shrinks with `n`, and then it stops shrinking. Unrouted, the same ratio is 3.1× on `words`
-at half a million keys, 1.6× on `titles-en` at a million and 1.12× on `titles-en` at ten million;
+at half a million keys, 1.6× on `titles-en` at a million and 1.16× on `titles-en` at ten million;
 with 4.0's `DictIndex`, on `powersave`, which is what the campaigns past ten million keys ran, it is
 1.17× on all 19.2 million English titles, while `urls` goes from 1.07× at ten million to
 1.08× whole. At a hundred million keys 4.0's `DictIndex` is 1.21× behind on `uuid` (1.24× at ten
@@ -2086,7 +2093,7 @@ ratio is set by how many dependent misses a probe takes, not by how many bytes i
 is a reading, not a measurement; a miss profile of both lookup paths is what would settle it. The
 claim for the rows above is the measured one: **smallest on every corpus, counting MARISA at its
 smallest, `paths` through the opt-in labelled build, and on the front of all of them; at ten million
-keys, routed, faster than XCDAT 15 on `numeric`, `dna`, `urls`, `titles-en` and `uuid` and 1.31×
+keys, routed, faster than XCDAT 15 on `numeric`, `dna`, `urls`, `titles-en` and `uuid` and 1.35×
 behind on `opaque`; at a hundred million, with 4.0 and no routing,
 faster on `numeric`, level on `dna` and 1.2× and 1.6× behind on `uuid` and `opaque`.** The 19.2 M
 and 100 M numbers are the standalone benchmark suite's, at its `a6c13d0` with lexindex 4.0.0 from
@@ -2097,123 +2104,123 @@ runs every structure over both corpora whole, and
 runs only `DictIndex` at blocks 256 and 1024, `StringIndex` and XCDAT 15, since the full set at a
 hundred million keys would run for two days.
 
-<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-ea82db8.json -->
+<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-7b65814.json -->
 | corpus | `Dict` 256 | smallest | fastest | lexindex on the front |
 |---|---:|---|---|---|
-| `dna-10000000` | 3.95 @ 481 | lexindex Dict 1024 3.81 @ 461 | lexindex HashedDict closed 7.19 @ 73 | Dict 1024 labelled, Dict 1024 routed, HashedDict closed |
-| `numeric-10000000` | 1.02 @ 285 | lexindex StringIndex 3.6e-05 @ 61 | lexindex HashedDict closed 4.25 @ 36 | HashedDict closed, StringIndex |
-| `opaque-10000000` | 10.05 @ 501 | lexindex Dict 1024 9.95 @ 531 | lexindex HashedDict closed 13.28 @ 73 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
-| `titles-en-10000000` | 5.53 @ 617 | lexindex Dict 1024 labelled 5.15 @ 720 | lexindex HashedDict closed 8.77 @ 67 | Dict 1024, Dict 1024 labelled, Dict 1024 routed, Dict 256, Dict 256 labelled, Dict 256 routed, HashedDict closed |
-| `urls-10000000` | 5.68 @ 692 | lexindex Dict 1024 labelled 5.20 @ 784 | lexindex HashedDict closed 8.91 @ 80 | Dict 1024, Dict 1024 labelled, Dict 1024 routed, Dict 256 routed, HashedDict closed |
-| `uuid-10000000` | 17.56 @ 618 | lexindex Dict 1024 17.42 @ 607 | lexindex HashedDict closed 20.80 @ 78 | Dict 1024 labelled, Dict 1024 routed, HashedDict closed |
+| `dna-10000000` | 3.95 @ 481 | lexindex Dict 1024 3.81 @ 463 | lexindex HashedDict closed 7.19 @ 72 | Dict 1024, Dict 1024 routed, HashedDict closed |
+| `numeric-10000000` | 1.02 @ 286 | lexindex StringIndex 3.6e-05 @ 62 | lexindex HashedDict closed 4.25 @ 36 | HashedDict closed, StringIndex |
+| `opaque-10000000` | 10.05 @ 520 | lexindex Dict 1024 9.95 @ 542 | lexindex HashedDict closed 13.29 @ 73 | Dict 1024, Dict 1024 routed, Dict 256, Dict 256 routed, HashedDict closed |
+| `titles-en-10000000` | 5.53 @ 635 | lexindex Dict 1024 labelled 5.15 @ 720 | lexindex HashedDict closed 8.77 @ 67 | Dict 1024, Dict 1024 labelled, Dict 1024 routed, Dict 256, Dict 256 labelled, Dict 256 routed, HashedDict closed |
+| `urls-10000000` | 5.68 @ 704 | lexindex Dict 1024 labelled 5.20 @ 789 | lexindex HashedDict closed 8.92 @ 80 | Dict 1024, Dict 1024 labelled, Dict 1024 routed, HashedDict closed |
+| `uuid-10000000` | 17.56 @ 625 | lexindex Dict 1024 17.42 @ 636 | lexindex HashedDict closed 20.80 @ 78 | Dict 1024, Dict 1024 routed, Dict 256 labelled, HashedDict closed |
 <!-- /table -->
 
-<sub>Ten million keys, measured 2026-11-05 at `ea82db8`
-([`bench/results/frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)),
+<sub>Ten million keys, measured 2026-11-05 at `7b65814`
+([`bench/results/frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)),
 on the `performance` governor, with two hours allowed a process and none reaching it. At this scale every lexindex row runs
 beside every competitor. The competitors read
-0.93–1.16 of the 2026-09-20 campaign at `7e42c43`, on `powersave`, median 0.98, MARISA's
-median 1.04, every size byte-identical. Other work while the 620 processes ran: median 0.01 busy
-CPUs, most 0.08.</sub>
+0.88–1.14 of the 2026-09-20 campaign at `7e42c43`, on `powersave`, median 0.97, MARISA's
+median 1.03, every size byte-identical. Other work while the 620 processes ran: median 0.01 busy
+CPUs, most 0.13.</sub>
 
 At ten times the keys lexindex is on the front of all six corpora, and nothing from elsewhere is on
 any of them: `HashedDictIndex` closed on all six, `DictIndex` on five, and `StringIndex` on
 `numeric`, where it is the smallest and the fastest exact search. `DictIndex` is the smallest
 structure on the other five: `dna` at 3.81 bytes a key at block 1024 against C²-CoCo's 5.98 at ρ=1,
 `opaque` 9.95 against PDT's 13.73 and `uuid` 17.42 against PDT's 20.59 — builds of 113 and 124
-seconds against 0.8 and 1.0 — and, by a narrower 9.8 % and 10.8 % with the labelled build and 6.1 %
+seconds against 0.9 and 1.2 — and, by a narrower 9.8 % and 10.8 % with the labelled build and 6.1 %
 and 7.0 % without it, `titles-en` and `urls` against
-MARISA at ρ=2. On `dna` block 1024 as a load leaves it reads 461 ns to XCDAT 15's 548, so it is
+MARISA at ρ=2. On `dna` block 1024 as a load leaves it reads 463 ns to XCDAT 15's 556, so it is
 smaller and faster than everything from elsewhere. `DictIndex` builds before every one of them
-again, in 0.45–2.2 s, where the next is MARISA at 3.0–11.9 times that (PDT, at 2.6 times, on
+again, in 0.49–2.3 s, where the next is MARISA at 2.9–10.8 times that (PDT, at 2.4 times, on
 `numeric`), C²'s structures take 10–31 s and PDT up to 124 s. Only `numeric` keeps a trie smaller
 than `DictIndex`: CoCo-trie's 0.51 bytes a key against block 1024's 0.92, and neither is near
 `StringIndex`. `urls`, the corpus with the longest keys, is
 below whole.
 
-<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-ea82db8.json corpus=urls-10000000 -->
+<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-7b65814.json corpus=urls-10000000 -->
 **`urls-10000000`** — 10,000,000 keys, 52.37 bytes a key raw
 
 | structure | bytes/key | % of raw | build ms | `id` ns | spread | front |
 |---|---:|---:|---:|---:|---:|:---:|
-| lexindex Dict 32 | 7.01 | 13.4 | 2213 | 691 | 4 % |  |
-| lexindex Dict 128/8 | 6.07 | 11.6 | 2295 | 695 | 3 % |  |
-| lexindex Dict 256 | 5.68 | 10.8 | 2188 | 692 | 1 % |  |
-| lexindex Dict 1024 | 5.42 | 10.4 | 2189 | 719 | 0 % | ● |
-| lexindex Dict 32 routed | 7.51 | 14.3 | 2191 | 664 | 2 % |  |
-| lexindex Dict 128/8 routed | 7.07 | 13.5 | 2338 | 594 | 2 % |  |
-| lexindex Dict 256 routed | 6.18 | 11.8 | 2244 | 561 | 3 % | ● |
-| lexindex Dict 1024 routed | 5.67 | 10.8 | 2174 | 564 | 2 % | ● |
-| lexindex Dict 256 labelled | 5.45 | 10.4 | 9824 | 756 | 4 % |  |
-| lexindex Dict 1024 labelled | 5.20 | 9.9 | 9846 | 784 | 1 % | ● |
-| lexindex StringIndex | 13.10 | 25.0 | 8918 | 708 | 2 % |  |
-| lexindex HashedDict closed | 8.91 | 17.0 | 3511 | 80 | 0 % | ● |
-| lexindex HashedDict fp=8 | 9.91 | 18.9 | 3481 | 108 | 1 % |  |
-| lexindex HashedDict fp=16 | 10.91 | 20.8 | 3556 | 109 | 0 % |  |
+| lexindex Dict 32 | 7.01 | 13.4 | 2275 | 703 | 4 % |  |
+| lexindex Dict 128/8 | 6.07 | 11.6 | 2352 | 714 | 1 % |  |
+| lexindex Dict 256 | 5.68 | 10.8 | 2309 | 704 | 1 % |  |
+| lexindex Dict 1024 | 5.42 | 10.4 | 2318 | 729 | 0 % | ● |
+| lexindex Dict 32 routed | 7.51 | 14.3 | 2305 | 678 | 1 % |  |
+| lexindex Dict 128/8 routed | 7.07 | 13.5 | 2426 | 604 | 1 % |  |
+| lexindex Dict 256 routed | 6.18 | 11.8 | 2354 | 574 | 1 % |  |
+| lexindex Dict 1024 routed | 5.67 | 10.8 | 2306 | 568 | 1 % | ● |
+| lexindex Dict 256 labelled | 5.45 | 10.4 | 9950 | 760 | 4 % |  |
+| lexindex Dict 1024 labelled | 5.20 | 9.9 | 9979 | 789 | 3 % | ● |
+| lexindex StringIndex | 13.10 | 25.0 | 8807 | 712 | 6 % |  |
+| lexindex HashedDict closed | 8.92 | 17.0 | 3579 | 80 | 1 % | ● |
+| lexindex HashedDict fp=8 | 9.92 | 18.9 | 3572 | 107 | 1 % |  |
+| lexindex HashedDict fp=16 | 10.92 | 20.8 | 3602 | 109 | 0 % |  |
 | lexindex DoubleArray | — | — | — | — | — | refused: build error: double-array: more than 8 388 608 keys; ids are 23 bits |
-| lexindex PerfectHash (ids in hash order) | 52.89 | 101.0 | 4018 | 163 | 0 % |  |
-| C²-FST | 9.41 | 18.0 | 11880 | 1516 | 1 % |  |
-| C²-FST ρ=1 | 8.20 | 15.7 | 13856 | 1800 | 0 % |  |
-| C²-FST ρ=2 | 8.20 | 15.7 | 14352 | 1801 | 2 % |  |
-| C²-CoCo | 9.92 | 18.9 | 28174 | 1547 | 2 % |  |
-| C²-CoCo ρ=1 | 8.71 | 16.6 | 30045 | 1761 | 1 % |  |
-| C²-CoCo ρ=2 | 8.71 | 16.6 | 30682 | 1768 | 1 % |  |
-| C²-MARISA | 8.34 | 15.9 | 11811 | 877 | 1 % |  |
-| C²-MARISA ρ=1 | 6.92 | 13.2 | 14130 | 1169 | 0 % |  |
-| C²-MARISA ρ=2 | 6.92 | 13.2 | 14822 | 1169 | 0 % |  |
-| FST | 9.54 | 18.2 | 15440 | 1917 | 1 % |  |
+| lexindex PerfectHash (ids in hash order) | 52.89 | 101.0 | 4135 | 163 | 0 % |  |
+| C²-FST | 9.41 | 18.0 | 11847 | 1508 | 0 % |  |
+| C²-FST ρ=1 | 8.20 | 15.7 | 13772 | 1789 | 1 % |  |
+| C²-FST ρ=2 | 8.20 | 15.7 | 14338 | 1796 | 0 % |  |
+| C²-CoCo | 9.92 | 18.9 | 27923 | 1525 | 2 % |  |
+| C²-CoCo ρ=1 | 8.71 | 16.6 | 29927 | 1782 | 1 % |  |
+| C²-CoCo ρ=2 | 8.71 | 16.6 | 30605 | 1744 | 1 % |  |
+| C²-MARISA | 8.34 | 15.9 | 11850 | 871 | 3 % |  |
+| C²-MARISA ρ=1 | 6.92 | 13.2 | 14151 | 1154 | 1 % |  |
+| C²-MARISA ρ=2 | 6.92 | 13.2 | 14803 | 1161 | 1 % |  |
+| FST | 9.54 | 18.2 | 15419 | 1913 | 1 % |  |
 | CoCo | — | — | — | — | — | aborted: std::bad_alloc |
-| MARISA | 8.66 | 16.5 | 10401 | 1136 | 4 % |  |
-| MARISA ρ=1 | 6.23 | 11.9 | 11907 | 1592 | 1 % |  |
-| MARISA ρ=2 | 5.83 | 11.1 | 12122 | 1661 | 1 % |  |
-| PDT | 7.34 | 14.0 | 27258 | 1124 | 3 % |  |
-| ART | 35.80 | 68.4 | 3521 | 942 | 14 % | ref |
-| C-ART | 16.85 | 32.2 | 4106 | 890 | 7 % | ref |
-| XCDAT 7 | 12.37 | 23.6 | 12450 | 830 | 0 % |  |
-| XCDAT 8 | 11.96 | 22.8 | 12096 | 827 | 1 % |  |
-| XCDAT 15 | 14.75 | 28.2 | 12436 | 695 | 3 % |  |
-| XCDAT 16 | 15.43 | 29.5 | 12096 | 737 | 0 % |  |
+| MARISA | 8.66 | 16.5 | 10756 | 1120 | 1 % |  |
+| MARISA ρ=1 | 6.23 | 11.9 | 12330 | 1556 | 4 % |  |
+| MARISA ρ=2 | 5.83 | 11.1 | 12513 | 1664 | 1 % |  |
+| PDT | 7.34 | 14.0 | 27235 | 1125 | 0 % |  |
+| ART | 35.80 | 68.4 | 3560 | 837 | 5 % | ref |
+| C-ART | 16.85 | 32.2 | 4123 | 879 | 10 % | ref |
+| XCDAT 7 | 12.37 | 23.6 | 12608 | 862 | 3 % |  |
+| XCDAT 8 | 11.96 | 22.8 | 12273 | 801 | 5 % |  |
+| XCDAT 15 | 14.75 | 28.2 | 12593 | 687 | 5 % |  |
+| XCDAT 16 | 15.43 | 29.5 | 12259 | 723 | 3 % |  |
 <!-- /table -->
 
 <sub>From the same artifact
-([`bench/results/frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)).
+([`bench/results/frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)).
 `spread` is the range of a cell's three rounds over their median, and `ref` marks the two structures
-that do not count their keys. Five rows are on the front: block 1024 labelled, the smallest structure here
-at 5.20 bytes a key against MARISA's 5.83 at ρ=2; block 1024, 5.42 bytes; block 1024 routed, 564 ns
-at 5.67, and block 256 routed, 561 at 6.18, against XCDAT 15's 695 at 14.75; and `HashedDictIndex`
-closed, 80 ns at 8.91. `bench/frontier/tables.py`
+that do not count their keys. Four rows are on the front: block 1024 labelled, the smallest structure here
+at 5.20 bytes a key against MARISA's 5.83 at ρ=2; block 1024, 5.42 bytes; block 1024 routed, 568 ns
+at 5.67, against XCDAT 15's 687 at 14.75; and `HashedDictIndex`
+closed, 80 ns at 8.92. `bench/frontier/tables.py`
 prints this table for every corpus at both scales from the logs.</sub>
 
 These are the same campaign's exact searches:
 
-<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-ea82db8.json view=search -->
+<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-7b65814.json view=search -->
 | corpus | XCDAT 15 | `Dict` 256 | 32 routed | 128/8 routed | 256 routed | 1024 routed | `StringIndex` | `DoubleArray` | `PerfectHash`, hash-order ids |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `dna-10000000` | 16.00 @ 548 | 3.95 @ 481 | 5.08 @ 559 | 5.17 @ 468 | 4.45 @ 422 | 4.06 @ 400 | 15.98 @ 682 | — | 16.47 @ 116 |
-| `numeric-10000000` | 7.06 @ 198 | 1.02 @ 285 | 1.76 @ 307 | 2.16 @ 312 | 1.52 @ 230 | 1.17 @ 202 | 3.6e-05 @ 61 | — | 4.61 @ 77 |
-| `opaque-10000000` | 21.66 @ 321 | 10.05 @ 501 | 10.79 @ 478 | 11.22 @ 452 | 10.55 @ 420 | 10.20 @ 430 | 21.47 @ 465 | — | 16.32 @ 117 |
-| `titles-en-10000000` | 13.95 @ 550 | 5.53 @ 617 | 6.51 @ 583 | 6.80 @ 526 | 6.03 @ 493 | 5.62 @ 509 | 13.25 @ 611 | — | 21.59 @ 116 |
-| `urls-10000000` | 14.75 @ 695 | 5.68 @ 692 | 7.51 @ 664 | 7.07 @ 594 | 6.18 @ 561 | 5.67 @ 564 | 13.10 @ 708 | — | 52.89 @ 163 |
-| `uuid-10000000` | 38.58 @ 543 | 17.56 @ 618 | 18.64 @ 560 | 18.79 @ 526 | 18.06 @ 493 | 17.67 @ 489 | 36.07 @ 530 | — | 34.64 @ 157 |
+| `dna-10000000` | 16.00 @ 556 | 3.95 @ 481 | 5.08 @ 556 | 5.17 @ 469 | 4.45 @ 421 | 4.06 @ 402 | 15.98 @ 713 | — | 16.47 @ 116 |
+| `numeric-10000000` | 7.06 @ 193 | 1.02 @ 286 | 1.76 @ 303 | 2.16 @ 306 | 1.52 @ 226 | 1.17 @ 201 | 3.6e-05 @ 62 | — | 4.61 @ 77 |
+| `opaque-10000000` | 21.66 @ 316 | 10.05 @ 520 | 10.79 @ 477 | 11.22 @ 455 | 10.55 @ 425 | 10.20 @ 430 | 21.47 @ 471 | — | 16.33 @ 116 |
+| `titles-en-10000000` | 13.95 @ 547 | 5.53 @ 635 | 6.51 @ 583 | 6.80 @ 532 | 6.03 @ 497 | 5.62 @ 507 | 13.25 @ 615 | — | 21.59 @ 116 |
+| `urls-10000000` | 14.75 @ 687 | 5.68 @ 704 | 7.51 @ 678 | 7.07 @ 604 | 6.18 @ 574 | 5.67 @ 568 | 13.10 @ 712 | — | 52.89 @ 163 |
+| `uuid-10000000` | 38.58 @ 531 | 17.56 @ 625 | 18.64 @ 575 | 18.79 @ 524 | 18.06 @ 507 | 17.67 @ 493 | 36.07 @ 530 | — | 34.64 @ 157 |
 <!-- /table -->
 
 <sub>From the same campaign
-([`bench/results/frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)).
+([`bench/results/frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)).
 The `DoubleArray` column is empty because the format stops at 8 388 608 keys: an id takes 23 bits.
-XCDAT 15 reads 0.99–1.03 of 4.4's subset of 2026-09-24 at `3a73ed5`, every `DictIndex` row 0.82–0.99,
-`StringIndex` 0.95–1.06 but on `numeric`, 95 → 61 ns. `DictIndex` sizes match it to the byte on `dna`, `numeric`,
+XCDAT 15 reads 0.98–1.02 of 4.4's subset of 2026-09-24 at `3a73ed5`, every `DictIndex` row 0.83–1.01,
+`StringIndex` 0.96–1.07 but on `numeric`, 95 → 62 ns. `DictIndex` sizes match it to the byte on `dna`, `numeric`,
 `opaque` and `uuid`; on `titles-en` and `urls` a `DictIndex` is 1.6–2.1 % smaller, block 256 at
 5.53 and 5.68 where it was 5.65 and 5.78, since a build past about 2.6 million keys mines its
 phrases from more of its sample.</sub>
 
 Routed, the exact search is ahead of XCDAT 15 on five corpora of six at ten million keys: `numeric`,
-where `StringIndex` reads 61 ns against 198 and holds all ten million keys in 356 bytes; `dna`,
-block 1024 routed at 400 against 548; `urls`, block 256 routed at 561 against 695; `titles-en`,
-block 256 routed at 493 against 550; and `uuid`, block 1024 routed at 489 against 543. `opaque` is the loss:
-420 ns for block 256 routed against 321, 1.31×. ART and C-ART, which do not count their keys, read
-faster than XCDAT 15 on three of the six, and against them `numeric` is 0.44 (ART's 141 ns), `uuid`
-0.95 (C-ART's 514) and `opaque` 1.67 (ART's 252). Unrouted, block 256 is ahead on `dna` (0.88), level
-on `urls` (0.995), and trails by 1.12–1.56× on the other four. Routing keeps the size lead on every one of the five that a
+where `StringIndex` reads 62 ns against 193 and holds all ten million keys in 356 bytes; `dna`,
+block 1024 routed at 402 against 556; `urls`, block 1024 routed at 568 against 687; `titles-en`,
+block 256 routed at 497 against 547; and `uuid`, block 1024 routed at 493 against 531. `opaque` is the loss:
+425 ns for block 256 routed against 316, 1.35×. ART and C-ART, which do not count their keys, read
+faster than XCDAT 15 on three of the six, and against them `numeric` is 0.44 (ART's 140 ns), `uuid`
+0.99 (ART's 497) and `opaque` 1.69 (ART's 251). Unrouted, block 256 is ahead on `dna` (0.87), level
+on `urls` (1.02), and trails by 1.16–1.65× on the other four. Routing keeps the size lead on every one of the five that a
 `DictIndex` holds — block 1024 routed is still under every structure from elsewhere — and it is
 thinnest on `titles-en`, 5.62 bytes a key against MARISA's 5.71 at ρ=2, where 4.4's 5.73 was over
 it.
@@ -2325,7 +2332,7 @@ beside `Dict` 256 and XCDAT 15 alone, twice: on the working tree that added the 
 after a reboot ([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-22-arz-8e04b0b.json)); 4.4's of 2026-09-24
 put every lexindex row beside XCDAT 15
 ([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-subset-2026-09-24-arz-3a73ed5.json)). The second table below is the full
-campaign's. Against 4.4's subset XCDAT 15 reads 0.99–1.03 and `HashedDict` closed 0.95–1.20. Every
+campaign's. Against 4.4's subset XCDAT 15 reads 0.98–1.02 and `HashedDict` closed 0.96–1.19. Every
 ratio below is taken inside one run.
 
 <!-- table: frontier bench/results/frontier-1m-2026-11-05-arz-ea82db8.json view=hashed -->
@@ -2350,42 +2357,42 @@ ratio below is taken inside one run.
 ([`bench/results/frontier-1m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-11-05-arz-ea82db8.json)).
 A cell reads bytes a key @ nanoseconds a lookup, the median of three rounds.</sub>
 
-<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-ea82db8.json view=hashed -->
+<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-7b65814.json view=hashed -->
 | corpus | XCDAT 15 | `Dict` 256 | `HashedDict` closed | fp=8 | fp=16 |
 |---|---:|---:|---:|---:|---:|
-| `dna-10000000` | 16.00 @ 548 | 3.95 @ 481 | 7.19 @ 73 | 8.19 @ 86 | 9.19 @ 88 |
-| `numeric-10000000` | 7.06 @ 198 | 1.02 @ 285 | 4.25 @ 36 | 5.25 @ 50 | 6.25 @ 52 |
-| `opaque-10000000` | 21.66 @ 321 | 10.05 @ 501 | 13.28 @ 73 | 14.28 @ 86 | 15.28 @ 87 |
-| `titles-en-10000000` | 13.95 @ 550 | 5.53 @ 617 | 8.77 @ 67 | 9.77 @ 79 | 10.77 @ 80 |
-| `urls-10000000` | 14.75 @ 695 | 5.68 @ 692 | 8.91 @ 80 | 9.91 @ 108 | 10.91 @ 109 |
-| `uuid-10000000` | 38.58 @ 543 | 17.56 @ 618 | 20.80 @ 78 | 21.80 @ 104 | 22.80 @ 106 |
+| `dna-10000000` | 16.00 @ 556 | 3.95 @ 481 | 7.19 @ 72 | 8.19 @ 86 | 9.19 @ 87 |
+| `numeric-10000000` | 7.06 @ 193 | 1.02 @ 286 | 4.25 @ 36 | 5.25 @ 50 | 6.25 @ 52 |
+| `opaque-10000000` | 21.66 @ 316 | 10.05 @ 520 | 13.29 @ 73 | 14.29 @ 85 | 15.29 @ 85 |
+| `titles-en-10000000` | 13.95 @ 547 | 5.53 @ 635 | 8.77 @ 67 | 9.77 @ 78 | 10.77 @ 79 |
+| `urls-10000000` | 14.75 @ 687 | 5.68 @ 704 | 8.92 @ 80 | 9.92 @ 107 | 10.92 @ 109 |
+| `uuid-10000000` | 38.58 @ 531 | 17.56 @ 625 | 20.80 @ 78 | 21.80 @ 103 | 22.80 @ 105 |
 <!-- /table -->
 
-<sub>Ten million keys, from the full campaign measured 2026-11-05 at `ea82db8`
-([`bench/results/frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)).
-Other work while the 620 processes ran: median 0.01 busy CPUs, most 0.08.</sub>
+<sub>Ten million keys, from the full campaign measured 2026-11-05 at `7b65814`
+([`bench/results/frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)).
+Other work while the 620 processes ran: median 0.01 busy CPUs, most 0.13.</sub>
 
 **On all nineteen, `HashedDictIndex` is both faster than XCDAT and smaller.** Closed,
-`id_unchecked` is 4.0× faster (`opaque` at a million keys) to 8.7× (`urls` at ten million), median
+`id_unchecked` is 4.0× faster (`opaque` at a million keys) to 8.6× (`urls` at ten million), median
 5.4×, at 1.39× (`words`) to 3.16× (`dna` at a million) less space; `id` at eight fingerprint bits is
 2.9–7.0× faster and 1.17–2.77× smaller; at sixteen, 3.1–6.9× faster, and the size lead narrows to
 0.9 % on `words`, 7.24 bytes a key against 7.30. At all three widths it is faster than every
 structure either campaign measured, the searches that beat XCDAT included: on `numeric` at a million
-keys 13 ns against `DoubleArrayIndex`'s 29, on `dna` at ten million 73 against block 1024 routed's
-400, on `numeric` there 36 against `StringIndex`'s 61. Against the search of the dictionary it
+keys 13 ns against `DoubleArrayIndex`'s 29, on `dna` at ten million 72 against block 1024 routed's
+402, on `numeric` there 36 against `StringIndex`'s 62. Against the search of the dictionary it
 carries, the hash is 6.0–17.8× faster closed and 5.1–13.3× at eight bits — 4.9–12.6× and 4.1–9.1×
 against the same dictionary routed — for 2.6–3.2 bytes a key more: 2.62 on `words`, 2.74 at a
 million keys and 3.24 at ten million, where a rank takes 24 bits. And it builds before XCDAT on every
-corpus, from 1.28× on `words` to 6.2× on `dna` at ten million, in 1.32–3.07× the time of the
+corpus, from 1.28× on `words` to 6.2× on `dna` at ten million, in 1.32–2.76× the time of the
 dictionary alone.
 
 **A loop whose lookups can overlap flatters a hash.** Those ratios are the cold pass, a free loop in
 which the next lookup starts before the last one's misses return. In the three chained passes these
 rows time after it, each query's slot waits on the answer before it: the latency a dependent caller
 sees. XCDAT 15 reads 0.99–1.09 of its cold pass there and `Dict` 256 0.98–1.01, and `HashedDict`
-closed 1.6–2.6× its own. It stays ahead on all nineteen, by less: XCDAT 15 is 1.74× (`opaque` at ten
-million) to 3.75× (`titles-en` at ten million) behind closed, median 2.8×, 1.67–3.63× behind eight
-bits and 1.63–3.66× behind sixteen; `Dict` 256 is 2.54–8.2× behind closed.
+closed 1.6–2.6× its own. It stays ahead on all nineteen, by less: XCDAT 15 is 1.69× (`opaque` at ten
+million) to 3.72× (`paths` at a million) behind closed, median 2.8×, 1.64–3.63× behind eight
+bits and 1.61–3.66× behind sixteen; `Dict` 256 is 2.56–8.2× behind closed.
 
 <!-- table: frontier bench/results/frontier-1m-2026-11-05-arz-ea82db8.json view=chained -->
 | corpus, chained | XCDAT 15 | `Dict` 256 | `HashedDict` closed | fp=8 | fp=16 |
@@ -2408,18 +2415,18 @@ bits and 1.63–3.66× behind sixteen; `Dict` 256 is 2.54–8.2× behind closed.
 <sub>A million keys ([`bench/results/frontier-1m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-11-05-arz-ea82db8.json)): bytes a key @ the median of the rounds' chained
 means.</sub>
 
-<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-ea82db8.json view=chained -->
+<!-- table: frontier bench/results/frontier-10m-2026-11-05-arz-7b65814.json view=chained -->
 | corpus, chained | XCDAT 15 | `Dict` 256 | `HashedDict` closed | fp=8 | fp=16 |
 |---|---:|---:|---:|---:|---:|
-| `dna-10000000` | 16.00 @ 556 | 3.95 @ 477 | 7.19 @ 188 | 8.19 @ 195 | 9.19 @ 200 |
-| `numeric-10000000` | 7.06 @ 199 | 1.02 @ 286 | 4.25 @ 86 | 5.25 @ 92 | 6.25 @ 99 |
-| `opaque-10000000` | 21.66 @ 327 | 10.05 @ 498 | 13.28 @ 188 | 14.28 @ 196 | 15.28 @ 201 |
-| `titles-en-10000000` | 13.95 @ 590 | 5.53 @ 621 | 8.77 @ 157 | 9.77 @ 165 | 10.77 @ 170 |
-| `urls-10000000` | 14.75 @ 755 | 5.68 @ 694 | 8.91 @ 203 | 9.91 @ 209 | 10.91 @ 213 |
-| `uuid-10000000` | 38.58 @ 568 | 17.56 @ 619 | 20.80 @ 200 | 21.80 @ 204 | 22.80 @ 208 |
+| `dna-10000000` | 16.00 @ 575 | 3.95 @ 481 | 7.19 @ 185 | 8.19 @ 192 | 9.19 @ 197 |
+| `numeric-10000000` | 7.06 @ 194 | 1.02 @ 286 | 4.25 @ 83 | 5.25 @ 93 | 6.25 @ 97 |
+| `opaque-10000000` | 21.66 @ 321 | 10.05 @ 519 | 13.29 @ 189 | 14.29 @ 196 | 15.29 @ 199 |
+| `titles-en-10000000` | 13.95 @ 580 | 5.53 @ 635 | 8.77 @ 156 | 9.77 @ 163 | 10.77 @ 167 |
+| `urls-10000000` | 14.75 @ 746 | 5.68 @ 703 | 8.92 @ 203 | 9.92 @ 208 | 10.92 @ 212 |
+| `uuid-10000000` | 38.58 @ 562 | 17.56 @ 625 | 20.80 @ 199 | 21.80 @ 204 | 22.80 @ 209 |
 <!-- /table -->
 
-<sub>Ten million keys ([`bench/results/frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)), the same.</sub>
+<sub>Ten million keys ([`bench/results/frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)), the same.</sub>
 
 **Its build needs no more memory than the dictionary's.** The sidecar holds a 16-byte hash pair a
 key and the table, and builds after the dictionary has freed its own buffers, so the dictionary's
@@ -2435,8 +2442,8 @@ to 8 bytes a key apart, so the gap is the allocator's size, not the sidecar's
 **What it does not do.** XCDAT answers a stranger exactly. `HashedDictIndex` does only through the
 dictionary's search — `id` at zero bits, the `Dict` 256 column, which `dict().route_microblocks()`
 routes like any other `DictIndex` — so for a stranger the exact searches earlier in this section are
-the comparison. Unrouted, XCDAT leads by 1.06–4.4× at a million keys and 1.12–1.56× at ten million on
-four corpora of six, `dna` there turning over (0.88×) and `urls` level (0.995×); routed at block 256, the
+the comparison. Unrouted, XCDAT leads by 1.06–4.4× at a million keys and 1.16–1.65× at ten million on
+four corpora of six, `dna` there turning over (0.87×) and `urls` level (1.02×); routed at block 256, the
 dictionary is ahead on `dna` and `urls` at both scales and on `titles-en` and `uuid` at ten million,
 and 1.01–3.1× behind everywhere else. With fingerprint bits, `id` answers a stranger
 as present at `2^-bits` — 0.4 % at eight, 0.0015 % at sixteen, `CompactHashIndex`'s rate — and with
@@ -2455,27 +2462,29 @@ rather than the corpus's:
 
 | n | structure | keys | build | bytes/key | peak RSS | lookup |
 |---|---|---|---:|---:|---:|---:|
-| 1 M | `StringIndex` | list | 0.31 s | 0.68\* | 155 MB | 134 ns |
-| 1 M | `StringIndex` | generator | 0.46 s | 0.68\* | 148 MB | 136 ns |
-| 1 M | `CompactHashIndex` | list | 0.08 s | 1.24 | 146 MB | 64 ns |
-| 1 M | `CompactHashIndex` | **generator** | 0.19 s | 1.24 | **79 MB** | 66 ns |
-| 10 M | `StringIndex` | list | 4.3 s | 2.00\* | 1109 MB | 527 ns |
-| 10 M | `StringIndex` | generator | 5.8 s | 2.00\* | 1033 MB | 502 ns |
-| 10 M | `CompactHashIndex` | list | 0.63 s | 1.24 | 997 MB | 284 ns |
-| 10 M | `CompactHashIndex` | **generator** | 1.8 s | 1.24 | **311 MB** | 297 ns |
+| 1 M | `StringIndex` | list | 0.32 s | 0.68\* | 155 MB | 134 ns |
+| 1 M | `StringIndex` | generator | 0.46 s | 0.68\* | 148 MB | 135 ns |
+| 1 M | `CompactHashIndex` | list | 0.08 s | 1.24 | 145 MB | 92 ns |
+| 1 M | `CompactHashIndex` | **generator** | 0.20 s | 1.24 | **79 MB** | 67 ns |
+| 10 M | `StringIndex` | list | 4.2 s | 2.00\* | 1109 MB | 541 ns |
+| 10 M | `StringIndex` | generator | 5.7 s | 2.00\* | 1033 MB | 543 ns |
+| 10 M | `CompactHashIndex` | list | 0.63 s | 1.24 | 953 MB | 218 ns |
+| 10 M | `CompactHashIndex` | **generator** | 1.8 s | 1.24 | **266 MB** | 250 ns |
 
-<sub>Measured 2026-11-05 at `ea82db8`, on `performance`
-([`bench/results/scale-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-11-05-arz-ea82db8.json)), one
-process per cell and the **minimum of five** per cell, at load 0.32 and 0.93 at its two ends.
+<sub>Measured 2026-11-05 at `7b65814`, on `performance`
+([`bench/results/scale-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-11-05-arz-7b65814.json)), one
+process per cell and the **minimum of five** per cell, at load 0.35 and 0.93 at its two ends.
 Against 2026-09-19 at `4ee80d2`
 ([artifact](https://github.com/ilgrad/lexindex/blob/main/bench/results/scale-2026-09-19-arz-4ee80d2.json)), `StringIndex`'s build is the control and reads
-back within its noise: 0.33 → 0.31 and 0.48 → 0.46 s at 1 M, 4.3 → 4.3 and 5.9 → 5.8 s at 10 M. Its
-lookup is no control now, since 4.3 changed the reader. `CompactHashIndex`'s builds read 0.08, 0.20 →
-0.19 s at 1 M and 0.58 → 0.63, 1.8 s at 10 M, and its blob stays **1.24 B/key**. Lookups at 1 M
-read 189 → 134 and 72 → 64 ns. **The lookup column at 10 M is not a measurement of the structures**:
-the same `CompactHashIndex` blob's five samples read 284–340 ns from the list, median 304, and
-297–374 from the generator, and `StringIndex`'s 527–653 and 502–700, so a minimum of five says little
-there and 284 against 2026-09-19's 210 is not a finding by itself; the medians read 304 against 267. Why they scatter is not traced. The
-generator build's peak at 10 M is 311 MB against the corpus-holding build's 997, up from 268 and 956 on 2026-09-19 — that gap, not the
+back within its noise: 0.33 → 0.32 and 0.48 → 0.46 s at 1 M, 4.3 → 4.2 and 5.9 → 5.7 s at 10 M. Its
+lookup is no control now, since 4.3 changed the reader. `CompactHashIndex`'s builds read 0.08, 0.20 s
+at 1 M and 0.58 → 0.63, 1.8 s at 10 M, and its blob stays **1.24 B/key**. Lookups at 1 M
+read 189 → 134 and 72 → 92 ns; the second is a blob and a reader this recount did not change, which
+the first window of 2026-11-05 read at 64, so the move is not the code's (its samples read 92–97, and
+72–153 on 2026-09-19). **The lookup column at 10 M is not a measurement of the structures**:
+the same `CompactHashIndex` blob's five samples read 218–329 ns from the list, median 247, and
+250–353 from the generator, and `StringIndex`'s 541–716 and 543–678, so a minimum of five says little
+there and 218 against 2026-09-19's 210 is not a finding by itself; the medians read 247 against 267. Why they scatter is not traced. The
+generator build's peak at 10 M is 266 MB against the corpus-holding build's 953, against 268 and 956 on 2026-09-19 — that gap, not the
 blob, is what the streaming constructor exists for.</sub>
 

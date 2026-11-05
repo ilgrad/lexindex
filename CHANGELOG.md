@@ -122,6 +122,11 @@ All notable changes to this project are documented here. The format follows
   −2.7…−10.8 %, `key` −29.1…−58.5 % on eleven corpora, Russian titles −3.5 %, Chinese titles +2.3 %,
   UUIDs +13.8 %, and with fingerprints a hit −1.1…−22.6 %. A miss reads −6.7…+5.7 % on nine, and
   bigrams +10.1 %, English titles +8.0 %, Chinese titles +13.4 %, PyPI names +13.7 %, UUIDs +22.9 %.
+  At ten million keys, English titles, URLs and opaque keys
+  (`bench/results/rel-scale-2026-11-05-arz-7b65814.txt`): a hit +9.2, +24.0 and +2.4 %, a chain
+  −13.3, −40.7 and −5.6 %, `key` −30.9, −32.3 and −31.4 %, a batch −0.8, −2.4 and −4.1 %; a build on
+  eight threads, English titles 2.20× the time and 1.89× the peak for 7.07 % fewer bytes, URLs 1.61×
+  and 1.22× for 3.19 % (`bench/results/rel-build-2026-11-05-arz-7b65814.txt`).
   From 2¹⁹ keys, a build counts the keys that are a prefix of the next exactly, merges every 32nd, 16th
   and 8th slot, and leaves the merge out when the saving those draws carry to the whole set still
   does not reach the blocked arena. On eighteen corpora of up to a million keys, plain and with

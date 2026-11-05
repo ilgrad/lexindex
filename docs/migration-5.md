@@ -159,9 +159,9 @@ Over thirteen corpora at a million keys, the new layout keeps plain `id` level w
 median ratio is 0.999, from 0.92 on `dna` to 1.14 on `numeric`. Its file is smaller on all thirteen,
 by 0.04 % to 18 %. After `route_microblocks()` its `id` is faster on all thirteen, at a median of
 0.879, and it holds 1.0 byte a key in memory where block 32 holds 0.5. At ten million keys the plain
-median is 1.04, and the routed median is 0.92, faster on five corpora of six
+median is 1.04, and the routed median is 0.91, faster on five corpora of six
 ([`frontier-1m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-11-05-arz-ea82db8.json),
-[`frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)).
+[`frontier-10m-2026-11-05-arz-7b65814.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-7b65814.json)).
 
 ## `Overlay::remove` needs exact membership
 
@@ -185,7 +185,7 @@ ov.retire_id(typo);
 Python has no compile time, so the same call raises a `TypeError` that names the base:
 
 ```python
-ov = lexindex.Overlay(lexindex.CompactHashIndex(keys, 4))
+ov = lexindex.Overlay(lexindex.CompactHashIndex(keys, fingerprint_bits=32))
 typo = ov.add("typo")
 ov.remove("typo")     # TypeError: an overlay over a CompactHashIndex has no remove(): ...
 ov.retire_id(typo)
