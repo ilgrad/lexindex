@@ -481,7 +481,7 @@ impl Cost {
     }
 
     /// Between two measured blocks, linear in `log2(block)`, which is what the constants move in
-    /// over 32..=1024.
+    /// over 128..=1024.
     fn between(self, other: Self, t: f64) -> Self {
         let mix = |x: f64, y: f64| x + (y - x) * t;
         Self {
@@ -565,31 +565,31 @@ impl Ops {
     }
 }
 
-/// Least squares on relative error over 240 measured cells: eight structures over thirteen corpora
+/// Least squares on relative error over 217 measured cells: seven structures over fourteen corpora
 /// at 100 000 keys, eleven at 1 000 000 and six at 10 000 000, in one process, every operation over
 /// fresh probes of its own and every structure timed at every place in its operation's round.
 /// `bench/latency_model.py measure` produced them and `fit` re-derives these tables from
-/// `bench/results/latency-model-2026-09-23-arz-7731027.json`, with no slope below zero — all but
-/// the [`DoubleArray`](Kind::DoubleArray) row and [`HASHED_ID`], which were not fitted. Mean absolute
-/// error is 6–12 % of the measurement on `id(key)` and 26–42 % on prefix counts, whose cost is
-/// mostly how many keys the prefix matches.
+/// `bench/results/latency-model-2026-11-05-arz-ea82db8.json`, with no slope below zero and without
+/// the blobs under 4 KiB, whose lookups read nothing from memory — all but the
+/// [`DoubleArray`](Kind::DoubleArray) row, which was not measured. Mean absolute error is 6–13 % of
+/// the measurement on `id(key)` and 40–41 % on prefix counts, whose cost is mostly how many keys the
+/// prefix matches.
 ///
 /// **Far too coarse to quote and quite enough to rank.** Fitted with a corpus left out, the model
-/// names the fastest index on that corpus in 30 of 30 corpus-size cells for `id(key)`, for nine
-/// hits to a miss, for batches of 1 024, for `key(id)` and for a `common_prefix`-heavy workload;
-/// over ten workloads the mean pick costs 1.000–1.050× the fastest. Against the *published*
-/// sweep, which it was not fitted to, it names the fastest of every lane in 28 of 30 cells — never
-/// more than 1.12× slower — the faster of `DictIndex` and `StringIndex` in 29, never more than
-/// 1.02× slower, and the fastest `DictIndex` block in 21, never more than 1.05× slower.
+/// names the fastest index on that corpus in 30 of 31 corpus-size cells for `id(key)`, in 30 for nine
+/// hits to a miss and for `key(id)`, and in all 31 for batches of 1 024 and for a
+/// `common_prefix`-heavy workload; over ten workloads the mean pick costs 1.000–1.021× the fastest.
+/// Against the *published* sweep, which it was not fitted to, it names the fastest of every lane in
+/// 30 of 31 cells, never more than 1.13× slower, the faster of `DictIndex` and `StringIndex` in 27,
+/// never more than 1.11× slower, and the fastest `DictIndex` block in 21, never more than 1.19×
+/// slower. That sweep's block 128 has microblocks of 16, not this table's 8.
 ///
 /// **What it gets wrong is a choice between ordered indexes, because there the candidates are
-/// close.** The transducer is the faster at 100 000 keys on six corpora of thirteen and at every
-/// size on `numeric`, and the blocks of one dictionary are often within a few per cent of each
-/// other. Held out, the fastest ordered `id(key)` is named in 19 of 30 cells and one within 5 %
-/// of it — what placement in physical memory moves a single-threaded probe on this machine — in
-/// 23, never more than 1.11× slower. Nine prefix counts to a hit is the weakest workload: 15 and
-/// 23 of 30, and 1.64× on ten million `numeric` ids, whose transducer of a few hundred bytes is
-/// smaller than any the fit sees once `numeric` is left out.
+/// close.** The blocks of one dictionary are often within a few per cent of each other. Held out,
+/// the fastest ordered `id(key)` is named in 25 of 31 cells and one within 5 % of it — what placement
+/// in physical memory moves a single-threaded probe on this machine — in 28, never more than 1.19×
+/// slower. Nine prefix counts to a hit is the weakest workload: 24 and 28 of 31, and 1.41× on ten
+/// million `numeric` ids, whose transducer of a few hundred bytes is smaller than any the fit sees.
 ///
 /// **These are one machine's cache latencies**, an AMD Ryzen 7 5800HS with 16 MB of L3, timed
 /// through the Python binding so that every one of them carries that call. Nothing here rescales
@@ -599,11 +599,11 @@ const COST: [(Kind, Ops); 5] = [
         Kind::Closed,
         Ops {
             floor: 0.00,
-            mixed: cost(47.4, 8.87, 0.060, 0.000),
-            hit: cost(47.5, 8.47, 0.062, 0.000),
-            miss: cost(45.3, 8.78, 0.068, 0.000),
-            batch16: cost(34.1, 1.98, 0.073, 0.000),
-            batch1024: cost(31.9, 0.78, 0.063, 0.000),
+            mixed: cost(45.0, 9.67, 0.066, 0.000),
+            hit: cost(45.1, 9.44, 0.063, 0.000),
+            miss: cost(42.5, 9.64, 0.077, 0.001),
+            batch16: cost(33.9, 1.72, 0.066, 0.005),
+            batch1024: cost(31.5, 0.85, 0.067, 0.000),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -614,11 +614,11 @@ const COST: [(Kind, Ops); 5] = [
         Kind::Compact,
         Ops {
             floor: 0.92,
-            mixed: cost(43.1, 16.10, 0.095, 0.000),
-            hit: cost(37.5, 15.90, 0.110, 0.000),
-            miss: cost(26.6, 15.13, 0.103, 0.010),
-            batch16: cost(39.0, 3.06, 0.090, 0.000),
-            batch1024: cost(33.7, 1.45, 0.070, 0.000),
+            mixed: cost(39.1, 16.58, 0.113, 0.000),
+            hit: cost(35.7, 15.49, 0.077, 0.021),
+            miss: cost(24.7, 14.51, 0.062, 0.037),
+            batch16: cost(39.8, 2.67, 0.054, 0.008),
+            batch1024: cost(33.1, 1.49, 0.068, 0.000),
             key: None,
             prefix: None,
             common_prefix: None,
@@ -628,13 +628,13 @@ const COST: [(Kind, Ops); 5] = [
     (
         Kind::Perfect,
         Ops {
-            floor: 3.30,
-            mixed: cost(-7.7, 22.55, 0.000, 0.000),
-            hit: cost(-23.3, 27.28, 0.000, 0.000),
-            miss: cost(-21.6, 16.27, 0.000, 0.000),
-            batch16: cost(36.9, 5.38, 0.028, 0.000),
-            batch1024: cost(35.6, 2.62, 0.066, 0.000),
-            key: Some(cost(-4.7, 21.27, 0.042, 0.000)),
+            floor: 2.51,
+            mixed: cost(-20.0, 23.19, 0.000, 0.000),
+            hit: cost(-37.4, 27.71, 0.000, 0.001),
+            miss: cost(-14.2, 14.62, 0.000, 0.000),
+            batch16: cost(30.7, 6.24, 0.000, 0.000),
+            batch1024: cost(33.7, 2.31, 0.082, 0.000),
+            key: Some(cost(-11.3, 21.13, 0.000, 0.005)),
             prefix: None,
             common_prefix: None,
             longest_prefix: None,
@@ -643,116 +643,101 @@ const COST: [(Kind, Ops); 5] = [
     (
         Kind::String,
         Ops {
-            floor: 0.00,
-            mixed: cost(152.2, 15.30, 0.000, 1.209),
-            hit: cost(150.1, 18.16, 0.000, 1.185),
-            miss: cost(142.0, 15.55, 0.000, 1.206),
-            batch16: cost(143.2, 18.03, 0.000, 1.191),
-            batch1024: cost(138.9, 18.45, 0.000, 1.186),
-            key: Some(cost(251.3, 22.94, 10.942, 1.541)),
-            prefix: Some(cost(365.8, 88.14, 1.537, 0.000)),
-            common_prefix: Some(cost(347.8, 0.00, 0.000, 1.149)),
-            longest_prefix: Some(cost(212.7, 17.36, 0.000, 0.968)),
+            floor: 3.64,
+            mixed: cost(-66.6, 44.43, 0.000, 0.523),
+            hit: cost(-82.4, 48.99, 0.000, 0.510),
+            miss: cost(-92.7, 47.28, 0.000, 0.515),
+            batch16: cost(-88.5, 48.47, 0.000, 0.522),
+            batch1024: cost(-88.1, 47.62, 0.000, 0.534),
+            key: Some(cost(135.3, 36.61, 14.444, 0.921)),
+            prefix: Some(cost(681.0, 44.09, 0.924, 0.000)),
+            common_prefix: Some(cost(71.3, 39.26, 0.000, 0.493)),
+            longest_prefix: Some(cost(17.5, 41.30, 0.000, 0.437)),
         },
     ),
-    // Published points, not a fit, until the model is refit. A walk is one load a character at
-    // `d·s·len` over the binding's call, and each lane is set where a table publishes it, by the
-    // table's own ratio to `StringIndex` read through that row of this model — docs/benchmarks.md
-    // says to compare ratios, only within a column — since the tables run on other protocols.
+    // The artifact these constants come from holds no double array, so set by hand. A walk
+    // is one load a character at `d·s·len` over the binding's call, and each lane is set where a table
+    // publishes it, by the table's own ratio to `StringIndex` read through that row of this model
+    // -- docs/benchmarks.md says to compare ratios, only within a column -- since the tables run on
+    // other protocols.
     //
-    // The call, 28 ns: `StringIndex` and `DictIndex` on words at docs/benchmarks.md:124 and :120
-    // (232, 323) against :830 (200-210, 291-298). `id`, d = 2.075: 231 ns at 17.80 B/key on a
-    // million bigrams of 10.9 bytes, 0.85x `StringIndex`, docs/benchmarks.md:826 and :816.
-    // `common_prefix`, d = 4.784: 473 against 530 at 24.42 B/key on words (mean 9.35 bytes),
-    // docs/benchmarks.md:1520; `longest_prefix`, d = 3.643: 234 against 295, the same row. A walk
+    // The call, 28 ns: read on 2026-09-23, `StringIndex` and `DictIndex` on words through Python and
+    // from Rust. `id`, d = 0.818: 221 ns at 17.67 B/key on a million bigrams of 10.9 bytes, 0.86x
+    // `StringIndex` at 0.68 B/key (`latency-rs-2026-11-05-arz-ea82db8.txt`). `common_prefix`, d =
+    // 3.826: 468 against 491 at 24.42 B/key on words (mean 9.35 bytes); `longest_prefix`, d =
+    // 2.551: 213 against 273, the same row (`common-prefix-2026-11-05-arz-ea82db8.txt`). A walk
     // that misses stops early and no table publishes it, so the three `id` lanes are one. `ids_of`
     // here is a loop, so a batch saves nothing.
     (
         Kind::DoubleArray,
         Ops {
             floor: 0.00,
-            mixed: cost(28.0, 0.00, 0.000, 2.075),
-            hit: cost(28.0, 0.00, 0.000, 2.075),
-            miss: cost(28.0, 0.00, 0.000, 2.075),
-            batch16: cost(28.0, 0.00, 0.000, 2.075),
-            batch1024: cost(28.0, 0.00, 0.000, 2.075),
+            mixed: cost(28.0, 0.00, 0.000, 0.818),
+            hit: cost(28.0, 0.00, 0.000, 0.818),
+            miss: cost(28.0, 0.00, 0.000, 0.818),
+            batch16: cost(28.0, 0.00, 0.000, 0.818),
+            batch1024: cost(28.0, 0.00, 0.000, 0.818),
             key: None,
             prefix: None,
-            common_prefix: Some(cost(28.0, 0.00, 0.000, 4.784)),
-            longest_prefix: Some(cost(28.0, 0.00, 0.000, 3.643)),
+            common_prefix: Some(cost(28.0, 0.00, 0.000, 3.826)),
+            longest_prefix: Some(cost(28.0, 0.00, 0.000, 2.551)),
         },
     ),
 ];
 
-/// `id_unchecked` on [`Kind::Hashed`]: the published point, not a fit, until the model is refit.
-/// `ClosedHashIndex`'s slopes, whose path this is with one more table to read, and `a` set so that
-/// a million bigrams read 62 ns plus the call's 28 (docs/benchmarks.md:823, and the call as at
-/// [`COST`]), at the blob's 4.65 B/key: 1.93 of dictionary (:830) and 2.72 of sidecar.
+/// `id_unchecked` on [`Kind::Hashed`], fitted like the rest and over the same blobs: a dictionary of
+/// block 256 with no fingerprints. `s` is the whole blob's, dictionary and sidecar together.
 ///
 /// `ids_of` at zero bits is the dictionary's, so a closed vocabulary's batch is this in a loop.
-const HASHED_ID: Cost = cost(34.8, 8.87, 0.060, 0.000);
+const HASHED_ID: Cost = cost(-1.0, 16.92, 0.000, 0.000);
 
-/// [`Kind::Dict`] is a curve, not a point: the block trades a scan against a search and both ends
-/// of 32..=1024 were measured. Ascending by block, interpolated in between and clamped outside.
-const DICT_COST: [(usize, Ops); 4] = [
-    (
-        32,
-        Ops {
-            floor: 0.86,
-            mixed: cost(147.3, 34.02, 0.000, 0.358),
-            hit: cost(130.4, 40.33, 0.000, 0.325),
-            miss: cost(130.0, 39.71, 0.000, 0.339),
-            batch16: cost(223.9, 23.65, 0.000, 0.310),
-            batch1024: cost(211.4, 23.94, 0.000, 0.308),
-            key: Some(cost(151.8, 20.66, 0.000, 0.319)),
-            prefix: Some(cost(270.8, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1158.8, 56.94, 44.316, 4.957)),
-            longest_prefix: Some(cost(513.8, 40.82, 0.000, 0.478)),
-        },
-    ),
+/// [`Kind::Dict`] is a curve, not a point: the block trades a scan against a search. Measured at the
+/// three layouts [`DictProfile`] names, the 128 row at its microblocks of 8. Ascending by block,
+/// interpolated in between and clamped outside: a block under 128 reads as that row.
+const DICT_COST: [(usize, Ops); 3] = [
     (
         128,
         Ops {
-            floor: 0.65,
-            mixed: cost(191.1, 27.69, 0.000, 0.395),
-            hit: cost(177.7, 32.61, 0.000, 0.373),
-            miss: cost(174.3, 32.61, 0.000, 0.380),
-            batch16: cost(238.5, 24.68, 0.000, 0.345),
-            batch1024: cost(223.8, 25.77, 0.000, 0.340),
-            key: Some(cost(189.4, 18.28, 0.024, 0.430)),
-            prefix: Some(cost(274.1, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1222.8, 48.86, 54.566, 4.425)),
-            longest_prefix: Some(cost(592.7, 32.15, 0.000, 0.490)),
+            floor: 0.77,
+            mixed: cost(159.8, 24.76, 0.000, 0.301),
+            hit: cost(142.9, 29.98, 0.000, 0.286),
+            miss: cost(141.4, 30.49, 0.000, 0.293),
+            batch16: cost(205.6, 22.18, 0.000, 0.274),
+            batch1024: cost(187.9, 22.62, 0.000, 0.274),
+            key: Some(cost(198.9, 15.00, 0.000, 0.429)),
+            prefix: Some(cost(236.8, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(792.9, 82.57, 54.013, 2.958)),
+            longest_prefix: Some(cost(527.3, 27.40, 0.000, 0.375)),
         },
     ),
     (
         256,
         Ops {
             floor: 0.63,
-            mixed: cost(222.0, 22.85, 0.000, 0.419),
-            hit: cost(210.7, 27.38, 0.000, 0.392),
-            miss: cost(206.3, 27.40, 0.000, 0.400),
-            batch16: cost(257.7, 24.13, 0.000, 0.355),
-            batch1024: cost(243.9, 24.82, 0.000, 0.351),
-            key: Some(cost(209.9, 16.45, 0.591, 0.382)),
-            prefix: Some(cost(282.5, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1191.7, 56.70, 65.209, 3.793)),
-            longest_prefix: Some(cost(634.6, 28.12, 0.000, 0.525)),
+            mixed: cost(188.1, 21.79, 0.000, 0.326),
+            hit: cost(176.6, 26.02, 0.000, 0.304),
+            miss: cost(172.7, 26.14, 0.000, 0.307),
+            batch16: cost(226.9, 20.65, 0.000, 0.296),
+            batch1024: cost(209.8, 20.84, 0.000, 0.296),
+            key: Some(cost(207.8, 15.77, 0.812, 0.323)),
+            prefix: Some(cost(247.7, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(752.2, 95.19, 64.135, 1.998)),
+            longest_prefix: Some(cost(572.1, 23.74, 0.000, 0.394)),
         },
     ),
     (
         1024,
         Ops {
             floor: 0.49,
-            mixed: cost(289.2, 18.60, 0.000, 0.428),
-            hit: cost(280.2, 21.96, 0.000, 0.416),
-            miss: cost(274.0, 21.96, 0.000, 0.417),
-            batch16: cost(317.5, 22.11, 0.000, 0.383),
-            batch1024: cost(303.6, 22.25, 0.000, 0.380),
-            key: Some(cost(267.1, 18.74, 1.136, 0.406)),
-            prefix: Some(cost(352.2, 0.00, 0.000, 0.000)),
-            common_prefix: Some(cost(1232.7, 81.44, 92.909, 2.122)),
-            longest_prefix: Some(cost(744.2, 26.80, 0.849, 0.432)),
+            mixed: cost(246.6, 17.50, 0.000, 0.361),
+            hit: cost(236.3, 21.53, 0.000, 0.339),
+            miss: cost(232.3, 21.30, 0.000, 0.337),
+            batch16: cost(273.3, 19.90, 0.000, 0.328),
+            batch1024: cost(257.8, 19.74, 0.000, 0.325),
+            key: Some(cost(262.3, 16.64, 1.310, 0.389)),
+            prefix: Some(cost(296.7, 0.00, 0.000, 0.000)),
+            common_prefix: Some(cost(791.9, 108.25, 85.402, 1.078)),
+            longest_prefix: Some(cost(680.3, 18.94, 0.000, 0.445)),
         },
     ),
 ];
@@ -816,20 +801,20 @@ fn nanos_of(
 }
 
 /// A build's cost at a key of [`BUILD_LEN`] bytes, nanoseconds a key, and whether it grows with the
-/// key's length as a build that keeps the keys does. Published points, not a fit, until the model
-/// is refit: the build column at docs/benchmarks.md:821-830, a million bigrams on 4.4.0-4.5.
-/// `ClosedHashIndex` has no row there, and is `CompactHashIndex`'s build less the fingerprints.
+/// key's length as a build that keeps the keys does. Published points, not a fit: a million bigrams
+/// in `latency-rs-2026-11-05-arz-ea82db8.txt`. `ClosedHashIndex` has no row there, and is
+/// `CompactHashIndex`'s build less the fingerprints.
 const BUILD: [(Kind, f64, bool); 7] = [
-    (Kind::Compact, 37.0, false),
-    (Kind::Closed, 37.0, false),
-    (Kind::Perfect, 228.0, true),
-    (Kind::String, 241.0, true),
-    (Kind::Dict, 206.0, true),
-    (Kind::Hashed, 262.0, true),
-    (Kind::DoubleArray, 577.0, true),
+    (Kind::Compact, 30.0, false),
+    (Kind::Closed, 30.0, false),
+    (Kind::Perfect, 310.0, true),
+    (Kind::String, 231.0, true),
+    (Kind::Dict, 98.0, true),
+    (Kind::Hashed, 161.0, true),
+    (Kind::DoubleArray, 344.0, true),
 ];
 
-/// The mean key length of the corpus [`BUILD`] was read on, docs/benchmarks.md:796.
+/// The mean key length of the corpus [`BUILD`] was read on.
 const BUILD_LEN: f64 = 10.9;
 
 /// What building `kind` over `keys` keys of mean length `mean_len` is modelled to take, in seconds.
@@ -2458,7 +2443,7 @@ mod tests {
         assert!(balanced <= worse(&plans[1]) + f64::EPSILON, "{balanced}");
     }
 
-    /// The model is a curve in the block, fitted at four points and read anywhere in 1..=1024.
+    /// The model is a curve in the block, fitted at three points and read anywhere in 1..=1024.
     #[test]
     fn the_dict_cost_follows_the_block_it_was_measured_at() {
         let at = |block: usize| {
@@ -2467,10 +2452,10 @@ mod tests {
             ops.mixed.nanos(s, len)
         };
         // Below and above the measured ends it is clamped, not extrapolated.
-        assert_eq!(at(1), at(32));
+        assert_eq!(at(1), at(128));
         assert_eq!(at(1024), at(4096));
         // Between them it moves, and at 100 000 keys a bigger block costs more.
-        assert!(at(32) < at(64) && at(64) < at(128));
+        assert!(at(128) < at(181) && at(181) < at(256));
         assert!(at(256) < at(512) && at(512) < at(1024));
     }
 
@@ -2486,7 +2471,7 @@ mod tests {
             (Kind::Perfect, None),
             (Kind::String, None),
             (Kind::Dict, Some(32)),
-            (Kind::Dict, Some(100)),
+            (Kind::Dict, Some(181)),
             (Kind::Dict, Some(1024)),
             (Kind::Hashed, Some(256)),
             (Kind::DoubleArray, None),

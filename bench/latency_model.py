@@ -53,7 +53,7 @@ OPS_PROBES = 20_000
 CP_PROBES = 5_000
 BATCHES = (16, 1_024)
 # A round for each place in an op, so that `_time` puts every structure at every one: ten
-# structures answer `id`.
+# structures answer `id`, or nine over a key set the double array refuses.
 ROUNDS = 10
 
 
@@ -132,6 +132,10 @@ OPS = (
     "common_prefix",
     "longest_prefix",
 )
+# `OPS` is the table's order. Timed in it, `prefix_count`'s four structures rotate against
+# `common_prefix`'s five, and in some rounds one structure ends the first and starts the second,
+# which `_time` refuses. With `prefix_count` last no two rotations meet that way.
+TIMED = (*(op for op in OPS if op != "prefix_count"), "prefix_count")
 
 
 def _walk(fn, xs) -> None:
@@ -196,7 +200,7 @@ def _time(
     moved along. So each round starts every op one structure further along, there is a round for
     each place, and a structure keeps its fastest.
     """
-    ops = [[lane for lane in lanes if lane[0][1] == op] for op in OPS]
+    ops = [[lane for lane in lanes if lane[0][1] == op] for op in TIMED]
     ops = [op for op in ops if op]
     assert all(len(op) <= ROUNDS for op in ops), "more structures at an op than rounds"
     passes = [
@@ -234,6 +238,15 @@ def _hashed(keys: list[str], bits: int):
     return lexindex.HashedDictIndex.from_dict(lexindex.DictIndex(keys, block=256), bits)
 
 
+def _double_array(keys: list[str]):
+    """A `DoubleArrayIndex`, or `None` over a key set whose trie outgrows its 23-bit bases."""
+    try:
+        return lexindex.DoubleArrayIndex(keys)
+    except ValueError as refused:
+        print(f"  DoubleArrayIndex: {refused}")
+        return None
+
+
 def structures():
     lanes = [
         ("ClosedHashIndex", lexindex.ClosedHashIndex, False),
@@ -249,8 +262,11 @@ def structures():
             )
         )
     lanes.append(("StringIndex", lexindex.StringIndex, True))
-    # Measured beside the rest so that the constants a planner would price it by come from the same
-    # cache conditions; `fit` leaves them out until `plan` has a `Kind` to file them under.
+    lanes.append(("DoubleArrayIndex", _double_array, True))
+    # Measured beside the rest so that the constants a planner prices it by come from the same cache
+    # conditions. `fit` keeps them out of `COST` and the scores, and prints `HASHED_ID` from the
+    # second: at the bits a plan offers, everything but a closed vocabulary's `id` is the
+    # dictionary's.
     lanes.append(("HashedDictIndex 256 fp=8", lambda k: _hashed(k, 8), True))
     lanes.append(("HashedDictIndex 256 unchecked", lambda k: _Unchecked(_hashed(k, 0)), True))
     return lanes
@@ -267,6 +283,8 @@ def _cell(path: Path, corpus: str, size: int) -> list[dict]:
         start = time.perf_counter()
         obj = build(keys)
         build_ms = (time.perf_counter() - start) * 1e3
+        if obj is None:
+            continue
         alive.append(obj)
         lanes.extend(((name, op), calls, xs, fn) for op, calls, xs, fn in _lanes(obj, probe))
         cells.append(
@@ -345,6 +363,19 @@ def _lstsq(rows: list[list[float]], y: list[float]) -> list[float]:
 
 # Below this a blob is priced as if it were this large: `s` is zero there.
 HINGE = 64 * 1024
+TINY = 4 * 1024
+
+
+def _weighs(cell: dict) -> bool:
+    """Whether a cell's blob is large enough to say how bytes price a lookup.
+
+    `StringIndex` over `numeric` is a few hundred bytes whatever the key count. Its lookups read
+    nothing from memory, and on relative error their 90 ns outweigh a 450 ns cell five to one:
+    fitted with them, the transducer read 336 ns where it took 460, and the plan took it for
+    `DictIndex` at up to 1.60x. Left out, such a blob is priced at the smallest one the structure
+    was fitted at.
+    """
+    return cell["bytes_per_key"] * max(cell["keys"], SAMPLE) >= TINY
 
 
 def _size(cell: dict) -> float:
@@ -403,6 +434,7 @@ class Model:
 
     @classmethod
     def fit(cls, cells: list[dict]) -> Model:
+        cells = [c for c in cells if _weighs(c)]
         rows = {
             c["structure"]: [r for r in cells if r["structure"] == c["structure"]] for c in cells
         }
@@ -423,6 +455,17 @@ class Model:
     def nanos(self, name: str, op: str, cell: dict) -> float:
         at = _features(cell, (self.floors[name], self.len_floor))
         return sum(k * x for k, x in zip(self.constants[(name, op)], at, strict=True))
+
+
+def _hashed_id(path: Path) -> str:
+    """`HASHED_ID`: `id_unchecked` at zero bits, the one lane a closed vocabulary's plan prices."""
+    own = [
+        c
+        for c in json.loads(path.read_text(encoding="utf-8"))["cells"]
+        if c["structure"] == "HashedDictIndex 256 unchecked"
+    ]
+    constants = _nonnegative([_features(c) for c in own], [c["ops"]["mixed"] for c in own])
+    return "const HASHED_ID: Cost = cost({:.1f}, {:.2f}, {:.3f}, {:.3f});".format(*constants)
 
 
 def _newest(pattern: str) -> Path:
@@ -453,6 +496,7 @@ def fit(artifact: Path | None) -> int:
         )
 
     print(f"\nsrc/estimate.rs:\n{_rust(model)}\n")
+    print(f"{_hashed_id(path)}\n")
 
     published = [
         c
@@ -563,6 +607,7 @@ KINDS = {
     "CompactHashIndex fp=1": "Compact",
     "PerfectHashIndex": "Perfect",
     "StringIndex": "String",
+    "DoubleArrayIndex": "DoubleArray",
 }
 FIELDS = {op: "prefix" if op == "prefix_count" else op for op in OPS}
 OPTIONAL = ("key", "prefix_count", "common_prefix", "longest_prefix")
@@ -587,9 +632,11 @@ def _rust(model: Model) -> str:
         return [*out, "        },", "    ),"]
 
     blocks = sorted(int(name.split()[1]) for name in model.floors if name.startswith("DictIndex "))
+    # An artifact from before a structure had a lane prints no row for it.
+    kinds = {name: kind for name, kind in KINDS.items() if name in model.floors}
     lines = [f"const LEN_FLOOR: f64 = {model.len_floor:.2f};", ""]
-    lines.append(f"const COST: [(Kind, Ops); {len(KINDS)}] = [")
-    for name, kind in KINDS.items():
+    lines.append(f"const COST: [(Kind, Ops); {len(kinds)}] = [")
+    for name, kind in kinds.items():
         lines += row(f"Kind::{kind}", name)
     lines += ["];", "", f"const DICT_COST: [(usize, Ops); {len(blocks)}] = ["]
     for block in blocks:
