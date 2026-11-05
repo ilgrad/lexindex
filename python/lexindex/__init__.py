@@ -11,7 +11,7 @@ many times:
 - ``ClosedHashIndex`` — the perfect hash and nothing else, a fifth of that: ``id`` never
   says absent, for a vocabulary known to be closed.
 - ``DictIndex`` — ordered dictionary with the key stored for every id: exact
-  ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.64 B/key on
+  ``string <-> rank`` both ways plus ``lower_bound``, prefix and range, no automata; 2.62 B/key on
   real words, 56 % below ``StringIndex``.
 - ``HashedDictIndex`` — a ``DictIndex`` with a hash sidecar: ``id`` at a hash index's
   cost, with the dictionary's ranks, and its ordered queries through ``.dict``.

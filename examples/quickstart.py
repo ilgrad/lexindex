@@ -104,7 +104,7 @@ def dict_index_demo() -> None:
     print(
         "DictIndex:        keys in ['b', 'c') ->",
         words.keys_of(list(range(lo, hi))),
-        "(2.64 B/key on the 479k-word dictionary)",
+        "(2.62 B/key on the 479k-word dictionary)",
     )
 
 

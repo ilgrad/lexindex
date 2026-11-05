@@ -297,9 +297,9 @@ impl DictIndex {
     /// head and its arrays are shared over, and it is split into microblocks of 16 to 32 — the
     /// smallest divisor of the block at or above its square root — of which a lookup scans one,
     /// after one restart a microblock: `block / micro + micro − 2` entries, not `block − 1`. On
-    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51
-    /// bytes per key, `id` at 253–254 / 250–254 / 263–265 / 281–283 / 312–322 / 341–342 ns and
-    /// `key_into` at 141–142 / 151–152 / 169–171 / 198–199 / 259–261 / 307. Every block is
+    /// real words 32 / 64 / 128 / 256 / 512 / 1024 give 2.84 / 2.71 / 2.65 / 2.62 / 2.51 / 2.50
+    /// bytes per key, `id` at 252–260 / 257–266 / 260–273 / 280–293 / 313–320 / 342–355 ns and
+    /// `key_into` at 140 / 149–150 / 167 / 194–195 / 255–257 / 301–303. Every block is
     /// under `marisa-trie`'s 2.955 floor on that corpus. [`DictProfile`] names three layouts
     /// for a caller who does not want to pick one.
     pub fn build_with_block<I, S>(items: I, block: usize) -> Result<Self, IndexError>
@@ -441,9 +441,9 @@ impl DictIndex {
     /// 16 to 32 it chooses: `1..=block`, dividing `block`. A lookup scans one restart a microblock
     /// and then one microblock, `block / micro + micro - 2` entries, so a larger `micro` stores
     /// fewer restarts for a longer scan. At the default block of 256, microblocks of 128 rather
-    /// than 16 made fourteen corpora 0.12–0.34 bytes a key smaller — paths 6.85 → 6.51, the
-    /// 479 823-word dictionary 2.64 → 2.45, a million URLs 7.51 → 7.35, a million UUIDs
-    /// 18.04 → 17.89 — and 64 took 80–90 % of that. What the longer scan costs an `id` is not
+    /// than 16 made fourteen corpora 0.11–0.34 bytes a key smaller — paths 6.81 → 6.47, the
+    /// 479 823-word dictionary 2.62 → 2.44, a million URLs 7.49 → 7.33, a million UUIDs
+    /// 18.04 → 17.89 — and 64 took 85–93 % of that, 52 % on word bigrams. What the longer scan costs an `id` is not
     /// measured yet, which is why no builder chooses it by itself. The blob is the same format:
     /// lexindex 4.5.3 loads one built here and answers every key of those fourteen.
     ///

@@ -1808,7 +1808,7 @@ impl BlockArg {
     }
 }
 
-/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, 2.64 B/key on real
+/// Ordered dictionary with the key stored for every id: exact `string ↔ rank`, 2.62 B/key on real
 /// words.
 #[pyclass(name = "DictIndex", module = "lexindex._core", frozen)]
 pub struct PyDictIndex {
@@ -1822,11 +1822,11 @@ impl PyDictIndex {
     /// `1..=1024`; the block is split into microblocks of 16 to 32 and a lookup scans one restart
     /// a microblock plus one microblock, so smaller blocks are faster and
     /// larger ones smaller -- 32 / 64 / 128 / 256 /
-    /// 512 / 1024 gave 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51 bytes per key on the dictionary,
+    /// 512 / 1024 gave 2.84 / 2.71 / 2.65 / 2.62 / 2.51 / 2.50 bytes per key on the dictionary,
     /// every one under `marisa-trie`'s 2.955 floor. `block` also takes the name of a point on that
     /// curve instead of a number: `"fast"` (128 in microblocks of 8), `"balanced"` (256, the default)
     /// or `"compact"` (1024). `micro` sets the microblock size instead, `1..=block` and dividing it: at the
-    /// default block, 128 stored 0.12–0.34 bytes a key less than the 16 chosen by default on
+    /// default block, 128 stored 0.11–0.34 bytes a key less than the 16 chosen by default on
     /// fourteen corpora, for a longer scan whose cost is not measured yet. `labels=True` tries a
     /// dictionary of the corpus's trie labels as well and keeps it where the blob comes out
     /// smaller -- path lists repeat whole directory and file names under different parents, and

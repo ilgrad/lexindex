@@ -485,9 +485,9 @@ class DictIndex:
     Ids are ranks: ``id(key)`` is the number of keys below it, ``key(id)`` the key at that rank,
     ``lower_bound(key)`` the rank a key would have, so every range of keys is a range of ids. The
     sorted keys are front-coded in blocks with the suffixes under a static symbol table:
-    2.64 bytes per key on real words, 56 % below ``StringIndex``. Prefix and range are order
+    2.62 bytes per key on real words, 56 % below ``StringIndex``. Prefix and range are order
     lookups, so it answers those itself; a fuzzy query needs an automaton and stays with
-    ``StringIndex``. ``block=512`` stores 2.52 bytes per key, well under ``marisa-trie``, for a
+    ``StringIndex``. ``block=512`` stores 2.51 bytes per key, well under ``marisa-trie``, for a
     slower reverse lookup.
     """
 
@@ -502,13 +502,13 @@ class DictIndex:
         are shared over; it is split into microblocks of 16 to 32 -- the smallest divisor of the
         block at or above its square root -- and a lookup scans one restart a microblock plus one
         microblock, ``block / micro + micro - 2`` entries rather than ``block - 1``.
-        32 / 64 / 128 / 256 / 512 / 1024 gave 2.85 / 2.72 / 2.66 / 2.64 / 2.52 / 2.51 bytes per key
+        32 / 64 / 128 / 256 / 512 / 1024 gave 2.84 / 2.71 / 2.65 / 2.62 / 2.51 / 2.50 bytes per key
         on the dictionary, every one under ``marisa-trie``'s 2.955 floor there. A name stands for
         a point on that curve: ``"fast"`` is 128 in microblocks of 8, ``"balanced"`` 256 and
         ``"compact"`` 1024.
         ``micro`` sets the microblock size instead, ``1..=block`` and dividing it: at the default
-        block, 128 stored 0.12--0.34 bytes per key less than the default 16 on fourteen corpora
-        (2.64 -> 2.45 on the dictionary), for a longer scan whose cost is not measured yet.
+        block, 128 stored 0.11--0.34 bytes per key less than the default 16 on fourteen corpora
+        (2.62 -> 2.44 on the dictionary), for a longer scan whose cost is not measured yet.
         ``labels=True`` tries a dictionary of the corpus's trie labels as well and keeps it where
         the blob comes out smaller -- at block 1024 a million paths go 9.323 -> 8.530 bytes per
         key, under ``marisa-trie``'s 8.81 at its smallest; URLs, titles, identifiers and domains

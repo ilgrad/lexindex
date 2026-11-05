@@ -180,8 +180,8 @@ const LANES: usize = 32;
 ///
 /// Ids are ranks. `id(key)` is the number of keys below it, `key(id)` the key at that rank, and
 /// [`lower_bound`](Self::lower_bound) the rank a key would have, so every range of keys is a
-/// range of ids. 2.64 bytes per key on real words, against 5.95 for the transducer of
-/// [`StringIndex`](crate::StringIndex) and 10.9 for [`PerfectHashIndex`](crate::PerfectHashIndex);
+/// range of ids. 2.62 bytes per key on real words, against 5.95 for the transducer of
+/// [`StringIndex`](crate::StringIndex) and 9.25 for [`PerfectHashIndex`](crate::PerfectHashIndex);
 /// `id` costs a few hundred nanoseconds and `key` about two hundred, both dominated by the scan of
 /// one microblock, whose size follows the `block` given at build time.
 ///

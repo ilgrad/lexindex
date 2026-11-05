@@ -24,7 +24,7 @@
 //!   `string ↔ rank` both ways, plus `lower_bound`, `prefix`, `range` and in-order iteration — no
 //!   automata, so no fuzzy queries. The sorted keys are front-coded in blocks, the suffixes coded
 //!   per shard under a symbol table or a packed alphabet, over a phrase dictionary mined from the
-//!   whole blob: 2.64 B/key on real words, 56 % below `StringIndex`. Use it
+//!   whole blob: 2.62 B/key on real words, 56 % below `StringIndex`. Use it
 //!   where the queries are exact and the index has to be small.
 //! - [`HashedDictIndex`] — a [`DictIndex`] with a hash sidecar: the dictionary's ranks and ordered
 //!   queries, with `id` answered by a minimal perfect hash and a table of ranks rather than a
