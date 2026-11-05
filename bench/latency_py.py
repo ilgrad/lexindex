@@ -112,7 +112,7 @@ def main() -> None:
         "marisa": marisa_trie.Trie(keys),
         "StringIndex": lexindex.StringIndex(keys),
         "PerfectHashIndex": lexindex.PerfectHashIndex(keys),
-        "CompactHashIndex": lexindex.CompactHashIndex(keys, 1),
+        "CompactHashIndex": lexindex.CompactHashIndex(keys, fingerprint_bits=8),
     }
     lookups = {
         REFERENCE: lambda s, ps: [s.get(k) for k in ps],

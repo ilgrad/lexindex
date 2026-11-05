@@ -65,7 +65,7 @@ def _build(kind: str, items: Iterable[str]) -> object:
 
     if kind == "StringIndex":
         return lexindex.StringIndex(items)
-    return lexindex.CompactHashIndex(items, 1)
+    return lexindex.CompactHashIndex(items, fingerprint_bits=8)
 
 
 def _bench_one(n: int, kind: str, source: str, q: mp.Queue) -> None:

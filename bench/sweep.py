@@ -43,7 +43,11 @@ def _structures():
 
     return [
         ("ClosedHashIndex", lexindex.ClosedHashIndex, False),
-        ("CompactHashIndex fp=1", lambda keys: lexindex.CompactHashIndex(keys, 1), False),
+        (
+            "CompactHashIndex fp=1",
+            lambda keys: lexindex.CompactHashIndex(keys, fingerprint_bits=8),
+            False,
+        ),
         ("DictIndex 128", lambda keys: lexindex.DictIndex(keys, block=128), True),
         ("DictIndex 256", lambda keys: lexindex.DictIndex(keys, block=256), True),
         ("DictIndex 1024", lambda keys: lexindex.DictIndex(keys, block=1024), True),

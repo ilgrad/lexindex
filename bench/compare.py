@@ -220,11 +220,11 @@ def build_lexindex_compact4bit():
 
 
 def build_lexindex_compact1():
-    return lexindex.CompactHashIndex(KEYS, 1)
+    return lexindex.CompactHashIndex(KEYS, fingerprint_bits=8)
 
 
 def build_lexindex_compact2():
-    return lexindex.CompactHashIndex(KEYS, 2)
+    return lexindex.CompactHashIndex(KEYS, fingerprint_bits=16)
 
 
 def build_marisa():

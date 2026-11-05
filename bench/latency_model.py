@@ -250,7 +250,11 @@ def _double_array(keys: list[str]):
 def structures():
     lanes = [
         ("ClosedHashIndex", lexindex.ClosedHashIndex, False),
-        ("CompactHashIndex fp=1", lambda k: lexindex.CompactHashIndex(k, 1), False),
+        (
+            "CompactHashIndex fp=1",
+            lambda k: lexindex.CompactHashIndex(k, fingerprint_bits=8),
+            False,
+        ),
         ("PerfectHashIndex", lexindex.PerfectHashIndex, True),
     ]
     for block, micro in LAYOUTS:
