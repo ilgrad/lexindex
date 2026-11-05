@@ -19,8 +19,8 @@ Three choices the figure makes, each of which could be made dishonestly:
   time and which is smaller than its timed configurations on every corpus. Holding this side to one
   index while the other picks from all of those is not modesty, it is a different measurement. So
   the bar is whichever index lexindex builds smallest, and the label says which one it is:
-  `DictIndex` at its block on twelve corpora, `StringIndex` on `numeric`, where an fst folds a dense
-  decimal id space into 301 bytes and the label prints that rather than a rounded 0.00.
+  `DictIndex` at its block, labelled where that is smaller, on twelve corpora, `StringIndex` on
+  `numeric`, where an fst folds a dense decimal id space into 301 bytes and the label prints that rather than a rounded 0.00.
 * **The pick is the planner's, not the author's.** `lexindex plan` chooses the index off the keys
   alone, and choosing after seeing the answer would be the mirage this repository exists to refuse.
   Scored against the built blob on all 19 corpora of this set, its ranking of the two candidates a

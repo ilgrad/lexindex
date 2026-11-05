@@ -35,8 +35,8 @@ you will ask about is in `keys`: one of them answers a stranger with some member
 
 Past 100 000 keys the three numbers no statistic gives — what the codec squeezes a suffix into, the
 bytes an fst spends a key, the bits the perfect hash spends per key — come from two draws of
-that size, and each estimate says so in `measured`. Scored against the built blob on 23 corpora of
-half a million to ten million keys, at each of the three priced blocks, `DictIndex` lands within
+that size, and each estimate says so in `measured`. Scored on 2026-11-02 against the built blob on 23 corpora of
+half a million to ten million keys, at the blocks then priced, 32, 256 and 1024, `DictIndex` lands within
 **1.6 % median, 5.3 % at the 90th percentile and 8.3 % at worst**; `StringIndex` within
 **1.1 / 6.7 / 11.7** over 19 corpora, because an fst merges equal right-languages and how much it
 merges is a property of the *density* of the whole key set rather than of any statistic of it. A
@@ -161,15 +161,15 @@ idx.keys_of([0, 2])           # ["apple", "banana"]
 materialises every match — 45 064 `(str, int)` tuples — even if the caller wanted ten. With it, the
 walk stops at the tenth match. The saving is therefore proportional to how much of the result you
 *discard*, and it varies enormously by query (same dictionary, min of 9 runs,
-[`limit-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/limit-2026-11-03-arz-82f2cb1.txt)):
+[`limit-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/limit-2026-11-05-arz-ea82db8.txt)):
 
 | query | matches | full | `limit` | speedup |
 |---|---:|---:|---:|---:|
-| `prefix("s", limit=10)` | 45 064 | 10.07 ms | 0.003 ms | ~3 000× |
+| `prefix("s", limit=10)` | 45 064 | 10.38 ms | 0.003 ms | ~3 000× |
 | `prefix("a", limit=10)` | 25 192 | 4.31 ms | 0.003 ms | ~1 500× |
-| `prefix("un", limit=10)` | 20 358 | 3.63 ms | 0.004 ms | ~900× |
-| `subsequence("abc", limit=10)` | 1 910 | 36.49 ms | 0.46 ms | ~80× |
-| `fuzzy("hello", 2, limit=5)` | 242 | 1.27 ms | 0.20 ms | ~7× |
+| `prefix("un", limit=10)` | 20 358 | 3.59 ms | 0.004 ms | ~900× |
+| `subsequence("abc", limit=10)` | 1 910 | 36.99 ms | 0.47 ms | ~80× |
+| `fuzzy("hello", 2, limit=5)` | 242 | 1.27 ms | 0.20 ms | ~6× |
 
 Three regimes hide in that column, and they tell you when to reach for `limit`:
 
@@ -255,8 +255,8 @@ That loader checks the transducer as a graph — every reachable node once, in t
 nodes and transitions rather than to the keys they spell, so a tiny blob spelling a billion keys is
 refused or accepted in microseconds — requires its values to be ranks and its keys to be UTF-8,
 and catches the panic at the load boundary, so a crafted blob raises `ValueError` like any other
-bad input. It costs 38× `from_bytes` (23.0 ms against 0.6 ms on
-479 823 words, [`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt)), which is the trade: pay it once for a stranger's blob, never for your
+bad input. It costs 36× `from_bytes` (23.1 ms against 0.6 ms on
+479 823 words, [`docnums-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-05-arz-ea82db8.txt)), which is the trade: pay it once for a stranger's blob, never for your
 own. The overlay form exists for the same reason — an overlay's own framing is checksummed and
 validated either way, but the base region inside it is handed to a base loader, and over a
 `StringIndex` base that is exactly the choice above. The hash indexes need no such call: their
@@ -300,8 +300,8 @@ dict_ = PerfectHashIndex.load_mmap("verbs.bmp")   # arena mapped zero-copy; tiny
 n = PerfectHashIndex.build_to_file(lambda: (line.rstrip("\n") for line in open("keys.txt")), "keys.bmp")
 
 # a workload that is mostly misses (a stop list, a block list): one more byte per key, and an
-# absent key stops after one cache miss instead of two — 38 → 29 ns on the 480 k-word dictionary,
-# a member +5 ns, the same ids. build_to_file takes the same keyword.
+# absent key stops after one cache miss instead of two — 39 → 30 ns on the 480 k-word dictionary,
+# a member +4 ns, the same ids. build_to_file takes the same keyword.
 stop = PerfectHashIndex(stop_words, fingerprints=True)
 stop.has_fingerprints()        # True
 ```
@@ -335,7 +335,7 @@ n = CompactHashIndex.build_to_file((line.rstrip() for line in open("keys.txt")),
 Size is the minimal perfect hash (0.24 B/key, flat in `n`) plus exactly `fingerprint_bits/8` bytes
 per key, and
 the membership false-positive rate is about `2^-fingerprint_bits` — a design rate for
-well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes;
+well-distributed keys, measured 6.2530 % at 4 bits and 1.5553 % at 6 over 2 M non-member probes on the 0.6.0 hash;
 not a defence against an adversary who chooses the queries, since both hashes are deterministic and
 unseeded — every width is a point on the
 same trade-off (measured on `/usr/share/dict/words`, 479 823 keys):
@@ -391,7 +391,7 @@ tokenizer over its own vocabulary, a join on a key column the index was built fr
 ```python
 from lexindex import DictIndex
 
-# Exact string <-> rank both ways, about 2.64 B/key: the sorted keys front-coded in blocks of 256,
+# Exact string <-> rank both ways, about 2.62 B/key: the sorted keys front-coded in blocks of 256,
 # each cut into microblocks of 16, with the suffixes under a symbol table trained on the index
 # itself. Ordered, so ranges of keys
 # are ranges of ids, and prefix and range fall out of that -- only fuzzy needs an automaton and
@@ -407,21 +407,21 @@ lo, hi = words.prefix_id_range("ap")   # (0, 2) -- two order lookups, whatever t
 words.prefix_count("ap")           # 2, without decoding a key
 words.keys_of(range(lo, hi))       # ["apple", "apricot"] -- the keys alone, and the fastest
                                    # way to them: no id is decoded, and one walk stays open
-                                   # across a block. 1.5x `prefix` on a 763-match prefix.
+                                   # across a block. 1.3x `prefix` on a 763-match prefix.
 words.range("apricot", "cherry")   # [("apricot", 1), ("banana", 2)]
 words.successor("az"), words.predecessor("az")   # ("banana", 2), ("apricot", 1)
 list(words)                        # [("apple", 0), ...], lazily
-faster = DictIndex(words_list, block=64)    # 2.72 B/key against 2.64; id 250–254 ns against 281–283
+faster = DictIndex(words_list, block=64)    # 2.71 B/key against 2.62; id 257–266 ns against 280–293
 smaller = DictIndex(words_list, block="compact")  # a name for a point on that curve: "fast" is 128
                                                   # keys a block in microblocks of 8, "balanced"
                                                   # 256, "compact" 1024
-fewer = DictIndex(words_list, micro=128)    # 2.45 B/key against 2.64: microblocks of 128, not 16 --
+fewer = DictIndex(words_list, micro=128)    # 2.44 B/key against 2.62: microblocks of 128, not 16 --
                                             # fewer restarts, a longer scan (its id cost unmeasured)
 paths = DictIndex(path_list, block=1024, labels=True)  # also tries a dictionary of the trie labels
                                             # and keeps it where the blob is smaller: a million paths
-                                            # 9.32 -> 8.53 B/key, URLs and titles 3-4 %; a lookup
-                                            # then reads 1.5 labels (+24 % instructions on paths,
-                                            # not yet timed). Elsewhere the plain blob, byte for byte
+                                            # 9.28 -> 8.50 B/key, URLs and titles 3-4 %; a lookup
+                                            # then reads 1.5 labels (+24 % instructions and +15 %
+                                            # time on paths). Elsewhere the plain blob, byte for byte
 words.save("words.bdx")
 # A corpus that does not fit in memory: sorted in runs spilled beside the output, encoded into the
 # file as it goes. Same bytes as the constructor plus save; returns the number of distinct keys.
@@ -437,8 +437,8 @@ words.route_microblocks()  # opt-in: 0.5 B/key more memory at this block, in no 
 and compares the stored suffixes there against the query without decoding them; `key` climbs the
 same two runs and decodes only the entries whose shared-prefix length strictly increases up to the
 id, a handful rather than one per entry read. A lookup therefore scans `block / micro + micro - 2`
-entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.64 bytes
-per key, `id` 281–283 ns and `key_into` 198–199, against 5.95 / 167–173 / 446–458 for
+entries — 30 at the default, where a block of 256 keys holds 255. On the dictionary: 2.62 bytes
+per key, `id` 280–293 ns and `key_into` 194–195, against 5.95 / 168–181 / 453–466 for
 `StringIndex` — which keeps fuzzy and subsequence iteration, and `Overlay`.
 
 `route_microblocks()` trades memory for that walk over the restarts. It derives eight bytes of every
@@ -446,13 +446,13 @@ microblock's first key — 0.5 bytes a key at the default block, 0.25 at 1024, h
 and in no blob — and every lookup then picks its microblock off those words, walking the restarts
 only where the query's eight bytes tie a restart's. Deriving them reads the start of every block, so
 a `load_mmap` index is paged in whole by the call rather than as queries reach it. On the
-dictionary, routed, `id` reads 213–215 ns at the default block, and 236–238 at `block="compact"`
-for 2.76 bytes a key in memory — faster than block 32 unrouted, at fewer bytes.
+dictionary, routed, `id` reads 216–230 ns at the default block, and 238–248 at `block="compact"`
+for 2.75 bytes a key in memory — faster than block 32 unrouted, at fewer bytes.
 
-At `block=512` the same index stores **2.52 bytes per key, well under `marisa-trie`'s 2.98 on this
+At `block=512` the same index stores **2.51 bytes per key, well under `marisa-trie`'s 2.98 on this
 corpus**, and answers prefix, range and `key(id)` — a marisa id is not the lexicographic rank, so
-it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 259–261 ns
-against 198–199 at the default, and `id` 312–322 against 281–283.
+it has no `lower_bound` to build a range on. The price is a longer scan: `key_into` 255–257 ns
+against 194–195 at the default, and `id` 313–320 against 280–293.
 
 ## `HashedDictIndex` — a `DictIndex` whose `id` is a hash
 
@@ -482,11 +482,11 @@ member with its rank and a non-member with `None` except at `2^-fingerprint_bits
 `CompactHashIndex`'s contract. At zero bits `id` is `DictIndex.id`, exact and at the dictionary's
 cost, and the hash path is `id_unchecked` alone. On the 480 k-word dictionary the sidecar is 2.62
 bytes per key at zero bits and one more for every eight fingerprint bits, beside the dictionary's
-2.64: 5.25 in all, 6.25 at eight bits. On the frontier protocol — every key looked up once, in a
-shuffled order — `id_unchecked` answers in 14 to 78 ns and `id` at eight bits in 17 to 104 over
-nineteen corpora of half a million to ten million keys, against 235 to 709 for the dictionary's own
-`id` and 52 to 684 for XCDAT, the fastest trie measured. When each lookup waits on the last,
-`id_unchecked` reads 28 to 204 ns against XCDAT's 56 to 722
+2.62: 5.24 in all, 6.24 at eight bits. On the frontier protocol — every key looked up once, in a
+shuffled order — `id_unchecked` answers in 13 to 103 ns and `id` at eight bits in 17 to 116 over
+nineteen corpora of half a million to ten million keys, against 231 to 692 for the dictionary's own
+`id` and 53 to 695 for XCDAT, the fastest trie measured. When each lookup waits on the last,
+`id_unchecked` reads 28 to 203 ns against XCDAT's 56 to 755
 ([the numbers](benchmarks.md#hasheddictindex-against-xcdat)).
 
 The blob holds the dictionary's own blob byte for byte, so a loaded index answers the ids its
@@ -675,9 +675,9 @@ idx.ids_into_arrow(col, out)                 # into memory you own
 ```
 
 On the shuffled dictionary (479 823 member probes, min of seven alternated rounds in one process,
-`local/arrowbench.py`, [`arrow-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/arrow-2026-11-03-arz-82f2cb1.txt)): `CompactHashIndex` 35 ns a key against 118 for `ids_of` and 82 for
-`ids_of_bytes`; `PerfectHashIndex` 26 against 114 / 85; `ClosedHashIndex` 12 against 90 / 63;
-`StringIndex` 131 against 290 / 263, where the transducer walk is most of the cost either way.
+`local/arrowbench.py`, [`arrow-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/arrow-2026-11-05-arz-ea82db8.txt)): `CompactHashIndex` 35 ns a key against 117 for `ids_of` and 80 for
+`ids_of_bytes`; `PerfectHashIndex` 24 against 110 / 80; `ClosedHashIndex` 12 against 89 / 65;
+`StringIndex` 128 against 285 / 258, where the transducer walk is most of the cost either way.
 
 ### Threads, including free-threaded CPython
 
@@ -771,7 +771,7 @@ fn main() -> Result<(), lexindex::IndexError> {
     let closed = ClosedHashIndex::build(["GET", "POST", "PUT"])?; // the perfect hash alone, ~0.24 B/key
     assert_eq!(closed.id("POST"), tiny.id_unchecked("POST")); // same hash, same ids; no membership
 
-    let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.64 B/key
+    let words = DictIndex::build(["apple", "apricot", "banana"])?; // ordered, keys stored, ~2.62 B/key
     assert_eq!((words.id("banana"), words.key(0).as_deref()), (Some(2), Some("apple")));
     assert_eq!(words.lower_bound("ap")..words.lower_bound("aq"), 0..2); // the "ap" keys as an id range
     assert_eq!(words.longest_prefix("bananas"), Some(("banana".to_string(), 2))); // longest match
@@ -850,7 +850,7 @@ thread the same two builds peak at 17.2 MB and 34.3, against 12.7 and 32.1 when 
 covered the whole index. It reads the sorted keys three times, and pays about 26 % in build time
 for it.
 
-The streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
+Measured on 2026-09-10, the streamed `CompactHashIndex` build peaks at **302 MB at 100 M real-word pairs against 8 834 MB**
 for the same keys handed to `build` as a list (254 against 903 at 10 M), and **0.94 GB at 10⁹**,
 where the list would need about 90 GB. Under 256 MiB of fingerprint table the peak is the run
 buffer itself or the perfect hash's construction plus the table, whichever is larger — at 100 M
@@ -1058,31 +1058,31 @@ own key iterators, and computes nothing of its own.
 ```console
 $ lexindex plan /usr/share/dict/words --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
-+ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
-+ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
-  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
-* and + are what no other row beats on both size and speed
+* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 
 $ lexindex build /usr/share/dict/words words.bin --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
-+ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
-+ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
-  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
-* and + are what no other row beats on both size and speed
+* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
-wrote words.bin: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote words.bin: DictIndex over 479823 keys, 1200371 bytes (2.50 B/key)
 
 $ lexindex inspect words.bin
 kind: DictIndex
 format: BDX3
-bytes: 1205985
+bytes: 1200371
 keys: 479823
-arena_bytes: 1173645
+arena_bytes: 1168173
 
 $ lexindex dump words.bin | head -3
 &c
@@ -1097,7 +1097,7 @@ overlay's own fields and its base nest under `overlay`, and with `--sections` th
 
 ```console
 $ lexindex inspect words.bin --json
-{"path":"words.bin","kind":"DictIndex","format":"BDX3","bytes":1264362,"keys":479823,"arena_bytes":1208211}
+{"path":"words.bin","kind":"DictIndex","format":"BDX3","bytes":1258086,"keys":479823,"arena_bytes":1202131}
 ```
 
 `inspect --sections` reads a `DictIndex` whole and says where its bytes went. The sections always
@@ -1108,11 +1108,11 @@ and as a share:
 $ lexindex inspect words.bin --sections
 kind: DictIndex
 format: BDX3
-bytes: 1205985
+bytes: 1200371
 keys: 479823
-arena_bytes: 1173645
+arena_bytes: 1168173
 sections.header: 72 (0.0002 B/key, 0.01 %)
-sections.tables: 7215 (0.0150 B/key, 0.60 %)
+sections.tables: 7073 (0.0147 B/key, 0.59 %)
 sections.header_codes: 761 (0.0016 B/key, 0.06 %)
 sections.phrases: 4 (0.0000 B/key, 0.00 %)
 sections.heads: 4282 (0.0089 B/key, 0.36 %)
@@ -1120,26 +1120,26 @@ sections.head_ends: 659 (0.0014 B/key, 0.05 %)
 sections.block_offsets: 1128 (0.0024 B/key, 0.09 %)
 sections.micro_offsets: 22501 (0.0469 B/key, 1.87 %)
 sections.chars: 0 (0.0000 B/key, 0.00 %)
-sections.restart_headers: 9845 (0.0205 B/key, 0.82 %)
-sections.restart_wide: 794 (0.0017 B/key, 0.07 %)
-sections.restart_codes: 47107 (0.0982 B/key, 3.91 %)
-sections.entry_headers: 299889 (0.6250 B/key, 24.87 %)
-sections.entry_wide: 48282 (0.1006 B/key, 4.00 %)
-sections.entry_codes: 763446 (1.5911 B/key, 63.30 %)
-sections.total: 1205985 (2.5134 B/key, 100.00 %)
+sections.restart_headers: 9824 (0.0205 B/key, 0.82 %)
+sections.restart_wide: 784 (0.0016 B/key, 0.07 %)
+sections.restart_codes: 46839 (0.0976 B/key, 3.90 %)
+sections.entry_headers: 299889 (0.6250 B/key, 24.98 %)
+sections.entry_wide: 45936 (0.0957 B/key, 3.83 %)
+sections.entry_codes: 760619 (1.5852 B/key, 63.37 %)
+sections.total: 1200371 (2.5017 B/key, 100.00 %)
 sections.restarts: 14526
 sections.entries: 464828
-sections.wide: 24538
+sections.wide: 23360
 ```
 
 Read it as four groups. The **codes** are the front-coded suffixes under whichever codec the shard
 settled on, which is what the index is for. The **headers** are the `(lcp, len)` stream and the
-varints of the pairs no code could name — 0.75 bytes a key here against the flat 0.97 `BDX2` spent,
+varints of the pairs no code could name — 0.74 bytes a key here against the flat 0.97 `BDX2` spent,
 a quarter of the blob on this corpus and near half of it on dense decimal ids, since there is almost
 nothing else to store. The **vocabulary** — the symbol tables, the code each shard's headers took,
 the phrase dictionary and, in a `BDX4` blob, the character code its keys are spelled in — is
-0.66 % here, and is the part that grows with the shards rather than with the keys. The
-**directory** — the three packed offset arrays and the block heads — is 2.7 % at this block and
+0.65 % here, and is the part that grows with the shards rather than with the keys. The
+**directory** — the three packed offset arrays and the block heads — is 2.4 % at this block and
 never more than a few per cent, which is worth knowing before optimising it. The
 per-block samples the opening search reads are not in the list because they are not in the blob:
 eight bytes of a head each, built from the heads at load. `--sections` is a `DictIndex`'s alone; on any other kind it says so.
@@ -1179,18 +1179,16 @@ say on stderr that they did:
 ```console
 $ lexindex plan words.txt
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
-+ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
-+ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
-  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
-+ PerfectHashIndex       4448829 bytes   9.27 B/key    130 ns   9.51 B/key resident     93.6 ms build  estimated
-  DoubleArrayIndex      11708630 bytes  24.40 B/key    173 ns  24.40 B/key resident    236.8 ms build  estimated
-* and + are what no other row beats on both size and speed
+* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
++ PerfectHashIndex       4448327 bytes   9.27 B/key    121 ns   9.51 B/key resident    127.2 ms build  estimated
++ DoubleArrayIndex      11708630 bytes  24.40 B/key     85 ns  24.40 B/key resident    141.2 ms build  estimated
+the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
-excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex
-(a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is
-in this file, and they are ranked with the rest.
+excluded: needs exact — CompactHashIndex (a bounded false-positive rate) and ClosedHashIndex (a stranger gets some member's id). Pass --closed-vocabulary if every key you will ask about is in this file, and they are ranked with the rest.
 ```
 
 `--closed-vocabulary` is that promise, and puts both back in the ranking. The line is printed only
@@ -1204,7 +1202,7 @@ stays free. `--index auto` is the default and is what asks the planner;
 `--index dict | string | compact | closed | perfect | hashed | double-array` names one instead and
 skips the plan entirely. The last two have no streaming build, so they hold the corpus: `hashed` is
 a `HashedDictIndex` with no fingerprint, so exact.
-On the 479 823-word dictionary that is 507-517 ms against 91-93 over nine alternating runs --
+On the 479 823-word dictionary that is 529-533 ms against 86-89 over nine alternating runs --
 `--index auto` pays for the planner's two 100 000-key draws, which build every candidate the needs
 left, and the dictionary once per priced block. Below 100 000 keys the plan builds the real indexes
 rather than modelling them, so an auto build there builds every candidate and then the winner again;
@@ -1214,9 +1212,14 @@ naming the index is how not to.
 is what `plan` has always answered; `latency` is the fastest `id(key)`; `balanced` is whichever
 candidate gives up least on the axis it does worse on. The candidates and their sizes do not change
 with it -- only the order, and so what `--index auto` builds. On the word list above, `memory`
-answers `DictIndex` at block 1024 and 2.48 B/key, `latency` answers `PerfectHashIndex`, four times
-the size and a third of the wait, and `balanced` answers the same dictionary at block 32 -- 19 %
-faster for 14 % more space. The block is a candidate of its own, so an objective picks one of those too.
+answers `DictIndex` at block 1024 and 2.47 B/key, `latency` answers `DoubleArrayIndex`, ten times
+the size and a quarter of the wait, and `balanced` answers `StringIndex` -- 39 % faster for 2.4 times
+the space. The block is a candidate of its own, so an objective picks one of those too. The `latency`
+answer is the model's, and the `DoubleArrayIndex` row is the one it sets by hand: the Rust harness, on
+nine tenths of this word list, reads a hit at 56 ns for `PerfectHashIndex`
+([`rel-1m-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-1m-2026-11-05-arz-ea82db8.txt))
+and at 112 for `DoubleArrayIndex`
+([`rel-sentinels-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-sentinels-2026-11-05-arz-ea82db8.txt)).
 
 `--objective` also takes a workload: `op=weight` pairs between commas, ranked by the workload's mean
 operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stranger), `reverse`
@@ -1225,9 +1228,10 @@ operation. The ops are `hits` and `misses` (`id(key)` on a member and on a stran
 read off a log serve as they are. An op is also a question the index has to answer: `reverse` rules
 out the two indexes that store no keys and a prefix query asks for an ordered one, whatever the
 flags said. The ordered pair is where this decides something. On the same word list
-`--objective common_prefix=9,hits=1` answers `DoubleArrayIndex` at 343 ns against `StringIndex`'s 397
-and 1853 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 32 -- 276 ns
-against 806 -- and `hits=9,misses=1,batch=1024` leaves `PerfectHashIndex` first at 55 ns a key.
+`--objective common_prefix=9,hits=1` answers `DoubleArrayIndex` at 274 ns against `StringIndex`'s 301
+and 1630 for the fastest dictionary, `prefix=9,hits=1` answers `DictIndex` at block 128 in microblocks
+of 8 -- 242 ns against `StringIndex`'s 858 -- and `hits=9,misses=1,batch=1024` leaves
+`PerfectHashIndex` first at 50 ns a key.
 
 **Beside the winner, the front.** `pareto()` in Rust, `p["pareto"]` in Python and the `+` on the
 ladder are the rows no other row beats on both size and speed, smallest first: the whole trade this
@@ -1240,24 +1244,28 @@ Chinese ones: a few per cent of `resident_bytes`, since that heap is a small sha
 **The nanoseconds are modelled, and of one machine, as are the build times.** `a + b·s + c·len + d·s·len` per structure,
 operation and `DictIndex` block, where `len` is the mean key length and `s` is `log2` of the blob
 over 64 KiB -- what a lookup waits on is how far its bytes are from the CPU, which the key count
-alone does not say. The constants are fitted to 240 cells timed on this crate's own hardware -- a
+alone does not say. The constants are fitted to 217 cells timed on this crate's own hardware -- a
 Ryzen 7 5800HS with 16 MB of L3 -- by `bench/latency_model.py`, whose `fit` re-derives the tables in
-`src/estimate.rs` from the artifact under `bench/results/`. Mean absolute error is 6-12 % on
-`id(key)`; on `prefix_count` it is 26-42 %, because that operation's cost is dominated by how many
+`src/estimate.rs` from the artifact under `bench/results/`, leaving out the blobs under 4 KiB, whose
+lookups read nothing from memory. The `DoubleArrayIndex` row is not fitted: that harness holds no
+double array, so the row is set by hand. Mean absolute error is 6-13 % on
+`id(key)`; on `prefix_count` it is 40-41 %, because that operation's cost is dominated by how many
 keys the prefix actually matches and the model has no term for it. Two things follow. It is an
-*ordering*: fitted with a corpus left out, it names the fastest index on that corpus in 30 of 30
-corpus-size cells for `id(key)`, for nine hits to a miss, for batches of 1 024, for `key(id)` and
-for a `common_prefix`-heavy workload; over ten workloads the mean pick costs 1.000-1.050× the
-fastest. Against the published sweep, which it was not fitted to, it names the fastest of every
-lane in 28 of 30 cells and picks between `DictIndex` and `StringIndex` the way the measurement does
-in 29, never choosing one more than 1.02× slower. **What it gets wrong is a choice between ordered
+*ordering*: fitted with a corpus left out, it names the fastest index on that corpus in 30 of 31
+corpus-size cells for `id(key)`, in 30 for nine hits to a miss and for `key(id)`, and in all 31 for
+batches of 1 024 and for a `common_prefix`-heavy workload; over ten workloads the mean pick costs
+1.000-1.021× the fastest. Against the published sweep, which it was not fitted to and whose block 128
+has microblocks of 16 where the plan's has 8, it names the fastest of every lane in 30 of 31 cells,
+never more than 1.13× slower, the faster of `DictIndex` and `StringIndex` in 27, never more than
+1.11× slower, and the fastest `DictIndex` block in 21, never more than 1.19× slower. **What it gets wrong is a choice between ordered
 indexes**, because there the candidates are close: the transducer is the faster at 100 000 keys on
-six corpora of thirteen, and the blocks of one dictionary are often within a few per cent of each
-other. Held out, it names the fastest ordered `id(key)` in 19 of 30 cells and one within 5 % of it
-in 23, never one more than 1.11× slower -- and 5 % is about what placement in physical memory moves
-a single-threaded probe on this machine. And it is *high*: the cells were timed through the Python
-binding, so every number carries that call, and the model reads 297 ns for `StringIndex` on the
-word list where the Rust harness in `docs/benchmarks.md` measures 256-270. The overhead falls on
+twelve corpora of fourteen, and the blocks of one dictionary are often within a few per cent of each
+other. Held out, it names the fastest ordered `id(key)` in 25 of 31 cells and one within 5 % of it
+in 28, never one more than 1.19× slower -- and 5 % is about what placement in physical memory moves
+a single-threaded probe on this machine. Nine prefix counts to a hit is the weakest workload: 24 and
+28 of 31, and 1.41× slower on ten million `numeric` ids. And it is *high*: the cells were timed through the Python
+binding, so every number carries that call, and the model reads 203 ns for `StringIndex` on the
+word list where the Rust harness in `docs/benchmarks.md` measures 168-181. The overhead falls on
 every candidate, so it moves the numbers and not the ranking -- but do not quote them as your own.
 
 `--block` sets the `DictIndex` block -- `1..=1024`, or `fast` / `balanced` / `compact` for 128 in
@@ -1269,8 +1277,9 @@ block on the line it marked; to choose one yourself, read it off the ladder and 
 `--labels`, with `--index dict` too, also tries a dictionary of the corpus's trie labels and keeps
 it where the blob comes out smaller -- path lists, URLs, titles, whose directory and file names recur
 under different parents -- and writes the plain blob, byte for byte, where it does not. A lookup
-then reads 1.5 labels on average, +24 % instructions on paths and +6-10 % elsewhere, counted and
-not yet timed, which is why no default builds them. Which labels pay is a count over every key, so
+then reads 1.5 labels on average, +24 % instructions on paths and +6-10 % elsewhere, counted. Timed
+in [the frontier](benchmarks.md#the-research-frontier-measured), `id` takes 15 % longer on paths and
+5-18 % longer elsewhere, which is why no default builds them. Which labels pay is a count over every key, so
 a streamed labelled build walks the keys five times rather than three and holds, while it chooses, a
 filter of 2-4 bytes a key and each label seen twice; it holds no corpus. Its peak went 290 → 582 MB
 on 7.3 million paths and 738 → 1 086 MB on 100 million bigrams, and the bytes are the held build's.

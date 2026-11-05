@@ -31,9 +31,12 @@ All notable changes to this project are documented here. The format follows
 - **A refused build answers `IndexError::Build`, not `Format`,** and `Build` is no longer behind `mph`.
   The C ABI answers `LEXINDEX_STATUS_BUILD`.
 - **`DictProfile::Fast` is block 128 in microblocks of 8,** and so are `block="fast"` and
-  `--block fast`, where they were block 32. Routed, it answered `id` faster than block 32 on all five
-  corpora timed, and `plan` prices that layout now. `DictProfile::block()` is gone, since
-  a block no longer says what a profile is: `layout()` gives the `DictLayout`.
+  `--block fast`, where they were block 32. Routed, it answers `id` faster than block 32 on all
+  thirteen corpora of a million keys, 0.80–0.99×, median 0.88×, and routing costs it a byte a key
+  where block 32 paid a half. Unrouted, `id` stays level, median 1.00×, DNA 0.92× to numbers 1.14×,
+  and the file is no larger on any of them (paths 12.96 → 10.63 bytes a key). `plan` prices that
+  layout now. `DictProfile::block()` is gone, since a block no longer says what a profile is:
+  `layout()` gives the `DictLayout`.
 - **The key hash carries 128 bits of state on every path.** Through 4.x both hashes of a key up to
   16 bytes were functions of one folded 64-bit product and the length, so a birthday search found two
   keys equal in both in 3.7·10⁹ steps, and from 97 bytes a block spelling the lane state erased the
@@ -46,6 +49,11 @@ All notable changes to this project are documented here. The format follows
   known below a birthday's 2^64 steps, and above 16 bytes one must be assumed cheap, so keys a stranger
   chooses still belong in `PerfectHashIndex` or an ordered index. Retired operations a
   `PerfectHashIndex::id` hit: urls 179 → 204, paths 229 → 270, uuid 172 → 196, dna 155 → 174.
+  **It slows a hit on long keys.** Those operations carry a hit past the point where it stops
+  overlapping the next one's cache miss: at a million keys against 4.5.3, a
+  `PerfectHashIndex` hit reads UUIDs +28.7 %, URLs +19.2 %, Russian titles +13.1 %, paths +12.7 %,
+  English titles +8.5 %, and −2.8…+4.3 % on the nine other corpora, and `ClosedHashIndex` URLs
+  +23.0 %, English titles +3.1 %, words −0.1 %. The table under Changed has every lane.
 - **Every hash blob takes a new number: `BMP9`, `BCH9`, `BCL3`, `BHD2`.** Under the new hash a 4.x blob
   would answer wrong ids, so `BMP8`, `BCH8`, `BCL2` and `BHD1` are refused by name, and so is an
   `OVL2` over one, with the base's message. **A `PerfectHashIndex` or `HashedDictIndex` converts**:
@@ -53,15 +61,6 @@ All notable changes to this project are documented here. The format follows
   (`--index hashed`). The perfect hash's ids change; the dictionary's ranks do not. **A
   `CompactHashIndex` or `ClosedHashIndex` does not**: they store no keys, nothing can dump them, and
   their users rebuild from the corpus or stay on 4.x. `MPH3` and `OVL2` keep their numbers.
-
-- **The MPHF cuts its first level into chunks of 2¹⁹ buckets, not 2¹⁶.** A boundary between two chunks
-  bumps about two hundred keys, so fewer of them save 0.007 bits a key at 10⁷ keys and 0.006 at 10⁸.
-  A first level under four chunks is cut into eight pieces no smaller than 2¹⁴ buckets, as before, so
-  a table of 10⁶ keys keeps its seven boundaries, its 1.923 bits and its parallel build: at a quarter
-  of 2¹⁹ its first level would have been one piece, placed on one thread. A larger chunk in flight
-  costs memory: `CompactHashIndex` over 10⁷ listed keys adds 253.8 MB to the keys against 216.7, on
-  8 threads, and 2·10⁶ keys and `PerfectHashIndex` do not move. Provisional: what fewer chunks over
-  fewer threads cost a build of 10⁷ keys and up is **not yet timed**.
 
 ### Added
 
@@ -74,10 +73,14 @@ All notable changes to this project are documented here. The format follows
   `BDX3` blob of reversed labels at 16 keys a block, and names it with a phrase reference; the
   parse takes a label wherever it is cheapest, and what it takes decides which labels stay and
   which a lookup reads often enough to be stored flat among the phrases. At block 1024 own paths go
-  9.323 → 8.530 bytes a key (under MARISA's 8.81 floor), the suite's paths 6.511 → 6.111, URLs,
-  English titles, identifiers, domains and PyPI names 2.7–3.8 % smaller, ten million titles 4.0 %.
-  A member `id` costs +10–26 % instructions and `key_into` +19–51 % on paths, +6–11 % and +9–21 %
-  elsewhere (counted at blocks 256 and 1024, not yet timed), so the build is opt-in:
+  9.277 → 8.501 bytes a key (under MARISA's 8.81 floor), the suite's paths 6.511 → 6.111, URLs,
+  English titles, identifiers, domains and PyPI names 2.9–3.8 % smaller, ten million titles and
+  URLs 4.0–4.1 %. A member `id` costs +10–26 % instructions and `key_into` +19–51 % on paths,
+  +6–11 % and +9–21 % elsewhere (counted at blocks 256 and 1024). Timed at block 1024 and a million
+  keys, `id` reads paths +14.9 %, domains +14.4 %, English titles +7.5 %, identifiers +6.9 %, URLs
+  +6.8 %, PyPI names +5.6 %, and a build takes 2.9–3.4× the time on those (paths 471 → 1 582 ms),
+  up to 6.6× on DNA, where no label pays (`bench/results/frontier-1m-2026-11-05-arz-ea82db8.json`).
+  So the build is opt-in:
   `DictIndex::build_with(keys, DictLayout::new(1024).with_labels(true))` in Rust, `labels=True` on
   the Python constructor, `--labels` on `lexindex build --index dict`; it keeps the labels only
   where the blob comes out smaller — otherwise its blob is the plain layout's byte for byte — and
@@ -109,22 +112,17 @@ All notable changes to this project are documented here. The format follows
   chains, the rest before the superstring is written, and the superstring then moves back inside its
   own allocation. Against the same build holding them to the end, peak −0.2…−24.2 % on fifteen
   corpora with every blob byte-identical: paths 629 → 477 MB, opaque 283 → 237, URLs at ten million
-  3 439 → 2 693, English titles at ten million 2 468 → 2 376. The comparison with 4.5.3 that follows
-  predates that and is measured again before the release. It costs build time: against 4.5.3 on fourteen corpora of up to a million keys, in one session,
-  1.54–4.99× on one thread and 1.50–3.19× on eight, peak memory 0.99–2.99×, for 1.7–44.7 % fewer bytes
-  (numbers 7.442 → 4.116, DNA 26.264 → 17.755); domains, paths and URLs, which merge nothing at a
-  million keys, keep their bytes at 1.50–1.67× the time and 0.99–1.02× the peak; at ten million on
-  eight threads, English titles 2.21× the time and 2.14× the peak for 7.07 % fewer bytes, URLs 1.57×
-  and 1.68× for 3.19 % (`bench/results/rel-build-2026-11-03-arz-82f2cb1.txt`). A lookup against 4.5.3
-  in the same session (`bench/results/rel-1m-2026-11-03-arz-82f2cb1.txt`,
-  `bench/results/rel-scale-2026-11-03-arz-82f2cb1.txt`), at a million keys: a hit −6.3…+2.8 %, a chain
-  −2.8…−31.0 %, a batch −6.1…+4.8 %, `key` −15.5…+5.7 %, with fingerprints a hit −3.7…−26.3 %. A miss
-  reads −10.0…+3.8 % but for English titles +9.7 %, identifiers +9.2 %, Chinese titles +6.5 % and
-  bigrams +6.3 %. `key` at ten million: English titles +8.3 %, URLs +10.8 %, opaque keys +10.7 %, and
-  DNA at a hundred thousand +43.4 % (15.8 → 23.3 ns); a batch at ten million: +9.2 %, +5.8 %, +1.9 %.
-  Those miss, `key` and batch rows fall on corpora the arena merges, but other merged corpora do not
-  show them, and the cause per cell is not traced. From
-  2¹⁹ keys, a build counts the keys that are a prefix of the next exactly, merges every 32nd, 16th
+  3 439 → 2 693, English titles at ten million 2 468 → 2 376. It costs build time: against 4.5.3,
+  the new hash in it, on fourteen corpora of up to a million keys, in one session, 1.17–4.64× on one
+  thread and 1.18–3.16× on eight, peak memory 1.03–2.22×, for 1.7–44.7 % fewer bytes (numbers
+  7.442 → 4.116, DNA 26.264 → 17.755); domains, paths and URLs, which merge nothing at a million
+  keys, keep their bytes at 1.17–1.59× the time and 1.03–1.17× the peak
+  (`bench/results/rel-build-2026-11-05-arz-ea82db8.txt`). A lookup in the same session, at a million
+  keys (`bench/results/rel-1m-2026-11-05-arz-ea82db8.txt`): a chain −1.9…−34.8 %, a batch
+  −2.7…−10.8 %, `key` −29.1…−58.5 % on eleven corpora, Russian titles −3.5 %, Chinese titles +2.3 %,
+  UUIDs +13.8 %, and with fingerprints a hit −1.1…−22.6 %. A miss reads −6.7…+5.7 % on nine, and
+  bigrams +10.1 %, English titles +8.0 %, Chinese titles +13.4 %, PyPI names +13.7 %, UUIDs +22.9 %.
+  From 2¹⁹ keys, a build counts the keys that are a prefix of the next exactly, merges every 32nd, 16th
   and 8th slot, and leaves the merge out when the saving those draws carry to the whole set still
   does not reach the blocked arena. On eighteen corpora of up to a million keys, plain and with
   fingerprints, every blob is the same to the byte as without it. URLs, domains and paths take
@@ -147,18 +145,18 @@ All notable changes to this project are documented here. The format follows
   rather than `<builtins.DictIndex object at 0x…>`: the kind, the key count, the parameter that
   sets its size, and `serialized_len()`. Nothing in it reads the index, so a `repr` of a
   ten-million-key blob in a notebook costs what `len` costs.
-- **Compatibility: upgrade readers first.** The magic stays `BMP8`; lexindex 4.0–4.5 refuse a
-  merged arena as `arena: unknown offset encoding`, and a blob whose arena stays blocked loads on
-  every 4.x. `build_to_file`, `build_to_file_with_fingerprints`, a streamed `lexindex build` and
-  `Overlay::compact_to_file` write the blocked layout as before: the same ids as `build` + `save`,
-  not always the same bytes. `plan` prices the merged arena at `n` (below, under Fixed).
+- **A streamed `PerfectHashIndex` stays blocked.** `build_to_file`,
+  `build_to_file_with_fingerprints`, a streamed `lexindex build` and `Overlay::compact_to_file`
+  write the blocked layout as before: the same ids as `build` + `save`, not always the same bytes.
+  `plan` prices the merged arena at `n` (below, under Fixed).
 
 - **`DictIndex::build_with_layout` and `DictIndex(…, micro=…)` choose the microblock size.** The
   builders split a block into microblocks of 16 to 32; this takes any size dividing the block. At
-  the default block of 256, microblocks of 128 store 0.12–0.34 bytes a key less on fourteen
-  corpora — paths 6.85 → 6.51, the dictionary 2.64 → 2.45, URLs 7.51 → 7.35 — and 64 takes 80–90 %
-  of that; a lookup scans up to 128 entries of a microblock rather than 16, a cost not measured
-  yet, so no builder or `plan` chooses it by itself. Same format: lexindex 4.5.3 loads these blobs
+  the default block of 256, microblocks of 128 store 0.11–0.34 bytes a key less on fourteen
+  corpora — paths 6.81 → 6.47, the dictionary 2.62 → 2.44, URLs 7.49 → 7.33 — and 64 takes 85–93 %
+  of that, 52 % on word bigrams; a lookup scans up to 128 entries of a microblock rather than 16. On a labelled build at
+  block 1024 microblocks of 64 cost `id` +2.2…+5.5 % and of 128 +11–24 %, for 0.5–1.4 % of the file
+  at 64, so no builder or `plan` chooses it by itself. Same format: lexindex 4.5.3 loads these blobs
   and answers every key.
 ### Fixed
 
@@ -174,8 +172,7 @@ All notable changes to this project are documented here. The format follows
   one. The range's whole huge pages are now given back
   (`MADV_DONTNEED`) before the advice, so the first write faults them in as huge pages; nothing has
   been written yet, so nothing is lost, and the tail short of a huge page stays as it was. Every
-  table now gets its huge pages at every build; what that is worth in nanoseconds on an index built
-  and queried in one process is for a quiet machine.
+  table now gets its huge pages at every build. It was not timed alone.
 - **A standalone `Mphf` blob whose level sits at the top of `u64` is refused at load.** Its keys and
   slice did not fit in 64 bits together, so a debug build, which the fuzz targets are, panicked on
   the add in a lookup under a header that checksums; a release build wrapped and stayed below `n`.
@@ -204,6 +201,25 @@ All notable changes to this project are documented here. The format follows
   changes, byte for byte.
 
 ### Changed
+
+- **Every lookup against 4.5.3, in one session, at a million keys.** Medians of rounds alternated
+  in one process, in per cent: fourteen corpora for the first five rows
+  (`bench/results/rel-1m-2026-11-05-arz-ea82db8.txt`), and words, English titles and URLs for the
+  hash indexes below them, three corpora for `DoubleArrayIndex`
+  (`bench/results/rel-sentinels-2026-11-05-arz-ea82db8.txt`). A negative is faster. Most of the
+  entries below were counted and not timed alone; this is what they add up to.
+
+  | index | hit | miss | chain | `key` | batch |
+  |---|---|---|---|---|---|
+  | `DictIndex` 256 | −5.1…−1.0 | −7.8…−1.8 | −4.2…−1.3 | −3.4…+1.5 | −6.5…−2.6 |
+  | `DictIndex` 1024 | −2.3…0 | −5.5…−0.6 | −2.7…+0.6 | −2.4…+1.4 | −4.9…−1.7 |
+  | `StringIndex` | −15.7…+1.4 | −22.9…+4.4 | −8.1…+1.4 | −2.9…+2.0 | |
+  | `PerfectHashIndex` | −2.8…+28.7 | −6.7…+22.9 | −34.8…−1.9 | −58.5…+13.8 | −10.8…−2.7 |
+  | with fingerprints | −22.6…−1.1 | −19.6…+0.2 | −34.8…+0.5 | −57.6…+5.0 | −10.2…−1.1 |
+  | `HashedDictIndex` | +2.3…+8.8 | −0.6…+4.5 | +0.4…+2.1 | −2.2…+0.7 | +1.2…+4.8 |
+  | `CompactHashIndex` | −5.9…+5.3 | +1.7…+2.8 | −1.3…+1.4 | | +1.4…+6.4 |
+  | `ClosedHashIndex` | −0.1…+23.0 | | +0.2…+2.0 | | −3.3…+7.8 |
+  | `DoubleArrayIndex` | +0.8…+6.1 | −3.0…+0.5 | −0.1…+3.8 | | |
 
 - **The merged `PerfectHashIndex` arena builds with up to 20 % fewer instructions and up to 45 % fewer
   mispredicted branches, and writes the same bytes.** Three changes to the greedy merge, none to a
@@ -241,8 +257,8 @@ All notable changes to this project are documented here. The format follows
   `from_bytes` shrinks by as much. A lookup makes the same loads from the blob's bytes instead of a
   copy's, with one more addition a phrase. Instructions an `id` after `route_microblocks` at block
   256: paths 3 826 → 3 868, titles-en 1 888 → 1 904, `words` unchanged, which holds no phrases; on the
-  labelled build at block 1024 paths 6 096 → 6 099 and titles-en 3 904 → 3 907. What that costs in
-  time is for a quiet machine.
+  labelled build at block 1024 paths 6 096 → 6 099 and titles-en 3 904 → 3 907. It was not timed
+  alone.
 - **`DictIndex` blobs are 0.2–0.6 % smaller on text at a million keys, in the same format.** The
   trainer ranked a candidate by the bytes it covers, and now adds one for each use, which each use
   also spares. The encoder's slot for a symbol's first three bytes holds two symbols where it held
@@ -305,8 +321,8 @@ All notable changes to this project are documented here. The format follows
   and the other two run together, either ending the other as soon as it finds the merge promising.
   The verdict reads the same numbers, and the blob is byte for byte what it was on domains, paths,
   urls, numeric and titles at a million keys. `plan()`'s draw of what a merge saves stops at the
-  length too. Instructions a build fall under 1 %, and only on the key sets the merge loses; what it
-  buys in wall time is for a quiet machine. Where the sample of every 32nd key, carried to the whole
+  length too. Instructions a build fall under 1 %, and only on the key sets the merge loses. Where
+  the sample of every 32nd key, carried to the whole
   key set, already does not beat the blocked arena, the other two are not drawn at all: no verdict
   moved on 21 corpora, and a build of a million `urls` went from 3.173 to 2.703 Gi (−15 %), the one
   of them it settles.
@@ -321,8 +337,7 @@ All notable changes to this project are documented here. The format follows
   does not need, so they overlap instead of following each other. Hints only — nothing is read
   early and the blob is unchanged. Instructions a lookup, over each corpus's probes: words +2.5 %,
   paths +1.5 %, urls +1.8 %, numeric +2.4 % (+3.1, +1.6, +2.2, +2.7 % after `route_microblocks`),
-  the price of the hints, and mispredicted branches unchanged. What they buy in nanoseconds, at a
-  million keys and at ten, is for a quiet machine.
+  the price of the hints, and mispredicted branches unchanged. They were not timed alone.
 - **The shared-prefix count behind a `DictIndex` lookup has no byte loop left.** `lcp` compared the
   tail under eight bytes a byte at a time, a loop whose exit falls on whatever byte differs and
   that no predictor learns. The tail is now a few overlapping loads placed at their own offsets in
@@ -330,8 +345,8 @@ All notable changes to this project are documented here. The format follows
   for a shorter one, its first, middle and last byte under four — and the first differing byte is
   one `trailing_zeros`. The equality test before a block's scan is read off the same count rather
   than a second compare. Instructions per lookup, built in one process over the probes of each
-  corpus: numeric −0.57 %, paths −0.13 %, words +0.08 %, urls +0.06 %. Nanoseconds are for a
-  quiet machine. The blob is unchanged.
+  corpus: numeric −0.57 %, paths −0.13 %, words +0.08 %, urls +0.06 %. It was not timed alone. The
+  blob is unchanged.
 - **A `DictIndex` lookup bisects its route and shifts to its shard.** The route to a microblock
   bisects its sorted route words instead of comparing all of them, and a block's shard is a shift
   where the blob's shard is a power of two, as every build writes it, instead of a 64-bit `div`.
@@ -344,8 +359,7 @@ All notable changes to this project are documented here. The format follows
   checking again what the load proved, the layout is chosen after the hash rather than before it,
   and a hit no longer asks for the collision table. Retired operations a hit on a million keys,
   against the same lookup before the merged layout: URLs 192 → 180, paths 197 → 185, UUIDs
-  188 → 175, English titles 180 → 168, Russian titles 185 → 172. Counted, not yet timed on a quiet
-  machine.
+  188 → 175, English titles 180 → 168, Russian titles 185 → 172. Counted, not timed alone.
   A merged arena whose entries have no bits is now refused at load: no build writes one, and for one
   empty key its read would end past the blob. The blobs are unchanged.
 - **`StringIndex::id` reads a node's inputs with one or two 16-byte compares.** A node of up to 32
@@ -354,7 +368,8 @@ All notable changes to this project are documented here. The format follows
   lookup no longer reads the final output of every final node it passes, and a pack size is masked
   from a table. Counted on a million keys a lookup (`perf stat`, one CPU): instructions −6…−17 %,
   branches −12…−34 %, branch misses −36…−62 % (identifiers 11.6 → 6.0, package names 10.6 → 5.4,
-  English words 10.4 → 3.9), loads −7…−29 %; the answers and the blob are unchanged. Not yet timed.
+  English words 10.4 → 3.9), loads −7…−29 %; the answers and the blob are unchanged. In time, the
+  table at the top of this section.
 - **A `DoubleArrayIndex` build peaks 5–7 % lower.** Numbering the trie kept the key range of every
   node it had numbered; it keeps about the breadth-first frontier now. Peak resident memory of a
   process that reads a million keys and builds over them: domain names 335 → 319 MB, identifiers

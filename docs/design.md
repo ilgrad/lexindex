@@ -75,7 +75,7 @@ fingerprint per key and no stored keys at all**:
   sub-byte widths hold to theory the same way: on the 0.6.0 code, 2 M random non-member probes
   measured 6.253 % at 4 bits (z = +0.18 against 2⁻⁴) and 1.555 % at 6 bits (z = −0.83).
 
-Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.918 bits/key at
+Because the keys themselves are never stored, size is just the MPH (0.24 B/key — 1.907 bits/key at
 10 M, measured, and flat in `n`: `8/λ` bits of seed plus what the 1.3 % of bumped keys cost)
 plus the fingerprints, bit-packed at exactly `fingerprint_bits/8` B/key: **0.74 B/key at 4 bits
 (6.25% false positives), 1.24 at the 8-bit default (0.39%), 2.24 at 16 (0.0015%)** on real words — below `marisa-trie`'s 2.98. The trade for that footprint is the false-positive rate and the absence of any
@@ -116,6 +116,12 @@ a change to one product can be paid for by the other, so a chosen pair must be a
 none has been built. A third product over every word prices it higher and costs up to 68 % of a
 lookup on long keys, against 4.x on the same machine, where this round's worst is 37 %
 ([`bench/results/hash-forms-2026-11-04-arz-8ca5a3c.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/hash-forms-2026-11-04-arz-8ca5a3c.txt)).
+Over that file's 32 cells a member lookup is about 7 % slower at the median, and its 37 % is
+`PerfectHashIndex` on `uuid`. The recount of the 5.0 candidate against 4.5.3 reads that index up to
+28.7 % slower, on `uuid`, and 19.2 % on `urls`
+([`bench/results/rel-1m-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-1m-2026-11-05-arz-ea82db8.txt));
+`ClosedHashIndex` 23.0 % on `urls`, `HashedDictIndex` up to 8.8 % and `CompactHashIndex` up to 5.3 %
+([`bench/results/rel-sentinels-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/rel-sentinels-2026-11-05-arz-ea82db8.txt)).
 Through 4.x it was cheaper at every length: up to 16 bytes both hashes were functions of one 64-bit
 product and the length, `≈ 2^-64` a pair of one length, and a birthday search found two 16-byte
 keys equal in both in 3.7·10⁹ steps on one core; from 97 bytes a block that started with the lane
@@ -139,8 +145,8 @@ ids in `[0, n)` and lets through a share `ε` of other keys needs, for almost ev
 least `log₂e + log₂(1/ε)` bits a key, less `O(log n)` bits in all. Such a structure accepts at most
 `n + ε·u` of the `u` possible keys, and among them it can pick out at most `((n + ε·u)/n)ⁿ` member
 sets — one accepted key for each id — of the `C(u, n)` it has to tell apart. At `ε = 2⁻⁸` that is
-9.443 bits a key (9.4427 at 10 M keys and `u = 2⁶⁴`). The 8-bit default stores 9.918, the perfect
-hash's 1.918 and the fingerprint's 8: 0.475 bits, 5.0 %, above the floor, and all of it is the
+9.443 bits a key (9.4427 at 10 M keys and `u = 2⁶⁴`). The 8-bit default stores 9.907, the perfect
+hash's 1.907 and the fingerprint's 8: 0.464 bits, 4.9 %, above the floor, and all of it is the
 perfect hash's. Given the slots, the fingerprints already sit at `log₂(1/ε)`, so moving them into
 any other structure, a retrieval table or a ribbon, cannot save a bit; only a smaller perfect hash
 can, down to `log₂e` = 1.443.
@@ -156,7 +162,7 @@ merge and writes the blocked arena — the same ids, a larger blob.
 
 **The MPH's parameters are not exposed, and that is a measurement, not an omission.** `λ`, the
 keys per bucket, sets `8/λ` bits of seed against the fraction of keys bumped to a further level,
-and the measured surface at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.925
+and the surface measured on 2026-09-17 at 10 M real-word bigram hashes is flat around the shipped 4.5: 1.925
 bits/key at 4.4, 1.917 at 4.5, 1.914 at 4.6, within a few nanoseconds per key of each other to
 build, and the bumped share — the lookup's cost — rises through it, 1.0 % to 1.7 %. The table
 has no load factor at all — every level's range is exactly its key count, and the
@@ -214,7 +220,7 @@ the same placement over its slice and the file is byte for byte what `build` and
 The fingerprints are then written at their slots, into memory while the table is under 256 MiB
 and past that through range files of 16 M slots each, read back one at a time, so that no byte
 of the output is written at a random offset — the lesson the perfect-hash arena taught. Measured
-at 100 M real-word pairs: 302 MB peak against 8 834 MB for the list, the run buffer and the
+on 2026-09-10 at 100 M real-word pairs: 302 MB peak against 8 834 MB for the list, the run buffer and the
 perfect hash's construction plus the table within 5 MB of each other; at 10⁹, 0.94 GB, which is
 the perfect hash's construction alone at 0.9 bytes per key — 0.6 of it the table and the keys its
 first level bumped, since a level's pieces go into the table as they finish rather than being kept
@@ -229,8 +235,10 @@ Measured on the 10 M bigram hashes (`mphf::spike::partitioned` under `bench-mphf
 **25 → 39 ns**, because a monolith's pointer chain stays in L1 while a part's differs per query. A
 flat layout — one seeds array and one slot space with per-part offsets — would win most of the
 lookup back at the price of a new format for all three hash indexes, and the memory it saves is not
-the binding constraint at the scale that would need it: at 10⁹ keys the MPHF's construction peak is
-0.94 GB and the sort scratch 44 GB of disk.
+the binding constraint at the scale that would need it: at 10⁹ keys the MPHF's construction peak was
+0.94 GB on 2026-09-10, the harness now reads 2.75 GB on eight threads
+([`bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/mphf-vs-1b-2026-11-05-arz-ea82db8.txt)),
+and the sort scratch was 44 GB of disk.
 
 ## `ClosedHashIndex`
 
@@ -286,7 +294,7 @@ alphabet, one to eight bits, against its table on its own bytes — the suffixes
 imply, since a packed `len` counts codes where a symbol-coded one counts bytes — and takes the
 winner, so a blob holding both shapes gets both. The codes of a run are continuous: an entry's
 suffix starts where the one before it ended, mid-byte, and padding each to a byte instead costs 0.32
-bytes a key on DNA, which is the whole margin. At block 256: dna 7.36 → 4.34 bytes a key, opaque
+bytes a key on DNA, which is the whole margin. When it landed, at block 256: dna 7.36 → 4.34 bytes a key, opaque
 13.24 → 10.36, numeric 1.39 → 0.98. `uuid` keeps its tables — seventeen characters do not fit a
 nibble — and is unchanged.
 
@@ -304,7 +312,7 @@ shards would take a split by 3 % on its own bytes: what the miner ranks is what 
 would save, and what decides the format is whether a shard would rather spend those byte codes on
 symbols — on a million opaque keys 40 000 spans clear the first bar and no shard takes one. Each
 shard then decides for itself and has its table retrained on the spans its phrases did not cover,
-and a blob no shard bought stores no dictionary. At block 1024 over a million keys: urls 9.26 →
+and a blob no shard bought stores no dictionary. When it landed, at block 1024 over a million keys: urls 9.26 →
 7.27 bytes a key, English titles 9.08 → 7.21, paths 12.48 → 9.32; dna, opaque and numeric buy
 nothing.
 
@@ -370,9 +378,9 @@ entry whose prefix is at least a later entry's writes nothing that survives, so 
 over the headers finds the few that do — and decodes only those, one eight-byte store per code, into
 a string the caller can keep (`key_into`). Past a staircase 32 deep a climb stops tracking it and
 decodes every entry, which is slower and not wrong. On the dictionary at `block = 256`:
-**2.64 B/key** (`StringIndex` 5.95), `id` 281–283 ns against 167–173, `key_into` 198–199 against
-`key`'s 265–270; 128 and 512 give 2.66 and 2.52 B/key at 263–265 and 312–322 ns, and 1024 gives
-2.51 at 341–342. Against one level at the same size the reverse lookup halves and `id` does not move:
+**2.62 B/key** (`StringIndex` 5.95), `id` 280–293 ns against 168–181, `key_into` 194–195 against
+`key`'s 263–265; 128 and 512 give 2.65 and 2.51 B/key at 260–273 and 313–320 ns, and 1024 gives
+2.50 at 342–355. Against one level at the same size, measured on 2026-09-12, the reverse lookup halves and `id` does not move:
 244–246 ns and 392–399 for 2.819 B/key, where one level at 128 keys a block stored 2.827 for
 460–464 and 393. The one-level format still reaches further down — 2.701 at 1024 keys a block —
 but pays 3 190 ns of `key_into` and 984 of `id` for it, which is the trade the second level
@@ -395,13 +403,17 @@ in one process and in two builds of the harness
 ([`bench/results/id-ab-2026-09-24-arz-0216b39.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-0216b39.txt)),
 `id` takes 19–31 % less time on the twelve at a million keys and 13–22 % on six corpora at ten
 million; `paths` does not move. At 32 keys a block the restart run is a single restart, and the
-words saved at most 15 % — and cost `numeric` at ten million 3–10 %.
+words saved at most 15 % — and cost `numeric` at ten million 3–10 %. The frontier's separate passes
+on 2026-11-05 read 15–32 % on the twelve, 4 % on `paths` and 12–20 % at ten million; at 32 keys a
+block, from 15 % saved on `numeric` to 1.2 % lost on `opaque` at ten million.
 
 It is a method rather than the default because it is paid for twice. The words take `8 / micro`
 bytes a key — 0.5 at the default block, 0.25 at 1024 — in memory and in no blob. The size in every
 table here is the blob's, which is what a load holds. Routed, the default block would give up the
-size lead on four of the thirteen corpora at a million keys: `words`, `domains`, `idents` and `pypi`,
-where its margin over MARISA is 0.34–0.39 B/key. Block 1024 would give it up on `paths`. And
+size lead over MARISA at its smallest on seven of the thirteen corpora at a million keys: `words`,
+`domains`, `idents`, `pypi`, `titles-en`, `titles-zh` and `urls`, where its margin is 0.08–0.39 B/key;
+it does not hold that lead on `paths` even unrouted. Block 1024 would give it up on `idents`, by
+0.006 B/key, and holds it on `paths` only with labels. And
 deriving the words decodes the start of every restart run, some fifteen instructions a key.
 `load_mmap` touches a page only when a query needs it; after routing, the whole file has been read.
 
@@ -446,8 +458,8 @@ compared eleven, and hands that compare to the block's scan: 16.3 % fewer instru
 at the default block and 10.8 % at 1024, and 8 % less time at both, against 4.4.0 in one process
 ([`bench/results/id-ab-2026-09-24-arz-b362f43.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/id-ab-2026-09-24-arz-b362f43.txt)).
 The rest of a paths lookup is the scan — 62 % of its instructions — which the trie does not touch.
-What the trie costs is a load's: a mapped load of paths takes 177 µs at the default block
-([`docnums-2026-11-03-arz-82f2cb1.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-03-arz-82f2cb1.txt), on `performance`),
+What the trie costs is a load's: a mapped load of paths takes 175 µs at the default block
+([`docnums-2026-11-05-arz-ea82db8.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/docnums-2026-11-05-arz-ea82db8.txt), on `performance`),
 where the A/B above, on `powersave`, read 238 against 130 without the trie, and holds 0.10 bytes a
 key more.
 
@@ -589,15 +601,18 @@ labels on those paths; the 2 851 most read take 59 % of the reads, the 2 851 mos
 
 At block 1024 on a million paths, counted: a member `id` takes 5 847 instructions against `BDX3`'s
 4 728 (+24 %) and `key_into` 6 628 against 4 699 (+41 %); on the suite's shorter paths +10 % and
-+19 %, and on URLs, titles, identifiers, domains and package names +6–10 % and +9–16 %. Nested blocks
++19 %, and on URLs, titles, identifiers, domains and package names +6–10 % and +9–16 %. Timed in
+[the frontier](benchmarks.md#the-research-frontier-measured) at blocks 256 and 1024, `id` takes 15 %
+longer on paths and 5–18 % longer on the other corpora that keep the labels, and the build takes
+2.9–4.5× as long. Nested blocks
 of 8 and 4, or labels stored unreversed, buy the same instructions for more bytes than a flat label
 does; a table of decoded labels derived at load holds labels past 32 bytes too and reads about 6 %
 cheaper, for four to five times the load instructions. So the labels are an opt-in of the build, and
 a choice of the blob: the build that tries them runs beside the plain one and keeps the smaller,
-byte for byte the plain blob where the labels lose. At block 1024: own paths 9.323 → 8.530 bytes a
-key (MARISA's floor is 8.81), the suite's paths 6.511 → 6.111, URLs 7.271 → 6.998, English titles
-7.212 → 6.939 (10 M: 5.375 → 5.159), identifiers 4.860 → 4.693, domains 4.363 → 4.244, PyPI names
-4.024 → 3.898; `words`, `dna`, `numeric`, `opaque` and `uuid` keep their blob, and a corpus spelled
+byte for byte the plain blob where the labels lose. At block 1024: own paths 9.277 → 8.501 bytes a
+key (MARISA's floor is 8.81), the suite's paths 6.511 → 6.111 when the labels landed, URLs 7.243 →
+6.977, English titles 7.178 → 6.906 (10 M: 5.366 → 5.153), identifiers 5.055 → 4.877, domains 4.345 →
+4.216, PyPI names 3.998 → 3.881; `words`, `dna`, `numeric`, `opaque` and `uuid` keep their blob, and a corpus spelled
 in a character code takes no labels.
 
 ## `HashedDictIndex`
@@ -725,8 +740,9 @@ gaps and near-`O(1)` lookup in tiny space. lexindex builds the MPH itself (`src/
 a **version-stable** 64-bit hash of each string (branch-free over three length
 classes — four overlapping 4-byte loads to 16 bytes, the first and last sixteen to 32, 32-byte
 blocks beyond — read into a 128-bit state by 64×64→128 multiplies left unfolded, and merged with the
-length; 3.9 ns a dictionary word in 4.0, not yet re-timed for 5.0's state, against 7.3 for the hash
-2.0–3.x shipped, whose word loop and tail switch mispredicted on every length change — not
+length; 3.9 ns a dictionary word read in order in 4.0, against 7.3 for the hash 2.0–3.x shipped,
+whose word loop and tail switch mispredicted on every length change, and not yet re-timed alone for
+5.0's state, whose cost per lookup is [with the collisions it closes](#compacthashindex) — not
 `std`'s `DefaultHasher`, which is not guaranteed stable and so cannot back a *serialised* MPH). A flat `slot → key` arena doubles as the membership check: an
 MPH returns a slot for *any* input, so a query is a hit only if the stored key at that slot equals the
 query. Two distinct keys colliding in the 64-bit hash cannot fail the build. The hash is
@@ -861,8 +877,8 @@ a fingerprint from the second hash, the one `CompactHashIndex` keeps — so a pr
 does not match stops at the block and never reads the key. A lookup of an absent key is then one cache
 miss instead of two: on the dictionary, then in this layout, 166 → 74 ns, a member 163 → 171, the
 index 10.90 → 11.90 B/key, the ids unchanged because the perfect hash is. The dictionary now takes
-the overlapped layout, with its fingerprints in a row of their own, and reads 38 → 29 ns, a member
-45 → 50, 9.25 → 10.25 B/key
+the overlapped layout, with its fingerprints in a row of their own, and reads 39 → 30 ns, a member
+46 → 50, 9.25 → 10.25 B/key
 ([measured](benchmarks.md#a-fingerprinted-perfecthashindex-on-mostly-absent-keys)). The bytes follow the offsets rather than interleave with
 them: an interleaved row pushed the offset pair up to 36 bytes from the base instead of 20, and the
 extra line splits cost a member probe 6 ns against 3 for this layout. The tag alone would
@@ -983,7 +999,7 @@ all inside a `catch_unwind` that turns the decoder's panic into an `IndexError`.
 the keys, so the cost is the graph's and not the language's: `fst` can spell a billion strings in
 896 bytes. The catch is load-bearing, not a backstop: a node cannot be checked without decoding
 it, and the specimen above is rejected by the catch, not by the address check. It costs
-38× the owned load (23.0 ms against 0.6 ms on 479 823 words), which
+36× the owned load (23.1 ms against 0.6 ms on 479 823 words), which
 is the right price once and the wrong price every time. `load_mmap`
 skips the payload checksum scan by design, trusting the mapped file outright to keep mapping time
 independent of blob size — the structural checks still run.
@@ -1027,8 +1043,8 @@ What no statistic gives is what a *compressor* will do: the ratio the FSST symbo
 suffix into, the bytes an fst actually spends a key once it has merged what it can, and the
 bits the perfect hash spends per key. Those are read off builds of two 100 000-key draws — one
 uniform over the corpus, one of runs of consecutive keys — and below that size there is nothing to
-model: the candidates are built and reported at what they weigh. Scored against the built blob on
-23 corpora of half a million to ten million keys, at each of the three priced blocks, the
+model: the candidates are built and reported at what they weigh. Scored on 2026-11-02 against the built blob on
+23 corpora of half a million to ten million keys, at the blocks then priced, 32, 256 and 1024, the
 `DictIndex` estimate lands within **1.6 % median, 5.3 % at the 90th percentile and 8.3 % at worst**.
 
 The two draws answer two different questions, and one draw answering both was the estimate's largest

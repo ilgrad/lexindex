@@ -37,12 +37,12 @@ the cheapest first:
 ```console
 $ lexindex plan keys.txt --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
-+ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
-+ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
-  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
-* and + are what no other row beats on both size and speed
+* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
 ```
 
@@ -56,14 +56,14 @@ not as a promise.
 ```console
 $ lexindex build keys.txt words.bdx --reverse --prefix
 479823 keys, mean length 9.3, mean shared prefix 6.3, ranked by size
-* DictIndex              1190567 bytes   2.48 B/key    384 ns   2.53 B/key resident     84.5 ms build  estimated at block 1024
-+ DictIndex              1252952 bytes   2.61 B/key    336 ns   2.69 B/key resident     84.5 ms build  estimated at block 256
-+ DictIndex              1357175 bytes   2.83 B/key    311 ns   3.12 B/key resident     84.5 ms build  estimated at block 32
-  HashedDictIndex        2508459 bytes   5.23 B/key    363 ns   5.54 B/key resident    107.5 ms build  estimated at block 256
-+ StringIndex            2882400 bytes   6.01 B/key    297 ns   6.01 B/key resident     98.9 ms build  estimated
-* and + are what no other row beats on both size and speed
+* DictIndex              1186914 bytes   2.47 B/key    334 ns   2.52 B/key resident     40.2 ms build  estimated at block 1024
++ DictIndex              1248682 bytes   2.60 B/key    294 ns   2.68 B/key resident     40.2 ms build  estimated at block 256
++ DictIndex              1370762 bytes   2.86 B/key    281 ns   2.96 B/key resident     40.2 ms build  estimated at block 128 micro 8
+  HashedDictIndex        2503686 bytes   5.22 B/key    319 ns   5.53 B/key resident     66.1 ms build  estimated at block 256
++ StringIndex            2882400 bytes   6.01 B/key    203 ns   6.01 B/key resident     94.8 ms build  estimated
+the rows marked * and + are what no other row beats on both size and speed
 the nanoseconds and the build times are a model of this crate's own machine, not a measurement of yours
-wrote words.bdx: DictIndex over 479823 keys, 1205985 bytes (2.51 B/key)
+wrote words.bdx: DictIndex over 479823 keys, 1200371 bytes (2.50 B/key)
 ```
 
 The same build from Python writes the same bytes:
@@ -78,7 +78,7 @@ print(index.serialized_len())
 ```
 
 ```console
-1205985
+1200371
 ```
 
 `inspect` reads a blob's header without loading it:
@@ -87,9 +87,9 @@ print(index.serialized_len())
 $ lexindex inspect words.bdx
 kind: DictIndex
 format: BDX3
-bytes: 1205985
+bytes: 1200371
 keys: 479823
-arena_bytes: 1173645
+arena_bytes: 1168173
 ```
 
 ## Load, look up, look back

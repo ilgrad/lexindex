@@ -149,6 +149,20 @@ smallest first; `best` is always on it. `build_secs` and the nanoseconds are one
 for ordering and never for predicting. The ladder `plan` prints marks the same rows with `+` and has
 two more columns, so a script that parses it by column position should use the fields instead.
 
+## `DictProfile::Fast` is a different layout
+
+`Fast` is now block 128 in microblocks of 8, where it was block 32. `DictProfile::block()` gave way to
+`layout()`, a `DictLayout` for `build_with`. A blob written at block 32 still loads as it is. To keep
+building that layout, name it: `block=32`, or `--block 32`.
+
+Over thirteen corpora at a million keys, the new layout keeps plain `id` level with block 32: the
+median ratio is 0.999, from 0.92 on `dna` to 1.14 on `numeric`. Its file is smaller on all thirteen,
+by 0.04 % to 18 %. After `route_microblocks()` its `id` is faster on all thirteen, at a median of
+0.879, and it holds 1.0 byte a key in memory where block 32 holds 0.5. At ten million keys the plain
+median is 1.04, and the routed median is 0.92, faster on five corpora of six
+([`frontier-1m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-1m-2026-11-05-arz-ea82db8.json),
+[`frontier-10m-2026-11-05-arz-ea82db8.json`](https://github.com/ilgrad/lexindex/blob/main/bench/results/frontier-10m-2026-11-05-arz-ea82db8.json)).
+
 ## `Overlay::remove` needs exact membership
 
 Over `CompactHashIndex`, a key the index never held can match a live id, and removing it retired that
