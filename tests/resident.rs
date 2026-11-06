@@ -87,7 +87,7 @@ fn counted(e: &Estimate, keys: &[&str], path: &Path) -> (usize, usize) {
                 heap_of(|| PerfectHashIndex::load_mmap(path).unwrap())
             }
             Kind::Compact => {
-                CompactHashIndex::build(keys, 1)
+                CompactHashIndex::build_bits(keys, 8)
                     .unwrap()
                     .save(path)
                     .unwrap();

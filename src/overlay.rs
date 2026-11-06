@@ -421,7 +421,7 @@ impl<I: OverlayBase> Overlay<I> {
     /// # #[cfg(feature = "mph")] {
     /// use lexindex::{CompactHashIndex, Overlay};
     ///
-    /// let mut ov = Overlay::new(CompactHashIndex::build(["apple", "banana"], 4).unwrap());
+    /// let mut ov = Overlay::new(CompactHashIndex::build_bits(["apple", "banana"], 32).unwrap());
     /// let cherry = ov.add("cherry");
     /// assert!(ov.retire_id(cherry));
     /// assert_eq!(ov.id("cherry"), None);
@@ -433,7 +433,7 @@ impl<I: OverlayBase> Overlay<I> {
     /// ```compile_fail
     /// use lexindex::{CompactHashIndex, Overlay};
     ///
-    /// let mut ov = Overlay::new(CompactHashIndex::build(["apple", "banana"], 4).unwrap());
+    /// let mut ov = Overlay::new(CompactHashIndex::build_bits(["apple", "banana"], 32).unwrap());
     /// ov.remove("apple");
     /// ```
     ///

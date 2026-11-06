@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn a_hash_build_refuses_with_a_build_error_and_its_blob_with_a_format_error() {
         assert!(matches!(
-            CompactHashIndex::build(["a", "b"], 3),
+            CompactHashIndex::build_bits(["a", "b"], 65),
             Err(IndexError::Build(_))
         ));
         let dict = || DictIndex::build(["a", "b"]).unwrap();

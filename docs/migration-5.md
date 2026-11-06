@@ -177,7 +177,7 @@ ov.add("typo");
 ov.remove("typo");
 
 // 5.0
-let mut ov = Overlay::new(CompactHashIndex::build(&keys, 4)?);
+let mut ov = Overlay::new(CompactHashIndex::build_bits(&keys, 32)?);
 let typo = ov.add("typo");
 ov.retire_id(typo);
 ```

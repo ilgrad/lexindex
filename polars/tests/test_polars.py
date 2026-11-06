@@ -35,7 +35,7 @@ def built(tmp_path):
         "string": _save(lx.StringIndex(KEYS), tmp_path, "keys.bst"),
         "dict": _save(dictionary, tmp_path, "keys.bdx"),
         "hashed": _save(lx.HashedDictIndex.from_dict(dictionary, 16), tmp_path, "keys.bhd"),
-        "compact": _save(lx.CompactHashIndex(KEYS, 2), tmp_path, "keys.bch"),
+        "compact": _save(lx.CompactHashIndex(KEYS, fingerprint_bits=16), tmp_path, "keys.bch"),
         "closed": _save(lx.ClosedHashIndex(KEYS), tmp_path, "keys.bcl"),
         "perfect": _save(lx.PerfectHashIndex(KEYS), tmp_path, "keys.bmp"),
         "double_array": _save(lx.DoubleArrayIndex(KEYS), tmp_path, "keys.bda"),
