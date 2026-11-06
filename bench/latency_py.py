@@ -30,6 +30,7 @@ Run: ``uv run --with <lexindex wheel> --with marisa-trie python bench/latency_py
 import gc
 import math
 import os
+import random
 import sys
 import time
 
@@ -80,7 +81,11 @@ def calibration(iters: int = 200_000) -> int:
 
 
 def probes(keys: list[str], pct: int) -> list[str]:
-    """`pct`% members, in an order unrelated to the build order.
+    """`pct`% members, every key once, in an order shuffled with a fixed seed.
+
+    Not at a fixed step: the step of 999,983 used until 5.0 is 999,983 mod n keys, so -17 at a
+    million, and walked the keys, the `dict`'s entries and their string objects at a stride the
+    L2 prefetcher learns.
 
     Members are the *existing* string objects, which is what a Python caller has; absent keys are
     freshly built. No layout axis here — CPython strings are objects on the heap either way.
@@ -90,10 +95,11 @@ def probes(keys: list[str], pct: int) -> list[str]:
     while lexindex rehashes the bytes on every call (measured separately: ~23 ns of the gap at
     1 M). That is the *favourable* reading for `dict`, which is the honest one to publish against.
     """
-    step = 999_983  # coprime with any n used here, so it visits every index once
+    order = list(range(len(keys)))
+    random.Random(0x5EED).shuffle(order)
     out = []
-    for i in range(len(keys)):
-        k = keys[(i * step) % len(keys)]
+    for i, at in enumerate(order):
+        k = keys[at]
         out.append(k if (i % 100) < pct else k + "~absent")
     return out
 
