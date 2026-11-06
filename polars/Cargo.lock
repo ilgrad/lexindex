@@ -765,14 +765,14 @@ dependencies = [
 
 [[package]]
 name = "lexindex"
-version = "4.5.3"
+version = "5.0.0"
 dependencies = [
  "fst",
 ]
 
 [[package]]
 name = "lexindex-polars"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "lexindex",
  "polars",

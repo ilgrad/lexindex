@@ -3,7 +3,7 @@
 `lexindex-polars` is versioned separately from `lexindex`: it tracks polars' plugin ABI, which
 moves on polars' cadence and not on the library's.
 
-## [Unreleased]
+## [0.2.0] — 2026-11-06
 
 ### Added
 
@@ -22,6 +22,12 @@ moves on polars' cadence and not on the library's.
 
 ### Changed
 
+- **The wheel is built against lexindex 5.0.0 and requires it.** 5.0 replaced the key hash, so the
+  plugin refuses the hash blobs 4.x wrote — `BMP8`, `BCH8`, `BCL2`, `BHD1` — as lexindex 5.0 does,
+  and reads the `BMP9`, `BCH9`, `BCL3` and `BHD2` that replace them. `StringIndex`,
+  `DictIndex` and `DoubleArrayIndex` blobs read as before. lexindex's `docs/migration-5.md` converts
+  a perfect hash or a hashed dictionary from 4.x; the two that store no keys are rebuilt from their
+  corpus.
 - **An expression is pinned to the file it saw when it was built.** A rebuild during a query used to
   reach its later chunks and not its earlier ones, and nothing said so: two columns of one result
   could hold ids from two generations of an index, which are not comparable. A chunk now gets the
