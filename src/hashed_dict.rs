@@ -22,7 +22,7 @@ use crate::pages::Pages;
 use crate::{DictIndex, IndexError};
 
 /// `[magic 4][n u64][fp_bits u32][dict_len u64][mph_len u64][side_len u32][payload u64][check u32]`,
-/// then the embedded `BDX3` or `BDX4` blob, the MPH blob, the bit-packed rank table and the side table.
+/// then the embedded `BDX3`, `BDX4` or `BDX5` blob, the MPH blob, the bit-packed rank table and the side table.
 const MAGIC: &[u8; 4] = b"BHD2";
 /// 4.x's, the same layout, keyed on the hash 5.0 replaced. The dictionary inside it holds the keys.
 const MAGIC_V1: &[u8; 4] = b"BHD1";

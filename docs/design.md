@@ -645,7 +645,7 @@ side table matched on the full second hash before the rank table is read, exact 
 width. The same dictionary and width give the same blob, byte for byte.
 
 The serialised blob is a 48-byte header — `[magic "BHD2"][n][fingerprint_bits][dictionary bytes]
-[mph bytes][side_len][payload][check]` — then the dictionary's `BDX3` or `BDX4` blob unchanged, the MPH blob,
+[mph bytes][side_len][payload][check]` — then the dictionary's `BDX3`, `BDX4` or `BDX5` blob unchanged, the MPH blob,
 the rank table and the side table. Embedding the dictionary verbatim keeps one loader for it: the
 region goes to `DictIndex`'s own, which checks it as it checks a standalone blob, and the pair is
 refused if the dictionary's key count and the header's disagree. `load_mmap` borrows the
@@ -1165,7 +1165,7 @@ or — never — read it wrong.
 | `BDX3` | 4.0 | `DictIndex` | `BDX1` (2.0) and `BDX2` (2.2–3.x) **refused by name** — `BDX1` had no microblocks and unpacked per-block arrays, `BDX2` a header byte an entry, one codec and no phrase dictionary |
 | `BDX4` | 4.3 | `DictIndex` over keys spelled in a character code | none: `BDX3` plus the code; a build that takes no code writes `BDX3`, which 4.3 reads |
 | `BDX5` | 5.0 (read; written only by the opt-in labelled build) | `DictIndex` whose dictionary names trie labels | none: `BDX3` plus a nested `BDX3` of labels; a build that keeps no nested labels writes `BDX3` |
-| `BHD2` | 5.0 | `HashedDictIndex` | `BHD1` (4.1–4.x) **refused by name**, naming `lexindex dump \| lexindex build`; the dictionary inside it is a `BDX3` or `BDX4` blob, read by `DictIndex`'s loader |
+| `BHD2` | 5.0 | `HashedDictIndex` | `BHD1` (4.1–4.x) **refused by name**, naming `lexindex dump \| lexindex build`; the dictionary inside it is a `BDX3`, `BDX4` or `BDX5` blob, read by `DictIndex`'s loader |
 | `BDA1` | 4.5 | `DoubleArrayIndex` | none: the first |
 | `OVL2` | 1.0 | `Overlay` | `OVL1` **read**; saving again writes `OVL2` |
 | `MPH3` | 4.0 | the minimal perfect hash, inside `BMP9`, `BCH9`, `BCL3` and `BHD2` | `MPH2` (1.1–3.0) **read**, inside those containers and standalone, under its own seed geometry; `MPH1` (1.0) **read** as a standalone blob |
