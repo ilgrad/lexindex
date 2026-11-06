@@ -8,7 +8,8 @@ something that crosses the line.
 
 | Version | Supported |
 |---|---|
-| 4.5.x | yes |
+| 5.0.x | yes |
+| 4.5.x | no, and not drop-in: 5.0's key hash carries 128 bits of state, so it refuses `BMP8`, `BCH8`, `BCL2` and `BHD1` by name, and an `OVL2` over one. What 4.5 lacks: two keys of up to 16 bytes that share both of its hashes are found in about 3.7·10⁹ steps, and from 97 bytes a crafted block erases the next eight bytes from both, so `CompactHashIndex` and `ClosedHashIndex` give such keys one id. A `PerfectHashIndex` or `HashedDictIndex` converts through 4.x's `lexindex dump`; the two that store no keys are rebuilt from their corpus. [`docs/migration-5.md`](docs/migration-5.md) is the worked path |
 | 4.4.x | no — 4.5 reads every blob 4.4 wrote and adds `DoubleArrayIndex`, whose `BDA1` 4.4 refuses. Two fixes a 4.4 reader lacks: a crafted `DictIndex` blob could make a routed lookup panic (4.4.0 to 4.5.1, fixed in 4.5.2), and on a 32-bit target a crafted hash-index blob could make a load panic rather than fail (fixed in 4.5.1) |
 | 4.3.x | no — 4.4 is a drop-in upgrade: it adds `DictIndex::route_microblocks` and changes no blob, byte for byte |
 | 4.2.x | no — 4.3 reads every blob 4.2 wrote; where a character code pays it writes `BDX4`, which 4.2 refuses, so upgrade the readers before the writers |

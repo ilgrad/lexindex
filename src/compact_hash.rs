@@ -912,6 +912,10 @@ impl CompactHashIndex {
 
     /// [`build_bits`](Self::build_bits) with the width in whole bytes: 1, 2 or 4, for
     /// `8 × fingerprint_bytes` bits.
+    #[deprecated(
+        since = "5.0.0",
+        note = "use `build_bits`, at eight times the width: `build_bits(items, 8)` for `build(items, 1)`"
+    )]
     pub fn build<I, S>(items: I, fingerprint_bytes: usize) -> Result<Self, IndexError>
     where
         I: IntoIterator<Item = S>,
@@ -1048,6 +1052,10 @@ impl CompactHashIndex {
 
     /// [`build_bits_to_file`](Self::build_bits_to_file) with the width in whole bytes: 1, 2 or 4,
     /// for `8 × fingerprint_bytes` bits.
+    #[deprecated(
+        since = "5.0.0",
+        note = "use `build_bits_to_file`, at eight times the width"
+    )]
     pub fn build_to_file<I, S>(
         items: I,
         path: impl AsRef<std::path::Path>,
@@ -2589,6 +2597,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(deprecated, reason = "these two forms answer until 6.0 removes them")]
     fn the_byte_sized_forms_are_the_bit_sized_ones_at_eight_times_the_width() {
         let keys = ["alpha", "beta", "gamma", "beta"];
         let path = tmp("bytes.bch");
