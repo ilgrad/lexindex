@@ -159,6 +159,11 @@ def main() -> None:
                     out = fn(s, ps)
                     dt = (time.perf_counter() - t) / n * 1e9
                     assert len(out) == n
+                    # Freed here, after the clock: rebinding `out` inside the next window would
+                    # charge that form with freeing this one's n fresh ints. `dict` returns the
+                    # ints its table holds, every lexindex and marisa form makes new ones, so
+                    # `dict` paid for the forms it is the reference of.
+                    del out
                     per_round.setdefault((label, name), []).append(dt)
     finally:
         if was_enabled:
