@@ -34,10 +34,11 @@ whether your machine is comparable to the one in the tables at all.
 ## How old each section is
 
 Read off this page by `bench/tables.py`, which CI runs, so a section cannot move without this table
-moving: the artifacts each section cites, and the oldest and newest of them with the newest release
-dated by that day, or main past the last one. A size needs no quiet machine and a time does, so a
-section's newest artifact can be younger than its timed columns; each table says which version it
-timed. 4.5.3 changed wheels and no lookup, so 4.5.2's numbers stand for it.
+moving: the artifacts each section cites, and the oldest and newest of them with the release dated
+that day, or main past the newest release before it. A size needs no quiet machine and a time does,
+so a section's newest artifact can be younger than its timed columns; each table says which version
+it timed. Main after 4.5.3 on 2026-11-05 is 5.0.0 before its version moved: nothing those artifacts
+time changed after them.
 
 <!-- table: freshness docs/benchmarks.md -->
 | section | artifacts cited | oldest | newest |
@@ -45,10 +46,10 @@ timed. 4.5.3 changed wheels and no lookup, so 4.5.2's numbers stand for it.
 | Every competitor, and the version measured | 1 | 2026-10-31 (main after 4.5.3) | 2026-10-31 (main after 4.5.3) |
 | Serialised size on real English words | 2 | 2026-11-05 (main after 4.5.3) | 2026-11-05 (main after 4.5.3) |
 | Against other Rust string indexes | 2 | 2026-10-31 (main after 4.5.3) | 2026-11-05 (main after 4.5.3) |
-| Which one to pick, and how much the corpus decides it | 1 | 2026-09-19 (3.0.0) | 2026-09-19 (3.0.0) |
+| Which one to pick, and how much the corpus decides it | 1 | 2026-09-19 (main after 3.0.0) | 2026-09-19 (main after 3.0.0) |
 | Where lexindex loses | 0 | — | — |
 | The corpus set | 0 | — | — |
-| Every structure over the whole set | 11 | 2026-09-20 (3.0.0) | 2026-11-05 (main after 4.5.3) |
+| Every structure over the whole set | 11 | 2026-09-20 (main after 3.0.0) | 2026-11-05 (main after 4.5.3) |
 | Lookup speed from Python, against `dict` and `marisa-trie` | 1 | 2026-11-05 (main after 4.5.3) | 2026-11-05 (main after 4.5.3) |
 | Point-lookup latency vs the standard library | 2 | 2026-11-05 (main after 4.5.3) | 2026-11-05 (main after 4.5.3) |
 | The perfect hash against PtrHash and PHast | 23 | 2026-09-10 (2.0.0) | 2026-11-05 (main after 4.5.3) |
@@ -57,11 +58,11 @@ timed. 4.5.3 changed wheels and no lookup, so 4.5.2's numbers stand for it.
 | `DictIndex`: the ordered dictionary against `StringIndex` | 4 | 2026-09-11 (2.1.0) | 2026-11-05 (main after 4.5.3) |
 | Prefix queries against the tries | 1 | 2026-11-05 (main after 4.5.3) | 2026-11-05 (main after 4.5.3) |
 | Common-prefix queries — the other direction | 10 | 2026-09-24 (4.4.2) | 2026-11-05 (main after 4.5.3) |
-| Hash quality | 4 | 2026-09-12 (2.1.0) | 2026-11-04 (main after 4.5.3) |
-| Error bars, and where a lookup number comes from | 4 | 2026-09-19 (3.0.0) | 2026-11-05 (main after 4.5.3) |
+| Hash quality | 4 | 2026-09-12 (main after 2.1.0) | 2026-11-04 (main after 4.5.3) |
+| Error bars, and where a lookup number comes from | 4 | 2026-09-19 (main after 3.0.0) | 2026-11-05 (main after 4.5.3) |
 | The research frontier, cited | 0 | — | — |
 | The research frontier, measured | 9 | 2026-09-22 (4.1.0) | 2026-11-05 (main after 4.5.3) |
-| Scaling to millions of keys | 2 | 2026-09-19 (3.0.0) | 2026-11-05 (main after 4.5.3) |
+| Scaling to millions of keys | 2 | 2026-09-19 (main after 3.0.0) | 2026-11-05 (main after 4.5.3) |
 <!-- /table -->
 
 ## Every competitor, and the version measured

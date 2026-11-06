@@ -211,10 +211,17 @@ def render_floor(artifact: dict, opts: dict[str, str]) -> str:
 
 
 def _as_of(day: str, releases: list[tuple[str, str]]) -> str:
-    """The release out on `day`, or main past the last one; `releases` is newest first."""
-    if day > releases[0][1]:
-        return f"main after {releases[0][0]}"
-    return next((version for version, date in releases if date <= day), "before the changelog")
+    """The release dated `day`, or main past the newest one before it; `releases` is newest first.
+
+    A day between two releases measured code past the older one, and naming that release would
+    credit it with work it does not hold.
+    """
+    for version, date in releases:
+        if date == day:
+            return version
+        if date < day:
+            return f"main after {version}"
+    return "before the changelog"
 
 
 def render_freshness(page: str) -> str:
