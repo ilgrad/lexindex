@@ -1199,8 +1199,8 @@ fn round<'a>(
                 let start = w.tokens[a].0;
                 let (mut bytes, mut cost) = (0usize, 0u64);
                 let mut hash = Span::NEW;
-                for b in a..w.tokens.len().min(a + WINDOW) {
-                    let (_, len, kind, _) = w.tokens[b];
+                let end = w.tokens.len().min(a + WINDOW);
+                for (b, &(_, len, kind, pick)) in (a..end).zip(&w.tokens[a..end]) {
                     if bytes + len > MAX {
                         break;
                     }
@@ -1214,7 +1214,7 @@ fn round<'a>(
                         if kind != PHRASE {
                             continue;
                         }
-                        let id = w.tokens[b].3 as usize;
+                        let id = pick as usize;
                         if solo[id] == 0 {
                             solo[id] = parse(span, &enc, trie, None, &mut alone) / 8;
                         }

@@ -603,8 +603,7 @@ fn sweep(text: &Text) -> Option<Sweep> {
     use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
     let placed: Vec<AtomicU32> = (0..n).map(|_| AtomicU32::new(NONE)).collect();
     let find = |from: usize, to: usize| {
-        for u in from..to {
-            let f = trie.fail[u];
+        for (u, &f) in (from..to).zip(&trie.fail[from..to]) {
             if is_term(f) {
                 let k = key_at[rank(f) as usize] as usize;
                 // A thread reads its nodes in order, so past its first, this load turns it away.
