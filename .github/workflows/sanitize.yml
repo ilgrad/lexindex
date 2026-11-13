@@ -129,11 +129,16 @@ jobs:
       # The double array's golden-blob test runs here too: its loader turns the header's u64 and u32
       # fields into `usize` offsets, bounding each before the sums, and this is the one run of that
       # on a 32-bit `usize`. Without `mmap`, as above; 321 s measured.
+      # One process a module: a 32-bit target gives a whole test process 4 GiB of addresses, and
+      # Miri never hands a stack allocation's address out again, so a long run uses them up. The
+      # run of 2026-11-09 did, in `arena::` after 1 h 45 of the job, with all three in one process.
       - name: cargo miri test on a 32-bit target (the parsers)
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
-          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena:: overlay:: \
+          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- arena::
+          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- overlay::
+          cargo +nightly miri test --target i686-unknown-linux-gnu --lib -- \
             dict_index::tests::a_load_without_the_walk_bounds_what_the_arrays_say \
             dict_index::tests::corrupted_block_data_never_panics
           cargo +nightly miri test --target i686-unknown-linux-gnu --no-default-features \

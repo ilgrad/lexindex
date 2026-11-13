@@ -2135,8 +2135,11 @@ mod tests {
             blob.extend_from_slice(key);
             StringArena::from_bytes(&blob).unwrap()
         };
+        // Under Miri, every branch of `all_ascii` up to two 16-byte chunks and a tail: all 71
+        // lengths took the 32-bit run past its 4 GiB of addresses.
+        let longest = if cfg!(miri) { 33 } else { 70 };
         for lead in 0..8 {
-            for len in 0..=70 {
+            for len in 0..=longest {
                 let plain = vec![b'a'; len];
                 let want = std::str::from_utf8(&plain).unwrap();
                 assert_eq!(second_key(lead, &plain).get(1), Some(want));
