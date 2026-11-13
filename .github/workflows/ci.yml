@@ -76,14 +76,8 @@ jobs:
       # tools do not both report the same advisory under different exit codes.
       - name: cargo deny (licences, bans, sources)
         run: cargo deny check licenses bans sources
-      # Rust 1.100.0 reads the same tests at 90.75 % of lines against 96.80 % on 1.99.1 (2026-11-13):
-      # it reports zero-count copies of generic functions, from a second compilation of the crate, and
-      # blank lines and closing braces inside them, as uncovered. Not traced to a cause yet; until it
-      # is, the floor is measured on 1.99.1.
       - name: coverage (llvm-cov, floor 95% lines; default = mph + mmap, plus the C ABI)
-        run: |
-          rustup toolchain install 1.99.1 --profile minimal --component llvm-tools-preview
-          cargo +1.99.1 llvm-cov --summary-only --fail-under-lines 95 --features capi
+        run: cargo llvm-cov --summary-only --fail-under-lines 95 --features capi
 
   # The release workflow ships wheels for Windows and macOS, so their platform-specific code paths
   # — `save`'s rename-over-existing and permission handling, mmap — deserve a test run, not just a
