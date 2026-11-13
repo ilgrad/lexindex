@@ -1,0 +1,12 @@
+[package]
+name = "growth"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lexindex = { path = "../.." }
+
+# Symbols for `perf report` on a phase the counts flag.
+[profile.release]
+debug = "line-tables-only"

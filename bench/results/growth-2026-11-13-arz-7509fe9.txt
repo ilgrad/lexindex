@@ -1,0 +1,911 @@
+# Instructions a key by n: bench/growth (sweep.sh, count.sh, analyse.py, gen.py), 2026-11-13, arz
+# (Ryzen 7 5800HS, Fedora 44, kernel 7.3.3, perf 7.3.3, rustc 1.99.1). instructions:u inside the one
+# operation (perf stat -D -1 --control), the process pinned to one CPU, so every build runs on one
+# thread. Counts, not times: taken on a loaded machine; a count does not depend on the load (v4.5.3
+# below repeats the 2026-10-28 counts of the same keys to within 0.01 %).
+# Lines: <build|load> <op> <keys>-<log2 n> 0 <instructions> <n>. FAILED: the double array refuses
+# past 2^23 slots.
+#
+## lexindex main 7509fe9 (5.0.0 + CI fixes; the library code is 5.0.0's but two loops), five corpora of bench/corpora.py
+build string words-full-16 0 171774268 65536
+build dict32 words-full-16 0 134501686 65536
+build dict256 words-full-16 0 136398953 65536
+build dict1024 words-full-16 0 132067187 65536
+build da words-full-16 0 302355157 65536
+build ph words-full-16 0 187112819 65536
+build phblocked words-full-16 0 79784644 65536
+build compact words-full-16 0 71716837 65536
+build compactfile words-full-16 0 73247662 65536
+build closed words-full-16 0 69103434 65536
+build hashed words-full-16 0 97808019 65536
+build overlay words-full-16 0 297328802 65536
+build plan words-full-16 0 1327437463 65536
+load load-string words-full-16 0 2198 65536
+load load-dict32 words-full-16 0 228695 65536
+load load-dict256 words-full-16 0 43284 65536
+load load-dict1024 words-full-16 0 22695 65536
+load load-da words-full-16 0 1194148 65536
+load load-ph words-full-16 0 198038 65536
+load load-phblocked words-full-16 0 198464 65536
+load load-compact words-full-16 0 198137 65536
+load load-closed words-full-16 0 209982 65536
+load load-hashed words-full-16 0 239745 65536
+build string words-full-17 0 304156633 131072
+build dict32 words-full-17 0 248903372 131072
+build dict256 words-full-17 0 249953871 131072
+build dict1024 words-full-17 0 241298378 131072
+build da words-full-17 0 559664830 131072
+build ph words-full-17 0 354741933 131072
+build phblocked words-full-17 0 148282944 131072
+build compact words-full-17 0 133067102 131072
+build compactfile words-full-17 0 136101938 131072
+build closed words-full-17 0 127841376 131072
+build hashed words-full-17 0 186135744 131072
+build overlay words-full-17 0 583194841 131072
+build plan words-full-17 0 2954897211 131072
+load load-string words-full-17 0 1870 131072
+load load-dict32 words-full-17 0 456172 131072
+load load-dict256 words-full-17 0 81681 131072
+load load-dict1024 words-full-17 0 40540 131072
+load load-da words-full-17 0 2107253 131072
+load load-ph words-full-17 0 308784 131072
+load load-phblocked words-full-17 0 308884 131072
+load load-compact words-full-17 0 308226 131072
+load load-closed words-full-17 0 330883 131072
+load load-hashed words-full-17 0 388926 131072
+build string words-full-18 0 534025378 262144
+build dict32 words-full-18 0 445725338 262144
+build dict256 words-full-18 0 444631394 262144
+build dict1024 words-full-18 0 425704393 262144
+build da words-full-18 0 1026973863 262144
+build ph words-full-18 0 681481983 262144
+build phblocked words-full-18 0 286394729 262144
+build compact words-full-18 0 258372721 262144
+build compactfile words-full-18 0 264412793 262144
+build closed words-full-18 0 247920915 262144
+build hashed words-full-18 0 360747766 262144
+build overlay words-full-18 0 1152488800 262144
+build plan words-full-18 0 2919411058 262144
+load load-string words-full-18 0 2198 262144
+load load-dict32 words-full-18 0 904566 262144
+load load-dict256 words-full-18 0 158791 262144
+load load-dict1024 words-full-18 0 78470 262144
+load load-da words-full-18 0 3625980 262144
+load load-ph words-full-18 0 619691 262144
+load load-phblocked words-full-18 0 619787 262144
+load load-compact words-full-18 0 619447 262144
+load load-closed words-full-18 0 665154 262144
+load load-hashed words-full-18 0 777262 262144
+build string titles-zh-full-16 0 454732730 65536
+build dict32 titles-zh-full-16 0 287868578 65536
+build dict256 titles-zh-full-16 0 288782462 65536
+build dict1024 titles-zh-full-16 0 281554744 65536
+build da titles-zh-full-16 0 464590193 65536
+build ph titles-zh-full-16 0 248834136 65536
+build phblocked titles-zh-full-16 0 79599887 65536
+build compact titles-zh-full-16 0 71193045 65536
+build compactfile titles-zh-full-16 0 72605219 65536
+build closed titles-zh-full-16 0 68580318 65536
+build hashed titles-zh-full-16 0 133201483 65536
+build overlay titles-zh-full-16 0 368721883 65536
+build plan titles-zh-full-16 0 2456593332 65536
+load load-string titles-zh-full-16 0 1869 65536
+load load-dict32 titles-zh-full-16 0 2521037 65536
+load load-dict256 titles-zh-full-16 0 1121977 65536
+load load-dict1024 titles-zh-full-16 0 971677 65536
+load load-da titles-zh-full-16 0 1396298 65536
+load load-ph titles-zh-full-16 0 190719 65536
+load load-phblocked titles-zh-full-16 0 190636 65536
+load load-compact titles-zh-full-16 0 190291 65536
+load load-closed titles-zh-full-16 0 201777 65536
+load load-hashed titles-zh-full-16 0 1312419 65536
+build string titles-zh-full-17 0 854708268 131072
+build dict32 titles-zh-full-17 0 1220092198 131072
+build dict256 titles-zh-full-17 0 1247779934 131072
+build dict1024 titles-zh-full-17 0 1239919170 131072
+build da titles-zh-full-17 0 867948748 131072
+build ph titles-zh-full-17 0 478657695 131072
+build phblocked titles-zh-full-17 0 148185859 131072
+build compact titles-zh-full-17 0 132284964 131072
+build compactfile titles-zh-full-17 0 135084813 131072
+build closed titles-zh-full-17 0 127058761 131072
+build hashed titles-zh-full-17 0 261214413 131072
+build overlay titles-zh-full-17 0 726258279 131072
+build plan titles-zh-full-17 0 5102704921 131072
+load load-string titles-zh-full-17 0 1869 131072
+load load-dict32 titles-zh-full-17 0 4320014 131072
+load load-dict256 titles-zh-full-17 0 1527960 131072
+load load-dict1024 titles-zh-full-17 0 1229223 131072
+load load-da titles-zh-full-17 0 2590293 131072
+load load-ph titles-zh-full-17 0 318562 131072
+load load-phblocked titles-zh-full-17 0 318476 131072
+load load-compact titles-zh-full-17 0 318465 131072
+load load-closed titles-zh-full-17 0 340833 131072
+load load-hashed titles-zh-full-17 0 1847281 131072
+build string titles-zh-full-18 0 1604962800 262144
+build dict32 titles-zh-full-18 0 2307901233 262144
+build dict256 titles-zh-full-18 0 2348798403 262144
+build dict1024 titles-zh-full-18 0 2325731486 262144
+build da titles-zh-full-18 0 1571423177 262144
+build ph titles-zh-full-18 0 898452262 262144
+build phblocked titles-zh-full-18 0 292398670 262144
+build compact titles-zh-full-18 0 263044643 262144
+build compactfile titles-zh-full-18 0 268621167 262144
+build closed titles-zh-full-18 0 252592875 262144
+build hashed titles-zh-full-18 0 512590987 262144
+build overlay titles-zh-full-18 0 1407022140 262144
+build plan titles-zh-full-18 0 7458943650 262144
+load load-string titles-zh-full-18 0 1868 262144
+load load-dict32 titles-zh-full-18 0 7757195 262144
+load load-dict256 titles-zh-full-18 0 2154789 262144
+load load-dict1024 titles-zh-full-18 0 1557961 262144
+load load-da titles-zh-full-18 0 4831595 262144
+load load-ph titles-zh-full-18 0 653234 262144
+load load-phblocked titles-zh-full-18 0 653149 262144
+load load-compact titles-zh-full-18 0 652465 262144
+load load-closed titles-zh-full-18 0 698181 262144
+load load-hashed titles-zh-full-18 0 2808665 262144
+build string titles-zh-full-19 0 2996952971 524288
+build dict32 titles-zh-full-19 0 4382678373 524288
+build dict256 titles-zh-full-19 0 4464042541 524288
+build dict1024 titles-zh-full-19 0 4412295434 524288
+build da titles-zh-full-19 0 2948018647 524288
+build ph titles-zh-full-19 0 1834927685 524288
+build phblocked titles-zh-full-19 0 574991835 524288
+build compact titles-zh-full-19 0 520852175 524288
+build compactfile titles-zh-full-19 0 531962440 524288
+build closed titles-zh-full-19 0 499949254 524288
+build hashed titles-zh-full-19 0 1006392332 524288
+build overlay titles-zh-full-19 0 2878588867 524288
+build plan titles-zh-full-19 0 7517217810 524288
+load load-string titles-zh-full-19 0 1868 524288
+load load-dict32 titles-zh-full-19 0 14522327 524288
+load load-dict256 titles-zh-full-19 0 3281940 524288
+load load-dict1024 titles-zh-full-19 0 2082534 524288
+load load-da titles-zh-full-19 0 9014900 524288
+load load-ph titles-zh-full-19 0 1340201 524288
+load load-phblocked titles-zh-full-19 0 1340115 524288
+load load-compact titles-zh-full-19 0 1339774 524288
+load load-closed titles-zh-full-19 0 1431089 524288
+load load-hashed titles-zh-full-19 0 4623236 524288
+build string titles-zh-full-20 0 5561577380 1048576
+build dict32 titles-zh-full-20 0 8432006785 1048576
+build dict256 titles-zh-full-20 0 8562207000 1048576
+build dict1024 titles-zh-full-20 0 8473977090 1048576
+build da titles-zh-full-20 0 5808570212 1048576
+build ph titles-zh-full-20 0 3600147807 1048576
+build phblocked titles-zh-full-20 0 1142854480 1048576
+build compact titles-zh-full-20 0 1041956198 1048576
+build compactfile titles-zh-full-20 0 1064167378 1048576
+build closed titles-zh-full-20 0 1000151367 1048576
+build hashed titles-zh-full-20 0 1992900011 1048576
+build overlay titles-zh-full-20 0 5746472859 1048576
+build plan titles-zh-full-20 0 7472126163 1048576
+load load-string titles-zh-full-20 0 1868 1048576
+load load-dict32 titles-zh-full-20 0 28003183 1048576
+load load-dict256 titles-zh-full-20 0 5312822 1048576
+load load-dict1024 titles-zh-full-20 0 2905628 1048576
+load load-da titles-zh-full-20 0 16734231 1048576
+load load-ph titles-zh-full-20 0 2353724 1048576
+load load-phblocked titles-zh-full-20 0 2353641 1048576
+load load-compact titles-zh-full-20 0 2353287 1048576
+load load-closed titles-zh-full-20 0 2534194 1048576
+load load-hashed titles-zh-full-20 0 7666555 1048576
+build string titles-zh-full-21 0 10205449779 2097152
+build dict32 titles-zh-full-21 0 15351204544 2097152
+build dict256 titles-zh-full-21 0 15580583387 2097152
+build dict1024 titles-zh-full-21 0 15315144467 2097152
+build da titles-zh-full-21 0 12310578589 2097152
+build ph titles-zh-full-21 0 7117469305 2097152
+build phblocked titles-zh-full-21 0 3680502325 2097152
+build compact titles-zh-full-21 0 2102576488 2097152
+build compactfile titles-zh-full-21 0 2169758396 2097152
+build closed titles-zh-full-21 0 2018966379 2097152
+build hashed titles-zh-full-21 0 3926164762 2097152
+build overlay titles-zh-full-21 0 11526441138 2097152
+build plan titles-zh-full-21 0 7909522111 2097152
+load load-string titles-zh-full-21 0 1869 2097152
+load load-dict32 titles-zh-full-21 0 54240225 2097152
+load load-dict256 titles-zh-full-21 0 9285918 2097152
+load load-dict1024 titles-zh-full-21 0 4465854 2097152
+load load-da titles-zh-full-21 0 30770742 2097152
+load load-ph titles-zh-full-21 0 4649827 2097152
+load load-phblocked titles-zh-full-21 0 4649746 2097152
+load load-compact titles-zh-full-21 0 4649391 2097152
+load load-closed titles-zh-full-21 0 5010925 2097152
+load load-hashed titles-zh-full-21 0 13936265 2097152
+build string paths-full-16 0 1197642228 65536
+build dict32 paths-full-16 0 1496823128 65536
+build dict256 paths-full-16 0 1555495661 65536
+build dict1024 paths-full-16 0 1522562893 65536
+build da paths-full-16 0 1998571047 65536
+build ph paths-full-16 0 350016346 65536
+build phblocked paths-full-16 0 94451691 65536
+build compact paths-full-16 0 75366389 65536
+build compactfile paths-full-16 0 76284177 65536
+build closed paths-full-16 0 72753021 65536
+build hashed paths-full-16 0 185734054 65536
+build overlay paths-full-16 0 470002714 65536
+build plan paths-full-16 0 9999148788 65536
+load load-string paths-full-16 0 1868 65536
+load load-dict32 paths-full-16 0 879127 65536
+load load-dict256 paths-full-16 0 158158 65536
+load load-dict1024 paths-full-16 0 88885 65536
+load load-da paths-full-16 0 7870293 65536
+load load-ph paths-full-16 0 186628 65536
+load load-phblocked paths-full-16 0 186665 65536
+load load-compact paths-full-16 0 186324 65536
+load load-closed paths-full-16 0 197797 65536
+load load-hashed paths-full-16 0 344979 65536
+build string paths-full-17 0 2137366150 131072
+build dict32 paths-full-17 0 2624356947 131072
+build dict256 paths-full-17 0 2694498480 131072
+build dict1024 paths-full-17 0 2638624757 131072
+build da paths-full-17 0 3674242953 131072
+build ph paths-full-17 0 646325208 131072
+build phblocked paths-full-17 0 179551047 131072
+build compact paths-full-17 0 142387820 131072
+build compactfile paths-full-17 0 144203712 131072
+build closed paths-full-17 0 137161634 131072
+build hashed paths-full-17 0 353004257 131072
+build overlay paths-full-17 0 894828400 131072
+build plan paths-full-17 0 17775720777 131072
+load load-string paths-full-17 0 1868 131072
+load load-dict32 paths-full-17 0 1822212 131072
+load load-dict256 paths-full-17 0 312391 131072
+load load-dict1024 paths-full-17 0 179507 131072
+load load-da paths-full-17 0 13823471 131072
+load load-ph paths-full-17 0 323196 131072
+load load-phblocked paths-full-17 0 323563 131072
+load load-compact paths-full-17 0 322879 131072
+load load-closed paths-full-17 0 345750 131072
+load load-hashed paths-full-17 0 636541 131072
+build string paths-full-18 0 3835406862 262144
+build dict32 paths-full-18 0 4554035218 262144
+build dict256 paths-full-18 0 4717799392 262144
+build dict1024 paths-full-18 0 4610976160 262144
+build da paths-full-18 0 6641529550 262144
+build ph paths-full-18 0 1209242383 262144
+build phblocked paths-full-18 0 352662220 262144
+build compact paths-full-18 0 280694314 262144
+build compactfile paths-full-18 0 284301224 262144
+build closed paths-full-18 0 270242597 262144
+build hashed paths-full-18 0 680731890 262144
+build overlay paths-full-18 0 1724836140 262144
+build plan paths-full-18 0 16220734788 262144
+load load-string paths-full-18 0 1868 262144
+load load-dict32 paths-full-18 0 3581090 262144
+load load-dict256 paths-full-18 0 579994 262144
+load load-dict1024 paths-full-18 0 290373 262144
+load load-da paths-full-18 0 24332928 262144
+load load-ph paths-full-18 0 652390 262144
+load load-phblocked paths-full-18 0 652304 262144
+load load-compact paths-full-18 0 651964 262144
+load load-closed paths-full-18 0 697663 262144
+load load-hashed paths-full-18 0 1233715 262144
+build string paths-full-19 0 6920639432 524288
+build dict32 paths-full-19 0 8095763157 524288
+build dict256 paths-full-19 0 8409257184 524288
+build dict1024 paths-full-19 0 8197192783 524288
+build da paths-full-19 0 FAILED 524288
+build ph paths-full-19 0 2480022415 524288
+build phblocked paths-full-19 0 1057732239 524288
+build compact paths-full-19 0 563550172 524288
+build compactfile paths-full-19 0 570710129 524288
+build closed paths-full-19 0 542648162 524288
+build hashed paths-full-19 0 1328050188 524288
+build overlay paths-full-19 0 3551435147 524288
+build plan paths-full-19 0 16903354852 524288
+load load-string paths-full-19 0 2198 524288
+load load-dict32 paths-full-19 0 7114796 524288
+load load-dict256 paths-full-19 0 1150092 524288
+load load-dict1024 paths-full-19 0 515171 524288
+load load-da paths-full-19 0 FAILED 524288
+load load-ph paths-full-19 0 1348627 524288
+load load-phblocked paths-full-19 0 1348540 524288
+load load-compact paths-full-19 0 1348200 524288
+load load-closed paths-full-19 0 1439565 524288
+load load-hashed paths-full-19 0 2500422 524288
+build string paths-full-20 0 12570953040 1048576
+build dict32 paths-full-20 0 14739194639 1048576
+build dict256 paths-full-20 0 15263994581 1048576
+build dict1024 paths-full-20 0 14896008389 1048576
+build da paths-full-20 0 FAILED 1048576
+build ph paths-full-20 0 4567614048 1048576
+build phblocked paths-full-20 0 2104255416 1048576
+build compact paths-full-20 0 1123596897 1048576
+build compactfile paths-full-20 0 1137865165 1048576
+build closed paths-full-20 0 1081791127 1048576
+build hashed paths-full-20 0 2593960117 1048576
+build overlay paths-full-20 0 6767696252 1048576
+build plan paths-full-20 0 16264054992 1048576
+load load-string paths-full-20 0 2198 1048576
+load load-dict32 paths-full-20 0 14144472 1048576
+load load-dict256 paths-full-20 0 2293048 1048576
+load load-dict1024 paths-full-20 0 980994 1048576
+load load-da paths-full-20 0 FAILED 1048576
+load load-ph paths-full-20 0 2346605 1048576
+load load-phblocked paths-full-20 0 2346523 1048576
+load load-compact paths-full-20 0 2346179 1048576
+load load-closed paths-full-20 0 2527016 1048576
+load load-hashed paths-full-20 0 4640797 1048576
+build string paths-full-21 0 22916599489 2097152
+build dict32 paths-full-21 0 26513010678 2097152
+build dict256 paths-full-21 0 27407820211 2097152
+build dict1024 paths-full-21 0 26669976379 2097152
+build da paths-full-21 0 FAILED 2097152
+build ph paths-full-21 0 8999516678 2097152
+build phblocked paths-full-21 0 4210533335 2097152
+build compact paths-full-21 0 2263906829 2097152
+build compactfile paths-full-21 0 2314749559 2097152
+build closed paths-full-21 0 2180298036 2097152
+build hashed paths-full-21 0 5111358414 2097152
+build overlay paths-full-21 0 13561360541 2097152
+build plan paths-full-21 0 17135525673 2097152
+load load-string paths-full-21 0 1868 2097152
+load load-dict32 paths-full-21 0 28847433 2097152
+load load-dict256 paths-full-21 0 4541276 2097152
+load load-dict1024 paths-full-21 0 1965817 2097152
+load load-da paths-full-21 0 FAILED 2097152
+load load-ph paths-full-21 0 4569499 2097152
+load load-phblocked paths-full-21 0 4569414 2097152
+load load-compact paths-full-21 0 4569073 2097152
+load load-closed paths-full-21 0 4930281 2097152
+load load-hashed paths-full-21 0 9112597 2097152
+build string paths-full-22 0 41831585395 4194304
+build dict32 paths-full-22 0 48200406994 4194304
+build dict256 paths-full-22 0 49710790238 4194304
+build dict1024 paths-full-22 0 48475774319 4194304
+build ph paths-full-22 0 16962046598 4194304
+build phblocked paths-full-22 0 8450750773 4194304
+build compact paths-full-22 0 4588092660 4194304
+build compactfile paths-full-22 0 4691358619 4194304
+build closed paths-full-22 0 4420876990 4194304
+build hashed paths-full-22 0 10182519443 4194304
+build overlay paths-full-22 0 26395518664 4194304
+build plan paths-full-22 0 19064789838 4194304
+load load-string paths-full-22 0 1869 4194304
+load load-dict32 paths-full-22 0 58285033 4194304
+load load-dict256 paths-full-22 0 8735895 4194304
+load load-dict1024 paths-full-22 0 3607025 4194304
+load load-ph paths-full-22 0 9080595 4194304
+load load-phblocked paths-full-22 0 9080510 4194304
+load load-compact paths-full-22 0 9080154 4194304
+load load-closed paths-full-22 0 9801892 4194304
+load load-hashed paths-full-22 0 17818109 4194304
+build string dna-10000000-16 0 588872104 65536
+build dict32 dna-10000000-16 0 194102421 65536
+build dict256 dna-10000000-16 0 196573576 65536
+build dict1024 dna-10000000-16 0 191423895 65536
+build da dna-10000000-16 0 863712861 65536
+build ph dna-10000000-16 0 296435785 65536
+build phblocked dna-10000000-16 0 78798044 65536
+build compact dna-10000000-16 0 70753489 65536
+build compactfile dna-10000000-16 0 72023877 65536
+build closed dna-10000000-16 0 68140200 65536
+build hashed dna-10000000-16 0 115308173 65536
+build overlay dna-10000000-16 0 406606434 65536
+build plan dna-10000000-16 0 2671744747 65536
+load load-string dna-10000000-16 0 1869 65536
+load load-dict32 dna-10000000-16 0 177696 65536
+load load-dict256 dna-10000000-16 0 27023 65536
+load load-dict1024 dna-10000000-16 0 10814 65536
+load load-da dna-10000000-16 0 4641760 65536
+load load-ph dna-10000000-16 0 171586 65536
+load load-phblocked dna-10000000-16 0 171698 65536
+load load-compact dna-10000000-16 0 171344 65536
+load load-closed dna-10000000-16 0 182759 65536
+load load-hashed dna-10000000-16 0 197487 65536
+build string dna-10000000-17 0 1135384922 131072
+build dict32 dna-10000000-17 0 380806702 131072
+build dict256 dna-10000000-17 0 385357433 131072
+build dict1024 dna-10000000-17 0 375609982 131072
+build da dna-10000000-17 0 1690263957 131072
+build ph dna-10000000-17 0 570349096 131072
+build phblocked dna-10000000-17 0 147815426 131072
+build compact dna-10000000-17 0 132661156 131072
+build compactfile dna-10000000-17 0 135179601 131072
+build closed dna-10000000-17 0 127434961 131072
+build hashed dna-10000000-17 0 222726498 131072
+build overlay dna-10000000-17 0 798837622 131072
+build plan dna-10000000-17 0 5600171778 131072
+load load-string dna-10000000-17 0 1869 131072
+load load-dict32 dna-10000000-17 0 351666 131072
+load load-dict256 dna-10000000-17 0 50315 131072
+load load-dict1024 dna-10000000-17 0 17837 131072
+load load-da dna-10000000-17 0 9000321 131072
+load load-ph dna-10000000-17 0 303892 131072
+load load-phblocked dna-10000000-17 0 304006 131072
+load load-compact dna-10000000-17 0 303651 131072
+load load-closed dna-10000000-17 0 326287 131072
+load load-hashed dna-10000000-17 0 353116 131072
+build string dna-10000000-18 0 2194132357 262144
+build dict32 dna-10000000-18 0 742841789 262144
+build dict256 dna-10000000-18 0 751458521 262144
+build dict1024 dna-10000000-18 0 731288357 262144
+build da dna-10000000-18 0 3288356377 262144
+build ph dna-10000000-18 0 1134585122 262144
+build phblocked dna-10000000-18 0 291500970 262144
+build compact dna-10000000-18 0 263657767 262144
+build compactfile dna-10000000-18 0 268669209 262144
+build closed dna-10000000-18 0 253206070 262144
+build hashed dna-10000000-18 0 439905374 262144
+build overlay dna-10000000-18 0 1605549735 262144
+build plan dna-10000000-18 0 5596354925 262144
+load load-string dna-10000000-18 0 1868 262144
+load load-dict32 dna-10000000-18 0 699345 262144
+load load-dict256 dna-10000000-18 0 96669 262144
+load load-dict1024 dna-10000000-18 0 32061 262144
+load load-da dna-10000000-18 0 17445321 262144
+load load-ph dna-10000000-18 0 662457 262144
+load load-phblocked dna-10000000-18 0 662571 262144
+load load-compact dna-10000000-18 0 662218 262144
+load load-closed dna-10000000-18 0 708267 262144
+load load-hashed dna-10000000-18 0 758095 262144
+build string dna-10000000-19 0 4244591422 524288
+build dict32 dna-10000000-19 0 1457046999 524288
+build dict256 dna-10000000-19 0 1473407021 524288
+build dict1024 dna-10000000-19 0 1433679263 524288
+build da dna-10000000-19 0 FAILED 524288
+build ph dna-10000000-19 0 2351861184 524288
+build phblocked dna-10000000-19 0 573575131 524288
+build compact dna-10000000-19 0 522435824 524288
+build compactfile dna-10000000-19 0 532428330 524288
+build closed dna-10000000-19 0 501532979 524288
+build hashed dna-10000000-19 0 867686545 524288
+build overlay dna-10000000-19 0 3320497327 524288
+build plan dna-10000000-19 0 5654130646 524288
+load load-string dna-10000000-19 0 1869 524288
+load load-dict32 dna-10000000-19 0 1395909 524288
+load load-dict256 dna-10000000-19 0 190365 524288
+load load-dict1024 dna-10000000-19 0 61214 524288
+load load-da dna-10000000-19 0 FAILED 524288
+load load-ph dna-10000000-19 0 1380782 524288
+load load-phblocked dna-10000000-19 0 1380895 524288
+load load-compact dna-10000000-19 0 1380541 524288
+load load-closed dna-10000000-19 0 1472051 524288
+load load-hashed dna-10000000-19 0 1570486 524288
+build string dna-10000000-20 0 8209003583 1048576
+build dict32 dna-10000000-20 0 2855590201 1048576
+build dict256 dna-10000000-20 0 2886684648 1048576
+build dict1024 dna-10000000-20 0 2805837816 1048576
+build da dna-10000000-20 0 FAILED 1048576
+build ph dna-10000000-20 0 4602876617 1048576
+build phblocked dna-10000000-20 0 1136220091 1048576
+build compact dna-10000000-20 0 1041082162 1048576
+build compactfile dna-10000000-20 0 1061055935 1048576
+build closed dna-10000000-20 0 999277371 1048576
+build hashed dna-10000000-20 0 1718672793 1048576
+build overlay dna-10000000-20 0 6595203253 1048576
+build plan dna-10000000-20 0 5813597291 1048576
+load load-string dna-10000000-20 0 1869 1048576
+load load-dict32 dna-10000000-20 0 2790046 1048576
+load load-dict256 dna-10000000-20 0 379144 1048576
+load load-dict1024 dna-10000000-20 0 120766 1048576
+load load-da dna-10000000-20 0 FAILED 1048576
+load load-ph dna-10000000-20 0 2428004 1048576
+load load-phblocked dna-10000000-20 0 2428116 1048576
+load load-compact dna-10000000-20 0 2427762 1048576
+load load-closed dna-10000000-20 0 2609063 1048576
+load load-hashed dna-10000000-20 0 2805998 1048576
+build string dna-10000000-21 0 15862857124 2097152
+build dict32 dna-10000000-21 0 5588888178 2097152
+build dict256 dna-10000000-21 0 5647851750 2097152
+build dict1024 dna-10000000-21 0 5491163919 2097152
+build da dna-10000000-21 0 FAILED 2097152
+build ph dna-10000000-21 0 9015889287 2097152
+build phblocked dna-10000000-21 0 3662248856 2097152
+build compact dna-10000000-21 0 2098898085 2097152
+build compactfile dna-10000000-21 0 2161158436 2097152
+build closed dna-10000000-21 0 2015289360 2097152
+build hashed dna-10000000-21 0 3427636776 2097152
+build overlay dna-10000000-21 0 13119347607 2097152
+build plan dna-10000000-21 0 6140606702 2097152
+load load-string dna-10000000-21 0 1868 2097152
+load load-dict32 dna-10000000-21 0 5580473 2097152
+load load-dict256 dna-10000000-21 0 758863 2097152
+load load-dict1024 dna-10000000-21 0 242264 2097152
+load load-da dna-10000000-21 0 FAILED 2097152
+load load-ph dna-10000000-21 0 4672744 2097152
+load load-phblocked dna-10000000-21 0 4672855 2097152
+load load-compact dna-10000000-21 0 4672513 2097152
+load load-closed dna-10000000-21 0 5034149 2097152
+load load-hashed dna-10000000-21 0 5431347 2097152
+build string dna-10000000-22 0 30622457736 4194304
+build dict32 dna-10000000-22 0 10950791989 4194304
+build dict256 dna-10000000-22 0 11065454036 4194304
+build dict1024 dna-10000000-22 0 10737636556 4194304
+build ph dna-10000000-22 0 18018697921 4194304
+build phblocked dna-10000000-22 0 7349055426 4194304
+build compact dna-10000000-22 0 4252528188 4194304
+build compactfile dna-10000000-22 0 4378868430 4194304
+build closed dna-10000000-22 0 4085311402 4194304
+build hashed dna-10000000-22 0 6858738757 4194304
+build overlay dna-10000000-22 0 26457748241 4194304
+build plan dna-10000000-22 0 6902388946 4194304
+load load-string dna-10000000-22 0 1869 4194304
+load load-dict32 dna-10000000-22 0 11161636 4194304
+load load-dict256 dna-10000000-22 0 1518981 4194304
+load load-dict1024 dna-10000000-22 0 484774 4194304
+load load-ph dna-10000000-22 0 9028238 4194304
+load load-phblocked dna-10000000-22 0 9028677 4194304
+load load-compact dna-10000000-22 0 9028336 4194304
+load load-closed dna-10000000-22 0 9749804 4194304
+load load-hashed dna-10000000-22 0 10547128 4194304
+build string dna-10000000-23 0 59049155078 8388608
+build dict32 dna-10000000-23 0 21460483960 8388608
+build dict256 dna-10000000-23 0 21678393388 8388608
+build dict1024 dna-10000000-23 0 21035310307 8388608
+build ph dna-10000000-23 0 35703479219 8388608
+build phblocked dna-10000000-23 0 14748528539 8388608
+build compact dna-10000000-23 0 8614699164 8388608
+build compactfile dna-10000000-23 0 8864503325 8388608
+build closed dna-10000000-23 0 8280267906 8388608
+build hashed dna-10000000-23 0 13724656226 8388608
+build overlay dna-10000000-23 0 53004208240 8388608
+build plan dna-10000000-23 0 8563100964 8388608
+load load-string dna-10000000-23 0 1869 8388608
+load load-dict32 dna-10000000-23 0 22322335 8388608
+load load-dict256 dna-10000000-23 0 3036292 8388608
+load load-dict1024 dna-10000000-23 0 970207 8388608
+load load-ph dna-10000000-23 0 17888861 8388608
+load load-phblocked dna-10000000-23 0 17888973 8388608
+load load-compact dna-10000000-23 0 17888632 8388608
+load load-closed dna-10000000-23 0 19330043 8388608
+load load-hashed dna-10000000-23 0 20924057 8388608
+build string urls-full-16 0 642005827 65536
+build dict32 urls-full-16 0 858995602 65536
+build dict256 urls-full-16 0 879903863 65536
+build dict1024 urls-full-16 0 863547245 65536
+build da urls-full-16 0 1179848894 65536
+build ph urls-full-16 0 233355027 65536
+build phblocked urls-full-16 0 83430890 65536
+build compact urls-full-16 0 71738816 65536
+build compactfile urls-full-16 0 72802850 65536
+build closed urls-full-16 0 69125529 65536
+build hashed urls-full-16 0 131910561 65536
+build overlay urls-full-16 0 343399474 65536
+build plan urls-full-16 0 5725132947 65536
+load load-string urls-full-16 0 1868 65536
+load load-dict32 urls-full-16 0 209024 65536
+load load-dict256 urls-full-16 0 46604 65536
+load load-dict1024 urls-full-16 0 30113 65536
+load load-da urls-full-16 0 4312325 65536
+load load-ph urls-full-16 0 187616 65536
+load load-phblocked urls-full-16 0 187652 65536
+load load-compact urls-full-16 0 187299 65536
+load load-closed urls-full-16 0 198778 65536
+load load-hashed urls-full-16 0 233033 65536
+build string urls-full-17 0 1232035829 131072
+build dict32 urls-full-17 0 1636325574 131072
+build dict256 urls-full-17 0 1671780645 131072
+build dict1024 urls-full-17 0 1644621783 131072
+build da urls-full-17 0 2232823220 131072
+build ph urls-full-17 0 443642970 131072
+build phblocked urls-full-17 0 158153139 131072
+build compact urls-full-17 0 135735176 131072
+build compactfile urls-full-17 0 137838487 131072
+build closed urls-full-17 0 130508854 131072
+build hashed urls-full-17 0 255279496 131072
+build overlay urls-full-17 0 670662112 131072
+build plan urls-full-17 0 10399809693 131072
+load load-string urls-full-17 0 1869 131072
+load load-dict32 urls-full-17 0 427559 131072
+load load-dict256 urls-full-17 0 98793 131072
+load load-dict1024 urls-full-17 0 61698 131072
+load load-da urls-full-17 0 8302306 131072
+load load-ph urls-full-17 0 324921 131072
+load load-phblocked urls-full-17 0 324955 131072
+load load-compact urls-full-17 0 324614 131072
+load load-closed urls-full-17 0 347476 131072
+load load-hashed urls-full-17 0 422586 131072
+build string urls-full-18 0 2356783758 262144
+build dict32 urls-full-18 0 3163072101 262144
+build dict256 urls-full-18 0 3224493544 262144
+build dict1024 urls-full-18 0 3169121246 262144
+build da urls-full-18 0 4235965429 262144
+build ph urls-full-18 0 856924742 262144
+build phblocked urls-full-18 0 308036942 262144
+build compact urls-full-18 0 265762082 262144
+build compactfile urls-full-18 0 269951515 262144
+build closed urls-full-18 0 255310388 262144
+build hashed urls-full-18 0 496717276 262144
+build overlay urls-full-18 0 1324370464 262144
+build plan urls-full-18 0 10359168344 262144
+load load-string urls-full-18 0 1869 262144
+load load-dict32 urls-full-18 0 876271 262144
+load load-dict256 urls-full-18 0 203245 262144
+load load-dict1024 urls-full-18 0 132205 262144
+load load-da urls-full-18 0 15871230 262144
+load load-ph urls-full-18 0 673567 262144
+load load-phblocked urls-full-18 0 673605 262144
+load load-compact urls-full-18 0 673263 262144
+load load-closed urls-full-18 0 719051 262144
+load load-hashed urls-full-18 0 875637 262144
+build string urls-full-19 0 4487304125 524288
+build dict32 urls-full-19 0 6070205286 524288
+build dict256 urls-full-19 0 6200541280 524288
+build dict1024 urls-full-19 0 6101941290 524288
+build da urls-full-19 0 7988992285 524288
+build ph urls-full-19 0 565417471 524288
+build phblocked urls-full-19 0 612254959 524288
+build compact urls-full-19 0 532004782 524288
+build compactfile urls-full-19 0 540361404 524288
+build closed urls-full-19 0 511101908 524288
+build hashed urls-full-19 0 978948133 524288
+build overlay urls-full-19 0 1529247404 524288
+build plan urls-full-19 0 10532832733 524288
+load load-string urls-full-19 0 1869 524288
+load load-dict32 urls-full-19 0 1780653 524288
+load load-dict256 urls-full-19 0 399356 524288
+load load-dict1024 urls-full-19 0 265240 524288
+load load-da urls-full-19 0 30114542 524288
+load load-ph urls-full-19 0 1296545 524288
+load load-phblocked urls-full-19 0 1296579 524288
+load load-compact urls-full-19 0 1296237 524288
+load load-closed urls-full-19 0 1387402 524288
+load load-hashed urls-full-19 0 1694195 524288
+build string urls-full-20 0 8525999326 1048576
+build dict32 urls-full-20 0 11623867393 1048576
+build dict256 urls-full-20 0 11925018996 1048576
+build dict1024 urls-full-20 0 11702242284 1048576
+build da urls-full-20 0 FAILED 1048576
+build ph urls-full-20 0 1115878024 1048576
+build phblocked urls-full-20 0 1917955674 1048576
+build compact urls-full-20 0 1068184117 1048576
+build compactfile urls-full-20 0 1084826440 1048576
+build closed urls-full-20 0 1026378418 1048576
+build hashed urls-full-20 0 1933740379 1048576
+build overlay urls-full-20 0 3099434866 1048576
+build plan urls-full-20 0 10961881135 1048576
+load load-string urls-full-20 0 1869 1048576
+load load-dict32 urls-full-20 0 3667447 1048576
+load load-dict256 urls-full-20 0 794734 1048576
+load load-dict1024 urls-full-20 0 518375 1048576
+load load-da urls-full-20 0 FAILED 1048576
+load load-ph urls-full-20 0 2400321 1048576
+load load-phblocked urls-full-20 0 2400691 1048576
+load load-compact urls-full-20 0 2400346 1048576
+load load-closed urls-full-20 0 2581495 1048576
+load load-hashed urls-full-20 0 3194445 1048576
+build string urls-full-21 0 16100893786 2097152
+build dict32 urls-full-21 0 22263850038 2097152
+build dict256 urls-full-21 0 22778890852 2097152
+build dict1024 urls-full-21 0 22315863904 2097152
+build da urls-full-21 0 FAILED 2097152
+build ph urls-full-21 0 3172788276 2097152
+build phblocked urls-full-21 0 3838502915 2097152
+build compact urls-full-21 0 2153467748 2097152
+build compactfile urls-full-21 0 2209097252 2097152
+build closed urls-full-21 0 2069859029 2097152
+build hashed urls-full-21 0 3830332018 2097152
+build overlay urls-full-21 0 7253609623 2097152
+build plan urls-full-21 0 11452469928 2097152
+load load-string urls-full-21 0 1869 2097152
+load load-dict32 urls-full-21 0 7729761 2097152
+load load-dict256 urls-full-21 0 1532999 2097152
+load load-dict1024 urls-full-21 0 957972 2097152
+load load-da urls-full-21 0 FAILED 2097152
+load load-ph urls-full-21 0 4671635 2097152
+load load-phblocked urls-full-21 0 4671674 2097152
+load load-compact urls-full-21 0 4671331 2097152
+load load-closed urls-full-21 0 5032967 2097152
+load load-hashed urls-full-21 0 6204750 2097152
+build string urls-full-22 0 30181375769 4194304
+build dict32 urls-full-22 0 41756227376 4194304
+build dict256 urls-full-22 0 42441732229 4194304
+build dict1024 urls-full-22 0 41524875288 4194304
+build ph urls-full-22 0 12927097790 4194304
+build phblocked urls-full-22 0 7700806617 4194304
+build compact urls-full-22 0 4361076913 4194304
+build compactfile urls-full-22 0 4473666265 4194304
+build closed urls-full-22 0 4193860047 4194304
+build hashed urls-full-22 0 7619881465 4194304
+build overlay urls-full-22 0 21328734766 4194304
+build plan urls-full-22 0 12616516862 4194304
+load load-string urls-full-22 0 1869 4194304
+load load-dict32 urls-full-22 0 16072065 4194304
+load load-dict256 urls-full-22 0 2792030 4194304
+load load-dict1024 urls-full-22 0 1620252 4194304
+load load-ph urls-full-22 0 9067330 4194304
+load load-phblocked urls-full-22 0 9067579 4194304
+load load-compact urls-full-22 0 9067233 4194304
+load load-closed urls-full-22 0 9788895 4194304
+load load-hashed urls-full-22 0 11859971 4194304
+build string urls-full-23 0 56045587935 8388608
+build dict32 urls-full-23 0 78387600248 8388608
+build dict256 urls-full-23 0 80378498697 8388608
+build dict1024 urls-full-23 0 78501851995 8388608
+build ph urls-full-23 0 25128824408 8388608
+build phblocked urls-full-23 0 15455530954 8388608
+build compact urls-full-23 0 8834214098 8388608
+build compactfile urls-full-23 0 9055797151 8388608
+build closed urls-full-23 0 8499781071 8388608
+build hashed urls-full-23 0 15158243835 8388608
+build overlay urls-full-23 0 42396138370 8388608
+build plan urls-full-23 0 14687289244 8388608
+load load-string urls-full-23 0 1868 8388608
+load load-dict32 urls-full-23 0 34303902 8388608
+load load-dict256 urls-full-23 0 5587559 8388608
+load load-dict1024 urls-full-23 0 3118631 8388608
+load load-ph urls-full-23 0 18010758 8388608
+load load-phblocked urls-full-23 0 18010346 8388608
+load load-compact urls-full-23 0 18010333 8388608
+load load-closed urls-full-23 0 19452675 8388608
+load load-hashed urls-full-23 0 23599253 8388608
+build string urls-full-24 0 102676982454 16777216
+build dict32 urls-full-24 0 133526922427 16777216
+build dict256 urls-full-24 0 137415159377 16777216
+build dict1024 urls-full-24 0 133502313355 16777216
+build ph urls-full-24 0 48729604268 16777216
+build phblocked urls-full-24 0 31031299115 16777216
+build compact urls-full-24 0 17906983363 16777216
+build compactfile urls-full-24 0 20615506419 16777216
+build closed urls-full-24 0 17237845464 16777216
+build hashed urls-full-24 0 29402515278 16777216
+build overlay urls-full-24 0 84035222140 16777216
+build plan urls-full-24 0 20205817352 16777216
+load load-string urls-full-24 0 1538 16777216
+load load-dict32 urls-full-24 0 73893455 16777216
+load load-dict256 urls-full-24 0 12083633 16777216
+load load-dict1024 urls-full-24 0 6697296 16777216
+load load-ph urls-full-24 0 35667619 16777216
+load load-phblocked urls-full-24 0 35667534 16777216
+load load-compact urls-full-24 0 35667181 16777216
+load load-closed urls-full-24 0 38549814 16777216
+load load-hashed urls-full-24 0 47751669 16777216
+#
+## lexindex v4.5.3: DoubleArrayIndex on titles-zh-full (the quadratic placer 5.0 fixed, 8c92679)
+build da titles-zh-full-16 0 472100807 65536
+load load-da titles-zh-full-16 0 1397596 65536
+build da titles-zh-full-17 0 1029613520 131072
+load load-da titles-zh-full-17 0 2595038 131072
+build da titles-zh-full-18 0 2561761554 262144
+load load-da titles-zh-full-18 0 4842739 262144
+build da titles-zh-full-19 0 7202697238 524288
+load load-da titles-zh-full-19 0 9033201 524288
+build da titles-zh-full-20 0 21828609727 1048576
+load load-da titles-zh-full-20 0 16772163 1048576
+build da titles-zh-full-21 0 67873382741 2097152
+load load-da titles-zh-full-21 0 30849437 2097152
+#
+## Shaped keys (gen.py wide-rows | alpha3000, n = 2^14..2^20): DoubleArrayIndex at v4.5.3, then at 7509fe9
+build da v4.5.3:wide-rows-14 0 28236867 16384
+build da v4.5.3:wide-rows-16 0 155105260 65536
+build da v4.5.3:wide-rows-18 0 1610224951 262144
+build da v4.5.3:wide-rows-20 0 21846487954 1048576
+build da v4.5.3:alpha3000-14 0 107029462 16384
+build da v4.5.3:alpha3000-16 0 522611187 65536
+build da v4.5.3:alpha3000-18 0 5977920706 262144
+build da v4.5.3:alpha3000-20 0 44145979086 1048576
+build da 7509fe9:wide-rows-14 0 28839584 16384
+build da 7509fe9:wide-rows-16 0 159582852 65536
+build da 7509fe9:wide-rows-18 0 1335065485 262144
+build da 7509fe9:wide-rows-20 0 3317522609 1048576
+build da 7509fe9:alpha3000-14 0 113760126 16384
+build da 7509fe9:alpha3000-16 0 506093481 65536
+build da 7509fe9:alpha3000-18 0 4156041651 262144
+build da 7509fe9:alpha3000-20 0 11446392368 1048576
+#
+## analyse.py over the 7509fe9 lines (instructions a key; FLAG = both last doublings > +10 %)
+# op              corpus           2^16     2^17     2^18     2^19     2^20     2^21     2^22     2^23     2^24      top-2 growth/doubling
+# closed          dna-10000000       1039.7    972.3    965.9    956.6    953.0    961.0    974.0    987.1             +1.4%   +1.3%
+# closed          paths-full         1110.1   1046.5   1030.9   1035.0   1031.7   1039.6   1054.0                      +0.8%   +1.4%
+# closed          titles-zh-full     1046.5    969.4    963.6    953.6    953.8    962.7                               +0.0%   +0.9%
+# closed          urls-full          1054.8    995.7    973.9    974.8    978.8    987.0    999.9   1013.3   1027.5    +1.3%   +1.4%
+# closed          words-full         1054.4    975.4    945.7                                                          -7.5%   -3.0%
+# compact         dna-10000000       1079.6   1012.1   1005.8    996.5    992.9   1000.8   1013.9   1027.0             +1.3%   +1.3%
+# compact         paths-full         1150.0   1086.3   1070.8   1074.9   1071.5   1079.5   1093.9                      +0.7%   +1.3%
+# compact         titles-zh-full     1086.3   1009.3   1003.4    993.4    993.7   1002.6                               +0.0%   +0.9%
+# compact         urls-full          1094.6   1035.6   1013.8   1014.7   1018.7   1026.9   1039.8   1053.1   1067.3    +1.3%   +1.4%
+# compact         words-full         1094.3   1015.2    985.6                                                          -7.2%   -2.9%
+# compactfile     dna-10000000       1099.0   1031.3   1024.9   1015.5   1011.9   1030.5   1044.0   1056.7             +1.3%   +1.2%
+# compactfile     paths-full         1164.0   1100.2   1084.5   1088.5   1085.2   1103.8   1118.5                      +1.7%   +1.3%
+# compactfile     titles-zh-full     1107.9   1030.6   1024.7   1014.6   1014.9   1034.6                               +0.0%   +1.9%
+# compactfile     urls-full          1110.9   1051.6   1029.8   1030.7   1034.6   1053.4   1066.6   1079.5   1228.8    +1.2%  +13.8% watch
+# compactfile     words-full         1117.7   1038.4   1008.7                                                          -7.1%   -2.9%
+# da              dna-10000000      13179.2  12895.7  12544.1                                                          -2.2%   -2.7%
+# da              paths-full        30495.8  28032.2  25335.4                                                          -8.1%   -9.6%
+# da              titles-zh-full     7089.1   6621.9   5994.5   5622.9   5539.5   5870.1                               -1.5%   +6.0%
+# da              urls-full         18003.1  17035.1  16158.9  15237.8                                                 -5.1%   -5.7%
+# da              words-full         4613.6   4269.9   3917.6                                                          -7.4%   -8.3%
+# dict1024        dna-10000000       2920.9   2865.7   2789.6   2734.5   2675.9   2618.4   2560.1   2507.6             -2.2%   -2.0%
+# dict1024        paths-full        23232.5  20131.1  17589.5  15634.9  14205.9  12717.2  11557.5                     -10.5%   -9.1%
+# dict1024        titles-zh-full     4296.2   9459.8   8872.0   8415.8   8081.4   7302.8                               -4.0%   -9.6%
+# dict1024        urls-full         13176.7  12547.5  12089.2  11638.5  11160.1  10641.0   9900.3   9358.2   7957.4    -5.5%  -15.0%
+# dict1024        words-full         2015.2   1841.0   1623.9                                                          -8.6%  -11.8%
+# dict256         dna-10000000       2999.5   2940.0   2866.6   2810.3   2753.0   2693.1   2638.2   2584.3             -2.0%   -2.0%
+# dict256         paths-full        23735.0  20557.4  17997.0  16039.4  14556.9  13069.1  11852.0                     -10.2%   -9.3%
+# dict256         titles-zh-full     4406.5   9519.8   8960.0   8514.5   8165.6   7429.4                               -4.1%   -9.0%
+# dict256         urls-full         13426.3  12754.7  12300.5  11826.6  11372.6  10861.8  10118.9   9581.9   8190.6    -5.3%  -14.5%
+# dict256         words-full         2081.3   1907.0   1696.1                                                          -8.4%  -11.1%
+# dict32          dna-10000000       2961.8   2905.3   2833.7   2779.1   2723.3   2665.0   2610.9   2558.3             -2.0%   -2.0%
+# dict32          paths-full        22839.7  20022.3  17372.3  15441.4  14056.4  12642.4  11491.9                     -10.1%   -9.1%
+# dict32          titles-zh-full     4392.5   9308.6   8803.9   8359.3   8041.4   7320.0                               -3.8%   -9.0%
+# dict32          urls-full         13107.2  12484.2  12066.2  11578.0  11085.4  10616.2   9955.5   9344.5   7958.8    -6.1%  -14.8%
+# dict32          words-full         2052.3   1899.0   1700.3                                                          -7.5%  -10.5%
+# hashed          dna-10000000       1759.5   1699.3   1678.1   1655.0   1639.1   1634.4   1635.3   1636.1             +0.1%   +0.1%
+# hashed          paths-full         2834.1   2693.2   2596.8   2533.1   2473.8   2437.3   2427.7                      -1.5%   -0.4%
+# hashed          titles-zh-full     2032.5   1992.9   1955.4   1919.5   1900.6   1872.1                               -1.0%   -1.5%
+# hashed          urls-full          2012.8   1947.6   1894.8   1867.2   1844.2   1826.4   1816.7   1807.0   1752.5    -0.5%   -3.0%
+# hashed          words-full         1492.4   1420.1   1376.1                                                          -4.8%   -3.1%
+# load-closed     dna-10000000          2.8      2.5      2.7      2.8      2.5      2.4      2.3      2.3             -3.2%   -0.9%
+# load-closed     paths-full            3.0      2.6      2.7      2.7      2.4      2.4      2.3                      -2.4%   -0.6%
+# load-closed     titles-zh-full        3.1      2.6      2.7      2.7      2.4      2.4                              -11.5%   -1.1%
+# load-closed     urls-full             3.0      2.7      2.7      2.6      2.5      2.4      2.3      2.3      2.3    -0.6%   -0.9%
+# load-closed     words-full            3.2      2.5      2.5                                                         -21.2%   +0.5%
+# load-compact    dna-10000000          2.6      2.3      2.5      2.6      2.3      2.2      2.2      2.1             -3.4%   -0.9%
+# load-compact    paths-full            2.8      2.5      2.5      2.6      2.2      2.2      2.2                      -2.6%   -0.6%
+# load-compact    titles-zh-full        2.9      2.4      2.5      2.6      2.2      2.2                              -12.2%   -1.2%
+# load-compact    urls-full             2.9      2.5      2.6      2.5      2.3      2.2      2.2      2.1      2.1    -0.7%   -1.0%
+# load-compact    words-full            3.0      2.4      2.4                                                         -22.2%   +0.5%
+# load-da         dna-10000000         70.8     68.7     66.5                                                          -3.1%   -3.1%
+# load-da         paths-full          120.1    105.5     92.8                                                         -12.2%  -12.0%
+# load-da         titles-zh-full       21.3     19.8     18.4     17.2     16.0     14.7                               -7.2%   -8.1%
+# load-da         urls-full            65.8     63.3     60.5     57.4                                                 -4.4%   -5.1%
+# load-da         words-full           18.2     16.1     13.8                                                         -11.8%  -14.0%
+# load-dict1024   dna-10000000          0.2      0.1      0.1      0.1      0.1      0.1      0.1      0.1             +0.1%   +0.1%
+# load-dict1024   paths-full            1.4      1.4      1.1      1.0      0.9      0.9      0.9                      +0.2%   -8.3%
+# load-dict1024   titles-zh-full       14.8      9.4      5.9      4.0      2.8      2.1                              -30.2%  -23.2%
+# load-dict1024   urls-full             0.5      0.5      0.5      0.5      0.5      0.5      0.4      0.4      0.4    -3.8%   +7.4%
+# load-dict1024   words-full            0.3      0.3      0.3                                                         -10.7%   -3.2%
+# load-dict256    dna-10000000          0.4      0.4      0.4      0.4      0.4      0.4      0.4      0.4             +0.1%   -0.1%
+# load-dict256    paths-full            2.4      2.4      2.2      2.2      2.2      2.2      2.1                      -1.0%   -3.8%
+# load-dict256    titles-zh-full       17.1     11.7      8.2      6.3      5.1      4.4                              -19.1%  -12.6%
+# load-dict256    urls-full             0.7      0.8      0.8      0.8      0.8      0.7      0.7      0.7      0.7    +0.1%   +8.1%
+# load-dict256    words-full            0.7      0.6      0.6                                                          -5.6%   -2.8%
+# load-dict32     dna-10000000          2.7      2.7      2.7      2.7      2.7      2.7      2.7      2.7             +0.0%   -0.0%
+# load-dict32     paths-full           13.4     13.9     13.7     13.6     13.5     13.8     13.9                      +2.0%   +1.0%
+# load-dict32     titles-zh-full       38.5     33.0     29.6     27.7     26.7     25.9                               -3.6%   -3.2%
+# load-dict32     urls-full             3.2      3.3      3.3      3.4      3.5      3.7      3.8      4.1      4.4    +6.7%   +7.7%
+# load-dict32     words-full            3.5      3.5      3.5                                                          -0.3%   -0.9%
+# load-hashed     dna-10000000          3.0      2.7      2.9      3.0      2.7      2.6      2.5      2.5             -2.9%   -0.8%
+# load-hashed     paths-full            5.3      4.9      4.7      4.8      4.4      4.3      4.2                      -1.8%   -2.2%
+# load-hashed     titles-zh-full       20.0     14.1     10.7      8.8      7.3      6.6                              -17.1%   -9.1%
+# load-hashed     urls-full             3.6      3.2      3.3      3.2      3.0      3.0      2.8      2.8      2.8    -0.5%   +1.2%
+# load-hashed     words-full            3.7      3.0      3.0                                                         -18.9%   -0.1%
+# load-ph         dna-10000000          2.6      2.3      2.5      2.6      2.3      2.2      2.2      2.1             -3.4%   -0.9%
+# load-ph         paths-full            2.8      2.5      2.5      2.6      2.2      2.2      2.2                      -2.6%   -0.6%
+# load-ph         titles-zh-full        2.9      2.4      2.5      2.6      2.2      2.2                              -12.2%   -1.2%
+# load-ph         urls-full             2.9      2.5      2.6      2.5      2.3      2.2      2.2      2.1      2.1    -0.7%   -1.0%
+# load-ph         words-full            3.0      2.4      2.4                                                         -22.0%   +0.3%
+# load-phblocked  dna-10000000          2.6      2.3      2.5      2.6      2.3      2.2      2.2      2.1             -3.4%   -0.9%
+# load-phblocked  paths-full            2.8      2.5      2.5      2.6      2.2      2.2      2.2                      -2.6%   -0.6%
+# load-phblocked  titles-zh-full        2.9      2.4      2.5      2.6      2.2      2.2                              -12.2%   -1.2%
+# load-phblocked  urls-full             2.9      2.5      2.6      2.5      2.3      2.2      2.2      2.1      2.1    -0.7%   -1.0%
+# load-phblocked  words-full            3.0      2.4      2.4                                                         -22.2%   +0.3%
+# load-string     dna-10000000          0.0      0.0      0.0      0.0      0.0      0.0      0.0      0.0            -50.0%  -50.0%
+# load-string     paths-full            0.0      0.0      0.0      0.0      0.0      0.0      0.0                     -57.5%  -50.0%
+# load-string     titles-zh-full        0.0      0.0      0.0      0.0      0.0      0.0                              -50.0%  -50.0%
+# load-string     urls-full             0.0      0.0      0.0      0.0      0.0      0.0      0.0      0.0      0.0   -50.0%  -58.8%
+# load-string     words-full            0.0      0.0      0.0                                                         -57.5%  -41.2%
+# overlay         dna-10000000       6204.3   6094.6   6124.7   6333.3   6289.7   6255.8   6308.0   6318.6             +0.8%   +0.2%
+# overlay         paths-full         7171.7   6827.0   6579.7   6773.8   6454.2   6466.6   6293.2                      +0.2%   -2.7%
+# overlay         titles-zh-full     5626.2   5540.9   5367.4   5490.5   5480.3   5496.2                               -0.2%   +0.3%
+# overlay         urls-full          5239.9   5116.7   5052.1   2916.8   2955.9   3458.8   5085.2   5054.0   5008.9    -0.6%   -0.9%
+# overlay         words-full         4536.9   4449.4   4396.4                                                          -1.9%   -1.2%
+# ph              dna-10000000       4523.3   4351.4   4328.1   4485.8   4389.6   4299.1   4296.0   4256.2             -0.1%   -0.9%
+# ph              paths-full         5340.8   4931.1   4612.9   4730.3   4356.0   4291.3   4044.1                      -1.5%   -5.8%
+# ph              titles-zh-full     3796.9   3651.9   3427.3   3499.8   3433.4   3393.9                               -1.9%   -1.2%
+# ph              urls-full          3560.7   3384.7   3268.9   1078.4   1064.2   1512.9   3082.1   2995.6   2904.5    -2.8%   -3.0%
+# ph              words-full         2855.1   2706.5   2599.6                                                          -5.2%   -3.9%
+# phblocked       dna-10000000       1202.4   1127.7   1112.0   1094.0   1083.6   1746.3   1752.2   1758.2             +0.3%   +0.3%
+# phblocked       paths-full         1441.2   1369.9   1345.3   2017.5   2006.8   2007.7   2014.8                      +0.0%   +0.4%
+# phblocked       titles-zh-full     1214.6   1130.6   1115.4   1096.7   1089.9   1755.0                               -0.6%  +61.0% watch
+# phblocked       urls-full          1273.1   1206.6   1175.1   1167.8   1829.1   1830.3   1836.0   1842.4   1849.6    +0.4%   +0.4%
+# phblocked       words-full         1217.4   1131.3   1092.5                                                          -7.1%   -3.4%
+# plan            dna-10000000      40767.6  42725.9  21348.4  10784.4   5544.3   2928.1   1645.7   1020.8            -43.8%  -38.0%
+# plan            paths-full       152574.9 135618.0  61877.2  32240.6  15510.6   8170.9   4545.4                     -47.3%  -44.4%
+# plan            titles-zh-full    37484.6  38930.5  28453.6  14338.0   7126.0   3771.6                              -50.3%  -47.1%
+# plan            urls-full         87358.6  79344.3  39517.1  20089.8  10454.1   5461.0   3008.0   1750.9   1204.4   -41.8%  -31.2%
+# plan            words-full        20255.1  22544.1  11136.7                                                         +11.3%  -50.6% watch
+# string          dna-10000000       8985.5   8662.3   8370.0   8095.9   7828.7   7564.0   7301.0   7039.2             -3.5%   -3.6%
+# string          paths-full        18274.6  16306.8  14630.9  13200.1  11988.6  10927.5   9973.4                      -8.9%   -8.7%
+# string          titles-zh-full     6938.7   6520.9   6122.4   5716.2   5303.9   4866.3                               -7.2%   -8.3%
+# string          urls-full          9796.2   9399.7   8990.4   8558.9   8131.0   7677.5   7195.8   6681.2   6120.0    -7.2%   -8.4%
+# string          words-full         2621.1   2320.5   2037.1                                                         -11.5%  -12.2%
+#
+## analyse.py over the v4.5.3 lines
+# op              corpus           2^16     2^17     2^18     2^19     2^20     2^21     2^22     2^23     2^24      top-2 growth/doubling
+# da              titles-zh-full     7203.7   7855.3   9772.3  13738.1  20817.4  32364.6                              +51.5%  +55.5% FLAG
+# load-da         titles-zh-full       21.3     19.8     18.5     17.2     16.0     14.7                               -7.2%   -8.0%

@@ -26,6 +26,8 @@ __pycache__/
 bench/mphf_vs/target/
 # So is the frontier harness's lexindex side (bench/frontier/frontier_lex).
 bench/frontier/frontier_lex/target/
+# And the instruction-count harness (bench/growth).
+bench/growth/target/
 # And so is the polars plugin, which builds a wheel of its own.
 polars/target/
 polars/dist/

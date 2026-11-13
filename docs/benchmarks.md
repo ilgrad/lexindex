@@ -63,6 +63,7 @@ time changed after them.
 | The research frontier, cited | 0 | — | — |
 | The research frontier, measured | 9 | 2026-09-22 (4.1.0) | 2026-11-05 (main after 4.5.3) |
 | Scaling to millions of keys | 2 | 2026-09-19 (main after 3.0.0) | 2026-11-05 (main after 4.5.3) |
+| Instructions a key as the keys double | 1 | 2026-11-13 (main after 5.0.0) | 2026-11-13 (main after 5.0.0) |
 <!-- /table -->
 
 ## Every competitor, and the version measured
@@ -2489,3 +2490,37 @@ there and 218 against 2026-09-19's 210 is not a finding by itself; the medians r
 generator build's peak at 10 M is 266 MB against the corpus-holding build's 953, against 268 and 956 on 2026-09-19 — that gap, not the
 blob, is what the streaming constructor exists for.</sub>
 
+
+## Instructions a key as the keys double
+
+A build that is linear in its keys retires about the same instructions a key at every size; a
+quadratic one does not, and a count shows it on any machine. `bench/growth/` counts the user-space
+instructions one build or one load retires (`perf stat` with its counters enabled only around that
+operation), the process pinned to one CPU so that every build runs on one thread, at 2^16 to 2^24
+keys on five corpora: 13 builds and 10 loads, 731 runs. `analyse.py` flags a phase whose
+instructions a key grow by more than 10 % in each of the last two doublings; a log factor adds about
+5 % a doubling at these sizes. A count is not a time — a phase that waits on memory retires the same
+instructions however long it waits — so this tests the shape of a cost, and needs no quiet machine:
+v4.5.3 counted on a loaded machine repeats the counts of 2026-10-28 to within 0.01 %.
+
+| `DoubleArrayIndex` build, instructions a key | 2^16 | 2^17 | 2^18 | 2^19 | 2^20 | 2^21 |
+|---|---:|---:|---:|---:|---:|---:|
+| Chinese titles, 4.5.3 | 7 204 | 7 855 | 9 772 | 13 738 | 20 817 | 32 365 |
+| Chinese titles, 5.0 | 7 089 | 6 622 | 5 995 | 5 623 | 5 539 | 5 870 |
+
+On 4.5.3 a row of several children searched the whole occupied array for a base, and the count a
+key grew 51.5 % and 55.5 % over the last two doublings; 5.0 searches a window under the top (`8c92679`), and a quiet A/B timed
+a million Chinese titles at 561 ms against 1 466 (CHANGELOG 5.0.0). Keys shaped against the placer,
+`gen.py wide-rows` (rows of 8 children out of 20 000 characters) at 2^20: 20 834 a key on 4.5.3,
+3 164 on 5.0; `alpha3000`: 42 101 and 10 916. At 5.0 no phase is flagged. Three move by a step,
+not a slope: the file-backed `PerfectHashIndex` build once its key bytes pass the 32 MiB spill
+window (+61 % at 2^21 Chinese titles, flat before), the file-backed `CompactHashIndex` build at 2^24
+URLs (+13.8 %), and `plan()` on words, which rises 11 % and then halves. CI keeps the double array's
+property without `perf`: `a_wide_row_searches_no_further_than_the_window_once_it_applies` counts
+search rounds in a test build: at most 34 a wide row, where a search without the window takes 75.
+
+<sub>Counted 2026-11-13 at `7509fe9` and at v4.5.3
+([`bench/results/growth-2026-11-13-arz-7509fe9.txt`](https://github.com/ilgrad/lexindex/blob/main/bench/results/growth-2026-11-13-arz-7509fe9.txt)),
+`instructions:u`, one CPU. To repeat: `cargo build --release --manifest-path bench/growth/Cargo.toml`,
+then `bench/growth/sweep.sh > results.txt` over the corpora `bench/corpora.py` writes, and
+`python3 bench/growth/analyse.py results.txt`.</sub>
