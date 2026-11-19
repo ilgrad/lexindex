@@ -18,6 +18,7 @@ abstract: >-
 authors:
   - family-names: Gradina
     given-names: Ilia
+    affiliation: "Independent Researcher"
     orcid: "https://orcid.org/0009-0008-0911-8765"
 license: MIT
 doi: 10.5281/zenodo.22119002
